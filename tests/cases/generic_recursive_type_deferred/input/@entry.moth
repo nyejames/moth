@@ -3,4 +3,4 @@ Node type T = |
     children {Node of T},
 |
 
-#[: recursive generic]
+[: recursive generic]

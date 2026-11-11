@@ -45,7 +45,16 @@ No claim of maximal speed, constant-time execution or improved total compile tim
 
 ### Attachment and lexical extent
 
-Each directive takes no arguments. Use `$fast_math`, not `$fast_math()`. Reuse the general modifier rules for trivia, same-line attachment, duplicate detection and dangling modifiers. Ordinary identifiers with these names stay legal outside directive syntax.
+Each directive takes no arguments. Use `$fast_math`, not `$fast_math()`. Reuse the shared source-directive-run attachment model: different directives may share a line with horizontal whitespace, require no commas, attach independently to the same following-line construct and have order-independent semantics. Each directive name may appear **once** per target, including parameterless constraint markers: every duplicate diagnoses at the later occurrence with a label on the first. A blank line, scope boundary or EOF breaks attachment. Ordinary identifiers with these names stay legal outside directive syntax.
+
+```moth
+$fast_math $infallible
+wrap_value |value I32| -> I32:
+    return value + 1
+;
+```
+
+The parser treats the next source directive as an operand terminator only at the outer annotation-expression depth; it must not confuse directives inside a nested template operand with another source annotation. The target begins on its own following line, not after a directive on the same line. This feature reuses that rule and does not introduce another directive parser.
 
 Eligible targets are function declarations, receiver methods, generic function declarations and executable statements, including declarations of runtime values, assignments, calls, returns, branches and loops. A compound statement includes its condition/header, arms and body. A function modifier covers its body. Nested callable declarations retain their own contracts and do not inherit the containing body's mode.
 
@@ -63,7 +72,7 @@ Numeric initialisers and other expressions inside a covered body keep that body'
 | `$safe_math` | Prove that the covered computation uses ordinary Moth numeric semantics throughout its transitive executed calls. Reject fast arithmetic and fast Math contracts. It does not prove arithmetic succeeds. |
 | `$infallible` | Prove that no recoverable failure escapes the selected boundary and no Moth-semantic panic/trap path can execute within it or its calls. Local recovery is permitted only when the handler also satisfies the constraint. |
 
-Constraints apply to the entire selected computation, not just tokens directly in its body. They never change a callee's mode. An outer `$safe_math` is not overridden by an inner `$fast_math`. Applying both to one target is a direct conflict. `$fast_math` and `$infallible` are compatible when the resulting operations have no possible semantic trap.
+Constraints apply to the entire selected computation, not just tokens directly in its body. They never change a callee's mode. An outer `$safe_math` is not overridden by an inner `$fast_math`. `$safe_math` and `$fast_math` may annotate the same target: select the fast numeric mode first, then reject only if the resulting reachable computation performs prohibited fast arithmetic or calls fast Math contracts. A vacuous fast-mode selection is not itself a safety violation. `$fast_math` and `$infallible` likewise coexist when the resulting computation meets the infallibility proof, including trapping-free wrapping arithmetic.
 
 Assertions with a possible false result contribute a panic path. So do fast numeric traps, language-defined range guards and documented fatal value-integrity guards. A function without an error slot is not automatically `$infallible`. A function may retain a declared error slot while proving that none of its paths returns an error. This does not remove ordinary call-site handling syntax or change the declared result ABI.
 
@@ -321,7 +330,7 @@ Gate: the implementer and backend author can derive every V1 outcome from perman
 
 ### Phase 2: directive attachment and typed numeric mode
 
-- [ ] Add source cases for statement/function/method attachment, nested arguments, compound statements, duplicates, empty parentheses, invalid targets and conflicting annotations.
+- [ ] Add source cases for statement/function/method attachment, compound statements, same-line versus multiline stacks, reversed-order constraints, duplicates (including repeated `$fast_math`, `$safe_math` and `$infallible`), empty parentheses, invalid targets and semantic constraint conflicts. Verify two-span duplicate diagnostics and that duplicate-free directives all attach to the same following-line construct.
 - [ ] Add cases proving lexical mode does not propagate into a callee or disappear during inlining/folding. Caller arguments and explicit casts retain their separate rules.
 - [ ] Extend shared attachment and typed-expression owners with compact semantic mode and constraint requirements. Thread these through concrete/generic headers, HIR and dumps without a new parser.
 - [ ] Add HIR validation rejecting invalid mode/operator/result shapes and mode/failure-delivery contradictions.

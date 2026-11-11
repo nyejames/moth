@@ -2,4 +2,4 @@
 
 value #I32 = 42
 
-[:[value]]
+~[:[value]]

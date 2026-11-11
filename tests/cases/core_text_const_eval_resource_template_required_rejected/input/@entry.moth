@@ -2,4 +2,4 @@
 
 content #= [:length=[text.length(@assets/value.txt)]]
 
-[content]
+~[content]

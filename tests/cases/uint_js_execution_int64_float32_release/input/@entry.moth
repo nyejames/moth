@@ -114,4 +114,4 @@ dynamic_above U64 = add_above(above, 0) catch:
 ;
 folded_dynamic_agree Bool = folded_above_kept is dynamic_above
 
-[:uint int64float32 wide=[kept_above]/[kept_huge]/[huge_plus_one]/[zero_minus_one] prod=[exact_product]/[square_overflow] compare=[above_is_less]/[max_below_above]/[above_above_max]/[min_below_zero]/[zero_above_min] converted=[converted_witness]/[explicit_witness]/[folded_eq]/[dynamic_eq]/[explicit_eq] casts=[huge_to_int]/[neg_to_uint]/[above_to_int] compound=[growing]/[grown] agree=[folded_dynamic_agree]]
+~[:uint int64float32 wide=[kept_above]/[kept_huge]/[huge_plus_one]/[zero_minus_one] prod=[exact_product]/[square_overflow] compare=[above_is_less]/[max_below_above]/[above_above_max]/[min_below_zero]/[zero_above_min] converted=[converted_witness]/[explicit_witness]/[folded_eq]/[dynamic_eq]/[explicit_eq] casts=[huge_to_int]/[neg_to_uint]/[above_to_int] compound=[growing]/[grown] agree=[folded_dynamic_agree]]

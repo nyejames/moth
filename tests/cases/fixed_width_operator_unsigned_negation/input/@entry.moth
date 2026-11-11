@@ -4,4 +4,4 @@ hidden ||:
     value = -zero
 ;
 
-[:unreachable]
+~[:unreachable]

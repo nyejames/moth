@@ -6,4 +6,4 @@ CountBox = |
 
 value = CountBox()
 
-[: struct field fallible default cast: [value.count]]
+~[: struct field fallible default cast: [value.count]]

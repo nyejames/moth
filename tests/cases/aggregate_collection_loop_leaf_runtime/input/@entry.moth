@@ -89,4 +89,4 @@ explicit_cast_source || -> String:
 
 nested_text = nested_projection_receiver() catch then "missing"
 
-[:collection_loop_leaf [before_receiver()] [after_receiver()] [body_receiver()] [statement_receiver()] [wrapped_receiver()] [inline_source_receiver()] [nested_text] [typed_float_source()] [raw_mixed_float_source()] [explicit_cast_source()]]
+~[:collection_loop_leaf [before_receiver()] [after_receiver()] [body_receiver()] [statement_receiver()] [wrapped_receiver()] [inline_source_receiver()] [nested_text] [typed_float_source()] [raw_mixed_float_source()] [explicit_cast_source()]]

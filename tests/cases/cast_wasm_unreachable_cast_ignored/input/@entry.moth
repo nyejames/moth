@@ -3,4 +3,4 @@
 comparison = compare(128)
 assert(comparison is true)
 
-[: wasm unreachable cast ignored]
+~[: wasm unreachable cast ignored]

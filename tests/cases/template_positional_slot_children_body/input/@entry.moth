@@ -3,7 +3,7 @@ wrapper #= [:
     [$before [:R: ]:[$slot]]
 ]
 
-[wrapper:
+~[wrapper:
     [: First]
     [: Second]
     [: Third]

@@ -15,4 +15,4 @@ home_literal = home is "/moth/"
 runtime_text = "z"
 shown = [:direct=[@assets/logo.svg] via=[logo] home_direct=[@/] home_via=[home]docs]
 mixed = [:via=[logo] rt=[runtime_text]]
-[:root same=[flag(same)] not_plain=[flag(not_plain)] home_same=[flag(home_same)] home_literal=[flag(home_literal)] shown=[shown] mixed=[mixed]]
+~[:root same=[flag(same)] not_plain=[flag(not_plain)] home_same=[flag(home_same)] home_literal=[flag(home_literal)] shown=[shown] mixed=[mixed]]

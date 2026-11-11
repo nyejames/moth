@@ -18,14 +18,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Templates"]]
-#[$in description:["Template strings, directives, slots, wrappers, control flow and Markdown in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Templates"]]
+[$in description:["Template strings, directives, slots, wrappers, control flow and Markdown in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Templates
 
     Templates form Moth's only string-composition system. Square brackets can
@@ -39,7 +39,7 @@ init_docs_sidebar()!
     lets the compiler fold it when every input comes from compile time.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:template-basics]
         [$in title:Template basics]
@@ -49,7 +49,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:template-directives]
         [$in title:Template directives]
@@ -59,7 +59,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:template-slots]
         [$in title:Template slots]
@@ -69,7 +69,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:child-wrappers]
         [$in title:Child wrappers]
@@ -79,7 +79,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:template-control-flow]
         [$in title:Template control flow]
@@ -89,7 +89,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:markdown-formatting]
         [$in title:Markdown formatting]
@@ -99,7 +99,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../collections/]
         [$in previous_title:Collections and maps]

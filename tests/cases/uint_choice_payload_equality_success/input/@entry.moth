@@ -50,4 +50,4 @@ first U32 = items.get(0) catch:
 ;
 element_same = first is 10
 
-[:uint_choice_payload_equality same=[same] different=[different] pair_same=[pair_same] pair_different=[pair_different] variant_mismatch=[variant_mismatch] optional_same=[optional_same] optional_different=[optional_different] optional_missing=[optional_missing] optional_present_vs_missing=[optional_present_vs_missing] nested_same=[nested_same] nested_different=[nested_different] field_same=[field_same] field_different=[field_different] element_same=[element_same]]
+~[:uint_choice_payload_equality same=[same] different=[different] pair_same=[pair_same] pair_different=[pair_different] variant_mismatch=[variant_mismatch] optional_same=[optional_same] optional_different=[optional_different] optional_missing=[optional_missing] optional_present_vs_missing=[optional_present_vs_missing] nested_same=[nested_same] nested_different=[nested_different] field_same=[field_same] field_different=[field_different] element_same=[element_same]]

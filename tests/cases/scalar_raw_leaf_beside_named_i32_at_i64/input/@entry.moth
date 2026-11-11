@@ -8,4 +8,4 @@ raw_leaf_at_i64 |base I32| -> String:
     return [:base=[base_text] total=[total_text]]
 ;
 
-[:scalar raw leaf beside named=[raw_leaf_at_i64(10)]]
+~[:scalar raw leaf beside named=[raw_leaf_at_i64(10)]]

@@ -191,7 +191,7 @@ fn execute_with_panicking_builder(
 #[test]
 fn backend_builder_panics_become_harness_failures_after_worker_drop() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let fixture = EntryFixture::new("#[:static-entry]\n", true);
+    let fixture = EntryFixture::new("[:static-entry]\n", true);
     let mut case = success_test_case(BackendId::Html, output_expectation("unused"));
     case.entry_path = fixture.entry.clone();
     case.fixture_root = fixture.directory.path().to_path_buf();
@@ -486,12 +486,12 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
         let mut fixture = EntryFixture::new(
             "@html p, center, canvas\n\
              @wrappers draw\n\
-             #[p, center: source-package-wrapper]\n\
-             #[canvas:\n\
+             [p, center: source-package-wrapper]\n\
+             [canvas:\n\
                  [$in id:game_canvas]\n\
              ]\n\
              result = draw(\"game_canvas\")!\n\
-             [:[result]]\n",
+             ~[:[result]]\n",
             directory_entry,
         );
         if ordinary_page_entry {
@@ -637,7 +637,7 @@ fn synthetic_single_file_moth_template_uses_implicit_html_package() {
     ] {
         let mut fixture = EntryFixture::new(
             "intro #= @docs/intro.mtf\n\
-             #[$html: [intro]]\n",
+             [$html: [intro]]\n",
             false,
         );
         if ordinary_page_entry {
@@ -738,7 +738,7 @@ fn synthetic_entry_modes_reject_registered_package_namespace_collisions() {
     ] {
         for (local_file, local_source) in html_collisions {
             let mut fixture = EntryFixture::new(
-                &format!("{html_clause}\n[:collision reproduction]\n"),
+                &format!("{html_clause}\n~[:collision reproduction]\n"),
                 directory_entry,
             );
             if ordinary_page_entry {
@@ -767,7 +767,7 @@ fn synthetic_entry_modes_reject_registered_package_namespace_collisions() {
         ("directory", true, false),
     ] {
         let mut fixture = EntryFixture::new(
-            &format!("{binding_clause}\n[:binding collision reproduction]\n"),
+            &format!("{binding_clause}\n~[:binding collision reproduction]\n"),
             directory_entry,
         );
         if ordinary_page_entry {
@@ -793,7 +793,7 @@ fn synthetic_entry_modes_reject_child_local_package_namespace_collisions() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let child_clause = "@html p";
     for (entry_mode, directory_entry) in [("selected @entry.moth", false), ("directory", true)] {
-        let fixture = EntryFixture::new("@child label\n[:[label]]\n", directory_entry);
+        let fixture = EntryFixture::new("@child label\n~[:[label]]\n", directory_entry);
         let child_directory = fixture.directory.path().join("src/child");
         fs::create_dir(&child_directory).expect("should create child module directory");
         fs::write(
@@ -823,7 +823,7 @@ fn synthetic_single_file_missing_package_keeps_its_authored_diagnostic_span() {
     let dependency_path = "@missing/graphics";
     for directory_entry in [true, false] {
         let fixture = EntryFixture::new(
-            &format!("{import_clause}\n[:missing dependency reproduction]\n"),
+            &format!("{import_clause}\n~[:missing dependency reproduction]\n"),
             directory_entry,
         );
         let failure = expect_diagnosed(fixture.build_result(&[]));
@@ -867,16 +867,16 @@ fn synthetic_start_builtin_propagation_and_arithmetic_execute_directory_and_sing
         for (source, expected) in [
             (
                 "load || -> String, Error!:\n    return \"loaded\"\n;\n\
-                 value = load()!\n[:[value]]\n",
+                 value = load()!\n~[:[value]]\n",
                 "loaded",
             ),
             (
-                "left ~= 6\nright ~= 7\nvalue = left * right\n[:[value]]\n",
+                "left ~= 6\nright ~= 7\nvalue = left * right\n~[:[value]]\n",
                 "42",
             ),
             (
                 "product |left I32, right I32| -> I32:\n    return left * right\n;\n\
-                 value = product(6, 7)\n[:[value]]\n",
+                 value = product(6, 7)\n~[:[value]]\n",
                 "42",
             ),
         ] {
@@ -909,11 +909,11 @@ fn synthetic_start_local_catch_narrows_and_executes_directory_and_single_file() 
         for (source, expected) in [
             (
                 "load || -> String, Error!:\n    return! Error(\"failed\", code = 0)\n;\n\
-                 value = load() catch then \"recovered\"\n[:[value]]\n",
+                 value = load() catch then \"recovered\"\n~[:[value]]\n",
                 "recovered",
             ),
             (
-                "left ~= 1\nright ~= 0\nvalue = left // right catch then 17\n[:[value]]\n",
+                "left ~= 1\nright ~= 0\nvalue = left // right catch then 17\n~[:[value]]\n",
                 "17",
             ),
         ] {
@@ -962,7 +962,7 @@ fn synthetic_start_custom_error_diagnostics_render_after_worker_drop() {
         let fixture = EntryFixture::new(
             "Failure = | message String |\n\
              load || -> String, Failure!:\n    return! Failure(\"custom\")\n;\n\
-             value = load()!\n[:[value]]\n",
+             value = load()!\n~[:[value]]\n",
             directory_entry,
         );
         let mut case = success_test_case(BackendId::Html, output_expectation("unreachable"));
@@ -1063,7 +1063,7 @@ fn synthetic_start_preserves_nested_returns_inside_authored_functions() {
              ;\n\
              return! Error(\"unused\")\n\
          ;\n\
-         value = choose()!\n[:[value]]\n",
+         value = choose()!\n~[:[value]]\n",
         true,
     );
     let frontend = fixture.frontend();
@@ -1090,11 +1090,11 @@ fn synthetic_start_wasm_rejects_reachable_failure_before_lir() {
         for (source, expected_reason_key) in [
             (
                 "load || -> String, Error!:\n    return! Error(\"failed\")\n;\n\
-                 value = load()!\n[:[value]]\n",
+                 value = load()!\n~[:[value]]\n",
                 "unsupported_backend_feature.error_values",
             ),
             (
-                "left ~= 6\nright ~= 7\nvalue = left * right\n[:[value]]\n",
+                "left ~= 6\nright ~= 7\nvalue = left * right\n~[:[value]]\n",
                 "unsupported_backend_feature.recoverable_numeric_failure",
             ),
         ] {
@@ -1125,7 +1125,7 @@ fn synthetic_start_wasm_rejects_reachable_failure_before_lir() {
 fn synthetic_start_infallible_wasm_retains_plain_vec_abi() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for directory_entry in [true, false] {
-        let fixture = EntryFixture::new("value = \"plain-vector\"\n[:[value]]\n", directory_entry);
+        let fixture = EntryFixture::new("value = \"plain-vector\"\n~[:[value]]\n", directory_entry);
         let frontend = fixture.frontend();
         let module = frontend
             .successful_module_views()
@@ -1168,7 +1168,7 @@ fn synthetic_start_infallible_wasm_retains_plain_vec_abi() {
 #[test]
 fn synthetic_start_static_html_needs_no_runtime_error_branch() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let fixture = EntryFixture::new("#[:static-entry]\n", true);
+    let fixture = EntryFixture::new("[:static-entry]\n", true);
     let frontend = fixture.frontend();
     let module = frontend
         .successful_module_views()
@@ -1210,7 +1210,7 @@ fn synthetic_start_static_html_needs_no_runtime_error_branch() {
 #[test]
 fn synthetic_start_api_support_and_package_facade_have_no_start() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let fixture = EntryFixture::new("@support label\n[:[label]]\n", true);
+    let fixture = EntryFixture::new("@support label\n~[:[label]]\n", true);
     fs::create_dir(fixture.directory.path().join("src/support")).expect("should create support");
     fs::create_dir(fixture.directory.path().join("src/api")).expect("should create API module");
     fs::create_dir(fixture.directory.path().join("src/triple"))
@@ -1232,7 +1232,7 @@ fn synthetic_start_api_support_and_package_facade_have_no_start() {
         ),
         (
             "src/triple/@entry.moth",
-            "#[$in title: \"triple metadata\"]\n",
+            "[$in title: \"triple metadata\"]\n",
         ),
     ] {
         fs::write(fixture.directory.path().join(path), source).expect("should write API root");
@@ -1324,7 +1324,7 @@ fn synthetic_start_api_support_and_package_facade_have_no_start() {
 #[test]
 fn synthetic_selected_api_facade_runtime_and_fragments_are_rejected() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let mut fixture = EntryFixture::new("@child value\n[: selected [value]]\n", false);
+    let mut fixture = EntryFixture::new("@child value\n~[: selected [value]]\n", false);
     // A selected API facade cannot carry runtime statements or fragments. Directory projects
     // reject an entryless facade directory before file selection; this covers explicit selection.
     let selected_root = fixture.root_source.with_file_name("@mod.moth");
@@ -1335,7 +1335,7 @@ fn synthetic_selected_api_facade_runtime_and_fragments_are_rejected() {
     fs::create_dir(&child).expect("should create the reached child module");
     fs::write(
         child.join("@mod.moth"),
-        "$export\nvalue #= \"child\"\nio.line(\"discarded runtime\")\n[: discarded fragment]\n",
+        "$export\nvalue #= \"child\"\nio.line(\"discarded runtime\")\n~[: discarded fragment]\n",
     )
     .expect("should write the child facade");
 
@@ -1358,7 +1358,7 @@ fn synthetic_selected_api_facade_runtime_and_fragments_are_rejected() {
 #[test]
 fn synthetic_start_failing_imported_provider_remains_dormant() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let fixture = EntryFixture::new("@provider label\n[:[label]]\n", true);
+    let fixture = EntryFixture::new("@provider label\n~[:[label]]\n", true);
     fs::create_dir(fixture.directory.path().join("src/provider")).expect("should create provider");
     fs::write(
         fixture.directory.path().join("src/provider/impl.moth"),
@@ -1372,7 +1372,7 @@ fn synthetic_start_failing_imported_provider_remains_dormant() {
     .expect("should write provider facade");
     fs::write(
         fixture.directory.path().join("src/provider/@entry.moth"),
-        "@impl load\nio.line(\"provider-ran\")\nvalue = load()!\n[:[value]]\n",
+        "@impl load\nio.line(\"provider-ran\")\nvalue = load()!\n~[:[value]]\n",
     )
     .expect("should write dormant provider entry");
     let frontend = fixture.frontend();
@@ -1421,10 +1421,10 @@ fn synthetic_start_expected_entry_code_from_linked_source_dependency_passes() {
         let fixture = EntryFixture::new(
             "@support load\n\
              io.line(\"before-failure\")\n\
-             [:staged-before-failure]\n\
+             ~[:staged-before-failure]\n\
              value = load()!\n\
              io.line(\"after-failure\")\n\
-             [:after-failure-[value]]\n",
+             ~[:after-failure-[value]]\n",
             true,
         );
         fs::create_dir(fixture.directory.path().join("src/support"))
@@ -1484,32 +1484,32 @@ fn synthetic_start_failure_publishes_no_staged_runtime_fragments() {
         for (source, code) in [
             (
                 "load || -> String, Error!:\n    return! Error(message = \"application-secret\", code = 0)\n;\n\
-             #[:static-survives]\n\
+             [:static-survives]\n\
              io.line(\"before-failure\")\n\
-             [:staged-before-failure]\n\
+             ~[:staged-before-failure]\n\
              value = load()!\n\
              io.line(\"after-failure\")\n\
-             [:after-failure-[value]]\n",
+             ~[:after-failure-[value]]\n",
                 0,
             ),
             (
                 "left ~= 1\nright ~= 0\n\
-             #[:static-survives]\n\
+             [:static-survives]\n\
              io.line(\"before-failure\")\n\
-             [:staged-before-failure]\n\
+             ~[:staged-before-failure]\n\
              value = left // right\n\
              io.line(\"after-failure\")\n\
-             [:after-failure-[value]]\n",
+             ~[:after-failure-[value]]\n",
                 300,
             ),
             (
                 "left ~= 2147483647\nright ~= 1\n\
-             #[:static-survives]\n\
+             [:static-survives]\n\
              io.line(\"before-failure\")\n\
-             [:staged-before-failure]\n\
+             ~[:staged-before-failure]\n\
              value = left + right\n\
              io.line(\"after-failure\")\n\
-             [:after-failure-[value]]\n",
+             ~[:after-failure-[value]]\n",
                 301,
             ),
         ] {
@@ -1637,9 +1637,9 @@ fn synthetic_start_release_fallback_is_fixed_text_and_preserves_earlier_io() {
     let source = "load || -> String, Error!:\n\
          return! Error(message = \"application-secret\", code = 0)\n\
      ;\n\
-     #[:static-survives]\n\
+     [:static-survives]\n\
      io.line(\"before-failure\")\n\
-     [:staged-before-failure]\n\
+     ~[:staged-before-failure]\n\
      value = load()!\n\
      io.line(\"after-failure\")\n";
     for release in [false, true] {
@@ -1698,7 +1698,7 @@ fn synthetic_start_root_assertion_remains_an_unexpected_runtime_error() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for directory_entry in [true, false] {
         let fixture = EntryFixture::new(
-            "io.line(\"before-assertion\")\n[:staged-before-assertion]\n\
+            "io.line(\"before-assertion\")\n~[:staged-before-assertion]\n\
              assert(false, \"root invariant failed\")\n",
             directory_entry,
         );

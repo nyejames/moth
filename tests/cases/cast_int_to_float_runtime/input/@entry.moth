@@ -7,4 +7,4 @@ whole F64 = as_float(10)
 
 assert(half is 1.0)
 assert(whole is 10.0)
-[:identity float cast: 1|10]
+~[:identity float cast: 1|10]

@@ -12,4 +12,4 @@ negative_real = divide(-5, 2)
 negative_int = truncate(-5, 2)
 negative_divisor = truncate(5, -2)
 
-[: real=[real_value], int=[int_value], negative=[negative_real]/[negative_int]/[negative_divisor] ]
+~[: real=[real_value], int=[int_value], negative=[negative_real]/[negative_int]/[negative_divisor] ]

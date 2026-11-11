@@ -2,4 +2,4 @@ Box type T = |
     value I32,
 |
 
-#[: unused generic]
+[: unused generic]

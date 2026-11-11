@@ -132,4 +132,4 @@ hide_pcall ||:
     hide_pdef(v = 255)
 ;
 
-[:unreachable fixed width literal contexts]
+~[:unreachable fixed width literal contexts]

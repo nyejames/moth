@@ -1,14 +1,14 @@
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-#[$in title:["Compiler-facing language reference"]]
-#[$in description:["Canonical language references and related compiler design documentation."]]
-#[$in head:[theme_head]]
+[$in title:["Compiler-facing language reference"]]
+[$in description:["Canonical language references and related compiler design documentation."]]
+[$in head:[theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
 
-#[section, $md:
+[section, $md:
     # Compiler-facing language reference
 
     Compiler changes should start from the language contract. The unsuffixed
@@ -16,7 +16,7 @@ init_docs_sidebar()!
     language surfaces.
 ]
 
-#[section, $md:
+[section, $md:
     ## Canonical references
 
     Each public route groups the references for one language area.
@@ -67,14 +67,14 @@ init_docs_sidebar()!
     replacing it.
 ]
 
-#[section, $md:
+[section, $md:
     ## Reference map
 
     `docs/developer-docs/language/overview.mtf` lists every canonical file and
     routes formal compiler, build and memory ownership.
 ]
 
-#[section, $md:
+[section, $md:
     ## Related design
 
     - @../../docs/design-scope (Design scope, public authority): accepted mechanisms and intentionally excluded complexity
@@ -83,7 +83,7 @@ init_docs_sidebar()!
     - @../../docs/progress (Progress matrix): current implementation support and known gaps
 ]
 
-#[section, $md:
+[section, $md:
     ## More documentation
 
     See @../../docs/ (All documentation) for tutorials, examples and feature-focused language pages.

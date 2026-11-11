@@ -23,4 +23,4 @@ label type T is DISPLAY_TEXT |this Maybe of T| -> String:
 
 value Maybe of Label = Maybe::Some(Label("ok"))
 
-[:trait_bound_generic_choice_success [value.label()]]
+~[:trait_bound_generic_choice_success [value.label()]]

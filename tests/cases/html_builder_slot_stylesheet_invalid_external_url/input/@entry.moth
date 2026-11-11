@@ -1,4 +1,4 @@
 -- External URLs belong in head, not the stylesheets slot.
-#[$in stylesheets: ["https://cdn.example.com/site.css"]]
+[$in stylesheets: ["https://cdn.example.com/site.css"]]
 
-#[:<main>invalid external stylesheet</main>]
+[:<main>invalid external stylesheet</main>]

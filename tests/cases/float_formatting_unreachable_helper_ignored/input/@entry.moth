@@ -3,4 +3,4 @@ unused_format |value F64| -> String:
     return text
 ;
 
-[: wasm unreachable float formatting ignored]
+~[: wasm unreachable float formatting ignored]

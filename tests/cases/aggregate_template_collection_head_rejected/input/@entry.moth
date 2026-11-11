@@ -7,4 +7,4 @@ render || -> String, Error!:
     return [:bad=[grid.get(0)!]]
 ;
 text = render() catch then "failed"
-[:[text]]
+~[:[text]]

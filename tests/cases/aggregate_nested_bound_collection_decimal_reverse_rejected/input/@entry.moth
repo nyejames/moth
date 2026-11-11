@@ -6,4 +6,4 @@ render_nested_bound_decimal_reverse || -> String:
     return [:unreachable]
 ;
 
-[:[render_nested_bound_decimal_reverse()]]
+~[:[render_nested_bound_decimal_reverse()]]

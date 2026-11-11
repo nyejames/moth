@@ -11,4 +11,4 @@ widen |base U8, ready Bool| -> U64:
     return total
 ;
 
-[:[widen(1, true)]]
+~[:[widen(1, true)]]

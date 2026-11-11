@@ -1,5 +1,5 @@
 `$` is the general directive marker. This page owns template-specific directive
-semantics; general ownership, context, argument and diagnostic rules live in
+semantics. General ownership, context, argument and diagnostic rules live in
 @../directives (Directives).
 
 Template-head directives modify their containing template, regardless of whether
@@ -18,10 +18,10 @@ builder extension point, so availability never depends on the selected builder:
 
 `$before value` and `$after value`:
 
-- add a prefix and suffix to each direct child; either directive may be omitted
+- add a prefix and suffix to each direct child. Either directive may be omitted
 - each may appear once per head, so a repeated `$before` or `$after` is rejected
 - accept a compile-time String or constant template wrapper and reject runtime-dependent values
-- values may contain named slots, but not default or positional slots; child insertion is implicit
+- values may contain named slots but not default or positional slots. Child insertion is implicit
 - produce no wrapper for structurally absent output, but wrap a selected empty String
 - wrap a direct child loop's aggregate output once
 
@@ -41,14 +41,12 @@ builder extension point, so availability never depends on the selected builder:
 - can appear only once per head
 - a routed contribution, including an explicitly empty one, suppresses that slot occurrence's default
 
-`$note` and `$todo`:
+`$note`:
 
-- discard their balanced bodies
-- are template-authored comments
+- discards its balanced body without evaluating it or producing output
+- is the sole template comment directive, including for direct entry templates
 
-`$doc`:
-
-- marks a documentation-comment template surface
+`$doc` and `$todo` annotate following source declarations or statements instead of template heads. They are invalid here. See @../directives (Directives).
 
 `$raw`:
 
@@ -96,8 +94,8 @@ The compiler owns these template-formatting directives. They are available under
 - suppresses nested child-template interpretation inside the code content
 
 
-Formatter directives remain constrained to formatting and composition contracts;
-they cannot rewrite functions, change nominal identity, mutate HIR or weaken language
+Formatter directives remain constrained to formatting and composition contracts.
+They cannot rewrite functions, change nominal identity, mutate HIR or weaken language
 safety. For the shared directive grammar and its single-operand rule, see
 @../directives (Directives).
 
@@ -115,14 +113,15 @@ Moth template files are the exception:
 
 ### Combining items in one head
 
-A template head can hold several comma-separated items, such as an expression
-and a formatter. Most directives combine freely with other items, but a few
-change what the whole template is, so they need the head to themselves.
+A template head can hold several **comma-separated** items, including expressions
+and directives. Unlike source directive runs, template heads always require
+commas between meaningful items. Every directive name may appear at most once
+in the same head, including `$fresh`. Most directives combine freely with other
+items, but structural directives can require the whole head.
 
-`$slot`, `$note`, `$todo` and `$doc` must be the only meaningful item in their
-head. A slot declaration marks a place for content that arrives from elsewhere,
-and the comment directives turn the template into a comment, so any other item
-in that head would have nothing to act on:
+`$slot` and `$note` must be the only meaningful item in their head. A slot
+declares where content arrives from elsewhere, while a note discards its
+balanced body. Either combined with another item has nothing to act on:
 
 [codeblock, $code "moth":
     -- Error: the slot shares its head with a string

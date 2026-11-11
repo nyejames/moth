@@ -10,4 +10,4 @@ display |this Label| -> String:
 
 Label must PUBLIC_DISPLAY
 
-[:trait_bound_facade_grouped_wrapper_success [show(Label("facade"))]]
+~[:trait_bound_facade_grouped_wrapper_success [show(Label("facade"))]]

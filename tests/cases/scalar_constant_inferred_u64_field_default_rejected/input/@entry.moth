@@ -6,4 +6,4 @@ Holder = |
     wide U64 = one,
 |
 
-[:unreachable]
+~[:unreachable]

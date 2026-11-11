@@ -17,5 +17,5 @@ A nested template inserts a value from the surrounding scope.
 Templates can build plain text, Markdown, HTML, CSS or another string-based
 format. They may be finished during compilation or built at runtime.
 
-HTML pages come from `@entry.moth`. A direct top-level template in that file
-becomes page output. Builder metadata uses direct const root `$in` inserts. See @../project-structure/#entry-config (Entry metadata and builder slots) for page metadata. Assigned or returned templates remain ordinary `String` values.
+HTML pages come from `@entry.moth`. A bare direct [$html:<code>&#91;...&#93;</code>] must fold into
+static page output. A direct [$html:<code>~&#91;...&#93;</code>] is an explicit runtime body fragment. Builder metadata uses direct bare [$html:<code>&#91;$in name: ...&#93;</code>] inserts. See @../project-structure/#entry-config (Entry metadata and builder slots) for page metadata. Assigned or returned templates remain ordinary `String` values.

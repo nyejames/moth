@@ -10,8 +10,8 @@ styles #= [$css:
 .button { color: red; }
 ]
 
-#[:
-[raw]
+[:
+~[raw]
 <style>[styles]</style>
-[escaped]
+~[escaped]
 ]

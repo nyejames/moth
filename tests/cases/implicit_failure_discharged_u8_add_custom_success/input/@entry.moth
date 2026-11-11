@@ -10,4 +10,4 @@ left I8 = 127
 right U8 = 255
 result = as_domain_value(left, right) catch then 0
 
-[: discharged custom u8 add sum=[result]]
+~[: discharged custom u8 add sum=[result]]

@@ -18,4 +18,4 @@ if steady:
 ;
 after_text = receive_u64(count)
 
-[:scalar mutable binding before=[before_text] after=[after_text]]
+~[:scalar mutable binding before=[before_text] after=[after_text]]

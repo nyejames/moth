@@ -6,4 +6,4 @@ render_alias_observes || -> String:
     return [:collection_alias_observes_mutation len=[len]]
 ;
 
-[:[render_alias_observes()]]
+~[:[render_alias_observes()]]

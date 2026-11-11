@@ -144,8 +144,8 @@ fn schema_has_all_explicit_tags_once() {
         "retired token tag code 107 must not be reused"
     );
     // Flag bits stay confined to tags whose meaning depends on authored spelling: numeric
-    // literal kind, double-colon attachment, directive-call attachment of `(`, and whether a
-    // line-break run contains a blank physical line.
+    // literal kind, double-colon attachment, directive-call attachment of `(`, source-directive
+    // adjacency, and whether a line-break run contains a blank physical line.
     assert_eq!(
         tags.iter()
             .filter(|tag| {
@@ -154,6 +154,7 @@ fn schema_has_all_explicit_tags_once() {
                     TokenTag::NUMERIC_LITERAL
                         | TokenTag::DOUBLE_COLON
                         | TokenTag::OPEN_PARENTHESIS
+                        | TokenTag::STYLE_DIRECTIVE
                         | TokenTag::NEWLINE
                 )
             })

@@ -12,8 +12,8 @@ fn entry_runtime_fragment_count_is_zero_with_no_templates() {
 
 #[test]
 fn entry_runtime_fragment_count_is_zero_for_const_only_templates() {
-    // #[...] is a const (exported) template — it does not contribute to the runtime count.
-    let headers = parse_single_file_headers("#[3]\n");
+    // A bare direct `[...]` is compile-time page metadata, not a runtime fragment.
+    let headers = parse_single_file_headers("[3]\n");
     assert_eq!(
         headers.entry_runtime_fragment_count, 0,
         "const templates should not increment the runtime fragment count"
@@ -23,9 +23,8 @@ fn entry_runtime_fragment_count_is_zero_for_const_only_templates() {
 
 #[test]
 fn entry_runtime_fragment_count_reflects_runtime_template_count() {
-    // [3] is a runtime template ([...]), while top-level const-templates use #[...]. One at top
-    // level yields count 1.
-    let headers = parse_single_file_headers("[3]\n");
+    // `~[...]` marks a runtime fragment; a bare direct `[...]` would be const metadata.
+    let headers = parse_single_file_headers("~[3]\n");
     assert_eq!(
         headers.entry_runtime_fragment_count, 1,
         "one runtime top-level template should yield runtime fragment count of 1"
@@ -34,7 +33,7 @@ fn entry_runtime_fragment_count_reflects_runtime_template_count() {
 
 #[test]
 fn entry_runtime_fragment_count_accumulates_across_multiple_runtime_templates() {
-    let headers = parse_single_file_headers("[1]\n[2]\n[3]\n");
+    let headers = parse_single_file_headers("~[1]\n~[2]\n~[3]\n");
     assert_eq!(
         headers.entry_runtime_fragment_count, 3,
         "three runtime top-level templates should yield runtime fragment count of 3"
@@ -44,7 +43,7 @@ fn entry_runtime_fragment_count_accumulates_across_multiple_runtime_templates() 
 #[test]
 fn entry_runtime_fragment_count_ignores_assigned_templates() {
     let headers = parse_single_file_headers(
-        "buffer ~= [:initial content]\n~buffer = [:updated content]\nvalues = {\n[:nested collection]\n}\ngrouped = (\n[:nested group]\n)\n[:fragment]\n",
+        "buffer ~= [:initial content]\n~buffer = [:updated content]\nvalues = {\n[:nested collection]\n}\ngrouped = (\n[:nested group]\n)\n~[:fragment]\n",
     );
 
     assert_eq!(
@@ -213,4 +212,33 @@ fn start_function_retains_segmented_source_runs_in_order_with_eof() {
             .is_some()
             && diagnostic_primary_span(diagnostic) == Some(duplicate_span)
     }));
+}
+
+#[test]
+fn runtime_marker_accepts_horizontal_space_before_the_template() {
+    let headers = parse_single_file_headers("~ [3]\n");
+    assert_eq!(headers.entry_runtime_fragment_count, 1);
+    assert_eq!(headers.const_fragment_count, 0);
+}
+
+#[test]
+fn runtime_marker_requires_the_template_on_the_same_line() {
+    let source = "value = 1\n~\n[:value]\n";
+    let failure =
+        crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic(source);
+    let diagnostic = crate::compiler_frontend::tests::parse_support::first_ast_error_view(&failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-RULE-0047",
+        "a newline-separated marker must be rejected by ordinary syntax"
+    );
+}
+
+#[test]
+fn same_line_second_runtime_marker_is_not_counted_as_a_header_fragment() {
+    let headers = parse_single_file_headers("~[1] ~[2]\n");
+    assert_eq!(
+        headers.entry_runtime_fragment_count, 1,
+        "only a statement-boundary marker owns a runtime header; ordinary parsing rejects the same-line continuation"
+    );
 }

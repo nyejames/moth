@@ -15,4 +15,4 @@ other_twice = other_base + other_base
 other_received_base = receive_u64(other_base)
 other_received_twice = receive_u64(other_twice)
 
-[:scalar independent base twice=[received_twice] base=[received_base] reversed_twice=[other_received_twice] reversed_base=[other_received_base]]
+~[:scalar independent base twice=[received_twice] base=[received_base] reversed_twice=[other_received_twice] reversed_base=[other_received_base]]

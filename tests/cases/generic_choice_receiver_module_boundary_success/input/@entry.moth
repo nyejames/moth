@@ -2,4 +2,4 @@
 
 value = make_result(42)
 
-[: [value.label()]]
+~[: [value.label()]]

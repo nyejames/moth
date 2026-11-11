@@ -9,19 +9,25 @@ The entry has built-in `Error!`. Checked numeric failure and compatible top-leve
 An empty entry file produces the builder's default page. A metadata-only entry produces a complete document too:
 
 [codeblock, $code "moth":
-    #[$in title:Welcome]
+    [$in title:Welcome]
 ]
 
 A nested or aliased insert remains ordinary template composition.
 
-`$doc`, `$note` and `$todo` templates are documentation or comment processing. They produce no page output, but the file still creates the page.
+`$doc` attaches documentation to a following declaration, and `$todo`
+annotates a declaration or executable statement. Both take compile-time
+String operands and are source directives. Inside templates, `$note` discards
+comment content without producing output.
 
 ### Page fragments
 
 Direct top-level templates in `@entry.moth` become fragments:
 
-- A const fragment (the `#` prefix form) becomes static HTML.
-- A runtime fragment (the plain bracket form) runs through the entry.
+- Bare [$html:<code>&#91;...&#93;</code>] must fold and becomes static HTML.
+- Explicit [$html:<code>~&#91;...&#93;</code>] runs through the entry, even if its content can fold.
+
+The removed [$html:<code>#&#91;...&#93;</code>] spelling is invalid. A nonconstant bare entry fragment is
+an error instead of an implicit runtime fragment.
 
 The builder keeps static and runtime fragments in source order. Assigned or returned templates are ordinary values. Helpers cannot create page fragments.
 

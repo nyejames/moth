@@ -2,4 +2,4 @@
 MapSlot type T = |values {String = T?}|
 values {String = U64} = {"value" = 1}
 origin = MapSlot(values)
-[:bound-map-optional-entry-rejected]
+~[:bound-map-optional-entry-rejected]

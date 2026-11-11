@@ -16,7 +16,7 @@ release_content #String = release.content
 notes_content #String = notes.content
 summary_content #String = summary.content
 
-[:
+~[:
     <main>
         [intro_content]
         [setup_content]

@@ -3,4 +3,4 @@ check |condition Bool| -> I32:
     return 7
 ;
 result I64 = cast check(false) catch then 0
-[: [result]]
+~[: [result]]

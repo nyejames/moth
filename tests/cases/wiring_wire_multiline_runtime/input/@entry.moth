@@ -19,4 +19,4 @@ render || -> String:
     return [:direct=[direct] forwarded=[forwarded]]
 ;
 
-[:multiline [render()]]
+~[:multiline [render()]]

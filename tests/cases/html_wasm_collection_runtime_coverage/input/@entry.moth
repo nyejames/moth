@@ -5,4 +5,4 @@ len = values.length()
 picked = values.get(1) catch:
     then 0
 ;
-[:html_wasm_collection_runtime_coverage len=[len] picked=[picked]]
+~[:html_wasm_collection_runtime_coverage len=[len] picked=[picked]]

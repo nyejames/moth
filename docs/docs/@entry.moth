@@ -1,13 +1,13 @@
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-#[$in title:["Documentation"]]
-#[$in description:["Moth language, project and compiler documentation."]]
-#[$in head:[theme_head]]
+[$in title:["Documentation"]]
+[$in description:["Moth language, project and compiler documentation."]]
+[$in head:[theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Documentation
 
     Welcome to Moth. Start with the project tool, learn the core language in order and drop into the focused pages when you need a precise rule.

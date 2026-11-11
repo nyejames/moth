@@ -9,4 +9,4 @@ lhs = false
 calls ~= 0
 value = lhs and rhs_probe(~calls)
 
-[:js_short_circuit_jump_args value=[value] calls=[calls]]
+~[:js_short_circuit_jump_args value=[value] calls=[calls]]

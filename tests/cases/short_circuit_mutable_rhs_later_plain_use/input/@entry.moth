@@ -10,4 +10,4 @@ calls ~= 0
 value = lhs and rhs_plain(~calls)
 after = calls
 
-[:short_circuit_mutable_rhs_later_plain_use value=[value] after=[after]]
+~[:short_circuit_mutable_rhs_later_plain_use value=[value] after=[after]]

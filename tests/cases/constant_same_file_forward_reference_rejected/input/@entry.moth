@@ -4,4 +4,4 @@
 second #I32 = first + 2
 first #I32 = 40
 
-[:[second]]
+~[:[second]]

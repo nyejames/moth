@@ -11,4 +11,4 @@ ref2 = data
 counter ~= 0
 ~counter = counter + 1
 
-[:borrow_checker_basic_variables result=[result] ref1=[ref1] ref2=[ref2] counter=[counter]]
+~[:borrow_checker_basic_variables result=[result] ref1=[ref1] ref2=[ref2] counter=[counter]]

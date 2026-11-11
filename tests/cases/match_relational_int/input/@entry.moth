@@ -28,4 +28,4 @@ if char_value is:
     else => ~char_result = "after-z"
 ;
 
-[:relational_result=[result] float_result=[float_result] char_result=[char_result]]
+~[:relational_result=[result] float_result=[float_result] char_result=[char_result]]

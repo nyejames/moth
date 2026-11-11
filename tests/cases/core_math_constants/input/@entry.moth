@@ -9,4 +9,4 @@ sqrt_2_ok = SQRT_2 is 1.4142135623730951
 ln_2_ok = LN_2 is 0.6931471805599453
 ln_10_ok = LN_10 is 2.302585092994046
 
-[:core_math_constants pi=[pi_ok] tau=[tau_ok] e=[e_ok] sqrt_2=[sqrt_2_ok] ln_2=[ln_2_ok] ln_10=[ln_10_ok]]
+~[:core_math_constants pi=[pi_ok] tau=[tau_ok] e=[e_ok] sqrt_2=[sqrt_2_ok] ln_2=[ln_2_ok] ln_10=[ln_10_ok]]

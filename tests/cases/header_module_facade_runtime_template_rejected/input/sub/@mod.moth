@@ -3,4 +3,4 @@ greet || -> String:
     return "hello"
 ;
 
-[: runtime template in module facade]
+~[: runtime template in module facade]

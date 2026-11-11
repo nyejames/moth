@@ -6,4 +6,4 @@ render || -> String:
     return value
 ;
 
-#[:ok]
+[:ok]

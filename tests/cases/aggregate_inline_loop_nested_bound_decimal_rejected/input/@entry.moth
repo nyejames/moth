@@ -6,4 +6,4 @@ render || -> String:
     ;
     return "empty"
 ;
-[:[render()]]
+~[:[render()]]

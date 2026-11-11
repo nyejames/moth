@@ -30,4 +30,4 @@ alias_value = echo_zero(whole)
 
 scaled Dec3 = 1.235
 
-[:dec reclaim type=[held_text] variant=[token_same] number=[number] whole=[whole] alias=[alias_value] scaled=[scaled]]
+~[:dec reclaim type=[held_text] variant=[token_same] number=[number] whole=[whole] alias=[alias_value] scaled=[scaled]]

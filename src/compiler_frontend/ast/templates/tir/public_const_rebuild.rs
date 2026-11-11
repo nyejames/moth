@@ -89,6 +89,7 @@ pub(crate) fn rebuild_const_template_reference(
             context: TemplateViewContext::default(),
         },
         span,
+        comment_directive_span: None,
     }))
 }
 

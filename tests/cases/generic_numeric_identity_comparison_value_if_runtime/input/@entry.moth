@@ -25,4 +25,4 @@ direct_block String = if identity(1) is 2:
 else
     then "no"
 ;
-[:pending-numeric-comparison inline=[inline_yes] block=[block_yes] named=[named_yes] nested=[nested_yes] later=[later_text] direct_inline=[direct_inline] direct_block=[direct_block]]
+~[:pending-numeric-comparison inline=[inline_yes] block=[block_yes] named=[named_yes] nested=[nested_yes] later=[later_text] direct_inline=[direct_inline] direct_block=[direct_block]]

@@ -83,4 +83,4 @@ assert(float_desc_sum is 1.5)
 assert(descending_flow_count is 2)
 assert(descending_flow_sum is 16)
 
-[:loop_range_direction_and_step descending_omitted=[descending_omitted_count] descending_positive=[descending_positive_count] descending_negative=[descending_negative_sum] ascending_negative=[ascending_negative_count] omitted_positive=[omitted_start_positive_count] omitted_equal=[omitted_start_equal_sum] equal_inclusive=[equal_inclusive_count]/[equal_inclusive_sum] ascending_positive=[ascending_positive_sum] float_desc=[float_desc_count]/[float_desc_sum] descending_flow=[descending_flow_count]/[descending_flow_sum]]
+~[:loop_range_direction_and_step descending_omitted=[descending_omitted_count] descending_positive=[descending_positive_count] descending_negative=[descending_negative_sum] ascending_negative=[ascending_negative_count] omitted_positive=[omitted_start_positive_count] omitted_equal=[omitted_start_equal_sum] equal_inclusive=[equal_inclusive_count]/[equal_inclusive_sum] ascending_positive=[ascending_positive_sum] float_desc=[float_desc_count]/[float_desc_sum] descending_flow=[descending_flow_count]/[descending_flow_sum]]

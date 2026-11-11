@@ -21,4 +21,4 @@ block_total I32 = 1 + 2 catch:
 
 maybe_text = if maybe is |value| then value else "none"
 
-[: target propagation: [maybe_text]|[cell.label]|[step]|[result]|[inline_total]|[block_total]]
+~[: target propagation: [maybe_text]|[cell.label]|[step]|[result]|[inline_total]|[block_total]]

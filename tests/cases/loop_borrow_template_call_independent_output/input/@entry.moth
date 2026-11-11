@@ -13,4 +13,4 @@ render_listing |cards {String}| -> String:
 cards = {"one", "two"}
 rendered = render_listing(cards)
 
-[:loop_borrow_template_call_independent_output [rendered]]
+~[:loop_borrow_template_call_independent_output [rendered]]

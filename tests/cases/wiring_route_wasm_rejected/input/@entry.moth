@@ -7,4 +7,4 @@ accept |route Route of String -> Message| -> String:
 ;
 
 accepted = accept(Message::Update)
-[:wasm route accepted=[accepted]]
+~[:wasm route accepted=[accepted]]

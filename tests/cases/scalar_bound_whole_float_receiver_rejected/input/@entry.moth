@@ -8,4 +8,4 @@ raw = accept_f64(1)
 whole = 1
 accept_f64(whole)
 
-[:unreachable]
+~[:unreachable]

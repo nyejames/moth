@@ -4,4 +4,4 @@ Box type T = |
 
 box = Box("visible")
 
-[: html wasm rejects reachable generic runtime value [box.value]]
+~[: html wasm rejects reachable generic runtime value [box.value]]

@@ -185,7 +185,7 @@ fn float_validation_distinguishes_compiler_entry_from_declared_error_contract() 
 fn float_formatting_in_synthetic_error_entry_keeps_integrity_trap() {
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(
         "identity |value F64| -> F64:\n    return value\n;\n\
-         value = identity(1.5)\n[:[value]]\n",
+         value = identity(1.5)\n~[:[value]]\n",
     );
     let module = lower_hir(
         ast,

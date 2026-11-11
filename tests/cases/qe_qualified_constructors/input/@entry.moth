@@ -6,4 +6,4 @@ if outcome is:
     Err(message as error_message) => io.line([: qe-constructors choice=[error_message] ])
 ;
 
-[: qe-constructors struct=[color.label] ]
+~[: qe-constructors struct=[color.label] ]

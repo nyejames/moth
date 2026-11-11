@@ -30,4 +30,4 @@ too_small_float_value = parse_float(-2147483649.0) catch |small_float_err|:
     then 0
 ;
 
-[: runtime i32 boundary catch codes: [too_big_string_code]/[too_small_string_code]/[too_big_float_code]/[too_small_float_code]]
+~[: runtime i32 boundary catch codes: [too_big_string_code]/[too_small_string_code]/[too_big_float_code]/[too_small_float_code]]

@@ -2,4 +2,4 @@ count #I32 = cast "0" catch:
     then 0
 ;
 
-[: const cast catch recovery: [count]]
+~[: const cast catch recovery: [count]]

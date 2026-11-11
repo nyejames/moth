@@ -1,3 +1,3 @@
 @impl value
 
-[:export_directive_ordinary_file_rejected [value]]
+~[:export_directive_ordinary_file_rejected [value]]

@@ -169,7 +169,7 @@ pub(super) fn parse_template_expression(
         }
 
         // Comment templates do not produce an expression.
-        TemplateType::Comment(_) => Ok(None),
+        TemplateType::Comment => Ok(None),
 
         TemplateType::SlotInsert(_) => {
             maybe_consume_closing_parenthesis(token_stream, consume_closing_parenthesis);

@@ -86,6 +86,7 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
             context: TemplateViewContext::default(),
         },
         span: None,
+        comment_directive_span: None,
     };
     let declaration = {
         let value = expression_builder
@@ -252,6 +253,7 @@ fn const_required_option_capture_template_with_direct_tir(
             context,
         },
         span: None,
+        comment_directive_span: None,
     }
 }
 
@@ -460,6 +462,7 @@ fn parse_runtime_template_without_validation(
     let template = Template {
         tir_reference,
         span,
+        comment_directive_span: None,
     };
 
     (template, context, string_table)

@@ -22,4 +22,4 @@ assert(mutable_value is 43)
 assert(immutable_fallback is 201)
 assert(mutable_fallback is 202)
 
-[:retained scalar cast success=[immutable_value]/[mutable_value] failure=[immutable_fallback]/[mutable_fallback]]
+~[:retained scalar cast success=[immutable_value]/[mutable_value] failure=[immutable_fallback]/[mutable_fallback]]

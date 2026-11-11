@@ -36,4 +36,4 @@ constant_rounded #F16 = (constant_large + constant_one) - constant_large
 assert(constant_rounded is 0)
 assert(rounded_value is constant_rounded)
 
-[:scalar f16 completion rounded=[rounded_text] overflow=[overflow_code]/[overflow_text] ok=[ok_sum_text]]
+~[:scalar f16 completion rounded=[rounded_text] overflow=[overflow_code]/[overflow_text] ok=[ok_sum_text]]

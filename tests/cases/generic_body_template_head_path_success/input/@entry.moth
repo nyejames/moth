@@ -4,4 +4,4 @@ draw type T |name T| -> String:
 
 value = draw("x")
 
-[: [value] ]
+~[: [value] ]

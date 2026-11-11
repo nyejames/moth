@@ -4,4 +4,4 @@ take_u64 |v U64| -> String:
     return cast v
 ;
 
-[:[take_u64(limit)]]
+~[:[take_u64(limit)]]

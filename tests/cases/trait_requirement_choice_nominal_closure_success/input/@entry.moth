@@ -2,4 +2,4 @@
 
 maker = make_maker()
 chosen = maker.kind()
-[:[show(chosen)]]
+~[:[show(chosen)]]

@@ -1,18 +1,18 @@
 @aliases preload_alias
 
-#[$in stylesheets: [@styles/docs.css]]
+[$in stylesheets: [@styles/docs.css]]
 
 -- The first contribution is literal text. Its structural duplicates must be compared only after
 -- each complete contribution is rendered in this page's artefact URL context.
-#[$in head:<link rel="preload" href="./static/theme.css">]
-#[$in head:<link rel="preload" href="[@static/theme.css]">]
-#[$in head:<link rel="preload" href="[preload_alias]">]
+[$in head:<link rel="preload" href="./static/theme.css">]
+[$in head:<link rel="preload" href="[@static/theme.css]">]
+[$in head:<link rel="preload" href="[preload_alias]">]
 
-#[$in head:<meta property="og:type" content="website">]
-#[$in head:<meta property="og:type" content="website">]
-#[$in head:<meta name="theme-color" content="#ffffff">]
+[$in head:<meta property="og:type" content="website">]
+[$in head:<meta property="og:type" content="website">]
+[$in head:<meta name="theme-color" content="#ffffff">]
 
 -- Duplicate subelements inside one complete contribution are not rewritten.
-#[$in head:<meta name="inner-dup" content="1"><meta name="inner-dup" content="1">]
+[$in head:<meta name="inner-dup" content="1"><meta name="inner-dup" content="1">]
 
-#[:<main>head dedup body</main>]
+[:<main>head dedup body</main>]

@@ -1,6 +1,6 @@
-#[$in description:["Intro & <guide>"]]
-#[$in lang:["en-GB"]]
-#[$in favicon:[@static/favicon.png]]
-#[$in body_style:["padding: 0;\"quoted\""]]
+[$in description:["Intro & <guide>"]]
+[$in lang:["en-GB"]]
+[$in favicon:[@static/favicon.png]]
+[$in body_style:["padding: 0;\"quoted\""]]
 
-#[:<main>Scalars</main>]
+[:<main>Scalars</main>]

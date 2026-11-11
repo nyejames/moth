@@ -1,6 +1,6 @@
 //! Top-level const-template header creation.
 //!
-//! WHAT: turns entry-file `#[...]` templates into const-template headers plus placement metadata.
+//! WHAT: turns bare direct entry-file `[...]` templates into const-template headers plus placement metadata.
 //! WHY: const fragments are folded by AST but ordered by header parsing through runtime insertion
 //! indices, so this logic must stay in the header stage.
 
@@ -88,7 +88,6 @@ pub(super) fn create_top_level_const_template(
     let post_close = crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region_from_source(
         cursor,
         opening,
-        context.string_table,
         |_token| {},
         |span, innermost_opening| {
             HeaderParseFailure::Diagnostic(templates::missing_closing_bracket(
@@ -257,6 +256,7 @@ pub(super) fn create_top_level_const_template(
         export_mode: HeaderExportMode::Private,
         local_ordering_hints,
         name_span: Some(name_span),
+        source_directives: Vec::new(),
         synthetic_content_payload: None,
         tokens: retained_range,
         declaration_path: full_name,

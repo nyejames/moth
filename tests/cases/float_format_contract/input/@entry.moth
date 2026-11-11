@@ -27,7 +27,7 @@ tiny #F64 = 0.0000001
 big #F64 = 1e21
 neg_big #F64 = -1e21
 
-[:folded float: [zero]|[neg_zero]|[one]|[one_half]|[small]|[tiny]|[big]|[neg_big]]
+~[:folded float: [zero]|[neg_zero]|[one]|[one_half]|[small]|[tiny]|[big]|[neg_big]]
 
 -- ---------------------
 --  Runtime path
@@ -52,7 +52,7 @@ format_f64 |value F64| -> String:
     return cast value
 ;
 
-[:runtime float: [format_value(0.0)]|[format_value(-0.0)]|[format_value(1.0)]|[format_value(1.5)]|[format_value(0.000001)]|[format_value(0.0000001)]|[format_value(1e21)]|[format_value(-1e21)]]
+~[:runtime float: [format_value(0.0)]|[format_value(-0.0)]|[format_value(1.0)]|[format_value(1.5)]|[format_value(0.000001)]|[format_value(0.0000001)]|[format_value(1e21)]|[format_value(-1e21)]]
 
 -- Typed function calls keep the fixed-precision cases on the runtime path.
-[:runtime precision: F16 max=[format_f16(65504)]|F16 2^-6=[format_f16(0.015625)]|F32 0.1=[format_f32(0.1)]|F64 1e21=[format_f64(1e21)]]
+~[:runtime precision: F16 max=[format_f16(65504)]|F16 2^-6=[format_f16(0.015625)]|F32 0.1=[format_f32(0.1)]|F64 1e21=[format_f64(1e21)]]

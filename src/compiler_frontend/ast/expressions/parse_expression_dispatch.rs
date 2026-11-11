@@ -241,6 +241,9 @@ fn reject_second_operand_after_value_template(
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     while token_stream.current_tag() == TokenTag::TEMPLATE_HEAD {
+        if state.stop_at_adjacent_operand {
+            return Ok(());
+        }
         let next_template_start = Some(token_stream.current_span());
         let next_template = parse_template_expression(
             token_stream,
@@ -255,9 +258,6 @@ fn reject_second_operand_after_value_template(
         )?;
 
         if next_template.is_some() {
-            if state.stop_at_adjacent_operand {
-                return Ok(());
-            }
             return Err(token_lexical::invalid_expression(
                 InvalidExpressionReason::ExpectedOperatorBeforeExpression,
                 next_template_start,

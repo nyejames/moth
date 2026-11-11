@@ -2070,6 +2070,7 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
             context: const_context,
         },
         span: None,
+        comment_directive_span: None,
     };
 
     let store = context.template_ir_store.borrow();
@@ -2219,6 +2220,7 @@ fn runtime_validation_uses_nested_child_overlay_identity() {
             context: parent_context,
         },
         span: None,
+        comment_directive_span: None,
     };
 
     let store = context.template_ir_store.borrow();

@@ -3,4 +3,4 @@ mixed_results || -> I32, F32, I64, F64:
 ;
 
 whole, single, wide, double = mixed_results()
-[:mixed slots: [whole]|[single]|[wide]|[double]]
+~[:mixed slots: [whole]|[single]|[wide]|[double]]

@@ -102,6 +102,7 @@ fn same_store_wrapper_reference_is_normalized_without_materialization() {
             context,
         },
         span: None,
+        comment_directive_span: None,
     };
 
     let reference = wrapper_reference_for_template(&template, &store)
@@ -131,6 +132,7 @@ fn wrapper_reference_rejects_missing_view_context_and_missing_template() {
             },
         },
         span: None,
+        comment_directive_span: None,
     };
     let missing_context_error = wrapper_reference_for_template(&missing_context_template, &store)
         .expect_err("missing view context should be rejected");
@@ -150,6 +152,7 @@ fn wrapper_reference_rejects_missing_view_context_and_missing_template() {
             context: TemplateViewContext::default(),
         },
         span: None,
+        comment_directive_span: None,
     };
     let missing_template_error = wrapper_reference_for_template(&missing_template, &empty_store)
         .expect_err("missing template should be rejected");

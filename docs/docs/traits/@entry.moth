@@ -20,14 +20,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Traits"]]
-#[$in description:["Static trait contracts, explicit conformance and generic bounds in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Traits"]]
+[$in description:["Static trait contracts, explicit conformance and generic bounds in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Traits
 
     A trait names a static method contract. Matching methods don't imply
@@ -39,7 +39,7 @@ init_docs_sidebar()!
     @#evidence-travels-with-values (Evidence travels with values).
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:trait-declarations]
         [$in title:Trait declarations]
@@ -49,7 +49,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:trait-requirements]
         [$in title:Trait requirements]
@@ -59,7 +59,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:conformance]
         [$in title:Conformance]
@@ -69,7 +69,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:generic-trait-bounds]
         [$in title:Generic trait bounds]
@@ -79,7 +79,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:trait-incompatibility]
         [$in title:Trait incompatibility]
@@ -89,7 +89,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:core-cast-traits]
         [$in title:Core cast traits]
@@ -99,7 +99,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:trait-design-scope]
         [$in title:Trait design scope]
@@ -109,7 +109,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../generics/]
         [$in previous_title:Generics]

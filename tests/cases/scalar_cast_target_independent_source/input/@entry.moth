@@ -13,4 +13,4 @@ casts_then_use = 1
 from_cast = receive_u32(cast casts_then_use)
 from_use = receive_i64(casts_then_use)
 
-[:scalar cast source first=[from_cast] later=[from_use]]
+~[:scalar cast source first=[from_cast] later=[from_use]]

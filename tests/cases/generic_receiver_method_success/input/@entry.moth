@@ -9,4 +9,4 @@ combine type A |this Box of A
 
 boxed = Box(42)
 
-[: generic receiver [boxed.combine(second = 7, first = 6)]]
+~[: generic receiver [boxed.combine(second = 7, first = 6)]]

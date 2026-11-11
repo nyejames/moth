@@ -6,7 +6,7 @@
 @sections/zeta render_zeta
 @sections/eta render_eta
 
-[:
+~[:
     <main>
         [render_alpha()]
         [render_beta()]

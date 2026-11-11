@@ -61,7 +61,7 @@ impl HeaderExpressionRange {
         }
     }
 
-    fn expression(header_index: usize, range: TokenRange) -> Self {
+    pub(crate) fn expression(header_index: usize, range: TokenRange) -> Self {
         Self {
             header_index,
             range,
@@ -434,19 +434,20 @@ pub(crate) fn push_const_required_expression_ranges(
 
     match &header.kind {
         HeaderKind::Constant { declaration } => {
-            if declaration.config_contract.is_some() {
-                return;
-            }
-            if let Some(range) = declaration.initializer_range {
-                push(range);
-            } else if matches!(
-                header.synthetic_content_payload,
-                Some(SyntheticContentPayload::MothTemplate { .. })
-            ) && !header.tokens.is_empty()
-            {
-                // A Moth-template synthetic content constant keeps its body in `Header::tokens`
-                // while leaving the declaration initializer range empty.
-                push(header.tokens);
+            // A config-qualified initializer stays ordering-neutral until config validation
+            // succeeds, but attached source-directive operands still fold during emission.
+            if declaration.config_contract.is_none() {
+                if let Some(range) = declaration.initializer_range {
+                    push(range);
+                } else if matches!(
+                    header.synthetic_content_payload,
+                    Some(SyntheticContentPayload::MothTemplate { .. })
+                ) && !header.tokens.is_empty()
+                {
+                    // A Moth-template synthetic content constant keeps its body in
+                    // `Header::tokens` while leaving the declaration initializer range empty.
+                    push(header.tokens);
+                }
             }
         }
         HeaderKind::ConstTemplate { .. } => {
@@ -475,6 +476,15 @@ pub(crate) fn push_const_required_expression_ranges(
         | HeaderKind::Trait { .. }
         | HeaderKind::TraitConformance { .. }
         | HeaderKind::TraitIncompatibility { .. } => {}
+    }
+
+    // Source-directive operands fold before their target is emitted, exactly like a const
+    // initializer, so their qualified references must create the same ordering edge and content
+    // dependency. They are const-required regardless of the target header kind.
+    for directive in &header.source_directives {
+        if let Some(operand) = directive.operand {
+            push(operand);
+        }
     }
 }
 

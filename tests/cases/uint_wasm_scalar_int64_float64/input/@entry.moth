@@ -45,4 +45,4 @@ witness_agree_text String = if converted_witness is explicit_witness then "yes" 
 fmt_above String = cast above
 fmt_huge String = cast huge
 
-[:uint wasm64f64 wide=[kept_above]/[huge] compare=[above_less_text]/[above_equal_text]/[above_above_max_text]/[min_below_zero_text]/[zero_above_min_text] float=[converted_witness]/[explicit_witness]/[witness_match_text]/[witness_agree_text] fmt=[fmt_above]/[fmt_huge]]
+~[:uint wasm64f64 wide=[kept_above]/[huge] compare=[above_less_text]/[above_equal_text]/[above_above_max_text]/[min_below_zero_text]/[zero_above_min_text] float=[converted_witness]/[explicit_witness]/[witness_match_text]/[witness_agree_text] fmt=[fmt_above]/[fmt_huge]]

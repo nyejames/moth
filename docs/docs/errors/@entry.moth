@@ -19,14 +19,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Errors, options and assertions"]]
-#[$in description:["Recoverable errors, optional values, local recovery and assertions in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Errors, options and assertions"]]
+[$in description:["Recoverable errors, optional values, local recovery and assertions in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Errors, options and assertions
 
     Moth separates ordinary absence, recoverable failure and broken invariants.
@@ -43,7 +43,7 @@ init_docs_sidebar()!
     Progress matrix owns current support: @../progress (Progress).
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:error-values]
         [$in title:Error values]
@@ -53,7 +53,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:error-returns]
         [$in title:Error returns]
@@ -63,7 +63,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:propagation]
         [$in title:Error propagation]
@@ -73,7 +73,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:catch-and-recovery]
         [$in title:Catch and recovery]
@@ -83,7 +83,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:options]
         [$in title:Options]
@@ -93,7 +93,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:assertions]
         [$in title:Assertions]
@@ -103,7 +103,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:runtime-failures-and-termination]
         [$in title:Runtime failures and termination]
@@ -115,7 +115,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../choices/]
         [$in previous_title:Choices]

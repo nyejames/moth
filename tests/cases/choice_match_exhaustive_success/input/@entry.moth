@@ -9,4 +9,4 @@ if current is:
     Offline => ~match_result = "offline"
 ;
 
-[:choice_match_exhaustive_success result=[match_result]]
+~[:choice_match_exhaustive_success result=[match_result]]

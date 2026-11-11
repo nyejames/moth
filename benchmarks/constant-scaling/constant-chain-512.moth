@@ -522,4 +522,4 @@ c509 #= c508 + 1
 c510 #= c509 + 1
 c511 #= c510 + 1
 
-[:constant-chain-512 last=[c511]]
+~[:constant-chain-512 last=[c511]]

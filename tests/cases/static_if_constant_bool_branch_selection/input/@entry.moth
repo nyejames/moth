@@ -38,4 +38,4 @@ if not disabled:
     ~negated = 8
 ;
 
-[:static_if with_else=[with_else] without_else=[without_else] literal_true=[literal_true] literal_false=[literal_false] negated=[negated]]
+~[:static_if with_else=[with_else] without_else=[without_else] literal_true=[literal_true] literal_false=[literal_false] negated=[negated]]

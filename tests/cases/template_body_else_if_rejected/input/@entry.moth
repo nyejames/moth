@@ -1,4 +1,4 @@
-[:
+~[:
     [if true:
         primary
     [else if false]

@@ -8,4 +8,4 @@ if value is:
     Busy => ~variant = "Busy"
 ;
 
-[:choice_same_module_private_dependency_success variant=[variant]]
+~[:choice_same_module_private_dependency_success variant=[variant]]

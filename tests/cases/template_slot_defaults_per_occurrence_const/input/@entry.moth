@@ -5,4 +5,4 @@ card #= [:named=[$slot title = title]|cast=[$slot title = cast 42]|again=[$slot 
 plain #= [card]
 filled #= [card, "POS":[$in title:Filled]]
 rendered #= [:plain=[plain]|filled=[filled]]
-[rendered]
+~[rendered]

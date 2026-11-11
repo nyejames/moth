@@ -13,4 +13,4 @@ if r is:
     else => io.line("else")
 ;
 
-[:pattern_choice_payload_existing_capture_alias_success]
+~[:pattern_choice_payload_existing_capture_alias_success]

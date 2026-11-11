@@ -5,4 +5,4 @@ mixed_add |signed I16, unsigned U16| -> I32:
 maximum = mixed_add(32767, 65535)
 minimum = mixed_add(-32768, 0)
 
-[: mixed i32 add min=[minimum] max=[maximum]]
+~[: mixed i32 add min=[minimum] max=[maximum]]

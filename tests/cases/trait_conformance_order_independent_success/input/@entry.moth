@@ -13,4 +13,4 @@ Widget = |
 |
 
 widget = Widget("ordered")
-[:trait_conformance_order_independent_success [widget.render()]]
+~[:trait_conformance_order_independent_success [widget.render()]]

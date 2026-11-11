@@ -12,4 +12,4 @@ render_alias || -> String:
     return [:fixed_collection_alias_success first=[first] length=[len]]
 ;
 
-[:[render_alias()]]
+~[:[render_alias()]]

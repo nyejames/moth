@@ -14,14 +14,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Functions"]]
-#[$in description:["Function declarations, parameters, calls, access and return values in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Functions"]]
+[$in description:["Function declarations, parameters, calls, access and return values in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Functions
 
     Moth functions use named declarations rather than anonymous closures or
@@ -33,7 +33,7 @@ init_docs_sidebar()!
     access and failure propagation where they occur.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:function-declarations]
         [$in title:Function declarations]
@@ -43,7 +43,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:parameters-and-defaults]
         [$in title:Parameters and defaults]
@@ -53,7 +53,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:calls-and-access]
         [$in title:Calls and access]
@@ -63,7 +63,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:returns-and-multiple-values]
         [$in title:Returns and multiple values]
@@ -73,7 +73,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../casts/]
         [$in previous_title:Casts]

@@ -1,3 +1,3 @@
 @provider label
 
-[: [label(42)] ]
+~[: [label(42)] ]

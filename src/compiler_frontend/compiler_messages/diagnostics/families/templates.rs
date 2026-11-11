@@ -78,6 +78,7 @@ unit_code! {
         DuplicateModifier = 12,
         DanglingModifier = 13,
         WrongTarget = 14,
+        MissingSeparator = 15,
     }
 }
 
@@ -111,6 +112,7 @@ impl InvalidTemplateDirectiveCode {
             InvalidTemplateDirectiveReason::DuplicateModifier => (Self::DuplicateModifier, None),
             InvalidTemplateDirectiveReason::DanglingModifier => (Self::DanglingModifier, None),
             InvalidTemplateDirectiveReason::WrongTarget => (Self::WrongTarget, None),
+            InvalidTemplateDirectiveReason::MissingSeparator => (Self::MissingSeparator, None),
         }
     }
 
@@ -133,6 +135,7 @@ impl InvalidTemplateDirectiveCode {
             Self::DuplicateModifier => InvalidTemplateDirectiveReason::DuplicateModifier,
             Self::DanglingModifier => InvalidTemplateDirectiveReason::DanglingModifier,
             Self::WrongTarget => InvalidTemplateDirectiveReason::WrongTarget,
+            Self::MissingSeparator => InvalidTemplateDirectiveReason::MissingSeparator,
         }
     }
 }
@@ -255,7 +258,6 @@ unit_code! {
         MultipleFormatters = 1,
         DuplicateExclusiveDirective = 2,
         DiscardedCommentDirectiveMustBeOnlyMeaningfulItem = 3,
-        DocumentationDirectiveMustBeOnlyMeaningfulItem = 4,
         SlotDirectiveMustBeExclusive = 5,
     }
 }
@@ -345,7 +347,6 @@ unit_code! {
         NestedTemplateNotAllowed = 5,
         HelperInConstTemplate = 6,
         NonFoldableConstTemplate = 7,
-        NonFoldableDocComment = 8,
         FallibleValueInTemplateHead = 9,
         UnsupportedTypeInTemplateHead = 10,
         RuntimeTemplateInConst = 11,
@@ -425,9 +426,6 @@ impl InvalidTemplateStructureCode {
             }
             InvalidTemplateStructureReason::NonFoldableConstTemplate => {
                 (Self::NonFoldableConstTemplate, None, None)
-            }
-            InvalidTemplateStructureReason::NonFoldableDocComment => {
-                (Self::NonFoldableDocComment, None, None)
             }
             InvalidTemplateStructureReason::FallibleValueInTemplateHead => {
                 (Self::FallibleValueInTemplateHead, None, None)
@@ -538,7 +536,6 @@ impl InvalidTemplateStructureCode {
             Self::NonFoldableConstTemplate => {
                 InvalidTemplateStructureReason::NonFoldableConstTemplate
             }
-            Self::NonFoldableDocComment => InvalidTemplateStructureReason::NonFoldableDocComment,
             Self::FallibleValueInTemplateHead => {
                 InvalidTemplateStructureReason::FallibleValueInTemplateHead
             }

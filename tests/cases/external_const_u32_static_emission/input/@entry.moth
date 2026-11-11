@@ -2,4 +2,4 @@
 
 max_value #U32 = u32_max
 triangles_value #U32 = primitive_triangles
-#[:constant max=[max_value] triangles=[triangles_value]]
+[:constant max=[max_value] triangles=[triangles_value]]

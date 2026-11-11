@@ -14,4 +14,4 @@ if echoed is:
     Busy => ~label = "busy"
 ;
 
-[:choice_dependency_visibility_exported label=[label]]
+~[:choice_dependency_visibility_exported label=[label]]

@@ -8,4 +8,4 @@ if value is:
     else => ~result = "other"
 ;
 
-[:pattern_duplicate_literal_warning result=[result]]
+~[:pattern_duplicate_literal_warning result=[result]]

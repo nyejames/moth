@@ -58,4 +58,4 @@ positive_huge_capacity = parse_number256("1e9000000000") catch |capacity_error|:
     then 0.0
 ;
 
-[:number parsing scale=[parsed_scale0]/[parsed_scale1]/[parsed_scale2]/[parsed_exponent] tiny=[tiny_matches] signed-huge-zero=[huge_zero_matches] malformed=[uppercase_error_code]/[plus_error_code] exactness=[inexact_error_code]/[negative_huge_error_code]/[capacity_error_code]]
+~[:number parsing scale=[parsed_scale0]/[parsed_scale1]/[parsed_scale2]/[parsed_exponent] tiny=[tiny_matches] signed-huge-zero=[huge_zero_matches] malformed=[uppercase_error_code]/[plus_error_code] exactness=[inexact_error_code]/[negative_huge_error_code]/[capacity_error_code]]

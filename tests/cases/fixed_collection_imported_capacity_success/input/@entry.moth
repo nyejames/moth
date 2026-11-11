@@ -19,4 +19,4 @@ render_imported || -> String:
     return [:fixed_collection_imported_capacity_success first=[first] length=[len]]
 ;
 
-[:[render_imported()]]
+~[:[render_imported()]]

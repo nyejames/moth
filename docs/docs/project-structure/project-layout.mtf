@@ -54,7 +54,7 @@ Any other `@*.moth` or `+*.moth` spelling is rejected as a structure error. The 
 A project produces an HTML page for each `@entry.moth` directory. Entry eligibility comes from file presence, not from the amount of authored activity:
 
 [codeblock, $code "moth":
-    #[$in title:Welcome]
+    [$in title:Welcome]
 ]
 
 This metadata-only entry still produces a complete document. An empty `@entry.moth` is also eligible.

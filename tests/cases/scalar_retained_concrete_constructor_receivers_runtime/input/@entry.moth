@@ -72,4 +72,4 @@ failure = Error(message = "full u32", code = pending_code32)
 -- 5. The ready side-effecting argument stays in field order with the retained one.
 ordered = OrderedBox(order = mark_step(~step_count), amount = pending)
 
-[:field=[receive_u64(box.amount)] origin=[pending] choice=[describe_code(selected)] nested=[receive_u64(nested.amount)] code=[failure.code] order=[ordered.order] marked=[step_count]]
+~[:field=[receive_u64(box.amount)] origin=[pending] choice=[describe_code(selected)] nested=[receive_u64(nested.amount)] code=[failure.code] order=[ordered.order] marked=[step_count]]

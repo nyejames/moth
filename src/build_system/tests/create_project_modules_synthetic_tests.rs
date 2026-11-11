@@ -62,7 +62,7 @@ fn synthetic_discovery_keeps_authored_kind_when_canonical_extension_disagrees() 
     let root = _temp.path().to_path_buf();
     let payload = root.join("payload.bin");
     let entry = root.join("main.moth");
-    fs::write(&payload, "#[:ok]\n").expect("should write unrecognized-extension payload");
+    fs::write(&payload, "[:ok]\n").expect("should write unrecognized-extension payload");
     symlink(&payload, &entry).expect("should symlink recognized source name onto payload");
 
     let config = Config::new(root.clone());

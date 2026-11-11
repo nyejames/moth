@@ -11,4 +11,4 @@ if current is:
     Busy => ~label = "busy"
     Offline => ~label = "offline"
 ;
-[:choice_function_return_flow result=[label]]
+~[:choice_function_return_flow result=[label]]

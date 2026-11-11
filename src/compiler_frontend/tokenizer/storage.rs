@@ -725,6 +725,22 @@ impl TestSourceTokensBuilder {
             .map_err(test_shape_error)
     }
 
+    pub(crate) fn push_style_directive(
+        &mut self,
+        value: StringId,
+        attached: bool,
+        span: LocalSpan,
+    ) -> Result<(), InfrastructureFailure> {
+        self.builder
+            .push_payload(
+                TokenTag::STYLE_DIRECTIVE,
+                TokenShape::style_directive_attached_flags(attached),
+                value.index(),
+                span,
+            )
+            .map_err(test_shape_error)
+    }
+
     pub(crate) fn push_path(
         &mut self,
         tag: TokenTag,

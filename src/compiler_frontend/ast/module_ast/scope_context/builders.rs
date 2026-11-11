@@ -200,6 +200,19 @@ impl ScopeContext {
         self
     }
 
+    pub fn with_source_doc_sink(
+        mut self,
+        sink: Rc<RefCell<Vec<crate::compiler_frontend::ast::AstDocFragment>>>,
+    ) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).source_docs = sink;
+        self
+    }
+
+    pub fn with_source_doc_publication(mut self, publish: bool) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).publish_source_docs = publish;
+        self
+    }
+
     pub fn with_source_file_scope(mut self, source_file: PathId) -> ScopeContext {
         Rc::make_mut(&mut self.shared).source_file_scope = Some(source_file);
         self

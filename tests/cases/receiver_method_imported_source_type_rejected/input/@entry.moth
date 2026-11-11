@@ -11,4 +11,4 @@ text |this Label| -> String:
 Label must LABEL_TEXT
 
 label = Label("imported")
-[:receiver_method_imported_source_type_rejected [label.text()]]
+~[:receiver_method_imported_source_type_rejected [label.text()]]

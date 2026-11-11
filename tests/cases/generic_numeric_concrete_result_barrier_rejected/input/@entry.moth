@@ -12,4 +12,4 @@ read_u64 |value U64| -> String:
 value = barrier(7)
 received = read_u64(value)
 
-[: [received]]
+~[: [received]]

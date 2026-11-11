@@ -37,4 +37,4 @@ halves = 1.0 / 2.0
 thirds_f32 = 1.0 / 3.0
 thirds_f16 = 1.0 / 3.0
 
-[:scalar retained division grouped=[receive_f64(grouped)] chained=[receive_f64(chained)] added=[receive_f64(added)] halves=[receive_f32(halves)] f32=[receive_f32(thirds_f32)] f16=[receive_f16(thirds_f16)]]
+~[:scalar retained division grouped=[receive_f64(grouped)] chained=[receive_f64(chained)] added=[receive_f64(added)] halves=[receive_f32(halves)] f32=[receive_f32(thirds_f32)] f16=[receive_f16(thirds_f16)]]

@@ -5,4 +5,4 @@ remainder || -> I32, Error!:
 recovered = remainder() catch:
     then 0
 ;
-[: [recovered]]
+~[: [recovered]]

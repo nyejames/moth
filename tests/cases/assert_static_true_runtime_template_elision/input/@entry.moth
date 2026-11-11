@@ -7,4 +7,4 @@ check |name String| -> String:
 ;
 
 result = check("runtime")
-[: [result]]
+~[: [result]]

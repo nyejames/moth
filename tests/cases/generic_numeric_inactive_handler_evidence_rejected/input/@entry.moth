@@ -13,4 +13,4 @@ value I32 = cast small catch:
     then 0
 ;
 
-[:[value]]
+~[:[value]]

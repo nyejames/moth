@@ -5,4 +5,4 @@ Box type T = |
 |
 
 instance Box of String = Box("hello")
-[: [instance]]
+~[: [instance]]

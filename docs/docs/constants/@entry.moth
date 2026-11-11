@@ -14,14 +14,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Constants and compile-time behaviour"]]
-#[$in description:["Compile-time bindings, folding, const records and const templates in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Constants and compile-time behaviour"]]
+[$in description:["Compile-time bindings, folding, const records and const templates in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Constants and compile-time behaviour
 
     A constant tells the compiler to finish a value before runtime. Unlike a
@@ -32,7 +32,7 @@ init_docs_sidebar()!
     fragments can contribute finished content to an HTML page.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:constant-bindings]
         [$in title:Constant bindings]
@@ -42,7 +42,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:constant-folding]
         [$in title:Constant folding]
@@ -52,7 +52,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:const-records]
         [$in title:Const records]
@@ -62,7 +62,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:const-templates]
         [$in title:Const templates]
@@ -72,7 +72,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../templates/]
         [$in previous_title:Templates]

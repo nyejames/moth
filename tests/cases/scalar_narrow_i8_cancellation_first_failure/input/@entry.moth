@@ -22,4 +22,4 @@ reassociated_value = reassociate_i8(127, 1) catch:
 ;
 reassociated_text String = cast reassociated_value
 
-[:scalar i8 cancellation code=[cancel_code] cancelled=[cancel_text] reassociated=[reassociated_text]]
+~[:scalar i8 cancellation code=[cancel_code] cancelled=[cancel_text] reassociated=[reassociated_text]]

@@ -247,6 +247,7 @@ fn raw_tir_dynamic_expression_is_checked_before_hir_handoff() {
             context: TemplateViewContext::default(),
         },
         span,
+        comment_directive_span: None,
     };
     let message = fx
         .builder

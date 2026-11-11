@@ -1,6 +1,6 @@
 wrapper #= [$before [:<li>W], $after [:Z</li>]:
 <ul>
-[$slot]
+~[$slot]
 </ul>
 ]
 
@@ -16,9 +16,9 @@ raw_block #= [$raw:
   keep
 ]
 
-#[wrapper:
-[md]
-[code_block]
-[raw_block]
-[$fresh: [:<fresh-item/>]]
+[wrapper:
+~[md]
+~[code_block]
+~[raw_block]
+~[$fresh: [:<fresh-item/>]]
 ]

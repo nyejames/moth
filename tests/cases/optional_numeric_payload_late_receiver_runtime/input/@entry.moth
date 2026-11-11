@@ -40,4 +40,4 @@ relational_text String = if relational_origin is:
     |payload| => then read_u64(payload)
     none => then "none"
 ;
-[:retained-optional-subject inline=[inline_text] block=[block_text] full=[full_text] statement=[statement_text] template=[template_text] exactequal=[exact_text] relational=[relational_text]]
+~[:retained-optional-subject inline=[inline_text] block=[block_text] full=[full_text] statement=[statement_text] template=[template_text] exactequal=[exact_text] relational=[relational_text]]

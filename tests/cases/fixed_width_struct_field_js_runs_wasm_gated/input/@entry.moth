@@ -7,4 +7,4 @@ ledger = Ledger(entries = {amount}, marker = amount)
 
 marker_text String = cast ledger.marker
 
-[:fixed width struct field marker=[marker_text]]
+~[:fixed width struct field marker=[marker_text]]

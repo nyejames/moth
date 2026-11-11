@@ -8,4 +8,4 @@ doubled U32 = double_u32(primitive_triangles)
 doubled_again U32 = double_u32(doubled)
 const_matches = primitive_triangles is 4
 max_matches = is_max_u32(u32_max)
-[:external const mixed doubled=[doubled]/[doubled_again] const=[const_matches] max=[max_matches]]
+~[:external const mixed doubled=[doubled]/[doubled_again] const=[const_matches] max=[max_matches]]

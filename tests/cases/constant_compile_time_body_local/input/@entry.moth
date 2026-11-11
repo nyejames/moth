@@ -11,4 +11,4 @@ make_value || -> I32:
 base #= 10
 computed #= base + 5
 
-[:[computed]-[make_value()]]
+~[:[computed]-[make_value()]]

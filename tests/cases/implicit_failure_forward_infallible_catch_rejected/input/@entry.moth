@@ -5,4 +5,4 @@ identity |value I32| -> I32:
     return value
 ;
 
-[: eligibility]
+~[: eligibility]

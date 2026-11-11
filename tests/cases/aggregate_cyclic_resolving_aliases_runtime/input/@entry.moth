@@ -34,4 +34,4 @@ render_multi || -> String, Error!:
 shared_text = render_shared() catch then "failed"
 copy_text = render_copy() catch then "failed"
 multi_text = render_multi() catch then "failed"
-[:resolving_aliases shared=[shared_text] copy=[copy_text] multi=[multi_text]]
+~[:resolving_aliases shared=[shared_text] copy=[copy_text] multi=[multi_text]]

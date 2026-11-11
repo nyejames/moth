@@ -11,4 +11,4 @@ Problem must CASTABLE_TO_ERROR
 problem = Problem(detail = "something went wrong")
 err Error = cast problem
 
-[:user same-file error: [err.message]]
+~[:user same-file error: [err.message]]

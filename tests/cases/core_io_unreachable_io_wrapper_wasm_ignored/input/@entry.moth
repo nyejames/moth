@@ -8,4 +8,4 @@ unused_io_wrapper || -> String, Error!:
     return "ok"
 ;
 
-[:core_io_unreachable_io_wrapper_wasm_ignored]
+~[:core_io_unreachable_io_wrapper_wasm_ignored]

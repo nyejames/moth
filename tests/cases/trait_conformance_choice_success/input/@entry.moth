@@ -21,4 +21,4 @@ text |this Status| -> String:
 Status must STATE_TEXT
 
 selected Status = Status::Ready
-[:trait_conformance_choice_success [selected.text()]]
+~[:trait_conformance_choice_success [selected.text()]]

@@ -8,4 +8,4 @@ render_collection || -> String:
     return [:fixed width collection return first=[first]]
 ;
 
-[:[render_collection()]]
+~[:[render_collection()]]

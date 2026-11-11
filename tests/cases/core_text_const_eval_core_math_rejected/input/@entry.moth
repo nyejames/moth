@@ -2,4 +2,4 @@
 
 value #= sin(0.5)
 
-[:[value]]
+~[:[value]]

@@ -5,4 +5,4 @@ if value is:
     else =>
 ;
 
-[: pattern_match_bodyless_else_noop_success]
+~[: pattern_match_bodyless_else_noop_success]

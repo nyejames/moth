@@ -18,4 +18,4 @@ using_runtime_slots = [runtime_wrapper:
     [$in second: second]
 ]
 
-[:template_docs_examples_runtime_coverage [single_slot] [using_runtime_slots]]
+~[:template_docs_examples_runtime_coverage [single_slot] [using_runtime_slots]]

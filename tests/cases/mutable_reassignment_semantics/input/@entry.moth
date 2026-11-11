@@ -25,4 +25,4 @@ update_amount |amount ~Amount|:
 unchanged Amount = 7
 update_amount(~value)
 
-[: counter=[counter];value=[value];message=[message];flag=[flag];unchanged=[unchanged]]
+~[: counter=[counter];value=[value];message=[message];flag=[flag];unchanged=[unchanged]]

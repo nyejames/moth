@@ -1,7 +1,7 @@
 -- Empty scalar contributions are present and suppress every configured fallback.
-#[$in description:[""]]
-#[$in lang:[""]]
-#[$in favicon:[""]]
-#[$in body_style:[""]]
+[$in description:[""]]
+[$in lang:[""]]
+[$in favicon:[""]]
+[$in body_style:[""]]
 
-#[:<main>Empty</main>]
+[:<main>Empty</main>]

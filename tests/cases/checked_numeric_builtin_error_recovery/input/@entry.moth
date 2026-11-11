@@ -20,4 +20,4 @@ nonfinite_value = nonfinite_float() catch |float_err|:
     then 0.0
 ;
 
-[: numeric recovery codes=[int_code]/[float_code]]
+~[: numeric recovery codes=[int_code]/[float_code]]

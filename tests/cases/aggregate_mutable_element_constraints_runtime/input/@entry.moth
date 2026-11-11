@@ -25,4 +25,4 @@ render_mutable_element_constraints || -> String:
     return [:mutable_element before=[before_text] removed=[removed] first=[first] last=[last] len=[len]]
 ;
 
-[:[render_mutable_element_constraints()]]
+~[:[render_mutable_element_constraints()]]

@@ -69,4 +69,4 @@ known_block = recover_fragment(dependent_fallback) catch:
     then dependent_fallback
 ;
 
-[:scalar fragment catch reversed=[reversed_failure]/[reversed_success] division=[division_failure]/[division_success] u64=[receive_u64(u64_failure)]/[receive_u64(u64_success)] fallback=[fallback_inline]/[fallback_block] known=[known_inline]/[known_block]]
+~[:scalar fragment catch reversed=[reversed_failure]/[reversed_success] division=[division_failure]/[division_success] u64=[receive_u64(u64_failure)]/[receive_u64(u64_success)] fallback=[fallback_inline]/[fallback_block] known=[known_inline]/[known_block]]

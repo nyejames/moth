@@ -1,4 +1,4 @@
 -- An explicitly empty title contribution is present and suppresses the route fallback.
-#[$in title:[""]]
+[$in title:[""]]
 
-#[:<main>About</main>]
+[:<main>About</main>]

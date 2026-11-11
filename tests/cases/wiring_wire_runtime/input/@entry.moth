@@ -35,4 +35,4 @@ loop running:
     ~second = true
 ;
 
-[:wire read=[read_result] forward=[forward_result] mutable=[mutable_result] number=[number_result] loop=[loop_text]]
+~[:wire read=[read_result] forward=[forward_result] mutable=[mutable_result] number=[number_result] loop=[loop_text]]

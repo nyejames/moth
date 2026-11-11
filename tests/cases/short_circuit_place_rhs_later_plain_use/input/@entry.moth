@@ -5,4 +5,4 @@ rhs ~= true
 value = lhs and rhs
 after = rhs
 
-[:short_circuit_place_rhs_later_plain_use value=[value] after=[after]]
+~[:short_circuit_place_rhs_later_plain_use value=[value] after=[after]]

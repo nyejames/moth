@@ -25,4 +25,4 @@ fallback = outer(true) catch |err|:
     then -1
 ;
 
-[:ok=[ok] fallback=[fallback]]
+~[:ok=[ok] fallback=[fallback]]

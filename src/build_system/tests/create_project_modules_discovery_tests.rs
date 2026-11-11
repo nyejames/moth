@@ -33,8 +33,8 @@ fn discover_modules_uses_reachable_files_only() {
     )
     .expect("should write config");
     fs::create_dir_all(src.join("errors")).expect("should create errors folder");
-    fs::write(src.join("@entry.moth"), "@libs/html basic\n#[:ok]\n").expect("should write entry");
-    fs::write(src.join("errors/@entry.moth"), "#[:404]\n").expect("should write 404");
+    fs::write(src.join("@entry.moth"), "@libs/html basic\n[:ok]\n").expect("should write entry");
+    fs::write(src.join("errors/@entry.moth"), "[:404]\n").expect("should write 404");
     fs::write(src.join("libs/html.moth"), "basic #= [:basic]\n").expect("should write lib");
     fs::write(src.join("styles/docs.moth"), "navbar #= [:nav]\n").expect("should write style");
     fs::write(src.join("docs/outdated.moth"), "this is invalid syntax")
@@ -417,7 +417,7 @@ fn directory_stage0_resolves_resource_from_consuming_module_root() {
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "unused #= @assets/logo.svg\n#[:ok]\n",
+        "unused #= @assets/logo.svg\n[:ok]\n",
     )
     .expect("should write entry");
     fs::write(src.join("assets/logo.svg"), "resource bytes").expect("should write resource");
@@ -474,7 +474,7 @@ fn directory_stage0_retains_missing_resource_diagnostic_without_aborting_discove
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "unused #= @assets/missing.svg\n#[:ok]\n",
+        "unused #= @assets/missing.svg\n[:ok]\n",
     )
     .expect("should write entry");
 
@@ -553,7 +553,7 @@ fn directory_stage0_identifies_moth_value_without_preparing_it() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "helpers = @missing.moth\n#[:ok]\n")
+    fs::write(src.join("@entry.moth"), "helpers = @missing.moth\n[:ok]\n")
         .expect("should write entry");
 
     let mut config = Config::new(root.clone());
@@ -609,7 +609,7 @@ fn directory_stage0_classifies_not_a_directory_as_typed_path_failure() {
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "value #= @not_a_directory/value.mtf\n#[:ok]\n",
+        "value #= @not_a_directory/value.mtf\n[:ok]\n",
     )
     .expect("should write entry");
     fs::write(src.join("not_a_directory"), "regular file").expect("should write blocker file");
@@ -672,14 +672,14 @@ fn directory_stage0_rejects_missing_targets_under_child_module_roots_without_wat
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "child_missing #= @child/missing.svg\nchild_existing #= @child/existing.svg\nsupport_missing #= @support/missing.svg\nsupport_existing #= @support/existing.svg\n#[:ok]\n",
+        "child_missing #= @child/missing.svg\nchild_existing #= @child/existing.svg\nsupport_missing #= @support/missing.svg\nsupport_existing #= @support/existing.svg\n[:ok]\n",
     )
     .expect("should write entry");
     fs::write(src.join("child/existing.svg"), "child resource")
         .expect("should write child resource");
     fs::write(src.join("support/existing.svg"), "support resource")
         .expect("should write support resource");
-    fs::write(src.join("child/@entry.moth"), "#[:ok]\n").expect("should write child root");
+    fs::write(src.join("child/@entry.moth"), "[:ok]\n").expect("should write child root");
     fs::write(
         src.join("support/@package.moth"),
         "$export\nrender || -> String:\n    return \"support\"\n;\n",
@@ -751,10 +751,10 @@ fn directory_stage0_rejects_missing_symlink_ancestors_without_watch() {
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "external #= @external-alias/missing.svg\nchild #= @child-alias/missing.svg\nsupport #= @support-alias/missing.svg\ndangling_external #= @dangling-external/missing.svg\ndangling_child #= @dangling-child/missing.svg\ndangling_support #= @dangling-support/missing.svg\n#[:ok]\n",
+        "external #= @external-alias/missing.svg\nchild #= @child-alias/missing.svg\nsupport #= @support-alias/missing.svg\ndangling_external #= @dangling-external/missing.svg\ndangling_child #= @dangling-child/missing.svg\ndangling_support #= @dangling-support/missing.svg\n[:ok]\n",
     )
     .expect("should write entry");
-    fs::write(child.join("@entry.moth"), "#[:ok]\n").expect("should write child root");
+    fs::write(child.join("@entry.moth"), "[:ok]\n").expect("should write child root");
     fs::write(
         support.join("@package.moth"),
         "$export\nrender || -> String:\n    return \"support\"\n;\n",
@@ -833,10 +833,10 @@ fn multi_module_retained_path_diagnostic_keeps_its_module_string_table() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "#[:ok]\n").expect("should write first root");
+    fs::write(src.join("@entry.moth"), "[:ok]\n").expect("should write first root");
     fs::write(
         nested.join("@entry.moth"),
-        "asset #= @Assets/logo.svg\n#[:ok]\n",
+        "asset #= @Assets/logo.svg\n[:ok]\n",
     )
     .expect("should write second root");
     fs::write(nested.join("assets/logo.svg"), "resource").expect("should write resource");
@@ -1064,7 +1064,7 @@ fn ordinary_synthetic_stage0_rejects_child_and_support_boundaries() {
         "child_content #= @child/existing.mtf\nsupport_resource #= @support/existing.svg\nchild_missing #= @child/missing.mtf\nsupport_missing #= @support/missing.svg\n",
     )
     .expect("should write synthetic entry");
-    fs::write(child.join("@entry.moth"), "#[:ok]\n").expect("should write child root");
+    fs::write(child.join("@entry.moth"), "[:ok]\n").expect("should write child root");
     fs::write(child.join("existing.mtf"), "template body\n").expect("should write child content");
     fs::write(
         support.join("@package.moth"),
@@ -1147,10 +1147,10 @@ fn compile_single_file_frontend_retains_ordinary_boundary_registry() {
     let entry = root.join("main.moth");
     fs::write(
         &entry,
-        "child_content #= @child/existing.mtf\nsupport_resource #= @support/existing.svg\nchild_missing #= @child/missing.mtf\nsupport_missing #= @support/missing.svg\n#[:ok]\n",
+        "child_content #= @child/existing.mtf\nsupport_resource #= @support/existing.svg\nchild_missing #= @child/missing.mtf\nsupport_missing #= @support/missing.svg\n[:ok]\n",
     )
     .expect("should write synthetic entry");
-    fs::write(child.join("@entry.moth"), "#[:ok]\n").expect("should write child root");
+    fs::write(child.join("@entry.moth"), "[:ok]\n").expect("should write child root");
     fs::write(child.join("existing.mtf"), "template body\n").expect("should write child content");
     fs::write(
         support.join("@package.moth"),
@@ -1208,7 +1208,7 @@ fn directory_stage0_reaches_content_reference_fixed_point() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "unused #= @docs/one.mtf\n#[:ok]\n")
+    fs::write(src.join("@entry.moth"), "unused #= @docs/one.mtf\n[:ok]\n")
         .expect("should write entry");
     fs::write(
         src.join("docs/one.mtf"),

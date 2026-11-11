@@ -87,4 +87,4 @@ free_value = 11
 set_free(~mutation_meter, free_value)
 free_read String = cast mutation_meter.amount
 
-[:scalar retained known result postfix method=[method_amount] source=[source_amount] grouped=[grouped_amount] chain=[chain_amount] items=[item_length] method_items=[method_length] scores=[score_length] mutable=[method_read]/[free_read]]
+~[:scalar retained known result postfix method=[method_amount] source=[source_amount] grouped=[grouped_amount] chain=[chain_amount] items=[item_length] method_items=[method_length] scores=[score_length] mutable=[method_read]/[free_read]]

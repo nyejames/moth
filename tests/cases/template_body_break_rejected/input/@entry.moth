@@ -1,6 +1,6 @@
 items = {1}
 
-[:
+~[:
     [loop items |item|:
         [item]
         [break]

@@ -19,4 +19,4 @@ render_forward_f16_collection || -> String, Error!:
 ;
 
 result = render_forward_f16_collection() catch then "failed"
-[:[result]]
+~[:[result]]

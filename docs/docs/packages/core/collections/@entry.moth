@@ -8,14 +8,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Core collections"]]
-#[$in description:["Ordered collection literals and common collection methods."]]
-#[$in head:[language_theme_head]]
+[$in title:["Core collections"]]
+[$in description:["Ordered collection literals and common collection methods."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Core collections
 
     Moth collections store ordered values through language-owned literals and
@@ -23,7 +23,7 @@ init_docs_sidebar()!
     collection syntax belongs to the language rather than a user dependency clause.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:collection-methods]
         [$in title:Collection methods]
@@ -33,7 +33,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../io/]
         [$in previous_title:Core IO]

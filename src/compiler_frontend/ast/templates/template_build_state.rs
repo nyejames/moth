@@ -15,6 +15,7 @@ use crate::compiler_frontend::ast::templates::template::{Style, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparationFacts, TemplateWrapperReference, refresh_kind_from_preparation,
 };
+use crate::compiler_frontend::source::SourceSpan;
 
 /// Parser-local mutable state accumulated during template head and body parsing.
 ///
@@ -35,6 +36,12 @@ pub(crate) struct TemplateBuildState {
     /// At most one entry: both edges are one composite wrapper so downstream
     /// wrapper sets, folding and runtime handoff see the same nesting.
     pub(crate) child_wrappers: Vec<TemplateWrapperReference>,
+    /// Authored `$note` token span when this template's kind is `Comment`.
+    ///
+    /// WHAT: retained only for diagnostics that must reject the semantic kind after parsing.
+    /// WHY: the durable template span starts at the opener; the directive token is the authored
+    ///      source location for wrong-context diagnostics.
+    pub(crate) comment_directive_span: Option<SourceSpan>,
 }
 
 impl TemplateBuildState {
@@ -46,6 +53,7 @@ impl TemplateBuildState {
             child_wrapper_before: None,
             child_wrapper_after: None,
             child_wrappers: vec![],
+            comment_directive_span: None,
         }
     }
 

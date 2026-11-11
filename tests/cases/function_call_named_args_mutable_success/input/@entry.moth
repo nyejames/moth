@@ -5,4 +5,4 @@ increment |value ~I32| -> I32:
 
 x ~= 10
 result = increment(value = ~x)
-[:function_call_named_args_mutable_success result=[result] x=[x]]
+~[:function_call_named_args_mutable_success result=[result] x=[x]]

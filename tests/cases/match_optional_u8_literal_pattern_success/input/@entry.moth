@@ -7,4 +7,4 @@ hide_optional_pattern ||:
     ;
 ;
 
-[:optional_u8_literal_pattern=accepted]
+~[:optional_u8_literal_pattern=accepted]

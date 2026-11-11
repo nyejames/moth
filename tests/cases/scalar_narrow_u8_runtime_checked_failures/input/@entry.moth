@@ -39,4 +39,4 @@ multiply_value = multiply_u8(16, 16) catch |multiply_error|:
 ;
 multiply_text String = cast multiply_value
 
-[:scalar u8 checked ok=[ok_sum_text] add=[add_code]/[add_text] subtract=[subtract_code]/[subtract_text] multiply=[multiply_code]/[multiply_text]]
+~[:scalar u8 checked ok=[ok_sum_text] add=[add_code]/[add_text] subtract=[subtract_code]/[subtract_text] multiply=[multiply_code]/[multiply_text]]

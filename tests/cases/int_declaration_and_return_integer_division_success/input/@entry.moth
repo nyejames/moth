@@ -6,4 +6,4 @@ calc || -> I32:
 
 result I32 = calc()
 
-[: decl=[value], ret=[result] ]
+~[: decl=[value], ret=[result] ]

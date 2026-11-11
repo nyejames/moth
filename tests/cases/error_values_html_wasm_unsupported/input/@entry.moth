@@ -12,4 +12,4 @@ load_message |fail Bool| -> String, Error!:
 message = load_message(true) catch |err|:
     then [:recovered=[err.message]]
 ;
-[:[message]]
+~[:[message]]

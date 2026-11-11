@@ -1,4 +1,4 @@
 -- A plain String path is not a tracked resource reference.
-#[$in stylesheets: ["styles/docs.css"]]
+[$in stylesheets: ["styles/docs.css"]]
 
-#[:<main>invalid text stylesheet</main>]
+[:<main>invalid text stylesheet</main>]

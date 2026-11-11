@@ -14,4 +14,4 @@ pair = Pair(4294967296, 1)
 first = read_u64(pair.left)
 second = read_i64(pair.right)
 
-[: [first] [second]]
+~[: [first] [second]]

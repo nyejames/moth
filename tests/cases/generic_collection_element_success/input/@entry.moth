@@ -4,4 +4,4 @@ Box type T = |
 
 items {Box of I32} = {Box(1), Box(2)}
 
-[: generic collection element]
+~[: generic collection element]

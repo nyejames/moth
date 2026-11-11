@@ -16,4 +16,4 @@ copied || -> I32:
     return 1
 ;
 
-[:[copied()]]
+~[:[copied()]]

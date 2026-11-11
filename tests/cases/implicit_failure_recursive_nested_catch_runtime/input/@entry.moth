@@ -32,4 +32,4 @@ safe_sum |unsigned U8, signed I8| -> I16:
 recovered = recover(127)
 ok = recover(0)
 safe = safe_sum(255, 127)
-[: recursive recovery=[recovered] ok=[ok] safe=[safe]]
+~[: recursive recovery=[recovered] ok=[ok] safe=[safe]]

@@ -4,7 +4,7 @@
 -- compile-time HTML formatter. The Rust block proves non-Moth profiles consume
 -- the same general palette classes.
 
-#[$md:
+[$md:
     [codeblock, $code "moth":
         -- trait declaration
         DISPLAY_TEXT must:

@@ -1,9 +1,9 @@
-#[$md:
+[$md:
 Const soft line starts here.
 and continues here.
 ]
 
-[$md:
+~[$md:
 # Docs @#docs
 Hello from markdown.
 Soft line break continues here.

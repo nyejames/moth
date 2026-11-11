@@ -14,4 +14,4 @@ Box type T is DISPLAY_TEXT = |
 
 bad Box of String = Box("local only")
 
-[:unreachable [bad.value]]
+~[:unreachable [bad.value]]

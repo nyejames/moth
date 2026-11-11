@@ -10,4 +10,4 @@ read_decimal |value Dec2| -> String:
 ratio = 1.25
 packet = Packet(ratio)
 text = read_decimal(packet.value)
-[:[text]]
+~[:[text]]

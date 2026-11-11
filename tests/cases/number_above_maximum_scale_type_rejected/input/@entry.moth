@@ -2,4 +2,4 @@ InvalidScaleName = |
     beyond_max Dec257,
 |
 
-[: Dec scale above 256 is rejected]
+~[: Dec scale above 256 is rejected]

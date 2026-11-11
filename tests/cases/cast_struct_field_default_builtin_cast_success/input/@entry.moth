@@ -5,4 +5,4 @@ Point = |
 
 value = Point(y = 5)
 
-[: struct field default cast: [value.x]]
+~[: struct field default cast: [value.x]]

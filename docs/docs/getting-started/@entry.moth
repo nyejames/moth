@@ -9,14 +9,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Getting Started with moth"]]
-#[$in description:["How to use the Moth compiler CLI, create a project, run the dev server, and read compiler diagnostics."]]
-#[$in head:[language_theme_head]]
+[$in title:["Getting Started with moth"]]
+[$in description:["How to use the Moth compiler CLI, create a project, run the dev server, and read compiler diagnostics."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Getting Started with moth
 
     `moth` compiles and tools Moth projects.
@@ -31,7 +31,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## Commands
 
     [styled_table:
@@ -81,7 +81,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## Flags
 
     [styled_table:
@@ -119,7 +119,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## Create a new HTML project
 
     An HTML project keeps settings in `config.moth` and executable page content in `@entry.moth`.
@@ -144,7 +144,7 @@ init_docs_sidebar()!
     metadata-only entry still produces a page:
 
     [codeblock, $code "moth":
-        #[$in title:Welcome]
+        [$in title:Welcome]
     ]
 
     A directory with `@entry.moth` is entry-eligible, including when the file is empty.
@@ -240,7 +240,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## Run the dev server
 
     `dev` handles normal day-to-day Moth project work.
@@ -268,7 +268,7 @@ init_docs_sidebar()!
     The dev server is designed around fast feedback rather than a manual rebuild loop.
 ]
 
-#[section, $md:
+[section, $md:
     ## Build a project
 
     Use `build` when you want files written to disk without running the dev server.
@@ -287,7 +287,7 @@ init_docs_sidebar()!
     The default scaffold uses `_dev` for development output and `_release` for release output.
 ]
 
-#[section, $md:
+[section, $md:
     ## Check without building
 
     `check` gives the fastest correctness signal for editor loops and CI-style validation.
@@ -311,7 +311,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## Reading compiler errors
 
     Moth uses the same formatted diagnostic system across the compiler front end and backend builders.
@@ -348,7 +348,7 @@ init_docs_sidebar()!
     5. The guidance lines are suggestions, not a separate error.
 ]
 
-#[section, $md:
+[section, $md:
     ## Error kinds
 
     [styled_table:
@@ -404,7 +404,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## Warnings
 
     Warnings identify source that can compile but deserves attention, such as naming mismatches
@@ -412,7 +412,7 @@ init_docs_sidebar()!
     writing build output.
 ]
 
-#[section:
+[section:
     [doc_pager_next:
         [$in next_path:../language-overview/]
         [$in next_title:Language basics]

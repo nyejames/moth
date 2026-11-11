@@ -878,4 +878,4 @@ Signal0019 ::
     Batch2 | items {small_capacity I32}, tag String |,
 ;
 
-[:nominal-scaling structs=80 choices=20]
+~[:nominal-scaling structs=80 choices=20]

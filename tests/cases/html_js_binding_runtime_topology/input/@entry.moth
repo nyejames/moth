@@ -36,4 +36,4 @@ if false:
 assert(true, api.assertion_only())
 assert(true, validation_message("validation only"))
 
-[:success=[successful] recovery=[recovered] error=[caught_code]:[caught_message] constant=[binding_limit] live-u32=[limit_value] alternate=[alternate] generated=[generated] state=[api.observed()]]
+~[:success=[successful] recovery=[recovered] error=[caught_code]:[caught_message] constant=[binding_limit] live-u32=[limit_value] alternate=[alternate] generated=[generated] state=[api.observed()]]

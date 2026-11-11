@@ -17,4 +17,4 @@ else
     ~another_result = 24
 ;
 
-[:dynamic_if result=[result] another=[another_result]]
+~[:dynamic_if result=[result] another=[another_result]]

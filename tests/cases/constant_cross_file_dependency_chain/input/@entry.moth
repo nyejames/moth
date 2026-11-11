@@ -6,4 +6,4 @@
 
 total #I32 = later + 1
 
-[:[total]]
+~[:[total]]

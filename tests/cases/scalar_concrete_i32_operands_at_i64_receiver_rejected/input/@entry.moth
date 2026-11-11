@@ -4,4 +4,4 @@ left I32 = 1
 right I32 = 2
 total I64 = left + right
 
-[:unreachable]
+~[:unreachable]

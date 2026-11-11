@@ -8,14 +8,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Core IO"]]
-#[$in description:["Console output and input polling helpers in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Core IO"]]
+[$in description:["Console output and input polling helpers in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Core IO
 
     `io` provides console output and explicit input polling. The prelude exposes
@@ -23,7 +23,7 @@ init_docs_sidebar()!
     before text crosses the output boundary.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:console-and-input]
         [$in title:Console and input]
@@ -33,7 +33,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../prelude/]
         [$in previous_title:Prelude policy]

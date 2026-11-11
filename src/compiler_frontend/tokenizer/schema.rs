@@ -350,6 +350,11 @@ const TOKEN_DOUBLE_COLON_RIGHT_ATTACHED: u16 = 1 << 1;
 /// WHY: a directive operand and a call share this token, and only adjacency distinguishes
 /// `$code("rust")` from a whitespace-separated parenthesised value.
 const TOKEN_OPEN_PARENTHESIS_ATTACHED: u16 = 1 << 0;
+/// The directive `$` has no whitespace before it.
+///
+/// WHY: source directives on one line must be separated by whitespace. The tokenizer is the only
+///      owner of that adjacency fact before comment text is discarded.
+const TOKEN_STYLE_DIRECTIVE_ATTACHED: u16 = 1 << 0;
 /// The whitespace run after this line break contains another line break.
 ///
 /// WHY: a source directive attaches across comment-only lines but not across a blank physical
@@ -380,7 +385,7 @@ token_schema! {
         8,
         "style directive",
         StyleDirective,
-        0,
+        TOKEN_STYLE_DIRECTIVE_ATTACHED,
         0,
         None
     ),
@@ -1119,8 +1124,8 @@ impl TokenShape {
             }
             TokenDescriptorPayload::BoolLiteral => flags == 0 && data <= 1,
             TokenDescriptorPayload::CharLiteral => flags == 0 && char::from_u32(data).is_some(),
+            TokenDescriptorPayload::StyleDirective => flags & !TOKEN_STYLE_DIRECTIVE_ATTACHED == 0,
             TokenDescriptorPayload::Symbol
-            | TokenDescriptorPayload::StyleDirective
             | TokenDescriptorPayload::StringLiteral
             | TokenDescriptorPayload::RawStringLiteral => flags == 0,
         }
@@ -1159,13 +1164,17 @@ impl TokenShape {
 
     pub(crate) fn string_id(self) -> Option<StringId> {
         let payload = self.tag.descriptor().payload();
+        let allowed_flags = match payload {
+            TokenDescriptorPayload::StyleDirective => TOKEN_STYLE_DIRECTIVE_ATTACHED,
+            _ => 0,
+        };
         if matches!(
             payload,
             TokenDescriptorPayload::Symbol
                 | TokenDescriptorPayload::StyleDirective
                 | TokenDescriptorPayload::StringLiteral
                 | TokenDescriptorPayload::RawStringLiteral
-        ) && self.flags == 0
+        ) && self.flags & !allowed_flags == 0
         {
             Some(StringId::from_index(self.data))
         } else {
@@ -1234,6 +1243,19 @@ impl TokenShape {
 
     pub(crate) fn open_parenthesis_is_attached(self) -> bool {
         self.tag == TokenTag::OPEN_PARENTHESIS && self.flags & TOKEN_OPEN_PARENTHESIS_ATTACHED != 0
+    }
+
+    pub(crate) const fn style_directive_attached_flags(attached: bool) -> u16 {
+        if attached {
+            TOKEN_STYLE_DIRECTIVE_ATTACHED
+        } else {
+            0
+        }
+    }
+
+    /// Whether a style directive follows the previous token with no intervening whitespace.
+    pub(crate) fn style_directive_is_attached(self) -> bool {
+        self.tag == TokenTag::STYLE_DIRECTIVE && self.flags & TOKEN_STYLE_DIRECTIVE_ATTACHED != 0
     }
 
     pub(crate) const fn newline_blank_line_flags(blank_line: bool) -> u16 {

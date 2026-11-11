@@ -14,4 +14,4 @@ small_to_int I32 = to_int(7) catch:
     then -2
 ;
 
-[:uint statement casts=[top_to_int]/[small_to_int]]
+~[:uint statement casts=[top_to_int]/[small_to_int]]

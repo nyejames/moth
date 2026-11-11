@@ -37,4 +37,4 @@ render_fresh_values || -> String:
     return [:function_call_mutable_param_fresh_values computed=[computed_out] template=[template_out] collection=[collection_out] struct=[struct_out]]
 ;
 
-[:[render_fresh_values()]]
+~[:[render_fresh_values()]]

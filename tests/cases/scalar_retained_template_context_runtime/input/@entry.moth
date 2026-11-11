@@ -19,4 +19,4 @@ rendered_skipped_conditional = [$before [:<b>], $after [:</b>], if identity(skip
 rendered_loop = [$before [:<i>], $after [:</i>], loop 0 to identity(loop_limit) |loop_item|:[:loop-[loop_item]]]
 rendered_empty_loop = [$before [:<i>], $after [:</i>], loop 0 to identity(empty_limit) |empty_loop_item|:[:loop-no-output]]
 
-[:[rendered_range][rendered_empty_range][rendered_conditional][rendered_skipped_conditional][rendered_loop][rendered_empty_loop]]
+~[:[rendered_range][rendered_empty_range][rendered_conditional][rendered_skipped_conditional][rendered_loop][rendered_empty_loop]]

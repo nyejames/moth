@@ -229,10 +229,14 @@ impl ModuleCompilerMetadata {
         })
     }
 
-    /// WHY: entry metadata owns every remapped field; `entry_point` is a `PathBuf`, const-fragment
+    /// WHY: entry metadata owns its remapped fields; `entry_point` is a `PathBuf`, const-fragment
     ///      spans are global, values are already owned folded strings and root activity has no
-    ///      interned fields. Only the materialisation context carries path identities.
+    ///      interned fields. Documentation targets and the materialisation context carry path
+    ///      identities, so both are rewritten through the supplied remap.
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        for fragment in &mut self.doc_fragments {
+            fragment.target = remap.get(fragment.target);
+        }
         if let Some(context) = &mut self.materialisation_context {
             Arc::make_mut(context).remap_path_ids(remap);
         }
@@ -284,3 +288,7 @@ pub(crate) struct ModuleExternalImport {
     pub(crate) runtime_asset: Option<RuntimeAssetIdentity>,
     pub(crate) required_runtime_imports: Vec<RequiredRuntimeImport>,
 }
+
+#[cfg(test)]
+#[path = "tests/artefact_tests.rs"]
+mod tests;

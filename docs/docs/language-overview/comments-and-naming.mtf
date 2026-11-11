@@ -15,8 +15,9 @@ Inside a template body, `--` is ordinary body text. A moth template `.mtf` file 
 the body of an implicit compile-time Markdown template, so `--` is text there
 too.
 
-Use template directives such as `$note` or `$todo` when template-authored
-content should be ignored.
+Use [$html:<code>&#91;$note: ...&#93;</code>] to discard template-authored comment content. `$todo`
+annotates the next source statement or declaration and is not a template
+comment. `$doc` likewise annotates declarations. See @../directives (Directives).
 
 ### Naming conventions
 
@@ -81,7 +82,7 @@ legacy `Number` type alias.
 
 ### Configuration names
 
-Source modifiers use the `$` marker. `$export` marks public declarations and direct-selection re-exports in `@mod.moth` and `@package.moth`. `$config` marks typed build inputs. Project and active-builder settings remain ordinary named records, so `$project`, `$builder` and `$html_builder` are not directives.
+Source directives use the `$` marker. `$export` marks public declarations and direct-selection re-exports in `@mod.moth` and `@package.moth`. `$config` marks typed build inputs, `$doc` records declaration documentation and `$todo` annotates source statements or declarations. They can share one line or occupy consecutive lines before the same target, but duplicate names are invalid. Project and active-builder settings remain ordinary named records, so `$project`, `$builder` and `$html_builder` are not directives.
 
 Directive spellings do not reserve ordinary identifiers. Names such as `export`, `project`, `html_builder` and `entry` are available outside directive syntax.
 The file `config.moth` and the dependency root `@project` retain their separate

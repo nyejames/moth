@@ -1,5 +1,5 @@
 show_banner #= true
 
-#[if show_banner:
+[if show_banner:
     Same-file source const visible
 ]

@@ -11,4 +11,4 @@ Label must CASTABLE_TO_STRING
 label = Label(text = "hello")
 message String = cast label
 
-[:user same-file string: [message]]
+~[:user same-file string: [message]]

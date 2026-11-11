@@ -20,4 +20,4 @@ else
     ~nested_result = 0
 ;
 
-[:simple_if result=[result] nested=[nested_result]]
+~[:simple_if result=[result] nested=[nested_result]]

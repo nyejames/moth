@@ -14,14 +14,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Plain Markdown"]]
-#[$in description:["Plain Markdown content dependencies for HTML projects."]]
-#[$in head:[language_theme_head]]
+[$in title:["Plain Markdown"]]
+[$in description:["Plain Markdown content dependencies for HTML projects."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Plain Markdown
 
     A `.md` file remains ordinary Markdown. The compiler renders it at compile
@@ -32,7 +32,7 @@ init_docs_sidebar()!
     when content needs Moth constants, templates or builder helpers.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:markdown-files]
         [$in title:Markdown files]
@@ -42,7 +42,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:markdown-dependencies]
         [$in title:Markdown dependencies]
@@ -52,7 +52,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:rendering-contract]
         [$in title:Rendering contract]
@@ -62,7 +62,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:choosing-a-content-format]
         [$in title:Choosing a content format]
@@ -72,7 +72,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../moth-templates/]
         [$in previous_title:Moth template files]

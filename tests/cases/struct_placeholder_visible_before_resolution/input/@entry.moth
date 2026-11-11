@@ -11,4 +11,4 @@ User = |
 |
 
 user = make_user()
-[:[user.name]]
+~[:[user.name]]

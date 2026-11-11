@@ -9,4 +9,4 @@ value = 1
 first = receive_i64(value)
 second = receive_u32(value)
 
-[:unreachable]
+~[:unreachable]

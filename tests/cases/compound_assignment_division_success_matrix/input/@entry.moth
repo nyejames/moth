@@ -4,4 +4,4 @@ count ~I32 = 10
 ratio ~F64 = 10
 ~ratio /= 4
 
-[: count=[count], ratio=[ratio] ]
+~[: count=[count], ratio=[ratio] ]

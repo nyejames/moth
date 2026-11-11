@@ -21,18 +21,23 @@
 mod builtins;
 mod compatibility;
 mod registry;
+mod source;
 mod specs;
 
 pub(crate) use crate::compiler_frontend::compiler_messages::TemplateHeadConflictReason;
 pub use compatibility::{TemplateHeadCompatibility, TemplateHeadTag};
 pub use registry::StyleDirectiveRegistry;
+pub(crate) use source::{
+    SourceDirectiveAnnotation, SourceOperandFoldResources, capture_source_directive_operand,
+    fold_source_directive_operand, parse_statement_source_directive_run,
+};
 pub(crate) use specs::DirectiveOccurrence;
 pub(crate) use specs::{
-    AFTER_DIRECTIVE_NAME, BEFORE_DIRECTIVE_NAME, DOC_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME,
-    SLOT_DIRECTIVE_NAME,
+    AFTER_DIRECTIVE_NAME, BEFORE_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME,
+    SourceDirectiveKind,
 };
 pub use specs::{
-    CoreStyleDirectiveKind, SourceModifierTarget, StyleDirectiveArgumentType,
+    CoreStyleDirectiveKind, SourceModifierOperand, StyleDirectiveArgumentType,
     StyleDirectiveArgumentValue, StyleDirectiveEffects, StyleDirectiveHandlerSpec,
     StyleDirectiveKind, StyleDirectiveSpec,
 };

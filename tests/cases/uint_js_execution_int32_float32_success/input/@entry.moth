@@ -92,4 +92,4 @@ dynamic_top U32 = add_wide(4294967295, 0) catch:
 ;
 folded_dynamic_agree Bool = folded_top_kept is dynamic_top
 
-[:uint float32 wide=[just_below]/[just_above]/[top]/[top_plus_one]/[zero_minus_one] prod=[boundary_product]/[large_product] compare=[low_before]/[low_after]/[neg_before]/[neg_after]/[top_before]/[top_after] converted=[converted_big]/[explicit_big]/[folded_eq]/[dynamic_eq]/[explicit_eq] compound=[growing]/[grown]/[recovered] agree=[folded_dynamic_agree]]
+~[:uint float32 wide=[just_below]/[just_above]/[top]/[top_plus_one]/[zero_minus_one] prod=[boundary_product]/[large_product] compare=[low_before]/[low_after]/[neg_before]/[neg_after]/[top_before]/[top_after] converted=[converted_big]/[explicit_big]/[folded_eq]/[dynamic_eq]/[explicit_eq] compound=[growing]/[grown]/[recovered] agree=[folded_dynamic_agree]]

@@ -9,4 +9,4 @@ render_mutable_alias || -> String:
     return [:collection_mutation_through_mutable_alias len=[len]]
 ;
 
-[:[render_mutable_alias()]]
+~[:[render_mutable_alias()]]

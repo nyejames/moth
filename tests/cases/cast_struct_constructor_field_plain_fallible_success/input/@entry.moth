@@ -34,4 +34,4 @@ private_point = Point(x = private_point_field("bad"), y = 0) catch then Point(4,
 assert(typed_point.x is 3)
 assert(private_point.x is 4)
 
-[: struct constructor field plain cast: [value.x]]
+~[: struct constructor field plain cast: [value.x]]

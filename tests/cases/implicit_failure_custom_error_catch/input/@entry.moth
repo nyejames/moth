@@ -16,4 +16,4 @@ recovered = check(false) catch |err|:
 
 exact = check(true) catch then false
 
-[: custom error catch recovered=[recovered] message=[saved_message] exact=[exact]]
+~[: custom error catch recovered=[recovered] message=[saved_message] exact=[exact]]

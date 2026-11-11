@@ -11,4 +11,4 @@ min_value = -2147483648
 minimum_remainder = remainder(min_value, -1)
 ordinary_remainder = remainder(-7, 3)
 
-[:int_remainder_signed_minimum_by_negative_one_runtime minimum=[minimum_remainder] ordinary=[ordinary_remainder]]
+~[:int_remainder_signed_minimum_by_negative_one_runtime minimum=[minimum_remainder] ordinary=[ordinary_remainder]]

@@ -14,14 +14,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Loops"]]
-#[$in description:["Conditional, collection and range loops with break and continue in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Loops"]]
+[$in description:["Conditional, collection and range loops with break and continue in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Loops
 
     Moth uses one `loop` keyword for conditional repetition, collection
@@ -33,7 +33,7 @@ init_docs_sidebar()!
     the exact numeric rules rather than backend-native arithmetic.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:conditional-loops]
         [$in title:Conditional loops]
@@ -43,7 +43,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:collection-loops]
         [$in title:Collection loops]
@@ -53,7 +53,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:range-loops]
         [$in title:Range loops]
@@ -63,7 +63,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:loop-control]
         [$in title:Loop control]
@@ -73,7 +73,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../branching/]
         [$in previous_title:Branching]

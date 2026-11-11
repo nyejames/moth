@@ -11,5 +11,5 @@ render_second || -> String:
 
 first_msg = render_first()
 second_msg = render_second()
-[:Slot0: [first_msg]]
-[:Slot1: [second_msg]]
+~[:Slot0: [first_msg]]
+~[:Slot1: [second_msg]]

@@ -244,6 +244,7 @@ fn template_head_expression_preserves_infrastructure_failure() {
             context: TemplateViewContext::default(),
         },
         span: None,
+        comment_directive_span: None,
     };
     let stale_value = expression_builder
         .template(stale_template, ValueMode::ImmutableOwned)
@@ -1002,6 +1003,30 @@ fn duplicate_formatter_directive_names_the_repeated_directive() {
     assert_eq!(
         rendered_diagnostic_message(&diagnostic, &string_table),
         "`$md` cannot appear more than once in a template head because each formatter controls template body formatting. Choose one formatter."
+    );
+}
+
+#[test]
+fn repeated_fresh_directive_is_rejected() {
+    let style_directives = frontend_test_style_directives();
+    let (diagnostic, string_table, _) =
+        parse_template_failure("[$fresh, $fresh: body]", &style_directives);
+    let view = diagnostic
+        .first()
+        .expect("duplicate fresh directive should compact to one record");
+    let facts = view
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("duplicate fresh directive should retain typed structure facts");
+    assert_eq!(
+        facts
+            .head_conflict
+            .expect("duplicate fresh should retain its typed conflict")
+            .reason,
+        TemplateHeadConflictReason::DuplicateExclusiveDirective
+    );
+    assert_eq!(
+        rendered_diagnostic_message(&diagnostic, &string_table),
+        "`$fresh` cannot appear more than once in a template head."
     );
 }
 

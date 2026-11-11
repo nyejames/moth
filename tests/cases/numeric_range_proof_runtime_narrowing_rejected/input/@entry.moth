@@ -8,4 +8,4 @@ increment_when_safe |small U8| -> U8:
     ;
 ;
 
-[:[increment_when_safe(1)]]
+~[:[increment_when_safe(1)]]

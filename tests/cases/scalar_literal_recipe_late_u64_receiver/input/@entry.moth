@@ -7,4 +7,4 @@ receive_u64 |value U64| -> String:
 value = 1 + 2
 received = receive_u64(value)
 
-[:scalar literal recipe=[received]]
+~[:scalar literal recipe=[received]]

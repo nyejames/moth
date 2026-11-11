@@ -13,4 +13,4 @@ render_boxes || -> String:
     return [:fixed width generic instance value=[raw]]
 ;
 
-[:[render_boxes()]]
+~[:[render_boxes()]]

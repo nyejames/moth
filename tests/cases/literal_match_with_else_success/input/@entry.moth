@@ -18,4 +18,4 @@ if template_text is:
     else => ~template_match_result = "other"
 ;
 
-[:literal_match_with_else_success result=[match_result] template=[template_match_result]]
+~[:literal_match_with_else_success result=[match_result] template=[template_match_result]]

@@ -12,4 +12,4 @@ ignored = parse() catch |err|:
     then 0
 ;
 
-[: timestamp_parse_grammar_date_only code=[code]]
+~[: timestamp_parse_grammar_date_only code=[code]]

@@ -16,4 +16,4 @@ render_chain || -> String, Error!:
 ;
 
 result = render_chain() catch then "failed"
-[:[result]]
+~[:[result]]

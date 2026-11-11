@@ -36,4 +36,4 @@ private_message = show_private(0) catch |private_message_error|:
     then private_message_error.message
 ;
 
-[: range step direct=[direct] private=[private_result] message=[direct_message]/[private_message]]
+~[: range step direct=[direct] private=[private_result] message=[direct_message]/[private_message]]

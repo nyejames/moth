@@ -51,4 +51,4 @@ render || -> String:
     return [:hashmap_scalar_key_types_success legacy_lengths=[by_name.length],[by_id.length] fixed_keys=[i8_value],[i16_value],[i32_value],[i64_value],[u8_value],[u16_value],[u32_value],[u64_value],[byte_value] alias=[ticket_value]]
 ;
 
-[:[render()]]
+~[:[render()]]

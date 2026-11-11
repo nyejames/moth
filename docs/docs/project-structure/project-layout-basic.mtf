@@ -32,7 +32,7 @@ Each source folder can contain `@mod.moth`, `@package.moth` and `@entry.moth`. A
 A page appears for every folder with `@entry.moth`. The file can be empty, hold only metadata or hold runtime code:
 
 [codeblock, $code "moth":
-    #[$in title:Welcome]
+    [$in title:Welcome]
 ]
 
 That metadata-only entry still produces a page. No other filename creates a page.

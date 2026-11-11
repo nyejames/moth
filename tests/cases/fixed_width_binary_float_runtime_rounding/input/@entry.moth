@@ -65,4 +65,4 @@ string_tie_half_text String = cast string_tie_half
 rounded_integer_text String = cast rounded_integer
 negative_zero_text String = cast negative_zero
 
-[:fixed float runtime f32=[f32_sum_text] f32-folded=[f32_sum_matches_folded] f16-sum=[f16_sum_text] f16-folded=[f16_sum_matches_folded] max-half=[half_max_text] direct-half=[direct_half_text] via-f32-half=[via_single_half_text] string-tie=[string_tie_half_text] i64-to-f32=[rounded_integer_text] negative-zero-equal=[negative_zero_equal] negative-zero-text=[negative_zero_text]]
+~[:fixed float runtime f32=[f32_sum_text] f32-folded=[f32_sum_matches_folded] f16-sum=[f16_sum_text] f16-folded=[f16_sum_matches_folded] max-half=[half_max_text] direct-half=[direct_half_text] via-f32-half=[via_single_half_text] string-tie=[string_tie_half_text] i64-to-f32=[rounded_integer_text] negative-zero-equal=[negative_zero_equal] negative-zero-text=[negative_zero_text]]

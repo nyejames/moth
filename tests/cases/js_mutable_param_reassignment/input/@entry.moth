@@ -10,4 +10,4 @@ x ~= 10
 result = increment(~x)
 io.line([: [result]])
 
-[:mutable_param_reassignment result=[result]]
+~[:mutable_param_reassignment result=[result]]

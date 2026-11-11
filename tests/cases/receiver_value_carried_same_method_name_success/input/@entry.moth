@@ -2,4 +2,4 @@
 
 circle = make_circle()
 square = make_square()
-[:receiver_value_carried_same_method_name_success circle=[circle.area()] square=[square.area()]]
+~[:receiver_value_carried_same_method_name_success circle=[circle.area()] square=[square.area()]]

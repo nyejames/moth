@@ -72,4 +72,4 @@ broken_step_log ~= [:]
 broken_visits ~= 0
 broken = walk_broken(~broken_source_log, ~broken_step_log, ~broken_visits) catch then -2
 
-[:implicit_failure_collection_step_zero_and_order descend=[descend] seen=[descend_seen] log=[descend_log] zero=[zero] zero-visits=[zero_visits] zero-seen=[zero_seen] zero-log=[zero_log] zero-report=[zero_report] empty=[empty] empty-visits=[empty_visits] empty-log=[empty_log] empty-code=[empty_code] broken=[broken] broken-visits=[broken_visits] broken-source-log=[broken_source_log] broken-step-log=[broken_step_log]]
+~[:implicit_failure_collection_step_zero_and_order descend=[descend] seen=[descend_seen] log=[descend_log] zero=[zero] zero-visits=[zero_visits] zero-seen=[zero_seen] zero-log=[zero_log] zero-report=[zero_report] empty=[empty] empty-visits=[empty_visits] empty-log=[empty_log] empty-code=[empty_code] broken=[broken] broken-visits=[broken_visits] broken-source-log=[broken_source_log] broken-step-log=[broken_step_log]]

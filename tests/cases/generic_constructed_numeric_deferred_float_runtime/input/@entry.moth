@@ -15,4 +15,4 @@ wide = Packet(1.00000001)
 narrow_text = read_f32(narrow.value)
 wide_text = read_f64(wide.value)
 
-[:generic_constructed_numeric_deferred_float_runtime narrow=[narrow_text] wide=[wide_text]]
+~[:generic_constructed_numeric_deferred_float_runtime narrow=[narrow_text] wide=[wide_text]]

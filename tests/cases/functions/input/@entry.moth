@@ -24,4 +24,4 @@ product = multiply(4, 6)
 message = greet("World")
 fact5 = factorial(5)
 
-[:functions sum=[sum] product=[product] message=[message] fact5=[fact5]]
+~[:functions sum=[sum] product=[product] message=[message] fact5=[fact5]]

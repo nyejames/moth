@@ -4,4 +4,4 @@ helper || -> String:
 ;
 
 helper()
-#[:log]
+[:log]

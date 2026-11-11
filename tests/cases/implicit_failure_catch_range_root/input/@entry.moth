@@ -27,4 +27,4 @@ walked = walk(double(0), double(3)) catch |loop_err|:
 loop_report = copy loop_info
 exact = walk(0, 3)
 
-[: span=[span_report] walked=[walked] loop=[loop_report] exact=[exact]]
+~[: span=[span_report] walked=[walked] loop=[loop_report] exact=[exact]]

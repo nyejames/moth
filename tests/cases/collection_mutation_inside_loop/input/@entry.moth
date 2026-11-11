@@ -9,4 +9,4 @@ render_loop_mutation || -> String:
     return [:collection_mutation_inside_loop len=[len]]
 ;
 
-[:[render_loop_mutation()]]
+~[:[render_loop_mutation()]]

@@ -1,21 +1,21 @@
 @html center, span
 @styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
 
-#[$in title:["Packages and Builders Progress Matrix"]]
-#[$in description:["Current implementation status, coverage and accepted follow-ups for Moth packages and project builders."]]
-#[$in head:[theme_head]]
+[$in title:["Packages and Builders Progress Matrix"]]
+[$in description:["Current implementation status, coverage and accepted follow-ups for Moth packages and project builders."]]
+[$in head:[theme_head]]
 
 red #= [$css "inline": background-color: rgb(239, 112, 112); color: black;]
 pink #= [$css "inline": background-color: rgb(231, 133, 218); color: black;]
 orange #= [$css "inline": background-color: rgb(223, 162, 100); color: black;]
 green #= [$css "inline": background-color: rgb(109, 232, 138); color: black;]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[title, center: PACKAGES AND BUILDERS PROGRESS]
+[title, center: PACKAGES AND BUILDERS PROGRESS]
 
-#[section, $md:
+[section, $md:
     This page tracks current implementation status for Moth packages and project builders.
     It also records the important accepted gaps and next extensions for partial package surfaces so
     later work does not need to rediscover them from implementation details.
@@ -44,7 +44,7 @@ init_docs_sidebar()!
       in the notes column instead of inventing new status labels.
 ]
 
-#[section, $md:
+[section, $md:
     ## Status legend
 
     [styled_table:
@@ -98,7 +98,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## Package model and infrastructure
 
     [styled_table:
@@ -171,7 +171,7 @@ init_docs_sidebar()!
 ]
 
 
-#[section, $md:
+[section, $md:
     ## Core packages
 
     [styled_table:
@@ -227,7 +227,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## HTML project builder
 
     [styled_table:
@@ -307,7 +307,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## Accepted deferred package and builder work
 
     [styled_table:
@@ -414,7 +414,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## Maintenance rule
 
     Keep this page concise but useful as a handoff between package iterations.

@@ -16,14 +16,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Moth template files"]]
-#[$in description:["Moth-aware Markdown content files for HTML projects."]]
-#[$in head:[language_theme_head]]
+[$in title:["Moth template files"]]
+[$in description:["Moth-aware Markdown content files for HTML projects."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Moth template files
 
     A `.mtf` file puts Markdown directly inside Moth's compile-time template
@@ -35,7 +35,7 @@ init_docs_sidebar()!
     dependencies or runtime work.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:moth-template-files-files]
         [$in title:Moth template files]
@@ -45,7 +45,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:implicit-markdown]
         [$in title:Implicit Markdown]
@@ -55,7 +55,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:content-dependencies]
         [$in title:Content dependencies]
@@ -65,7 +65,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:template-scope]
         [$in title:Template scope]
@@ -75,7 +75,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:moth-template-files-limits]
         [$in title:Moth template file limits]
@@ -85,7 +85,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../resources/]
         [$in previous_title:Resources and file values]

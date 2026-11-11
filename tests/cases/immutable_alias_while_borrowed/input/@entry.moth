@@ -13,4 +13,4 @@ render_aliases || -> String:
     return [:immutable_alias_while_borrowed first=[data_ref] second=[another_ref] result=[result]]
 ;
 
-[:[render_aliases()]]
+~[:[render_aliases()]]

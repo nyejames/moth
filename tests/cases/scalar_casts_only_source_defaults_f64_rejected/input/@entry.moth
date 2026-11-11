@@ -12,4 +12,4 @@ source = 1.0
 text = receive_string(cast source)
 same_default = receive_f64(cast source)
 
-[:unreachable]
+~[:unreachable]

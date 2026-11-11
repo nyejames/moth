@@ -53,4 +53,4 @@ immediate_forward_first_slots |base I32, ready Bool| -> String:
     return [:total=[render_i64(total)] label=[label] base=[render_i32(base)]]
 ;
 
-[:immediate_ready=[immediate_slots(10, true)] immediate_waiting=[immediate_slots(10, false)] immediate_known_first_ready=[immediate_known_first_slots(10, true)] immediate_known_first_waiting=[immediate_known_first_slots(10, false)] immediate_forward_first_ready=[immediate_forward_first_slots(10, true)] immediate_forward_first_waiting=[immediate_forward_first_slots(10, false)]]
+~[:immediate_ready=[immediate_slots(10, true)] immediate_waiting=[immediate_slots(10, false)] immediate_known_first_ready=[immediate_known_first_slots(10, true)] immediate_known_first_waiting=[immediate_known_first_slots(10, false)] immediate_forward_first_ready=[immediate_forward_first_slots(10, true)] immediate_forward_first_waiting=[immediate_forward_first_slots(10, false)]]

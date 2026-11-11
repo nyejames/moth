@@ -39,4 +39,4 @@ terminal_then_slots || -> U64:
     return first
 ;
 
-[:numeric=[numeric_slots(true)]/[numeric_slots(false)] mixed=[mixed_slots(true)]/[mixed_slots(false)] terminal=[render_count(terminal_then_slots())]]
+~[:numeric=[numeric_slots(true)]/[numeric_slots(false)] mixed=[mixed_slots(true)]/[mixed_slots(false)] terminal=[render_count(terminal_then_slots())]]

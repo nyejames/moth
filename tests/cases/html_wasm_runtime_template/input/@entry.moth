@@ -11,7 +11,7 @@ second = render_fragment()
 other = render_other_fragment()
 same = first is second
 different = first is not other
-[: [first]
+~[: [first]
     [if same:
         same=true
     ]
@@ -19,4 +19,4 @@ different = first is not other
         different=true
     ]
 ]
-#[:entry]
+[:entry]

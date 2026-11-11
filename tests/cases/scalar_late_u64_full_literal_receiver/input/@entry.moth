@@ -9,4 +9,4 @@ received = receive_u64(full)
 above_i32 = 2147483648
 above_i32_received = receive_u64(above_i32)
 
-[:scalar late u64 received=[received] above_i32=[above_i32_received]]
+~[:scalar late u64 received=[received] above_i32=[above_i32_received]]

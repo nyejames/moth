@@ -9,4 +9,4 @@ use_choice |r Reply| -> String:
 ;
 
 label = use_choice(Reply::Err("bad"))
-[:choice_payload_match_dependency_alias_success label=[label]]
+~[:choice_payload_match_dependency_alias_success label=[label]]

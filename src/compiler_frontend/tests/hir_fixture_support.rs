@@ -83,6 +83,7 @@ pub(crate) fn raw_template_expression_for_hir_invariant(
             context,
         },
         span,
+        comment_directive_span: None,
     };
 
     let expression = expression_builder

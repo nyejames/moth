@@ -14,14 +14,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Branching"]]
-#[$in description:["If statements, value-producing control flow, pattern matching and exhaustiveness in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Branching"]]
+[$in description:["If statements, value-producing control flow, pattern matching and exhaustiveness in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Branching
 
     Use statement `if` for a Boolean decision. Use a full match when one value
@@ -32,7 +32,7 @@ init_docs_sidebar()!
     compiler can prove every case appears.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:statement-if]
         [$in title:Statement if]
@@ -42,7 +42,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:value-producing-if]
         [$in title:Value-producing if]
@@ -52,7 +52,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:pattern-matching]
         [$in title:Pattern matching]
@@ -62,7 +62,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:patterns-and-exhaustiveness]
         [$in title:Patterns and exhaustiveness]
@@ -72,7 +72,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../functions/]
         [$in previous_title:Functions]

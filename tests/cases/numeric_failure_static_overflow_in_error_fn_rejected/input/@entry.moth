@@ -5,4 +5,4 @@ overflow || -> I32, Error!:
 recovered = overflow() catch:
     then 0
 ;
-[: [recovered]]
+~[: [recovered]]

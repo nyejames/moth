@@ -89,4 +89,4 @@ render |asc_total U64, asc_count I32, asc_last_index I32, stepped_total U64, ste
     return [:uint_range_runtime_int64 asc=[asc_total]/[asc_count]/[asc_last_index] step=[stepped_total]/[stepped_count] desc=[desc_total]/[desc_count]/[desc_first_val]/[desc_last] dstep=[desc_step_total]/[desc_step_count] above=[above_count]/[above_last] max=[max_last]/[max_count] zero=[zero_terminal]/[zero_count]]
 ;
 
-[:[render(asc_total, asc_count, asc_last_index, stepped_total, stepped_count, desc_total, desc_count, desc_last, desc_first_val, desc_step_total, desc_step_count, above_count, above_last, max_last, max_count, zero_terminal, zero_count)]]
+~[:[render(asc_total, asc_count, asc_last_index, stepped_total, stepped_count, desc_total, desc_count, desc_last, desc_first_val, desc_step_total, desc_step_count, above_count, above_last, max_last, max_count, zero_terminal, zero_count)]]

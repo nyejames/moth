@@ -461,7 +461,7 @@ fn diagnostic_recovery_project_soft_cutoff_on_last_module_records_no_stop() {
         root,
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 3,\n)\nhtml #= ()\n",
         &[
-            ("src/@entry.moth", "#[:site]\n"),
+            ("src/@entry.moth", "[:site]\n"),
             (
                 "src/first/@entry.moth",
                 "answer || -> I32:\n    return 1\n;\n",
@@ -508,7 +508,7 @@ fn diagnostic_recovery_project_soft_cutoff_counts_shared_provider_once() {
         root,
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n",
         &[
-            ("src/@entry.moth", "@shared broken\n#[:site]\n"),
+            ("src/@entry.moth", "@shared broken\n[:site]\n"),
             (
                 "src/shared/@mod.moth",
                 "$export\nbroken || -> I32:\n    return shared_missing_one\n;\n\n\
@@ -705,7 +705,7 @@ fn diagnostic_recovery_paired_roots_report_together_before_the_budget_stops_late
                 "src/@entry.moth",
                 "entry_value || -> I32:\n    return entry_missing\n;\n",
             ),
-            ("src/other/@entry.moth", "other_missing\n#[:site]\n"),
+            ("src/other/@entry.moth", "other_missing\n[:site]\n"),
         ],
     );
 
@@ -787,11 +787,11 @@ fn diagnostic_recovery_project_budget_spans_source_package_work() {
         root,
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n",
         &[
-            ("src/a/@entry.moth", "owner_missing\n#[:site]\n"),
-            ("src/b/@entry.moth", "second_missing\n#[:site]\n"),
+            ("src/a/@entry.moth", "owner_missing\n[:site]\n"),
+            ("src/b/@entry.moth", "second_missing\n[:site]\n"),
             (
                 "src/uses/@entry.moth",
-                "@shared render\nvalue = render() catch:\n    then \"\"\n;\n#[:site]\n",
+                "@shared render\nvalue = render() catch:\n    then \"\"\n;\n[:site]\n",
             ),
             (
                 "packages/shared/@mod.moth",
@@ -927,7 +927,7 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
         root,
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
         &[
-            ("src/@entry.moth", "#[:site]\n"),
+            ("src/@entry.moth", "[:site]\n"),
             ("src/broken/@mod.moth", RESOURCE_FAILING_MODULE_ROOT),
             ("src/broken/extra.moth", RESOURCE_FAILING_MODULE_EXTRA),
             (
@@ -1151,7 +1151,7 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
         &[
             (
                 "src/@entry.moth",
-                "@shared render\nvalue = render() catch:\n    then 0\n;\n#[:site]\n",
+                "@shared render\nvalue = render() catch:\n    then 0\n;\n[:site]\n",
             ),
             (
                 "packages/shared/@mod.moth",
@@ -1286,7 +1286,7 @@ fn diagnostic_recovery_package_cutoff_can_diagnose_its_own_root() {
         &[
             (
                 "src/@entry.moth",
-                "@shared a\nvalue = a() catch:\n    then 0\n;\n#[:site]\n",
+                "@shared a\nvalue = a() catch:\n    then 0\n;\n[:site]\n",
             ),
             (
                 "packages/shared/@mod.moth",
@@ -1374,7 +1374,7 @@ fn write_deferred_check_only_package_project(
         &[
             (
                 "src/@entry.moth",
-                "@shared render\nvalue = render() catch:\n    then 0\n;\n#[:site]\n",
+                "@shared render\nvalue = render() catch:\n    then 0\n;\n[:site]\n",
             ),
             (
                 "packages/shared/@mod.moth",
@@ -1603,13 +1603,13 @@ fn qualified_cycle_and_invalid_selection_under_project_budget_are_deterministic(
         &[
             (
                 "src/a_invalid/@entry.moth",
-                "broken = @helper missing\n#[:site]\n",
+                "broken = @helper missing\n[:site]\n",
             ),
             ("src/a_invalid/helper.moth", "present #= 1\n"),
-            ("src/b_cycle/@entry.moth", "@alpha a\n#[:site]\n"),
+            ("src/b_cycle/@entry.moth", "@alpha a\n[:site]\n"),
             ("src/b_cycle/alpha.moth", "a #= @beta b\n"),
             ("src/b_cycle/beta.moth", "b #= @alpha a\n"),
-            ("src/zz_last/@entry.moth", "#[:site]\n"),
+            ("src/zz_last/@entry.moth", "[:site]\n"),
         ],
     );
 
@@ -1709,7 +1709,7 @@ fn qualified_cycle_and_invalid_selection_under_project_budget_are_deterministic(
 fn qualified_forward_reference_diagnostics_follow_authored_span_order() {
     const SETTINGS_SOURCE: &str =
         "combined #= @settings last + @settings later\nlater #= 2\nlast #= 3\n";
-    const ENTRY_SOURCE: &str = "@settings combined\n#[:site]\n";
+    const ENTRY_SOURCE: &str = "@settings combined\n[:site]\n";
 
     /// Exact user-facing facts retained for one error: code, typed reason, authored excerpt and
     /// half-open line/column positions.

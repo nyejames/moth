@@ -8,4 +8,4 @@ if value is:
     else => ~match_result = "other"
 ;
 
-[:literal_match_negative_literal_arm_boundary result=[match_result]]
+~[:literal_match_negative_literal_arm_boundary result=[match_result]]

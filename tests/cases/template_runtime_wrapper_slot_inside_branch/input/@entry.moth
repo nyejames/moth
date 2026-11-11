@@ -2,7 +2,7 @@ list = [$before [if true:<li class="branch-slot">], $after [if true:</li>]:
     <ul>[$slot]</ul>
 ]
 
-[:template_runtime_wrapper_slot_inside_branch
+~[:template_runtime_wrapper_slot_inside_branch
     [list:
         [: hello]
     ]

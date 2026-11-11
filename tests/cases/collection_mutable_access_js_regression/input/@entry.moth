@@ -15,4 +15,4 @@ render_js_regression || -> String:
     return [:collection_mutable_access_js_regression first=[first] removed=[removed] len=[len]]
 ;
 
-[:[render_js_regression()]]
+~[:[render_js_regression()]]

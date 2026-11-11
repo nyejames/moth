@@ -10,6 +10,7 @@
 //! Constants and choices are handled in earlier passes; they do not emit nodes here.
 //! Struct node emission reads the resolved field table produced by environment construction.
 
+use crate::compiler_frontend::ast::AstDocFragment;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::cursor::AstCursor;
@@ -69,6 +70,9 @@ use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
+use crate::compiler_frontend::style_directives::{
+    SourceDirectiveKind, SourceOperandFoldResources, fold_source_directive_operand,
+};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceTokens;
@@ -128,6 +132,8 @@ pub(in crate::compiler_frontend::ast) struct AstEmission {
     /// Fully validated generic template bodies retained only through static specialisation and
     /// terminality. They never enter executable HIR.
     pub(in crate::compiler_frontend::ast) validated_generic_template_bodies: Vec<AstNode>,
+    /// Declaration-attached documentation records folded during emission.
+    pub(in crate::compiler_frontend::ast) doc_fragments: Vec<AstDocFragment>,
 }
 
 #[cfg(test)]
@@ -176,6 +182,17 @@ impl ScopeFrameCapacityBudget {
         self.remaining_roots -= 1;
         capacity
     }
+
+    /// Returns the reservation for one header metadata fold without spending body capacity.
+    ///
+    /// WHAT: always zero and deliberately leaves `remaining_frames` and `remaining_roots` alone.
+    /// WHY: `$doc`/`$todo` folding owns a separate arena at a non-counted root. Spending a slice
+    ///      here would starve the annotated executable root that follows. The metadata arena still
+    ///      grows normally when an operand contains control flow; a plain String operand needs its
+    ///      single root frame only.
+    fn next_metadata_fold_capacity(&mut self) -> usize {
+        0
+    }
 }
 
 /// Rebase each parameter's [`PathId`] from a bare name to a fully qualified path
@@ -206,8 +223,8 @@ fn rebase_signature_parameters(
 /// template body; start headers and top-level const templates also parse in their own root
 /// contexts.
 /// WHY: the module-wide capacity estimate must be distributed over root parse contexts that can
-/// consume it once. Header kinds handled entirely by environment construction or metadata
-/// validation do not allocate root body arenas here.
+/// consume it once. Metadata-only source-directive folding starts an unreserved arena and is
+/// deliberately outside this distribution, so it cannot starve the executable root it annotates.
 fn count_root_scope_arena_consumers(headers: &[Header]) -> usize {
     headers
         .iter()
@@ -318,6 +335,8 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
         FxHashMap<GenericFunctionInstanceKey, GenericFunctionInstance>,
     validated_generic_template_bodies: Vec<AstNode>,
     generic_call_site_identity_handle: Option<FrozenIdentityHandle>,
+    doc_fragments: Rc<RefCell<Vec<AstDocFragment>>>,
+    publish_source_docs: bool,
 }
 impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environment> {
     pub(in crate::compiler_frontend::ast) fn new(
@@ -344,6 +363,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             generic_function_instances_by_key: FxHashMap::default(),
             validated_generic_template_bodies: Vec::new(),
             generic_call_site_identity_handle: None,
+            doc_fragments: Rc::new(RefCell::new(Vec::new())),
+            publish_source_docs: true,
         }
     }
 
@@ -352,6 +373,14 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         handle: FrozenIdentityHandle,
     ) -> Self {
         self.generic_call_site_identity_handle = Some(handle);
+        self
+    }
+
+    pub(in crate::compiler_frontend::ast) fn with_source_doc_publication(
+        mut self,
+        publish: bool,
+    ) -> Self {
+        self.publish_source_docs = publish;
         self
     }
 
@@ -379,6 +408,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             generic_instance_count: self.generic_function_instances_by_key.len(),
             deferred_generic_requests,
             validated_generic_template_bodies: self.validated_generic_template_bodies,
+            doc_fragments: std::mem::take(&mut self.doc_fragments.borrow_mut()),
         })
     }
 
@@ -399,6 +429,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             self.context.template_ir_store.clone(),
         )
         .with_style_directives(self.context.style_directives)
+        .with_source_doc_sink(Rc::clone(&self.doc_fragments))
+        .with_source_doc_publication(self.publish_source_docs)
         .with_build_profile(self.context.build_profile)
         .with_template_const_loop_iteration_limit(self.context.template_const_loop_iteration_limit)
         .with_file_visibility(Arc::clone(&input.visibility))
@@ -434,6 +466,84 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             context = context.with_config_resolution(Rc::clone(services));
         }
         context
+    }
+
+    /// Folds declaration-attached `$doc`/`$todo` operands for one header.
+    ///
+    /// WHAT: parses each retained operand through the ordinary expression/template pipeline and
+    ///       records `$doc` text against the header's declaration path.
+    /// WHY: both directives must share constant semantics with every other expression, and only
+    ///      documentation with a real target belongs in module metadata. `$todo` is validated and
+    ///      dropped until a consumer exists.
+    fn fold_header_source_directives(
+        &mut self,
+        header: &Header,
+        source_file_scope: PathId,
+        visibility: Arc<FileVisibility>,
+        scope_frame_capacity: usize,
+        string_table: &mut StringTable,
+    ) -> Result<(), PreparedFailure> {
+        let source = self
+            .canonical_owner_for_header(header)
+            .map_err(|error| self.error_messages(error, string_table))?;
+        let context = self.build_base_scope_context(BaseScopeContextInput {
+            kind: ContextKind::Constant,
+            scope: source_file_scope,
+            top_level_declarations: &self.environment.lookups.declaration_table,
+            visibility,
+            declaring_file_id: header.tokens.source(),
+            source_file_scope,
+            scope_frame_capacity,
+        });
+
+        {
+            let mut type_interner = AstTypeInterner::new(
+                &mut self.environment.type_environment,
+                &mut self.compatibility_cache,
+            );
+            let mut fold_error = None;
+            for directive in header.source_directives.iter().filter(|directive| {
+                matches!(
+                    directive.kind,
+                    SourceDirectiveKind::Doc | SourceDirectiveKind::Todo
+                )
+            }) {
+                let folded = fold_source_directive_operand(
+                    directive,
+                    &source,
+                    None,
+                    &context,
+                    SourceOperandFoldResources {
+                        type_interner: &mut type_interner,
+                        expression_builder: &mut self.context.expression_builder,
+                        const_values: &mut self.context.const_values,
+                        string_table,
+                        path_fork: &mut *self.path_fork,
+                    },
+                );
+                let (value, span) = match folded {
+                    Ok(value) => value,
+                    Err(error) => {
+                        fold_error = Some(error);
+                        break;
+                    }
+                };
+                if directive.kind == SourceDirectiveKind::Doc {
+                    self.doc_fragments.borrow_mut().push(AstDocFragment {
+                        target: header.declaration_path,
+                        value,
+                        span: Some(span),
+                    });
+                }
+            }
+            if let Some(error) = fold_error {
+                return Err(self.expression_error_messages(error, string_table));
+            }
+        }
+        for warning in context.take_emitted_warnings() {
+            self.warnings.push(warning);
+        }
+        Ok(())
     }
 
     fn source_path_for_header(&self, header: &Header) -> Result<PathId, InfrastructureFailure> {
@@ -585,6 +695,21 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     .visibility_for(&source_file_scope)
                     .map_err(|error| self.error_messages(error, string_table))?,
             );
+
+            if header.source_directives.iter().any(|directive| {
+                matches!(
+                    directive.kind,
+                    SourceDirectiveKind::Doc | SourceDirectiveKind::Todo
+                )
+            }) {
+                self.fold_header_source_directives(
+                    &header,
+                    source_file_scope,
+                    Arc::clone(&visibility),
+                    scope_frame_capacity_budget.next_metadata_fold_capacity(),
+                    string_table,
+                )?;
+            }
 
             match &header.kind {
                 HeaderKind::Function {
@@ -746,6 +871,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             generic_instance_count: self.generic_function_instances_by_key.len(),
             deferred_generic_requests,
             validated_generic_template_bodies: self.validated_generic_template_bodies,
+            doc_fragments: std::mem::take(&mut self.doc_fragments.borrow_mut()),
         })
     }
 
@@ -1517,7 +1643,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         )
         .map_err(|error| self.error_messages(error, string_table))?;
 
-        // A direct active-root `#[$in name: ...]` is a builder contribution, not an escaped
+        // A direct active-root `[$in name: ...]` is a builder contribution, not an escaped
         // template-composition helper. Recognise only this exact shallow shape before the
         // ordinary helper rejection below; nested and stored helpers keep their existing paths.
         // The template-kind lookup is skipped entirely when no builder schema is present, so the
@@ -1575,6 +1701,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     &mut self.context.expression_builder,
                     &mut self.context.const_values,
                 );
+                let is_comment = Self::is_comment_template(&view)?;
                 let mut result =
                     match fold_prepared_root_slot(&preparation, view, &mut fold_context) {
                         Ok(result) => result,
@@ -1589,6 +1716,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 }
                 let value = match result.emission {
                     TemplateEmission::Output(value) => value,
+                    TemplateEmission::NoOutput if is_comment => {
+                        return Ok(FoldedConstTemplateResult::NoOutput);
+                    }
                     TemplateEmission::NoOutput => {
                         ConstStringValue::Text(fold_context.string_table.intern(""))
                     }
@@ -1629,6 +1759,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut self.context.expression_builder,
             &mut self.context.const_values,
         );
+        let is_comment = Self::is_comment_template(&view)?;
         // Top-level const fragments are builder-facing rendered text metadata; no semantic or
         // fingerprint consumer owns provenance at this boundary in the current milestone.
         let mut result = match fold_prepared_template(&prepared, view, &mut fold_context) {
@@ -1647,6 +1778,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let TemplateFoldResult { emission, .. } = result;
         let value = match emission {
             TemplateEmission::Output(value) => value,
+            TemplateEmission::NoOutput if is_comment => {
+                return Ok(FoldedConstTemplateResult::NoOutput);
+            }
             TemplateEmission::NoOutput => {
                 ConstStringValue::Text(fold_context.string_table.intern(""))
             }
@@ -1655,6 +1789,13 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let result = FoldedConstTemplateResult::new(value, ConstFragmentDestination::Body);
 
         Ok(result)
+    }
+
+    /// Reports whether the prepared root is a template-local comment (`$note`) that emits nothing.
+    fn is_comment_template(view: &TirView<'_>) -> Result<bool, PreparedFailure> {
+        view.root_template()
+            .map(|template| matches!(template.kind, TemplateType::Comment))
+            .map_err(|error| PreparedFailure::Infrastructure(error.into()))
     }
 
     /// Routes infrastructure failures through their typed lane.

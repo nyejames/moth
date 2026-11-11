@@ -26,4 +26,4 @@ read_leaf || -> U64:
 ;
 
 leaf = read_leaf()
-[:shared_pair=[leaf]]
+~[:shared_pair=[leaf]]

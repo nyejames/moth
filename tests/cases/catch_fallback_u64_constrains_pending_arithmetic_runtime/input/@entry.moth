@@ -19,4 +19,4 @@ probe_block || -> String:
     return [:[value]]
 ;
 
-[:inline=[probe()] block=[probe_block()]]
+~[:inline=[probe()] block=[probe_block()]]

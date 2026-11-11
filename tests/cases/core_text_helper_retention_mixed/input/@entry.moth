@@ -12,4 +12,4 @@ ready #Bool = is_empty("")
 prefix #Bool = starts_with("abc", "a")
 suffix #Bool = ends_with("abc", "c")
 
-[:len=[measure("a😊b")] has_b=[has_b("abc")] ready=[ready] prefix=[prefix] suffix=[suffix]]
+~[:len=[measure("a😊b")] has_b=[has_b("abc")] ready=[ready] prefix=[prefix] suffix=[suffix]]

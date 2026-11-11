@@ -7,4 +7,4 @@ new_input || -> String, Error!:
 result = new_input() catch:
     then "error"
 ;
-[:core_io_input_wasm_rejected [result]]
+~[:core_io_input_wasm_rejected [result]]

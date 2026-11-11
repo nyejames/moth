@@ -9,7 +9,7 @@ code = "MOTH-SYNTAX-0022"
 reason = "invalid_template_structure.missing_closing_bracket"
 path = "input/@entry.moth"
 line = 2
-column = 26
+column = 27
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1

@@ -15,4 +15,4 @@ format_level |level AlertLevel| -> String:
 ;
 
 message = format_level(AlertLevel::Warning)
-[:exhaustive_choice_match_returns message=[message]]
+~[:exhaustive_choice_match_returns message=[message]]

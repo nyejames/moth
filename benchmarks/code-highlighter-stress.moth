@@ -1519,4 +1519,4 @@ render || -> String:
     return [code_snippet]
 ;
 
-[render()]
+~[render()]

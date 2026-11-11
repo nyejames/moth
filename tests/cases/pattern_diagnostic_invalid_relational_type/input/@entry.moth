@@ -14,4 +14,4 @@ if value is:
     else => ~result = "fallback"
 ;
 
-[:should_not_reach=[result]]
+~[:should_not_reach=[result]]

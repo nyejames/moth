@@ -17,5 +17,5 @@ overflow = safe_product(2147483647, 2) catch |overflow_error|:
 ;
 exact = safe_product(6, 7) catch then 0
 
-[: private failure code=[overflow_code] recovered=[overflow] exact=[exact]]
+~[: private failure code=[overflow_code] recovered=[overflow] exact=[exact]]
 

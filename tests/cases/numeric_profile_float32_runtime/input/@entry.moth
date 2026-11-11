@@ -28,4 +28,4 @@ threshold_text = format_float(0.000001)
 large_text = format_float(1e21)
 negative_large_text = format_float(-1e21)
 
-[: float32 sum=[sum_text] overflow=[overflow_text] decimal=[parsed_text] thresholds=[tiny_text]|[threshold_text]|[large_text]|[negative_large_text]]
+~[: float32 sum=[sum_text] overflow=[overflow_text] decimal=[parsed_text] thresholds=[tiny_text]|[threshold_text]|[large_text]|[negative_large_text]]

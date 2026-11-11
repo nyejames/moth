@@ -10,4 +10,4 @@ use_choice |r Response| -> String:
 ;
 
 label = use_choice(Response::Success)
-[:choice_payload_imported_field_type_success label=[label]]
+~[:choice_payload_imported_field_type_success label=[label]]

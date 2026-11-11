@@ -30,7 +30,9 @@ use crate::compiler_frontend::paths::file_references::PreparedFileReferenceTable
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::semantic_identity::{ModuleRootFiles, ModuleRootRole};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
-use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::style_directives::{
+    SourceDirectiveAnnotation, StyleDirectiveRegistry,
+};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
@@ -613,6 +615,14 @@ pub struct Header {
     pub local_ordering_hints: HashSet<LocalDeclarationOrderingHint>,
     /// Exact authored declaration-name span; synthetic headers use `None`.
     pub name_span: Option<SourceSpan>,
+    /// Ordered source-directive annotations attached to this declaration.
+    ///
+    /// WHAT: retained `$doc`/`$todo` and other source-directive operands whose semantics apply
+    ///       after the target header is known.
+    /// WHY: the header parser validates attachment once and the AST stage folds retained operands
+    ///      with the ordinary constant-expression pipeline. No later stage re-scans directive
+    ///      tokens.
+    pub source_directives: Vec<SourceDirectiveAnnotation>,
     /// Explicit source-kind adapter facts for generated `content #String` declarations.
     ///
     /// `None` means this header came from tokenized declaration syntax. A payload-only
@@ -1138,6 +1148,9 @@ impl Header {
     /// Source-owned token ranges and sequence IDs contain no remappable payload.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.kind.remap_string_ids(remap);
+        for annotation in &mut self.source_directives {
+            annotation.name_id = remap.get(annotation.name_id);
+        }
         if let Some(payload) = &mut self.synthetic_content_payload {
             payload.remap_string_ids(remap);
         }
@@ -1216,6 +1229,12 @@ impl Header {
 
         if let Some(name_span) = self.name_span {
             self.name_span = Some(SourceSpan::new(file_id, name_span.local()));
+        }
+        for annotation in &mut self.source_directives {
+            annotation.span = SourceSpan::new(file_id, annotation.span.local());
+            if let Some(operand) = &mut annotation.operand {
+                *operand = operand.rebind_source(file_id);
+            }
         }
         self.declaration_path = rebind_required_path(
             self.declaration_path,

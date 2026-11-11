@@ -8,4 +8,4 @@ recover_product |left I32, right I32| -> I32:
 recovered = recover_product(50000, 50000)
 exact = recover_product(6, 7)
 
-[: implicit expression catch recovered=[recovered] exact=[exact]]
+~[: implicit expression catch recovered=[recovered] exact=[exact]]

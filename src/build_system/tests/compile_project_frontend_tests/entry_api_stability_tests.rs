@@ -217,8 +217,8 @@ fn reachable_external_functions(
 ///       entry edit must not invalidate normal or support API consumers.
 #[test]
 fn entry_implementation_edits_preserve_facade_interface_fingerprints() {
-    let entry_before = "@impl compute\n\nresult = compute(1)\n[1]\n";
-    let entry_after = "@impl compute\n\nresult = compute(2)\nio.line(\"entry implementation changed\")\n[2]\n[3]\n";
+    let entry_before = "@impl compute\n\nresult = compute(1)\n~[1]\n";
+    let entry_after = "@impl compute\n\nresult = compute(2)\nio.line(\"entry implementation changed\")\n~[2]\n~[3]\n";
 
     let before = compile_fixture(&[
         ("src/@mod.moth", BASE_FACADE),
@@ -370,13 +370,13 @@ fn shared_helper_export_changes_invalidate_the_provider_interface_fingerprint() 
 fn qualified_private_helper_edit_changes_only_the_dependent_folded_content() {
     let before = compile_template_fixture(&[
         ("src/@mod.moth", "$export\nunrelated #= 1\n"),
-        ("src/@entry.moth", "#[: [@intro content] ]\n"),
+        ("src/@entry.moth", "[: [@intro content] ]\n"),
         ("src/intro.mtf", "[@settings site_name]\n"),
         ("src/settings.moth", "site_name #= \"Moth Site\"\n"),
         ("src/other/@mod.moth", "$export\nstable #= 1\n"),
     ]);
     let after = compile_template_fixture(&[
-        ("src/@entry.moth", "#[: [@intro content] ]\n"),
+        ("src/@entry.moth", "[: [@intro content] ]\n"),
         ("src/settings.moth", "site_name #= \"Changed Site\"\n"),
         ("src/intro.mtf", "[@settings site_name]\n"),
         ("src/other/@mod.moth", "$export\nstable #= 1\n"),
@@ -437,7 +437,7 @@ fn qualified_cross_module_constant_edit_changes_the_consumer_and_provider_only()
         ("src/@mod.moth", "$export\nunrelated #= 1\n"),
         (
             "src/@entry.moth",
-            "message #= @child label\n#[: [message] ]\n",
+            "message #= @child label\n[: [message] ]\n",
         ),
         ("src/child/@mod.moth", "$export\nlabel #= \"one\"\n"),
         ("src/other/@mod.moth", "$export\nstable #= 1\n"),
@@ -446,7 +446,7 @@ fn qualified_cross_module_constant_edit_changes_the_consumer_and_provider_only()
         ("src/@mod.moth", "$export\nunrelated #= 1\n"),
         (
             "src/@entry.moth",
-            "message #= @child label\n#[: [message] ]\n",
+            "message #= @child label\n[: [message] ]\n",
         ),
         ("src/child/@mod.moth", "$export\nlabel #= \"two\"\n"),
         ("src/other/@mod.moth", "$export\nstable #= 1\n"),
@@ -504,7 +504,7 @@ fn qualified_cross_module_constant_edit_changes_the_consumer_and_provider_only()
 fn qualified_reference_builds_are_deterministic_across_source_creation_order() {
     let files = [
         ("src/@mod.moth", "$export\nunrelated #= 1\n"),
-        ("src/@entry.moth", "page #= @child intro\n#[: [page] ]\n"),
+        ("src/@entry.moth", "page #= @child intro\n[: [page] ]\n"),
         ("src/child/@mod.moth", "$export\n@intro content as intro\n"),
         ("src/child/intro.mtf", "[@settings site_name]\n"),
         ("src/child/settings.moth", "site_name #= \"stable\"\n"),

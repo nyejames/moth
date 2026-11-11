@@ -31,4 +31,4 @@ adjusted = safe_adjust(10) catch |writeback_error|:
     then 250
 ;
 
-[: compound write-back code=[code] recovered=[recovered] exact=[exact] rhs=[rhs_code] adjusted=[adjusted]]
+~[: compound write-back code=[code] recovered=[recovered] exact=[exact] rhs=[rhs_code] adjusted=[adjusted]]

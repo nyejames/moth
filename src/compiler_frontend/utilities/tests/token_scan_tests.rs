@@ -157,11 +157,11 @@ fn fixture_span(start: u32, length: u32) -> LocalSpan {
 
 fn unclosed_delimiter_for(
     parts: Vec<FixturePart>,
-    string_table: &StringTable,
+    _string_table: &StringTable,
 ) -> Option<UnclosedDelimiter> {
     let owner = source_tokens_from_parts(SourceId::COMPILATION_ROOT, parts);
     let eof = TokenIndex::try_from_index(owner.len() - 1).expect("EOF index should fit");
-    innermost_unclosed_delimiter(&owner, TokenIndex::from_raw(0), eof, string_table)
+    innermost_unclosed_delimiter(&owner, TokenIndex::from_raw(0), eof)
 }
 
 #[test]
@@ -230,54 +230,6 @@ fn eof_scan_skips_balanced_nested_pairs() {
     );
 }
 
-/// A literal `[` inside `$doc` must not become the label. The scan recognises the authored
-/// `[$doc` head, so its unclosed template is the documentation template itself.
-#[test]
-fn eof_scan_labels_the_doc_opening_not_a_literal_bracket_in_its_body() {
-    let mut string_table = StringTable::new();
-    let doc_directive = string_table.intern("doc");
-    let doc_opening = SourceSpan::new(SourceId::COMPILATION_ROOT, fixture_span(0, 1));
-    assert_eq!(
-        unclosed_delimiter_for(
-            vec![
-                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(0, 1)),
-                FixturePart::StyleDirective(doc_directive),
-                FixturePart::Static(TokenTag::START_TEMPLATE_BODY),
-                FixturePart::StringSlice(string_table.intern("a ")),
-                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(20, 1)),
-                FixturePart::StringSlice(string_table.intern(" b")),
-                FixturePart::Static(TokenTag::EOF),
-            ],
-            &string_table,
-        ),
-        Some(UnclosedDelimiter::Template(doc_opening)),
-    );
-}
-
-/// A documentation template nested in an ordinary template is still the innermost authored
-/// opening, and its literal body brackets do not replace it.
-#[test]
-fn eof_scan_labels_a_nested_doc_opening_inside_an_outer_template() {
-    let mut string_table = StringTable::new();
-    let doc_directive = string_table.intern("doc");
-    let doc_opening = SourceSpan::new(SourceId::COMPILATION_ROOT, fixture_span(20, 1));
-    assert_eq!(
-        unclosed_delimiter_for(
-            vec![
-                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(0, 1)),
-                FixturePart::Static(TokenTag::START_TEMPLATE_BODY),
-                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(20, 1)),
-                FixturePart::StyleDirective(doc_directive),
-                FixturePart::Static(TokenTag::START_TEMPLATE_BODY),
-                FixturePart::SpannedStatic(TokenTag::TEMPLATE_HEAD, fixture_span(30, 1)),
-                FixturePart::Static(TokenTag::EOF),
-            ],
-            &string_table,
-        ),
-        Some(UnclosedDelimiter::Template(doc_opening)),
-    );
-}
-
 #[test]
 fn eof_scan_returns_the_innermost_unmatched_parenthesis() {
     let parenthesis = SourceSpan::new(SourceId::COMPILATION_ROOT, fixture_span(5, 1));
@@ -307,12 +259,7 @@ fn template_only_scan_labels_the_template_holding_an_open_parenthesis() {
     );
     let eof = TokenIndex::try_from_index(owner.len() - 1).expect("EOF index should fit");
     assert_eq!(
-        innermost_unclosed_template_opening(
-            &owner,
-            TokenIndex::from_raw(0),
-            eof,
-            &StringTable::new()
-        ),
+        innermost_unclosed_template_opening(&owner, TokenIndex::from_raw(0), eof,),
         Some(SourceSpan::new(
             SourceId::COMPILATION_ROOT,
             fixture_span(9, 1)
@@ -567,7 +514,6 @@ fn balanced_template_region_consumes_nested_templates_from_source() {
     let end = consume_balanced_template_region_from_source(
         &mut cursor,
         opening,
-        &string_table,
         |token| consumed.push(token.tag()),
         |_location, _opening| String::from("unexpected eof"),
         |error| format!("infrastructure failure: {error:?}"),
@@ -608,7 +554,6 @@ fn balanced_template_region_errors_on_eof_before_close_from_source() {
     let error = consume_balanced_template_region_from_source(
         &mut cursor,
         opening,
-        &string_table,
         |_token| {},
         |_location, _opening| String::from("missing template close"),
         |error| format!("infrastructure failure: {error:?}"),
@@ -645,7 +590,6 @@ fn balanced_template_region_consumes_doc_body_literal_brackets() {
     let end = consume_balanced_template_region_from_source(
         &mut cursor,
         opening,
-        &string_table,
         |_token| {},
         |_location, _opening| String::from("unexpected eof"),
         |error| format!("infrastructure failure: {error:?}"),
@@ -685,7 +629,6 @@ fn balanced_template_region_labels_doc_opening_on_eof() {
     let (_eof_span, labelled_opening) = consume_balanced_template_region_from_source(
         &mut cursor,
         opening,
-        &string_table,
         |_token| {},
         |span, labelled_opening| (span, labelled_opening),
         |error| panic!("template scan infrastructure failure: {error:?}"),

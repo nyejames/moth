@@ -1,6 +1,6 @@
 @html canvas, Canvas, get_canvas
 
-#[canvas:
+[canvas:
   [$in id:unused_canvas]
   [$in style:
     width: 320px;

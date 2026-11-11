@@ -5,4 +5,4 @@ probe || -> I32:
     ;
     return value
 ;
-[:[probe()]]
+~[:[probe()]]

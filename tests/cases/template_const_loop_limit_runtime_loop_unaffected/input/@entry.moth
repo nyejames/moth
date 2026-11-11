@@ -2,7 +2,7 @@ last_number || -> I32:
     return 3
 ;
 
-[:
+~[:
     runtime loop unaffected before
     [loop 1 to & last_number() |numeric_value|:
         runtime-[numeric_value];

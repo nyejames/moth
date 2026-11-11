@@ -7,9 +7,9 @@ page_favicon #= "old-favicon.ico"
 page_body_style #= "outline: 1px solid red;"
 page_head #= [$html:<meta name="old-head" content="old-head-sentinel">]
 
-#[page_title]
-#[page_description]
-#[page_lang]
-#[page_favicon]
-#[page_body_style]
-#[page_head]
+[page_title]
+[page_description]
+[page_lang]
+[page_favicon]
+[page_body_style]
+[page_head]

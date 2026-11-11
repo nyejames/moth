@@ -21,4 +21,4 @@ LabelBox as Box of Label
 wrapped LabelBox = Box(Label("ok"))
 direct Box of Label = Box(Label("direct"))
 
-[:trait_bound_generic_struct_success [wrapped.value.display()] [direct.value.display()]]
+~[:trait_bound_generic_struct_success [wrapped.value.display()] [direct.value.display()]]

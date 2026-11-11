@@ -13,4 +13,4 @@ render_loop || -> String:
     ]
 ;
 
-[:template_conditional_loop_runtime_slot_renders_empty [render_loop()]]
+~[:template_conditional_loop_runtime_slot_renders_empty [render_loop()]]

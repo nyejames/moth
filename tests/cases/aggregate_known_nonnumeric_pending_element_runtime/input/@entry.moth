@@ -36,4 +36,4 @@ render_pending_known_nonnumeric || -> String:
     return [:known_nonnumeric_pending label=[label] len=[label_count] wide=[wide] narrow=[narrow] flags_len=[flag_count] comparison_wide=[comparison_wide] comparison_narrow=[comparison_narrow]]
 ;
 
-[:[render_pending_known_nonnumeric()]]
+~[:[render_pending_known_nonnumeric()]]

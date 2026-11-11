@@ -6,4 +6,4 @@ render_negative || -> String:
     return [:collection_negative_index_fallback result=[result]]
 ;
 
-[:[render_negative()]]
+~[:[render_negative()]]

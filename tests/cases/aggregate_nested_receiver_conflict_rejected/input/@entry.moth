@@ -12,4 +12,4 @@ grid = {{1, 2}}
 first = receive_u64_grid(grid)
 second = receive_i64_grid(grid)
 
-[:unreachable]
+~[:unreachable]

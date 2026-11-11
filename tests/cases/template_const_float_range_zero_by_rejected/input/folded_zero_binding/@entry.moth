@@ -1,6 +1,6 @@
 -- The outer binding substitutes a const-known zero into the inner step, so the
 -- const fold rejects the zero step even though no literal is authored.
-#[loop 0 to 1 |i|:
+[loop 0 to 1 |i|:
     [loop 0 to 3 by i |j|:
         [j]
     ]

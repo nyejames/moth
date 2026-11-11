@@ -8,4 +8,4 @@ base = 1
 twice = base + base
 received = receive_u64(twice)
 
-[:unreachable]
+~[:unreachable]

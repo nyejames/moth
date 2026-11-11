@@ -3,4 +3,4 @@ hidden ||:
     value = x + 300
 ;
 
-[:unreachable]
+~[:unreachable]

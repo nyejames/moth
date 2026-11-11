@@ -7,7 +7,6 @@
 //! metadata result boundary, not stored on `HirModule`.
 
 use crate::compiler_frontend::ast::Ast;
-use crate::compiler_frontend::ast::AstDocFragmentKind;
 use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, NodeKind};
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
 use crate::compiler_frontend::ast::expressions::failure_classification::AstBuiltinFailureSummaries;
@@ -27,7 +26,7 @@ use crate::compiler_frontend::hir::failure_facts::{
 };
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirStableFunctionOrigin};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
-use crate::compiler_frontend::module_metadata::{ModuleDocFragment, ModuleDocFragmentKind};
+use crate::compiler_frontend::module_metadata::ModuleDocFragment;
 
 impl<'a> HirBuilder<'a> {
     /// Record this expression's synthetic-interface provenance in its owning HIR block.
@@ -287,14 +286,10 @@ impl<'a> HirBuilder<'a> {
         self.extracted_metadata.doc_fragments.clear();
 
         for fragment in &ast.doc_fragments {
-            let kind = match fragment.kind {
-                AstDocFragmentKind::Doc => ModuleDocFragmentKind::Doc,
-            };
-
             self.extracted_metadata
                 .doc_fragments
                 .push(ModuleDocFragment {
-                    kind,
+                    target: fragment.target,
                     rendered_text: self.string_table.resolve(fragment.value).to_owned(),
                     span: fragment.span,
                 });

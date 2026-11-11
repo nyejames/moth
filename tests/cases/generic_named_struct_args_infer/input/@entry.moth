@@ -7,4 +7,4 @@ pair = Pair(right = "two", left = 1)
 left I32 = pair.left
 right String = pair.right
 
-[: named struct generic inference]
+~[: named struct generic inference]

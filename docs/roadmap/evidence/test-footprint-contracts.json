@@ -1095,7 +1095,7 @@
       "existing_owner": "src/compiler_frontend/ast/templates/tests/create_template_node/parser_tir_tests.rs",
       "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
       "required_validation": "cargo test -p moth --lib parser_tir_tests",
-      "review_outcome": "Phase 4: merge two exact subsets into the named stronger same-file survivors, leaving 44 definitions and 2296 noncomment LOC. Const-required parsing, child boundary/order/summaries and formatted/composed phases remain protected.",
+      "review_outcome": "Phase 4: merge two exact subsets into the named stronger same-file survivors, leaving 44 definitions and 2296 noncomment LOC. Const-required parsing, child boundary/order/summaries and formatted/composed phases remain protected. The later const-default entry-template cutover removed the two baseline `$doc` tests marked removed below, leaving 42 definitions.",
       "tests": [
         {
           "test_id": "parser_tir_owns_contiguous_literal_body_text",
@@ -1112,8 +1112,9 @@
         {
           "test_id": "parser_tir_records_suppressed_child_template_brackets_as_literal_text",
           "asserted_contract": "`$doc` suppression emits bracket syntax as literal text.",
-          "decision": "keep",
-          "line": 216
+          "line": 216,
+          "decision": "removed",
+          "reason": "Superseded by the const-default entry-template cutover: `$doc` is a compile-time source directive, not a `Comment` template, so suppressed bracket text is no longer a parser/TIR contract. Baseline row retained for the 665-ID reconciliation."
         },
         {
           "test_id": "template_tir_folds_nested_child_as_child_template_boundary",
@@ -1356,8 +1357,9 @@
         {
           "test_id": "doc_comment_with_formatter_records_comment_kind",
           "asserted_contract": "`$doc` root retains `Comment(Doc)` kind.",
-          "decision": "keep",
-          "line": 2554
+          "line": 2554,
+          "decision": "removed",
+          "reason": "Superseded by the const-default entry-template cutover: `$doc` is a compile-time source directive and no longer produces a `Comment(Doc)` TIR root. Baseline row retained for the 665-ID reconciliation."
         },
         {
           "test_id": "no_prefix_if_finalizes_with_direct_conditional_root",

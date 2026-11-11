@@ -5,7 +5,7 @@
 @parts/e label_e
 @parts/f label_f
 
-[:
+~[:
     <ul>
         <li>[label_a]</li>
         <li>[label_b]</li>

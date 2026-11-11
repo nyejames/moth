@@ -19,4 +19,4 @@ render_facade || -> String:
     return [:fixed_collection_facade_capacity_success first=[first] length=[len]]
 ;
 
-[:[render_facade()]]
+~[:[render_facade()]]

@@ -4,4 +4,4 @@ is_even |this I32| -> Bool:
 
 n = 4
 m = 5
-[:scalar_int n=[n.is_even()] m=[m.is_even()]]
+~[:scalar_int n=[n.is_even()] m=[m.is_even()]]

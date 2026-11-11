@@ -8,4 +8,4 @@ code = "MOTH-RULE-0051"
 reason = "invalid_fallible_handling.unhandled_error_return"
 path = "input/@entry.moth"
 line = 7
-column = 5
+column = 6

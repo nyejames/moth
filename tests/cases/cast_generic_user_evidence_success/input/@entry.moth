@@ -14,4 +14,4 @@ show type T is CASTABLE_TO_STRING |value T| -> String:
 
 message = show(Label(text = "from generic"))
 
-[:generic user evidence: [message]]
+~[:generic user evidence: [message]]

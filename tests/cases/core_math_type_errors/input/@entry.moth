@@ -1,4 +1,4 @@
 @core/math sin, pow
 
 bad = sin("hello")
-#[:bad={bad}]
+[:bad={bad}]

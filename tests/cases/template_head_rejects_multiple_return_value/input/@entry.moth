@@ -4,4 +4,4 @@ multi || -> String, I32:
     return "hello", 42
 ;
 
-[: [multi()]]
+~[: [multi()]]

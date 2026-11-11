@@ -24,14 +24,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Project structure"]]
-#[$in description:["How Moth projects are structured, how modules are discovered and how the HTML builder emits pages."]]
-#[$in head:[language_theme_head]]
+[$in title:["Project structure"]]
+[$in description:["How Moth projects are structured, how modules are discovered and how the HTML builder emits pages."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Project structure
 
     A Moth project combines directory-scoped modules, an optional root-level
@@ -44,7 +44,7 @@ init_docs_sidebar()!
     no root-purpose directive exists.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:project-layout]
         [$in title:Project layout]
@@ -54,7 +54,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:project-config]
         [$in title:Project config]
@@ -64,7 +64,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:module-roots]
         [$in title:Module roots]
@@ -74,7 +74,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:public-api]
         [$in title:Public API]
@@ -84,7 +84,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:entry-runtime-and-fragments]
         [$in title:Entry runtime and fragments]
@@ -94,7 +94,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:html-routing-and-artifacts]
         [$in title:HTML routing and artefacts]
@@ -104,7 +104,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:build-inputs]
         [$in title:Build configuration values]
@@ -114,7 +114,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:entry-config]
         [$in title:Entry metadata and builder slots]
@@ -124,7 +124,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:project-package-facade]
         [$in title:Project package facade]
@@ -134,7 +134,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../memory/]
         [$in previous_title:Memory and lifetimes]

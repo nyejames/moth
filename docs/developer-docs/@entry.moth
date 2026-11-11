@@ -1,15 +1,15 @@
 @html table
 @styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
 
-#[$in title:["Developer documentation"]]
-#[$in description:["Compiler and build-system references for contributors and anyone reading Moth's internals."]]
-#[$in head:[theme_head]]
+[$in title:["Developer documentation"]]
+[$in description:["Compiler and build-system references for contributors and anyone reading Moth's internals."]]
+[$in head:[theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
 
-#[section, $md:
+[section, $md:
     # Developer documentation
 
     This section is for contributors working on the compiler, and for anyone who wants to understand Moth beyond using the language.
@@ -17,7 +17,7 @@ init_docs_sidebar()!
     It provides a peek behind the curtain at how Moth works under the hood: the staged compiler pipeline, the memory model, and the standards the codebase is held to.
 ]
 
-#[section, $md:
+[section, $md:
     ## Explore the internals
 
     - @./compiler-design (Compiler design): staged pipeline, task-reading matrix and cross-cutting contracts
@@ -33,7 +33,7 @@ init_docs_sidebar()!
     - @https://github.com/nyejames/moth/blob/main/index.md (Repository index): quick module and file locator
 ]
 
-#[section, $md:
+[section, $md:
     ## Compiler flow
 
     [codeblock, $code "text":
@@ -55,7 +55,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## Design docs vs current support
 
     Developer documentation describes accepted end-state architecture. Some pages define design that the compiler and backends are still converging on.

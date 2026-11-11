@@ -52,7 +52,7 @@ pub struct BuilderSurface {
     /// Statically known named destinations for direct top-level const contributions.
     ///
     /// WHAT: read-only builder input to frontend root-fragment routing.
-    /// WHY: the compiler validates `#[$in name: ...]` targets and assigns the destination without
+    /// WHY: the compiler validates `[$in name: ...]` targets and assigns the destination without
     ///      knowing any builder's slot names.
     builder_root_slots: BuilderRootSlotSchema,
 }

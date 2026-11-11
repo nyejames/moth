@@ -2,4 +2,4 @@
 @b other
 
 page = label
-[: [page] ]
+~[: [page] ]

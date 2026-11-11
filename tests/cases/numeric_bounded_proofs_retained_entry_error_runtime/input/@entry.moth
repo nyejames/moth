@@ -24,5 +24,5 @@ increment_u32 |value U32| -> U32:
 exact_sum = u8_sum(200, 100)
 exact_identity = i64_identity(-9223372036854775808)
 exact_power = power_u8(2, 31)
-[:proven [exact_sum]/[exact_identity]/[exact_power]]
+~[:proven [exact_sum]/[exact_identity]/[exact_power]]
 overflowed = increment_u32(4294967295)

@@ -13,4 +13,4 @@ render_write_through || -> String:
     return [:write_through value=[c.value] alias_value=[alias.value]]
 ;
 
-[:[render_write_through()]]
+~[:[render_write_through()]]

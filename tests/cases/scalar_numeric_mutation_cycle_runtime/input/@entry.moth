@@ -29,4 +29,4 @@ self_wide_text = render_u64(self_wide)
 self_default ~= 5
 ~self_default = self_default + self_default
 
-[:scalar numeric mutation u64=[wide_seed_text]/[wide_next_text]/[wide_current_text] default=[defaulted_seed]/[defaulted_next]/[defaulted] self=[self_wide_text]/[self_default]]
+~[:scalar numeric mutation u64=[wide_seed_text]/[wide_next_text]/[wide_current_text] default=[defaulted_seed]/[defaulted_next]/[defaulted] self=[self_wide_text]/[self_default]]

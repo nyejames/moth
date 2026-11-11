@@ -6,4 +6,4 @@ at U32 = 1
 result = values.get(at) catch:
     then -1
 ;
-[:uint_index_type_mismatch result=[result]]
+~[:uint_index_type_mismatch result=[result]]

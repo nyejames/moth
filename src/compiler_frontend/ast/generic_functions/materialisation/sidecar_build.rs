@@ -273,6 +273,7 @@ where
             FxHashMap::default(),
         )
         .with_generic_call_site_identity_handle(requester_context.frozen_identity_handle.clone())
+        .with_source_doc_publication(false)
         .emit_generated_request(request, string_table)?
     };
 

@@ -145,15 +145,15 @@ fn lane_installation_splits_code_carrying_traps_but_not_codeless_float_negation(
 #[test]
 fn start_narrowing_drops_only_a_non_escaping_error_channel() {
     for (source, escapes) in [
-        ("value = \"plain\"\n[:[value]]\n", false),
+        ("value = \"plain\"\n~[:[value]]\n", false),
         (
             "load || -> String, Error!:\n    return! Error(\"failed\")\n;\n\
-             value = load()!\n[:[value]]\n",
+             value = load()!\n~[:[value]]\n",
             true,
         ),
         (
             "load || -> String, Error!:\n    return! Error(\"failed\")\n;\n\
-             value = load() catch then \"recovered\"\n[:[value]]\n",
+             value = load() catch then \"recovered\"\n~[:[value]]\n",
             false,
         ),
     ] {

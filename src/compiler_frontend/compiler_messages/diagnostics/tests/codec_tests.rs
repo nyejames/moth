@@ -323,8 +323,7 @@ fn template_head_conflict_codec_round_trips_every_reason_and_kind() {
 
     use TemplateHeadConflictOwner::{EarlierItem, IncomingItem};
     use TemplateHeadConflictReason::{
-        DiscardedCommentDirectiveMustBeOnlyMeaningfulItem,
-        DocumentationDirectiveMustBeOnlyMeaningfulItem, DuplicateExclusiveDirective,
+        DiscardedCommentDirectiveMustBeOnlyMeaningfulItem, DuplicateExclusiveDirective,
         MultipleFormatters, SlotDirectiveMustBeExclusive,
     };
     use TemplateHeadItemKind::{Directive, Expression};
@@ -333,7 +332,6 @@ fn template_head_conflict_codec_round_trips_every_reason_and_kind() {
         MultipleFormatters,
         DuplicateExclusiveDirective,
         DiscardedCommentDirectiveMustBeOnlyMeaningfulItem,
-        DocumentationDirectiveMustBeOnlyMeaningfulItem,
         SlotDirectiveMustBeExclusive,
     ];
     for reason in reasons {

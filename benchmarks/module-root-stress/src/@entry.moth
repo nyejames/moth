@@ -6,12 +6,12 @@
 @pages/about render_about
 
 page_title #= "Module Root Stress"
-#[$in title:[page_title]]
+[$in title:[page_title]]
 
 card_a = Card(format_label("Home"), render_home())
 card_b = Card(format_label("About"), render_about())
 
-[:
+~[:
     <main>
         <h1>[page_title]</h1>
         [render_card(card_a)]

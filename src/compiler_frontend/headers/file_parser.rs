@@ -23,7 +23,6 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::headers::file_dependency_clauses::parse_and_record_dependency;
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
-use crate::compiler_frontend::headers::hash_items::{HashItemRequest, handle_hash_item};
 use crate::compiler_frontend::headers::header_dispatch::{
     HeaderDeclarationMetadata, create_header,
 };
@@ -48,7 +47,10 @@ use crate::compiler_frontend::paths::file_references::classify_prepared_file_ref
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::file_name_is_config_file;
-use crate::compiler_frontend::style_directives::SourceModifierTarget;
+use crate::compiler_frontend::style_directives::{
+    SourceDirectiveAnnotation, SourceDirectiveKind, SourceModifierOperand,
+    capture_source_directive_operand,
+};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -101,70 +103,116 @@ fn record_start_body_token_from_source(
         .map_err(HeaderParseFailure::Infrastructure)
 }
 
+/// Records a statement-attached directive run into the entry body.
+///
+/// WHAT: carries the run's authored tokens up to the target token, where the AST statement parser
+///       owns attachment.
+/// WHY: top-level executable statements are re-parsed from the synthesized entry body. Rejecting
+///      their directives at the header walk would make `$todo` unusable on the only source that
+///      can own entry runtime statements.
+fn record_pending_run_for_statement(
+    canonical: &SourceTokens,
+    state: &mut HeaderFileParseState,
+    pending: Option<PendingSourceDirectiveRun>,
+    target_index: TokenIndex,
+) -> FileParserResult<()> {
+    let Some(pending) = pending else {
+        return Ok(());
+    };
+    let range =
+        TokenRange::try_new_for(canonical, pending.start_index, target_index).map_err(|error| {
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("source-directive run did not form a valid token range: {error:?}"),
+            ))
+        })?;
+    state
+        .record_start_body_source_range_from_source_tokens(range, canonical)
+        .map_err(HeaderParseFailure::Infrastructure)
+}
+
 // Top-level declarations are same-module-visible by default; cross-module public visibility
 // comes only from `$export`-marked facade items. Non-declaration statements are collected into
 // the compiler-owned entry header for that file.
 
-/// One source modifier that has been read and is waiting for its eligible attachment target.
+/// One contiguous source-directive run waiting for its target construct.
 ///
-/// WHAT: the directive's name, its authored span and the eligible target its spec declares.
-/// WHY: a source modifier occupies its own line, so the header walk must retain the pending
-///      attachment across line-break tokens while it looks for the next top-level declaration
-///      or dependency clause.
-#[derive(Clone, Copy)]
-struct PendingSourceModifier {
-    name_id: StringId,
-    span: SourceSpan,
-    target: SourceModifierTarget,
+/// WHAT: retains the first authored directive token and every parsed annotation in order.
+/// WHY: a run attaches as one unit once the target item is known. Keeping the start index lets a
+///      run whose target is an executable statement be recorded into the entry body, where the
+///      statement parser owns attachment without a second header lookahead.
+#[derive(Clone)]
+struct PendingSourceDirectiveRun {
+    start_index: TokenIndex,
+    annotations: Vec<SourceDirectiveAnnotation>,
+    /// Set when the walk observes a line break after the most recent directive.
+    ///
+    /// WHAT: resets when the run gains another directive.
+    /// WHY: the target must start on a later line than the final directive, not merely later than
+    ///      the first one.
+    saw_line_break: bool,
 }
 
-/// Build the diagnostic for a source modifier that never reached an eligible target.
-fn dangling_source_modifier(name_id: StringId, span: SourceSpan) -> DiagnosticDraft {
+impl PendingSourceDirectiveRun {
+    fn first(&self) -> Option<&SourceDirectiveAnnotation> {
+        self.annotations.first()
+    }
+
+    fn contains_name(&self, name_id: StringId) -> Option<SourceSpan> {
+        self.annotations
+            .iter()
+            .find(|annotation| annotation.name_id == name_id)
+            .map(|annotation| annotation.span)
+    }
+}
+
+/// Build the diagnostic for a source directive that never reached an eligible target.
+fn dangling_source_directive(annotation: &SourceDirectiveAnnotation) -> DiagnosticDraft {
     templates::invalid_template_directive(
-        Some(name_id),
+        Some(annotation.name_id),
         InvalidTemplateDirectiveReason::DanglingModifier,
-        Some(span),
+        Some(annotation.span),
     )
 }
 
-/// Build the diagnostic for a source modifier whose next item cannot accept it.
-fn wrong_target_source_modifier(name_id: StringId, span: SourceSpan) -> DiagnosticDraft {
+/// Build the diagnostic for a source directive whose next item cannot accept it.
+fn wrong_target_source_directive(annotation: &SourceDirectiveAnnotation) -> DiagnosticDraft {
     templates::invalid_template_directive(
-        Some(name_id),
+        Some(annotation.name_id),
         InvalidTemplateDirectiveReason::WrongTarget,
-        Some(span),
+        Some(annotation.span),
     )
 }
 
-/// Whether this file may author the modifier's declared target at all.
+/// Whether this file may author the directive's declared target at all.
 ///
 /// WHAT: `$export` belongs only to an API facade root; `$config` keeps its existing placement
-///       contract, which its declaration-level target check owns. Dependency-clause attachment
-///       is validated separately by the dependency parser.
+///       contract, which its declaration-level target check owns. `$doc` and `$todo` are ordinary
+///       source directives with no file-role restriction.
 /// WHY: an ineligible file is a placement failure at the directive, not a missing or wrong target
 ///      on the next item.
-fn source_modifier_allowed_in_file(
-    target: SourceModifierTarget,
+fn source_directive_allowed_in_file(
+    kind: SourceDirectiveKind,
     context: &HeaderParseContext<'_>,
 ) -> bool {
-    match target {
-        SourceModifierTarget::ExplicitTypedCompileTimeBinding => true,
-        SourceModifierTarget::ExportablePublicApiItem => {
+    match kind {
+        SourceDirectiveKind::Config | SourceDirectiveKind::Doc | SourceDirectiveKind::Todo => true,
+        SourceDirectiveKind::Export => {
             !context.is_config_file && context.file_role.is_export_capable()
         }
     }
 }
 
-/// Resolve one recognised directive token to its source-modifier target.
+/// Resolve one recognised directive token to its source-directive contract.
 ///
 /// WHY: the lexer only emits registered names, and the header walk resolves the name's declared
 ///      context before parsing attachment. A known template-only name stays a typed
 ///      wrong-context error instead of falling into unknown-name or generic syntax diagnostics.
-fn source_modifier_target_for(
+fn source_directive_for(
     context: &HeaderParseContext<'_>,
     name_id: StringId,
     span: SourceSpan,
-) -> FileParserResult<SourceModifierTarget> {
+) -> FileParserResult<(SourceDirectiveKind, SourceModifierOperand)> {
     let directive_name = context.string_table.resolve(name_id);
     let Some(spec) = context.style_directives.find(directive_name) else {
         return Err(diagnostic_failure(templates::invalid_template_directive(
@@ -174,12 +222,18 @@ fn source_modifier_target_for(
         )));
     };
 
+    if !spec.contexts.allows_source_modifier() {
+        return Err(diagnostic_failure(templates::invalid_template_directive(
+            Some(name_id),
+            InvalidTemplateDirectiveReason::WrongContext,
+            Some(span),
+        )));
+    }
     match spec.kind {
-        crate::compiler_frontend::style_directives::StyleDirectiveKind::SourceModifier(target)
-            if spec.contexts.allows_source_modifier() =>
-        {
-            Ok(target)
-        }
+        crate::compiler_frontend::style_directives::StyleDirectiveKind::SourceModifier {
+            target,
+            operand,
+        } => Ok((target.directive_kind(), operand)),
         _ => Err(diagnostic_failure(templates::invalid_template_directive(
             Some(name_id),
             InvalidTemplateDirectiveReason::WrongContext,
@@ -188,15 +242,14 @@ fn source_modifier_target_for(
     }
 }
 
-/// Whether one declaration header accepts the source modifier's declared target.
+/// Whether one declaration header accepts the source directive's declared target.
 ///
 /// WHAT: compares the built declaration kind against the spec's eligible-target contract.
-/// WHY: attachment is a syntactic fact, but recording the modifier on an ineligible declaration
-///      would hand a later stage a target its contract cannot accept. Dependency clauses are
-///      validated by their own parser because they never build a declaration header.
-fn header_accepts_source_modifier(kind: &HeaderKind, target: SourceModifierTarget) -> bool {
-    match target {
-        SourceModifierTarget::ExplicitTypedCompileTimeBinding => {
+/// WHY: attachment is a syntactic fact, but recording the directive on an ineligible declaration
+///      would hand a later stage a target its contract cannot accept.
+fn header_accepts_source_directive(kind: &HeaderKind, directive: SourceDirectiveKind) -> bool {
+    match directive {
+        SourceDirectiveKind::Config => {
             matches!(
                 kind,
                 HeaderKind::Constant { declaration }
@@ -204,10 +257,22 @@ fn header_accepts_source_modifier(kind: &HeaderKind, target: SourceModifierTarge
                         && !matches!(declaration.type_annotation, ParsedTypeRef::Inferred)
             )
         }
-        SourceModifierTarget::ExportablePublicApiItem => {
-            kind.is_authored_public_export_declaration()
-        }
+        SourceDirectiveKind::Export => kind.is_authored_public_export_declaration(),
+        SourceDirectiveKind::Doc | SourceDirectiveKind::Todo => matches!(
+            kind,
+            HeaderKind::Function { .. }
+                | HeaderKind::Struct { .. }
+                | HeaderKind::Choice { .. }
+                | HeaderKind::TypeAlias { .. }
+                | HeaderKind::Trait { .. }
+                | HeaderKind::Constant { .. }
+        ),
     }
+}
+
+/// Whether a dependency clause accepts the directive's declared target.
+fn dependency_accepts_source_directive(directive: SourceDirectiveKind) -> bool {
+    matches!(directive, SourceDirectiveKind::Export)
 }
 
 pub(super) fn parse_headers_in_file(
@@ -249,9 +314,15 @@ fn parse_headers_in_file_inner(
     // Declaration handlers consume their own balanced regions. Track only runtime tokens left
     // to this walk, where a physical newline inside an expression is not a file boundary.
     let mut runtime_nesting = NestingDepth::default();
+    // `:` opens one executable control or value-producing block in the entry body; its matching
+    // `;` closes it. Header parsing sees direct templates before the AST statement owner, so it
+    // must keep a template inside such a block in the runtime body instead of promoting it to
+    // unconditional const metadata. Parentheses, collections and braces already live in
+    // `runtime_nesting`, so only top-level colons and semicolons update this counter.
+    let mut executable_block_depth = 0usize;
     // One source-modifier run awaiting the next eligible top-level declaration or dependency
     // clause.
-    let mut pending_source_modifier: Option<PendingSourceModifier> = None;
+    let mut pending_source_directive: Option<PendingSourceDirectiveRun> = None;
     loop {
         let current_index = cursor.position();
         let current = cursor.current().ok_or_else(|| {
@@ -266,12 +337,7 @@ fn parse_headers_in_file_inner(
                 // A rejected foreign-root body has no AST consumer, so validate nested template
                 // balance here.
                 cursor.advance();
-                let range = capture_runtime_template_range_from_cursor(
-                    current,
-                    cursor,
-                    file_id,
-                    context.string_table,
-                )?;
+                let range = capture_runtime_template_range_from_cursor(current, cursor, file_id)?;
                 state
                     .record_start_body_source_range_from_source_tokens(range, canonical)
                     .map_err(HeaderParseFailure::Infrastructure)?;
@@ -294,56 +360,158 @@ fn parse_headers_in_file_inner(
             .and_then(|index| canonical.token(index).ok());
         let at_boundary = statement_boundary_at_source(canonical, current_index.index());
         let current_span = current.source_span();
-        let item = classify_current_item_ref(current, follower, at_boundary);
+        if runtime_nesting.is_top_level() {
+            match current_tag {
+                TokenTag::COLON => {
+                    executable_block_depth = executable_block_depth.saturating_add(1);
+                }
+                TokenTag::END => {
+                    executable_block_depth = executable_block_depth.saturating_sub(1);
+                }
+                _ => {}
+            }
+        }
+        let classified_item = classify_current_item_ref(current, follower, at_boundary);
+        let item = if current_tag == TokenTag::STYLE_DIRECTIVE
+            && pending_source_directive.is_some()
+            && let Some(name_id) = current.string_id()
+        {
+            // A same-line directive continues the pending run even though it is not a fresh
+            // statement boundary. The duplicate check still runs in the directive arm.
+            HeaderFileItem::StyleDirective(name_id)
+        } else if executable_block_depth > 0
+            && matches!(
+                classified_item,
+                HeaderFileItem::DirectTemplate
+                    | HeaderFileItem::RuntimeTemplate
+                    | HeaderFileItem::Symbol(_)
+                    | HeaderFileItem::StyleDirective(_)
+                    | HeaderFileItem::Dependency
+                    | HeaderFileItem::BuiltinTypeConformanceTarget(_)
+                    | HeaderFileItem::ReservedTraitSyntax
+            )
+        {
+            // A template, directive run or declaration inside `if`/`loop`/`choice`/`catch`
+            // belongs to that statement body. The AST statement owner decides attachment and
+            // whether the authored form is valid there; the header walk must not register a
+            // nested local as a module header.
+            HeaderFileItem::StartBodyToken
+        } else {
+            classified_item
+        };
 
-        if let Some(pending) = pending_source_modifier {
+        if let Some(pending) = pending_source_directive.as_ref() {
             if current_tag == TokenTag::NEWLINE {
-                // A blank physical line ends the modifier's run; indentation and comment-only
-                // lines keep it because comments produce no token and do not add a line break
-                // to this token's run.
+                // A blank physical line ends the directive run; comment-only lines keep it
+                // because comments produce no token and do not add a line break to this token.
                 if current.shape().newline_has_blank_line() {
-                    return Err(diagnostic_failure(dangling_source_modifier(
-                        pending.name_id,
-                        pending.span,
+                    return Err(diagnostic_failure(dangling_source_directive(
+                        pending
+                            .first()
+                            .expect("a pending source directive run is never empty"),
                     )));
+                }
+                if let Some(pending) = pending_source_directive.as_mut() {
+                    pending.saw_line_break = true;
                 }
                 cursor.advance();
                 continue;
             }
 
+            if !pending.saw_line_break
+                && !matches!(
+                    item,
+                    HeaderFileItem::StyleDirective(_) | HeaderFileItem::Eof
+                )
+            {
+                return Err(diagnostic_failure(wrong_target_source_directive(
+                    pending
+                        .first()
+                        .expect("a pending source directive run is never empty"),
+                )));
+            }
+
             match &item {
-                // The next directive is handled by its own arm so a repeated modifier can cite
-                // both authored spans.
+                // The next directive is handled by its own arm so a repeated name can cite both
+                // authored spans.
                 HeaderFileItem::StyleDirective(_) => {}
-                // Dependency clauses reach their own strict-selection validation. The main walk
-                // checks whether the pending target can attach there.
-                HeaderFileItem::Dependency => {}
-                HeaderFileItem::Symbol(_) => {
-                    if !classify_symbol_statement_start_at_source(canonical, follower_index)
-                        .starts_header_declaration()
+                HeaderFileItem::Dependency => {
+                    if let Some(annotation) = pending
+                        .annotations
+                        .iter()
+                        .find(|annotation| !dependency_accepts_source_directive(annotation.kind))
                     {
-                        return Err(diagnostic_failure(wrong_target_source_modifier(
-                            pending.name_id,
-                            pending.span,
+                        return Err(diagnostic_failure(wrong_target_source_directive(
+                            annotation,
                         )));
                     }
                 }
-                // Declaration kinds that cannot accept a modifier are still real targets, so
+                HeaderFileItem::Symbol(_) => {
+                    let starts_declaration =
+                        classify_symbol_statement_start_at_source(canonical, follower_index)
+                            .starts_header_declaration();
+                    if !starts_declaration {
+                        if let Some(annotation) = pending.annotations.iter().find(|annotation| {
+                            !matches!(
+                                annotation.kind,
+                                SourceDirectiveKind::Doc | SourceDirectiveKind::Todo
+                            )
+                        }) {
+                            return Err(diagnostic_failure(wrong_target_source_directive(
+                                annotation,
+                            )));
+                        }
+                        // A top-level entry binding is a runtime-body local declaration. The
+                        // statement owner distinguishes it from an ordinary expression and
+                        // attaches `$doc` only when the declaration shape is eligible.
+                        record_pending_run_for_statement(
+                            canonical,
+                            state,
+                            pending_source_directive.take(),
+                            current_index,
+                        )?;
+                        continue;
+                    }
+                }
+                // Declaration kinds that cannot accept a directive are still real targets, so
                 // attachment reports a wrong target rather than a missing one.
                 HeaderFileItem::BuiltinTypeConformanceTarget(_) => {}
-                HeaderFileItem::Hash { .. }
-                | HeaderFileItem::RuntimeTemplate
-                | HeaderFileItem::StartBodyToken
-                | HeaderFileItem::ReservedTraitSyntax => {
-                    return Err(diagnostic_failure(wrong_target_source_modifier(
-                        pending.name_id,
-                        pending.span,
+                HeaderFileItem::DirectTemplate => {
+                    return Err(diagnostic_failure(wrong_target_source_directive(
+                        pending
+                            .first()
+                            .expect("a pending source directive run is never empty"),
                     )));
                 }
+                HeaderFileItem::RuntimeTemplate
+                | HeaderFileItem::StartBodyToken
+                | HeaderFileItem::ReservedTraitSyntax => {
+                    if let Some(annotation) = pending.annotations.iter().find(|annotation| {
+                        !matches!(
+                            annotation.kind,
+                            SourceDirectiveKind::Doc | SourceDirectiveKind::Todo
+                        )
+                    }) {
+                        return Err(diagnostic_failure(wrong_target_source_directive(
+                            annotation,
+                        )));
+                    }
+                    // Statement attachment validates `$doc` against a declaration and accepts
+                    // `$todo` on executable statements. Carry the complete run into the entry
+                    // body instead of rejecting declaration targets here.
+                    record_pending_run_for_statement(
+                        canonical,
+                        state,
+                        pending_source_directive.take(),
+                        current_index,
+                    )?;
+                    continue;
+                }
                 HeaderFileItem::Eof => {
-                    return Err(diagnostic_failure(dangling_source_modifier(
-                        pending.name_id,
-                        pending.span,
+                    return Err(diagnostic_failure(dangling_source_directive(
+                        pending
+                            .first()
+                            .expect("a pending source directive run is never empty"),
                     )));
                 }
             }
@@ -362,7 +530,10 @@ fn parse_headers_in_file_inner(
                         name_id,
                         current_span,
                         current_index,
-                        source_modifier: pending_source_modifier.take(),
+                        source_directives: pending_source_directive
+                            .take()
+                            .map(|run| run.annotations)
+                            .unwrap_or_default(),
                     },
                 )?;
             }
@@ -379,23 +550,26 @@ fn parse_headers_in_file_inner(
                         name_id,
                         current_span,
                         current_index,
-                        source_modifier: pending_source_modifier.take(),
+                        source_directives: pending_source_directive
+                            .take()
+                            .map(|run| run.annotations)
+                            .unwrap_or_default(),
                     },
                 )?;
             }
 
             HeaderFileItem::Dependency => {
-                let export_mode = match pending_source_modifier.take() {
-                    None => HeaderExportMode::Private,
-                    Some(modifier) => match modifier.target {
-                        SourceModifierTarget::ExportablePublicApiItem => HeaderExportMode::Public,
-                        SourceModifierTarget::ExplicitTypedCompileTimeBinding => {
-                            return Err(diagnostic_failure(wrong_target_source_modifier(
-                                modifier.name_id,
-                                modifier.span,
-                            )));
-                        }
-                    },
+                let annotations = pending_source_directive
+                    .take()
+                    .map(|run| run.annotations)
+                    .unwrap_or_default();
+                let is_export = annotations
+                    .iter()
+                    .any(|annotation| annotation.kind == SourceDirectiveKind::Export);
+                let export_mode = if is_export {
+                    HeaderExportMode::Public
+                } else {
+                    HeaderExportMode::Private
                 };
                 parse_and_record_dependency(
                     cursor,
@@ -407,20 +581,14 @@ fn parse_headers_in_file_inner(
                 )?;
             }
 
-            HeaderFileItem::Hash {
-                at_statement_boundary,
-            } => {
-                handle_hash_item(
+            HeaderFileItem::DirectTemplate => {
+                handle_direct_template_item(
                     cursor,
                     file_id,
                     source_file,
                     state,
                     context,
-                    HashItemRequest {
-                        current_index,
-                        current_span,
-                        at_statement_boundary,
-                    },
+                    current_span,
                 )?;
             }
 
@@ -429,15 +597,42 @@ fn parse_headers_in_file_inner(
             }
 
             HeaderFileItem::RuntimeTemplate => {
-                handle_runtime_template_item(cursor, file_id, state, context)?;
+                let opening_index = cursor.position();
+                let opening = cursor.current().ok_or_else(|| {
+                    HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
+                        "runtime template marker exceeded its source token owner",
+                    ))
+                })?;
+                if opening.tag() != TokenTag::TEMPLATE_HEAD {
+                    return Err(HeaderParseFailure::Infrastructure(
+                        InfrastructureFailure::internal(
+                            CompilerStage::HeaderParsing,
+                            format!(
+                                "runtime template marker was not followed by a template opening: {:?}",
+                                opening.tag().descriptor().text()
+                            ),
+                        ),
+                    ));
+                }
+                cursor.advance();
+                handle_runtime_template_item(
+                    cursor,
+                    file_id,
+                    state,
+                    context,
+                    opening_index,
+                    current_index,
+                )?;
             }
 
             HeaderFileItem::StyleDirective(name_id) => {
-                // Resolve the incoming name before comparing it with a pending modifier. A
+                // Resolve the incoming name before comparing it with the pending run. A
                 // template-only directive that follows `$config` is a wrong-context use, not a
-                // duplicate of the pending source modifier.
-                let target = source_modifier_target_for(context, name_id, current_span)?;
-                if !source_modifier_allowed_in_file(target, context) {
+                // duplicate of the pending source directive.
+                let (kind, operand_contract) =
+                    source_directive_for(context, name_id, current_span)?;
+                if !source_directive_allowed_in_file(kind, context) {
                     return Err(diagnostic_failure(templates::invalid_template_directive(
                         Some(name_id),
                         InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
@@ -445,7 +640,10 @@ fn parse_headers_in_file_inner(
                     )));
                 }
 
-                if let Some(previous) = pending_source_modifier {
+                if let Some(previous_span) = pending_source_directive
+                    .as_ref()
+                    .and_then(|pending| pending.contains_name(name_id))
+                {
                     return Err(diagnostic_failure(
                         templates::invalid_template_directive(
                             Some(name_id),
@@ -453,33 +651,46 @@ fn parse_headers_in_file_inner(
                             Some(current_span),
                         )
                         .with_label(
-                            Some(previous.span),
+                            Some(previous_span),
                             Some(LabelDraftMessage::EarlierDirective),
                         ),
                     ));
                 }
-
-                // A source modifier owns its line. Any token before the line break is an operand
-                // or the removed call spelling, which every current source modifier rejects.
-                let following = cursor.current().ok_or_else(|| {
-                    HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
-                        CompilerStage::HeaderParsing,
-                        "source-directive cursor exceeded its source token owner",
-                    ))
-                })?;
-                if !matches!(following.tag(), TokenTag::NEWLINE | TokenTag::EOF) {
+                if pending_source_directive.is_some()
+                    && current.shape().style_directive_is_attached()
+                {
                     return Err(diagnostic_failure(templates::invalid_template_directive(
                         Some(name_id),
-                        InvalidTemplateDirectiveReason::UnexpectedArguments,
-                        Some(following.source_span()),
+                        InvalidTemplateDirectiveReason::MissingSeparator,
+                        Some(current_span),
                     )));
                 }
 
-                pending_source_modifier = Some(PendingSourceModifier {
+                let operand = capture_source_directive_operand(
+                    cursor,
+                    operand_contract,
+                    name_id,
+                    current_span,
+                )?;
+                let annotation = SourceDirectiveAnnotation {
+                    kind,
                     name_id,
                     span: current_span,
-                    target,
-                });
+                    operand,
+                };
+                match &mut pending_source_directive {
+                    Some(pending) => {
+                        pending.annotations.push(annotation);
+                        pending.saw_line_break = false;
+                    }
+                    None => {
+                        pending_source_directive = Some(PendingSourceDirectiveRun {
+                            start_index: current_index,
+                            annotations: vec![annotation],
+                            saw_line_break: false,
+                        })
+                    }
+                }
             }
 
             HeaderFileItem::Eof => {
@@ -502,8 +713,8 @@ struct SymbolItemRequest {
     name_id: StringId,
     current_span: SourceSpan,
     current_index: TokenIndex,
-    /// A pending source modifier that attaches to this declaration.
-    source_modifier: Option<PendingSourceModifier>,
+    /// Ordered source directives that attach to this declaration.
+    source_directives: Vec<SourceDirectiveAnnotation>,
 }
 
 fn handle_symbol_item(
@@ -518,19 +729,16 @@ fn handle_symbol_item(
         name_id,
         current_span,
         current_index,
-        source_modifier,
+        source_directives,
     } = symbol;
     // `$export` is the only authored public-surface form. An unmarked declaration stays private.
-    let export_mode = match source_modifier {
-        Some(modifier)
-            if matches!(
-                modifier.target,
-                SourceModifierTarget::ExportablePublicApiItem
-            ) =>
-        {
-            HeaderExportMode::Public
-        }
-        _ => HeaderExportMode::Private,
+    let export_mode = if source_directives
+        .iter()
+        .any(|directive| directive.kind == SourceDirectiveKind::Export)
+    {
+        HeaderExportMode::Public
+    } else {
+        HeaderExportMode::Private
     };
     let Some(follower_index) = TokenIndex::try_from_index(cursor.position().index()) else {
         crate::compiler_bug!(
@@ -606,7 +814,7 @@ fn handle_symbol_item(
                 Some(current_span),
             ))
         })?;
-    let header = create_header(
+    let mut header = create_header(
         declaration_path,
         cursor,
         file_id,
@@ -614,31 +822,25 @@ fn handle_symbol_item(
             declaration_span: current_span,
             declaration_order: current_index.index(),
             export_mode,
-            config_input_span: source_modifier
-                .filter(|modifier| {
-                    matches!(
-                        modifier.target,
-                        SourceModifierTarget::ExplicitTypedCompileTimeBinding
-                    )
-                })
-                .map(|modifier| modifier.span),
+            config_input_span: source_directives
+                .iter()
+                .find(|directive| directive.kind == SourceDirectiveKind::Config)
+                .map(|directive| directive.span),
         },
         &mut build_context,
         context.span_builder,
     )?;
 
-    if let Some(modifier) = source_modifier
-        && !header_accepts_source_modifier(&header.kind, modifier.target)
+    if let Some(directive) = source_directives
+        .iter()
+        .find(|directive| !header_accepts_source_directive(&header.kind, directive.kind))
     {
-        return Err(diagnostic_failure(templates::invalid_template_directive(
-            Some(modifier.name_id),
-            InvalidTemplateDirectiveReason::WrongTarget,
-            Some(modifier.span),
-        )));
+        return Err(diagnostic_failure(wrong_target_source_directive(directive)));
     }
+    header.source_directives = source_directives;
 
-    // Structural modifier targets are already settled by the pending-directive preflight and
-    // `header_accepts_source_modifier`; only receiver-method ownership needs an extra check.
+    // Structural directive targets are already settled by the pending-run preflight and
+    // `header_accepts_source_directive`; only receiver-method ownership needs an extra check.
     if export_mode.is_public()
         && let HeaderKind::Function { signature, .. } = &header.kind
         && is_receiver_method_candidate(signature, context.string_table, context.path_fork)
@@ -696,27 +898,141 @@ fn handle_trait_keyword_header_item(
     Ok(())
 }
 
+/// Parses one bare direct top-level template as compile-time output.
+///
+/// WHAT: reuses the retained const-template construction path and records its runtime insertion
+///       index. The opening token is already consumed by the header walk.
+/// WHY: an executable entry's bare `[...]` is page or builder-slot metadata, never a runtime body
+///      fragment. Reusing the existing path keeps slot registration, folding and builder ordering
+///      unchanged while the spelling loses its `#` prefix.
+fn handle_direct_template_item(
+    cursor: &mut TokenCursor<'_>,
+    file_id: SourceId,
+    source_file: PathId,
+    state: &mut HeaderFileParseState,
+    context: &mut HeaderParseContext<'_>,
+    current_span: SourceSpan,
+) -> FileParserResult<()> {
+    if context.file_role == FileRole::Normal {
+        return Err(names_declarations::deferred_feature(
+            context
+                .string_table
+                .intern("top-level const templates in ordinary source files"),
+            Some(current_span),
+        )
+        .into());
+    }
+
+    // A reached foreign facade keeps its declaration surface but owns no start or root runtime
+    // in this compilation.
+    if matches!(context.file_role, FileRole::ReachedApiFacadeRoot(_)) {
+        return Err(
+            names_declarations::invalid_top_level_runtime_statement(Some(current_span)).into(),
+        );
+    }
+
+    if matches!(context.file_role, FileRole::ActiveApiOnlyModuleRoot(_)) {
+        return Err(
+            names_declarations::invalid_top_level_runtime_statement(Some(current_span)).into(),
+        );
+    }
+
+    let opening_index = cursor
+        .position()
+        .index()
+        .checked_sub(1)
+        .and_then(TokenIndex::try_from_index)
+        .ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "direct template opening preceded the source token index",
+            ))
+        })?;
+    let canonical = cursor.source_tokens();
+    if canonical.source() != file_id {
+        return Err(HeaderParseFailure::Infrastructure(
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "direct template source token owner does not match its file identity",
+            ),
+        ));
+    }
+    let opening = canonical.token(opening_index).map_err(|error| {
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            format!("direct template opening exceeded its source token owner: {error:?}"),
+        ))
+    })?;
+
+    let const_template_number = context
+        .const_template_offset
+        .checked_add(state.const_template_count)
+        .ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "const-template number overflowed its module source range",
+            ))
+        })?;
+
+    let mut build_context = HeaderBuildContext {
+        warnings: &mut state.warnings,
+        source_file,
+        file_dependency_clauses: &state.file_dependency_clauses,
+        dependency_selections: &state.dependency_selections,
+        string_table: context.string_table,
+        path_fork: context.path_fork,
+        file_role: context.file_role,
+    };
+    let header =
+        crate::compiler_frontend::headers::const_fragments::create_top_level_const_template(
+            source_file,
+            opening,
+            const_template_number,
+            cursor,
+            &mut build_context,
+            context.span_builder,
+        )?;
+
+    state.const_template_count = state.const_template_count.checked_add(1).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            "const-template count overflowed its source state",
+        ))
+    })?;
+
+    let runtime_insertion_index = context
+        .runtime_fragment_offset
+        .checked_add(state.runtime_fragment_count)
+        .ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "runtime insertion index overflowed its module source range",
+            ))
+        })?;
+    let fragment_path = header.declaration_path;
+    let fragment = crate::compiler_frontend::headers::types::TopLevelConstFragment {
+        runtime_insertion_index,
+        span: header
+            .name_span
+            .expect("authored const-template headers carry a source span"),
+        header_path: fragment_path,
+    };
+    state.register_top_level_const_fragment(fragment, header);
+
+    Ok(())
+}
+
 fn handle_runtime_template_item(
     cursor: &mut TokenCursor<'_>,
     file_id: SourceId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
+    opening_index: TokenIndex,
+    marker_index: TokenIndex,
 ) -> FileParserResult<()> {
     // Runtime top-level templates stay in the start-function body and are evaluated in source
-    // order by the compiler-owned entry. The runtime fragment count lets later const fragments record their
-    // insertion point relative to already-seen runtime fragments.
-    let opening_index = cursor.position().index().checked_sub(1).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
-            CompilerStage::HeaderParsing,
-            "runtime template opening preceded the source token index",
-        ))
-    })?;
-    let opening_index = TokenIndex::try_from_index(opening_index).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
-            CompilerStage::HeaderParsing,
-            "runtime template opening exceeded the source token index space",
-        ))
-    })?;
+    // order by the compiler-owned entry. The runtime fragment count lets later const fragments
+    // record their insertion point relative to already-seen runtime fragments.
     let canonical = cursor.source_tokens();
     if canonical.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
@@ -732,8 +1048,15 @@ fn handle_runtime_template_item(
             format!("runtime template opening exceeded its source token owner: {error:?}",),
         ))
     })?;
-    let range =
-        capture_runtime_template_range_from_cursor(opening, cursor, file_id, context.string_table)?;
+    let range = capture_runtime_template_range_from_cursor(opening, cursor, file_id)?;
+    // The body dispatcher needs the authored `~` marker to distinguish the runtime fragment from
+    // compile-time page metadata, so the retained start range begins at the marker.
+    let range = TokenRange::new(file_id, marker_index, range.end()).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            "runtime template marker range was reversed",
+        ))
+    })?;
     state
         .record_start_body_source_range_from_source_tokens(range, canonical)
         .map_err(HeaderParseFailure::Infrastructure)?;
@@ -915,6 +1238,22 @@ fn attach_structural_file_facts(
         let mut config_owned_ranges = Vec::new();
         push_header_expression_ranges(header, header_index, canonical, &mut config_owned_ranges)?;
         for expression_range in config_owned_ranges {
+            // A source-directive operand is metadata syntax, not part of the config contract
+            // value. Keep it in the ordinary expression lane so its content and qualified
+            // references stay visible to ordering and file-reference discovery.
+            if header
+                .source_directives
+                .iter()
+                .any(|directive| directive.operand == Some(expression_range.range))
+            {
+                qualified_reference_ranges.push(
+                    crate::compiler_frontend::headers::qualified_references::HeaderExpressionRange::const_required(
+                        header_index,
+                        expression_range.range,
+                    ),
+                );
+                continue;
+            }
             append_source_range_paths(
                 &mut consumed_path_syntax_ids,
                 canonical,

@@ -2,4 +2,4 @@ render_float |value F64| -> String:
     return [:[value]]
 ;
 
-[: [render_float(1.5)] / [render_float(0.000001)] / [render_float(1e21)] / [render_float(-0.0)]]
+~[: [render_float(1.5)] / [render_float(0.000001)] / [render_float(1e21)] / [render_float(-0.0)]]

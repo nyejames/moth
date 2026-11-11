@@ -14,4 +14,4 @@ echo_label type T |label String, event Route of T -> AppMessage| -> String:
 editor = echo_label("editor", AppMessage::Editor(12))
 search = echo_label("search", AppMessage::Search)
 
-[:generic-input editor=[editor] search=[search]]
+~[:generic-input editor=[editor] search=[search]]

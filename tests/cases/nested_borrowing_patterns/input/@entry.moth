@@ -22,4 +22,4 @@ render_nested_borrowing || -> String:
     return [:nested_borrowing_patterns first=[first_ref] second=[second_ref] third=[third_ref] sum=[sum] rebound=[mutable_data]]
 ;
 
-[:[render_nested_borrowing()]]
+~[:[render_nested_borrowing()]]

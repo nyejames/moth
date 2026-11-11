@@ -2,6 +2,6 @@
 -- rejects the authored step position instead of the template's source position.
 zero #I32 = 0
 
-#[loop {"red", "green", "blue"} by zero |item|:
+[loop {"red", "green", "blue"} by zero |item|:
     [item]
 ]

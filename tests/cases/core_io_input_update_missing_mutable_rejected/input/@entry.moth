@@ -8,4 +8,4 @@ bad_update | | -> String, Error!:
 result = bad_update() catch:
     then "error"
 ;
-[:result [result]]
+~[:result [result]]

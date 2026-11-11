@@ -11,13 +11,13 @@ code = "MOTH-SYNTAX-0022"
 reason = "invalid_template_structure.incompatible_head_item"
 path = "input/@entry.moth"
 line = 1
-column = 7
+column = 8
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
 path = "input/@entry.moth"
 line = 1
-column = 2
+column = 3
 
 [backends.html_wasm]
 mode = "failure"

@@ -10,4 +10,4 @@ if reading is:
     Sample(value) => ~selected = copy value
     Empty => ~selected = 0.0
 ;
-[:fixed width choice payload value=[selected]]
+~[:fixed width choice payload value=[selected]]

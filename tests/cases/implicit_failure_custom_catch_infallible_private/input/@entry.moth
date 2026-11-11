@@ -57,4 +57,4 @@ recursive_three_after |again Bool| -> I32:
     return 3
 ;
 
-[: custom catch folded-before=[folded_before] literal-before=[literal_before] recursive-before=[recursive_before] folded-after=[folded_after] literal-after=[literal_after] recursive-after=[recursive_after]]
+~[: custom catch folded-before=[folded_before] literal-before=[literal_before] recursive-before=[recursive_before] folded-after=[folded_after] literal-after=[literal_after] recursive-after=[recursive_after]]

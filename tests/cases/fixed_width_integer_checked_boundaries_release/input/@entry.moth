@@ -311,7 +311,7 @@ i32_product_result = multiply_i32(46340, 46340) catch:
 i32_product_in = format_i32(i32_product_result)
 i32_product_out = capture_i32_product(46341, 46341)
 
-[:integer boundaries i8=[limits_i8]/[limits_i8_max] i16=[limits_i16]/[limits_i16_max] i32=[limits_i32]/[limits_i32_max] i64=[limits_i64]/[limits_i64_max] u8=[limits_u8]/[limits_u8_max] u16=[limits_u16]/[limits_u16_max] u32=[limits_u32]/[limits_u32_max] u64=[limits_u64]/[limits_u64_max] narrow=[narrow_i8_min]/[narrow_i8_max]/[narrow_i16_min]/[narrow_i16_max]/[narrow_u8_max]/[narrow_u16_max] overflow=[i32_add_error]/[i32_sub_error]/[i64_add_error]/[i64_sub_error]/[u32_add_error]/[u32_sub_error]/[u64_add_error]/[u64_sub_error] min-div=[i32_min_div_error]/[i64_min_div_error] min-rem=[i32_min_remainder]/[i64_min_remainder]/[i32_min_remainder_error]/[i64_min_remainder_error] zero-div=[i32_zero_div_error]/[i32_zero_rem_error] exponent=[negative_exponent_error]/[overflow_exponent_error] products=[u32_product_in]/[u32_product_out]/[u64_product_in]/[u64_product_out]/[i64_product_in]/[i64_product_out]/[i32_product_in]/[i32_product_out]]
+~[:integer boundaries i8=[limits_i8]/[limits_i8_max] i16=[limits_i16]/[limits_i16_max] i32=[limits_i32]/[limits_i32_max] i64=[limits_i64]/[limits_i64_max] u8=[limits_u8]/[limits_u8_max] u16=[limits_u16]/[limits_u16_max] u32=[limits_u32]/[limits_u32_max] u64=[limits_u64]/[limits_u64_max] narrow=[narrow_i8_min]/[narrow_i8_max]/[narrow_i16_min]/[narrow_i16_max]/[narrow_u8_max]/[narrow_u16_max] overflow=[i32_add_error]/[i32_sub_error]/[i64_add_error]/[i64_sub_error]/[u32_add_error]/[u32_sub_error]/[u64_add_error]/[u64_sub_error] min-div=[i32_min_div_error]/[i64_min_div_error] min-rem=[i32_min_remainder]/[i64_min_remainder]/[i32_min_remainder_error]/[i64_min_remainder_error] zero-div=[i32_zero_div_error]/[i32_zero_rem_error] exponent=[negative_exponent_error]/[overflow_exponent_error] products=[u32_product_in]/[u32_product_out]/[u64_product_in]/[u64_product_out]/[i64_product_in]/[i64_product_out]/[i32_product_in]/[i32_product_out]]
 
 -- Byte formatting goes through U8, while every signed real quotient has an
 -- explicit F64 return slot rather than inheriting integer quotient overflow.
@@ -348,4 +348,4 @@ i16_quotient = quotient_i16(-32768, -1) catch |quotient_error|:
     then 0
 ;
 i16_remainder = remainder_i16(-32768, -1)
-[:integer extra byte=[byte_max_text] real-min=[real_min_i8]/[real_min_i16]/[real_min_i32]/[real_min_i64] i16-div=[i16_quotient_code]/[i16_quotient] i16-rem=[i16_remainder]]
+~[:integer extra byte=[byte_max_text] real-min=[real_min_i8]/[real_min_i16]/[real_min_i32]/[real_min_i64] i16-div=[i16_quotient_code]/[i16_quotient] i16-rem=[i16_remainder]]

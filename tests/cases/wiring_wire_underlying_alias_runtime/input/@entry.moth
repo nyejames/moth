@@ -9,4 +9,4 @@ render || -> String:
     return read_text(value)
 ;
 
-[:alias wire=[render()]]
+~[:alias wire=[render()]]

@@ -301,7 +301,7 @@ fn registered_support_only_package_compiles_its_external_surface() {
     let frontend = successful_compilation_value(compile_registered_package_project(
         "supportpkg",
         &[("@package.moth", "$export\nsupport_label #= \"support\"\n")],
-        "@supportpkg support_label\n[:[support_label]]\n",
+        "@supportpkg support_label\n~[:[support_label]]\n",
     ));
     assert_eq!(frontend.source_packages.len(), 1);
     let package = frontend
@@ -347,7 +347,7 @@ fn registered_triple_root_package_keeps_its_entry_dormant() {
             ("@package.moth", "$export\nsupport_label #= \"support\"\n"),
             ("@entry.moth", "package_runtime ~= 1\n"),
         ],
-        "@triplepkg support_label\n[:[support_label]]\n",
+        "@triplepkg support_label\n~[:[support_label]]\n",
     ));
     assert_eq!(frontend.source_packages.len(), 1);
     let package = frontend
@@ -917,7 +917,7 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
              safe_product |left I32, right I32| -> I32, Error!:\n    return multiply(left, right)\n;\n\n\
              product = safe_product(6, 7) catch then 0\n\
              same I32 = identity(product)\n\
-             [: product=[same]]\n",
+             ~[: product=[same]]\n",
             None,
         ),
         // I8 + U8 into I16 has a full-domain contained result range, so it is proven safe without
@@ -931,7 +931,7 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
             "left I8 = -128\n\
              right U8 = 255\n\
              same I16 = identity(left) + right catch then 0\n\
-             [: same=[same]]\n",
+             ~[: same=[same]]\n",
             None,
         ),
         // Every page has an entry whose provisional error carrier is narrowed, so only an
@@ -939,7 +939,7 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
         // no catch to record and no fallible private function to give a lane.
         (
             LaneFixture::Unchanged,
-            "@utils pass_through\nsame I32 = pass_through(42)\n[: same=[same]]\n",
+            "@utils pass_through\nsame I32 = pass_through(42)\n~[: same=[same]]\n",
             Some("$export\npass_through |value I32| -> I32:\n    return identity(value)\n;\n"),
         ),
         // The sidecar's failure lane splits the block after `sum`. The second add then sits after
@@ -950,7 +950,7 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
             "compute type T |value T| -> I32:\n    seed I32 = 3\n    sum I32 = seed + 1\n    doubled I32 = sum + sum\n    return doubled\n;\n\n\
              marker I32 = 1\n\
              result I32 = compute(marker) catch then 0\n\
-             [: result=[result]]\n",
+             ~[: result=[result]]\n",
             None,
         ),
     ] {
@@ -1055,7 +1055,7 @@ fn compile_single_api_facade_project(
     )
     .expect("should write config");
     fs::write(dir.join("src/@mod.moth"), facade).expect("should write facade");
-    fs::write(dir.join("src/@entry.moth"), "#[:ok]\n").expect("should write entry");
+    fs::write(dir.join("src/@entry.moth"), "[:ok]\n").expect("should write entry");
     fs::write(
         dir.join("src/impl.moth"),
         include_str!(concat!(
@@ -1125,7 +1125,7 @@ fn pruned_fallback_map_leaves_no_runtime_map_demand() {
     // publication. Its map literal and `.length` must leave no map demand in the link facts.
     let frontend = super::super::create_project_modules_tests::successful_compilation_value(
         compile_single_page_project(
-            "value = 1 + 2 catch:\n    fallback_map = {1 = 2}\n    then fallback_map.length\n;\n[: value=[value]]\n",
+            "value = 1 + 2 catch:\n    fallback_map = {1 = 2}\n    then fallback_map.length\n;\n~[: value=[value]]\n",
         ),
     );
 
@@ -1154,7 +1154,7 @@ fn live_fallback_map_demand_is_visible_to_the_published_probe() {
         compile_single_page_project(
             "risky |value I32| -> I32, Error!:\n    return value\n;\n\n\
          value = risky(1) catch:\n    fallback_map = {1 = 2}\n    then fallback_map.length\n;\n\
-         [: value=[value]]\n",
+         ~[: value=[value]]\n",
         ),
     );
 
@@ -1221,7 +1221,7 @@ fn static_if_duplicate_identity_request_publishes_one_canonical_sidecar() {
          result ~U64 = 0\n\
          if enabled:\n    inactive = identity(1)\n    ~result = read_u64(inactive)\n\
          else\n    first = identity(2)\n    second = identity(3)\n    ~result = read_u64(first)\n    ~result = read_u64(second)\n;\n\
-         [: result=[result]]\n",
+         ~[: result=[result]]\n",
     )
     .expect("should write page");
 
@@ -1337,7 +1337,7 @@ fn inactive_static_if_retained_method_on_concrete_field_publishes_no_request() {
          active ~I32 = 0\n\
          if enabled:\n    ~active = make_outer(1).packet.peek()\n\
          else\n    ~active = make_outer(2).packet.get()\n;\n\
-         [: value=[active]]\n",
+         ~[: value=[active]]\n",
     )
     .expect("should write page");
 
@@ -1426,7 +1426,7 @@ fn valid_identity_request_before_failed_concrete_body_publishes_nothing() {
          first = read_u64(ready)\n\
          bad = outer(4294967297)\n\
          second = read_u64(bad)\n\
-         [: second=[second]]\n",
+         ~[: second=[second]]\n",
     )
     .expect("should write page");
 
@@ -2089,7 +2089,7 @@ Box must FIRST_TEXT, SECOND_TEXT
 @impl Label, Box
 
 result = combine(Box(Label("payload")))
-[:result=[result]]
+~[:result=[result]]
 "#,
     )
     .expect("should write requester-owned public generic evidence");
@@ -3449,7 +3449,7 @@ fn paired_root_publishes_one_artifact_one_helper_body_and_two_interfaces() {
         &compile_inline_root_fixture(&[
             (
                 "@entry.moth",
-                "@shared label\n\nsupport_label #= \"entry-local\"\n\n[: [label()]]\n",
+                "@shared label\n\nsupport_label #= \"entry-local\"\n\n~[: [label()]]\n",
             ),
             (
                 "@package.moth",
@@ -3469,7 +3469,7 @@ fn paired_root_publishes_one_artifact_one_helper_body_and_two_interfaces() {
         &compile_inline_root_fixture(&[
             (
                 "@entry.moth",
-                "@shared label\n\nnormal_label #= \"entry-normal\"\nsupport_label #= \"entry-support\"\n\n[: [label()]]\n",
+                "@shared label\n\nnormal_label #= \"entry-normal\"\nsupport_label #= \"entry-support\"\n\n~[: [label()]]\n",
             ),
             (
                 "@mod.moth",

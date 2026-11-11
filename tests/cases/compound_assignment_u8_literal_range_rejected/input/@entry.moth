@@ -2,4 +2,4 @@ hidden ||:
     x ~U8 = 250
     ~x += 300
 ;
-[:unreachable]
+~[:unreachable]

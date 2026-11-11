@@ -23,19 +23,11 @@
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 
 // -------------------------
 //  Resolved documentation fragments
 // -------------------------
-
-/// Kind of resolved documentation fragment.
-///
-/// WHY: preserved so the metadata payload carries the full fragment shape. Currently only `Doc`
-/// is produced; the enum remains explicit so future fragment kinds stay a single-owner decision.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ModuleDocFragmentKind {
-    Doc,
-}
 
 /// WHAT: carries the fully resolved documentation text and its authored source span, when one
 ///       exists. Generated documentation remains spanless rather than inventing provenance.
@@ -43,8 +35,13 @@ pub enum ModuleDocFragmentKind {
 ///      is compiler metadata, not executable HIR state.
 #[derive(Debug, Clone)]
 pub struct ModuleDocFragment {
+    /// Stable module-local declaration identity this documentation belongs to.
+    ///
+    /// WHAT: the target declaration path, never the documentation's own source position.
+    /// WHY: consumers must join documentation to the declaration it documents; an unattached
+    ///      position would let later tooling pair text with the wrong declaration.
     #[allow(dead_code)] // Retained for deferred documentation-metadata consumers.
-    pub kind: ModuleDocFragmentKind,
+    pub target: PathId,
     /// The resolved documentation text.
     ///
     /// WHY: preserved for builder/documentation-metadata consumers. Currently read only in tests;

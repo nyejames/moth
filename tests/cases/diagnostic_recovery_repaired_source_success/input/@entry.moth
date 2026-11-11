@@ -7,4 +7,4 @@ second || -> I32:
 ;
 
 total = first() + second()
-[:diagnostic_recovery_repaired_source_success total=[total]]
+~[:diagnostic_recovery_repaired_source_success total=[total]]

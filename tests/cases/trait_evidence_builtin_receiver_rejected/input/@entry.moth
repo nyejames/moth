@@ -10,4 +10,4 @@ I32 must INT_LABEL
 
 value = 7
 
-[:trait_evidence_builtin_receiver_rejected [value.label()]]
+~[:trait_evidence_builtin_receiver_rejected [value.label()]]

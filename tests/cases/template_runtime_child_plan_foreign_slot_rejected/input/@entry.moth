@@ -15,4 +15,4 @@ inner #= [$before [$html:<b style="[$slot tone]">], $after [$html:</b>]:[$slot]]
 
 rows = [:$html:<div>[inner:[$in tone:inner-red][:[identity("body")]]]</div>[$slot]]
 
-[rows:[$in tone:[identity("outer-red")]][:outer-body]]
+~[rows:[$in tone:[identity("outer-red")]][:outer-body]]

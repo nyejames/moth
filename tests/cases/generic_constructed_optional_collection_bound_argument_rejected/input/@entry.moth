@@ -2,4 +2,4 @@
 CollectionSlot type T = |values {T?}|
 values {U64} = {1}
 origin = CollectionSlot(values)
-[:bound-collection-optional-entry-rejected]
+~[:bound-collection-optional-entry-rejected]

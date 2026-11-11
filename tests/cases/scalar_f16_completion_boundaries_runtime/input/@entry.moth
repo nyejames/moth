@@ -55,4 +55,4 @@ positive_zero_f64 F64 = cast positive_zero
 negative_zero_is_negative = atan2(negative_zero_f64, -1.0) < 0.0
 positive_zero_is_negative = atan2(positive_zero_f64, -1.0) < 0.0
 
-[:scalar f16 boundaries nested-subnormal=[nested_text] return-boundary=[return_text] compound-subnormal=[compound_text] max-finite=[finite_text] min-subnormal=[smallest_text] signed-zero=[negative_zero_text]/[negative_zero_is_negative]/[positive_zero_text]/[positive_zero_is_negative]]
+~[:scalar f16 boundaries nested-subnormal=[nested_text] return-boundary=[return_text] compound-subnormal=[compound_text] max-finite=[finite_text] min-subnormal=[smallest_text] signed-zero=[negative_zero_text]/[negative_zero_is_negative]/[positive_zero_text]/[positive_zero_is_negative]]

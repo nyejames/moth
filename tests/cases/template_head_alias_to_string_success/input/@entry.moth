@@ -3,4 +3,4 @@
 Text as String
 
 message Text = "hello world"
-[: [message]]
+~[: [message]]

@@ -19,4 +19,4 @@ exact = update(~succeeded, 10) catch then 0
 committed U8 = copy succeeded
 ~succeeded = 9
 
-[: writeback commit old=[old] code=[code] recovered=[recovered] failed=[failed] exact=[exact] committed=[committed] reborrowed=[succeeded]]
+~[: writeback commit old=[old] code=[code] recovered=[recovered] failed=[failed] exact=[exact] committed=[committed] reborrowed=[succeeded]]

@@ -1,31 +1,48 @@
-A directive modifies an existing construct. Template-head directives modify their containing template. Source directives attach to the next eligible declaration or dependency clause.
+A directive modifies an existing construct. Template-head directives modify
+their template. Source directives attach to the next declaration or statement
+when their own contract allows it.
 
 ### Two locations
 
 [codeblock, $code "moth":
     message #= [$md: Hello from Moth]
 
-    $export
+    $export $doc [: Public greeting.]
     greeting #= "Hello"
+
+    $todo [: Add a better error message.]
+    assert(false, "Not implemented")
 ]
 
-`$export` makes a declaration public in `@mod.moth` or `@package.moth`. It can also mark a direct-selection dependency clause as a public re-export.
+`$export` publishes declarations or direct-selection dependency clauses from
+`@mod.moth` and `@package.moth`. `$config` marks an explicitly typed
+top-level compile-time binding as a build input.
 
-`$config` marks one explicitly typed top-level compile-time `#` binding in `config.moth` or a selected source module as a build input:
+`$doc` documents a declaration. `$todo` annotates a declaration or
+statement. Both take a compile-time `String` value, often written as a
+template. `$doc` records declaration documentation. `$todo` has no runtime
+or builder effect. Use [$html:<code>$doc &#91;$md: ...&#93;</code>] to request Markdown explicitly.
 
-[codeblock, $code "moth":
-    $config
-    api_url #String = "https://example.com"
-]
+### Stacking and operands
 
-The name is the input key, the type is its contract and the initializer is the fallback. Only `$config` bindings may omit their initializer.
+Source directives may share one line or use consecutive lines. No commas
+separate them. Each distinct directive attaches independently to the same
+following-line construct and order never changes its meaning. Any repeated
+directive name on one target is an error.
 
-Source directives occupy their own line. Comment-only lines may intervene, but a blank line breaks attachment. Each item accepts at most one source modifier.
+Comment-only lines can intervene, but a blank line breaks attachment. Another
+source directive ends a preceding operand only at the outer expression
+boundary, not inside a nested template. A directive cannot skip an invalid
+target.
 
-### Operands
+Directives use `$name`, `$name value` or `$name key = value`, according
+to their contract. Parenthesized calls like `$name(...)` are invalid.
+`$export` and `$config` take no operand.
 
-Some template directives accept `$name value` or `$name key = value`. Parenthesized forms such as `$name(...)` are invalid. `$export` and `$config` take no operands.
+Template-head directives include `$before`, `$after`, `$fresh`,
+`$slot`, `$in`, `$note`, `$raw`, `$md`, `$html`, `$css`,
+`$escape_html` and `$code`. Template heads use commas between items.
+Only `$note` discards a comment template.
 
-Template-head directives are `$before`, `$after`, `$fresh`, `$slot`, `$in`, `$note`, `$todo`, `$doc`, `$raw`, `$md`, `$html`, `$css`, `$escape_html` and `$code`.
-
-Entries are selected by the `@entry.moth` filename, not a directive. See @../directives (Directives), @../project-structure/#public-api (Public API) and @../project-structure/#build-inputs (Build inputs).
+See @../directives (Directives), @../templates/#template-directives (Template
+directives) and @../project-structure/#build-inputs (Build inputs).

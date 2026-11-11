@@ -19,4 +19,4 @@ zero_result_producer |ready Bool| -> String:
     return first
 ;
 
-[: [zero_result_producer(true)]]
+~[: [zero_result_producer(true)]]

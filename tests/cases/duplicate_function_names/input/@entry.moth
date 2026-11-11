@@ -9,4 +9,4 @@ simple_function |value I32| -> I32:
 ;
 
 result = simple_function(42)
-["Result: " result]
+~["Result: " result]

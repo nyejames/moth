@@ -1182,7 +1182,7 @@ fn parse_style_directive_from_spec(
         )?,
         // The head parser rejects a source-only directive before dispatch; this arm keeps the
         // match exhaustive without inventing template behavior for a wrong-context name.
-        StyleDirectiveKind::SourceModifier(_) => {
+        StyleDirectiveKind::SourceModifier { .. } => {
             let directive_id = string_table.intern(directive_name);
             return Err(with_current_token_span(
                 token_stream,

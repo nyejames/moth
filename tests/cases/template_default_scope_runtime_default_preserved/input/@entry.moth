@@ -4,4 +4,4 @@ identity |value String| -> String:
 
 card #= [:<h1>[$slot title = "Untitled"]</h1><section>[$slot]</section>]
 page = [:[card:[identity("Runtime body")]]<main>[$slot]</main>]
-[page:Outer body]
+~[page:Outer body]

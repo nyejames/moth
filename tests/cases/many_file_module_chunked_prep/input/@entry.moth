@@ -10,4 +10,4 @@
 -- Combine labels from every helper so the rendered output proves all imports compiled.
 combined #= [:[label_a][label_b][label_c][label_d][label_e][label_f][label_g][label_h]]
 
-#[:<p id="chunked">[combined]</p>]
+[:<p id="chunked">[combined]</p>]

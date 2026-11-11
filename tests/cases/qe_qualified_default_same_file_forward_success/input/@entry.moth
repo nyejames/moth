@@ -1,4 +1,4 @@
 @shapes Box
 
 b = Box()
-[:qualified default forward n=[b.n]]
+~[:qualified default forward n=[b.n]]

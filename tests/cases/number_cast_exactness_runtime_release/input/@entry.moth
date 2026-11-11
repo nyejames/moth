@@ -112,4 +112,4 @@ int64_low = number_to_int(-9223372036854775809) catch |low_error|:
     then 0
 ;
 
-[:number casts targets=[all_targets] int-source=[int_source] U64max=[u64_value]/[u64_source] scale=[wide4]/[narrowed]/[narrow_error_code] scale256=[wide256_matches] integer-failures=[negative_u64_code]/[fractional_i8_code]/[fraction_before_range_code] int64=[int64_maximum]/[int64_minimum]/[int64_high_code]/[int64_low_code] float64=[profile_float]]
+~[:number casts targets=[all_targets] int-source=[int_source] U64max=[u64_value]/[u64_source] scale=[wide4]/[narrowed]/[narrow_error_code] scale256=[wide256_matches] integer-failures=[negative_u64_code]/[fractional_i8_code]/[fraction_before_range_code] int64=[int64_maximum]/[int64_minimum]/[int64_high_code]/[int64_low_code] float64=[profile_float]]

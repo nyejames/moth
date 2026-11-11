@@ -5,4 +5,4 @@ helper |param I32| -> I32:
     return value
 ;
 
-[:[helper(1)]]
+~[:[helper(1)]]

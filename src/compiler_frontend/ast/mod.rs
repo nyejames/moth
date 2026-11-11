@@ -150,8 +150,6 @@ pub(crate) use module_ast::scope_context::ScopeDeclarationRef;
 pub use module_ast::scope_context::{ContextKind, ScopeContext};
 pub(crate) use module_ast::scope_context::{FileValueResolutionServices, Stage0ResolutionFacts};
 pub(crate) use receiver_methods::{ReceiverMethodCatalog, ReceiverMethodEntry};
-pub use templates::top_level_templates::AstDocFragment;
-pub use templates::top_level_templates::AstDocFragmentKind;
 
 // Imports for the AST entry point and body-parsing helper.
 use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, AstNode};
@@ -192,8 +190,9 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::traits::evidence::environment::InfallibleCastEvidenceContract;
 use crate::timing_scope_attributed;
@@ -217,6 +216,18 @@ pub struct AstChoiceDefinition {
 #[derive(Clone, Debug)]
 pub(crate) struct AstImportedStructDefinition {
     pub(crate) nominal_path: PathId,
+}
+
+/// One compile-time documentation record attached to its declaration.
+///
+/// WHAT: carries the target declaration path, the folded text and the directive operand span.
+/// WHY: documentation is declaration metadata, not an unattached page fragment. The declaration
+/// path is the stable module-local identity later consumers join on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AstDocFragment {
+    pub target: PathId,
+    pub value: StringId,
+    pub span: Option<SourceSpan>,
 }
 
 /// Unified AST output for all source files in one compilation unit.

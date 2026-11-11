@@ -5,4 +5,4 @@ if name is:
     else => ~picked = "miss"
 ;
 
-[:html_resource_match_guard_reachable picked=[picked]]
+~[:html_resource_match_guard_reachable picked=[picked]]

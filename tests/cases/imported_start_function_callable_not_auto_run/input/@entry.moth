@@ -2,4 +2,4 @@
 @idle_helper idle_helper
 
 called_helper()
-#[:entry]
+[:entry]

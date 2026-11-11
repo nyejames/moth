@@ -12,4 +12,4 @@ classify |n I32| -> String:
 ;
 
 result = classify(5)
-[:structured_match_converge result=[result]]
+~[:structured_match_converge result=[result]]

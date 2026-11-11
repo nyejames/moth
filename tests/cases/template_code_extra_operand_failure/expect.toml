@@ -11,5 +11,5 @@ code = "MOTH-SYNTAX-0021"
 reason = "invalid_template_directive.unexpected_arguments"
 path = "input/@entry.moth"
 line = 1
-column = 15
+column = 16
 count = 1

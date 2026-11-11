@@ -4,7 +4,7 @@ list #= [$before [:<span class="once">], $after [:</span>]:
 
 show = true
 
-[:template_runtime_children_wrapper_applied_once
+~[:template_runtime_children_wrapper_applied_once
     [list:
         [if show:
             child

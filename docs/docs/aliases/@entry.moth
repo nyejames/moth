@@ -12,14 +12,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Aliases"]]
-#[$in description:["Type aliases, dependency aliases and choice payload capture aliases in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Aliases"]]
+[$in description:["Type aliases, dependency aliases and choice payload capture aliases in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Aliases
 
     An alias gives an existing type, dependency or payload field a local name. It
@@ -29,7 +29,7 @@ init_docs_sidebar()!
     syntax. The surrounding declaration always determines what gets renamed.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:type-aliases]
         [$in title:Type aliases]
@@ -39,7 +39,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:dependency-aliases]
         [$in title:Dependency aliases]
@@ -49,7 +49,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:payload-capture-aliases]
         [$in title:Payload capture aliases]
@@ -59,7 +59,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../constants/]
         [$in previous_title:Constants and compile-time behaviour]

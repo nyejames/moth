@@ -19,4 +19,4 @@ loop outer |o, oi|:
     ;
 ;
 
-[:dispatcher_nested_loops_multi_break total=[total]]
+~[:dispatcher_nested_loops_multi_break total=[total]]

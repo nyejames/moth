@@ -3,7 +3,7 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::templates::styles::markdown::markdown_formatter;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{
-    CommentDirectiveKind, SlotKey, Style, TemplateSegmentOrigin, TemplateType,
+    SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateControlFlowValidationMode;
@@ -205,30 +205,6 @@ fn parser_tir_records_quoted_and_raw_markers_as_body_text() {
     assert_eq!(
         parser_tir_texts(&template, &store, &string_table),
         vec![" \"quoted\" `raw` plain"]
-    );
-}
-
-#[test]
-fn parser_tir_records_suppressed_child_template_brackets_as_literal_text() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let mut expression_builder = AstExpressionBuilder::new().unwrap();
-    let mut const_values = ConstValueStore::default();
-    let (template, store) = parse_template(
-        "[$doc:\n[: child [else] [break] [continue]]\n]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-        &mut expression_builder,
-        &mut const_values,
-    );
-    let store = store.borrow();
-
-    assert_eq!(
-        parser_tir_texts(&template, &store, &string_table),
-        vec!["<p>[: child [else] [break] [continue]]</p>"],
-        "post-render parser TIR must reflect formatted output, with suppressed brackets preserved as literal text"
     );
 }
 
@@ -1074,6 +1050,7 @@ fn build_template_with_direct_tir_root(
             context,
         },
         span,
+        comment_directive_span: None,
     }
 }
 
@@ -2456,41 +2433,6 @@ fn parser_tir_skips_conditional_child_wrappers_for_fresh_control_flow_child() {
         "$fresh control-flow child should have zero wrapper count"
     );
 }
-
-#[test]
-fn doc_comment_with_formatter_records_comment_kind() {
-    // `$doc` applies markdown formatting automatically while retaining the
-    // comment directive kind on the module-local TIR root.
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let mut expression_builder = AstExpressionBuilder::new().unwrap();
-    let mut const_values = ConstValueStore::default();
-    let (template, store) = parse_template(
-        "[$doc: doc body]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-        &mut expression_builder,
-        &mut const_values,
-    );
-    let store = store.borrow();
-    let template_kind = store
-        .get_template(template.tir_reference.root)
-        .expect("TIR entry should exist")
-        .kind
-        .clone();
-
-    assert_eq!(
-        template_kind,
-        TemplateType::Comment(CommentDirectiveKind::Doc),
-        "$doc should produce a doc-comment template kind"
-    );
-}
-
-// -------------------------
-//  Direct control-flow root after render-unit refresh
-// -------------------------
 
 #[test]
 fn no_prefix_if_finalizes_with_direct_conditional_root() {

@@ -1,6 +1,6 @@
 missing #I32? = none
 
-#[:
+[:
     template_const_loop_option_absent_empty before
     [if missing is |captured|:
         [loop 0 to captured |i|:

@@ -10,14 +10,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Resources and file values"]]
-#[$in description:["Naming project files with file paths, and what those paths evaluate to in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Resources and file values"]]
+[$in description:["Naming project files with file paths, and what those paths evaluate to in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Resources and file values
 
     Projects contain more than source. Images, fonts, stylesheets and data files
@@ -29,7 +29,7 @@ init_docs_sidebar()!
     one you meant, until a builder decides where it lands and what the URL says.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:file-paths]
         [$in title:File paths]
@@ -39,7 +39,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:file-values]
         [$in title:File values]
@@ -49,7 +49,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../packages/]
         [$in previous_title:Packages and dependencies]

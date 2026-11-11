@@ -1,2 +1,2 @@
 @helper
-#[:<p>from entry</p>]
+[:<p>from entry</p>]

@@ -3,15 +3,15 @@
 @validation content as validation_content
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-#[$in title:["Codebase development standards"]]
-#[$in description:["Rust code style, testing strategy and validation gates for Moth compiler work."]]
-#[$in head:[theme_head]]
+[$in title:["Codebase development standards"]]
+[$in description:["Rust code style, testing strategy and validation gates for Moth compiler work."]]
+[$in head:[theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
 
-#[section, $md:
+[section, $md:
     # Codebase development standards
 
     Good compiler work should be easy to read, easy to test and hard to misinterpret. 
@@ -20,6 +20,6 @@ init_docs_sidebar()!
     All of these must be followed by all contributors to meet the criteria for an acceptable PR.
 ]
 
-#[section, style_content]
-#[section, testing_content]
-#[section, validation_content]
+[section, style_content]
+[section, testing_content]
+[section, validation_content]

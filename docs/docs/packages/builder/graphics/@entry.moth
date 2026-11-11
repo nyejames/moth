@@ -8,14 +8,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["@web/graphics"]]
-#[$in description:["WebGL2 rendering as a builder binding-backed runtime package."]]
-#[$in head:[language_theme_head]]
+[$in title:["@web/graphics"]]
+[$in description:["WebGL2 rendering as a builder binding-backed runtime package."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # @web/graphics
 
     `@web/graphics` is the HTML builder's WebGL2 package. Its API will expose GPU
@@ -23,7 +23,7 @@ init_docs_sidebar()!
     keeping WebGL's explicit graphics model.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:graphics]
         [$in title:Graphics]
@@ -33,7 +33,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../canvas/]
         [$in previous_title:@web/canvas]

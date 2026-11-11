@@ -11,4 +11,4 @@ label |this Duration| -> String:
 Duration must DURATION_LABEL
 
 duration = duration_from_seconds(2.5)
-[:receiver_method_external_opaque_type_rejected [duration.label()]]
+~[:receiver_method_external_opaque_type_rejected [duration.label()]]

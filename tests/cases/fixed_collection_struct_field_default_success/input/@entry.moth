@@ -27,4 +27,4 @@ render_struct_field || -> String:
     return [:fixed_collection_struct_field_default_success length=[len] value=[first] named_length=[named_len]]
 ;
 
-[:[render_struct_field()]]
+~[:[render_struct_field()]]

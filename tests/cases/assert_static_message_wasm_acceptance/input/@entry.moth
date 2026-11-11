@@ -14,4 +14,4 @@ assert_folded ||:
 
 assert_default()
 assert_folded()
-[:assert_static_message_wasm_acceptance]
+~[:assert_static_message_wasm_acceptance]

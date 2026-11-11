@@ -5,4 +5,4 @@ render_readings || -> String:
     return [:fixed width cross module return first=[first]]
 ;
 
-[:[render_readings()]]
+~[:[render_readings()]]

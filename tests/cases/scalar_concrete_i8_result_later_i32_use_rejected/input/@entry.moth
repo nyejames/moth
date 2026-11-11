@@ -8,4 +8,4 @@ right I8 = 2
 sum = left + right
 received = take_i32(sum)
 
-[:unreachable]
+~[:unreachable]

@@ -517,6 +517,19 @@ impl<'a> AstCursor<'a> {
         self.cursor.range().source()
     }
 
+    /// Canonical source owner retained for bounded parser handoffs.
+    pub(crate) fn canonical_owner(&self) -> Option<&Arc<SourceTokens>> {
+        self.canonical_owner.as_ref()
+    }
+
+    /// Mutable access to the underlying canonical token cursor.
+    ///
+    /// WHAT: lets a focused source-directive helper consume its own operand tokens.
+    /// WHY: operand capture must advance the same parser cursor without cloning a token window.
+    pub(crate) fn token_cursor_mut(&mut self) -> &mut TokenCursor<'a> {
+        &mut self.cursor
+    }
+
     pub(crate) fn current_tag(&self) -> TokenTag {
         self.current()
             .map(|token| token.tag())

@@ -14,14 +14,10 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
-    InvalidTemplateStructureCode, InvalidTemplateStructureView,
-};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     UnexpectedTokenShape, UnexpectedTokenView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
-use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::CompactDiagnosticBagForTest;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -130,27 +126,6 @@ fn assert_span_is_meaningful(diagnostic: &CompactDiagnosticBagForTest) {
     );
 }
 
-/// Asserts a truncated template reports the structure reason and its opening-bracket label.
-fn assert_missing_closing_bracket(diagnostic: &CompactDiagnosticBagForTest) {
-    let view = diagnostic
-        .first()
-        .expect("truncated template should compact to one record");
-    let facts = view
-        .family_view::<InvalidTemplateStructureView>()
-        .expect("truncated template should retain structure facts");
-    assert_eq!(
-        facts.reason,
-        InvalidTemplateStructureCode::MissingClosingBracket
-    );
-    let labels: Vec<_> = view.durable_labels().collect();
-    assert_eq!(labels.len(), 1, "the opening bracket should carry a label");
-    assert!(matches!(
-        labels[0].message,
-        DurableLabelMessage::TemplateStartsHere
-    ));
-    assert_span_is_meaningful(diagnostic);
-}
-
 #[test]
 fn unexpected_template_body_token_retains_exact_primary_span() {
     let source = "[:π]";
@@ -172,13 +147,6 @@ fn unexpected_template_body_token_retains_exact_primary_span() {
     assert_eq!(range.end(), 4);
     assert_eq!(&source[range.start() as usize..range.end() as usize], "π");
     assert_eq!(view.durable_labels().count(), 0);
-}
-
-#[test]
-fn doc_suppressed_child_template_unclosed_bracket_reports_eof() {
-    let diagnostic = parse_template_diagnostic("[$doc: [: unclosed");
-
-    assert_missing_closing_bracket(&diagnostic);
 }
 
 #[test]

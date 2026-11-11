@@ -21,4 +21,4 @@ read_input | | -> String, Error!:
 result = read_input() catch:
     then "error"
 ;
-[:core_io_input_reads_success [result]]
+~[:core_io_input_reads_success [result]]

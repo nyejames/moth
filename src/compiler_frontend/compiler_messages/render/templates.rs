@@ -375,9 +375,6 @@ fn incompatible_template_head_item_message(
         TemplateHeadConflictReason::DiscardedCommentDirectiveMustBeOnlyMeaningfulItem => format!(
             "{subject} cannot be combined with {other} because a discarded comment directive must be the template's only meaningful head item."
         ),
-        TemplateHeadConflictReason::DocumentationDirectiveMustBeOnlyMeaningfulItem => format!(
-            "{subject} cannot be combined with {other} because a documentation directive must be the template's only meaningful head item."
-        ),
         TemplateHeadConflictReason::SlotDirectiveMustBeExclusive => format!(
             "{subject} cannot be combined with {other} because a slot declaration must be the template head's only meaningful item."
         ),
@@ -410,9 +407,6 @@ pub(crate) fn invalid_template_structure_message(reason: InvalidTemplateStructur
         }
         InvalidTemplateStructureReason::NonFoldableConstTemplate => {
             "Top-level const templates must be fully foldable at compile time.".to_string()
-        }
-        InvalidTemplateStructureReason::NonFoldableDocComment => {
-            "'$doc' comments can only contain compile-time values.".to_string()
         }
         InvalidTemplateStructureReason::FallibleValueInTemplateHead => {
             "Template heads do not implicitly unwrap fallible values. Handle the error before using the success value, with postfix `!` in a compatible fallible function or with `catch` recovery.".to_string()

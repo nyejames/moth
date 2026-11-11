@@ -4,7 +4,7 @@
 
 card = Card("Benchmark", card_body)
 
-[:
+~[:
     <p>[tagline]</p>
     [render_page(card)]
 ]

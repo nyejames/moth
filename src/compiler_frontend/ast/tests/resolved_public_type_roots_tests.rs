@@ -72,6 +72,7 @@ fn header(
         export_mode,
         local_ordering_hints: std::collections::HashSet::new(),
         name_span: None,
+        source_directives: Vec::new(),
         synthetic_content_payload: None,
         tokens: TokenRange::new(SourceId::COMPILATION_ROOT, token_index, token_index)
             .expect("equal token indexes always form a valid range"),

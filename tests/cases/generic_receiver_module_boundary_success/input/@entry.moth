@@ -2,4 +2,4 @@
 
 value = Box(42)
 
-[: [value.label()]]
+~[: [value.label()]]

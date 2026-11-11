@@ -8,4 +8,4 @@ read_values |values {U64}| -> I32:
 
 values = empty()
 count = read_values(values)
-[:[count]]
+~[:[count]]

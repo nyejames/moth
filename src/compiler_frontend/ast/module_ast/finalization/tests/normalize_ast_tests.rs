@@ -137,6 +137,7 @@ fn template_with_reference(reference: TemplateTirReference, span: Option<SourceS
     Template {
         tir_reference: reference,
         span,
+        comment_directive_span: None,
     }
 }
 

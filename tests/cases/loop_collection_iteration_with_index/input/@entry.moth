@@ -52,4 +52,4 @@ loop empty_items by -2 |item, index|:
     ~empty_reverse += 1
 ;
 
-[:loop_collection_iteration_with_index weighted=[weighted] forward=[forward] reverse=[reverse] overshoot=[overshoot_forward]/[overshoot_reverse] narrow=[narrow] minimum=[minimum] empty=[empty_forward]/[empty_reverse]]
+~[:loop_collection_iteration_with_index weighted=[weighted] forward=[forward] reverse=[reverse] overshoot=[overshoot_forward]/[overshoot_reverse] narrow=[narrow] minimum=[minimum] empty=[empty_forward]/[empty_reverse]]

@@ -13,4 +13,4 @@ read_fixed |values {capacity U64}| -> String:
 
 holder = Holder()
 values {capacity U64} = {18_446_744_073_709_551_615}
-[:numeric_boundaries default=[read_default(default_count)] field=[holder.value] fixed=[read_fixed(values)]]
+~[:numeric_boundaries default=[read_default(default_count)] field=[holder.value] fixed=[read_fixed(values)]]

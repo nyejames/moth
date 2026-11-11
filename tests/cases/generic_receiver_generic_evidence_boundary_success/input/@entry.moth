@@ -14,4 +14,4 @@ render type T is DISPLAY_TEXT |value T| -> String:
     return value.display()
 ;
 
-[: [render(Box(Label("local")))]]
+~[: [render(Box(Label("local")))]]

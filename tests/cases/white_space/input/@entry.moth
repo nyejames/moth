@@ -7,4 +7,4 @@ normal_var_after_tabs = 123
 var_with_whitespace_after = 123     
 var_after_whitespace = normal_var_after_tabs
 
-[:white_space first=[normal_var_after_tabs] second=[var_with_whitespace_after] third=[var_after_whitespace]]
+~[:white_space first=[normal_var_after_tabs] second=[var_with_whitespace_after] third=[var_after_whitespace]]

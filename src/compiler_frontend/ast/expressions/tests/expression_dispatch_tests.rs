@@ -455,6 +455,7 @@ fn constant_identifier_uses_module_store_tir() {
             context: TemplateViewContext::default(),
         },
         span: None,
+        comment_directive_span: None,
     };
 
     let mut context = ScopeContext::new_for_tests(

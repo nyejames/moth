@@ -10,4 +10,4 @@
 count = 1
 result U64 = count.unsupported()
 
-[:unreachable]
+~[:unreachable]

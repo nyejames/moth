@@ -21,4 +21,4 @@ render || -> String, Error!:
 ;
 
 text = render() catch then "failed"
-[:[text]]
+~[:[text]]

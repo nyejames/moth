@@ -15,4 +15,4 @@ result = accumulate({"a", "b", "a"}) catch then {}
 distinct_keys = result.length
 count_for_a = result.get("a") catch then 0
 
-[: loop_rebound_alias_allows_source_mutation distinct=[distinct_keys] a=[count_for_a]]
+~[: loop_rebound_alias_allows_source_mutation distinct=[distinct_keys] a=[count_for_a]]

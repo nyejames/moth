@@ -5,4 +5,4 @@ show |n I32| -> I32:
 ;
 
 value = show(length("a😊b"))
-[:folded_argument=[value]]
+~[:folded_argument=[value]]

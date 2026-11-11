@@ -2,4 +2,4 @@
 
 rendered #= [:lengths=[loop {"a", "abc"} |item|:[text.length(item)];]]
 
-[:core_text_const_eval_template_loop [rendered]]
+~[:core_text_const_eval_template_loop [rendered]]

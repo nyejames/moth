@@ -2,4 +2,4 @@
 
 value = forward("x")
 
-[: [value] ]
+~[: [value] ]

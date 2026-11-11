@@ -438,6 +438,7 @@ define_stable_reason_keys! {
         &InvalidTemplateDirectiveCode::DuplicateModifier => "invalid_template_directive.duplicate_modifier",
         &InvalidTemplateDirectiveCode::DanglingModifier => "invalid_template_directive.dangling_modifier",
         &InvalidTemplateDirectiveCode::WrongTarget => "invalid_template_directive.wrong_target",
+        &InvalidTemplateDirectiveCode::MissingSeparator => "invalid_template_directive.missing_separator",
     },
     CssTemplateWarning => {
         @delegate(reason => CssTemplateWarningCode::of(reason).stable_reason_key());
@@ -483,7 +484,6 @@ define_stable_reason_keys! {
         &InvalidTemplateStructureCode::NestedTemplateNotAllowed => "invalid_template_structure.nested_template_not_allowed",
         &InvalidTemplateStructureCode::HelperInConstTemplate => "invalid_template_structure.helper_in_const_template",
         &InvalidTemplateStructureCode::NonFoldableConstTemplate => "invalid_template_structure.non_foldable_const_template",
-        &InvalidTemplateStructureCode::NonFoldableDocComment => "invalid_template_structure.non_foldable_doc_comment",
         &InvalidTemplateStructureCode::FallibleValueInTemplateHead => "invalid_template_structure.fallible_value_in_template_head",
         &InvalidTemplateStructureCode::UnsupportedTypeInTemplateHead => "invalid_template_structure.unsupported_type_in_template_head",
         &InvalidTemplateStructureCode::RuntimeTemplateInConst => "invalid_template_structure.runtime_template_in_const",

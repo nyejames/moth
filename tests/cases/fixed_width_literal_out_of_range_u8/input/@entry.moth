@@ -2,4 +2,4 @@ hidden ||:
     v U8 = 256
 ;
 
-[:unreachable]
+~[:unreachable]

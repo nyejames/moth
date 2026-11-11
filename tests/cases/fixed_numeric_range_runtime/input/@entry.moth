@@ -218,4 +218,4 @@ assert(u8_zero_count is 2)
 assert(u8_zero_last is 0)
 assert(maximum_singleton(18446744073709551615) is 1)
 assert(maximum_empty(18446744073709551615) is 0)
-[:fixed_numeric_range_runtime verified]
+~[:fixed_numeric_range_runtime verified]

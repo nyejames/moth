@@ -7,4 +7,4 @@ get_greeting || -> String:
 ;
 
 msg = get_greeting()
-[: [msg]]
+~[: [msg]]

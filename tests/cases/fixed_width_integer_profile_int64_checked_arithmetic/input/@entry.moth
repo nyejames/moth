@@ -18,4 +18,4 @@ profile_int_to_i64 |value I64| -> String:
 
 edges = profile_edges(9223372036854775806, -9223372036854775807, 3037000499, 3037000499, -9223372036854775807)
 cast_result = profile_int_to_i64(9223372036854775807)
-[:integer checked arithmetic profile=[edges]/[cast_result]]
+~[:integer checked arithmetic profile=[edges]/[cast_result]]

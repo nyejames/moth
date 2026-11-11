@@ -8,4 +8,4 @@ render_shorthand || -> String:
     return [:fixed_collection_shorthand_success first=[first] length=[len]]
 ;
 
-[:[render_shorthand()]]
+~[:[render_shorthand()]]

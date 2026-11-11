@@ -16,14 +16,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Collections and maps"]]
-#[$in description:["Collections, fixed capacity, builtin operations and insertion-ordered maps in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Collections and maps"]]
+[$in description:["Collections, fixed capacity, builtin operations and insertion-ordered maps in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Collections and maps
 
     Collections store one element type in order. Maps associate one value type
@@ -35,7 +35,7 @@ init_docs_sidebar()!
     explicit.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:collection-literals]
         [$in title:Collection literals]
@@ -45,7 +45,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:growable-collections]
         [$in title:Growable collections]
@@ -55,7 +55,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:fixed-collections]
         [$in title:Fixed collections]
@@ -65,7 +65,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:collection-operations]
         [$in title:Collection operations]
@@ -75,7 +75,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:hash-maps]
         [$in title:Hash maps]
@@ -85,7 +85,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../errors/]
         [$in previous_title:Errors, options and assertions]

@@ -10,4 +10,4 @@ read_f32 |value F32| -> String:
 count = 1
 packet = Packet(count)
 text = read_f32(packet.value)
-[:[text]]
+~[:[text]]

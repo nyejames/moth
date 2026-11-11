@@ -301,8 +301,13 @@ impl<'a> TokenStream<'a> {
     pub(crate) fn emit_style_directive(
         &mut self,
         value: StringId,
+        attached: bool,
     ) -> Result<TokenTag, TokenEmitError> {
-        self.emit_payload(TokenTag::STYLE_DIRECTIVE, 0, value.index())
+        self.emit_payload(
+            TokenTag::STYLE_DIRECTIVE,
+            TokenShape::style_directive_attached_flags(attached),
+            value.index(),
+        )
     }
 
     pub(crate) fn emit_string_literal(

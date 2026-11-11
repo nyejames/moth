@@ -17,4 +17,4 @@ identity type T is DISPLAY_TEXT |value T| -> T:
 ;
 
 label = identity(Label("ok"))
-[:trait_bound_function_success [label.display()]]
+~[:trait_bound_function_success [label.display()]]

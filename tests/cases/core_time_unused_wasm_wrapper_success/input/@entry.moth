@@ -9,4 +9,4 @@ unused_wrapper || -> String:
     return [:unused delta=[milliseconds]]
 ;
 
-[:core_time_unused_wasm_wrapper_success]
+~[:core_time_unused_wasm_wrapper_success]

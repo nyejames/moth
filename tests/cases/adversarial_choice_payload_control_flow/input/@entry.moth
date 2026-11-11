@@ -128,4 +128,4 @@ extract_label |t TaskResult| -> String:
 
 interop_label = extract_label(interop_result)
 
-[:adversarial_choice_payload_control_flow summary=[summary] nested=[nested_result] formatted=[formatted] interop=[interop_label] handles=[small_handled],[large_handled],[failure_handled],[pending_handled] trace=[trace] counts=[pending_count],[success_one_count],[success_two_count],[failure_count] recovered=[recovered_summary] error=[recovery_error] recoveries=[recovery_count]]
+~[:adversarial_choice_payload_control_flow summary=[summary] nested=[nested_result] formatted=[formatted] interop=[interop_label] handles=[small_handled],[large_handled],[failure_handled],[pending_handled] trace=[trace] counts=[pending_count],[success_one_count],[success_two_count],[failure_count] recovered=[recovered_summary] error=[recovery_error] recoveries=[recovery_count]]

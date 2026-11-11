@@ -10,4 +10,4 @@ if next is:
     Yellow => ~result = "yellow"
     Green => ~result = "green"
 ;
-[:choice_cross_file_carrier_shape result=[result]]
+~[:choice_cross_file_carrier_shape result=[result]]

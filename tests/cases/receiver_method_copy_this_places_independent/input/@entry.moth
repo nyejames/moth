@@ -25,4 +25,4 @@ run || -> String, Error!:
     return [:[original_value]|[whole_copy_value]|[field_copy_value]]
 ;
 
-[:[run()!]]
+~[:[run()!]]

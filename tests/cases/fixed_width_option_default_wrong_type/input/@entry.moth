@@ -6,4 +6,4 @@ hidden ||:
     x = 1
 ;
 
-[:unreachable]
+~[:unreachable]

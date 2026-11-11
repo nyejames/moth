@@ -2,7 +2,7 @@
 
 card_image_css #= "object-fit: cover; border-radius: 999px; max-width: 64px;"
 
-[$html:
+~[$html:
     <section class="runtime-slot-test">
         [img, @assets/test-card.webp:
             [$in style:[card_image_css]]

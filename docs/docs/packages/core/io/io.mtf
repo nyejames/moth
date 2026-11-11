@@ -242,7 +242,7 @@ Teardown is explicit. Host garbage collection doesn't define when a handle stops
 `String`, returns no source-visible value and has no recoverable error channel.
 
 [codeblock, $code "moth":
-    #[$in title:Initial title]
+    [$in title:Initial title]
 
     io.set_title("Loaded")
 ]

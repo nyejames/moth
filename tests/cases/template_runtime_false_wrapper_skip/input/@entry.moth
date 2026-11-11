@@ -4,4 +4,4 @@ render |include_child Bool, include_sibling Bool| -> String:
     return [list:["skip-head", if include_child:hidden branch][if include_sibling:visible sibling]]
 ;
 
-[:template_runtime_false_wrapper_skip|before|[render(false, false)]|[render(false, true)]|after]
+~[:template_runtime_false_wrapper_skip|before|[render(false, false)]|[render(false, true)]|after]

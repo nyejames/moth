@@ -18,4 +18,4 @@ render_late_u64_collection || -> String:
     return [:late_u64_collection original=[read_pair(original)] duplicate=[read_pair(duplicate)]]
 ;
 
-[:[render_late_u64_collection()]]
+~[:[render_late_u64_collection()]]

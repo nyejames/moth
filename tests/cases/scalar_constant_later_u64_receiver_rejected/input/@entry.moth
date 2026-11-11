@@ -8,4 +8,4 @@ one #= 1
 raw = accept_u64(1)
 accept_u64(one)
 
-[:unreachable]
+~[:unreachable]

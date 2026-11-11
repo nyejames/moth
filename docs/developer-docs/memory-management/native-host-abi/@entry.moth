@@ -1,16 +1,16 @@
 @native-host-abi content as reference_content
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-#[$in title:["Native host ABI"]]
-#[$in description:["The physical Wasm32 boundary between compiled Moth and native Rust host code."]]
-#[$in head:[theme_head]]
+[$in title:["Native host ABI"]]
+[$in description:["The physical Wasm32 boundary between compiled Moth and native Rust host code."]]
+[$in head:[theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
 
-#[section, $md:
+[section, $md:
     Compiled Moth calls registered Rust host functions, and Rust calls builder-selected Moth exports, through one closed value boundary. Accepted design with implementation deferred.
 ]
 
-#[section, reference_content]
+[section, reference_content]

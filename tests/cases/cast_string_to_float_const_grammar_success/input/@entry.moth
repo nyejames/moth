@@ -6,4 +6,4 @@ big #F64 = cast "1e+21" catch: then 0.0;
 small #F64 = cast "1e-6" catch: then 0.0;
 under #F64 = cast "1_000.5e-2" catch: then 0.0;
 
-[: [one]|[ptfive]|[neg]|[exp]|[big]|[small]|[under]]
+~[: [one]|[ptfive]|[neg]|[exp]|[big]|[small]|[under]]

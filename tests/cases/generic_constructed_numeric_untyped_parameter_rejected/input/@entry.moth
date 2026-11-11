@@ -18,4 +18,4 @@ read_outcome |value Outcome of U64| -> String:
 
 empty = Outcome::Empty
 text = read_outcome(empty)
-[:[text]]
+~[:[text]]

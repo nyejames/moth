@@ -2,4 +2,4 @@ small #U8 = 1
 one #U16 = 1
 total U8 = small + one
 
-[:[total]]
+~[:[total]]

@@ -10,4 +10,4 @@ to_u8 type T |this Count of T| -> U8:
 
 Count must CASTABLE_TO_U8
 
-[:unused generic evidence still has to be infallible]
+~[:unused generic evidence still has to be infallible]

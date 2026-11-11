@@ -6,4 +6,4 @@ value String = "hello"
 stored = scores.get("key") catch:
     then ""
 ;
-[:map_set_immutable_non_copy_value_later_use value=[value] stored=[stored]]
+~[:map_set_immutable_non_copy_value_later_use value=[value] stored=[stored]]

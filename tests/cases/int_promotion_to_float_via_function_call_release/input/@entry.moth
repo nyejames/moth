@@ -15,4 +15,4 @@ counter ~I32 = 5
 snapshot F64 = cast counter
 ~counter = 7
 
-[:coerced call=[result] snapshot=[snapshot] reassigned=[counter]]
+~[:coerced call=[result] snapshot=[snapshot] reassigned=[counter]]

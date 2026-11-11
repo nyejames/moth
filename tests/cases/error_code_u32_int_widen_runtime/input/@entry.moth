@@ -20,4 +20,4 @@ negative_wide = widen_code(-1) catch |negative_err|:
 positive_bound = positive_wide is 41
 negative_is_cast_failure = negative_code is 242
 
-[:int widen runtime code=[positive_wide]/[positive_wide_code] negative-code=[negative_wide]/[negative_code] positive-bound=[positive_bound] negative-is-cast-failure=[negative_is_cast_failure]]
+~[:int widen runtime code=[positive_wide]/[positive_wide_code] negative-code=[negative_wide]/[negative_code] positive-bound=[positive_bound] negative-is-cast-failure=[negative_is_cast_failure]]

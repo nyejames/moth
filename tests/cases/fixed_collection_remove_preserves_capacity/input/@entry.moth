@@ -15,4 +15,4 @@ render_remove || -> String:
     return [:fixed_collection_remove_preserves_capacity removed=[removed] first=[first] second=[second] length=[len]]
 ;
 
-[:[render_remove()]]
+~[:[render_remove()]]

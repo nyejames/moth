@@ -31,7 +31,7 @@ A direct root builder slot can receive a resource-bearing `String`, such as a
 favicon:
 
 [codeblock, $code "moth":
-    #[$in favicon:[@assets/logo.svg]]
+    [$in favicon:[@assets/logo.svg]]
 ]
 
 This is normal source resource use. The path resolves from the module root,

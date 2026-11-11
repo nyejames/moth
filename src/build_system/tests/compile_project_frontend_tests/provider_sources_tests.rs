@@ -478,7 +478,7 @@ fn reexported_js_final_calls_retain_provider_runtime_candidate() {
     .expect("should write config");
     fs::write(
         dir.join("@entry.moth"),
-        "@components animate_canvas, observed\nanimate_canvas(\"canvas\")\n[:[observed()]]\n",
+        "@components animate_canvas, observed\nanimate_canvas(\"canvas\")\n~[:[observed()]]\n",
     )
     .expect("should write page");
     fs::write(

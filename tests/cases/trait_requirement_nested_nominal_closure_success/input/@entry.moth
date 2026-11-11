@@ -3,4 +3,4 @@
 maker = make_maker()
 held = maker.boxed()
 label_text = held.value.text
-[:[label_text]]
+~[:[label_text]]

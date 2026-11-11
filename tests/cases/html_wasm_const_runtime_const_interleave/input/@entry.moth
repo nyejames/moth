@@ -6,5 +6,5 @@ render_middle || -> String:
 ;
 
 middle = render_middle()
-[: [middle]]
-#[:entry]
+~[: [middle]]
+[:entry]

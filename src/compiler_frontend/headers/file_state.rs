@@ -251,6 +251,7 @@ impl HeaderFileParseState {
             export_mode: HeaderExportMode::Private,
             local_ordering_hints: HashSet::new(),
             name_span: None,
+            source_directives: Vec::new(),
             synthetic_content_payload: None,
             tokens: start_range,
             declaration_path: source_file,

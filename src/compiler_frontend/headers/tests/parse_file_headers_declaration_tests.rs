@@ -283,7 +283,7 @@ fn malformed_generic_bound_retains_exact_multibyte_extended_span() {
 #[test]
 fn top_level_const_template_outside_entry_file_errors() {
     let result = parse_single_file_headers_with_entry(
-        "#[html.head: [\"x\"]]\n",
+        "[html.head: [\"x\"]]\n",
         "src/lib.moth",
         "src/@entry.moth",
     );
@@ -300,7 +300,7 @@ fn top_level_const_template_outside_entry_file_errors() {
 
 #[test]
 fn top_level_const_template_tokens_keep_close_and_eof_for_ast_parser() {
-    let headers = parse_single_file_headers("#[3]\n");
+    let headers = parse_single_file_headers("[3]\n");
 
     let const_template_header = headers
         .headers
@@ -330,7 +330,7 @@ fn top_level_const_template_tokens_keep_close_and_eof_for_ast_parser() {
 #[test]
 fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
     let long_fragment_name = "fragment_".to_owned() + &"x".repeat(1300);
-    let source = format!("$config\nvalue #I32 = 1\n#[{long_fragment_name}]\n");
+    let source = format!("$config\nvalue #I32 = 1\n[{long_fragment_name}]\n");
     let mut source_context = TestSourceContext::new("src/@entry.moth");
     let mut path_fork = PathInternerFork::empty();
     let source_id = source_context.source_id();
@@ -431,7 +431,7 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
 
 #[test]
 fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
-    let source = "#[value]\n";
+    let source = "[value]\n";
     let mut source_context = TestSourceContext::new("src/@entry.moth");
     let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -498,7 +498,7 @@ fn top_level_const_template_uses_selected_dependency_alias_path() {
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@entry.moth");
     let (output, _span_builder) = prepare_single_file_with_fork(
-        "@widgets content as panel\n#[panel]\n",
+        "@widgets content as panel\n[panel]\n",
         &file_path,
         &file_path,
         &mut string_table,
@@ -523,7 +523,7 @@ fn top_level_const_template_uses_selected_dependency_alias_path() {
 #[test]
 fn top_level_const_template_collects_if_condition_dependency_refs() {
     let (headers, string_table) = parse_single_file_headers_with_table(
-        "#[if show_banner:
+        "[if show_banner:
             [if maybe_name is |name|:
                 [name]
             ]
@@ -612,7 +612,7 @@ fn top_level_expression_symbols_stay_in_implicit_start_body() {
          loop items |item, index|:\n\
              io.line([: [item]])\n\
          ;\n\
-         [basic]\n\
+         ~[basic]\n\
          basic()\n\
          items\n",
     );
@@ -660,7 +660,7 @@ fn compile_time_declarations_parse_as_headers_without_elevating_body_symbols() {
          loop items |item, index|:\n\
              io.line([: [item]])\n\
          ;\n\
-         [theme]\n\
+         ~[theme]\n\
          theme\n",
     );
 

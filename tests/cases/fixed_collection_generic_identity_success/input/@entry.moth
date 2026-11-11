@@ -12,4 +12,4 @@ render_generic || -> String:
     return [:fixed_collection_generic_identity_success value=[first] length=[len]]
 ;
 
-[:[render_generic()]]
+~[:[render_generic()]]

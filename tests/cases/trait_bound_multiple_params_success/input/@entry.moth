@@ -30,4 +30,4 @@ choose_left type Left is DISPLAY_TEXT, Right is HAS_NAME |left Left, right Right
 ;
 
 label = choose_left(Label("left"), Badge("right"))
-[:trait_bound_multiple_params_success [label.display()]]
+~[:trait_bound_multiple_params_success [label.display()]]

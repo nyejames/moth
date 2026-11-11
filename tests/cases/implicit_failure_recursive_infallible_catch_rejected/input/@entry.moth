@@ -8,4 +8,4 @@ recover |value I32| -> I32:
     return recursive(value, true) catch then 0
 ;
 
-[: eligibility]
+~[: eligibility]

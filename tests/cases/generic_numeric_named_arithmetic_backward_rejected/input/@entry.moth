@@ -13,4 +13,4 @@ base = 1
 value = identity(base + base)
 received = read_u64(value)
 
-[: [received]]
+~[: [received]]

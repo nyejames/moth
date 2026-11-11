@@ -1,17 +1,22 @@
-#[:
+[:
     ORDER_CONST_BEFORE
 ]
 
 show_first = true
-[if show_first:
+~[if show_first:
     ORDER_RUNTIME_IF
 ]
 
 items {String} = {"A", "B"}
-[loop items |item|:
+~[loop items |item|:
     ORDER_RUNTIME_LOOP_[item]
 ]
 
-#[:
+~["note"]
+note #= "identifier-value"
+~[note]
+~[:ORDER_RUNTIME_NESTED_BEFORE[$note: hidden]ORDER_RUNTIME_NESTED_AFTER]
+
+[:
     ORDER_CONST_AFTER
 ]

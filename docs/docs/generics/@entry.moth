@@ -16,14 +16,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Generics"]]
-#[$in description:["Declaration-site generics, type application and local inference in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Generics"]]
+[$in description:["Declaration-site generics, type application and local inference in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Generics
 
     Generics let one declaration describe a family of concrete structs, choices
@@ -36,7 +36,7 @@ a generic signature to later exact uses in the same body. It never searches
 callee bodies or the whole program.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:generic-declarations]
         [$in title:Generic declarations]
@@ -46,7 +46,7 @@ callee bodies or the whole program.
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:type-application]
         [$in title:Type application]
@@ -56,7 +56,7 @@ callee bodies or the whole program.
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:generic-inference]
         [$in title:Generic inference]
@@ -66,7 +66,7 @@ callee bodies or the whole program.
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:generic-instances]
         [$in title:Generic instances]
@@ -76,7 +76,7 @@ callee bodies or the whole program.
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:generic-limits]
         [$in title:Generic limits]
@@ -86,7 +86,7 @@ callee bodies or the whole program.
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../aliases/]
         [$in previous_title:Aliases]

@@ -16,4 +16,4 @@ pick |flag Bool| -> I32:
 
 constant_pick = pick(enabled)
 
-[:value_if active=[active_label] inactive=[inactive_label] literal=[literal_label] call=[constant_pick]]
+~[:value_if active=[active_label] inactive=[inactive_label] literal=[literal_label] call=[constant_pick]]

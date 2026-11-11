@@ -13,4 +13,4 @@ receive_u64 |value U64| -> String:
 count = 4_294_967_296
 y = (count + 1).unsupported(receive_u64(count))
 
-[:unreachable]
+~[:unreachable]

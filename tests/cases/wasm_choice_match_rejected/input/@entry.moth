@@ -11,4 +11,4 @@ format_level |level AlertLevel| -> String:
 ;
 
 message = format_level(AlertLevel::Watch)
-[:match_message=[message]]
+~[:match_message=[message]]

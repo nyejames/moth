@@ -5,4 +5,4 @@ mutate |value ~I32| -> I32:
 
 source = 5
 out = mutate(copy source)
-[:function_call_mutable_param_copy_arg out=[out]]
+~[:function_call_mutable_param_copy_arg out=[out]]

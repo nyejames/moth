@@ -6,4 +6,4 @@ value I32 = parse_int("42") catch:
     then -1
 ;
 
-[: string int demand: [value]]
+~[: string int demand: [value]]

@@ -7,4 +7,4 @@ measure |value String| -> I32:
 value = measure("abc")
 folded_sibling = contains("mothball", "ball")
 
-[:core_text_helper_reachability length=[value] folded_sibling=[folded_sibling]]
+~[:core_text_helper_reachability length=[value] folded_sibling=[folded_sibling]]

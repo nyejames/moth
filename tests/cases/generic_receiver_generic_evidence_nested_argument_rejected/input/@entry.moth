@@ -6,4 +6,4 @@ Plain = |
 
 bad = Box(Plain("no evidence"))
 
-[: [bad.value.text]]
+~[: [bad.value.text]]

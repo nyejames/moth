@@ -20,7 +20,7 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::styles::markdown::markdown_formatter;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{
-    BodyWhitespacePolicy, CommentDirectiveKind, Style, TemplateParsingMode, TemplateType,
+    BodyWhitespacePolicy, Style, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_body_parser::{
     NestedTemplateParseOptions, TemplateBodyEndPolicy, TemplateBodyParseRequest,
@@ -32,8 +32,7 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     validate_runtime_template_control_flow_slot_artifacts,
 };
 use crate::compiler_frontend::ast::templates::template_head_parser::{
-    ParsedTemplateHead, TemplateHeadParseRequest, apply_doc_comment_defaults,
-    finish_child_decorators, parse_template_head,
+    ParsedTemplateHead, TemplateHeadParseRequest, finish_child_decorators, parse_template_head,
 };
 use crate::compiler_frontend::ast::templates::template_render_units::{
     ControlFlowRenderUnitRequest, install_formatted_tir_reference_for_linear_template,
@@ -57,7 +56,6 @@ use crate::compiler_frontend::ast::statements::numeric_body_completion::complete
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::InvalidTemplateSlotReason;
-use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, FrontendCounter, add_ast_counter, increment_frontend_counter,
 };
@@ -318,8 +316,7 @@ impl Template {
         )
     }
 
-    /// Internal constructor that supports doc comment context propagation.
-    /// Called recursively for nested templates in the body parser.
+    /// Internal constructor for nested templates parsed from a template body.
     #[allow(
         clippy::too_many_arguments,
         reason = "recursive parsing keeps stream, scope, interner, builders, options and tables separate"
@@ -371,7 +368,6 @@ impl Template {
             path_fork,
         } = tables;
         let NestedTemplateParseOptions {
-            parsing_mode,
             control_flow_validation,
             preparation_mode,
             default_style,
@@ -434,10 +430,6 @@ impl Template {
         // Both decorator edges become one direct-child wrapper before the body
         // parser hands wrappers to nested templates and slot declarations.
         finish_child_decorators(&mut build_state, &context.template_ir_store)?;
-
-        if parsing_mode == TemplateParsingMode::DocComment {
-            apply_doc_comment_defaults(&mut build_state);
-        }
 
         // Stage 2: Parse the template body (strings, nested templates, slots)
         parse_template_body(
@@ -640,19 +632,6 @@ impl Template {
 
         build_state.refresh_kind_from_preparation(&template_preparation.facts);
 
-        // Post-parse validation
-        if matches!(
-            build_state.kind,
-            TemplateType::Comment(CommentDirectiveKind::Doc)
-        ) && !template_preparation.facts.is_const_evaluable_shape
-        {
-            return Err(templates::invalid_template_structure(
-                InvalidTemplateStructureReason::NonFoldableDocComment,
-                construction_span,
-            )
-            .into());
-        }
-
         // A compile-time template has no parent template to receive an escaped `$in name: ...`
         // helper. Head-chain composition already ran, so a surviving contribution cannot be
         // routed and the constant would otherwise fail later as a generic non-foldable value.
@@ -696,6 +675,7 @@ impl Template {
         let template = Template {
             tir_reference,
             span: construction_span,
+            comment_directive_span: build_state.comment_directive_span,
         };
 
         if matches!(

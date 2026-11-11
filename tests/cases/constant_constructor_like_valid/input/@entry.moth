@@ -2,4 +2,4 @@ Point = |x I32, y I32|
 
 origin #= Point(0, 0)
 
-[:[origin.x],[origin.y]]
+~[:[origin.x],[origin.y]]

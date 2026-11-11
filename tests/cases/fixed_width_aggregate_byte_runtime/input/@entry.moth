@@ -61,4 +61,4 @@ collection_first_text String = cast collection_first
 other_u8 U8 = cast other_byte
 other_byte_text String = cast other_u8
 
-[:fixed aggregate runtime struct=[balance_text] copy=[balance_text]/[copied_text] options-equal=[options_equal] choice=[choice_text] generic=[boxed_text] map-value=[map_text] byte=[byte_text]/[other_byte_text] byte-collection=[collection_first_text] equal=[byte_equal] greater=[byte_greater]]
+~[:fixed aggregate runtime struct=[balance_text] copy=[balance_text]/[copied_text] options-equal=[options_equal] choice=[choice_text] generic=[boxed_text] map-value=[map_text] byte=[byte_text]/[other_byte_text] byte-collection=[collection_first_text] equal=[byte_equal] greater=[byte_greater]]

@@ -40,7 +40,7 @@ use crate::compiler_frontend::ast::statements::value_production::{
     ProducedValues, ThenValueContinuation, ThenValueSlot, ValueReceiverKind,
     is_missing_produced_value_boundary, parse_retained_produced_values,
 };
-use crate::compiler_frontend::ast::templates::template::Template;
+use crate::compiler_frontend::ast::templates::template::{Template, TemplateType};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -291,6 +291,87 @@ pub(crate) fn parse_function_body_statements(
         let current_tag = token_stream.current_tag();
 
         ast_log!("Parsing Token: ", #current_tag);
+
+        if current_tag == TokenTag::STYLE_DIRECTIVE {
+            let in_match_arm = context.kind == ContextKind::MatchArm;
+            crate::compiler_frontend::style_directives::parse_statement_source_directive_run(
+                token_stream,
+                &mut context,
+                crate::compiler_frontend::style_directives::SourceOperandFoldResources {
+                    type_interner,
+                    expression_builder,
+                    const_values,
+                    string_table,
+                    path_fork,
+                },
+                |cursor| {
+                    in_match_arm
+                        && (current_token_starts_match_arm_header(cursor).is_some()
+                            || current_token_starts_colon_separated_arm_header(cursor))
+                },
+            )?;
+            continue;
+        }
+
+        // Statement-boundary `~[...]` is the explicit runtime fragment in the compiler-owned
+        // entry body. Consume the marker so the template parser sees the opening head.
+        let runtime_marker_at_statement_boundary = token_stream.previous().is_none_or(|token| {
+            matches!(
+                token.tag(),
+                TokenTag::MODULE_START | TokenTag::NEWLINE | TokenTag::END
+            )
+        });
+        if current_tag == TokenTag::MUTABLE
+            && context.kind == ContextKind::Module
+            && runtime_marker_at_statement_boundary
+            && token_stream.peek_next_tag() == Some(TokenTag::TEMPLATE_HEAD)
+        {
+            token_stream.advance();
+            let fragment_span = Some(token_stream.current_span());
+            let template = Template::new_with_type_interner(
+                token_stream,
+                context.scope,
+                &context,
+                type_interner,
+                expression_builder,
+                const_values,
+                vec![],
+                string_table,
+                path_fork,
+            )?;
+            // The root kind is authoritative after parsing: a direct comment cannot publish a
+            // runtime fragment, while a literal or identifier merely spelled `note` can.
+            let is_comment = {
+                let store = context.template_ir_store.borrow();
+                store
+                    .get_template(template.tir_reference.root)
+                    .map(|template_ir| matches!(template_ir.kind, TemplateType::Comment))
+                    .ok_or_else(|| {
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            "parsed runtime template kind was missing from its module-local TIR store.",
+                        )
+                    })?
+            };
+            if is_comment {
+                let note_name = string_table.intern("note");
+                return Err(statement_dispatch_error(
+                    templates::invalid_template_directive(
+                        Some(note_name),
+                        InvalidTemplateDirectiveReason::WrongContext,
+                        template.comment_directive_span.or(fragment_span),
+                    ),
+                ));
+            }
+            let expression = expression_builder.template(template, ValueMode::MutableOwned)?;
+
+            draft.push_node(AstNode {
+                kind: NodeKind::PushStartRuntimeFragment(expression.id()),
+                span: fragment_span,
+                scope: context.scope,
+            });
+            continue;
+        }
 
         // Match-arm bodies end when the next line-initial arm header or `else` is reached.
         // Same-line accidental second arms are rejected here before statement dispatch.
@@ -665,10 +746,9 @@ pub(crate) fn parse_function_body_statements(
                 }
             },
 
-            // Templates
-            // Top-level runtime template in the compiler-owned entry body.
-            // Each template becomes a PushStartRuntimeFragment so the HIR builder can
-            // push the evaluated string directly to the runtime fragment list.
+            // Direct `[...]` templates are compile-time page or builder-slot metadata owned by
+            // header parsing, so they must never reach statement dispatch. Runtime fragments are
+            // marked with `~` and handled above.
             TokenTag::TEMPLATE_HEAD => {
                 if context.kind != ContextKind::Module {
                     return Err(statement_dispatch_error(
@@ -679,25 +759,11 @@ pub(crate) fn parse_function_body_statements(
                     ));
                 }
 
-                let fragment_span = Some(token_stream.current_span());
-                let template = Template::new_with_type_interner(
-                    token_stream,
-                    context.scope,
-                    &context,
-                    type_interner,
-                    expression_builder,
-                    const_values,
-                    vec![],
-                    string_table,
-                    path_fork,
-                )?;
-                let expression = expression_builder.template(template, ValueMode::MutableOwned)?;
-
-                draft.push_node(AstNode {
-                    kind: NodeKind::PushStartRuntimeFragment(expression.id()),
-                    span: fragment_span,
-                    scope: context.scope,
-                })
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "an unmarked direct template reached the executable body; header parsing must own it",
+                )
+                .into());
             }
 
             // End of file

@@ -22,4 +22,4 @@ min_from_float = parse_float(-2147483648.0) catch:
     then 1
 ;
 
-[: runtime i32 boundaries: [max_from_string]/[min_from_string]/[max_from_float]/[min_from_float]]
+~[: runtime i32 boundaries: [max_from_string]/[min_from_string]/[max_from_float]/[min_from_float]]

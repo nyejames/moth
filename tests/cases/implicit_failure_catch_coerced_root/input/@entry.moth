@@ -15,4 +15,4 @@ coerced = take_opt(value = double(2)) catch |coerced_err|:
 coerced_report = copy coerced_info
 exact = take_opt(value = 5)
 
-[: coerced=[coerced] report=[coerced_report] exact=[exact]]
+~[: coerced=[coerced] report=[coerced_report] exact=[exact]]

@@ -2,4 +2,4 @@
 @impl identity
 
 result = identity(Label(text = "free"))
-[:result=[result]]
+~[:result=[result]]

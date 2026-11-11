@@ -18,4 +18,4 @@ render_overflow || -> String:
     return [:fixed_collection_push_overflow_catch message=[message] length=[len] first=[first]]
 ;
 
-[:[render_overflow()]]
+~[:[render_overflow()]]

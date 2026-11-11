@@ -2,4 +2,4 @@ show ||:
     Empty = | |
 ;
 
-[: empty-struct-ok]
+~[: empty-struct-ok]

@@ -118,8 +118,10 @@ observable semantics for their topics.
 
 Contributor routing for compiler and build handoffs lives in
 `docs/docs/directives/overview.mtf`. That file is not a public page import.
-Template-specific directive meanings stay in
-`docs/docs/templates/template-directives.mtf`. Exact named `project` and
+Template-specific directive meanings and comma-separated head items stay in
+`docs/docs/templates/template-directives.mtf`. `docs/docs/directives/directives.mtf`
+owns independent same-line source annotation stacking, unique directive names
+and `$doc`/`$todo` declaration or statement attachment. Exact named `project` and
 active-builder record fields plus the `$config` input contract stay in the
 project-structure references. Root file roles are fixed at `@mod.moth`,
 `@package.moth` and `@entry.moth`. A source annotation never selects an entry.

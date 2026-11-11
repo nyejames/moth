@@ -152,4 +152,4 @@ assert(count_f16(65504, 65504, 65504) is 1)
 assert(count_f32(3e38, 3e38, 3e38) is 1)
 assert(count_f64(1e308, 1e308, 1e308) is 1)
 
-[:fixed_float_range_rounded_endpoint_runtime verified]
+~[:fixed_float_range_rounded_endpoint_runtime verified]

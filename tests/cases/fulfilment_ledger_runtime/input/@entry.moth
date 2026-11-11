@@ -70,4 +70,4 @@ loop orders |order|:
     assert(stock.available >= 0)
 ;
 
-[:ledger:[loop ledger |entry|:[entry];]accepted=[accepted],partial=[partial],rejected=[rejected];available=[stock.available],shipped=[stock.shipped],returned=[stock.returned];snapshot=[snapshot.available]/[snapshot.shipped]/[snapshot.returned]]
+~[:ledger:[loop ledger |entry|:[entry];]accepted=[accepted],partial=[partial],rejected=[rejected];available=[stock.available],shipped=[stock.shipped],returned=[stock.returned];snapshot=[snapshot.available]/[snapshot.shipped]/[snapshot.returned]]

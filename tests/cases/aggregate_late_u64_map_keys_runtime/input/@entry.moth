@@ -19,4 +19,4 @@ render_late_u64_map_keys || -> String:
     return read_scores(scores)
 ;
 
-[:[render_late_u64_map_keys()]]
+~[:[render_late_u64_map_keys()]]

@@ -18,7 +18,7 @@ fn frontend_builtin_directives_work_with_a_minimal_builder() {
     let entry_file = root.join("builtins.moth");
     fs::write(
         &entry_file,
-        "[$before [:<li>], $after [:</li]:\n<ul>\n  [$md:\n# Docs\n]\n  [$raw:\n  keep\n]\n  [$fresh:\n    [: plain ]\n  ]\n</ul>\n]\n[$code \"moth\":\n    loop value\n]\n[$html:\n    <p>Hello</p>\n]",
+        "~[$before [:<li>], $after [:</li]:\n<ul>\n  [$md:\n# Docs\n]\n  [$raw:\n  keep\n]\n  [$fresh:\n    [: plain ]\n  ]\n</ul>\n]\n~[$code \"moth\":\n    loop value\n]\n~[$html:\n    <p>Hello</p>\n]",
     )
     .expect("should write source file");
 

@@ -19,4 +19,4 @@ success = increment(9223372036854775806) catch:
     then -1
 ;
 
-[: k1 known-int int64 runtime control=[valid_top] copy=[copied] copy-sum=[copied_sum] overflow-code=[overflow_code] success=[success]]
+~[: k1 known-int int64 runtime control=[valid_top] copy=[copied] copy-sum=[copied_sum] overflow-code=[overflow_code] success=[success]]

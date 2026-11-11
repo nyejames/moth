@@ -11,4 +11,4 @@ render_label || -> String:
     return [:propagation_template label=[label]]
 ;
 
-[:[render_label()]]
+~[:[render_label()]]

@@ -34,4 +34,4 @@ check_range_aliases |ascending_start I32, ascending_end I32, ascending_step I32,
 ;
 
 checks = check_range_aliases(2, 8, 2, 9, 2, 2, -2)
-[:integer range aliases=[checks]]
+~[:integer range aliases=[checks]]

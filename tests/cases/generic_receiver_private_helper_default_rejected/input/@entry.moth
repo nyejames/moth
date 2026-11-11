@@ -6,4 +6,4 @@ bump type T |this Counter, value T, label String = [$in x: text]| -> T:
     return value
 ;
 
-#[:<h1>Private generic receiver helper default rejected</h1>]
+[:<h1>Private generic receiver helper default rejected</h1>]

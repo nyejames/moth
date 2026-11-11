@@ -2,4 +2,4 @@ InvalidScaleNames = |
     leading_zero Dec01,
 |
 
-[: invalid Dec scale names rejected]
+~[: invalid Dec scale names rejected]

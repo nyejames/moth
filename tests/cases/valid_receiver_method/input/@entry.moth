@@ -10,4 +10,4 @@ get_x |this Point| -> I32:
 p = Point(1, 2)
 result = p.get_x()
 
-[: valid_receiver_method result=[result]]
+~[: valid_receiver_method result=[result]]

@@ -1,4 +1,4 @@
--- Shared documentation navigation. Add #[sidebar] after #[navbar] and call init_docs_sidebar()
+-- Shared documentation navigation. Add [sidebar] after [navbar] and call init_docs_sidebar()
 -- once on each docs page. sidebar.js reads the navbar for desktop geometry.
 -- Only rules needing selectors or media queries use an embedded stylesheet.
 

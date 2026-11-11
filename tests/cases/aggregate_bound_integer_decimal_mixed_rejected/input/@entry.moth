@@ -5,4 +5,4 @@ mixed_forward ||:
     mixed = {count, 2.5}
 ;
 
-[:bound_integer_decimal_mixed_rejected]
+~[:bound_integer_decimal_mixed_rejected]

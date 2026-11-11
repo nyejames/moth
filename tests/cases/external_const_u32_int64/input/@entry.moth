@@ -19,4 +19,4 @@ max_fn_matches = is_max_u32(u32_max)
 ns_renamed = helper_ns.triangles_ns is 4
 ns_max = helper_ns.max_ns is 4294967295
 ns_max_fn = is_max_u32(helper_ns.max_ns)
-[:external const u32 zero=[zero_matches] small=[small_matches] above_signed=[above_signed_direct]/[above_signed_fn] renamed=[renamed_matches] max=[max_matches]/[max_fn_matches] ns=[ns_renamed]/[ns_max]/[ns_max_fn]]
+~[:external const u32 zero=[zero_matches] small=[small_matches] above_signed=[above_signed_direct]/[above_signed_fn] renamed=[renamed_matches] max=[max_matches]/[max_fn_matches] ns=[ns_renamed]/[ns_max]/[ns_max_fn]]

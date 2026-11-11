@@ -12,4 +12,4 @@ first = values.get(0) catch:
 ;
 len = values.length()
 
-[:collection_methods_backend_contract first=[first] removed=[removed] len=[len]]
+~[:collection_methods_backend_contract first=[first] removed=[removed] len=[len]]

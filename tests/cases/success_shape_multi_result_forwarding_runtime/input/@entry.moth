@@ -10,6 +10,6 @@ forward |calls ~I32| -> String, I32:
 
 
 calls ~= 0
-[:before-forward calls=[calls]]
+~[:before-forward calls=[calls]]
 label, number = forward(~calls)
-[:after-forward label=[label] number=[number] calls=[calls]]
+~[:after-forward label=[label] number=[number] calls=[calls]]

@@ -18,4 +18,4 @@ if echoed is:
     Offline => ~label = "offline"
 ;
 
-[:choice_basic_declaration_and_use label=[label]]
+~[:choice_basic_declaration_and_use label=[label]]

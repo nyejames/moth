@@ -4,4 +4,4 @@
 
 source U32 = 7
 target I32 = source
-[:test]
+~[:test]

@@ -136,4 +136,4 @@ assert(i32_last is 9)
 assert(u8_step_first is 0)
 assert(u8_step_last is 200)
 
-[: uint_range_mixed_step_full_width u64=[u64_first]/[u64_second_seen]/[u64_last] u8=[u8_first]/[u8_second_seen]/[u8_last] i8=[i8_first]/[i8_second_seen]/[i8_last] i64=[i64_first]/[i64_second_seen]/[i64_last] wrong=[wrong_seen] i32=[i32_first]/[i32_second]/[i32_last] u8_step=[u8_step_first]/[u8_step_last]]
+~[: uint_range_mixed_step_full_width u64=[u64_first]/[u64_second_seen]/[u64_last] u8=[u8_first]/[u8_second_seen]/[u8_last] i8=[i8_first]/[i8_second_seen]/[i8_last] i64=[i64_first]/[i64_second_seen]/[i64_last] wrong=[wrong_seen] i32=[i32_first]/[i32_second]/[i32_last] u8_step=[u8_step_first]/[u8_step_last]]

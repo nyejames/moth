@@ -30,4 +30,4 @@ loop i < 5:
     ~i = i + 1
 ;
 
-[:adversarial_match_result_control_flow_chain sum=[sum] label=[label]]
+~[:adversarial_match_result_control_flow_chain sum=[sum] label=[label]]

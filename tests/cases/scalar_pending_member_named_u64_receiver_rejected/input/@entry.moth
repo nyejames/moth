@@ -17,4 +17,4 @@ render_count |value U64| -> String:
 count = 4_294_967_296
 result = count.unsupported(value = render_count(count))
 
-[:unreachable]
+~[:unreachable]

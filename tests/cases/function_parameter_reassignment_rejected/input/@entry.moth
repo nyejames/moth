@@ -8,4 +8,4 @@ render_count |count I32| -> String:
 
 count I32 = 1
 
-[:function_parameter_reassignment_rejected [render_count(count)]]
+~[:function_parameter_reassignment_rejected [render_count(count)]]

@@ -12,4 +12,4 @@ parse |text String| -> I32:
 ok = parse("42")
 underscore = parse("1_000")
 
-[: runtime string int cast: [ok]/[underscore]]
+~[: runtime string int cast: [ok]/[underscore]]

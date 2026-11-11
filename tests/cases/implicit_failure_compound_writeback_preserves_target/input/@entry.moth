@@ -13,4 +13,4 @@ recovered = bump(~kept, 100) catch |err|:
 exact_target ~U8 = 200
 exact = bump(~exact_target, 50) catch then 0
 
-[: writeback preserves target=[kept] code=[code] recovered=[recovered] exact=[exact] exact-target=[exact_target]]
+~[: writeback preserves target=[kept] code=[code] recovered=[recovered] exact=[exact] exact-target=[exact_target]]

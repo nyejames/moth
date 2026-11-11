@@ -15,4 +15,4 @@ render_loop || -> String:
     ]
 ;
 
-[:template_conditional_loop_head_wraps_aggregate_once [render_loop()]]
+~[:template_conditional_loop_head_wraps_aggregate_once [render_loop()]]

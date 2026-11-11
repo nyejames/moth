@@ -21,4 +21,4 @@ big_value U32 = 16777217
 cmp_runtime_eq Bool = runtime_eq(big_value, comparison_float)
 cmp_runtime_lt Bool = runtime_lt(comparison_float, big_value)
 
-[:uint float32 eq=[folded_eq]/[cmp_runtime_eq] lt=[folded_lt]/[cmp_runtime_lt]]
+~[:uint float32 eq=[folded_eq]/[cmp_runtime_eq] lt=[folded_lt]/[cmp_runtime_lt]]

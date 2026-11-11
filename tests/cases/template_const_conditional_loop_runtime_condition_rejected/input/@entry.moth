@@ -6,4 +6,4 @@ render || -> String:
     return value
 ;
 
-#[:template_const_conditional_loop_runtime_condition_rejected]
+[:template_const_conditional_loop_runtime_condition_rejected]

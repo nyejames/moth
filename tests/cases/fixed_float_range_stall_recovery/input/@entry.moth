@@ -86,4 +86,4 @@ half_endpoint = walk_f16(2048, 2048, 1) catch then -1
 double_endpoint = walk_f64(9007199254740992, 9007199254740992, 1) catch then -1
 assert(half_endpoint is 1)
 assert(double_endpoint is 1)
-[: stall recovered=[seen]/[private_seen] code=[code]/[private_code] zero=[zero] code=[zero_code] float_zero=[float_zero] code=[float_zero_code]]
+~[: stall recovered=[seen]/[private_seen] code=[code]/[private_code] zero=[zero] code=[zero_code] float_zero=[float_zero] code=[float_zero_code]]

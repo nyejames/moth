@@ -2,4 +2,4 @@
 @models Label
 @renderers render
 
-[:generic_bound_receiver_call_success [render(Label("ok"))]]
+~[:generic_bound_receiver_call_success [render(Label("ok"))]]

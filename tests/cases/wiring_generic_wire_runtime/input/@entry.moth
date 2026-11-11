@@ -15,4 +15,4 @@ render || -> String:
     return [:generic=[forward(value)]]
 ;
 
-[:wire [render()]]
+~[:wire [render()]]

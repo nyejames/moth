@@ -10,4 +10,4 @@ render_branch_write || -> String:
     return [:collection_set_readback_branch second=[second]]
 ;
 
-[:[render_branch_write()]]
+~[:[render_branch_write()]]

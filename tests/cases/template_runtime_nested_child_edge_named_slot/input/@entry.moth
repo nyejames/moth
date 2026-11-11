@@ -13,4 +13,4 @@ table #= [$html:<table>[row_wrap]</table>[$slot]]
 
 runtime_style = identity("background: blue;")
 
-[:const=[table:[$in row_style:background: red;][:body]]|runtime=[table:[$in row_style:[runtime_style]][:body]]]
+~[:const=[table:[$in row_style:background: red;][:body]]|runtime=[table:[$in row_style:[runtime_style]][:body]]]

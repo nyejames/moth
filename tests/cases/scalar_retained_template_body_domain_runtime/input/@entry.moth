@@ -15,4 +15,4 @@ render_inner || -> String:
 ;
 
 rendered = render_outer()
-[:[rendered]]
+~[:[rendered]]

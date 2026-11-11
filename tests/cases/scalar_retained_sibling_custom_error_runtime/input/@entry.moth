@@ -38,4 +38,4 @@ sibling_probe |fail Bool| -> Bool:
     return outcome
 ;
 
-[:scalar retained sibling custom failure=[sibling_probe(true)] success=[sibling_probe(false)]]
+~[:scalar retained sibling custom failure=[sibling_probe(true)] success=[sibling_probe(false)]]

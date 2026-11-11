@@ -2,4 +2,4 @@
 
 value = show("ignored")
 
-[: [value] ]
+~[: [value] ]

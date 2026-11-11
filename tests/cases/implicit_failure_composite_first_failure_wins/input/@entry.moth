@@ -31,7 +31,7 @@ second = combine(right(~trace, 2), left(~trace, 1)) catch |second_err|:
 ;
 after_second = trace
 
-[: composite first-failure first=[first] code=[first_code] spent=[after_first] second=[second] code2=[second_code] spent2=[after_second]]
+~[: composite first-failure first=[first] code=[first_code] spent=[after_first] second=[second] code2=[second_code] spent2=[after_second]]
 
 -- Distinct failure codes expose which arithmetic ran first, independently
 -- of fallback values. The skipped operand must not increment its trace.
@@ -55,4 +55,4 @@ zero_first = zero_operand(~zero_first_trace, 1, 0) + overflow_operand(~zero_firs
     ~zero_first_code = zero_first_error.code
     then 0
 ;
-[:numeric order overflow-first=[overflow_first_code]/[overflow_first_trace]/[overflow_first] zero-first=[zero_first_code]/[zero_first_trace]/[zero_first]]
+~[:numeric order overflow-first=[overflow_first_code]/[overflow_first_trace]/[overflow_first] zero-first=[zero_first_code]/[zero_first_trace]/[zero_first]]

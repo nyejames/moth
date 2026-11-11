@@ -15,7 +15,7 @@ Statements run in source order.
     ;
 ]
 
-- `--` starts a line comment in code. In template bodies it is text. Use `$note` or `$todo` for discarded template content.
+- `--` starts a line comment in code. In template bodies it is text. Use `$note` for discarded template content.
 - Names never shadow visible values, types, aliases, dependencies or builtins, including in parameters and child scopes.
   Separate scopes may reuse names when neither sees the other.
 - Variables and functions use `snake_case`, types and generic parameters use `PascalCase` and traits use `ALL_CAPS`.
@@ -769,7 +769,7 @@ A source/target pair can conform to only one of the infallible or fallible varia
 ]
 
 `{T}` grows dynamically. `{N T}` has fixed maximum capacity `N`, which is part of its type. `N` is a positive `I32` literal or bare `#I32` constant.
-Length, capacity and indexes use `I32`. Collections have no `[]` indexing or builtin equality.
+Length, capacity and indexes use `I32`. Collections have no [$html:<code>&#91;&#93;</code>] indexing or builtin equality.
 
 Non-empty literals have one element type. Raw numeric literals can receive that type from context.
 A collection can't promote already typed elements to a new storage type. Empty collections require an explicit type at declaration or field default.
@@ -849,7 +849,7 @@ Directives are compiler-defined operations written `$name`, `$name value` or one
 Builders add no directives. The parenthesised call spelling `$name(...)` is rejected.
 Some format templates, while others mark declarations or declare build inputs (see @../directives (Directives)).
 
-`$md` formats Markdown. `$raw` preserves text and whitespace. `$note`/`$todo` discard content, while `$doc` marks documentation.
+`$md` formats Markdown. `$raw` preserves text and whitespace. `$note` alone discards template comments. `$doc` and `$todo` annotate source declarations or statements.
 The compiler provides `$html`, `$css`, `$escape_html` and `$code` (optionally `$code "language"`) under every builder. `$code` highlights literal code.
 Formatters apply to their own templates, and incompatible formatters can't share a head.
 
@@ -1122,9 +1122,13 @@ See @../project-structure (Project structure) and @../packages (Package visibili
 
 ## Directives and project configuration
 
-Template-head directives modify their containing template. Source directives `$export` and `$config` occupy their own lines and attach to one
-eligible declaration or dependency clause. Comments may intervene, but a blank physical line breaks attachment. Both take no operands.
-Other compiler-owned directives may accept a bare compile-time operand, never a function-style argument list.
+Template-head items, including directives and expressions, always use commas. Source directives may share one line or occupy consecutive lines
+without commas. They all attach independently to the same following-line construct, regardless of directive order. Repeating a directive name
+on one target is invalid. Comments may intervene, but a blank line breaks attachment and no directive skips an unsuitable target.
+`$export` publishes eligible declarations or direct-selection re-exports in facades. `$config` marks a typed build input. Both take no operand.
+`$doc` documents a declaration and `$todo` annotates a declaration or executable statement. Both require one compile-time String operand,
+usually a template; `$doc` applies no implicit Markdown formatting. Source directives stop at the next outer source directive token, not at
+nested template-head directives. No directive uses a function-style argument list.
 
 An authored project-root `config.moth` contains compile-time values and configuration. It uses ordinary named records for the project and the selected
 builder. Source imports, functions and runtime work belong in ordinary modules:
@@ -1210,17 +1214,17 @@ static-only or metadata-only entry still counts. `@mod.moth` and `@package.moth`
 For an HTML page:
 
 [codeblock, $code "moth":
-    #[$in title:Moth]
-    #[$in description:A language for creating reliable software]
-    #[$in stylesheets:[@styles/site.css]]
-    #[$in head:<meta name="theme-color" content="#ffffff">]
+    [$in title:Moth]
+    [$in description:A language for creating reliable software]
+    [$in stylesheets:[@styles/site.css]]
+    [$in head:<meta name="theme-color" content="#ffffff">]
 
-    #[$md:
+    [$md:
         # Welcome
     ]
 
     name = "Moth"
-    [: Hello, [name].]
+    ~[: Hello, [name].]
 ]
 
 Direct top-level const `$in` inserts route to builder-registered destinations. The HTML builder registers `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and `head`.
@@ -1228,7 +1232,9 @@ Ordinary const and runtime fragments render into the body. Scalar metadata contr
 Only direct root inserts route. Nested, stored and aliased inserts remain template composition. Runtime top-level named builder inserts are not supported. Old `page_*` names are ordinary constants with no implicit metadata effect.
 Helpers, `@mod.moth` and `@package.moth` facades and `config.moth` cannot supply entry contributions.
 
-Direct constant fragments become static HTML. Runtime work runs once at page startup, and runtime fragments publish only after successful completion.
+Bare direct [$html:<code>&#91;...&#93;</code>] is const-required and becomes static HTML; [$html:<code>~&#91;...&#93;</code>] is a runtime fragment even when foldable. Runtime-dependent bare
+entry fragments are errors, not runtime fallbacks. The former direct [$html:<code>#&#91;...&#93;</code>] spelling is removed. Ordinary assigned or nested templates keep
+their own const/runtime rules. Runtime work runs once at page startup and publishes runtime fragments only after success.
 An error leaves static fragments in place but doesn't roll back earlier side effects.
 The release page shows a generic failure notice, not application error text.
 

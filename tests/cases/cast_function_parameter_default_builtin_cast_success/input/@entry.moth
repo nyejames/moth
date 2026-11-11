@@ -4,4 +4,4 @@ draw |x F64 = cast 42| -> F64:
 
 value = draw()
 
-[: function parameter default cast: [value]]
+~[: function parameter default cast: [value]]

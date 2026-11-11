@@ -1,4 +1,4 @@
 @extensions
 
 value = 7
-[:unreachable [value.label()]]
+~[:unreachable [value.label()]]

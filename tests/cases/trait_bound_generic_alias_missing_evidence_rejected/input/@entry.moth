@@ -14,4 +14,4 @@ PlainBox as Box of Plain
 
 value PlainBox = Box(Plain("no evidence"))
 
-[:unreachable [value.value.text]]
+~[:unreachable [value.value.text]]

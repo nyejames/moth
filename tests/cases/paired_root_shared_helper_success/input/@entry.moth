@@ -3,4 +3,4 @@
 label #= "normal"
 message = Message("normal-message")
 
-[: [value] [message.label()] [label]]
+~[: [value] [message.label()] [label]]

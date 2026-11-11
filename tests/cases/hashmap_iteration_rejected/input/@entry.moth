@@ -4,4 +4,4 @@ loop scores |entry|:
     io.line([: [entry]])
 ;
 
-[:test]
+~[:test]

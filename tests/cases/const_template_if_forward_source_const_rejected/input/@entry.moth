@@ -1,4 +1,4 @@
-#[if show_banner:
+[if show_banner:
     Forward source const visible
 ]
 

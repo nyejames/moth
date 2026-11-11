@@ -4,4 +4,4 @@ read_values |values {U64}| -> I32:
 
 values ~= {}
 count = read_values(values)
-[:[count]]
+~[:[count]]

@@ -60,4 +60,4 @@ bounds_total = sum_fallible_bounds() catch then -1
 step_total = sum_fallible_step() catch then -1
 unreachable_total = sum_unreachable_loop() catch then -1
 
-[:loop_fallible_iterable_and_bounds iterable=[iterable_total] bounds=[bounds_total] step=[step_total] unreachable=[unreachable_total]]
+~[:loop_fallible_iterable_and_bounds iterable=[iterable_total] bounds=[bounds_total] step=[step_total] unreachable=[unreachable_total]]

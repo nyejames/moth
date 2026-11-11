@@ -6,4 +6,4 @@ read_decimal |value Dec2| -> String:
 ;
 forwarded = identity(1.25)
 text = read_decimal(forwarded)
-[:[text]]
+~[:[text]]

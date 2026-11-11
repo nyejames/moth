@@ -10,4 +10,4 @@ maybe Dec2? = none
 echoed = echo_optional(maybe)
 none_result = echoed is none
 
-[: wasm reachable optional Dec none=[none_result]]
+~[: wasm reachable optional Dec none=[none_result]]

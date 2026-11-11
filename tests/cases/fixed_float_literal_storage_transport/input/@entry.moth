@@ -37,4 +37,4 @@ single_zero_wide F64 = cast stored_single_zero
 half_zero_sign = atan2(half_zero_wide, -1.0) < 0.0
 single_zero_sign = atan2(single_zero_wide, -1.0) < 0.0
 double_zero_sign = atan2(stored_double_zero, -1.0) < 0.0
-[:literal transport midpoint=[stored_midpoint] above=[stored_above] finite=[stored_limit] subnormals=[stored_half]/[stored_single]/[stored_double] signs=[half_zero_sign]/[single_zero_sign]/[double_zero_sign]]
+~[:literal transport midpoint=[stored_midpoint] above=[stored_above] finite=[stored_limit] subnormals=[stored_half]/[stored_single]/[stored_double] signs=[half_zero_sign]/[single_zero_sign]/[double_zero_sign]]

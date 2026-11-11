@@ -5,4 +5,4 @@ from_default |value F64 = large_integer| -> F64:
 ;
 
 rendered_default String = cast from_default()
-[:int64-float64-default=[rendered_default]]
+~[:int64-float64-default=[rendered_default]]

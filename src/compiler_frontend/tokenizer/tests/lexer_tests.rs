@@ -1740,7 +1740,7 @@ fn rejects_unknown_source_directive_with_source_suggestions() {
     );
     assert_eq!(
         string_table.resolve(facts.supported_directives),
-        "'$export', '$config'",
+        "'$export', '$config', '$doc', '$todo'",
         "source suggestions must include source modifiers but not template-only directives"
     );
 }
@@ -2152,42 +2152,9 @@ fn balanced_directive_uses_general_balanced_mode() {
 }
 
 #[test]
-fn note_and_todo_template_bodies_are_discarded_until_balanced_close() {
-    for directive in ["note", "todo"] {
-        let source = format!(
-            "[${directive}:\n[this [body] has [nested [brackets]] and should be discarded]\n]"
-        );
-        let (file_tokens, string_table) = tokenize_source(&source);
-        let tokens = file_tokens.tokens.as_ref();
-
-        let template_heads = token_refs(tokens)
-            .filter(|token| token.tag() == TokenTag::TEMPLATE_HEAD)
-            .count();
-        let template_closes = token_refs(tokens)
-            .filter(|token| token.tag() == TokenTag::TEMPLATE_CLOSE)
-            .count();
-
-        assert_eq!(template_heads, 1);
-        assert_eq!(template_closes, 1);
-        assert!(token_refs(tokens).any(|token| {
-            token.tag() == TokenTag::STYLE_DIRECTIVE
-                && token_string_is(token, &string_table, directive)
-        }));
-        assert!(
-            !token_refs(tokens).any(|token| {
-                token.tag() == TokenTag::STRING_SLICE_LITERAL
-                    && token
-                        .string_id()
-                        .is_some_and(|id| string_table.resolve(id).contains("discarded"))
-            }),
-            "expected ${directive} body text to be discarded during tokenization"
-        );
-    }
-}
-
-#[test]
-fn doc_template_body_keeps_nested_templates_as_template_tokens() {
-    let (file_tokens, string_table) = tokenize_source("[$doc:\n[: child]\n]");
+fn note_template_bodies_are_discarded_until_balanced_close() {
+    let source = "[$note:\n[this [body] has [nested [brackets]] and should be discarded]\n]";
+    let (file_tokens, string_table) = tokenize_source(source);
     let tokens = file_tokens.tokens.as_ref();
 
     let template_heads = token_refs(tokens)
@@ -2197,14 +2164,20 @@ fn doc_template_body_keeps_nested_templates_as_template_tokens() {
         .filter(|token| token.tag() == TokenTag::TEMPLATE_CLOSE)
         .count();
 
-    assert_eq!(
-        template_heads, 2,
-        "expected doc body nested template to tokenize as a child template"
-    );
-    assert_eq!(template_closes, 2);
+    assert_eq!(template_heads, 1);
+    assert_eq!(template_closes, 1);
     assert!(token_refs(tokens).any(|token| {
-        token.tag() == TokenTag::STYLE_DIRECTIVE && token_string_is(token, &string_table, "doc")
+        token.tag() == TokenTag::STYLE_DIRECTIVE && token_string_is(token, &string_table, "note")
     }));
+    assert!(
+        !token_refs(tokens).any(|token| {
+            token.tag() == TokenTag::STRING_SLICE_LITERAL
+                && token
+                    .string_id()
+                    .is_some_and(|id| string_table.resolve(id).contains("discarded"))
+        }),
+        "expected $note body text to be discarded during tokenization"
+    );
 }
 
 #[test]

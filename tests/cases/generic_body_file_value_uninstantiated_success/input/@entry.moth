@@ -2,4 +2,4 @@ draw type T |name T| -> String:
     return @vendor/drawing.js
 ;
 
-[: no call site]
+~[: no call site]

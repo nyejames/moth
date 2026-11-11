@@ -39,5 +39,5 @@ u64_assignment_handler_if |fail Bool, zero Bool| -> U64:
     return total
 ;
 
-[:scalar nested catch return failure=[u64_return_handler_if(true, true)]/[u64_return_handler_if(true, false)] success=[u64_return_handler_if(false, true)]]
-[:scalar nested catch assignment failure=[u64_assignment_handler_if(true, true)]/[u64_assignment_handler_if(true, false)] success=[u64_assignment_handler_if(false, true)]]
+~[:scalar nested catch return failure=[u64_return_handler_if(true, true)]/[u64_return_handler_if(true, false)] success=[u64_return_handler_if(false, true)]]
+~[:scalar nested catch assignment failure=[u64_assignment_handler_if(true, true)]/[u64_assignment_handler_if(true, false)] success=[u64_assignment_handler_if(false, true)]]

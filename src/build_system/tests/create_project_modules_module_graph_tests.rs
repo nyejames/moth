@@ -101,7 +101,7 @@ fn same_module_dependency_creates_no_project_graph_edge() {
     )
     .expect("should write config");
     // The single entry module depends on a sibling file inside its own module root.
-    fs::write(src.join("@entry.moth"), "@helper\n#[:page]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@helper\n[:page]\n").expect("should write entry");
     fs::write(src.join("helper.moth"), "value #= 1\n").expect("should write helper");
 
     let mut config = Config::new(root.clone());
@@ -183,8 +183,8 @@ fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
     )
     .expect("should write config");
     // Two independent entry modules with no cross-module dependencies.
-    fs::write(module_a.join("@entry.moth"), "#[:pageA]\n").expect("should write pageA");
-    fs::write(module_b.join("@entry.moth"), "#[:pageB]\n").expect("should write pageB");
+    fs::write(module_a.join("@entry.moth"), "[:pageA]\n").expect("should write pageA");
+    fs::write(module_b.join("@entry.moth"), "[:pageB]\n").expect("should write pageB");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -269,7 +269,7 @@ fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
     // idempotent.
     fs::write(
         module_a.join("@entry.moth"),
-        "@module_b\n@module_b\n#[:pageA]\n",
+        "@module_b\n@module_b\n[:pageA]\n",
     )
     .expect("should write pageA");
     fs::write(module_b.join("@mod.moth"), "$export\nb #= 1\n").expect("should write module_b root");
@@ -557,7 +557,7 @@ fn canonical_module_job_excludes_cross_module_donor_sources() {
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "@z_local\n@a_provider value\n#[:entry]\n",
+        "@z_local\n@a_provider value\n[:entry]\n",
     )
     .expect("should write consumer root");
     fs::write(src.join("z_local.moth"), "local #= 1\n").expect("should write local source");
@@ -614,7 +614,7 @@ fn indexed_namespace_rejects_direct_entry_root_dependency() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@@page symbol\n#[:page]\n")
+    fs::write(src.join("@entry.moth"), "@@page symbol\n[:page]\n")
         .expect("should write entry root");
 
     let mut config = Config::new(root.clone());
@@ -647,7 +647,7 @@ fn indexed_namespace_rejects_direct_nested_child_root_dependency() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@child/@home symbol\n#[:page]\n")
+    fs::write(src.join("@entry.moth"), "@child/@home symbol\n[:page]\n")
         .expect("should write parent root");
     fs::write(child.join("@entry.moth"), "$export\nsymbol #= 1\n")
         .expect("should write child root");
@@ -746,7 +746,7 @@ fn qualified_occurrence_queues_same_module_helper_source() {
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "message = @helper answer\n#[:entry]\n",
+        "message = @helper answer\n[:entry]\n",
     )
     .expect("should write entry");
     fs::write(src.join("helper.moth"), "answer #= 42\n").expect("should write helper");
@@ -820,7 +820,7 @@ fn qualified_occurrence_in_moth_template_queues_same_module_helper_source() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "title #= @intro.mtf\n#[:entry]\n")
+    fs::write(src.join("@entry.moth"), "title #= @intro.mtf\n[:entry]\n")
         .expect("should write entry");
     // The `.mtf` body selects a private same-module helper constant from a template head.
     fs::write(src.join("intro.mtf"), "# [@settings site_name]\n").expect("should write template");
@@ -907,7 +907,7 @@ fn qualified_occurrence_in_moth_source_queues_moth_template_content_source() {
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "message = @intro content\n#[:entry]\n",
+        "message = @intro content\n[:entry]\n",
     )
     .expect("should write entry");
     fs::write(src.join("intro.mtf"), "hello\n").expect("should write template");
@@ -987,7 +987,7 @@ fn qualified_occurrence_creates_one_cross_module_graph_edge() {
     // Replace the authored namespace clause with an expression-qualified occurrence.
     fs::write(
         module_a_root.join("@entry.moth"),
-        "value = @module_b b\n#[:pageA]\n",
+        "value = @module_b b\n[:pageA]\n",
     )
     .expect("should write pageA");
 
@@ -1051,7 +1051,7 @@ fn duplicate_qualified_occurrences_share_one_provider_edge_and_preparation() {
         write_cross_module_project(&root);
     fs::write(
         module_a_root.join("@entry.moth"),
-        "first = @module_b b\nsecond = @module_b b\n#[:pageA]\n",
+        "first = @module_b b\nsecond = @module_b b\n[:pageA]\n",
     )
     .expect("should write pageA");
 
@@ -1173,7 +1173,7 @@ fn qualified_occurrence_in_unused_function_body_reaches_provider() {
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "unused || -> I32:\n    value = @helper answer\n    return value\n;\n#[:entry]\n",
+        "unused || -> I32:\n    value = @helper answer\n    return value\n;\n[:entry]\n",
     )
     .expect("should write entry");
     fs::write(src.join("helper.moth"), "answer #= 42\n").expect("should write helper");
@@ -1237,7 +1237,7 @@ fn facade_content_constant_qualified_reference_orders_provider_first() {
     // The parent consumes the child facade's re-exported synthetic content constant.
     fs::write(
         module_a.join("@entry.moth"),
-        "page = @module_b intro\n#[:pageA]\n",
+        "page = @module_b intro\n[:pageA]\n",
     )
     .expect("should write pageA");
     // The child facade re-exports its own `.mtf` content under a public name.

@@ -154,4 +154,4 @@ loop borrow_i < 5:
 borrow_len = borrow_items.length()
 borrow_last = borrow_items.get(1)!
 
-[:<p>[sum] [stride_sum] [stride_seen] [true_count] [zero_catch_count] [value_if_sum] [value_if_i] [recovered] [catch_i] [catch_continue_sum] [catch_continue_i] [match_sum] [match_i] [early_break_count] [early_continue_sum] [borrow_len] [borrow_last]</p>]
+~[:<p>[sum] [stride_sum] [stride_seen] [true_count] [zero_catch_count] [value_if_sum] [value_if_i] [recovered] [catch_i] [catch_continue_sum] [catch_continue_i] [match_sum] [match_i] [early_break_count] [early_continue_sum] [borrow_len] [borrow_last]</p>]

@@ -15,4 +15,4 @@ render_strict_contract || -> String:
     return [:strict_contract first=[first] removed=[removed] len=[len]]
 ;
 
-[:[render_strict_contract()]]
+~[:[render_strict_contract()]]

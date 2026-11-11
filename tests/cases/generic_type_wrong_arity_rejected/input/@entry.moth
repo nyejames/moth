@@ -4,4 +4,4 @@ Box type T = |
 
 StringIntBox as Box of String, I32
 
-#[: wrong arity]
+[: wrong arity]

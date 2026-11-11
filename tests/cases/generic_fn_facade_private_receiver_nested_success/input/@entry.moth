@@ -12,4 +12,4 @@ Label must DISPLAY_TEXT
 
 value = make(Label("private generic receiver evidence"))
 
-[: [value]]
+~[: [value]]

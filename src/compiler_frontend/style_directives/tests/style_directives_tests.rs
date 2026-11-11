@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::style_directives::specs::SourceModifierTarget;
 
 #[test]
 fn supported_directives_for_diagnostic_uses_stable_registry_order() {
@@ -6,7 +7,7 @@ fn supported_directives_for_diagnostic_uses_stable_registry_order() {
 
     assert_eq!(
         registry.supported_directives_for_diagnostic(DirectiveOccurrence::TemplateHead),
-        "'$before', '$after', '$fresh', '$slot', '$in', '$note', '$todo', '$doc', '$raw', '$md', '$html', '$css', '$escape_html', '$code'"
+        "'$before', '$after', '$fresh', '$slot', '$in', '$note', '$raw', '$md', '$html', '$css', '$escape_html', '$code'"
     );
 }
 
@@ -16,7 +17,7 @@ fn diagnostic_suggestions_are_limited_to_the_occurrence() {
 
     assert_eq!(
         registry.supported_directives_for_diagnostic(DirectiveOccurrence::Source),
-        "'$export', '$config'",
+        "'$export', '$config', '$doc', '$todo'",
         "a source position must not suggest template-only directives"
     );
     assert!(
@@ -44,7 +45,10 @@ fn export_and_config_are_source_modifiers() {
     assert!(!export.contexts.allows_template_head());
     assert!(matches!(
         export.kind,
-        StyleDirectiveKind::SourceModifier(SourceModifierTarget::ExportablePublicApiItem)
+        StyleDirectiveKind::SourceModifier {
+            target: SourceModifierTarget::ExportablePublicApiItem,
+            operand: SourceModifierOperand::None,
+        }
     ));
 
     let config = built_ins
@@ -54,7 +58,10 @@ fn export_and_config_are_source_modifiers() {
     assert!(!config.contexts.allows_template_head());
     assert!(matches!(
         config.kind,
-        StyleDirectiveKind::SourceModifier(SourceModifierTarget::ExplicitTypedCompileTimeBinding)
+        StyleDirectiveKind::SourceModifier {
+            target: SourceModifierTarget::ExplicitTypedCompileTimeBinding,
+            operand: SourceModifierOperand::None,
+        }
     ));
 
     for template_directive in [
@@ -64,8 +71,6 @@ fn export_and_config_are_source_modifiers() {
         "slot",
         "in",
         "note",
-        "todo",
-        "doc",
         "raw",
         "md",
         "html",
@@ -91,13 +96,24 @@ fn export_and_config_are_source_modifiers() {
 fn frontend_built_ins_have_expected_classification() {
     let built_ins = StyleDirectiveRegistry::built_ins();
 
-    for required in [
-        "before", "after", "slot", "in", "fresh", "doc", "todo", "note", "raw",
-    ] {
+    for required in ["before", "after", "slot", "in", "fresh", "note", "raw"] {
         let directive = built_ins
             .find(required)
             .unwrap_or_else(|| panic!("missing core built-in directive '{required}'"));
         assert!(matches!(directive.kind, StyleDirectiveKind::Core(_)));
+    }
+
+    for source_directive in ["doc", "todo"] {
+        let directive = built_ins
+            .find(source_directive)
+            .unwrap_or_else(|| panic!("missing source directive '${source_directive}'"));
+        assert!(matches!(
+            directive.kind,
+            StyleDirectiveKind::SourceModifier {
+                operand: SourceModifierOperand::RequiredSingleString,
+                ..
+            }
+        ));
     }
 
     for handler_directive in ["md", "html", "css", "escape_html", "code"] {
@@ -139,40 +155,23 @@ fn frontend_built_in_head_compatibility_profiles_match_contract() {
         )
     );
 
-    for (comment_directive, conflict_reason) in [
-        (
-            "note",
-            TemplateHeadConflictReason::DiscardedCommentDirectiveMustBeOnlyMeaningfulItem,
-        ),
-        (
-            "todo",
-            TemplateHeadConflictReason::DiscardedCommentDirectiveMustBeOnlyMeaningfulItem,
-        ),
-        (
-            "doc",
-            TemplateHeadConflictReason::DocumentationDirectiveMustBeOnlyMeaningfulItem,
-        ),
-    ] {
-        let directive = built_ins
-            .find(comment_directive)
-            .unwrap_or_else(|| panic!("missing '${comment_directive}' directive"));
-        assert_eq!(
-            directive.head_compatibility.presence_tags,
-            TemplateHeadTag::MEANINGFUL_ITEM | TemplateHeadTag::COMMENT_DIRECTIVE
-        );
-        assert_eq!(
-            directive.head_compatibility.required_absent_tags,
-            TemplateHeadTag::MEANINGFUL_ITEM
-        );
-        assert_eq!(
-            directive.head_compatibility.blocks_future_tags,
-            TemplateHeadTag::MEANINGFUL_ITEM
-        );
-        assert_eq!(
-            directive.head_compatibility.conflict_reason,
-            Some(conflict_reason)
-        );
-    }
+    let note = built_ins.find("note").expect("missing '$note' directive");
+    assert_eq!(
+        note.head_compatibility.presence_tags,
+        TemplateHeadTag::MEANINGFUL_ITEM | TemplateHeadTag::COMMENT_DIRECTIVE
+    );
+    assert_eq!(
+        note.head_compatibility.required_absent_tags,
+        TemplateHeadTag::MEANINGFUL_ITEM
+    );
+    assert_eq!(
+        note.head_compatibility.blocks_future_tags,
+        TemplateHeadTag::MEANINGFUL_ITEM
+    );
+    assert_eq!(
+        note.head_compatibility.conflict_reason,
+        Some(TemplateHeadConflictReason::DiscardedCommentDirectiveMustBeOnlyMeaningfulItem)
+    );
 
     for formatter_directive in ["md", "raw", "html", "css", "escape_html", "code"] {
         let directive = built_ins

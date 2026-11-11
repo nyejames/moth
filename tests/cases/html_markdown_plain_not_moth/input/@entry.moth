@@ -2,4 +2,4 @@
 
 intro_content #String = intro.content
 
-[:[intro_content]]
+~[:[intro_content]]

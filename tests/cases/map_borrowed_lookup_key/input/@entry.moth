@@ -19,4 +19,4 @@ removed = ~scores.remove(key) catch:
 length_after = scores.length
 -- The same key binding remains usable after all three operations.
 label = key
-[:[captured] removed=[removed] length_after=[length_after] label=[label]]
+~[:[captured] removed=[removed] length_after=[length_after] label=[label]]

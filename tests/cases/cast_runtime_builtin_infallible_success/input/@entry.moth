@@ -48,4 +48,4 @@ code = as_int_char('Z')
 err = as_error("boom")
 msg = as_string_error(err)
 
-[: runtime infallible casts: [ratio_text]|[count]|[pi]|[flag]|[letter]|[code]|[err.message]|[msg]]
+~[: runtime infallible casts: [ratio_text]|[count]|[pi]|[flag]|[letter]|[code]|[err.message]|[msg]]

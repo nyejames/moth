@@ -16,9 +16,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::{
 };
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::style_directives::{
-    DOC_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME,
-};
+use crate::compiler_frontend::style_directives::{INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRangeError, TokenRef, TokenTag,
@@ -687,107 +685,33 @@ impl TemplateBalance {
     }
 }
 
-/// Tracks template nesting for header-stage scans, where a `$doc` body keeps its brackets literal.
+/// Tracks template nesting for header-stage scans.
 ///
-/// WHAT: balances `TEMPLATE_HEAD`/`TEMPLATE_CLOSE` tokens like [`TemplateBalance`], except that
-/// while a `$doc` body is open a `[` opens a literal bracket and a `]` closes one. Only a `]` with
-/// no literal bracket left closes the documentation template.
-/// WHY: the AST body parser suppresses child templates in `$doc` bodies. Header-stage scanners run
-/// before it, so they must apply the same rule or they report a literal bracket as the innermost
-/// unclosed template.
+/// WHAT: balances `TEMPLATE_HEAD`/`TEMPLATE_CLOSE` tokens.
+/// WHY: header-stage scanners run before AST body parsing and only need the token-level balance
+/// that tokenization guarantees. Whether a balanced bracket group later becomes literal text
+/// under a suppressing style is a body-parser decision, not a header-scan exception.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TemplateNestingTracker {
-    open_templates: usize,
-    /// Literal bracket depth of the active `$doc` body, once its head has opened.
-    doc_literal_brackets: Option<usize>,
+    balance: TemplateBalance,
 }
 
 impl TemplateNestingTracker {
-    /// Starts a scan whose authored opening token is `opening`.
-    pub(crate) fn with_opening_template(
-        source: &SourceTokens,
-        opening: TokenIndex,
-        string_table: &StringTable,
-    ) -> Self {
+    /// Starts a scan whose authored opening token is already consumed.
+    pub(crate) fn with_opening_template() -> Self {
         Self {
-            open_templates: 1,
-            doc_literal_brackets: template_head_opens_doc_body(source, opening, string_table)
-                .then_some(0),
+            balance: TemplateBalance::with_opening_template(),
         }
     }
 
     pub(crate) fn has_unclosed_templates(self) -> bool {
-        self.open_templates > 0
+        self.balance.has_unclosed_templates()
     }
 
-    /// Steps over one token, naming the directive that follows a new template head.
-    pub(crate) fn step_token(
-        &mut self,
-        source: &SourceTokens,
-        token: TokenRef<'_>,
-        string_table: &StringTable,
-    ) {
-        match token.tag() {
-            TokenTag::TEMPLATE_HEAD => {
-                if let Some(literal_brackets) = &mut self.doc_literal_brackets {
-                    *literal_brackets = literal_brackets.saturating_add(1);
-                    return;
-                }
-                self.open_templates = self.open_templates.saturating_add(1);
-                if template_head_opens_doc_body(source, token.index(), string_table) {
-                    self.doc_literal_brackets = Some(0);
-                }
-            }
-            TokenTag::TEMPLATE_CLOSE => match self.doc_literal_brackets {
-                Some(0) => {
-                    self.doc_literal_brackets = None;
-                    self.open_templates = self.open_templates.saturating_sub(1);
-                }
-                Some(literal_brackets) => {
-                    self.doc_literal_brackets = Some(literal_brackets - 1);
-                }
-                None => {
-                    self.open_templates = self.open_templates.saturating_sub(1);
-                }
-            },
-            _ => {}
-        }
+    /// Steps over one token tag.
+    pub(crate) fn step_tag(&mut self, tag: TokenTag) {
+        self.balance.step_tag(tag);
     }
-}
-
-/// Whether the template head at `head` opens a core `$doc` body.
-///
-/// `$doc` takes no directive arguments, so its body begins at the token after the directive. A
-/// malformed head with other tokens keeps the ordinary nesting rules and reports its own error
-/// once the AST parses it.
-fn template_head_opens_doc_body(
-    source: &SourceTokens,
-    head: TokenIndex,
-    string_table: &StringTable,
-) -> bool {
-    let Some(directive_index) = TokenIndex::try_from_index(head.index().saturating_add(1)) else {
-        return false;
-    };
-    let Ok(directive) = source.token(directive_index) else {
-        return false;
-    };
-    if directive.tag() != TokenTag::STYLE_DIRECTIVE {
-        return false;
-    }
-    let Some(name) = directive.string_id() else {
-        return false;
-    };
-    if string_table.resolve(name) != DOC_DIRECTIVE_NAME {
-        return false;
-    }
-
-    let Some(body_index) = TokenIndex::try_from_index(directive_index.index().saturating_add(1))
-    else {
-        return false;
-    };
-    source
-        .token(body_index)
-        .is_ok_and(|token| token.tag() == TokenTag::START_TEMPLATE_BODY)
 }
 
 /// One still-open delimiter found by the EOF scan.
@@ -822,17 +746,15 @@ enum UnclosedDelimiterKind {
 /// WHAT: forward-scans from `start` to `eof`, balancing templates, parentheses and braces
 /// independently. The unmatched opener closest to `eof` has no matching close to its right, so it
 /// is the innermost unmatched opener.
-/// WHY: the scan must know that a `$doc` body's brackets are literal text. A backward pass over
-/// bare tags cannot tell those brackets from authored template heads, so it would label a bracket
-/// inside documentation instead of the documentation template. The scan only runs on the EOF
-/// diagnostic path.
+/// WHY: template tokens carry their own open/close structure, so a reverse pass over authored
+/// template heads identifies the innermost unmatched opener without reconstructing literal-body
+/// rules. The scan only runs on the EOF diagnostic path.
 pub(crate) fn innermost_unclosed_delimiter(
     source: &SourceTokens,
     start: TokenIndex,
     eof: TokenIndex,
-    string_table: &StringTable,
 ) -> Option<UnclosedDelimiter> {
-    walk_to_unclosed_delimiter(source, start, eof, true, string_table)
+    walk_to_unclosed_delimiter(source, start, eof, true)
 }
 
 /// The innermost unclosed template opener, for scanners that only diagnose missing `]`.
@@ -843,9 +765,8 @@ pub(crate) fn innermost_unclosed_template_opening(
     source: &SourceTokens,
     start: TokenIndex,
     eof: TokenIndex,
-    string_table: &StringTable,
 ) -> Option<SourceSpan> {
-    match walk_to_unclosed_delimiter(source, start, eof, false, string_table) {
+    match walk_to_unclosed_delimiter(source, start, eof, false) {
         Some(UnclosedDelimiter::Template(span)) => Some(span),
         Some(UnclosedDelimiter::Parenthesis(_) | UnclosedDelimiter::Collection(_)) | None => None,
     }
@@ -865,7 +786,7 @@ pub(crate) fn unclosed_delimiter_eof_diagnostic(
     fallback_expected_delimiter: Option<&'static str>,
     string_table: &mut StringTable,
 ) -> DiagnosticDraft {
-    match innermost_unclosed_delimiter(source, start, eof, string_table) {
+    match innermost_unclosed_delimiter(source, start, eof) {
         Some(UnclosedDelimiter::Template(opening)) => {
             templates::missing_closing_bracket(eof_span, Some(opening))
         }
@@ -885,10 +806,8 @@ fn walk_to_unclosed_delimiter(
     start: TokenIndex,
     eof: TokenIndex,
     track_groups: bool,
-    string_table: &StringTable,
 ) -> Option<UnclosedDelimiter> {
     let mut templates = Vec::new();
-    let mut doc_literal_brackets = None;
     let mut parentheses = Vec::new();
     let mut collections = Vec::new();
 
@@ -897,26 +816,10 @@ fn walk_to_unclosed_delimiter(
         let token_index = TokenIndex::try_from_index(index)?;
         let token = source.token(token_index).ok()?;
         match token.tag() {
-            TokenTag::TEMPLATE_HEAD => {
-                if let Some(literal_brackets) = &mut doc_literal_brackets {
-                    *literal_brackets += 1;
-                } else {
-                    templates.push(token_index);
-                    if template_head_opens_doc_body(source, token_index, string_table) {
-                        doc_literal_brackets = Some(0);
-                    }
-                }
+            TokenTag::TEMPLATE_HEAD => templates.push(token_index),
+            TokenTag::TEMPLATE_CLOSE => {
+                templates.pop();
             }
-            TokenTag::TEMPLATE_CLOSE => match doc_literal_brackets {
-                Some(0) => {
-                    doc_literal_brackets = None;
-                    templates.pop();
-                }
-                Some(literal_brackets) => doc_literal_brackets = Some(literal_brackets - 1),
-                None => {
-                    templates.pop();
-                }
-            },
             _ if !track_groups => {}
             TokenTag::OPEN_PARENTHESIS => parentheses.push(token_index),
             TokenTag::CLOSE_PARENTHESIS => {
@@ -1115,7 +1018,6 @@ pub(crate) fn collect_declaration_initializer_range(
                             source_tokens,
                             start,
                             current_ref.index(),
-                            string_table,
                         ),
                     ),
                 ));
@@ -1397,7 +1299,6 @@ pub(crate) fn has_top_level_comma_before_statement_end(token_stream: &AstCursor)
 pub(crate) fn consume_balanced_template_region_from_source<E>(
     cursor: &mut TokenCursor<'_>,
     opening: TokenRef<'_>,
-    string_table: &StringTable,
     mut on_token: impl FnMut(TokenRef<'_>),
     on_eof_error: impl Fn(SourceSpan, SourceSpan) -> E,
     on_infrastructure_error: impl Fn(InfrastructureFailure) -> E,
@@ -1435,8 +1336,7 @@ pub(crate) fn consume_balanced_template_region_from_source<E>(
         )));
     }
 
-    let mut balance =
-        TemplateNestingTracker::with_opening_template(source_tokens, opening.index(), string_table);
+    let mut balance = TemplateNestingTracker::with_opening_template();
     while balance.has_unclosed_templates() {
         let token = cursor.current().ok_or_else(|| {
             on_infrastructure_error(InfrastructureFailure::internal(
@@ -1453,16 +1353,11 @@ pub(crate) fn consume_balanced_template_region_from_source<E>(
         if token.is_eof() {
             return Err(on_eof_error(
                 token.source_span(),
-                innermost_unclosed_template_opening(
-                    source_tokens,
-                    opening.index(),
-                    token.index(),
-                    string_table,
-                )
-                .unwrap_or_else(|| opening.source_span()),
+                innermost_unclosed_template_opening(source_tokens, opening.index(), token.index())
+                    .unwrap_or_else(|| opening.source_span()),
             ));
         }
-        balance.step_token(source_tokens, token, string_table);
+        balance.step_tag(token.tag());
         on_token(token);
         let _ = cursor.advance();
     }

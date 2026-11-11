@@ -32,4 +32,4 @@ render_f32_mixed_collections || -> String:
     return [:f32_mixed forward_above=[forward_above] reverse_above=[reverse_above] forward_zero=[forward_zero] simple_forward=[simple_forward_first],[simple_forward_second] simple_reverse=[simple_reverse_first],[simple_reverse_second]]
 ;
 
-[:[render_f32_mixed_collections()]]
+~[:[render_f32_mixed_collections()]]

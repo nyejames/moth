@@ -11,4 +11,4 @@ IntStringPair as Pair of I32, String
 
 value Box of IntStringPair = Box(Pair(1, "two"))
 
-[: generic alias workaround]
+~[: generic alias workaround]

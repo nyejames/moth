@@ -1,15 +1,15 @@
 @styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
 @wasm-optimisation content as optimisation_content
 
-#[$in title:["Wasm optimisation"]]
-#[$in description:["Optimisation ownership across Moth, WebAssembly and native execution."]]
-#[$in head:[theme_head]]
+[$in title:["Wasm optimisation"]]
+[$in description:["Optimisation ownership across Moth, WebAssembly and native execution."]]
+[$in head:[theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
 
-#[section, $md:
+[section, $md:
     # Wasm optimisation
 
     Moth and its execution environment see different information about a
@@ -17,4 +17,4 @@ init_docs_sidebar()!
     evidence and how to measure the result without duplicating compiler work.
 ]
 
-#[section, optimisation_content]
+[section, optimisation_content]

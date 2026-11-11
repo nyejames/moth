@@ -22,4 +22,4 @@ three |left I32, right I32| -> I32, DomainError!:
 
 custom_value = three(50000, 50000) catch then 0
 
-[: folded catch inline=[inline_value] block=[block_value] bound=[bound_value] custom=[custom_value] handler-runs=[handler_runs]]
+~[: folded catch inline=[inline_value] block=[block_value] bound=[bound_value] custom=[custom_value] handler-runs=[handler_runs]]

@@ -6,4 +6,4 @@ capacity #I32 = 2
 Names as {capacity String}
 names Names = {"a", "b"}
 
-[: [names.length()]]
+~[: [names.length()]]

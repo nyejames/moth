@@ -1,4 +1,4 @@
 @helpers forward
 
 value = forward(42)
-[: [value] ]
+~[: [value] ]

@@ -3,4 +3,4 @@
 
 bad {U32 = String} = {7 = "a", 7 = "b"}
 spelled {U32 = String} = {1_000 = "a", 1000 = "b"}
-[:test]
+~[:test]

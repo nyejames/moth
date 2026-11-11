@@ -24,4 +24,4 @@ annotated U64 = copy value_4
 annotated_alias = copy annotated
 received_annotation = receive_u64(annotated_alias)
 
-[:chain=[received_1]/[received_2]/[received_3]/[received_4]/[received_5]/[received_6]/[received_7]/[received_8] annotation=[received_annotation]]
+~[:chain=[received_1]/[received_2]/[received_3]/[received_4]/[received_5]/[received_6]/[received_7]/[received_8] annotation=[received_annotation]]

@@ -13,4 +13,4 @@ render_loop || -> String:
     ]
 ;
 
-[:template_conditional_loop_runtime_multiple_iterations [render_loop()]]
+~[:template_conditional_loop_runtime_multiple_iterations [render_loop()]]

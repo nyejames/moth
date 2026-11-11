@@ -1227,7 +1227,7 @@ fn collect_expression_fragment_into(
             && expression
                 .last()
                 .is_some_and(ExpressionRpnItem::is_operand_shape)
-            && token.is_operand_start()
+            && (token.is_operand_start() || token == TokenTag::TEMPLATE_HEAD)
         {
             break;
         }

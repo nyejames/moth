@@ -2,4 +2,4 @@
 target ~= "old"
 ~target = target
 
-[:mutable_slot_self_assignment target=[target]]
+~[:mutable_slot_self_assignment target=[target]]

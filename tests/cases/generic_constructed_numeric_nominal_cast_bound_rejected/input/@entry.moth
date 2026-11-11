@@ -13,4 +13,4 @@ read_u64 |value U64| -> String:
 number = Bounded(1)
 text = read_u64(number.value)
 
-[:generic_constructed_numeric_nominal_cast_bound_rejected [text]]
+~[:generic_constructed_numeric_nominal_cast_bound_rejected [text]]

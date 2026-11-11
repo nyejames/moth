@@ -7,4 +7,4 @@ Person = |
 Alias as Person
 
 value Alias = Person("test")
-[: [value]]
+~[: [value]]

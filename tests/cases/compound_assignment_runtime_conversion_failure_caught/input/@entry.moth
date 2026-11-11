@@ -9,4 +9,4 @@ result = divide(~target, -1) catch |conversion_error|:
     ~error_code = conversion_error.code
     then target
 ;
-[: compound assignment conversion: error=[error_code], result=[result], target=[target] ]
+~[: compound assignment conversion: error=[error_code], result=[result], target=[target] ]

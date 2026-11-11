@@ -664,12 +664,12 @@ fn unknown_namespace_member_renders_dotted_namespace_path() {
 
 #[test]
 fn duplicate_source_modifier_messages_name_the_incoming_conflict() {
-    // The parser rejects identical repeats and both `$config`/`$export` orders with the same
-    // reason. The rendered message therefore names the incoming modifier and describes the
-    // earlier directive generically rather than claiming the incoming one is already attached.
+    // Duplicate names are rejected without exceptions. The rendered message names the incoming
+    // directive and describes the earlier directive generically rather than claiming the
+    // incoming one is already attached.
     let mut string_table = StringTable::new();
 
-    for name in ["export", "config"] {
+    for name in ["export", "config", "doc", "todo"] {
         let name_id = string_table.intern(name);
         let compact = compact_bag_for_test(
             DiagnosticBag::from(templates::invalid_template_directive(
@@ -684,12 +684,12 @@ fn duplicate_source_modifier_messages_name_the_incoming_conflict() {
             terminal::format_guidance_view(view, DiagnosticRenderContext::new(&string_table));
         let message = guidance
             .iter()
-            .find(|line| line.contains("Only one source modifier"))
+            .find(|line| line.contains("Each directive name"))
             .expect("duplicate modifier message");
         assert_eq!(
             message,
             &format!(
-                "Only one source modifier may attach to an item. '${name}' conflicts with the earlier directive."
+                "Each directive name may appear at most once in one source-directive run. '${name}' conflicts with the earlier directive."
             )
         );
     }

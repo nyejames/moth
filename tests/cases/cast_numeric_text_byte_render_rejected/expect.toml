@@ -8,4 +8,4 @@ code = "MOTH-SYNTAX-0022"
 reason = "invalid_template_structure.unsupported_type_in_template_head"
 path = "input/@entry.moth"
 line = 3
-column = 16
+column = 17
