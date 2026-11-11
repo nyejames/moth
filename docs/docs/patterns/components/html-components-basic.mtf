@@ -1,0 +1,71 @@
+A component can be an ordinary value containing its HTML and the
+stylesheets it needs. A const function constructs that value. Another const
+function combines several parts into one page.
+
+This is the intended `@html` component API, **not yet a shipped package
+surface**. In particular, const functions and combined stylesheet
+contributions still need their planned implementation.
+
+### Compose a documentation page
+
+[codeblock, $code "moth":
+    -- docs/functions/@entry.moth
+    -- Proposed @html component helpers
+
+    @html HtmlPart, html_page
+    @components navbar, docs_sidebar, docs_topic
+    @introduction content as introduction
+
+    article #= HtmlPart(
+        body = [introduction]
+    )
+
+    page #= html_page({
+        navbar(),
+        docs_sidebar("Documentation"),
+        docs_topic("Functions", article)
+    })
+
+    [$in title:Functions]
+    [$in description:Function declarations and calls.]
+
+    -- Proposed multi-resource stylesheet contribution.
+    [$in stylesheets:[page.stylesheets]]
+
+    [page.body]
+]
+
+The entry owns the final document. Each component returns its body and
+stylesheet references, while `html_page()` assembles the parts in order.
+The page passes dependencies to the builder instead of letting a nested
+template insert into a distant `head` or `stylesheets` slot.
+
+A small page can skip `html_page()` and write its main content directly:
+
+[codeblock, $code "moth":
+    @components sidebar
+
+    [sidebar]
+
+    [$md:
+        # Getting started
+
+        Write an ordinary Moth program first.
+    ]
+]
+
+Use the abstraction where it saves work. A component system should not make
+a simple page harder to read.
+
+### Reuse a component
+
+A sidebar component can return the same markup for many pages with different
+headings. Its implementation lives in a shared package, alongside
+`sidebar.css`. The stylesheet is a tracked resource, not a string URL
+assembled by the component.
+
+Components may also contain local templates with named `$slot`s. A
+`$in` contribution fills the receiving template's immediate slots. It
+does not search ancestors or send implicit builder messages.
+
+See @../../templates (Templates) for slot and wrapper composition.

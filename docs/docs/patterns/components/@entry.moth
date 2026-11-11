@@ -1,4 +1,6 @@
-@styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
+@html-components-basic content as components_basic
+@html-components content as components_advanced
+@styles navbar, section, language_theme_head, doc_level, doc_pager, sidebar, init_docs_sidebar
 
 [$in title:HTML components]
 [$in description:Compose reusable HTML, styles and dependencies using ordinary Moth values.]
@@ -11,12 +13,24 @@ init_docs_sidebar()!
 [section, $md:
     # HTML components
 
-    Templates produce HTML strings, while const functions build reusable
-    component values. An entry explicitly sends the final page content and
-    dependencies to the HTML builder.
+    A reusable component is a value made from templates, types and functions.
+    Its HTML, stylesheet dependencies and other outputs remain explicit.
+    A const function can construct the value, and the entry can compose
+    several components into a page.
 
-    This pattern describes the intended component library design. Its Basic
-    and Advanced examples are being developed in this section.
+    This guide describes the intended `@html` component layer, including
+    APIs not yet implemented. See the @../../progress (progress matrix)
+    for the currently available language and package surface.
+]
+
+[section:
+    [doc_level:
+        [$in key:html-components]
+        [$in title:Composing HTML parts]
+        [$in advanced:[components_advanced]]
+
+        [components_basic]
+    ]
 ]
 
 [section:
