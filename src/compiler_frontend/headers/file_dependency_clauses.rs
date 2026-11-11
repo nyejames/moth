@@ -121,6 +121,16 @@ fn parse_and_record_dependency_clause(
         context.path_fork,
         context.string_table,
     );
+
+    if export_mode.is_public()
+        && !matches!(
+            &parsed.binding,
+            ScannedDependencyBinding::DirectSelections { selections } if !selections.is_empty()
+        )
+    {
+        return Err(generics_traits_api::invalid_export_target(Some(clause_span)).into());
+    }
+
     if matches!(
         &parsed.binding,
         ScannedDependencyBinding::Namespace { alias: None }
@@ -130,15 +140,6 @@ fn parse_and_record_dependency_clause(
         crate::compiler_frontend::compiler_messages::InvalidDependencyClauseReason::ProviderRequiresBinding,
         Some(parsed.provider.path_span),)
         .into());
-    }
-
-    if export_mode.is_public()
-        && !matches!(
-            &parsed.binding,
-            ScannedDependencyBinding::DirectSelections { selections } if !selections.is_empty()
-        )
-    {
-        return Err(generics_traits_api::invalid_export_target(Some(clause_span)).into());
     }
 
     let ordinal = u32::try_from(state.dependency_clause_count).map_err(|_| {

@@ -663,6 +663,39 @@ fn unknown_namespace_member_renders_dotted_namespace_path() {
 }
 
 #[test]
+fn duplicate_source_modifier_messages_name_the_incoming_conflict() {
+    // The parser rejects identical repeats and both `$config`/`$export` orders with the same
+    // reason. The rendered message therefore names the incoming modifier and describes the
+    // earlier directive generically rather than claiming the incoming one is already attached.
+    let mut string_table = StringTable::new();
+
+    for name in ["export", "config"] {
+        let name_id = string_table.intern(name);
+        let compact = compact_bag_for_test(
+            DiagnosticBag::from(templates::invalid_template_directive(
+                Some(name_id),
+                InvalidTemplateDirectiveReason::DuplicateModifier,
+                None,
+            )),
+            None,
+        );
+        let view = compact.first().expect("duplicate modifier compact");
+        let guidance =
+            terminal::format_guidance_view(view, DiagnosticRenderContext::new(&string_table));
+        let message = guidance
+            .iter()
+            .find(|line| line.contains("Only one source modifier"))
+            .expect("duplicate modifier message");
+        assert_eq!(
+            message,
+            &format!(
+                "Only one source modifier may attach to an item. '${name}' conflicts with the earlier directive."
+            )
+        );
+    }
+}
+
+#[test]
 fn syntax_renderers_keep_typed_prose_without_error_conversion() {
     let mut string_table = StringTable::new();
     let path_table = PathInternerFork::empty().snapshot_table();

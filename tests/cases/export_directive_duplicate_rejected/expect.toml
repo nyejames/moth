@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-SYNTAX-0021"]
-message_contains = ["already attached to the next item"]
+message_contains = ["Only one source modifier may attach to an item. '$export' conflicts with the earlier directive."]

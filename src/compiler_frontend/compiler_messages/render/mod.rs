@@ -512,7 +512,9 @@ pub(crate) fn invalid_template_directive_message(
             ),
         },
         InvalidTemplateDirectiveReason::DuplicateModifier => {
-            format!("`${name}` is already attached to the next item.")
+            format!(
+                "Only one source modifier may attach to an item. '${name}' conflicts with the earlier directive."
+            )
         }
         InvalidTemplateDirectiveReason::DanglingModifier => match name {
             "export" => "`$export` must immediately precede an eligible public declaration or direct-selection dependency clause.\n                 Add an eligible item on the following line, or remove the directive.".to_owned(),

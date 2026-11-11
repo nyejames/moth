@@ -795,6 +795,50 @@ fn export_modifier_rejects_invalid_dependency_shapes() {
     }
 }
 
+#[test]
+fn exported_namespace_dependencies_report_public_target_before_provider_binding() {
+    let cases = [
+        ("$export\n@impl\n", "@impl"),
+        ("$export\n@impl as impl_ns\n", "@impl"),
+        ("$export\n@core/math\n", "@core/math"),
+        ("$export\n@drawing.js\n", "@drawing.js"),
+        ("$export\n@drawing.js as drawing\n", "@drawing.js"),
+    ];
+
+    for (source, path) in cases {
+        let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
+        let mut span_builder = ExtendedSpanBuilder::new();
+        let failure = match prepare_active_root_with_role(
+            source,
+            &PathBuf::from("src/@mod.moth"),
+            ModuleRootRole::Normal,
+            &mut string_table,
+            &mut span_builder,
+            &mut path_fork,
+        ) {
+            Ok(_) => panic!("a public namespace dependency must be rejected"),
+            Err(failure) => failure,
+        };
+        let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
+            panic!("the fixture should diagnose the public namespace dependency");
+        };
+        let diagnostics = diagnostic_view_for_test(error.diagnostic);
+        let diagnostic = diagnostics
+            .first()
+            .expect("the dependency failure should compact to one record");
+        assert!(
+            diagnostic_has_family::<generics_traits_api::InvalidExportTargetView>(&diagnostic),
+            "`{source}` must report an invalid public export target"
+        );
+        assert_eq!(
+            diagnostic_primary_span(diagnostic),
+            Some(source_span_for(source, path, 0)),
+            "the public-target failure must point at the namespace path for `{source}`"
+        );
+    }
+}
+
 enum InvalidDependencyCode {
     InvalidExportTarget,
     MissingSelectionAfterComma,
