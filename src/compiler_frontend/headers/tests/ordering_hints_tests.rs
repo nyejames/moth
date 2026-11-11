@@ -637,12 +637,14 @@ gamma #= @helper e_target
         }
     }
 
-    let mut environment = HeaderBindingEnvironment::default();
-    environment.qualified_reference_targets = Arc::new(qualified_targets_for_module(
-        &module_symbols,
-        &declaration_paths,
-        &string_table,
-    ));
+    let environment = HeaderBindingEnvironment {
+        qualified_reference_targets: Arc::new(qualified_targets_for_module(
+            &module_symbols,
+            &declaration_paths,
+            &string_table,
+        )),
+        ..HeaderBindingEnvironment::default()
+    };
     assert!(
         environment
             .qualified_reference_targets
@@ -748,12 +750,14 @@ fn qualified_hints_cover_many_headers_without_cross_attachment() {
         }
     }
 
-    let mut environment = HeaderBindingEnvironment::default();
-    environment.qualified_reference_targets = Arc::new(qualified_targets_for_module(
-        &module_symbols,
-        &declaration_paths,
-        &string_table,
-    ));
+    let environment = HeaderBindingEnvironment {
+        qualified_reference_targets: Arc::new(qualified_targets_for_module(
+            &module_symbols,
+            &declaration_paths,
+            &string_table,
+        )),
+        ..HeaderBindingEnvironment::default()
+    };
 
     collect_qualified_reference_ordering_hints(&mut headers, &module_symbols, &environment)
         .expect("many rebased indexes should collect");
