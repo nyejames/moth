@@ -414,7 +414,7 @@ fn retained_dependency_shells_get_deterministic_ordinals_per_authored_clause() {
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@mod.moth");
     let (output, _span_builder) = prepare_api_root_with_fork(
-        "@one a\n@two\nexport:\n    @one a\n;\n",
+        "@one a\n@two\n$export\n@one a\n",
         &file_path,
         &mut string_table,
         &mut path_fork,
@@ -540,7 +540,7 @@ fn api_only_support_root_exports_declarations_without_synthesizing_start() {
     let file_path = PathBuf::from("src/styles/@package.moth");
     let mut span_builder = ExtendedSpanBuilder::new();
     let output = prepare_active_root_with_role(
-        "export:\n    theme #= \"dark\"\n;\n",
+        "$export\ntheme #= \"dark\"\n",
         &file_path,
         root_role,
         &mut string_table,
@@ -575,7 +575,7 @@ fn synthetic_project_context_root_rejects_export_surfaces() {
     let file_path = PathBuf::from("src/styles/@package.moth");
     let mut span_builder = ExtendedSpanBuilder::new();
     let diagnostic = match prepare_active_root_with_role(
-        "export:\n    theme #= \"dark\"\n;\n",
+        "$export\ntheme #= \"dark\"\n",
         &file_path,
         ModuleRootRole::SyntheticProjectContext,
         &mut string_table,
@@ -593,7 +593,7 @@ fn synthetic_project_context_root_rejects_export_surfaces() {
 
     let diagnostics = diagnostic_view_for_test(diagnostic);
     let diagnostic = diagnostics.first().expect("the export rejection compacts");
-    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0077");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0021");
 }
 
 #[test]
@@ -673,10 +673,10 @@ fn ordinary_source_file_is_assigned_normal_role() {
 }
 
 #[test]
-fn support_package_root_file_accepts_an_export_block() {
+fn support_package_root_file_accepts_export_directives() {
     let headers = expect_header_success(
         parse_single_file_headers_with_entry(
-            "export:\n    Button = | label String |\n;\n",
+            "$export\nButton = | label String |\n",
             "src/styles/@package.moth",
             "src/@entry.moth",
         ),

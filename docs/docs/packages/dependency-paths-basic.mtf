@@ -1,43 +1,21 @@
-Dependencies make names visible. Every source dependency resolves from the binding file's owning module root, not the file's directory.
-
-A path has three jobs:
+Dependencies make names visible. A source dependency path resolves from the binding file's owning module root, not its directory.
 
 - `@card render_card` at the start of a statement is a dependency clause. It binds `render_card`.
-- `@settings site_name` inside an expression reads one value. It binds nothing.
-- `@docs/intro.mtf` is a file value. It gives a `String`.
+- `@settings site_name` inside an expression reads one value without binding it.
+- `@docs/intro.mtf` is a file value that produces a `String`.
 
-### A module-root-relative dependency
+### Module-root-relative paths
 
 [codeblock, $code "moth":
     @card render_card
-]
-
-`@card` resolves to `card.moth` under the binding file's owning module root, regardless of how deep the binding file is inside the module.
-
-### A support package dependency
-
-[codeblock, $code "moth":
     @markdown render
-]
 
-`@markdown` resolves to a scoped `@package.moth` support package visible in the binding module's lexical scope.
-
-### A qualified read
-
-[codeblock, $code "moth":
     title = @settings site_name
-]
-
-`@settings` names a module or helper and `site_name` names one declaration. The path and the symbol stay on one line. The read creates no local `site_name`.
-
-### A file value
-
-[codeblock, $code "moth":
     intro = @docs/intro.mtf
 ]
 
-The extension makes this a file value, not a dependency. A `.moth` path has no file value. Depend on its declarations instead.
+`@card` resolves under the owning module root. `@markdown` can name an accessible scoped support package. A `.moth` file has no file value.
 
-Root files such as `@mod.moth`, `@package.moth` and `@entry.moth` are never dependency targets. Depend on the module folder.
+Root filenames such as `@mod.moth` and `@entry.moth` cannot be dependency targets. Cross-module imports see only names marked by `$export` in the applicable facade.
 
-`export:` remains current. A later `$export` migration will replace it only in `@mod.moth` and `@package.moth`. It does not change module-root-relative resolution.
+See @#dependency-paths (Dependency paths).

@@ -1,3 +1,2 @@
-export:
-    broken #= missing
-;
+$export
+broken #= missing

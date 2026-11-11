@@ -1,3 +1,2 @@
-export:
-    value #= "support"
-;
+$export
+value #= "support"

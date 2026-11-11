@@ -1,12 +1,13 @@
-export:
-    ExportedStruct = |
-        value String,
-    |
+$export
+ExportedStruct = |
+    value String,
+|
 
-    ExportedChoice ::
-        VariantA,
-        VariantB | payload I32 |,
-    ;
-
-    ExportedAlias as String
+$export
+ExportedChoice ::
+    VariantA,
+    VariantB | payload I32 |,
 ;
+
+$export
+ExportedAlias as String

@@ -860,12 +860,12 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
     for (topology, package_root_source, provider_root_source) in [
         (
             "nested",
-            "export:\n    @providers provider_value as package_value\n;\n",
-            Some("export:\n    @binding.js provider_value\n;\n"),
+            "$export\n@providers provider_value as package_value\n",
+            Some("$export\n@binding.js provider_value\n"),
         ),
         (
             "flat",
-            "export:\n    @providers/binding.js provider_value as package_value\n;\n",
+            "$export\n@providers/binding.js provider_value as package_value\n",
             None,
         ),
     ] {
@@ -895,7 +895,7 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
                 ),
                 (
                     marker_root.join("@mod.moth"),
-                    "export:\n    marker #= \"marker:43\"\n;\n",
+                    "$export\nmarker #= \"marker:43\"\n",
                 ),
             ];
             if let Some(source) = provider_root_source {
@@ -1063,13 +1063,10 @@ fn build_html_normal_sibling_name_is_not_visible_from_child_module() {
                 "project #= (\n    name = \"sibling_boundary\",\n)\nhtml #= ()\n",
             ),
             ("src/@entry.moth", "@consumer value\n[:[value]]\n"),
-            (
-                "src/consumer/@mod.moth",
-                "export:\n    @provider value\n;\n",
-            ),
+            ("src/consumer/@mod.moth", "$export\n@provider value\n"),
             (
                 "src/provider/@mod.moth",
-                "export:\n    value #= \"must not escape through a sibling lookup\"\n;\n",
+                "$export\nvalue #= \"must not escape through a sibling lookup\"\n",
             ),
         ];
         if reversed {
@@ -1130,7 +1127,7 @@ fn build_html_project_shared_support_provider_keeps_page_wrappers_isolated() {
     .expect("should write about page");
     fs::write(
         shared.join("@package.moth"),
-        "export:\n    @binding.js root_value, about_value, unused_value\n;\n",
+        "$export\n@binding.js root_value, about_value, unused_value\n",
     )
     .expect("should write shared support facade");
     let source = shared.join("binding.js");
@@ -1290,7 +1287,7 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
     .expect("should write page");
     fs::write(
         facade.join("@mod.moth"),
-        "export:\n    @provider.js get_number\n;\n",
+        "$export\n@provider.js get_number\n",
     )
     .expect("should write pure re-export facade");
     fs::write(
@@ -1767,7 +1764,7 @@ fn build_html_project_literal_const_change_reaches_next_build_without_asset() {
     .expect("should write page");
     fs::write(
         helper.join("@mod.moth"),
-        "export:\n    @gl_constants.js primitive_triangles as triangles_ns\n;\n",
+        "$export\n@gl_constants.js primitive_triangles as triangles_ns\n",
     )
     .expect("should write helper");
     fs::write(
@@ -1921,7 +1918,7 @@ fn write_shared_glue_project(root: &Path, page_dirs: &[&str], page_export: &str)
     .expect("should write config");
     fs::write(
         shared.join("@package.moth"),
-        "export:\n    @provider.js get_number, get_other\n;\n",
+        "$export\n@provider.js get_number, get_other\n",
     )
     .expect("should write provider facade");
     fs::write(

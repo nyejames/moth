@@ -432,7 +432,7 @@ pub(crate) fn invalid_template_directive_message(
 
     match reason {
         InvalidTemplateDirectiveReason::UnknownDirective => {
-            format!("Unknown template directive '{name}'.")
+            format!("Unknown directive '{name}'.")
         }
         InvalidTemplateDirectiveReason::MissingArgument => {
             format!("Template directive '{name}' is missing a required argument.")
@@ -444,10 +444,22 @@ pub(crate) fn invalid_template_directive_message(
                 None => message,
             }
         }
-        InvalidTemplateDirectiveReason::DirectiveNotAllowedHere => {
-            format!("Template directive '{name}' is not allowed here.")
-        }
+        InvalidTemplateDirectiveReason::DirectiveNotAllowedHere => match name {
+            "export" => {
+                "`$export` is only valid in `@mod.moth` or `@package.moth`, on its own line before an eligible public declaration or direct-selection dependency clause.".to_owned()
+            }
+            "config" => {
+                "`$config` is only valid on an explicitly typed top-level compile-time `#` binding."
+                    .to_owned()
+            }
+            _ => format!("Directive '{name}' is not allowed here."),
+        },
         InvalidTemplateDirectiveReason::UnexpectedArguments => match name {
+            "export" | "config" => {
+                format!(
+                    "`${name}` takes no operand and must occupy its own line. Remove the operand, colon, or parentheses after it."
+                )
+            }
             "slot" => {
                 "`$slot` takes one name or position and at most one compile-time default.\n                 Use `$slot`, `$slot title`, `$slot title = \"Untitled\"`, or `$slot 1`; remove parentheses or a second value.".to_owned()
             }
@@ -492,22 +504,35 @@ pub(crate) fn invalid_template_directive_message(
             "config" => {
                 "`$config` is a source modifier and cannot appear in a template head.".to_owned()
             }
+            "export" => {
+                "`$export` is a source modifier and cannot appear in a template head.".to_owned()
+            }
             _ => format!(
                 "Template directive '{name}' can only appear in a template head, not in source code."
             ),
         },
         InvalidTemplateDirectiveReason::DuplicateModifier => {
-            format!("`${name}` is already applied to this declaration.")
+            format!(
+                "Only one source modifier may attach to an item. '${name}' conflicts with the earlier directive."
+            )
         }
-        InvalidTemplateDirectiveReason::DanglingModifier => format!(
-            "`${name}` must immediately precede an eligible declaration.\n                 Add a declaration on the following line, or remove the directive."
-        ),
+        InvalidTemplateDirectiveReason::DanglingModifier => match name {
+            "export" => "`$export` must immediately precede an eligible public declaration or direct-selection dependency clause.\n                 Add an eligible item on the following line, or remove the directive.".to_owned(),
+            "config" => "`$config` must immediately precede an explicitly typed top-level compile-time `#` binding.\n                 Add that binding on the following line, or remove the directive.".to_owned(),
+            _ => format!(
+                "`${name}` must immediately precede an eligible declaration or dependency clause.\n                 Add an eligible item on the following line, or remove the directive."
+            ),
+        },
         InvalidTemplateDirectiveReason::WrongTarget => match name {
             "config" => {
                 "`$config` must modify one explicitly typed top-level compile-time `#` binding."
                     .to_owned()
             }
-            _ => format!("`${name}` cannot modify this declaration."),
+            "export" => {
+                "`$export` must modify an eligible public declaration or a direct-selection dependency clause."
+                    .to_owned()
+            }
+            _ => format!("`${name}` cannot modify this item."),
         },
     }
 }
@@ -524,7 +549,7 @@ pub(crate) fn render_invalid_template_directive(
     let reason = facts.reason.to_reason(facts.detail);
     let guidance = if facts.reason == InvalidTemplateDirectiveCode::UnknownDirective {
         vec![
-            "Known template directives include `$md`, `$raw`, `$before`, `$after`, `$slot`, `$in`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, `$doc`, and the `$config` source modifier.".to_owned(),
+            "Known directives include `$md`, `$raw`, `$before`, `$after`, `$slot`, `$in`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, `$doc`, and the `$export` and `$config` source modifiers.".to_owned(),
         ]
     } else {
         Vec::new()

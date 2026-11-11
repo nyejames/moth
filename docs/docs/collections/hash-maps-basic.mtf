@@ -35,5 +35,4 @@ Maps remember insertion order.
 ]
 
 Builtin keys are `String`, `Bool`, `Char`, fixed-width integers and `Byte`.
-Binary floats, `Dec` and `DecN` are not key types. Maps run on HTML-JS.
-Wasm still rejects map runtime work. See @../progress (Progress) for current support.
+Binary floats, `Dec` and `DecN` are not key types.

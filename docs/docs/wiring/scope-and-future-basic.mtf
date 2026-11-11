@@ -28,18 +28,12 @@ separates the template head from its body. That colon does not open a statement
 block. See the @../language-overview/#blocks-and-statements (Blocks and
 statements) reference and @../templates/#head-and-body (Template head and body).
 
-The accepted channel construction syntax is future-only:
+### Channel construction
 
 [codeblock, $code "moth":
     reader, writer Channel of AppMessage = Channel()
 ]
 
-The receiving annotation supplies the channel's carried type. `reader` and
-`writer` are directional endpoints from one channel. This form is accepted
-design, not implemented channel support; it does not define async execution,
-buffering, cancellation or sending. Omitting `= Channel()` has no accepted
-zero-value initialisation rule.
-
-Channels and async implementation remain deferred beyond the Wiring foundation.
-See the @../progress (Progress matrix) and the detailed Wiring reference for the
-exact status and boundary.
+The annotation supplies the carried type. `reader` and `writer` are
+directional endpoints of one channel. Channel transport, scheduling and
+cancellation are separate from Wiring. See @#wiring-introduction (Wiring reference) for details.

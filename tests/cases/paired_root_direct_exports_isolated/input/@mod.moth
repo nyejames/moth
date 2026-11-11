@@ -2,10 +2,10 @@ private_label || -> String:
     return "normal"
 ;
 
-export:
-    value #= "normal"
+$export
+value #= "normal"
 
-    public_label || -> String:
-        return private_label()
-    ;
+$export
+public_label || -> String:
+    return private_label()
 ;

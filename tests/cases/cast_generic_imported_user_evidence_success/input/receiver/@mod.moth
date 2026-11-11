@@ -1,5 +1,5 @@
-export:
-    @tickets Ticket
+$export
+@tickets Ticket
 
-    @generic show_ticket
-;
+$export
+@generic show_ticket

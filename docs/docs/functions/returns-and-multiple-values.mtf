@@ -136,8 +136,7 @@ Exported callables have closed error contracts. An exported callable without an
 error slot must discharge implicit failure or receive a compiler diagnostic.
 Traits and generic conformance cannot secretly widen that signature. The
 compiler-owned entry has built-in `Error!`; compatible top-level postfix `!`
-is legal, while custom errors still need explicit recovery. See
-@../progress (Progress) for current compiler support.
+is legal, while custom errors still need explicit recovery.
 
 ### Return contract
 
@@ -178,8 +177,4 @@ Fallible success values may alias a parameter allocation. Multiple return values
 may alias parameters or each other. Each returned value enters its own caller
 binding, defined only on the successful path. The separate error channel defines
 no success value on failure. Any physical result carrier belongs to the target
-ABI and proves neither fresh allocations nor disjoint results. Runtime lowering
-preserves those allocation relationships. Current analysis may conservatively
-treat projected results as sharing any parameter root returned by the function. This can
-produce a stricter alias diagnostic than more precise per-result analysis
-would require.
+ABI and proves neither fresh allocations nor disjoint results. Runtime lowering preserves those allocation relationships.

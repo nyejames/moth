@@ -32,7 +32,7 @@ that implicit failure; the enclosing handler or function contract delivers it.
 This does not remove postfix `!` from explicit typed error propagation.
 Exported signatures stay closed and must discharge failure or declare a
 compatible error slot. See @#returns-and-multiple-values (Returns and multiple
-values) and @../progress (Progress) for the contract and current support.
+values) for the contract.
 
 ### Never calls
 

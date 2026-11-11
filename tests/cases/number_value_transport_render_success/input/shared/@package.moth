@@ -1,17 +1,18 @@
-export:
-    huge_value #Dec0 = 12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+$export
+huge_value #Dec0 = 12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
 
-    keep type T |value T| -> T:
-        return value
-    ;
+$export
+keep type T |value T| -> T:
+    return value
+;
 
-    text_of type T is CASTABLE_TO_STRING |value T| -> String:
-        return cast value
-    ;
+$export
+text_of type T is CASTABLE_TO_STRING |value T| -> String:
+    return cast value
+;
 
-    private_number_text type T |value T| -> String:
-        private_value Dec17 = 1.23000
-        return cast private_value
-    ;
-
+$export
+private_number_text type T |value T| -> String:
+    private_value Dec17 = 1.23000
+    return cast private_value
 ;

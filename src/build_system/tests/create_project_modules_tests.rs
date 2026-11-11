@@ -1682,8 +1682,7 @@ fn write_cross_module_project(
     )
     .expect("should write config");
     fs::write(module_a.join("@entry.moth"), "@module_b\n#[:pageA]\n").expect("should write pageA");
-    fs::write(module_b.join("@mod.moth"), "export:\n    b #= 1\n;\n")
-        .expect("should write module_b root");
+    fs::write(module_b.join("@mod.moth"), "$export\nb #= 1\n").expect("should write module_b root");
     fs::write(module_b.join("impl.moth"), "impl #= 1\n").expect("should write module_b impl");
 
     let mut config = Config::new(root.to_path_buf());
@@ -1804,7 +1803,7 @@ fn direct_selection_resolves_cross_module_child_facade() {
     fs::write(src.join("@entry.moth"), "@child greet\n#[:entry]\n").expect("should write entry");
     fs::write(
         src.join("child/@mod.moth"),
-        "export:\n    greet || -> String:\n        return \"hi\"\n    ;\n;\n",
+        "$export\ngreet || -> String:\n    return \"hi\"\n;\n",
     )
     .expect("should write child module root");
 
@@ -1867,24 +1866,18 @@ fn namespace_selects_present_child_surfaces_without_surface_fallback() {
     )
     .expect("should write config");
     fs::write(src.join("@mod.moth"), "").expect("should write normal parent root");
-    fs::write(
-        src.join("child/@package.moth"),
-        "export:\n    value #= 1\n;\n",
-    )
-    .expect("should write support-only child root");
-    fs::write(src.join("paired/@mod.moth"), "export:\n    value #= 1\n;\n")
+    fs::write(src.join("child/@package.moth"), "$export\nvalue #= 1\n")
+        .expect("should write support-only child root");
+    fs::write(src.join("paired/@mod.moth"), "$export\nvalue #= 1\n")
         .expect("should write paired normal root");
-    fs::write(
-        src.join("paired/@package.moth"),
-        "export:\n    value #= 1\n;\n",
-    )
-    .expect("should write paired support root");
+    fs::write(src.join("paired/@package.moth"), "$export\nvalue #= 1\n")
+        .expect("should write paired support root");
     fs::write(src.join("entry_child/@entry.moth"), "").expect("should write entry-only child root");
     fs::write(src.join("entry_support/@entry.moth"), "")
         .expect("should write paired entry/support entry root");
     fs::write(
         src.join("entry_support/@package.moth"),
-        "export:\n    value #= 1\n;\n",
+        "$export\nvalue #= 1\n",
     )
     .expect("should write paired entry/support support root");
 
@@ -2024,7 +2017,7 @@ fn direct_selection_resolves_source_package_facade() {
     fs::write(src.join("@entry.moth"), "@helper add\n#[:entry]\n").expect("should write entry");
     fs::write(
         package_root.join("@mod.moth"),
-        "export:\n    add |a I32, b I32| -> I32:\n        return a + b\n    ;\n;\n",
+        "$export\nadd |a I32, b I32| -> I32:\n    return a + b\n;\n",
     )
     .expect("should write helper package root");
 
@@ -2093,7 +2086,7 @@ fn underscore_prefixed_source_package_prefix_precedes_hidden_directory_rejection
         .expect("should write entry");
     fs::write(
         package_root.join("@mod.moth"),
-        "export:\n    add |a I32, b I32| -> I32:\n        return a + b\n    ;\n;\n",
+        "$export\nadd |a I32, b I32| -> I32:\n    return a + b\n;\n",
     )
     .expect("should write toolkit package root");
 

@@ -1,1 +1,2 @@
-export: @internal LABELED, show ;
+$export
+@internal LABELED, show

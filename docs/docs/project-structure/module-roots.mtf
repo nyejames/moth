@@ -95,9 +95,9 @@ In this layout `shared.moth` can expose `site_label` to every root, but no root 
 
 ### What each root may contain
 
-`@mod.moth` and `@package.moth` carry declarations and function bodies. They may use an `export:` block to publish their API. They reject top-level runtime statements, direct const fragments, runtime fragments and builder-slot contributions. A rejected top-level runtime body reports `MOTH-RULE-0023`. Functions declared inside a facade remain ordinary callable functions when reachable through the API.
+`@mod.moth` and `@package.moth` carry declarations and function bodies. They use `$export` before each declaration or direct-selection dependency clause they publish. They reject top-level runtime statements, direct const fragments, runtime fragments and builder-slot contributions. A rejected top-level runtime body reports `MOTH-RULE-0023`. Functions declared inside a facade remain ordinary callable functions when reachable through the API.
 
-`@entry.moth` carries private declarations, top-level runtime statements, direct compile-time and runtime fragments and registered direct builder slots. It owns the module's implicit `start`. It rejects `export:` and any future export modifier.
+`@entry.moth` carries private declarations, top-level runtime statements, direct compile-time and runtime fragments and registered direct builder slots. It owns the module's implicit `start`. It rejects `$export` because entry roots have no public surface.
 
 An API facade has no implicit start, route metadata or entry lifecycle. An entry root publishes no importable interface. Only the two facades publish APIs.
 
@@ -127,22 +127,20 @@ Invalid dependency spellings:
 
 Do not concatenate the filesystem `@` with the dependency `@`. The exact root filename is the role, not a dependency name. Direct dependency clauses on a root file are rejected. Depend on the module directory instead.
 
-### Normal files belong to the surrounding module
-
-Ordinary files in the same directory belong to that module. They contribute shared declarations that any root may bind. They do not execute top-level runtime work independently, and they never become entry roots by themselves.
-
 ### Entry eligibility follows presence
 
 A module is entry-eligible when `@entry.moth` exists. Presence alone decides eligibility. An empty file, a file with only static content and a file with only builder metadata all count. No activity heuristic selects an HTML route.
 
 Compiling or importing a module never activates its entry. Only the selected build command activates a compiled entry, and a project-local `@entry.moth` is the only project entry source. Separately compiled source packages and dependency entries never activate.
 
-### Visibility status
+### Publishing a public API
 
-`export:` is the implemented public-API block. It is legal only in `@mod.moth` and `@package.moth`; an entry or ordinary helper that uses it is rejected with `MOTH-RULE-0077`. The accepted future `$export` migration will replace this spelling, restricted to the same two facades. It will never apply to `@entry.moth`, helpers, templates or config. Do not use `$export` as current syntax.
+Only `@mod.moth` and `@package.moth` accept `$export`. Place it above each eligible public declaration or direct-selection re-export. A facade with no marked items exposes an empty API. Root-local declarations remain isolated from sibling roots.
+
+See @#public-api (Public API) for eligible targets and @../packages/#module-visibility (Module visibility) for consumer access.
 
 ### Concepts related to module roots
 
-- For the export block and its current status see @#public-api (Public API).
+- For `$export` declarations and re-exports see @#public-api (Public API).
 - For entry runtime and fragments see @#entry-runtime-and-fragments (Entry runtime and fragments).
 - For HTML routes and command policy see @#html-routing-and-artifacts (HTML routing and artefacts).

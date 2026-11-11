@@ -1,7 +1,7 @@
-export:
-    PublicData = |
-        value String,
-    |
+$export
+PublicData = |
+    value String,
+|
 
-    public_value #= PublicData("shown")
-;
+$export
+public_value #= PublicData("shown")

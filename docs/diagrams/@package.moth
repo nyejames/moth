@@ -429,15 +429,23 @@ flow_fanout #= [$html:
     </div>
 ]
 
-export:
-    css #= flow_diagram_css
-    diagram_head #= flow_diagram_head
-    diagram #= flow_diagram
-    stage #= flow_stage
-    node #= flow_node
-    branch #= flow_branch
-    lane #= flow_lane
-    detail #= flow_detail
-    island #= flow_island
-    fanout #= flow_fanout
-;
+$export
+css #= flow_diagram_css
+$export
+diagram_head #= flow_diagram_head
+$export
+diagram #= flow_diagram
+$export
+stage #= flow_stage
+$export
+node #= flow_node
+$export
+branch #= flow_branch
+$export
+lane #= flow_lane
+$export
+detail #= flow_detail
+$export
+island #= flow_island
+$export
+fanout #= flow_fanout

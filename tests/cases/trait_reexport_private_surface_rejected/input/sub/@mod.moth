@@ -1,1 +1,2 @@
-export: @internal DISPLAYABLE ;
+$export
+@internal DISPLAYABLE

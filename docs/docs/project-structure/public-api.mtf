@@ -1,121 +1,63 @@
-**Current support versus accepted design.** `export:` is implemented and remains
-the only public API marker in current source. The accepted future `$export`
-migration will replace it later. Directive-block support for that migration is
-undecided, so these forms will not remain permanent alternatives.
+Declarations are private to their module by default. In `@mod.moth` and `@package.moth`, place `$export` on its own line before a declaration to include it in that facade's public API.
 
-The current `export:` block is valid only in a module root file. It marks legal
-declarations as visible to other modules.
-
-### Syntax
+### Exporting declarations
 
 [codeblock, $code "moth":
+    -- @mod.moth
     private_helper || -> String:
         return "private"
     ;
 
-    export:
-        public_name #= "Moth"
+    $export
+    public_name #= "Moth"
 
-        render || -> String:
-            return private_helper()
-        ;
+    $export
+    render || -> String:
+        return private_helper()
     ;
 ]
 
-### Rules
+`public_name` and `render` are visible through the module's normal facade. `private_helper` remains private. An unmarked facade exports nothing.
 
-- `export:` is valid only in a module root file. An `export:` block in a normal source file is rejected with `MOTH-RULE-0077`.
-- A module root may contain at most one `export:` block. Duplicate blocks are rejected with `MOTH-RULE-0085`.
-- The block ends with normal Moth `;`.
-- An empty `export:` block is rejected with `MOTH-RULE-0080`.
-- Items inside the block are ordinary top-level module-root items marked public.
-- Items outside the block remain private to the module.
+`$export` applies to the next eligible top-level item only. It must occupy its own line, with no operands. Comment-only lines may intervene, but a blank line breaks attachment. It is valid only in the two facade files, including when both exist in one directory. It does not apply in `@entry.moth`, ordinary helper files or `config.moth`.
 
-### Allowed inside export:
+The directive can mark a function, struct, choice, transparent type alias, trait or compile-time `#` constant. The `#` marker controls when a constant is evaluated, not whether it is public.
 
-- direct-selection source clauses (re-exports)
-- direct-selection external clauses
-- functions
-- structs
-- choices
-- type aliases
-- traits
-- compile-time constants using `#`
+Runtime bindings, mutable bindings, executable statements, templates, page fragments, trait conformances and incompatibilities cannot be exported. Receiver methods are exposed through their public receiver type, not exported independently.
 
-### Rejected inside export:
+### Re-exporting dependencies
 
-- runtime bindings
-- mutable bindings
-- top-level executable statements
-- runtime templates
-- top-level const page fragments
-- trait conformances
-- trait incompatibility declarations
-- receiver methods as directly exported symbols
-- bare namespace dependency bindings or exports
-- wildcard exports
-- export lists
-- function alias exports
-- nested `export:` blocks
-- all legacy inline `export` forms
-
-Runtime statements inside the block are rejected with `MOTH-RULE-0080`.
-Legacy inline `export` syntax without the `:` block delimiter is rejected with
-`MOTH-SYNTAX-0001`.
-
-### Re-exports
-
-The export block can re-export direct selections from other files:
+A facade may publish selected declarations defined in another file without moving them into the facade:
 
 [codeblock, $code "moth":
-    export:
-        @components/card CardData as Card, render_card
+    $export
+    @components/card CardData as Card, render_card
 
-        @core/math PI, sin
-    ;
+    $export
+    @core/math PI, sin
 ]
 
-The selected alias becomes the public name. In this example cross-module
-consumers can depend on `Card`, not `CardData`, unless the export block lists
-`CardData` separately.
+One `$export` publishes every selected name in its dependency clause. The alias `Card` is the public name. `CardData` is not also published unless selected separately. Bare namespaces and namespace aliases cannot be re-exported.
 
-### `#` constants are compile-time, not visibility
+An ordinary dependency clause without `$export` binds names for the facade's own use but does not publish them. See @../packages/#public-reexports (Public re-exports) for selection and alias rules.
 
-The `#` marker on a binding means compile-time constant. It does not control
-cross-module visibility. Cross-module visibility is controlled exclusively by
-the `export:` block.
+### Visibility boundaries
 
-### Same-module versus cross-module visibility
+Files in one module can bind shared helper declarations through ordinary dependencies. Declarations authored directly in any root file remain local to that root. Other roots and helper files cannot read them, even if the roots share a directory.
 
-- Normal declarations in any file within a module are visible to other files in the same module by default.
-- Cross-module dependencies can only access declarations marked public by the module root's `export:` block.
-- Private declarations in the module root file are not available to other modules.
-- A module root with no `export:` block exports nothing.
+Consumers in another module can bind only the applicable facade's explicitly exported names. A normal module publishes through `@mod.moth`. A scoped support or external project package publishes through `@package.moth`. Resolution never falls back between facades or bypasses one with a filesystem path.
 
-### Closed exported error contracts
+See @#module-roots (Module roots) for file roles and @../packages/#module-visibility (Module visibility) for the complete access rules.
 
-Private functions without an error slot may infer and propagate implicit
-numeric failure within the same module, without postfix `!` at each internal
-call. Exported callables without an error slot must discharge that failure or
-receive a compiler diagnostic. Built-in `Error!` materialises it; a custom
-`E!` requires local recovery or explicit mapping. Traits and generic conformance
-cannot secretly widen an exported signature.
+### Public API contracts
 
-This applies to public receiver methods as well as exported functions. See
-@../functions/#returns-and-multiple-values (Returns and multiple values) and
-@../progress (Progress) for the contract and current compiler support.
+An exported signature must not expose private types, inaccessible trait requirements or project-private context. Exported functions and public receiver methods also need closed error contracts: implicit built-in failures must be handled or delivered through an explicit built-in `Error!` result. A custom error result needs local recovery or explicit mapping. The same rules apply to re-exports.
 
-### Future migration
+See @../functions/#returns-and-multiple-values (Returns and multiple values) and @../errors/#propagation (Error propagation) for error handling.
 
-The accepted `$export` direction belongs to the general directive family, but
-its exact block syntax and migration timing remain future work. Recognition or
-documentation of its name does not add semantics. Do not write `$export` in a
-current project, and do not promise that both spellings will be supported
-forever.
+### Related references
 
-### Concepts related to the public API
-
-- For module root rules see @#module-roots (Module roots).
-- For entry activity and page fragments see @#entry-runtime-and-fragments (Active-root runtime and fragments).
-- For re-export syntax see @../packages/#public-reexports (Public re-exports).
-- For visibility rules see @../packages/#module-visibility (Module visibility).
+- @../packages/#dependency-clauses (Dependency clauses)
+- @../packages/#public-reexports (Public re-exports)
+- @#project-package-facade (Project package facade)
+- @https://github.com/nyejames/moth/blob/main/src/compiler_frontend/headers/public_exports.rs (Compiler public-export construction)

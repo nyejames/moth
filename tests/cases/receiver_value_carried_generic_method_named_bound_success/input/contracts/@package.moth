@@ -1,5 +1,4 @@
-export:
-    PUBLIC_LABEL must:
-        label |This| -> String
-    ;
+$export
+PUBLIC_LABEL must:
+    label |This| -> String
 ;

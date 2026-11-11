@@ -1,3 +1,2 @@
-export:
-    capacity #I32 = 4
-;
+$export
+capacity #I32 = 4

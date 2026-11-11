@@ -1,7 +1,7 @@
-export:
-    shared_count #U32 = 23
+$export
+shared_count #U32 = 23
 
-    keep_uint |value U32| -> U32:
-        return value
-    ;
+$export
+keep_uint |value U32| -> U32:
+    return value
 ;

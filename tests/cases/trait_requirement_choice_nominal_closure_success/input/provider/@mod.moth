@@ -1,28 +1,32 @@
-export:
-    KIND_SOURCE must:
-        kind |This| -> Kind
-    ;
+$export
+KIND_SOURCE must:
+    kind |This| -> Kind
+;
 
-    KIND_LABEL must:
-        label |This| -> String
-    ;
+$export
+KIND_LABEL must:
+    label |This| -> String
+;
 
-    Kind ::
-        Small,
-        Large,
-    ;
+$export
+Kind ::
+    Small,
+    Large,
+;
 
-    Maker = |
-        label String,
-    |
+$export
+Maker = |
+    label String,
+|
 
-    make_maker || -> Maker:
-        return Maker(label = "maker")
-    ;
+$export
+make_maker || -> Maker:
+    return Maker(label = "maker")
+;
 
-    show type T is KIND_LABEL |value T| -> String:
-        return value.label()
-    ;
+$export
+show type T is KIND_LABEL |value T| -> String:
+    return value.label()
 ;
 
 label |this Kind| -> String:

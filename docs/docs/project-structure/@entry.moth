@@ -39,9 +39,9 @@ init_docs_sidebar()!
 
     A module recognises three optional root files: `@mod.moth` publishes the
     normal API, `@package.moth` publishes a scoped support API and `@entry.moth`
-    owns page runtime work. Any subset is valid. `export:` currently defines a
-    facade's public API. The HTML builder emits one directory-derived page for
-    each `@entry.moth`; no root-purpose directive exists.
+    owns page runtime work. Any subset is valid. `$export` marks each public declaration or selected re-export in a facade.
+    The HTML builder emits one directory-derived page for each `@entry.moth`;
+    no root-purpose directive exists.
 ]
 
 #[section:

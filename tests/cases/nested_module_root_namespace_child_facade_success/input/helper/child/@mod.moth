@@ -1,5 +1,4 @@
-export:
-    greet_from_child || -> String:
-        return "hello from child"
-    ;
+$export
+greet_from_child || -> String:
+    return "hello from child"
 ;

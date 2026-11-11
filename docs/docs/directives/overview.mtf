@@ -7,13 +7,14 @@ This index routes contributors to the canonical directive contract and its compi
 - `docs/docs/directives/directives.mtf` owns the two attachment locations, one-operand grammar, validation and diagnostics.
 - `docs/docs/directives/directives-basic.mtf` presents the short accepted surface.
 - `docs/docs/templates/template-directives.mtf` owns the existing template-head composition and formatting semantics.
-- `docs/docs/project-structure/project-config.mtf` owns named config records. `docs/docs/project-structure/build-inputs.mtf` owns the `$config` input contract. `docs/docs/project-structure/entry-config.mtf` owns HTML builder slots and presence-based entry selection.
+- `docs/docs/project-structure/public-api.mtf` owns `$export` targets and public API contracts. `docs/docs/packages/public-reexports.mtf` owns public selection semantics.
+- `docs/docs/project-structure/project-config.mtf` owns config records. `docs/docs/project-structure/build-inputs.mtf` owns `$config` inputs. `docs/docs/project-structure/entry-config.mtf` owns builder slots.
 
 ## Compiler and build handoffs
 
 - `docs/compiler-design-overview.md` owns Stage 1 tokenization, Stage 2 header syntax, Stage 4 semantics and entry metadata. Directive recognition must retain a known name and precise authored span before context validation.
 - `docs/build-system-design.md` owns selected configuration, root-role facts and builder entry selection.
-- Source modifiers have contiguous next-construct attachment; template directives use the containing template. Fixed root roles own `@entry.moth` eligibility and entry selection.
+- Source modifiers have contiguous next-item attachment. `$export` accepts declarations or direct-selection clauses in public facades. `$config` accepts explicitly typed `#` bindings in config. Template directives use the containing template.
 - Placement errors must distinguish known invalid contexts, unknown names, deferred features, invalid operands, duplicate modifiers and attachment broken by an empty physical line. Use existing compiler diagnostic owners and avoid a second lexer/header grammar.
 
 ## Status

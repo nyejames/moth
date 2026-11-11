@@ -202,8 +202,8 @@ addressed before arbitrary unknown syntax can be skipped.
 
 Future `$layout` constrains representation while preserving nominal identity.
 C order alone is not a complete ABI contract, and SoA is not automatically a
-scalar layout option. Future `$export` replaces rather than permanently
-duplicates export syntax; block support remains undecided.
+scalar layout option. `$export` marks public declarations and direct-selection re-exports in public
+facades. See @../project-structure/#public-api (Public API).
 
 `$test` is a deferred root-purpose direction. Runner, command and lifecycle
 details are not yet defined. A separate custom-metadata directive remains open

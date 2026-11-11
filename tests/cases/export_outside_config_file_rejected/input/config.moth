@@ -1,3 +1,0 @@
-export project #= (
-    name = "test_project")
-html #= ()

@@ -7638,13 +7638,6 @@ contract = "language.traits.incompatibility_duplicate_rejected"
 role = "primary"
 
 [[case]]
-id = "trait_relation_facade_public_leaks_private_rejected"
-path = "trait_relation_facade_public_leaks_private_rejected"
-tags = ["integration","traits","diagnostics","facade"]
-contract = "language.traits.incompatibility_facade_leaks_private_rejected"
-role = "primary"
-
-[[case]]
 id = "trait_relation_facade_private_private_success"
 path = "trait_relation_facade_private_private_success"
 tags = ["integration","traits","facade"]
@@ -12980,24 +12973,24 @@ contract = "language.dependencies.module_facade_export_surface_acceptance"
 role = "primary"
 
 [[case]]
-id = "export_outside_ordinary_file_rejected"
-path = "export_outside_ordinary_file_rejected"
+id = "export_directive_ordinary_file_rejected"
+path = "export_directive_ordinary_file_rejected"
 tags = ["integration", "diagnostics", "dependencies", "facades"]
-contract = "language.dependencies.export_outside_module_root_rejected"
+contract = "language.dependencies.export_directive_outside_facade_rejected"
 role = "primary"
 
 [[case]]
-id = "export_block_active_root_success"
-path = "export_block_active_root_success"
+id = "export_directive_active_root_success"
+path = "export_directive_active_root_success"
 tags = ["integration", "diagnostics", "dependencies", "facades"]
-contract = "language.dependencies.export_block_active_root_acceptance"
+contract = "language.dependencies.export_directive_active_root_acceptance"
 role = "primary"
 
 [[case]]
-id = "export_outside_config_file_rejected"
-path = "export_outside_config_file_rejected"
+id = "export_directive_config_file_rejected"
+path = "export_directive_config_file_rejected"
 tags = ["integration", "diagnostics", "config", "facades"]
-contract = "language.dependencies.export_outside_module_root_rejected"
+contract = "language.dependencies.export_directive_outside_facade_rejected"
 role = "boundary"
 
 [[case]]
@@ -14240,87 +14233,73 @@ contract = "language.choices.variant_misspelling_did_you_mean_rejected"
 role = "primary"
 
 [[case]]
-id = "export_block_strict_success"
-path = "export_block_strict_success"
+id = "export_directive_strict_success"
+path = "export_directive_strict_success"
 tags = ["integration", "dependencies", "facades"]
-contract = "language.dependencies.export_block_strict_success_acceptance"
+contract = "language.dependencies.export_directive_strict_success_acceptance"
 role = "primary"
 
 [[case]]
-id = "export_block_outside_module_root_rejected"
-path = "export_block_outside_module_root_rejected"
+id = "export_directive_outside_facade_rejected"
+path = "export_directive_outside_facade_rejected"
 tags = ["integration", "diagnostics", "dependencies", "facades"]
-contract = "language.dependencies.export_outside_module_root_rejected"
+contract = "language.dependencies.export_directive_outside_facade_rejected"
 role = "boundary"
 
 [[case]]
-id = "entry_root_export_block_rejected"
-path = "entry_root_export_block_rejected"
+id = "entry_root_export_directive_rejected"
+path = "entry_root_export_directive_rejected"
 tags = ["integration", "modules", "root-boundaries", "entry", "diagnostics", "negative"]
 contract = "language.project_structure.entry_root_export_rejected"
 role = "primary"
 
 [[case]]
-id = "export_block_missing_colon_rejected"
-path = "export_block_missing_colon_rejected"
+id = "export_directive_duplicate_rejected"
+path = "export_directive_duplicate_rejected"
 tags = ["integration", "diagnostics", "dependencies", "facades"]
-contract = "language.dependencies.export_block_missing_colon_rejected"
+contract = "language.dependencies.export_directive_duplicate_rejected"
 role = "primary"
 
 [[case]]
-id = "export_block_duplicate_rejected"
-path = "export_block_duplicate_rejected"
+id = "export_directive_dangling_rejected"
+path = "export_directive_dangling_rejected"
 tags = ["integration", "diagnostics", "dependencies", "facades"]
-contract = "language.dependencies.export_block_duplicate_rejected"
+contract = "language.dependencies.export_directive_dangling_rejected"
 role = "primary"
 
 [[case]]
-id = "export_block_empty_rejected"
-path = "export_block_empty_rejected"
+id = "export_directive_runtime_item_rejected"
+path = "export_directive_runtime_item_rejected"
 tags = ["integration", "diagnostics", "dependencies", "facades"]
-contract = "language.dependencies.export_block_empty_rejected"
+contract = "language.dependencies.export_directive_runtime_item_rejected"
 role = "primary"
 
 [[case]]
-id = "export_block_runtime_item_rejected"
-path = "export_block_runtime_item_rejected"
+id = "export_directive_bare_dependency_rejected"
+path = "export_directive_bare_dependency_rejected"
 tags = ["integration", "diagnostics", "dependencies", "facades"]
-contract = "language.dependencies.export_block_runtime_item_rejected"
+contract = "language.dependencies.export_directive_bare_dependency_rejected"
 role = "primary"
 
 [[case]]
-id = "export_block_bare_dependency_rejected"
-path = "export_block_bare_dependency_rejected"
-tags = ["integration", "diagnostics", "dependencies", "facades"]
-contract = "language.dependencies.export_block_bare_dependency_rejected"
-role = "primary"
-
-[[case]]
-id = "export_block_conformance_rejected"
-path = "export_block_conformance_rejected"
+id = "export_directive_conformance_rejected"
+path = "export_directive_conformance_rejected"
 tags = ["integration", "diagnostics", "dependencies", "facades", "traits"]
-contract = "language.dependencies.export_block_conformance_rejected"
+contract = "language.dependencies.export_directive_conformance_rejected"
 role = "primary"
 
 [[case]]
-id = "export_block_incompatibility_rejected"
-path = "export_block_incompatibility_rejected"
+id = "export_directive_incompatibility_rejected"
+path = "export_directive_incompatibility_rejected"
 tags = ["integration", "diagnostics", "dependencies", "facades", "traits"]
-contract = "language.dependencies.export_block_incompatibility_rejected"
+contract = "language.dependencies.export_directive_incompatibility_rejected"
 role = "primary"
 
 [[case]]
-id = "export_block_nested_rejected"
-path = "export_block_nested_rejected"
+id = "export_as_ordinary_identifier_success"
+path = "export_as_ordinary_identifier_success"
 tags = ["integration", "diagnostics", "dependencies", "facades"]
-contract = "language.dependencies.export_block_nested_rejected"
-role = "primary"
-
-[[case]]
-id = "legacy_inline_export_rejected"
-path = "legacy_inline_export_rejected"
-tags = ["integration", "diagnostics", "dependencies", "facades"]
-contract = "language.dependencies.legacy_inline_export_rejected"
+contract = "language.dependencies.export_as_ordinary_identifier"
 role = "primary"
 
 [[case]]
@@ -19507,8 +19486,8 @@ contract = "language.entry.explicit_single_file_facade_selection_is_not_an_entry
 role = "primary"
 
 [[case]]
-id = "single_file_selected_entry_export_rejected"
-path = "single_file_selected_entry_export_rejected"
+id = "single_file_selected_entry_export_directive_rejected"
+path = "single_file_selected_entry_export_directive_rejected"
 tags = ["integration", "html", "single-file", "diagnostics", "root-roles"]
 contract = "language.entry.selected_single_file_entry_rejects_export_surface"
 role = "primary"

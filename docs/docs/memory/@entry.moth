@@ -32,7 +32,6 @@ init_docs_sidebar()!
     language, its accepted design proves memory safety statically: alias and
     lifetime-topology validation are mandatory on every backend, and backends
     with full memory control produce release builds with no tracing collector.
-    Lifetime-topology validation remains deferred in the compiler.
 
     These pages explain source behaviour. The @../../developer-docs/memory-management (memory model) defines borrow validation and backend lowering.
 ]

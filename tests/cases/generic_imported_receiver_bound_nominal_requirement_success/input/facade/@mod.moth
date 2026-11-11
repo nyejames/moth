@@ -1,1 +1,2 @@
-export: @provider Box ;
+$export
+@provider Box

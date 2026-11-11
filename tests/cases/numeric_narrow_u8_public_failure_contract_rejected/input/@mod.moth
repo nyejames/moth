@@ -1,5 +1,4 @@
-export:
-    narrow_add |left U8, right U8| -> U8:
-        return left + right
-    ;
+$export
+narrow_add |left U8, right U8| -> U8:
+    return left + right
 ;

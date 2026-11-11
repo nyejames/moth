@@ -1,5 +1,4 @@
-Moth has an accepted but not yet implemented feature called declared regions.
-This page explains what they are so you know the concept exists.
+Declared regions let you name a bounded lifetime and control where allocations are owned.
 
 ### What declared regions do
 
@@ -39,14 +38,3 @@ An ordinary statically known `if true:` still creates a lexical branch scope
 and is removed before HIR. It does not create a declared region and does not change declared region
 placement rules.
 
-### Current status
-
-Declared region syntax is **accepted but deferred**. Current programs cannot declare or
-place values into declared regions yet.
-
-The compiler reserves valid `name:` headers with a deferred-feature diagnostic
-and rejects exact `_:`. Full declared region parsing and `into` placement remain deferred.
-
-You do not need declared regions to write Moth programs today. Current shared-access,
-explicit-copy and `~` rules cover access conflicts, while lifetime-topology
-validation remains deferred.

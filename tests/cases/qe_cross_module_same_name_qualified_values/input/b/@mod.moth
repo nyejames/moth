@@ -1,3 +1,2 @@
-export:
-    value #= "B"
-;
+$export
+value #= "B"

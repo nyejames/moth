@@ -56,10 +56,6 @@ Independent Rust callers use `moth_mon`. Compiler clients may use the same API
 and Rust types through the convenience re-export `moth::mon`. Prepare a schema
 once and reuse it across documents. The codec returns owned values or a
 structured `MonError` that supports ordinary Rust reporting and propagation.
-Moth-native operations, `$mon`, automatic schema extraction and the static
-project builder remain deferred. Compiled Moth programs have no runtime codec
-support. The Rust API uses exact numeric schemas without profile selection or
-aliases. A raw whole literal can receive an `I64` schema directly, but a
+The Rust API uses exact numeric schemas without profile selection or aliases. A raw whole literal can receive an `I64` schema directly, but a
 programmatic `Value::I32` cannot satisfy it. Binary-float literals round
-directly at their declared precision. See @#mon-format (MON format) and
-@../progress (Progress).
+directly at their declared precision. See @#mon-format (MON format).

@@ -17,7 +17,7 @@ code = "MOTH-RULE-0051"
 occurrence = 1
 path = "input/cast_operand/@mod.moth"
 line = 2
-column = 5
+column = 1
 reason = "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function"
 
 [[backends.html.diagnostic_assertions]]

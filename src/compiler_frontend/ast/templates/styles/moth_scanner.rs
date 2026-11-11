@@ -454,7 +454,7 @@ impl<'source> CodeScanner<'source> {
             .rfind('\n')
             .map_or(0, |newline| newline + 1);
         let prefix = self.source[line_start..path_start].trim();
-        prefix.is_empty() || prefix == "export:"
+        prefix.is_empty()
     }
 
     /// Recognises Moth numeric runs: digits with separators, a decimal fraction

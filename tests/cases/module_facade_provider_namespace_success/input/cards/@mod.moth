@@ -1,3 +1,2 @@
-export:
-    @child greet as friendly
-;
+$export
+@child greet as friendly

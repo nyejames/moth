@@ -12,7 +12,7 @@
     init_docs_sidebar
 
 #[$in title:["Wiring"]]
-#[$in description:["Accepted Wire and Route parameter contracts, with current implementation status."]]
+#[$in description:["Wire and Route parameter contracts, capability positions and channel boundaries."]]
 #[$in head:[language_theme_head]]
 
 #[navbar]
@@ -24,12 +24,10 @@ init_docs_sidebar()!
     Wiring describes parameter contracts for binding identity and choice
     constructors. It does not create callbacks, subscriptions or a UI runtime.
 
-    Wire and Route parameter contracts compile and run on the JS/HTML target.
-    HTML-Wasm supports Wire arguments and rejects reachable route formation
-    with a target diagnostic. Route invocation, composition, observation,
-    channels and async remain outside this foundation. See @../progress (Progress) for current
-    support and the complete @#wiring-introduction (Wiring reference) for exact
-    rules.
+    A Wire preserves binding identity. A Route captures choice-constructor
+    arguments for later completion. Neither introduces callbacks, subscriptions
+    or implicit event delivery. See @#wiring-introduction (Wiring reference)
+    for the complete contracts.
 ]
 
 #[section:
@@ -65,8 +63,8 @@ init_docs_sidebar()!
 #[section:
     [doc_level:
         [$in key:wiring-scope-and-future]
-        [$in title:Scope and future channels]
-        [$in advanced:See Capability positions and lifetimes and Future channel boundary in the detailed Wiring reference above.]
+        [$in title:Scope and channels]
+        [$in advanced:See Capability positions and lifetimes and Channel boundary in the detailed Wiring reference above.]
 
         [scope_and_future_basic]
     ]

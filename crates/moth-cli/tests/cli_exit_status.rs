@@ -156,7 +156,7 @@ fn write_support_scope_project(project: &Path) {
     write_source(
         project,
         "pages/extras/@package.moth",
-        "export:\n    extra #= 1\n;\n",
+        "$export\nextra #= 1\n",
     );
 }
 
@@ -196,7 +196,7 @@ fn support_scope_diagnostic_matches_canonical_and_check_only_lanes() {
     write_source(
         &check_only_project,
         "pages/@package.moth",
-        "export:\n    marker #= 1\n;\n",
+        "$export\nmarker #= 1\n",
     );
     write_source(&check_only_project, "pages/orphan.moth", "@extras extra\n");
 
@@ -234,11 +234,7 @@ fn paired_provider_check_only_uses_the_selected_surface() {
         "project #= (name = \"check_only\")\nhtml #= ()\n",
     );
     write_source(&project, "@entry.moth", "@consumer run\n[:run]\n");
-    write_source(
-        &project,
-        "consumer/@mod.moth",
-        "export:\n    run #= \"ok\"\n;\n",
-    );
+    write_source(&project, "consumer/@mod.moth", "$export\nrun #= \"ok\"\n");
     write_source(
         &project,
         "consumer/orphan.moth",
@@ -247,12 +243,12 @@ fn paired_provider_check_only_uses_the_selected_surface() {
     write_source(
         &project,
         "pkg/@package.moth",
-        "export:\n    support_only #= \"support\"\n;\n",
+        "$export\nsupport_only #= \"support\"\n",
     );
     write_source(
         &project,
         "pkg/@mod.moth",
-        "export:\n    normal_only #= \"normal\"\n;\n",
+        "$export\nnormal_only #= \"normal\"\n",
     );
 
     let check = run_moth_from_dir(&project, &["check", ".", "--terse"]);
@@ -914,7 +910,7 @@ fn check_only_shared_helper_rejects_lateral_support_import() {
     write_source(
         &project,
         "@package.moth",
-        "export:\n    root_support #= \"root\"\n;\n",
+        "$export\nroot_support #= \"root\"\n",
     );
     write_source(
         &project,
@@ -924,7 +920,7 @@ fn check_only_shared_helper_rejects_lateral_support_import() {
     write_source(
         &project,
         "pkg/@package.moth",
-        "export:\n    support_only #= \"support\"\n;\n",
+        "$export\nsupport_only #= \"support\"\n",
     );
 
     let check = run_moth_from_dir(&project, &["check", ".", "--terse"]);

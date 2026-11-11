@@ -144,10 +144,11 @@ Site navigation is the separate case. A route is not a file the build emits, so 
 A file value obeys filesystem ownership, so it cannot reach into a child module's or support package's private files. Content and resources cross a boundary as ordinary exported strings instead:
 
 [codeblock, $code "moth":
-    export:
-        logo  #= @assets/logo.svg
-        intro #= @docs/intro.mtf
-    ;
+    $export
+    logo #= @assets/logo.svg
+
+    $export
+    intro #= @docs/intro.mtf
 ]
 
 A consumer binds those as ordinary exported `String` constants. Aliases and re-exports preserve the resource behind the string, so the link still renders correctly from the consumer's own pages.

@@ -36,7 +36,7 @@ A configurable value uses `$config` before one explicitly typed top-level `#` bi
 
 ### Directory roles
 
-- The selected directory is the only build root and the top of the discoverable source tree.
+- The selected directory is the build root and the top of the discoverable source tree.
 - `config.moth` is optional. When present, only the one at the selected root applies. It is not module source.
 - A directory named `src/` is ordinary source content. There is no configured entry directory or `entry_root`.
 - `_dev/` and `_release/` are hidden generated output folders, not source folders. The build system manages them through manifests.
@@ -75,7 +75,7 @@ A directory may contain both an `@mod.moth` normal root and an `@package.moth` s
 
 For the full package contract see @../packages/#project-local-packages (Project-local packages).
 
-### Current scaffold notice
+### Project scaffold
 
 `moth new html` creates a `config.moth` with an explicit valid project name, a root-level `@entry.moth` and a `.gitignore` containing `/_dev` and `/_release`. The generated config is:
 
@@ -94,13 +94,13 @@ Developers own source directories. The builder generates hidden output folders a
 
 ### Builder-neutral frontend versus builder-owned output
 
-The compiler frontend discovers modules, resolves dependencies, checks types, lowers code and validates borrowing. A project builder then decides how compiled modules become real output files. The current user-facing builder is the HTML project builder.
+The compiler frontend discovers modules, resolves dependencies, checks types, lowers code and validates borrowing. A project builder then decides how compiled modules become real output files. The HTML project builder uses this frontend.
 
 This separation lets the same frontend feed other builders. The frontend does not decide which modules produce artefacts. The builder owns that decision.
 
 ### Only config.moth has config semantics
 
-No other filename has config meaning. `@config.moth` is rejected as a module-root name, not read as a config file. Alternate config filenames and compatibility handling are not supported. A nested `config.moth` is reserved and inert to the enclosing build.
+Only the selected project's root-level `config.moth` defines its settings. A nested `config.moth` does not configure the enclosing build. Invalid special root filenames are rejected during source discovery.
 
 ### Concepts related to project layout
 

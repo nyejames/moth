@@ -1,6 +1,5 @@
 $config
 configured_maximum #I32 = 2147483647
 
-export:
-    counts #= (maximum = configured_maximum)
-;
+$export
+counts #= (maximum = configured_maximum)

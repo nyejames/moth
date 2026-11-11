@@ -1,10 +1,11 @@
-export:
-    Bounds = |
-        maximum I32,
-    |
-    Limits = |
-        inner Bounds,
-    |
+$export
+Bounds = |
+    maximum I32,
+|
+$export
+Limits = |
+    inner Bounds,
+|
 
-    limits #= Limits(inner = Bounds(maximum = 2147483647))
-;
+$export
+limits #= Limits(inner = Bounds(maximum = 2147483647))

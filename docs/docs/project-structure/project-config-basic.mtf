@@ -1,4 +1,4 @@
-**Current support.** `config.moth` uses ordinary named `project` and selected builder-settings records with `$config` input declarations. The named records remain the accepted configuration model. `$config` marks typed inputs and does not replace the records. See @../progress (Progress).
+Project and builder settings use top-level compile-time constants in the optional `config.moth`. `$config` marks typed external inputs, not the settings records.
 
 `config.moth` is optional at the selected build root and is one self-contained compile-time source with no source dependencies. A nested config file has no effect on its enclosing build.
 
@@ -28,6 +28,6 @@ The `project` record is optional. Omitting `name` uses the selected directory na
     html #= ()
 ]
 
-`$config` marks one explicitly typed top-level compile-time `#` binding as a build input. The binding name is the input key, the declared type is the receiving contract and the initializer is the missing-input fallback. Only a marked binding may omit its initializer. The rest of `config.moth` remains ordinary compile-time configuration. `$project`, `$builder` and `$html_builder` are not accepted directives.
+`$config` marks one explicitly typed top-level compile-time `#` binding as a build input. The binding name is the input key, the declared type is the receiving contract and the initializer is the missing-input fallback. Only a marked binding may omit its initializer. The other bindings in `config.moth` remain ordinary compile-time constants.
 
 See @#project-config (Project config), @#build-inputs (Build configuration values) and @../directives (Directives).

@@ -4,7 +4,7 @@ reclaim reserved words by changing ASCII case or adding leading underscores.
 ### Keywords
 
 - **Control flow:** `if`, `else`, `then`, `loop`, `to`, `by`, `break`, `continue`, `return`, `catch`, `assert`
-- **Declarations and types:** `export`, `type`, `of`, `as`, `copy`, `cast`, `must`, `this`, `This`
+- **Declarations and types:** `type`, `of`, `as`, `copy`, `cast`, `must`, `this`, `This`
 - **Reserved for future syntax:** `async`, `yield`, `checked`
 - **Word operators:** `is`, `not`, `and`, `or`
 - **Literals:** `true`, `false`, `none`
@@ -48,9 +48,10 @@ The `@project` dependency root is reserved for project globals.
 
 ### Source directives
 
-- `$config` - source-only modifier that marks one explicitly typed top-level compile-time `#` binding as a build input (compiler).
+- `$export` - marks one public declaration or direct-selection re-export in `@mod.moth` or `@package.moth`.
+- `$config` - marks one explicitly typed top-level compile-time `#` binding as a build input.
 
-`$config` is delivered and takes no operand. It occupies its own line immediately above its binding; comment-only lines may intervene, but a blank physical line breaks attachment. Every template directive above is registered by the compiler and available under every builder.
+Both source directives take no operand and occupy their own line. Comments may intervene, but a blank physical line breaks attachment. Template directives are compiler-owned and available under every builder.
 
 No `$project`, `$builder` or `$html_builder` directive exists. Project and builder settings use the ordinary named `project` and builder records in `config.moth`.
 

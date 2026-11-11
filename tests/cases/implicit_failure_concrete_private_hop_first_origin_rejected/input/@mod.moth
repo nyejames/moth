@@ -7,8 +7,7 @@ bump |wide U32, one U32, amount U8| -> U8:
     ~total += risky(amount) catch then amount
     return total
 ;
-export:
-    boundary |wide U32, one U32, amount U8| -> U8:
-        return bump(wide, one, amount)
-    ;
+$export
+boundary |wide U32, one U32, amount U8| -> U8:
+    return bump(wide, one, amount)
 ;

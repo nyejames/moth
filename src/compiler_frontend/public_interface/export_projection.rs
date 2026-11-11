@@ -34,8 +34,9 @@
 //! Only declarations defined directly in the active module root's public surface are recorded
 //! as directly-defined exports: free functions, nominal structs, choices, transparent aliases,
 //! constants and traits. Receiver methods are attached to their exported receiver type's surface
-//! rather than becoming free namespace bindings. Same-module re-exports from the root's `export:`
-//! block that target private-file declarations are joined alongside directly-defined exports.
+//! rather than becoming free namespace bindings. Same-module re-exports from the root's public
+//! export surface that target private-file declarations are joined alongside directly-defined
+//! exports.
 //! Cross-module re-exports from provider interfaces are joined during recursive closure at
 //! publication time.
 //!
@@ -695,8 +696,8 @@ fn any_retained_public_export_targets_source_path(
 /// callable seed table (see `build_callable_seed_table`) and must not become independent
 /// free namespace bindings.
 ///
-/// Re-exports from the root's `export:` block that target same-module private-file declarations
-/// are joined here alongside directly-defined root-file exports. Each re-export's public name
+/// Re-exports from the root's public export surface that target same-module private-file
+/// declarations are joined here alongside directly-defined root-file exports. Each re-export's public name
 /// comes from the `module_root_public_exports` entry and its origin is derived from the target
 /// declaration's header through the `SourceModuleOriginTable`.
 #[allow(
@@ -759,7 +760,8 @@ fn collect_free_export_bindings(
     }
 
     // Collect re-export bindings from the module root's public export entries. These entries
-    // cover declarations from private files re-exported through the root's `export:` block.
+    // cover declarations from private files re-exported through the root's public export
+    // surface.
     // Directly-defined exports already collected above are skipped by checking the public name.
     let reexport_bindings = collect_reexport_bindings(
         source_module_origins,
@@ -802,7 +804,7 @@ fn collect_free_export_bindings(
 ///       to the active module is resolved to an `ExportBinding` with the export name and the
 ///       declaration's stable origin. `External` targets are deferred to the binding-backed
 ///       re-export owner.
-/// WHY: the `export:` block may re-export declarations from private files within the same module.
+/// WHY: the public export surface may re-export declarations from private files within the same module.
 /// Those declarations are not in the active root file, so `is_directly_defined_public_export`
 /// excludes them. The header-built public export maps already resolved the re-export target, so
 /// this function joins them into the export seed without a second source scan.
@@ -1147,8 +1149,8 @@ fn free_export_declaration_origin(
 ///
 /// WHAT: narrows the export surface to the active module's own declarations. The active module
 ///       root is the file being compiled; imported-module-root headers belong to another
-///       module's surface and are excluded. Only declarations marked public by a strict
-///       `export:` block are admitted. The declaration-kind gate is the shared
+///       module's surface and are excluded. Only declarations marked with
+///       `$export` are admitted. The declaration-kind gate is the shared
 ///       [`HeaderKind::is_authored_public_export_declaration`] owner so the header, AST and
 ///       semantic-origin public-export predicates cannot drift; this predicate keeps the
 ///       stage-local file-role and export-mode policy (active module root plus explicit `Public`

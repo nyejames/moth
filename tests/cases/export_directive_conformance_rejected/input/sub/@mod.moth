@@ -1,0 +1,6 @@
+Label = |
+    text String,
+|
+
+$export
+Label must DISPLAYABLE

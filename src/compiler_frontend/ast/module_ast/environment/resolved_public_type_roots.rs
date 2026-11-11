@@ -150,8 +150,8 @@ impl ResolvedTraitSourceFact {
 ///
 /// WHAT: `roots` holds the named declaration roots in deterministic sorted-header order;
 /// `receiver_methods` holds the receiver methods attached to directly-defined public
-/// nominal receivers, selected in a separate pass so private method headers outside
-/// `export:` are admitted by receiver ownership rather than their own export binding.
+/// nominal receivers, selected in a separate pass so private method headers without `$export`
+/// are admitted by receiver ownership rather than their own export binding.
 /// `trait_source_facts` retains the resolved trait identity source facts needed by generic
 /// bounds on the exported free-function, struct/choice roots, and receiver methods, and by
 /// public trait incompatibility relations, so bound and incompatibility projection can resolve
@@ -173,7 +173,7 @@ pub(crate) struct ResolvedPublicTypeRootTable {
 ///
 /// WHAT: groups the resolved signature, nominal identity, alias, constant and receiver
 /// side tables used while building the root table, plus the set of re-exported declaration
-/// paths targeted by public export entries from the root's `export:` block.
+/// paths targeted by public export entries from the root's public export surface.
 /// WHY: building the table sits at the join of completed AST environment facts; keeping the
 /// inputs named makes that boundary easier to audit than a long positional list.
 pub(crate) struct BuildResolvedPublicTypeRootsInput<'a> {
@@ -188,8 +188,8 @@ pub(crate) struct BuildResolvedPublicTypeRootsInput<'a> {
     pub trait_environment: &'a TraitEnvironment,
     pub type_environment: &'a TypeEnvironment,
     pub string_table: &'a StringTable,
-    /// Source declaration paths re-exported through the root's `export:` block from private files
-    /// in the same module.
+    /// Source declaration paths re-exported through the root's public export surface from private
+    /// files in the same module.
     pub reexport_target_paths: &'a FxHashSet<PathId>,
     /// The selected root surface whose directly-authored public declarations belong to this table.
     pub active_root_file_id: SourceId,
@@ -483,7 +483,7 @@ pub(crate) fn build_resolved_public_type_roots(
     }
 
     // Pass 2: select receiver methods attached to public nominal receivers owned by this module.
-    // Real methods on a public receiver are normally private headers outside `export:`, so this
+    // Real methods on a public receiver are normally private headers without `$export`, so this
     // pass ignores the method header's export mode and file role and selects by the receiver path
     // admitted in Pass 1/1b. Imported-provider methods cannot enter because their receiver paths
     // are not in this module's public nominal set.

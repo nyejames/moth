@@ -1,28 +1,11 @@
-A project can expose a public package API to other projects through `@package.moth` at its selected root.
+A project publishes an external package API through `@package.moth` at the selected project root. Each public declaration or direct-selection re-export uses `$export`.
 
-### What the package surface does
+The project can also contain `@mod.moth`, `@entry.moth` and `config.moth`. Roots share ordinary helpers but keep separate declaration scopes. The package facade never falls back to the normal facade.
 
-`@package.moth` at the project root is the project package's support surface. It exports declarations that external consumers can bind. Without it, the project has no externally consumable package surface, even when `@mod.moth` exists.
+The support facade rejects runtime statements, page fragments and builder slots. Without a project-root `@package.moth`, the project has no external Moth package surface.
 
-The project can also have `@mod.moth`, `@entry.moth` and `config.moth`. The roots share helper files but keep separate declarations and interfaces.
+Exported signatures and reachable implementations cannot depend on project-private `@project` values. Consumer configuration does not implicitly supply a dependency package's `$config` inputs.
 
-The package surface rejects top-level runtime work, page fragments and builder-slot contributions. It has no entry and emits no route.
+Registered Core and Builder source packages may use their own `@mod.moth` surface instead.
 
-### How it reaches descendant modules
-
-The support surface follows the ordinary support visibility rule. It does not receive a privileged namespace over descendant modules, and internal project modules cannot import it as a private back door.
-
-### Privacy and inputs
-
-It cannot depend on `@project` or expose declarations that depend on project-private context. A declaration whose reachable implementation uses private project values cannot leave the project.
-
-Configuration input contracts stay scoped to one project or package boundary. A consumer does not satisfy a dependency's contracts implicitly.
-
-### Registered packages are different
-
-Only an external project package needs a project-root `@package.moth`. Registered Core and Builder source packages can publish a normal `@mod.moth` surface, as `@html` and `@web/site` do.
-
-### Concepts related to the facade basics
-
-- For module root rules see @#module-roots (Module roots).
-- For entry runtime and dependency non-activation see @#entry-runtime-and-fragments (Entry runtime and fragments).
+See @#project-package-facade (Project package facade) and @#module-roots (Module roots).

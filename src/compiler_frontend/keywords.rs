@@ -10,7 +10,6 @@ use moth_lexical::words::{SourceWord, SourceWordClass, classify_source_word};
 /// Returns the compiler token identity for a shared exact source word.
 pub(crate) fn token_tag_for_source_word(word: SourceWord) -> TokenTag {
     match word {
-        SourceWord::Export => TokenTag::EXPORT,
         SourceWord::Type => TokenTag::TYPE,
         SourceWord::Of => TokenTag::OF,
         SourceWord::As => TokenTag::AS,

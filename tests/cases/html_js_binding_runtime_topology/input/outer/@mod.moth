@@ -1,3 +1,2 @@
-export:
-    @inner note, choose, observed, generated_label, read_limit, limit, unused_live, private_only, branch_only, assertion_only
-;
+$export
+@inner note, choose, observed, generated_label, read_limit, limit, unused_live, private_only, branch_only, assertion_only

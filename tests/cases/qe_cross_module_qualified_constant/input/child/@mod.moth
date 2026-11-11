@@ -1,3 +1,2 @@
-export:
-    value #= "cross-module child"
-;
+$export
+value #= "cross-module child"

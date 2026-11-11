@@ -6,8 +6,7 @@ first |left I32, right I32| -> I32:
     return multiply(left, right)
 ;
 
-export:
-    product |left I32, right I32| -> I32:
-        return first(left, right)
-    ;
+$export
+product |left I32, right I32| -> I32:
+    return first(left, right)
 ;

@@ -275,15 +275,6 @@ pub enum RootLocalDeclarationRole {
     EntryRoot,
 }
 
-/// Why an authored `export:` clause is rejected for its file role.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ExportOutsideModuleRootReason {
-    /// The file is an ordinary helper, a config bootstrap, or a root that owns no export surface.
-    NoExportSurface,
-    /// `@entry.moth` owns start and runtime and has no export surface at all.
-    EntryRoot,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DiagnosticPlace {
     Local(StringId),
@@ -904,11 +895,12 @@ pub enum InvalidTemplateDirectiveReason {
     InvalidChildDecoratorValue,
     /// A known directive appeared in a context its definition does not allow.
     WrongContext,
-    /// The same source modifier was attached twice to one declaration.
+    /// The same source modifier was attached twice to one item.
     DuplicateModifier,
-    /// A source modifier reached end of file or a non-declaration item instead of a target.
+    /// A source modifier reached a blank line or file end before an eligible target.
     DanglingModifier,
-    /// A source modifier attached to a declaration its contract does not accept.
+    /// A source modifier attached to a declaration or dependency clause its contract does not
+    /// accept.
     WrongTarget,
 }
 

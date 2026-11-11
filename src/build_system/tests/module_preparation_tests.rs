@@ -589,10 +589,9 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let entry_file = temp_dir.path().join("@mod.moth");
     let parameter_name = format!("value_{}", "x".repeat(1_500));
     let source = format!(
-        "export:\n\
+        "$export\n\
         identity type T |{parameter_name} T| -> T:\n\
             return {parameter_name}\n\
-        ;\n\
         ;\n"
     );
     fs::write(&entry_file, &source).unwrap();
@@ -848,7 +847,7 @@ fn support_api_only_root_compiles_public_interface_without_hir_start() {
 fn compile_api_only_root_and_assert_boundary() {
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
     let entry_file = temp_dir.path().join("@package.moth");
-    let source = "export:\n    answer #= 42\n;\n";
+    let source = "$export\nanswer #= 42\n";
     fs::write(&entry_file, source).expect("test source should be written");
     let canonical_entry = fs::canonicalize(&entry_file).expect("test source should canonicalize");
 

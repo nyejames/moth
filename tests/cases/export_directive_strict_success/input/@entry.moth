@@ -1,0 +1,3 @@
+@sub public_value
+
+[:export_directive_strict_success [public_value]]

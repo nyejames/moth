@@ -1,3 +1,2 @@
-export:
-    support_label #= "support"
-;
+$export
+support_label #= "support"

@@ -16,7 +16,7 @@ fn diagnostic_suggestions_are_limited_to_the_occurrence() {
 
     assert_eq!(
         registry.supported_directives_for_diagnostic(DirectiveOccurrence::Source),
-        "'$config'",
+        "'$export', '$config'",
         "a source position must not suggest template-only directives"
     );
     assert!(
@@ -25,11 +25,27 @@ fn diagnostic_suggestions_are_limited_to_the_occurrence() {
             .contains("$config"),
         "a template head must not suggest the source modifier"
     );
+    assert!(
+        !registry
+            .supported_directives_for_diagnostic(DirectiveOccurrence::TemplateHead)
+            .contains("$export"),
+        "a template head must not suggest the source modifier"
+    );
 }
 
 #[test]
-fn config_is_the_only_source_modifier_directive() {
+fn export_and_config_are_source_modifiers() {
     let built_ins = StyleDirectiveRegistry::built_ins();
+
+    let export = built_ins
+        .find("export")
+        .expect("missing '$export' directive");
+    assert!(export.contexts.allows_source_modifier());
+    assert!(!export.contexts.allows_template_head());
+    assert!(matches!(
+        export.kind,
+        StyleDirectiveKind::SourceModifier(SourceModifierTarget::ExportablePublicApiItem)
+    ));
 
     let config = built_ins
         .find("config")

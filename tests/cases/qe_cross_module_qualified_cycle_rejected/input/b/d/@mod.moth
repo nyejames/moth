@@ -1,3 +1,2 @@
-export:
-    other #= @a label
-;
+$export
+other #= @a label

@@ -1,3 +1,2 @@
-export:
-    value #= "provider"
-;
+$export
+value #= "provider"

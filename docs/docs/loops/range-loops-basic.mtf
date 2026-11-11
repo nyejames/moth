@@ -74,7 +74,4 @@ Fixed-width bounds follow the exact numeric domain rules. Steps are signed whole
 numbers from `I8` through `I64`. An omitted step is one, and unsigned, `Byte`,
 `Dec` or float steps do not apply to an integer range. A literal zero step is
 rejected during compilation. Any other zero step fails before the first iteration.
-Counter updates end at the last valid endpoint rather than
-overflowing. Ranges run on HTML-JS. HTML-Wasm lowers integer, `F32` and `F64`
-counters, and rejects `F16` counters or recoverable range failure with a
-capability diagnostic. See @../progress (Progress) for current support.
+Counter updates end at the last valid endpoint rather than overflowing.

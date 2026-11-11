@@ -18,6 +18,4 @@ Templates can build plain text, Markdown, HTML, CSS or another string-based
 format. They may be finished during compilation or built at runtime.
 
 HTML pages come from `@entry.moth`. A direct top-level template in that file
-becomes page output. Builder metadata uses direct const root `$in` inserts. See @../progress (Progress) for current support and
-@../project-structure/#entry-config (Entry metadata and builder slots) for page
-metadata. Assigned or returned templates remain ordinary `String` values.
+becomes page output. Builder metadata uses direct const root `$in` inserts. See @../project-structure/#entry-config (Entry metadata and builder slots) for page metadata. Assigned or returned templates remain ordinary `String` values.

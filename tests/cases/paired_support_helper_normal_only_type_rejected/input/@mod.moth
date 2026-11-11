@@ -1,2 +1,3 @@
 @internal NormalOnly
-export: @internal NormalOnly ;
+$export
+@internal NormalOnly

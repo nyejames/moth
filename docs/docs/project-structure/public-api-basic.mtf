@@ -1,38 +1,32 @@
-**Current versus future.** `export:` is the implemented public API marker.
-The later `$export` migration will replace it. Its directive-block syntax is
-undecided, and the two forms won't remain permanent alternatives.
+Declarations are private by default. In `@mod.moth` and `@package.moth`, place `$export` before each public declaration or direct-selection re-export.
 
-Declarations are private to their module by default. The `export:` block marks
-what other modules can see.
-
-### A compact export block
+### Exporting declarations
 
 [codeblock, $code "moth":
     private_helper || -> String:
         return "private"
     ;
 
-    export:
-        public_name #= "Moth"
+    $export
+    public_name #= "Moth"
 
-        render || -> String:
-            return private_helper()
-        ;
+    $export
+    render || -> String:
+        return private_helper()
     ;
 ]
 
-### Private by default
+`$export` applies only to the next eligible item. It occupies its own line and a blank line breaks attachment. A `#` binding is compile-time, not automatically public.
 
-Files in the same module can see each other's declarations. Other modules can
-only see what the root's `export:` block makes public. The `#` marker means
-compile-time constant, not public visibility.
+### Re-exporting helpers
 
-Private functions without an error slot can propagate implicit numeric failure
-within their module without postfix `!` at each internal call. Exported
-callables without an error slot must handle that failure, not silently add an
-error channel. Built-in `Error!` can deliver it; custom errors need recovery or
-explicit mapping. Traits and generic conformance cannot widen the public
-signature. See @../progress (Progress) for current support.
+[codeblock, $code "moth":
+    $export
+    @components/card CardData as Card, render_card
+]
 
-Re-export direct selections inside the same current block. Don't use `$export`
-until its migration and syntax land.
+This publishes `Card` and `render_card`. `CardData` is not also exported under its original name.
+
+Files within a module can bind shared helpers. Other modules see only the matching facade's exported API. Declarations in separate root files remain isolated. Public signatures cannot expose private types or trait evidence, and public callables require closed error contracts.
+
+See @#public-api (Public API) and @../packages/#module-visibility (Module visibility).

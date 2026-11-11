@@ -1,3 +1,2 @@
-export:
-    @binding.js alternate_value
-;
+$export
+@binding.js alternate_value

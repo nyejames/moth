@@ -1,3 +1,2 @@
-export:
-    max_value #I64 = 9223372036854775807
-;
+$export
+max_value #I64 = 9223372036854775807

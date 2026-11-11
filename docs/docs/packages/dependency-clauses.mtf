@@ -34,7 +34,7 @@ The comma always promises another selection, so a trailing comma is invalid:
     @core/math sin, cos,
 ]
 
-The same activation, comma-continuation and no-trailing-comma rules apply inside `export:`.
+The same rules apply when `$export` marks a direct-selection clause for re-export.
 
 ### Namespace dependencies
 

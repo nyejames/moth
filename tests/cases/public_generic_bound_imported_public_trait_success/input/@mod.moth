@@ -1,3 +1,2 @@
-export:
-    @impl identity
-;
+$export
+@impl identity

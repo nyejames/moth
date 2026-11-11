@@ -1,6 +1,7 @@
 use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
-    InvalidTemplateStructureCode, InvalidTemplateStructureView,
+    InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView, InvalidTemplateStructureCode,
+    InvalidTemplateStructureView,
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootFiles;
 
@@ -8,7 +9,7 @@ use crate::compiler_frontend::semantic_identity::ModuleRootFiles;
 fn api_only_normal_root_keeps_exportable_headers_and_rejects_runtime_body() {
     let errors = expect_header_error(
         parse_single_file_headers_with_entry(
-            "export:\n    Button = | label String |\n;\n[ Button(\"ignored\") ]\n",
+            "$export\nButton = | label String |\n[ Button(\"ignored\") ]\n",
             "src/@mod.moth",
             "src/@entry.moth",
         ),
@@ -27,7 +28,7 @@ fn api_only_normal_root_keeps_exportable_headers_and_rejects_runtime_body() {
 
     let headers = expect_header_success(
         parse_single_file_headers_with_entry(
-            "export:\n    Button = | label String |\n;\n",
+            "$export\nButton = | label String |\n",
             "src/@mod.moth",
             "src/@entry.moth",
         ),
@@ -120,7 +121,7 @@ fn api_only_normal_root_rejects_const_root_fragments() {
 fn reached_root_keeps_export_surface_without_start() {
     let headers = expect_header_success(
         parse_single_file_headers_with_reached_role(
-            "export:\n    Button = | label String |\n;\n",
+            "$export\nButton = | label String |\n",
             "src/widgets/@mod.moth",
             FileRole::ReachedApiFacadeRoot(ModuleRootRole::Normal),
         ),
@@ -300,55 +301,27 @@ fn metadata_only_entry_root_keeps_start_and_const_fragment() {
 }
 
 #[test]
-fn entry_root_rejects_export_block() {
+fn entry_root_rejects_export_directive() {
     let errors = expect_header_error(
         parse_single_file_headers_with_options(
-            "export:\n    theme #= \"dark\"\n;\n",
+            "$export\ntheme #= \"dark\"\n",
             Path::new("src/@entry.moth"),
             entry_root_options(),
         ),
         "entry roots must reject export surfaces",
     );
 
-    assert!(errors.diagnostics.views().any(|diagnostic| {
-        diagnostic_has_family::<generics_traits_api::ExportOutsideModuleRootView>(&diagnostic)
-    }));
-
     let diagnostic = errors
         .diagnostics
         .first()
         .expect("entry export rejection holds one diagnostic");
     let view = diagnostic
-        .family_view::<generics_traits_api::ExportOutsideModuleRootView>()
+        .family_view::<InvalidTemplateDirectiveView>()
         .expect("entry export rejection keeps its typed reason");
     assert_eq!(
         view.reason,
-        crate::compiler_frontend::compiler_messages::ExportOutsideModuleRootReason::EntryRoot,
-        "an entry root names its own missing export surface"
-    );
-}
-
-#[test]
-fn entry_root_rejects_non_block_export() {
-    let errors = expect_header_error(
-        parse_single_file_headers_with_options(
-            "export\n",
-            Path::new("src/@entry.moth"),
-            entry_root_options(),
-        ),
-        "entry roots must reject a non-block export clause",
-    );
-
-    let diagnostic = errors
-        .diagnostics
-        .first()
-        .expect("entry export rejection holds one diagnostic");
-    let view = diagnostic
-        .family_view::<generics_traits_api::ExportOutsideModuleRootView>()
-        .expect("non-block entry export keeps its typed reason");
-    assert_eq!(
-        view.reason,
-        crate::compiler_frontend::compiler_messages::ExportOutsideModuleRootReason::EntryRoot
+        InvalidTemplateDirectiveCode::DirectiveNotAllowedHere,
+        "an entry root rejects the source directive at its own span"
     );
 }
 
@@ -512,7 +485,7 @@ fn normal_root_export_cannot_reexport_an_entry_root_declaration() {
             "src/@entry.moth".to_owned(),
         ),
         (
-            "export:\n    @\"@entry\" greeting\n;\n".to_owned(),
+            "$export\n@\"@entry\" greeting\n".to_owned(),
             "src/@mod.moth".to_owned(),
         ),
     ];
@@ -537,7 +510,7 @@ fn normal_root_export_cannot_reexport_a_support_facade_declaration() {
             "src/@package.moth".to_owned(),
         ),
         (
-            "export:\n    @\"@package\" support_value\n;\n".to_owned(),
+            "$export\n@\"@package\" support_value\n".to_owned(),
             "src/@mod.moth".to_owned(),
         ),
     ];

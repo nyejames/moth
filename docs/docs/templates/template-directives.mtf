@@ -2,12 +2,6 @@
 semantics; general ownership, context, argument and diagnostic rules live in
 @../directives (Directives).
 
-The template directives documented here are current supported semantics. The
-`$config` source modifier is delivered and its general grammar lives in
-@../directives (Directives).
-Named project and builder settings remain ordinary compile-time records in
-`config.moth`.
-
 Template-head directives modify their containing template, regardless of whether
 the head also has ordinary expressions. Their syntax does not change the placement
 rules for following-construct source modifiers.
@@ -76,9 +70,6 @@ Builder destinations are builder-interpreted. The HTML builder registers
 `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and
 `head`. See @../constants/#const-templates (Const templates) and
 @../project-structure/#entry-config (Entry metadata and builder slots).
-
-Runtime top-level named builder inserts are not supported, and their final
-design remains unsettled.
 
 ### Formatter directives
 

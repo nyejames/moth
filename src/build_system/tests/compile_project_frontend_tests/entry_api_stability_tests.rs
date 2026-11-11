@@ -12,10 +12,9 @@ const CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n
 
 const BASE_HELPER: &str = "compute |value I32| -> I32:\n    return value\n;\n";
 
-const BASE_FACADE: &str = "@impl compute\n\nexport:\n    @impl compute\n;\n";
+const BASE_FACADE: &str = "@impl compute\n\n$export\n@impl compute\n";
 
-const SUPPORT_FACADE: &str =
-    "export:\n    support_label || -> String:\n        return \"support\"\n    ;\n;\n";
+const SUPPORT_FACADE: &str = "$export\nsupport_label || -> String:\n    return \"support\"\n;\n";
 
 /// Compiles one directory project from the given `(relative path, source text)` files.
 fn compile_fixture(files: &[(&str, &str)]) -> ProjectFrontendCompilation {
@@ -370,18 +369,18 @@ fn shared_helper_export_changes_invalidate_the_provider_interface_fingerprint() 
 #[test]
 fn qualified_private_helper_edit_changes_only_the_dependent_folded_content() {
     let before = compile_template_fixture(&[
-        ("src/@mod.moth", "export:\n    unrelated #= 1\n;\n"),
+        ("src/@mod.moth", "$export\nunrelated #= 1\n"),
         ("src/@entry.moth", "#[: [@intro content] ]\n"),
         ("src/intro.mtf", "[@settings site_name]\n"),
         ("src/settings.moth", "site_name #= \"Moth Site\"\n"),
-        ("src/other/@mod.moth", "export:\n    stable #= 1\n;\n"),
+        ("src/other/@mod.moth", "$export\nstable #= 1\n"),
     ]);
     let after = compile_template_fixture(&[
         ("src/@entry.moth", "#[: [@intro content] ]\n"),
         ("src/settings.moth", "site_name #= \"Changed Site\"\n"),
         ("src/intro.mtf", "[@settings site_name]\n"),
-        ("src/other/@mod.moth", "export:\n    stable #= 1\n;\n"),
-        ("src/@mod.moth", "export:\n    unrelated #= 1\n;\n"),
+        ("src/other/@mod.moth", "$export\nstable #= 1\n"),
+        ("src/@mod.moth", "$export\nunrelated #= 1\n"),
     ]);
 
     let before_content = entry_folded_fragments(entry_artifact(&before));
@@ -435,22 +434,22 @@ fn qualified_private_helper_edit_changes_only_the_dependent_folded_content() {
 #[test]
 fn qualified_cross_module_constant_edit_changes_the_consumer_and_provider_only() {
     let before = compile_template_fixture(&[
-        ("src/@mod.moth", "export:\n    unrelated #= 1\n;\n"),
+        ("src/@mod.moth", "$export\nunrelated #= 1\n"),
         (
             "src/@entry.moth",
             "message #= @child label\n#[: [message] ]\n",
         ),
-        ("src/child/@mod.moth", "export:\n    label #= \"one\"\n;\n"),
-        ("src/other/@mod.moth", "export:\n    stable #= 1\n;\n"),
+        ("src/child/@mod.moth", "$export\nlabel #= \"one\"\n"),
+        ("src/other/@mod.moth", "$export\nstable #= 1\n"),
     ]);
     let after = compile_template_fixture(&[
-        ("src/@mod.moth", "export:\n    unrelated #= 1\n;\n"),
+        ("src/@mod.moth", "$export\nunrelated #= 1\n"),
         (
             "src/@entry.moth",
             "message #= @child label\n#[: [message] ]\n",
         ),
-        ("src/child/@mod.moth", "export:\n    label #= \"two\"\n;\n"),
-        ("src/other/@mod.moth", "export:\n    stable #= 1\n;\n"),
+        ("src/child/@mod.moth", "$export\nlabel #= \"two\"\n"),
+        ("src/other/@mod.moth", "$export\nstable #= 1\n"),
     ]);
 
     let before_content = entry_folded_fragments(entry_artifact(&before));
@@ -504,15 +503,12 @@ fn qualified_cross_module_constant_edit_changes_the_consumer_and_provider_only()
 #[test]
 fn qualified_reference_builds_are_deterministic_across_source_creation_order() {
     let files = [
-        ("src/@mod.moth", "export:\n    unrelated #= 1\n;\n"),
+        ("src/@mod.moth", "$export\nunrelated #= 1\n"),
         ("src/@entry.moth", "page #= @child intro\n#[: [page] ]\n"),
-        (
-            "src/child/@mod.moth",
-            "export:\n    @intro content as intro\n;\n",
-        ),
+        ("src/child/@mod.moth", "$export\n@intro content as intro\n"),
         ("src/child/intro.mtf", "[@settings site_name]\n"),
         ("src/child/settings.moth", "site_name #= \"stable\"\n"),
-        ("src/other/@mod.moth", "export:\n    stable #= 1\n;\n"),
+        ("src/other/@mod.moth", "$export\nstable #= 1\n"),
     ];
     let mut reversed = files.to_vec();
     reversed.reverse();

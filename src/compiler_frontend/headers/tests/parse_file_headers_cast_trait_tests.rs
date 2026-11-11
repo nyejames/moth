@@ -96,7 +96,7 @@ fn header_parsing_rejects_module_public_surface_re_export_with_core_cast_trait_n
             "src/helper.moth".to_owned(),
         ),
         (
-            "export:\n    @helper USER_TRAIT as CASTABLE_TO_STRING\n;\n".to_owned(),
+            "$export\n@helper USER_TRAIT as CASTABLE_TO_STRING\n".to_owned(),
             "src/@mod.moth".to_owned(),
         ),
         ("@helper\n".to_owned(), "src/@entry.moth".to_owned()),

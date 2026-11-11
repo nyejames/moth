@@ -1,1 +1,2 @@
-export: @internal Holder, Label ;
+$export
+@internal Holder, Label

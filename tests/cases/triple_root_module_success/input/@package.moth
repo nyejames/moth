@@ -1,6 +1,5 @@
 @shared label
-export:
-    support_label || -> String:
-        return label()
-    ;
+$export
+support_label || -> String:
+    return label()
 ;

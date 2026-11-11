@@ -10,42 +10,49 @@ make_private_label |text String| -> PrivateLabel:
     return PrivateLabel([: [private_prefix]-[text]-[accent]])
 ;
 
-export:
-    UnusedBox type T = |
-        value T,
-    |
+$export
+UnusedBox type T = |
+    value T,
+|
 
-    UnusedChoice type T ::
-        Some | value T |,
-        Empty,
+$export
+UnusedChoice type T ::
+    Some | value T |,
+    Empty,
+;
+
+$export
+PublicCard = |
+    title String,
+|
+
+$export
+PublicState ::
+    Ready,
+;
+
+$export
+PublicText as String
+
+$export
+public_title #= "card"
+
+$export
+make_state || -> PublicState:
+    return PublicState::Ready
+;
+
+$export
+render_card |card PublicCard| -> PublicText:
+    label = make_private_label(card.title)
+    return label.text
+;
+
+$export
+render_card_or_error |card PublicCard, fail Bool| -> PublicText, Error!:
+    if fail:
+        return! Error("render failed")
     ;
 
-    PublicCard = |
-        title String,
-    |
-
-    PublicState ::
-        Ready,
-    ;
-
-    PublicText as String
-
-    public_title #= "card"
-
-    make_state || -> PublicState:
-        return PublicState::Ready
-    ;
-
-    render_card |card PublicCard| -> PublicText:
-        label = make_private_label(card.title)
-        return label.text
-    ;
-
-    render_card_or_error |card PublicCard, fail Bool| -> PublicText, Error!:
-        if fail:
-            return! Error("render failed")
-        ;
-
-        return render_card(card)
-    ;
+    return render_card(card)
 ;

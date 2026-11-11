@@ -1,3 +1,2 @@
-export:
-    @core/text length as measure, is_empty
-;
+$export
+@core/text length as measure, is_empty

@@ -2,12 +2,12 @@ Request ::
     Query,
 ;
 
-export:
-    Message ::
-        Done,
-    ;
+$export
+Message ::
+    Done,
+;
 
-    accept |route Route of Request -> Message| -> String:
-        return "route private"
-    ;
+$export
+accept |route Route of Request -> Message| -> String:
+    return "route private"
 ;

@@ -1,8 +1,7 @@
-export:
-    Box type T is CASTABLE_TO_STRING = |
-        value T,
-    |
-;
+$export
+Box type T is CASTABLE_TO_STRING = |
+    value T,
+|
 
 to_string type T is CASTABLE_TO_STRING |this Box of T| -> String:
     return cast this.value

@@ -1,11 +1,11 @@
-export:
-    Counter = |
-        count I32,
-    |
+$export
+Counter = |
+    count I32,
+|
 
-    make_counter || -> Counter:
-        return Counter(41)
-    ;
+$export
+make_counter || -> Counter:
+    return Counter(41)
 ;
 
 tick |this Counter| -> I32:

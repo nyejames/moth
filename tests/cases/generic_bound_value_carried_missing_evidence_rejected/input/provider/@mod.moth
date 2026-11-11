@@ -1,19 +1,21 @@
-export:
-    LABELED must:
-        label |This| -> String
-    ;
+$export
+LABELED must:
+    label |This| -> String
+;
 
-    Label = |
-        text String,
-    |
+$export
+Label = |
+    text String,
+|
 
-    make_label |text String| -> Label:
-        return Label(text)
-    ;
+$export
+make_label |text String| -> Label:
+    return Label(text)
+;
 
-    show type Item is LABELED |item Item| -> String:
-        return item.label()
-    ;
+$export
+show type Item is LABELED |item Item| -> String:
+    return item.label()
 ;
 
 label |this Label| -> String:

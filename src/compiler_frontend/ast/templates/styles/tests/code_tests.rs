@@ -697,6 +697,47 @@ fn moth_highlighter_keeps_expression_path_followers_plain() {
 }
 
 #[test]
+fn moth_highlighter_limits_direct_selection_roles_to_start_of_line_paths() {
+    let marked = highlight_code_html("$export\n@core/math sin as sine", CodeLanguage::Moth);
+    assert!(
+        marked.contains("<span class='moth-code-directive'>$export</span>"),
+        "$export must keep its directive role, got: {marked}"
+    );
+    assert!(
+        marked.contains("<span class='moth-code-string'>@core/math</span>"),
+        "a marked dependency path must keep its string role, got: {marked}"
+    );
+    for name in ["sin", "sine"] {
+        assert!(
+            marked.contains(&format!("<span class='moth-code-nominal'>{name}</span>")),
+            "a real marked selection name {name:?} must keep its nominal role, got: {marked}"
+        );
+    }
+
+    let unmarked = highlight_code_html("@core/math sin as sine", CodeLanguage::Moth);
+    for name in ["sin", "sine"] {
+        assert!(
+            unmarked.contains(&format!("<span class='moth-code-nominal'>{name}</span>")),
+            "a real unmarked selection name {name:?} must keep its nominal role, got: {unmarked}"
+        );
+    }
+
+    let same_line = highlight_code_html("$export @core/math sin", CodeLanguage::Moth);
+    assert!(
+        same_line.contains("<span class='moth-code-directive'>$export</span>"),
+        "$export must keep its directive role, got: {same_line}"
+    );
+    assert!(
+        same_line.contains("<span class='moth-code-string'>@core/math</span> sin"),
+        "a same-line path must not present a direct-selection name, got: {same_line}"
+    );
+    assert!(
+        !same_line.contains("moth-code-nominal'>sin"),
+        "an invalid same-line dependency must keep its follower plain, got: {same_line}"
+    );
+}
+
+#[test]
 fn moth_highlighter_keeps_non_directive_dollar_prefix_as_operator() {
     let type_dollar = highlight_code_html("$Bool", CodeLanguage::Moth);
     assert!(

@@ -1394,8 +1394,7 @@ fn canonical_tail_retains_donor_only_package_identity() {
     let requester_path = source_root.join("@entry.moth");
     let donor_path = donor_directory.path().join("@mod.moth");
     const REQUESTER: &str = "@pkg outer\nvalue I32 = outer(1)\n";
-    const DONOR: &str = "inner type U |text String, result U| -> U:\n    return result\n;\n\
-        export:\n    outer type T |value T| -> I32:\n        return inner(value, 1)\n    ;\n;\n";
+    const DONOR: &str = "inner type U |text String, result U| -> U:\n    return result\n;\n$export\nouter type T |value T| -> I32:\n    return inner(value, 1)\n;\n";
     fs::write(&requester_path, REQUESTER).expect("the requester should be written");
     fs::write(&donor_path, DONOR).expect("the donor should be written");
     fs::write(
@@ -1897,10 +1896,9 @@ wrap type T |value T| -> String:
     return [shell: generated]
 ;
 
-export:
-    run || -> String:
-        return wrap(42)
-    ;
+$export
+run || -> String:
+    return wrap(42)
 ;
 "#,
     )

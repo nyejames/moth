@@ -86,6 +86,16 @@ fn removed_builtin_spellings_are_ordinary_names() {
 }
 
 #[test]
+fn removed_export_keyword_is_an_ordinary_name() {
+    for ordinary in ["export", "EXPORT", "_export", "__Export"] {
+        assert!(
+            !is_reserved_user_name(ordinary),
+            "{ordinary:?} should be an ordinary name"
+        );
+    }
+}
+
+#[test]
 fn dec_family_policy_matches_only_bare_name_and_ascii_digit_suffixes() {
     for reserved in ["dec", "Dec2", "dec01", "DEC257", "_Dec9"] {
         assert!(is_reserved_dec_family_name(reserved));

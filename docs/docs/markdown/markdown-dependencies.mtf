@@ -26,7 +26,7 @@ Insert the bound content into a template body. The caller decides where it appea
 
 ### Dependency paths and module visibility
 
-Content dependency clauses follow the same path resolution and module visibility rules as normal source dependency clauses. Both `@intro` and `@docs/intro` resolve from the declaring file's owning module root; the latter selects `docs/intro` below that root. `@./...` has no supported meaning. Cross-module dependency clauses require the module root's `export:` block to re-export the content.
+Content dependency clauses follow the same path resolution and module visibility rules as normal source dependency clauses. Both `@intro` and `@docs/intro` resolve from the declaring file's owning module root; the latter selects `docs/intro` below that root. `@./...` has no supported meaning. Cross-module consumers can bind the content only when the applicable facade re-exports it with `$export`.
 
 ### No automatic page fragment
 

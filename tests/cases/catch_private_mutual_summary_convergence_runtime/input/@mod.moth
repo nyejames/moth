@@ -1,3 +1,2 @@
-export:
-    @impl DomainError, builtin_forward, custom_map
-;
+$export
+@impl DomainError, builtin_forward, custom_map

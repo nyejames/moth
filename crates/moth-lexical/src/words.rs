@@ -100,7 +100,6 @@ macro_rules! define_source_words {
 }
 
 define_source_words! {
-    Export => ("export", Keyword, None);
     Type => ("type", Keyword, None);
     Of => ("of", Keyword, None);
     As => ("as", Keyword, None);

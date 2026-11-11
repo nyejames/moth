@@ -1,2 +1,3 @@
 @internal Box
-export: @internal Box ;
+$export
+@internal Box

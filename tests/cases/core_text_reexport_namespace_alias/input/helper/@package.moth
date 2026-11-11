@@ -1,3 +1,2 @@
-export:
-    @core/text starts_with as begins, ends_with
-;
+$export
+@core/text starts_with as begins, ends_with

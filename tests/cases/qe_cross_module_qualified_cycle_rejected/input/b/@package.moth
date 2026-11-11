@@ -1,3 +1,2 @@
-export:
-    @d other as other
-;
+$export
+@d other as other

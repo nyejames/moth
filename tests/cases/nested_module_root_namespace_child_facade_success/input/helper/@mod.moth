@@ -1,7 +1,6 @@
 @child
 
-export:
-    greet || -> String:
-        return child.greet_from_child()
-    ;
+$export
+greet || -> String:
+    return child.greet_from_child()
 ;

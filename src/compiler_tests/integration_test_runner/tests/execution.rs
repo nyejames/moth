@@ -798,7 +798,7 @@ fn synthetic_entry_modes_reject_child_local_package_namespace_collisions() {
         fs::create_dir(&child_directory).expect("should create child module directory");
         fs::write(
             child_directory.join("@mod.moth"),
-            format!("{child_clause}\nexport:\n    label #String = \"child\"\n;\n"),
+            format!("{child_clause}\n$export\nlabel #String = \"child\"\n"),
         )
         .expect("should write child module dependency");
         fs::write(
@@ -1218,17 +1218,17 @@ fn synthetic_start_api_support_and_package_facade_have_no_start() {
     for (path, source) in [
         (
             "src/support/@package.moth",
-            "export:\n    label #= \"support\"\n;\n",
+            "$export\nlabel #= \"support\"\n",
         ),
-        ("src/api/@mod.moth", "export:\n    label #= \"api\"\n;\n"),
-        ("@package.moth", "export:\n    label #= \"facade\"\n;\n"),
+        ("src/api/@mod.moth", "$export\nlabel #= \"api\"\n"),
+        ("@package.moth", "$export\nlabel #= \"facade\"\n"),
         (
             "src/triple/@mod.moth",
-            "export:\n    label #= \"triple normal\"\n;\n",
+            "$export\nlabel #= \"triple normal\"\n",
         ),
         (
             "src/triple/@package.moth",
-            "export:\n    label #= \"triple support\"\n;\n",
+            "$export\nlabel #= \"triple support\"\n",
         ),
         (
             "src/triple/@entry.moth",
@@ -1335,9 +1335,7 @@ fn synthetic_selected_api_facade_runtime_and_fragments_are_rejected() {
     fs::create_dir(&child).expect("should create the reached child module");
     fs::write(
         child.join("@mod.moth"),
-        "export:\n    value #= \"child\"\n;\n\
-         io.line(\"discarded runtime\")\n\
-         [: discarded fragment]\n",
+        "$export\nvalue #= \"child\"\nio.line(\"discarded runtime\")\n[: discarded fragment]\n",
     )
     .expect("should write the child facade");
 
@@ -1369,7 +1367,7 @@ fn synthetic_start_failing_imported_provider_remains_dormant() {
     .expect("should write failing provider helper");
     fs::write(
         fixture.directory.path().join("src/provider/@mod.moth"),
-        "@impl load\n\nexport:\n    label #= \"consumer-only\"\n;\n",
+        "@impl load\n\n$export\nlabel #= \"consumer-only\"\n",
     )
     .expect("should write provider facade");
     fs::write(
@@ -1434,11 +1432,10 @@ fn synthetic_start_expected_entry_code_from_linked_source_dependency_passes() {
         fs::write(
             fixture.directory.path().join("src/support/@package.moth"),
             format!(
-                "export:\n\
+                "$export\n\
                      load || -> String, Error!:\n\
                          return! Error(message = \"application-secret\", code = {code})\n\
-                     ;\n\
-                 ;\n"
+                     ;\n"
             ),
         )
         .expect("should write fallible source dependency");

@@ -24,9 +24,8 @@ Declarations authored directly in `@mod.moth`, `@package.moth` or `@entry.moth` 
 
 [codeblock, $code "moth":
     -- docs/@mod.moth
-    export:
-        site_name #= "Moth"
-    ;
+    $export
+    site_name #= "Moth"
 ]
 
 [codeblock, $code "md":

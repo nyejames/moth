@@ -1,133 +1,14 @@
+//! Export-specific header parsing tests.
+//!
+//! WHAT: covers private-by-default declarations, duplicate detection and distinct retained
+//!       public/private dependency shells.
+//! WHY: authored visibility and retained dependency shape are separate header contracts.
+
 use super::*;
-use crate::compiler_frontend::compiler_messages::DiagnosticToken;
-use crate::compiler_frontend::tokenizer::tokens::TokenTag;
-
-fn expects_colon(diagnostic: DiagnosticView<'_>) -> bool {
-    diagnostic
-        .family_view::<token_lexical::ExpectedTokenView>()
-        .is_some_and(|facts| facts.expected == DiagnosticToken::from_static_tag(TokenTag::COLON))
-}
 
 // ------------------------------
-//  Export block parsing tests
+//  Export modifier parsing tests
 // ------------------------------
-
-#[test]
-fn export_alone_is_rejected() {
-    let result =
-        parse_single_file_headers_with_entry("export\n", "src/@mod.moth", "src/@entry.moth");
-    let errors = expect_header_error(result, "export without a block colon should be rejected");
-
-    assert!(errors.diagnostics.views().any(expects_colon));
-}
-
-#[test]
-fn legacy_inline_export_declaration_is_rejected() {
-    let result = parse_single_file_headers_with_entry(
-        "export Button = | label String |\n",
-        "src/@mod.moth",
-        "src/@entry.moth",
-    );
-    let errors = expect_header_error(result, "legacy inline export should be rejected");
-
-    assert!(errors.diagnostics.views().any(expects_colon));
-}
-
-#[test]
-fn export_dependency_path_parsed_as_public_surface_dependency() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let output = prepare_active_root_with_role(
-        "export:\n    @button Button\n;\n",
-        &PathBuf::from("src/@mod.moth"),
-        ModuleRootRole::Normal,
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    )
-    .expect("an API-only normal root should accept its export block");
-
-    assert_eq!(output.file_dependency_clauses.len(), 1);
-    assert_eq!(
-        output.file_dependency_clauses[0].export_mode,
-        HeaderExportMode::Public
-    );
-    assert_ne!(
-        output.file_dependency_clauses[0].dependency.path,
-        PathId::ROOT
-    );
-    let selections = output.file_dependency_clauses[0]
-        .selections(&output.dependency_selections)
-        .expect("retained public export selection range should be valid");
-    assert_eq!(selections.len(), 1);
-    assert_eq!(string_table.resolve(selections[0].source_name), "Button");
-}
-
-#[test]
-fn export_block_accepts_an_item_without_a_following_newline() {
-    let headers = expect_header_success(
-        parse_single_file_headers_with_entry(
-            "export: Button = | label String |\n;\n",
-            "src/@mod.moth",
-            "src/@entry.moth",
-        ),
-        "export block should accept its first item after the colon",
-    );
-
-    assert!(headers.headers.iter().any(|header| {
-        matches!(header.kind, HeaderKind::Struct { .. })
-            && header.export_mode == HeaderExportMode::Public
-    }));
-}
-
-#[test]
-fn legacy_export_path_syntax_is_rejected() {
-    let result = parse_single_file_headers_with_entry(
-        "export @card Card, render as render_card\n",
-        "src/@mod.moth",
-        "src/@entry.moth",
-    );
-    let errors = expect_header_error(result, "legacy export path syntax should be rejected");
-
-    assert!(errors.diagnostics.views().any(expects_colon));
-}
-
-#[test]
-fn export_bare_path_rejected_as_deferred_namespace_export() {
-    let result = parse_single_file_headers_with_entry(
-        "export @layout\n",
-        "src/@mod.moth",
-        "src/@entry.moth",
-    );
-    let errors = expect_header_error(
-        result,
-        "bare namespace export should be rejected as deferred",
-    );
-
-    assert!(errors.diagnostics.views().any(expects_colon));
-}
-
-#[test]
-fn export_before_authored_declaration_marks_header_public() {
-    let source = "export:\n    Button = | label String |\n    render |button Button| -> String:\n        return button.label\n    ;\n;\n";
-    let headers = expect_header_success(
-        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
-        "headers should parse",
-    );
-
-    let public_headers: Vec<_> = headers
-        .headers
-        .iter()
-        .filter(|header| header.export_mode == HeaderExportMode::Public)
-        .collect();
-
-    assert_eq!(
-        public_headers.len(),
-        2,
-        "expected two public headers: struct and function"
-    );
-}
 
 #[test]
 fn unmarked_authored_declarations_in_module_root_remain_private() {
@@ -154,7 +35,7 @@ fn unmarked_authored_declarations_in_module_root_remain_private() {
 #[test]
 fn duplicate_declaration_detection_works_with_exported_declarations() {
     let result = parse_single_file_headers_with_entry(
-        "export:\n    Button = | label String |\n;\nButton = | title String |\n",
+        "$export\nButton = | label String |\nButton = | title String |\n",
         "src/@mod.moth",
         "src/@entry.moth",
     );
@@ -171,107 +52,19 @@ fn duplicate_declaration_detection_works_with_exported_declarations() {
 }
 
 #[test]
-fn export_before_constant_marks_header_public() {
-    let source = "export:\n    theme #= \"dark\"\n    threshold #I32 = 42\n;\n";
-    let headers = expect_header_success(
-        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
-        "headers should parse",
-    );
-
-    let public_constants: Vec<_> = headers
-        .headers
-        .iter()
-        .filter(|header| {
-            matches!(header.kind, HeaderKind::Constant { .. })
-                && header.export_mode == HeaderExportMode::Public
-        })
-        .collect();
-
-    assert_eq!(
-        public_constants.len(),
-        2,
-        "expected two public constant headers"
-    );
-}
-
-#[test]
-fn export_before_type_alias_marks_header_public() {
-    let source = "export:\n    UserId as I32\n;\n";
-    let headers = expect_header_success(
-        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
-        "headers should parse",
-    );
-
-    let alias_header = headers
-        .headers
-        .iter()
-        .find(|header| matches!(header.kind, HeaderKind::TypeAlias { .. }))
-        .expect("expected type alias header");
-
-    assert_eq!(alias_header.export_mode, HeaderExportMode::Public);
-}
-
-#[test]
-fn export_before_choice_marks_header_public() {
-    let source = "export:\n    Status :: Ready, Failed | message String |;\n;\n";
-    let headers = expect_header_success(
-        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
-        "headers should parse",
-    );
-
-    let choice_header = headers
-        .headers
-        .iter()
-        .find(|header| matches!(header.kind, HeaderKind::Choice { .. }))
-        .expect("expected choice header");
-
-    assert_eq!(choice_header.export_mode, HeaderExportMode::Public);
-}
-
-#[test]
-fn export_before_trait_declaration_marks_header_public() {
-    let source = "export:\n    DISPLAY_TEXT must:\n        display |This| -> String\n    ;\n;\n";
-    let headers = expect_header_success(
-        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
-        "headers should parse",
-    );
-
-    let trait_header = headers
-        .headers
-        .iter()
-        .find(|header| matches!(header.kind, HeaderKind::Trait { .. }))
-        .expect("expected trait header");
-
-    assert_eq!(trait_header.export_mode, HeaderExportMode::Public);
-}
-
-#[test]
-fn export_before_runtime_template_is_rejected() {
-    let result = parse_single_file_headers_with_entry(
-        "export:\n    [: hello ]\n;\n",
-        "src/@mod.moth",
-        "src/@entry.moth",
-    );
-    let errors = expect_header_error(result, "export before runtime template should be rejected");
-
-    assert!(errors.diagnostics.views().any(|diagnostic| {
-        diagnostic_has_family::<generics_traits_api::InvalidExportTargetView>(&diagnostic)
-    }));
-}
-#[test]
 fn public_dependency_and_private_dependency_keep_distinct_retained_shells() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let output = prepare_active_root_with_role(
-        "@button Button\nexport:\n    @button Button\n;\n",
+        "@button Button\n$export\n@button Button\n",
         &PathBuf::from("src/@mod.moth"),
         ModuleRootRole::Normal,
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
     )
-    .expect("an API-only normal root should accept its export block");
+    .expect("an API-only normal root should accept its `$export` declarations");
 
     assert_eq!(
         output.file_dependency_clauses.len(),
@@ -299,53 +92,5 @@ fn public_dependency_and_private_dependency_keep_distinct_retained_shells() {
             .dependency_shell_id
             .ordinal,
         1
-    );
-}
-#[test]
-fn capacity_references_extract_value_refs_without_treating_element_type_as_value_ref() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/test.moth");
-    let source = "make |items ~{capacity MyType}| -> I32:\n    return 1\n;\n";
-    let (output, mut span_builder) = prepare_single_file_with_fork(
-        source,
-        &file_path,
-        &file_path,
-        &mut string_table,
-        &mut path_fork,
-    );
-
-    let headers = prepare_and_bind_headers_result(
-        vec![output],
-        std::slice::from_mut(&mut span_builder),
-        &ExternalPackageRegistry::new(),
-        &ExternalImportResolutionTable::default(),
-        None,
-        &mut string_table,
-        &mut path_fork,
-    )
-    .expect("headers should parse");
-
-    let make_header = headers
-        .headers
-        .iter()
-        .find(|h| {
-            matches!(h.kind, HeaderKind::Function { .. }) && h.declaration_path != PathId::ROOT
-        })
-        .expect("make header should exist");
-
-    let capacity_names: Vec<_> = make_header
-        .capacity_references
-        .iter()
-        .map(|r| string_table.resolve(r.name))
-        .collect();
-
-    assert!(
-        capacity_names.contains(&"capacity"),
-        "bare capacity syntax should reference the capacity constant"
-    );
-    assert!(
-        !capacity_names.contains(&"MyType"),
-        "element type name must not be treated as a capacity value reference"
     );
 }

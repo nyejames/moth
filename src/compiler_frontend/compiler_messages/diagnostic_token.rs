@@ -73,6 +73,7 @@ impl DiagnosticToken {
     /// WHY: diagnostics must outlive the source token buffer without retaining
     ///      its lifetime, cloning the live token view, or materializing path tables.
     ///      `Path` keeps only its stable tag; the dense path handle is dropped.
+    #[cfg(test)]
     pub(crate) fn try_from_token_ref(token: TokenRef<'_>) -> Result<Self, TokenViewError> {
         Self::try_project_token_ref(token, None, None)
     }
@@ -169,6 +170,7 @@ impl DiagnosticToken {
     ///      construction/publication, so the checked views above hold. Callers
     ///      with unvalidated views must use `try_from_token_ref` and map the
     ///      `TokenViewError` into the compiler-invariant error lane.
+    #[cfg(test)]
     pub(crate) fn from_token_ref(token: TokenRef<'_>) -> Self {
         Self::try_from_token_ref(token)
             .expect("validated source token view must project to a diagnostic token")

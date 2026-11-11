@@ -41,17 +41,17 @@ use crate::compiler_frontend::compiler_messages::{
     BuiltinFailureOriginKind, BuiltinFailureWitness, CompileTimeEvaluationErrorReason,
     DeferredFeatureReason, DependencyClauseKind, DiagnosticBag,
     DiagnosticCompoundAssignmentOperator, DiagnosticOperator, DiagnosticSeverity,
-    ExportOutsideModuleRootReason, ExternalJsAnnotationDirective, ExternalJsDeclarationKind,
-    GenericApplicationErrorReason, InvalidAssignmentTargetReason, InvalidBuiltinCallReason,
-    InvalidCallShapeReason, InvalidCastReason, InvalidChoiceVariantReason,
-    InvalidCollectionTypeReason, InvalidConfigReason, InvalidDependencyClauseReason,
-    InvalidExpressionReason, InvalidExternalModuleReason, InvalidFallibleHandlingReason,
-    InvalidFunctionSignatureReason, InvalidGenericParameterReason, InvalidImportPathReason,
-    InvalidReceiverCallReason, InvalidSignatureMemberReason, InvalidStandaloneStatementReason,
-    InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidTemplateDirectiveReason,
-    InvalidTemplateStructureReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
-    NameNamespace, NamespaceMemberRole, NamespaceRecordKind, NamespaceTypeValueMisuseKind,
-    PathKind, ReceiverCallKind, TypeAnnotationContext, TypeMismatchContext, UnknownTypeNameSite,
+    ExternalJsAnnotationDirective, ExternalJsDeclarationKind, GenericApplicationErrorReason,
+    InvalidAssignmentTargetReason, InvalidBuiltinCallReason, InvalidCallShapeReason,
+    InvalidCastReason, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
+    InvalidConfigReason, InvalidDependencyClauseReason, InvalidExpressionReason,
+    InvalidExternalModuleReason, InvalidFallibleHandlingReason, InvalidFunctionSignatureReason,
+    InvalidGenericParameterReason, InvalidImportPathReason, InvalidReceiverCallReason,
+    InvalidSignatureMemberReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
+    InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
+    InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, NameNamespace,
+    NamespaceMemberRole, NamespaceRecordKind, NamespaceTypeValueMisuseKind, PathKind,
+    ReceiverCallKind, TypeAnnotationContext, TypeMismatchContext, UnknownTypeNameSite,
     ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
@@ -663,6 +663,39 @@ fn unknown_namespace_member_renders_dotted_namespace_path() {
 }
 
 #[test]
+fn duplicate_source_modifier_messages_name_the_incoming_conflict() {
+    // The parser rejects identical repeats and both `$config`/`$export` orders with the same
+    // reason. The rendered message therefore names the incoming modifier and describes the
+    // earlier directive generically rather than claiming the incoming one is already attached.
+    let mut string_table = StringTable::new();
+
+    for name in ["export", "config"] {
+        let name_id = string_table.intern(name);
+        let compact = compact_bag_for_test(
+            DiagnosticBag::from(templates::invalid_template_directive(
+                Some(name_id),
+                InvalidTemplateDirectiveReason::DuplicateModifier,
+                None,
+            )),
+            None,
+        );
+        let view = compact.first().expect("duplicate modifier compact");
+        let guidance =
+            terminal::format_guidance_view(view, DiagnosticRenderContext::new(&string_table));
+        let message = guidance
+            .iter()
+            .find(|line| line.contains("Only one source modifier"))
+            .expect("duplicate modifier message");
+        assert_eq!(
+            message,
+            &format!(
+                "Only one source modifier may attach to an item. '${name}' conflicts with the earlier directive."
+            )
+        );
+    }
+}
+
+#[test]
 fn syntax_renderers_keep_typed_prose_without_error_conversion() {
     let mut string_table = StringTable::new();
     let path_table = PathInternerFork::empty().snapshot_table();
@@ -672,9 +705,11 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
     let fixed_signed_literal = string_table.intern("-129");
     let style_directive = string_table.intern("unknown");
     let supported_directives = string_table.intern("'$html', '$css'");
-    let source_directives = string_table.intern("'$config'");
+    let source_directives = string_table.intern("'$export', '$config'");
     let declaration_name = string_table.intern("Card");
     let template_directive = string_table.intern("insert");
+    let export_directive = string_table.intern("export");
+    let config_directive = string_table.intern("config");
     let namespace_name = string_table.intern("card");
     let cases = [
         (
@@ -735,8 +770,62 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
                 DirectiveOccurrence::Source,
                 None,
             ),
-            "'$unknown' is not a directive. Source directives are '$config'.",
+            "'$unknown' is not a directive. Source directives are '$export', '$config'.",
             "UnknownDirective",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(export_directive),
+                InvalidTemplateDirectiveReason::WrongContext,
+                None,
+            ),
+            "`$export` is a source modifier and cannot appear in a template head.",
+            "WrongContext",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(export_directive),
+                InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
+                None,
+            ),
+            "`$export` is only valid in `@mod.moth` or `@package.moth`, on its own line before an eligible public declaration or direct-selection dependency clause.",
+            "DirectiveNotAllowedHere",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(config_directive),
+                InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
+                None,
+            ),
+            "`$config` is only valid on an explicitly typed top-level compile-time `#` binding.",
+            "DirectiveNotAllowedHere",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(export_directive),
+                InvalidTemplateDirectiveReason::UnexpectedArguments,
+                None,
+            ),
+            "`$export` takes no operand and must occupy its own line. Remove the operand, colon, or parentheses after it.",
+            "UnexpectedArguments",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(export_directive),
+                InvalidTemplateDirectiveReason::DanglingModifier,
+                None,
+            ),
+            "`$export` must immediately precede an eligible public declaration or direct-selection dependency clause.",
+            "DanglingModifier",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(config_directive),
+                InvalidTemplateDirectiveReason::DanglingModifier,
+                None,
+            ),
+            "`$config` must immediately precede an explicitly typed top-level compile-time `#` binding.",
+            "DanglingModifier",
         ),
         (
             names_declarations::invalid_type_annotation(
@@ -2285,35 +2374,5 @@ fn scalar_type_called_as_function_renders_cast_guidance() {
     assert!(
         terse_line.contains("Use `cast` at an explicit typed receiving boundary"),
         "{terse_line}"
-    );
-}
-
-#[test]
-fn export_outside_module_root_names_a_nested_selected_entry() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let file = path_fork
-        .try_intern_portable_path("docs/@entry.moth", &mut string_table)
-        .expect("portable path fits");
-    let compact = compact_bag_for_test(
-        DiagnosticBag::from(generics_traits_api::export_outside_module_root(
-            file,
-            ExportOutsideModuleRootReason::EntryRoot,
-            None,
-        )),
-        None,
-    );
-    let view = compact.first().expect("export rejection compacts");
-    assert_eq!(view.descriptor().code, "MOTH-RULE-0077");
-    let path_table = path_fork.snapshot_table();
-    let guidance = terminal::format_guidance_view(
-        view,
-        DiagnosticRenderContext::new(&string_table).with_path_table(&path_table),
-    )
-    .join("\n");
-
-    assert!(
-        guidance.contains("`export:` is not allowed in `docs/@entry.moth`"),
-        "{guidance}"
     );
 }
