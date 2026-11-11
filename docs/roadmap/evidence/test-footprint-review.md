@@ -337,6 +337,17 @@ A name-level scan of literal `#[test]` markers and their following function name
 
 At head `18fd47c2e` the totals are 19 removed names and 33 added names. The extra addition is `dormant_dependency_root_grouped_delimiters_report_eof_in_child_source`. It adds no integration case, so the 2,396-case / 2,787-execution inventory is unchanged. No deleted test was restored and the 665-row ledger keeps its ten-file scope.
 
+### Post-checkpoint `$doc` test removals
+
+The const-default entry-template cutover (`44bc96d58`) removed two baseline tests from `parser_tir_tests.rs` after the test-footprint checkpoint. Both protected the retired runtime `$doc` comment-template contract:
+
+| Removed baseline test | Retired contract | Current owner or reason |
+|---|---|---|
+| `parser_tir_records_suppressed_child_template_brackets_as_literal_text` | `$doc` was a runtime comment template whose suppressed child brackets remained literal text | No successor: `$doc` is a compile-time source directive. In a template head it is rejected by `todo_and_doc_are_rejected_in_template_heads`. |
+| `doc_comment_with_formatter_records_comment_kind` | `$doc` produced a `Comment(Doc)` TIR root with automatic markdown formatting | Documentation now attaches to declaration identity. `doc_attaches_to_an_entry_local_declaration` covers attachment, and `extracts_ast_doc_fragments_into_module_metadata` covers HIR extraction. |
+
+The two ledger rows now record `decision: removed` with the superseding context. `parser_tir_tests.rs` holds 42 definitions after that cutover; the earlier 44-definition figure remains the Phase 4 checkpoint measurement.
+
 ### Grouped-delimiter phase validation note
 
 The grouped-delimiter phase evidence also covers the complete `source_identity_loading_tests` module. Default features select the six ungated definitions (`6/6`, matching the figure in the grouped-delimiter section above). The `timers` feature selects those six plus the six gated instrumentation definitions for `12/12`, including `dormant_dependency_root_grouped_delimiters_report_eof_in_child_source`, `ast_aggregate_metrics_recorded_with_timers` and `unguarded_parallel_compile_registers_into_an_active_timing_session`. The existing imported-template regression passed `1/1`. A retained session log (`289.bash-original.log`, `SHA-256 7c618831491c1621dbf193e966dadd7746718711614dd6904bacc3197aa488eb`) holds the `12/12` run.
