@@ -37,8 +37,7 @@ The `@project` dependency root is reserved for project globals.
 - `$fresh` - bypass the parent's child wrapper.
 - `$slot` - declare a default, named or positional slot, with an optional compile-time String default.
 - `$in` - contribute to one named slot.
-- `$note`, `$todo` - discard template comments.
-- `$doc` - mark documentation content.
+- `$note` - discard a balanced comment template.
 - `$raw` - preserve unformatted template content.
 - `$md` - format Moth Markdown.
 - `$html` - HTML content.
@@ -51,7 +50,15 @@ The `@project` dependency root is reserved for project globals.
 - `$export` - marks one public declaration or direct-selection re-export in `@mod.moth` or `@package.moth`.
 - `$config` - marks one explicitly typed top-level compile-time `#` binding as a build input.
 
-Both source directives take no operand and occupy their own line. Comments may intervene, but a blank physical line breaks attachment. Template directives are compiler-owned and available under every builder.
+- `$doc` - attach one compile-time String as documentation to a following declaration.
+- `$todo` - annotate a following declaration or executable statement with one compile-time String, with no runtime effect.
+
+`$export` and `$config` take no operand. Source directives may share a line
+or occupy consecutive lines without commas. All apply to the same following-line
+target regardless of order; duplicate directive names are always invalid.
+Comment-only lines may intervene, but a blank physical line breaks attachment.
+Template heads continue to require commas between directives and expressions.
+All directives are compiler-owned and available under every builder where valid.
 
 No `$project`, `$builder` or `$html_builder` directive exists. Project and builder settings use the ordinary named `project` and builder records in `config.moth`.
 

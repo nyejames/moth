@@ -6,7 +6,9 @@ In ordinary Moth code, comments begin with two minus signs:
 ]
 
 Template and moth template bodies are content. Two minus signs inside those bodies
-are text rather than source comments.
+are text rather than source comments. Use `[$note: ...]` for a discarded
+comment template. `$doc` and `$todo` attach to following source constructs
+rather than commenting out template bodies.
 
 Use `regular_snake_case` for values and functions:
 
