@@ -673,7 +673,7 @@ fn ordinary_source_file_is_assigned_normal_role() {
 }
 
 #[test]
-fn support_package_root_file_accepts_an_export_block() {
+fn support_package_root_file_accepts_export_directives() {
     let headers = expect_header_success(
         parse_single_file_headers_with_entry(
             "$export\nButton = | label String |\n",

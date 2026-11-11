@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-SYNTAX-0021"]
-message_contains = ["must immediately precede an eligible declaration or dependency clause"]
+message_contains = ["must immediately precede an eligible public declaration or direct-selection dependency clause"]
