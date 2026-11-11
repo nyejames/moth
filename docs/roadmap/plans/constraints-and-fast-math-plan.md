@@ -45,7 +45,16 @@ No claim of maximal speed, constant-time execution or improved total compile tim
 
 ### Attachment and lexical extent
 
-Each directive takes no arguments. Use `$fast_math`, not `$fast_math()`. Reuse contiguous source-directive-run attachment, blank-line/trivia boundaries, per-directive multiplicity and dangling diagnostics. Different directives independently annotate the same following construct without commas or order-dependent behavior. Repeated pure constraint markers are idempotent. Ordinary identifiers with these names stay legal outside directive syntax.
+Each directive takes no arguments. Use `$fast_math`, not `$fast_math()`. Reuse the shared source-directive-run attachment model: different directives may share a line with horizontal whitespace, require no commas, attach independently to the same following-line construct and have order-independent semantics. Each directive name may appear **once** per target, including parameterless constraint markers: every duplicate diagnoses at the later occurrence with a label on the first. A blank line, scope boundary or EOF breaks attachment. Ordinary identifiers with these names stay legal outside directive syntax.
+
+```moth
+$fast_math $infallible
+wrap_value |value I32| -> I32:
+    return value + 1
+;
+```
+
+The parser treats the next source directive as an operand terminator only at the outer annotation-expression depth; it must not confuse directives inside a nested template operand with another source annotation. The target begins on its own following line, not after a directive on the same line. This feature reuses that rule and does not introduce another directive parser.
 
 Eligible targets are function declarations, receiver methods, generic function declarations and executable statements, including declarations of runtime values, assignments, calls, returns, branches and loops. A compound statement includes its condition/header, arms and body. A function modifier covers its body. Nested callable declarations retain their own contracts and do not inherit the containing body's mode.
 
@@ -321,7 +330,7 @@ Gate: the implementer and backend author can derive every V1 outcome from perman
 
 ### Phase 2: directive attachment and typed numeric mode
 
-- [ ] Add source cases for statement/function/method attachment, nested arguments, compound statements, duplicates, empty parentheses, invalid targets and conflicting annotations.
+- [ ] Add source cases for statement/function/method attachment, compound statements, same-line versus multiline stacks, reversed-order constraints, duplicates (including repeated `$fast_math`, `$safe_math` and `$infallible`), empty parentheses, invalid targets and semantic constraint conflicts. Verify two-span duplicate diagnostics and that duplicate-free directives all attach to the same following-line construct.
 - [ ] Add cases proving lexical mode does not propagate into a callee or disappear during inlining/folding. Caller arguments and explicit casts retain their separate rules.
 - [ ] Extend shared attachment and typed-expression owners with compact semantic mode and constraint requirements. Thread these through concrete/generic headers, HIR and dumps without a new parser.
 - [ ] Add HIR validation rejecting invalid mode/operator/result shapes and mode/failure-delivery contradictions.
