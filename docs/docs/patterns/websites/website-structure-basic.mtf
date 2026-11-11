@@ -55,7 +55,7 @@ The page mixes authored Markdown with imported templates. A `.mtf` asset
 supplies a compile-time `content` value, so a longer chapter can remain in
 `introduction.mtf` rather than making the entry file unwieldy.
 
-Direct entry templates are **constant by default**. A direct `~[...]`
+Direct entry templates are **constant by default**. A direct `["~[...]"]`
 fragment explicitly requests runtime evaluation. Both are different from a
 named template stored in a binding.
 

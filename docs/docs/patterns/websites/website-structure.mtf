@@ -38,11 +38,11 @@ Do not use an old `+*.moth` root or invent page names such as
 
 ### Why the entry stays simple
 
-Direct top-level `[...]` fragments must fold at compilation. The compiler
+Direct top-level `["[...]"]` fragments must fold at compilation. The compiler
 preserves their source order and the builder assembles them into the final
 document. This avoids constructing static content during page startup.
 
-A direct `~[...]` fragment opts into runtime output. The page's entry
+A direct `["~[...]"]` fragment opts into runtime output. The page's entry
 runs once when selected. Runtime fragments are published after successful
 startup, so a failed start cannot publish half of that invocation's dynamic
 fragments. Earlier static fragments remain.
@@ -54,7 +54,7 @@ That binding remains data: it does not emit a page merely by being declared.
 
 The HTML builder owns directory routes, metadata destinations, resource
 output and URL rendering. Only a **direct** entry-root
-`[$in title:...]` or other registered builder contribution reaches it.
+`["[$in title:...]"]` or other registered builder contribution reaches it.
 An ordinary nested `$in` targets its immediate template receiver.
 
 Resources remain structural Strings until the consuming output has a URL
