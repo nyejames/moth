@@ -1,6 +1,6 @@
 card #= [:[$slot]]
 show = true
 
-[card if show:
+~[card if show:
     Visible
 ]

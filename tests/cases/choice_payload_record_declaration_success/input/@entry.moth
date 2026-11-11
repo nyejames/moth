@@ -8,4 +8,4 @@ use_choice |r Response| -> String:
 ;
 
 label = use_choice(Response::Success)
-[:choice_payload_record_declaration_success label=[label]]
+~[:choice_payload_record_declaration_success label=[label]]

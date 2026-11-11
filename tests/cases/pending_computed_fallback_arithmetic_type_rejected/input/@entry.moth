@@ -9,4 +9,4 @@ probe || -> String:
     return [:[value]]
 ;
 
-[:[probe()]]
+~[:[probe()]]

@@ -37,4 +37,4 @@ render_nested_known_numeric_shapes || -> String:
     return [:nested_known_numeric full=[read_packet(full)] sparse=[read_packet(sparse)]]
 ;
 
-[:[render_nested_known_numeric_shapes()]]
+~[:[render_nested_known_numeric_shapes()]]

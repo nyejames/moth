@@ -2,7 +2,7 @@ last_number || -> I32:
     return 3
 ;
 
-[:
+~[:
     template_loop_range_runtime
     [loop 1 to & last_number() |numeric_value|:
         range-[numeric_value];

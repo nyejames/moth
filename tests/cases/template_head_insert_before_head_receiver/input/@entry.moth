@@ -5,4 +5,4 @@ outer #= [:<h1>[$slot title]</h1>[$slot]]
 inner #= [:<p>[$slot]</p>]
 ins #= [$in title:T]
 
-[outer,ins,inner:Body]
+~[outer,ins,inner:Body]

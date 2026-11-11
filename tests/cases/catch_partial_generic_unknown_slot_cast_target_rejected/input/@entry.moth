@@ -11,4 +11,4 @@ probe || -> String:
     rendered = consume_u64(origin)
     return [:[first],[second]]
 ;
-[:[probe()]]
+~[:[probe()]]

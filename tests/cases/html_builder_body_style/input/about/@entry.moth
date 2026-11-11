@@ -1,3 +1,3 @@
-#[$in body_style:["padding: 1rem;"]]
+[$in body_style:["padding: 1rem;"]]
 
-#[:<main>About</main>]
+[:<main>About</main>]

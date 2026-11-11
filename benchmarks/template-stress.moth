@@ -9,7 +9,7 @@
 -- - Runtime template construction in loops
 
 page_title #= "Template System Stress Test"
-#[$in title:[page_title]]
+[$in title:[page_title]]
 base_color #= "hsl(280, 70%, 50%)"
 accent_a #= "hsl(200, 80%, 55%)"
 accent_b #= "hsl(40, 90%, 60%)"
@@ -333,7 +333,7 @@ run_tests ||:
 ;
 
 -- Final output
-[shell, shell_style:
+~[shell, shell_style:
     [$in title:
         [page_title]
     ]

@@ -412,7 +412,7 @@ fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completi
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(dir.join("@entry.moth"), "@core/math sin,\n#[:ok]\n")
+    fs::write(dir.join("@entry.moth"), "@core/math sin,\n[:ok]\n")
         .expect("should write malformed entry");
 
     let mut config = Config::new(dir.clone());
@@ -982,7 +982,7 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
         format!("project #= (\n    name = \"{project_a_name}\",\n)\nhtml #= ()\n"),
     )
     .expect("should write config");
-    fs::write(dir_a.join("@entry.moth"), "@core/math sin,\n#[:ok]\n")
+    fs::write(dir_a.join("@entry.moth"), "@core/math sin,\n[:ok]\n")
         .expect("should write malformed entry");
     let dir_b_temp = tempfile::tempdir().expect("should create temp dir");
     let dir_b = dir_b_temp.path().to_path_buf();
@@ -1179,7 +1179,7 @@ fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
     // The entry is HTML-selected by its authored root fragment and imports the public value.
     fs::write(
         dir.join("src/@entry.moth"),
-        "@components label\n[:[label]]\n",
+        "@components label\n~[:[label]]\n",
     )
     .expect("should write entry page");
 

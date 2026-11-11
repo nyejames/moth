@@ -198,4 +198,4 @@ assert(u8_max_count is 2)
 assert(u8_max_last is 255)
 assert(u8_zero_count is 2)
 assert(u8_zero_last is 0)
-[:fixed_numeric_range_runtime verified]
+~[:fixed_numeric_range_runtime verified]

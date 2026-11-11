@@ -434,11 +434,19 @@ pub(crate) fn invalid_template_directive_message(
         InvalidTemplateDirectiveReason::UnknownDirective => {
             format!("Unknown directive '{name}'.")
         }
-        InvalidTemplateDirectiveReason::MissingArgument => {
-            format!("Template directive '{name}' is missing a required argument.")
-        }
+        InvalidTemplateDirectiveReason::MissingArgument => match name {
+            "doc" | "todo" => {
+                format!("`${name}` requires exactly one compile-time `String` operand.")
+            }
+            _ => format!("Template directive '{name}' is missing a required argument."),
+        },
         InvalidTemplateDirectiveReason::InvalidArgument { detail } => {
-            let message = format!("Invalid argument for template directive '{name}'.");
+            let message = match name {
+                "doc" | "todo" => {
+                    format!("`${name}` requires exactly one compile-time `String` operand.")
+                }
+                _ => format!("Invalid argument for template directive '{name}'."),
+            };
             match detail {
                 Some(detail_id) => format!("{message} {}", string_table.resolve(detail_id)),
                 None => message,
@@ -458,6 +466,11 @@ pub(crate) fn invalid_template_directive_message(
             "export" | "config" => {
                 format!(
                     "`${name}` takes no operand and must occupy its own line. Remove the operand, colon, or parentheses after it."
+                )
+            }
+            "doc" | "todo" => {
+                format!(
+                    "`${name}` takes one bare operand. Remove parentheses or the extra value."
                 )
             }
             "slot" => {
@@ -507,18 +520,23 @@ pub(crate) fn invalid_template_directive_message(
             "export" => {
                 "`$export` is a source modifier and cannot appear in a template head.".to_owned()
             }
+            "doc" | "todo" => {
+                format!("`${name}` is a source directive and cannot appear in a template head.")
+            }
             _ => format!(
                 "Template directive '{name}' can only appear in a template head, not in source code."
             ),
         },
         InvalidTemplateDirectiveReason::DuplicateModifier => {
             format!(
-                "Only one source modifier may attach to an item. '${name}' conflicts with the earlier directive."
+                "Each directive name may appear at most once in one source-directive run. '${name}' conflicts with the earlier directive."
             )
         }
         InvalidTemplateDirectiveReason::DanglingModifier => match name {
             "export" => "`$export` must immediately precede an eligible public declaration or direct-selection dependency clause.\n                 Add an eligible item on the following line, or remove the directive.".to_owned(),
             "config" => "`$config` must immediately precede an explicitly typed top-level compile-time `#` binding.\n                 Add that binding on the following line, or remove the directive.".to_owned(),
+            "doc" => "`$doc` must immediately precede an eligible declaration.\n                 Add the declaration on the following line, or remove the directive.".to_owned(),
+            "todo" => "`$todo` must immediately precede an eligible declaration or executable statement.\n                 Add that construct on the following line, or remove the directive.".to_owned(),
             _ => format!(
                 "`${name}` must immediately precede an eligible declaration or dependency clause.\n                 Add an eligible item on the following line, or remove the directive."
             ),
@@ -532,6 +550,9 @@ pub(crate) fn invalid_template_directive_message(
                 "`$export` must modify an eligible public declaration or a direct-selection dependency clause."
                     .to_owned()
             }
+            "doc" => "`$doc` must attach to an eligible declaration.".to_owned(),
+            "todo" => "`$todo` must attach to an eligible declaration or executable statement."
+                .to_owned(),
             _ => format!("`${name}` cannot modify this item."),
         },
     }

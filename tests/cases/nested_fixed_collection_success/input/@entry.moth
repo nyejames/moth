@@ -12,4 +12,4 @@ render_nested || -> String:
     return [:nested_fixed_collection_success value=[value] rows=[grid_len]]
 ;
 
-[:[render_nested()]]
+~[:[render_nested()]]

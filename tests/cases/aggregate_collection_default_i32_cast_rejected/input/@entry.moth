@@ -14,4 +14,4 @@ same_default I32 = cast values.get(0) catch:
     then 0
 ;
 
-[:unreachable]
+~[:unreachable]

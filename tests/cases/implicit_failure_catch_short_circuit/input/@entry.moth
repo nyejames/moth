@@ -15,4 +15,4 @@ after_guard U32 = trace + 0
 failing = not (not (check(true) and check((risky(~trace, 2) - risky(~trace, 2) + 1) is 0))) catch then false
 after_fail U32 = trace + 0
 
-[: short-circuit shorted=[shorted] spent1=[after_short] guarded=[guarded] spent2=[after_guard] failing=[failing] spent3=[after_fail]]
+~[: short-circuit shorted=[shorted] spent1=[after_short] guarded=[guarded] spent2=[after_guard] failing=[failing] spent3=[after_fail]]

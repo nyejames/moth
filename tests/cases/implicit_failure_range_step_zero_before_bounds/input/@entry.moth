@@ -40,4 +40,4 @@ assert(equal_code is 306)
 assert(zero_ascending is -1)
 assert(ascending_code is 306)
 
-[: implicit_failure_range_step_zero_before_bounds descending=[descending] positive-wrong-direction=[positive_wrong_direction] minimum-step=[minimum_step] zero-wrong-direction=[zero_wrong_direction]/[zero_code] zero-equal-bounds=[zero_equal_bounds]/[equal_code] zero-ascending=[zero_ascending]/[ascending_code]]
+~[: implicit_failure_range_step_zero_before_bounds descending=[descending] positive-wrong-direction=[positive_wrong_direction] minimum-step=[minimum_step] zero-wrong-direction=[zero_wrong_direction]/[zero_code] zero-equal-bounds=[zero_equal_bounds]/[equal_code] zero-ascending=[zero_ascending]/[ascending_code]]

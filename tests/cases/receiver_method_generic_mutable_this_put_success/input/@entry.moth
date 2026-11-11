@@ -12,4 +12,4 @@ run || -> I32, Error!:
     return grid.values.get(0)!
 ;
 
-[:[run()!]]
+~[:[run()!]]

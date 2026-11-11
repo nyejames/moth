@@ -22,4 +22,4 @@ big_report = copy big_seen
 small_seen ~= ""
 small = measure(6, 7, ~small_seen)
 small_report = copy small_seen
-[: mapped big=[big] report=[big_report] small=[small] clean=[small_report]]
+~[: mapped big=[big] report=[big_report] small=[small] clean=[small_report]]

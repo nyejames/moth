@@ -8,4 +8,4 @@ if value is:
     else => ~result = "other"
 ;
 
-[:match_guard_literal_success result=[result]]
+~[:match_guard_literal_success result=[result]]

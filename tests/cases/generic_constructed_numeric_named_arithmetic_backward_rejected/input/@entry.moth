@@ -11,4 +11,4 @@ base = 1
 doubled = base + base
 packet = Packet(doubled)
 text = read_u64(packet.value)
-[:[text]]
+~[:[text]]

@@ -10,4 +10,4 @@ custom_value = custom_map("bad") catch |domain_error|:
     then -9
 ;
 custom_success = custom_map("43") catch then -10
-[:private=[recover("bad")]/[recover("42")] builtin=[builtin_value]/[builtin_code] custom=[custom_value]/[custom_success]]
+~[:private=[recover("bad")]/[recover("42")] builtin=[builtin_value]/[builtin_code] custom=[custom_value]/[custom_success]]

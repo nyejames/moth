@@ -23,4 +23,4 @@ loop stride_items by -2:
     ~reverse_count += 1
 ;
 
-[:loop_bindingless_iteration item_count=[item_count] range_count=[range_count] stride_count=[stride_count] reverse_count=[reverse_count]]
+~[:loop_bindingless_iteration item_count=[item_count] range_count=[range_count] stride_count=[stride_count] reverse_count=[reverse_count]]

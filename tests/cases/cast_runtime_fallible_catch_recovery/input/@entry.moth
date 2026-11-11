@@ -49,4 +49,4 @@ bad_char = code_for_char("ab")
 
 bad_cp = code_for_int_char(1114112)
 
-[: runtime catch codes: [bad_float_fmt]|[oor_float]|[bad_char]|[bad_cp]]
+~[: runtime catch codes: [bad_float_fmt]|[oor_float]|[bad_char]|[bad_cp]]

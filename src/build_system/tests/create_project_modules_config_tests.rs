@@ -826,7 +826,7 @@ fn rejects_config_const_page_fragment() {
 
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
-    fs::write(&config_path, "#[: hello]\n").expect("should write config");
+    fs::write(&config_path, "[: hello]\n").expect("should write config");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -991,7 +991,7 @@ fn malformed_dependency_path_keeps_precise_location_during_module_discovery() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(root.join("@entry.moth"), "@core//math sin\n#[:ok]\n")
+    fs::write(root.join("@entry.moth"), "@core//math sin\n[:ok]\n")
         .expect("should write malformed entry");
 
     let mut config = Config::new(root.clone());

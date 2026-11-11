@@ -18,4 +18,4 @@ first = notify(FormMessage::NameChanged)
 second = notify(SettingsMessage::Saved)
 forwarded = forward(FormMessage::NameChanged)
 
-[:generic-output first=[first] second=[second] forwarded=[forwarded]]
+~[:generic-output first=[first] second=[second] forwarded=[forwarded]]

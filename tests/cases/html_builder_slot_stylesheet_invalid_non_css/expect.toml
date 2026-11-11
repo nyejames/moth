@@ -11,7 +11,7 @@ code = "MOTH-RULE-0061"
 reason = "invalid_html_slot_contribution.non_css_resource"
 path = "input/@entry.moth"
 line = 2
-column = 3
+column = 2
 
 [backends.html_wasm]
 mode = "failure"
@@ -23,4 +23,4 @@ code = "MOTH-RULE-0061"
 reason = "invalid_html_slot_contribution.non_css_resource"
 path = "input/@entry.moth"
 line = 2
-column = 3
+column = 2

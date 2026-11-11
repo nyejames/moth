@@ -5,4 +5,4 @@ Box = |
     y I32 = 2,
 |
 
-[:struct_default_pending_constructor x=[val.x] y=[val.y]]
+~[:struct_default_pending_constructor x=[val.x] y=[val.y]]

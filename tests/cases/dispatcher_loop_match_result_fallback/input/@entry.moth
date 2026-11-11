@@ -25,4 +25,4 @@ loop i < 4:
     ~i = i + 1
 ;
 
-[:dispatcher_loop_match_result_fallback sum=[sum]]
+~[:dispatcher_loop_match_result_fallback sum=[sum]]

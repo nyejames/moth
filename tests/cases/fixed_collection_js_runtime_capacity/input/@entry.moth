@@ -32,4 +32,4 @@ render_fixed_runtime || -> String:
     return [:fixed_collection_js_runtime lengths=[initial_length],[after_first_length],[after_overflow_length],[after_remove_length],[final_length] removed=[removed] values=[first],[second]]
 ;
 
-[:[render_fixed_runtime()]]
+~[:[render_fixed_runtime()]]

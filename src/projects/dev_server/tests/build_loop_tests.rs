@@ -1097,7 +1097,7 @@ fn project_build_executor_writes_the_validated_directory_plan() {
     .expect("should write project config");
     fs::write(
         source_root.join("@entry.moth"),
-        "@project version\n#[:<h1>[version]</h1>]\n",
+        "@project version\n[:<h1>[version]</h1>]\n",
     )
     .expect("should write page source");
     let mut build_config_inputs = BuildConfigInputSet::new();
@@ -1182,7 +1182,7 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(source_root.join("@entry.moth"), "#[:<h1>Dev Cycle</h1>]\n")
+    fs::write(source_root.join("@entry.moth"), "[:<h1>Dev Cycle</h1>]\n")
         .expect("should write page source");
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
@@ -1961,7 +1961,7 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
         source.join("@entry.moth"),
         "@support product\n\
          asset #= @site.css\n\
-         #[:<main>static-survives</main><link rel=\"stylesheet\" href=\"[asset]\">]\n\
+         [:<main>static-survives</main><link rel=\"stylesheet\" href=\"[asset]\">]\n\
          argument ~= 50000\n\
          result = product(argument)!\n\
          io.line([:value-[result]])\n",
@@ -1970,7 +1970,7 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
     fs::write(source.join("site.css"), "body { color: green; }").expect("write supporting asset");
     fs::write(
         source.join("other/@entry.moth"),
-        "#[:<main>other-page</main>]\n",
+        "[:<main>other-page</main>]\n",
     )
     .expect("write independent page");
 
@@ -2142,7 +2142,7 @@ second || -> I32:
     return 2
 ;
 
-#[:<main>repaired</main>]
+[:<main>repaired</main>]
 ";
 
 #[test]

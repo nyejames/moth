@@ -37,4 +37,4 @@ rounded_matches = is_tenth_f32(rounded)
 native_int I32 = identity_int(17)
 native_uint U32 = identity_uint(18)
 native_float F32 = identity_float(1.5)
-[:fixed scalar zero=[zero] maximum=[maximum_matches] loaded=[loaded_matches] f32=[fraction_matches]/[rounded_matches] overflow=[boundary_code] native=[native_int]/[native_uint]/[native_float]]
+~[:fixed scalar zero=[zero] maximum=[maximum_matches] loaded=[loaded_matches] f32=[fraction_matches]/[rounded_matches] overflow=[boundary_code] native=[native_int]/[native_uint]/[native_float]]

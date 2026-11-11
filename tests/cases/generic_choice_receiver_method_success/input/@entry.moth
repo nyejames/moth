@@ -9,4 +9,4 @@ label type A |this Maybe of A| -> String:
 
 value = Maybe::Some(10)
 
-[: generic choice receiver [value.label()]]
+~[: generic choice receiver [value.label()]]

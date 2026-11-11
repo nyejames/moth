@@ -1,6 +1,6 @@
 @separator content as separator_content
 
-#[$md:
+[$md:
 See @./#numeric-literals
 (Numeric literals).
 
@@ -22,4 +22,4 @@ stray (Blocked). Then @./#after
 (After).
 ]
 
-#[:[separator_content]]
+[:[separator_content]]

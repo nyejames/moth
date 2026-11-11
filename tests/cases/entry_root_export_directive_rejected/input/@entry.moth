@@ -1,4 +1,4 @@
 $export
 greeting #= "hello"
 
-[: ["page"]]
+~[: ["page"]]

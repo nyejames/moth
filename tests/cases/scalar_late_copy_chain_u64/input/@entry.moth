@@ -9,4 +9,4 @@ first = copy source
 second = copy first
 received = receive_u64(second)
 
-[:scalar copy chain received=[received]]
+~[:scalar copy chain received=[received]]

@@ -11,4 +11,4 @@ region || -> I32:
 ;
 
 block_value = block() + group() + region()
-[:block_identifier_success value=[block_value]]
+~[:block_identifier_success value=[block_value]]

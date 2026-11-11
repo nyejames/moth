@@ -34,4 +34,4 @@ render_early || -> String, Error!:
 
 late_text = render_late() catch then "failed"
 early_text = render_early() catch then "failed"
-[:cyclic_producer_order late=[late_text] early=[early_text]]
+~[:cyclic_producer_order late=[late_text] early=[early_text]]

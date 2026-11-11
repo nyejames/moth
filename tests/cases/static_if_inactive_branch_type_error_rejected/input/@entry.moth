@@ -9,4 +9,4 @@ else
     ~value = "still type checked"
 ;
 
-[: [value]]
+~[: [value]]

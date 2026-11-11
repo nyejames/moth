@@ -56,8 +56,8 @@ loop numbers |number|:
     ~running = running + number
 ;
 
-[:numbers seen=[number_seen] sum=[number_sum] first=[first_number] last=[last_number]]
-[:units seen=[unit_seen] first=[first_unit.id] last=[last_unit.id]]
-[:nested [nested_seen]]
-[:range [range_seen] while [while_seen]]
-[:total [total]]
+~[:numbers seen=[number_seen] sum=[number_sum] first=[first_number] last=[last_number]]
+~[:units seen=[unit_seen] first=[first_unit.id] last=[last_unit.id]]
+~[:nested [nested_seen]]
+~[:range [range_seen] while [while_seen]]
+~[:total [total]]

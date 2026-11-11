@@ -6,4 +6,4 @@ a = show(42)
 b = show(true)
 c = show('Z')
 
-[:generic builtin evidence: [a]|[b]|[c]]
+~[:generic builtin evidence: [a]|[b]|[c]]

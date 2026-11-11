@@ -21,4 +21,4 @@ run || -> String, Error!:
     return [:[value]]
 ;
 
-[:[run()!]]
+~[:[run()!]]

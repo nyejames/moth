@@ -2,7 +2,7 @@ runtime || -> I32:
     return 1
 ;
 
-#[if false:
+[if false:
     [loop 0 to runtime() |i|:
         [i]
     ]

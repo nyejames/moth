@@ -17,4 +17,4 @@ token = Token(raw = "x")
 text String = cast token
 err Error = cast token
 
-[:user multiple targets: [text]|[err.message]]
+~[:user multiple targets: [text]|[err.message]]

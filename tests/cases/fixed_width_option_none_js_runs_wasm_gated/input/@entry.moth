@@ -12,5 +12,5 @@ render_none |probe U16?| -> String:
     return [:fixed width option none=[state]]
 ;
 
-[:[render_none(probe)]]
+~[:[render_none(probe)]]
 

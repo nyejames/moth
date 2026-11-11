@@ -1,4 +1,4 @@
 ok = @settings site_name
 later = site_name
 
-[: [ok] ]
+~[: [ok] ]

@@ -16,4 +16,4 @@ local = identity(18_446_744_073_709_551_615)
 relayed = facade_identity(18_446_744_073_709_551_615)
 local_text = read_u64(local)
 relayed_text = read_u64(relayed)
-[:numeric_module direct=[read_u64(limit)] facade=[read_u64(facade_limit)] constant=[read_u64(reexported_limit)] first=[read_box(first)] second=[read_box(second)] local=[local_text] relayed=[relayed_text] equal=[first.value is second.value]]
+~[:numeric_module direct=[read_u64(limit)] facade=[read_u64(facade_limit)] constant=[read_u64(reexported_limit)] first=[read_box(first)] second=[read_box(second)] local=[local_text] relayed=[relayed_text] equal=[first.value is second.value]]

@@ -8,14 +8,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Core math"]]
-#[$in description:["F64 math constants and helper functions."]]
-#[$in head:[language_theme_head]]
+[$in title:["Core math"]]
+[$in description:["F64 math constants and helper functions."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Core math
 
     `@core/math` provides finite `F64` constants and functions for
@@ -24,7 +24,7 @@ init_docs_sidebar()!
     observes it.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:math-helpers]
         [$in title:Math helpers]
@@ -34,7 +34,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../collections/]
         [$in previous_title:Core collections]

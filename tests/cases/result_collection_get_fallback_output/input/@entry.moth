@@ -12,4 +12,4 @@ get_with_fallback || -> String:
     return [:collection_get_fallback in_bounds=[in_bounds] out_of_bounds=[out_of_bounds]]
 ;
 
-[:[get_with_fallback()]]
+~[:[get_with_fallback()]]

@@ -5,4 +5,4 @@ make_message || -> String:
 ;
 
 assert(true, make_message())
-[:assert_static_true_message_elision]
+~[:assert_static_true_message_elision]

@@ -15,4 +15,4 @@ if ungrouped:
     ~ungrouped_taken = 1
 ;
 
-[:logical_grouping grouped=[grouped] ungrouped=[ungrouped] taken=[grouped_taken]-[ungrouped_taken]]
+~[:logical_grouping grouped=[grouped] ungrouped=[ungrouped] taken=[grouped_taken]-[ungrouped_taken]]

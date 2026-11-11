@@ -71,4 +71,4 @@ remainder_value = remainder_i8(-128, -1) catch:
 ;
 remainder_text String = cast remainder_value
 
-[:scalar i8 checked ok=[ok_sum_text] add=[add_code]/[add_text] subtract=[subtract_code]/[subtract_text] multiply=[multiply_code]/[multiply_text] negate=[negate_code]/[negate_text] divide=[divide_code]/[divide_text] remainder=[remainder_text]]
+~[:scalar i8 checked ok=[ok_sum_text] add=[add_code]/[add_text] subtract=[subtract_code]/[subtract_text] multiply=[multiply_code]/[multiply_text] negate=[negate_code]/[negate_text] divide=[divide_code]/[divide_text] remainder=[remainder_text]]

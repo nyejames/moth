@@ -3,4 +3,4 @@ unused_overflow |value I32| -> I32:
     return x + value
 ;
 
-[: wasm unreachable checked numeric ignored]
+~[: wasm unreachable checked numeric ignored]

@@ -61,4 +61,4 @@ custom_error_count = count_with_custom_error({5, 6, 7}) catch then -1
 
 endpoint_count = walk_to_int_max() catch then -1
 
-[:loop_generated_arithmetic_in_fallible_function collection=[collection_total] ascending=[ascending_count] descending=[descending_total] custom=[custom_error_count] endpoint_count=[endpoint_count]]
+~[:loop_generated_arithmetic_in_fallible_function collection=[collection_total] ascending=[ascending_count] descending=[descending_total] custom=[custom_error_count] endpoint_count=[endpoint_count]]

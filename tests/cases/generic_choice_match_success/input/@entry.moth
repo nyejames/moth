@@ -10,4 +10,4 @@ if get_value is:
     Err(error) => io.line([: [error.message]])
 ;
 
-[: generic choice match success]
+~[: generic choice match success]

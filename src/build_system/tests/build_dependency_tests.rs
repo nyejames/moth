@@ -882,7 +882,7 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
                 ),
                 (
                     project_root.join("@entry.moth"),
-                    "@binding.js provider_value as project_value\n@campaign package_value\n@x/y\n[:project=[project_value()]|package=[package_value()]|[y.marker]]\n",
+                    "@binding.js provider_value as project_value\n@campaign package_value\n@x/y\n~[:project=[project_value()]|package=[package_value()]|[y.marker]]\n",
                 ),
                 (
                     project_root.join("binding.js"),
@@ -1062,7 +1062,7 @@ fn build_html_normal_sibling_name_is_not_visible_from_child_module() {
                 "config.moth",
                 "project #= (\n    name = \"sibling_boundary\",\n)\nhtml #= ()\n",
             ),
-            ("src/@entry.moth", "@consumer value\n[:[value]]\n"),
+            ("src/@entry.moth", "@consumer value\n~[:[value]]\n"),
             ("src/consumer/@mod.moth", "$export\n@provider value\n"),
             (
                 "src/provider/@mod.moth",
@@ -1117,12 +1117,12 @@ fn build_html_project_shared_support_provider_keeps_page_wrappers_isolated() {
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "@shared root_value\n[:[root_value()]]\n",
+        "@shared root_value\n~[:[root_value()]]\n",
     )
     .expect("should write homepage");
     fs::write(
         about.join("@entry.moth"),
-        "@shared about_value\n[:[about_value()]]\n",
+        "@shared about_value\n~[:[about_value()]]\n",
     )
     .expect("should write about page");
     fs::write(
@@ -1510,7 +1510,7 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
     fs::write(
         src.join("@entry.moth"),
         r#"@html canvas, get_canvas_context
-#[canvas:
+[canvas:
   [$in id:unused_canvas]
   [$in style:
     width: 320px;
@@ -1759,7 +1759,7 @@ fn build_html_project_literal_const_change_reaches_next_build_without_asset() {
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "@helper as helper_ns\n#[:constant=[helper_ns.triangles_ns is 4]]\n",
+        "@helper as helper_ns\n[:constant=[helper_ns.triangles_ns is 4]]\n",
     )
     .expect("should write page");
     fs::write(
@@ -1846,7 +1846,7 @@ fn build_html_project_mixed_const_and_function_emits_single_glue_module() {
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "@gl_mixed.js primitive_triangles, u32_max, double_u32\n\ndoubled U32 = double_u32(primitive_triangles)\ndoubled_again U32 = double_u32(doubled)\n[:mixed doubled=[doubled]/[doubled_again] const=[primitive_triangles is 4]]\n",
+        "@gl_mixed.js primitive_triangles, u32_max, double_u32\n\ndoubled U32 = double_u32(primitive_triangles)\ndoubled_again U32 = double_u32(doubled)\n~[:mixed doubled=[doubled]/[doubled_again] const=[primitive_triangles is 4]]\n",
     )
     .expect("should write page");
     fs::write(

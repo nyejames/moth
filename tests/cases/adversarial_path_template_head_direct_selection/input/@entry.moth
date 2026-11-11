@@ -1,1 +1,1 @@
-[@subdir/docs/a.txt][@subdir/docs/b.txt][@subdir/docs/c.txt]
+~[:[@subdir/docs/a.txt][@subdir/docs/b.txt][@subdir/docs/c.txt]]

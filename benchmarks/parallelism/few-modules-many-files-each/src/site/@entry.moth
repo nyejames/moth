@@ -1,7 +1,7 @@
 @copy site_title
 @panel render_site_panel
 
-[:
+~[:
     <main>
         <h1>[site_title]</h1>
         [render_site_panel()]

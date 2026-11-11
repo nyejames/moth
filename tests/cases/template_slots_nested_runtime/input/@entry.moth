@@ -16,4 +16,4 @@ using_runtime_slots = [runtime_wrapper:
     [$in second: second]
 ]
 
-[:template_slots_nested_runtime [using_runtime_slots]]
+~[:template_slots_nested_runtime [using_runtime_slots]]

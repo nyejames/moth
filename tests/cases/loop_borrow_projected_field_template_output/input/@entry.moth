@@ -17,4 +17,4 @@ render_listing |listing Listing| -> String:
 listing = Listing({"one", "two"})
 rendered = render_listing(listing)
 
-[:loop_borrow_projected_field_template_output [rendered]]
+~[:loop_borrow_projected_field_template_output [rendered]]

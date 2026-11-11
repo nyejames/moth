@@ -4,4 +4,4 @@ source ~= "before"
 read_value = echo_wire(source)
 ~source = "after"
 
-[:imported-wire read=[read_value] source=[source]]
+~[:imported-wire read=[read_value] source=[source]]

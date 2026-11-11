@@ -7,4 +7,4 @@ minimum #I8 = -128
 minus_one #I8 = -1
 quotient #I8 = minimum // minus_one
 
-[:unreachable]
+~[:unreachable]

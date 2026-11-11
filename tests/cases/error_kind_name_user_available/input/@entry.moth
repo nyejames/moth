@@ -3,4 +3,4 @@ ErrorKind = |
 |
 
 kind = ErrorKind("custom")
-[:error_kind_name_user_available name=[kind.name]]
+~[:error_kind_name_user_available name=[kind.name]]

@@ -18,7 +18,7 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@helper\n#[:entry]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@helper\n[:entry]\n").expect("should write entry");
     fs::write(src.join("helper.moth"), "message #= \"helper\"\n").expect("should write helper");
 
     let mut config = Config::new(root.clone());
@@ -71,7 +71,7 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@reachable\n@leaf\n#[:entry]\n")
+    fs::write(src.join("@entry.moth"), "@reachable\n@leaf\n[:entry]\n")
         .expect("should write entry");
     fs::write(
         src.join("reachable.moth"),
@@ -243,7 +243,7 @@ fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@intro\n@notes\n#[:entry]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro\n@notes\n[:entry]\n").expect("should write entry");
     fs::write(src.join("intro.mtf"), "moth template body\n").expect("should write moth template");
     fs::write(src.join("notes.md"), "# Markdown body\n").expect("should write markdown");
 
@@ -518,7 +518,7 @@ fn provider_backed_imports_are_resolved_without_becoming_source_inputs() {
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "@drawing.js as drawing\n#[:entry]\n",
+        "@drawing.js as drawing\n[:entry]\n",
     )
     .expect("should write entry");
     fs::write(src.join("drawing.js"), "export function draw() {}\n").expect("should write js");
@@ -567,10 +567,10 @@ fn synthetic_nested_module_provider_resolves_from_owning_module_root() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "#[:entry]\n").expect("should write entry root");
+    fs::write(src.join("@entry.moth"), "[:entry]\n").expect("should write entry root");
     fs::write(
         feature.join("@entry.moth"),
-        "@drawing.js as drawing\n#[:feature]\n",
+        "@drawing.js as drawing\n[:feature]\n",
     )
     .expect("should write nested entry");
     fs::write(src.join("drawing.js"), "entry provider\n")
@@ -649,10 +649,10 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
             "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
         )
         .expect("should write config");
-        fs::write(src.join("@entry.moth"), "#[:entry]\n").expect("should write entry root");
+        fs::write(src.join("@entry.moth"), "[:entry]\n").expect("should write entry root");
         fs::write(
             feature.join("@entry.moth"),
-            format!("{clauses}#[:feature]\n"),
+            format!("{clauses}[:feature]\n"),
         )
         .expect("should write nested entry");
         fs::write(feature.join("drawing.js"), "local provider\n")
@@ -756,12 +756,12 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
     // Two entry points with independent module-local dependency trees.
     fs::write(
         src.join("page_a/@entry.moth"),
-        "@helper\n@a_only\n#[:pageA]\n",
+        "@helper\n@a_only\n[:pageA]\n",
     )
     .expect("should write pageA");
     fs::write(
         src.join("page_b/@entry.moth"),
-        "@helper\n@b_only\n#[:pageB]\n",
+        "@helper\n@b_only\n[:pageB]\n",
     )
     .expect("should write pageB");
     fs::write(src.join("page_a/helper.moth"), "helper #= 1\n").expect("should write helper A");
@@ -855,7 +855,7 @@ fn canonical_multi_entry_discovery_calls_provider_once() {
     fs::write(src.join("page_a/@entry.moth"), "a #= 1\n").expect("should write pageA");
     fs::write(
         src.join("page_b/@entry.moth"),
-        "@drawing.js as drawing\n#[:pageB]\n",
+        "@drawing.js as drawing\n[:pageB]\n",
     )
     .expect("should write pageB");
     fs::write(src.join("page_b/drawing.js"), "export function draw() {}\n")
@@ -916,12 +916,12 @@ fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
     .expect("should write config");
 
     // Entry A is provider-free; entry B imports a .js file backed by a registered provider.
-    fs::write(src.join("page_a/@entry.moth"), "@helper\n#[:pageA]\n").expect("should write pageA");
+    fs::write(src.join("page_a/@entry.moth"), "@helper\n[:pageA]\n").expect("should write pageA");
     fs::write(src.join("page_a/helper.moth"), "helper #= 1\n")
         .expect("should write module-local helper");
     fs::write(
         src.join("page_b/@entry.moth"),
-        "@drawing.js as drawing\n#[:pageB]\n",
+        "@drawing.js as drawing\n[:pageB]\n",
     )
     .expect("should write pageB");
     fs::write(src.join("page_b/drawing.js"), "export function draw() {}\n")
@@ -1004,7 +1004,7 @@ fn unsupported_external_extension_in_multi_entry_preserves_diagnostic_shape() {
     fs::write(src.join("page_a/@entry.moth"), "a #= 1\n").expect("should write pageA");
     fs::write(
         src.join("page_b/@entry.moth"),
-        "@drawing.js as drawing\n#[:pageB]\n",
+        "@drawing.js as drawing\n[:pageB]\n",
     )
     .expect("should write pageB");
     fs::write(src.join("page_b/drawing.js"), "export function draw() {}\n")
@@ -1065,7 +1065,7 @@ fn directory_provider_dependency_calls_provider_once_for_repeated_physical_sourc
     // provider source is reached twice during one traversal.
     fs::write(
         src.join("@entry.moth"),
-        "@drawing.js as drawing\n@drawing.js as drawing2\n#[:entry]\n",
+        "@drawing.js as drawing\n@drawing.js as drawing2\n[:entry]\n",
     )
     .expect("should write entry");
     fs::write(src.join("drawing.js"), "export function draw() {}\n").expect("should write js");
@@ -1116,7 +1116,7 @@ fn directory_provider_dependency_rejects_cross_module_target() {
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "@feature/private.js as private\n#[:entry]\n",
+        "@feature/private.js as private\n[:entry]\n",
     )
     .expect("should write entry importing a cross-module provider file");
     fs::write(feature.join("@mod.moth"), "").expect("should write feature root");
@@ -1176,7 +1176,7 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
     // The imported .js file does not exist on disk, so it is absent from the source tree index.
     fs::write(
         src.join("@entry.moth"),
-        "@missing.js as missing\n#[:entry]\n",
+        "@missing.js as missing\n[:entry]\n",
     )
     .expect("should write entry importing a missing provider file");
 
@@ -1248,8 +1248,7 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
     .expect("should write config");
 
     // Entry A depends on its direct child module B, which should queue module B's root.
-    fs::write(module_a.join("@entry.moth"), "@module_b b\n#[:pageA]\n")
-        .expect("should write pageA");
+    fs::write(module_a.join("@entry.moth"), "@module_b b\n[:pageA]\n").expect("should write pageA");
     fs::write(module_b.join("@mod.moth"), "$export\nb #= 1\n").expect("should write module_b root");
     fs::write(module_b.join("impl.moth"), "impl #= 1\n").expect("should write module_b impl");
 
@@ -1323,14 +1322,14 @@ fn scoped_support_package_is_visible_by_name_to_owner_and_sibling_descendant() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@markdown render\n#[:site]\n")
+    fs::write(src.join("@entry.moth"), "@markdown render\n[:site]\n")
         .expect("should write owner root");
     fs::write(
         support.join("@package.moth"),
         "$export\nrender || -> String:\n    return \"support\"\n;\n",
     )
     .expect("should write support root");
-    fs::write(pages.join("@entry.moth"), "@markdown render\n#[:page]\n")
+    fs::write(pages.join("@entry.moth"), "@markdown render\n[:page]\n")
         .expect("should write sibling module root");
 
     let mut config = Config::new(root.clone());
@@ -1367,7 +1366,7 @@ fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() 
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@HELPER\n#[:page]\n").expect("should write root");
+    fs::write(src.join("@entry.moth"), "@HELPER\n[:page]\n").expect("should write root");
     fs::write(src.join("helper.moth"), "value #= 1\n").expect("should write Moth source");
     fs::write(src.join("Helper.md"), "# Helper\n").expect("should write Markdown source");
 
@@ -1404,10 +1403,10 @@ fn binding_package_and_local_module_prefix_collision_is_ambiguous() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@core/io input\n#[:page]\n").expect("should write root");
+    fs::write(src.join("@entry.moth"), "@core/io input\n[:page]\n").expect("should write root");
     fs::write(local_core.join("@mod.moth"), "$export\nlocal #= 1\n")
         .expect("should write colliding local facade");
-    fs::write(local_core.join("@entry.moth"), "#[:local core]\n")
+    fs::write(local_core.join("@entry.moth"), "[:local core]\n")
         .expect("should write colliding local module entry");
 
     let mut config = Config::new(root.clone());
@@ -1440,7 +1439,7 @@ fn binding_package_case_variant_import_with_local_file_is_ambiguous() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@core/IO\n#[:[IO.value]]\n").expect("should write root");
+    fs::write(src.join("@entry.moth"), "@core/IO\n[:[IO.value]]\n").expect("should write root");
     // Package identities reject case-only overlaps, so `@core/IO` can't select this local file
     // just because the registered `@core/io` lookup is exact.
     fs::write(local_core.join("IO.moth"), "value #= 1\n").expect("should write local file");
@@ -1475,7 +1474,7 @@ fn directory_source_dependency_rejects_obsolete_relative_form() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@./helper value\n#[:page]\n").expect("should write root");
+    fs::write(src.join("@entry.moth"), "@./helper value\n[:page]\n").expect("should write root");
     fs::write(src.join("helper.moth"), "value #= 1\n").expect("should write helper");
 
     let mut config = Config::new(root.clone());
@@ -1508,7 +1507,7 @@ fn direct_child_private_path_bypass_is_rejected() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@child/private value\n#[:page]\n")
+    fs::write(src.join("@entry.moth"), "@child/private value\n[:page]\n")
         .expect("should write parent root");
     fs::write(child.join("@mod.moth"), "$export\nvalue #= 1\n").expect("should write child root");
     fs::write(child.join("private.moth"), "value #= 2\n")
@@ -1545,7 +1544,7 @@ fn module_import_through_hidden_directory_reports_hidden_reason() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@_private/child value\n#[:page]\n")
+    fs::write(src.join("@entry.moth"), "@_private/child value\n[:page]\n")
         .expect("should write page");
 
     let mut config = Config::new(root.clone());
@@ -1588,7 +1587,7 @@ fn single_component_hidden_import_remains_ambiguous_missing_target() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@_private value\n#[:page]\n").expect("should write page");
+    fs::write(src.join("@entry.moth"), "@_private value\n[:page]\n").expect("should write page");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -1626,7 +1625,7 @@ fn underscore_prefixed_helper_file_remains_importable() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@_helper value\n#[:page]\n").expect("should write page");
+    fs::write(src.join("@entry.moth"), "@_helper value\n[:page]\n").expect("should write page");
     fs::write(src.join("_helper.moth"), "value #= 1\n").expect("should write helper");
 
     let mut config = Config::new(root.clone());
@@ -1657,7 +1656,7 @@ fn selected_hidden_root_can_import_its_visible_child_module() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(selected.join("@entry.moth"), "@visible v\n#[:site]\n").expect("should write root");
+    fs::write(selected.join("@entry.moth"), "@visible v\n[:site]\n").expect("should write root");
     fs::write(child.join("@mod.moth"), "$export\nv #= 1\n").expect("should write child root");
 
     let mut config = Config::new(selected.clone());
@@ -1689,7 +1688,7 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@helper\n@intro\n#[:entry]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@helper\n@intro\n[:entry]\n").expect("should write entry");
     fs::write(src.join("helper.moth"), "value #= 42\n").expect("should write helper");
     fs::write(src.join("intro.mtf"), "moth template body\n").expect("should write moth template");
     fs::write(src.join("notes.md"), "# Markdown body\n").expect("should write markdown");
@@ -1766,9 +1765,9 @@ fn canonical_discovery_consumes_moth_tokens_for_every_reachable_file() {
     .expect("should write config");
 
     // Two entry points retain independent canonical source ownership. Each module depends on a helper.
-    fs::write(module_a.join("@entry.moth"), "@helperA\n#[:pageA]\n").expect("should write pageA");
+    fs::write(module_a.join("@entry.moth"), "@helperA\n[:pageA]\n").expect("should write pageA");
     fs::write(module_a.join("helperA.moth"), "a #= 1\n").expect("should write helperA");
-    fs::write(module_b.join("@entry.moth"), "@helperB\n#[:pageB]\n").expect("should write pageB");
+    fs::write(module_b.join("@entry.moth"), "@helperB\n[:pageB]\n").expect("should write pageB");
     fs::write(module_b.join("helperB.moth"), "b #= 2\n").expect("should write helperB");
 
     let mut config = Config::new(root.clone());
@@ -1861,7 +1860,7 @@ fn resource_path_qualified_occurrence_uses_the_provider_lane_without_reading_the
     let root = _tmp_root.path().to_path_buf();
     let (config, resolver, style_directives, src) = write_qualified_reference_probe_project(
         &root,
-        "logo = @images/logo.svg name\n#[:entry]\n",
+        "logo = @images/logo.svg name\n[:entry]\n",
         &[("images/logo.svg", "<svg/>")],
     );
 
@@ -1884,7 +1883,7 @@ fn resource_path_qualified_occurrence_uses_the_provider_lane_without_reading_the
     let (clause_config, clause_resolver, clause_directives, clause_src) =
         write_qualified_reference_probe_project(
             &clause_root,
-            "@images/logo.svg name\n#[:entry]\n",
+            "@images/logo.svg name\n[:entry]\n",
             &[("images/logo.svg", "<svg/>")],
         );
     let clause_failure =
@@ -1908,7 +1907,7 @@ fn explicit_moth_extension_qualified_occurrence_keeps_the_source_extension_diagn
     let root = _tmp_root.path().to_path_buf();
     let (config, resolver, style_directives, src) = write_qualified_reference_probe_project(
         &root,
-        "value = @helper.moth answer\n#[:entry]\n",
+        "value = @helper.moth answer\n[:entry]\n",
         &[("helper.moth", "answer #= 1\n")],
     );
 
@@ -1927,7 +1926,7 @@ fn explicit_moth_extension_qualified_occurrence_keeps_the_source_extension_diagn
     let (clause_config, clause_resolver, clause_directives, _clause_src) =
         write_qualified_reference_probe_project(
             &clause_root,
-            "@helper.moth answer\n#[:entry]\n",
+            "@helper.moth answer\n[:entry]\n",
             &[("helper.moth", "answer #= 1\n")],
         );
     let clause_failure =
@@ -1968,7 +1967,7 @@ fn entry_only_child_qualified_occurrence_matches_the_clause_error_lane() {
     let _occurrence_root = tempfile::tempdir().expect("should create temp dir");
     let occurrence_root = _occurrence_root.path().to_path_buf();
     let (occurrence_config, occurrence_resolver, occurrence_directives, occurrence_src) =
-        write_entry_only_child_fixture(&occurrence_root, "value = @child hidden\n#[:entry]\n");
+        write_entry_only_child_fixture(&occurrence_root, "value = @child hidden\n[:entry]\n");
     let occurrence_failure = discover_modules_for_test(
         &occurrence_config,
         &occurrence_resolver,
@@ -1984,7 +1983,7 @@ fn entry_only_child_qualified_occurrence_matches_the_clause_error_lane() {
     let _clause_root = tempfile::tempdir().expect("should create temp dir");
     let clause_root = _clause_root.path().to_path_buf();
     let (clause_config, clause_resolver, clause_directives, clause_src) =
-        write_entry_only_child_fixture(&clause_root, "@child hidden\n#[:entry]\n");
+        write_entry_only_child_fixture(&clause_root, "@child hidden\n[:entry]\n");
     let clause_failure =
         discover_modules_for_test(&clause_config, &clause_resolver, &clause_directives);
     let clause_diagnostic = first_error_diagnostic(&clause_failure);
@@ -2003,7 +2002,7 @@ fn duplicate_qualified_occurrences_invoke_a_registered_provider_once() {
     let root = _tmp_root.path().to_path_buf();
     let (config, resolver, style_directives, _src) = write_qualified_reference_probe_project(
         &root,
-        "first = @app.js one\nsecond = @app.js two\n#[:entry]\n",
+        "first = @app.js one\nsecond = @app.js two\n[:entry]\n",
         &[("app.js", "export const one = 1;\n")],
     );
 

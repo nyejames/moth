@@ -14,4 +14,4 @@ render_mutable_push || -> String:
     return [:fixed_collection_mutable_empty_push_success length=[len] first=[first] second=[second]]
 ;
 
-[:[render_mutable_push()]]
+~[:[render_mutable_push()]]

@@ -48,4 +48,4 @@ ic Char = int_to_char(90) catch:
 private_invalid = parse_private("not an integer") catch then -1
 assert(private_invalid is -1)
 
-[: runtime fallible casts: [i]|[f]|[b]|[c]|[fi]|[ic]]
+~[: runtime fallible casts: [i]|[f]|[b]|[c]|[fi]|[ic]]

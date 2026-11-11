@@ -10,4 +10,4 @@ if value is:
     else => ~result = "other"
 ;
 
-[:relational_guard_result=[result]]
+~[:relational_guard_result=[result]]

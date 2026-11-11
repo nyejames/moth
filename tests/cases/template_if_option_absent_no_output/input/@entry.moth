@@ -18,4 +18,4 @@ absent_result = render(none) catch:
     then "caught inactive option body"
 ;
 
-[:template_if_option_absent_no_output [absent_result]]
+~[:template_if_option_absent_no_output [absent_result]]

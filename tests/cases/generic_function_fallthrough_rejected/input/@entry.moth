@@ -5,4 +5,4 @@ identity type T |value T| -> T:
 ;
 
 result = identity(42)
-[: [result] ]
+~[: [result] ]

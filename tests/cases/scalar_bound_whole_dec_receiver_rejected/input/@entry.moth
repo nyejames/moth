@@ -8,4 +8,4 @@ raw = accept_dec2(1)
 whole = 1
 accept_dec2(whole)
 
-[:unreachable]
+~[:unreachable]

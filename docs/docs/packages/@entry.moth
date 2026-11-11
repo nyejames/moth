@@ -20,14 +20,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Packages and dependencies"]]
-#[$in description:["Dependency paths, module visibility, project-local packages and package origin and backing."]]
-#[$in head:[language_theme_head]]
+[$in title:["Packages and dependencies"]]
+[$in description:["Dependency paths, module visibility, project-local packages and package origin and backing."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Packages and dependencies
 
     Dependencies make names visible, module roots define public boundaries and
@@ -41,7 +41,7 @@ init_docs_sidebar()!
     records current package and project-builder support.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:dependency-paths]
         [$in title:Dependency paths]
@@ -51,7 +51,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:dependency-clauses]
         [$in title:Dependency clauses]
@@ -61,7 +61,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:module-visibility]
         [$in title:Module visibility]
@@ -71,7 +71,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:public-reexports]
         [$in title:Public re-exports]
@@ -81,7 +81,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:project-local-packages]
         [$in title:Project-local packages]
@@ -91,7 +91,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:package-origins-and-backing]
         [$in title:Package origins and backing]
@@ -101,7 +101,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:external-binding-contracts]
         [$in title:External binding contracts]
@@ -111,14 +111,14 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## Package reference pages
 
     - @./core (Core packages)
     - @./builder (Builder packages)
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../project-structure/]
         [$in previous_title:Project structure]

@@ -165,4 +165,4 @@ runtime_duplicate_key |key String| -> String:
     return [:[key]]
 ;
 
-[:[render_hashmap_contract()]]
+~[:[render_hashmap_contract()]]

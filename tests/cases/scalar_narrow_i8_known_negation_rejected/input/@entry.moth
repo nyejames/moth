@@ -6,4 +6,4 @@
 minimum #I8 = -128
 negative #I8 = -minimum
 
-[:unreachable]
+~[:unreachable]

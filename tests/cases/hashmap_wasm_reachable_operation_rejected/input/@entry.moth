@@ -6,4 +6,4 @@ scores = get_map()
 value = scores.get("Priya") catch:
     then false
 ;
-[:hashmap reachable operation]
+~[:hashmap reachable operation]

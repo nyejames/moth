@@ -10,4 +10,4 @@ unused |seed String| -> String:
     return accept(Message::Update)
 ;
 
-[:unreachable route formation accepted]
+~[:unreachable route formation accepted]

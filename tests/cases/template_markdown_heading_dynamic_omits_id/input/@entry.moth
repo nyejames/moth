@@ -1,6 +1,6 @@
 name #String = "World"
 
-#[$md:
+[$md:
 # Hello [name]
 # Marked [name] @#marked
 Static body.

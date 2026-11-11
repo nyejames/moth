@@ -17,4 +17,4 @@ render_branch_mutation || -> String:
     return [:collection_mutation_inside_branch first=[first] len=[len]]
 ;
 
-[:[render_branch_mutation()]]
+~[:[render_branch_mutation()]]

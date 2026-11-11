@@ -11,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The smallest page that compiles without diagnostics.
-const PAGE_SOURCE: &str = "#[:<h1>About</h1>]\n";
+const PAGE_SOURCE: &str = "[:<h1>About</h1>]\n";
 
 /// A record literal that is never closed, so the frontend rejects the project before any builder
 /// runs.

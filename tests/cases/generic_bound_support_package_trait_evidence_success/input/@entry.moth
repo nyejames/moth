@@ -3,4 +3,4 @@
 
 shown = show(Item(text = "x"))
 
-[:[shown]]
+~[:[shown]]

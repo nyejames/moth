@@ -8,4 +8,4 @@ if value is:
     3 => ~result = "three"
 ;
 
-[:pattern_unreachable_after_else_warning result=[result]]
+~[:pattern_unreachable_after_else_warning result=[result]]

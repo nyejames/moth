@@ -10,4 +10,4 @@ if next is:
     Yellow => ~label = "yellow"
     Green => ~label = "green"
 ;
-[:choice_cross_file_runtime initial=[label] next=[label]]
+~[:choice_cross_file_runtime initial=[label] next=[label]]

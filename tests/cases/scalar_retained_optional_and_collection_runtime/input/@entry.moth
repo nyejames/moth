@@ -162,4 +162,4 @@ bang_text = receive_u64(bang_value)
 pending_batch = 1
 batch = make_batch(pending_batch)
 
-[:scalar retained optional present=[present_text] absent=[absent_text] grouped=[grouped_text] projected=[projected_text] optional=[optional_text]/[optional_absent_text] bang=[bang_text] items=[loop batch.values |item_value, item_index|:[item_index]=[receive_u64(item_value)];]]
+~[:scalar retained optional present=[present_text] absent=[absent_text] grouped=[grouped_text] projected=[projected_text] optional=[optional_text]/[optional_absent_text] bang=[bang_text] items=[loop batch.values |item_value, item_index|:[item_index]=[receive_u64(item_value)];]]

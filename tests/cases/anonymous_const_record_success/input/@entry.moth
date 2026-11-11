@@ -37,4 +37,4 @@ io.line([: grouped-call=[grouped_runtime]])
 label #String = cast 42
 
 io.line([: runtime-field=[labels.first] runtime-nested=[nested.inner.x]])
-[: const record label: [label] first: [first] also: [also_first] x: [x_value] nominal=[settings_width] grouped=[grouped_first] panel=[panel_title] detail=[panel_detail_title]]
+~[: const record label: [label] first: [first] also: [also_first] x: [x_value] nominal=[settings_width] grouped=[grouped_first] panel=[panel_title] detail=[panel_detail_title]]

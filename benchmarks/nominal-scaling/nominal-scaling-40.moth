@@ -448,4 +448,4 @@ Signal0009 ::
     Batch2 | items {large_capacity I32}, tag String |,
 ;
 
-[:nominal-scaling structs=40 choices=10]
+~[:nominal-scaling structs=40 choices=10]

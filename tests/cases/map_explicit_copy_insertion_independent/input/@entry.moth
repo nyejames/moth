@@ -11,4 +11,4 @@ length = scores.length
 stored = scores.get(key) catch:
     then ""
 ;
-[:map_explicit_copy_insertion_independent key=[key] value=[value] stored=[stored] length=[length]]
+~[:map_explicit_copy_insertion_independent key=[key] value=[value] stored=[stored] length=[length]]

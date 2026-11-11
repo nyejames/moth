@@ -1,4 +1,4 @@
 @file_a anchor
 @file_b build_label_box
 
-[:[anchor] [build_label_box()]]
+~[:[anchor] [build_label_box()]]

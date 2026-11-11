@@ -109,4 +109,4 @@ tagged_origin = Tagged(4294967343, ready_marker)
 tagged_text = read_optional_u64(tagged_origin.value)
 tagged_marker_text = read_u64(tagged_origin.marker)
 
-[:generic_constructed_numeric_optional_envelopes struct=[slot_text] choice=[branch_text] packet=[packet_text] immediate=[immediate_text] field=[field_text] ready=[ready_text] collection=[collection_text] map=[map_text] choice_collection=[choice_collection_text] nested=[nested_text] nested_map=[nested_map_text] seeded_collection=[seeded_collection_text] seeded_choice=[seeded_choice_text] sibling=[sibling_text] marker=[marker_text] tagged=[tagged_text] tagged_marker=[tagged_marker_text]]
+~[:generic_constructed_numeric_optional_envelopes struct=[slot_text] choice=[branch_text] packet=[packet_text] immediate=[immediate_text] field=[field_text] ready=[ready_text] collection=[collection_text] map=[map_text] choice_collection=[choice_collection_text] nested=[nested_text] nested_map=[nested_map_text] seeded_collection=[seeded_collection_text] seeded_choice=[seeded_choice_text] sibling=[sibling_text] marker=[marker_text] tagged=[tagged_text] tagged_marker=[tagged_marker_text]]

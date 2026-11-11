@@ -3,4 +3,4 @@ identity type T |value T| -> T:
 ;
 
 value = identity[I32](42)
-[: [value] ]
+~[: [value] ]

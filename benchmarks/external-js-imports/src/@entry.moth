@@ -18,7 +18,7 @@ summary = fmt.join_label("external-js", direct_label)
 emphasized = fmt.emphasize(fallback_label)
 angle = PI / 2.0
 
-[:
+~[:
     <section>
         <h1>[summary]</h1>
         <p>[emphasized]</p>

@@ -28,4 +28,4 @@ mixed_recovered = safe_mixed_bump(~mixed_target, 100) catch |mixed_err|:
 ;
 mixed_exact_target ~U8 = 200
 mixed_exact = safe_mixed_bump(~mixed_exact_target, 50) catch then 0
-[: generic writeback target=[kept] code=[code] recovered=[recovered] exact=[exact] exact-target=[exact_target] mixed-target=[mixed_target] mixed-code=[mixed_code] mixed-recovered=[mixed_recovered] mixed-exact=[mixed_exact] mixed-exact-target=[mixed_exact_target]]
+~[: generic writeback target=[kept] code=[code] recovered=[recovered] exact=[exact] exact-target=[exact_target] mixed-target=[mixed_target] mixed-code=[mixed_code] mixed-recovered=[mixed_recovered] mixed-exact=[mixed_exact] mixed-exact-target=[mixed_exact_target]]

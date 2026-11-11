@@ -15,4 +15,4 @@ task = Task(identity(1))
 list TaskList = {task}
 maybe MaybeTask = none
 
-[: [task.id]|[list.length()]]
+~[: [task.id]|[list.length()]]

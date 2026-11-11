@@ -14,9 +14,9 @@ pub(super) enum HeaderFileItem {
     Symbol(StringId),
     BuiltinTypeConformanceTarget(&'static str),
     Dependency,
-    Hash {
-        at_statement_boundary: bool,
-    },
+    /// A bare direct top-level template that must fold as compile-time output.
+    DirectTemplate,
+    /// A `~`-marked top-level template captured as one runtime body fragment.
     RuntimeTemplate,
     ReservedTraitSyntax,
     /// A registered `$name` directive token on its own top-level line.
@@ -58,15 +58,16 @@ pub(super) fn classify_tagged_item(
         return HeaderFileItem::Dependency;
     }
 
-    if current_tag == TokenTag::HASH {
-        return HeaderFileItem::Hash {
-            at_statement_boundary,
-        };
+    if current_tag == TokenTag::MUTABLE
+        && at_statement_boundary
+        && follower_tag == Some(TokenTag::TEMPLATE_HEAD)
+    {
+        return HeaderFileItem::RuntimeTemplate;
     }
 
     if current_tag == TokenTag::TEMPLATE_HEAD {
         if at_statement_boundary {
-            return HeaderFileItem::RuntimeTemplate;
+            return HeaderFileItem::DirectTemplate;
         }
         return HeaderFileItem::StartBodyToken;
     }

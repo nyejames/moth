@@ -64,5 +64,5 @@ assert(mapped_error_code is 200)
 converted_text String = cast converted
 fractional_text String = cast fractional
 fractional_error_code_text String = cast fractional_error_code
-[:generic Dec TRY_CASTABLE_TO_I32 [converted_text]/[fractional_text]/[fractional_error_code_text]/[boxed_number_text]/[boxed_value_text]]
+~[:generic Dec TRY_CASTABLE_TO_I32 [converted_text]/[fractional_text]/[fractional_error_code_text]/[boxed_number_text]/[boxed_value_text]]
 

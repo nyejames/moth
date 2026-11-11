@@ -5,4 +5,4 @@ State type T ::
 
 state State of I32 = State::Empty
 
-[: expected unit choice generic]
+~[: expected unit choice generic]

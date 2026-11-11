@@ -10,4 +10,4 @@ render_commas || -> String:
     return [:commas result=[result] trailing=[trailing]]
 ;
 
-[:[render_commas()]]
+~[:[render_commas()]]

@@ -4,4 +4,4 @@ scores ~{String = String} = {"key" = value}
 stored = scores.get("key") catch:
     then ""
 ;
-[:map_literal_stored_non_copy_value_later_use value=[value] stored=[stored]]
+~[:map_literal_stored_non_copy_value_later_use value=[value] stored=[stored]]

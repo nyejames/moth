@@ -307,7 +307,7 @@ fn warning_only_check_exits_successfully() {
 #[test]
 fn valid_project_build_exits_successfully() {
     let root = tempdir().expect("temporary directory should be created");
-    write_directory_html_project(root.path(), "#[:<h1>Hello</h1>]\nentry = \".\"\n");
+    write_directory_html_project(root.path(), "[:<h1>Hello</h1>]\nentry = \".\"\n");
 
     let output = run_moth(&[
         "build",
@@ -420,7 +420,7 @@ fn single_file_build_writes_outputs_using_containing_directory_context() {
     let root = tempdir().expect("temporary directory should be created");
     let project_dir = root.path().join("project");
     fs::create_dir(&project_dir).expect("single-file project directory should be created");
-    write_source(&project_dir, "main.moth", "#[:<h1>Hello</h1>]\n");
+    write_source(&project_dir, "main.moth", "[:<h1>Hello</h1>]\n");
 
     let output = run_moth_from_dir(root.path(), &["build", "project/main.moth"]);
 
@@ -438,7 +438,7 @@ fn single_file_build_writes_outputs_using_containing_directory_context() {
 #[test]
 fn bare_single_file_build_writes_outputs_in_current_directory() {
     let root = tempdir().expect("temporary directory should be created");
-    write_source(root.path(), "main.moth", "#[:<h1>Hello</h1>]\n");
+    write_source(root.path(), "main.moth", "[:<h1>Hello</h1>]\n");
 
     let output = run_moth_from_dir(root.path(), &["build", "main.moth"]);
 
@@ -470,7 +470,7 @@ fn invalid_syntax_project_build_exits_with_failure() {
 #[test]
 fn output_root_write_failure_exits_with_failure_without_benchmark_status() {
     let root = tempdir().expect("temporary directory should be created");
-    write_directory_html_project(root.path(), "#[:<h1>Hello</h1>]\nentry = \".\"\n");
+    write_directory_html_project(root.path(), "[:<h1>Hello</h1>]\nentry = \".\"\n");
     fs::write(root.path().join("_dev"), b"occupied output root")
         .expect("output-root collision file should be written");
 
@@ -546,7 +546,7 @@ fn benchmark_status_record_is_emitted_once_for_check_and_build() {
     assert_status_record(&check_output, "MOTH_BENCH status errors=0 warnings=0");
 
     let build_root = tempdir().expect("temporary directory should be created");
-    write_directory_html_project(build_root.path(), "#[:<h1>Hello</h1>]\nentry = \".\"\n");
+    write_directory_html_project(build_root.path(), "[:<h1>Hello</h1>]\nentry = \".\"\n");
     let build_path = build_root
         .path()
         .to_str()

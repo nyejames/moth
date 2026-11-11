@@ -13,4 +13,4 @@ items ~{capacity String} = {}
 ;
 len = items.length()
 
-[:imported_chain limit=[Limit] double=[DOUBLE] length=[len]]
+~[:imported_chain limit=[Limit] double=[DOUBLE] length=[len]]

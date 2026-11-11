@@ -11,4 +11,4 @@ label_for |current Status| -> String:
 
 label = label_for(Status::Busy)
 
-[:value_match_duplicate_warning result=[label]]
+~[:value_match_duplicate_warning result=[label]]

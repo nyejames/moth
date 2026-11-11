@@ -83,4 +83,4 @@ mixed_first = inline_mixed_collection(true) catch then "failed"
 mixed_second = inline_mixed_collection(false) catch then "failed"
 mixed_map_first = inline_mixed_map(true) catch then "failed"
 mixed_map_second = inline_mixed_map(false) catch then "failed"
-[:multi_bind_known_leaves named_first=[named_first] named_second=[named_second] inline_first=[inline_first] inline_second=[inline_second] named_map_first=[named_map_first] named_map_second=[named_map_second] inline_map_first=[inline_map_first] inline_map_second=[inline_map_second] mixed_first=[mixed_first] mixed_second=[mixed_second] mixed_map_first=[mixed_map_first] mixed_map_second=[mixed_map_second]]
+~[:multi_bind_known_leaves named_first=[named_first] named_second=[named_second] inline_first=[inline_first] inline_second=[inline_second] named_map_first=[named_map_first] named_map_second=[named_map_second] inline_map_first=[inline_map_first] inline_map_second=[inline_map_second] mixed_first=[mixed_first] mixed_second=[mixed_second] mixed_map_first=[mixed_map_first] mixed_map_second=[mixed_map_second]]

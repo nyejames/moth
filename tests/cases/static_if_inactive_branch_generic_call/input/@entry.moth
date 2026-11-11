@@ -27,4 +27,4 @@ else
     append_label(~labels)
 ;
 
-[:inactive_work active=[active] inactive=[inactive] labels=[labels.length()]]
+~[:inactive_work active=[active] inactive=[inactive] labels=[labels.length()]]

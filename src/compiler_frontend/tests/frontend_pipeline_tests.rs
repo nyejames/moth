@@ -803,7 +803,7 @@ fn direct_root_named_insert_routes_to_registered_builder_slot() {
     let mut project = FrontendProject::new(
         &[(
             "src/@entry.moth",
-            "#[$in sidebar: Sidebar]\n#[: <main>Body</main>]\n#[$in sidebar: Tail]\n#[$in sidebar:]\n",
+            "[$in sidebar: Sidebar]\n[: <main>Body</main>]\n[$in sidebar: Tail]\n[$in sidebar:]\n",
         )],
         "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
@@ -854,7 +854,7 @@ fn unregistered_direct_root_builder_slot_diagnoses_at_authored_site() {
     schema.register("sidebar");
 
     let mut project = FrontendProject::new(
-        &[("src/@entry.moth", "#[$in title: Title]\n#[: body]\n")],
+        &[("src/@entry.moth", "[$in title: Title]\n~[: body]\n")],
         "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     )
@@ -882,7 +882,7 @@ fn runtime_direct_root_builder_slot_contribution_is_not_folded() {
     let mut project = FrontendProject::new(
         &[(
             "src/@entry.moth",
-            "runtime_value || -> String:\n    return \"runtime\"\n;\n#[$in sidebar: [runtime_value()]]\n",
+            "runtime_value || -> String:\n    return \"runtime\"\n;\n[$in sidebar: [runtime_value()]]\n",
         )],
         "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
@@ -907,7 +907,7 @@ fn nested_insert_in_ordinary_root_fragment_stays_an_ordinary_helper() {
     let mut project = FrontendProject::new(
         &[(
             "src/@entry.moth",
-            "#[: before [$in sidebar: Nested] after]\n",
+            "[: before [$in sidebar: Nested] after]\n",
         )],
         "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
@@ -931,7 +931,7 @@ fn root_builder_insert_rejects_unresolved_template_slots() {
     let mut project = FrontendProject::new(
         &[(
             "src/@entry.moth",
-            "card #= [:<h1>[$slot title]</h1>]\n#[$in sidebar: [card]]\n",
+            "card #= [:<h1>[$slot title]</h1>]\n[$in sidebar: [card]]\n",
         )],
         "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
@@ -952,7 +952,7 @@ fn aliased_root_insert_is_not_a_builder_message() {
     let mut schema = BuilderRootSlotSchema::default();
     schema.register("sidebar");
     let mut project = FrontendProject::new(
-        &[("src/@entry.moth", "part #= [$in sidebar: X]\n#[part]\n")],
+        &[("src/@entry.moth", "part #= [$in sidebar: X]\n[part]\n")],
         "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     )
@@ -1408,13 +1408,13 @@ fn failure_api_project(source: &str) -> FrontendProject {
 #[test]
 fn synthetic_start_keeps_ast_builtin_error_slot_before_hir_narrowing() {
     for source in [
-        "value = \"plain\"\n[:[value]]\n",
+        "value = \"plain\"\n~[:[value]]\n",
         "load || -> String, Error!:\n    return! Error(\"failed\")\n;\n\
-         value = load()!\n[:[value]]\n",
+         value = load()!\n~[:[value]]\n",
         "load || -> String, Error!:\n    return! Error(\"failed\")\n;\n\
-         value = load() catch then \"recovered\"\n[:[value]]\n",
-        "left ~= 6\nright ~= 7\nvalue = left * right\n[:[value]]\n",
-        "left ~= 6\nright ~= 7\nvalue = left * right catch then 0\n[:[value]]\n",
+         value = load() catch then \"recovered\"\n~[:[value]]\n",
+        "left ~= 6\nright ~= 7\nvalue = left * right\n~[:[value]]\n",
+        "left ~= 6\nright ~= 7\nvalue = left * right catch then 0\n~[:[value]]\n",
     ] {
         let mut project = failure_project(source);
         let ast = project.ast();

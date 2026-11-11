@@ -3,7 +3,7 @@ list = [$before [inner], $after [:</span>]:
     <ul>[$slot]</ul>
 ]
 
-[:template_runtime_wrapper_slot_inside_child_template
+~[:template_runtime_wrapper_slot_inside_child_template
     [list:
         [: hello]
     ]

@@ -29,8 +29,6 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Sequenced work
 
-- [Const-default entry templates and source documentation directives](./plans/const-default-top-level-templates-plan.md) - Queued for compiler implementation after the merged `$export` prerequisite. The branch is current with main and final-design documentation is updated. Bare `[...]` entries become const-required, `~[...]` selects runtime output and `$doc`/`$todo` become independently stacked source annotations.
-
 - [Const functions and shared compile-time evaluation](./plans/const-functions-plan.md) - explicit `#|...|` compile-time-only callable contracts, a unified constant/function dependency graph, bounded shared function evaluation, cross-module const body publication, release-only ordinary function folding and low-priority budget suggestions. The first active slice is the Stage 4 ownership and early-HIR feasibility gate.
 
 - [Constraints foundations and fast math](./plans/constraints-and-fast-math-plan.md) - Queued: compiler-owned `$fast_math`, transitive `$safe_math` and `$infallible`, a universal numeric backend contract V1, selected fast Core Math helpers and the corresponding documentation and optimisation work. Ordinary arithmetic remains checked. Fast arithmetic has specified wrapping and trapping while preserving numeric value invariants.

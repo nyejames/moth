@@ -2,4 +2,4 @@
 @impl Label, Box
 
 result = combine(Box(Label("payload")))
-[:result=[result]]
+~[:result=[result]]

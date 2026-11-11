@@ -1,4 +1,4 @@
 @core/math NOPE
 
 value = NOPE
-#[:value={value}]
+[:value={value}]

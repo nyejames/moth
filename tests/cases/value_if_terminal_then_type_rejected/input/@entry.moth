@@ -7,4 +7,4 @@ probe || -> I32:
     ;
     return first
 ;
-[:[probe()]]
+~[:[probe()]]

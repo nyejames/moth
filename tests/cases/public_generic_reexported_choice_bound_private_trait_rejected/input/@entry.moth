@@ -6,4 +6,4 @@ chosen_text String = if chosen is:
     Empty => then "empty"
 ;
 
-[:[chosen_text]]
+~[:[chosen_text]]

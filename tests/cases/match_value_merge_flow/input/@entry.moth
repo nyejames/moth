@@ -8,4 +8,4 @@ if value is:
 ;
 
 result = picked + 5
-[:match_value_merge_flow result=[result]]
+~[:match_value_merge_flow result=[result]]

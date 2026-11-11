@@ -4,4 +4,4 @@
 -- the following body text as loose fill and reject the program.
 rows #= [$before [$html:<tr style="[$slot row_style = "background: red;"]">], $after [$html:</tr>]:[:a][:b]]
 
-[if true:[rows]X]
+~[if true:[rows]X]

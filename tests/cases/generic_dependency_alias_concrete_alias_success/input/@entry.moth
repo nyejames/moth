@@ -10,4 +10,4 @@ maybe ImportedMaybe of I32 = ImportedMaybe::Some(7)
 
 io.line([: [raw.value]])
 
-[: generic import alias concrete alias]
+~[: generic import alias concrete alias]

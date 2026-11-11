@@ -5,9 +5,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     ExprId, ExpressionOperationView,
 };
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::template::{
-    CommentDirectiveKind, SlotDeclaration, SlotKey, TemplateType,
-};
+use crate::compiler_frontend::ast::templates::template::{SlotDeclaration, SlotKey, TemplateType};
 use crate::compiler_frontend::ast::templates::template_head_parser::core_directives::{
     parse_in_target, parse_slot_declaration,
 };
@@ -1083,21 +1081,31 @@ fn wrong_operand_type_is_rejected() {
 }
 
 #[test]
-fn note_and_todo_templates_do_not_render_content() {
+fn note_template_does_not_render_content() {
     let note_rendered = folded_template_output("[:before[$note:ignored]after]");
-    let todo_rendered = folded_template_output("[:before[$todo:ignored]after]");
 
     assert_eq!(note_rendered, "beforeafter");
-    assert_eq!(todo_rendered, "beforeafter");
 }
 
 #[test]
-fn note_and_todo_directives_reject_arguments() {
+fn todo_and_doc_are_rejected_in_template_heads() {
+    for directive in ["todo", "doc"] {
+        let source = format!("[${directive}:ignored]");
+        let error = template_parse_error(&source);
+        assert!(
+            error.contains(&format!(
+                "`${directive}` is a source directive and cannot appear in a template head."
+            )),
+            "expected a source-head rejection for '{source}', got: {error}"
+        );
+    }
+}
+
+#[test]
+fn note_directive_rejects_arguments() {
     let note_error = template_parse_error("[$note(\"x\"): ignored]");
-    let todo_error = template_parse_error("[$todo(\"x\"): ignored]");
 
     assert!(!note_error.is_empty());
-    assert!(!todo_error.is_empty());
 }
 
 #[test]
@@ -1125,57 +1133,27 @@ fn slot_directive_must_be_alone_in_template_head() {
 }
 
 #[test]
-fn comment_directives_must_be_alone_in_template_head() {
-    for (directive, clause) in [
-        (
-            "note",
-            "a discarded comment directive must be the template's only meaningful head item",
-        ),
-        (
-            "todo",
-            "a discarded comment directive must be the template's only meaningful head item",
-        ),
-        (
-            "doc",
-            "a documentation directive must be the template's only meaningful head item",
-        ),
-    ] {
-        let expected =
-            format!("`${directive}` cannot be combined with an expression because {clause}.");
-        let before = format!("[\"prefix\", ${directive}]");
-        let after = format!("[${directive}, \"suffix\"]");
-        let before_error = template_parse_error(&before);
-        let after_error = template_parse_error(&after);
+fn note_directive_must_be_alone_in_template_head() {
+    let expected = "`$note` cannot be combined with an expression because a discarded comment directive must be the template's only meaningful head item.";
+    for source in ["[\"prefix\", $note]", "[$note, \"suffix\"]"] {
+        let error = template_parse_error(source);
 
         assert!(
-            before_error.contains(&expected),
-            "expected the comment-directive reason for '{before}', got: {before_error}"
-        );
-        assert!(
-            after_error.contains(&expected),
-            "expected the comment-directive reason for '{after}', got: {after_error}"
+            error.contains(expected),
+            "expected the note-directive reason for '{source}', got: {error}"
         );
     }
 }
 
 #[test]
-fn comment_directive_conflict_with_another_directive_names_both() {
-    for (source, expected) in [
-        (
-            "[$note, $fresh]",
-            "`$note` cannot be combined with `$fresh` because a discarded comment directive must be the template's only meaningful head item.",
+fn note_conflict_with_another_directive_names_both() {
+    let error = template_parse_error("[$note, $fresh]");
+    assert!(
+        error.contains(
+            "`$note` cannot be combined with `$fresh` because a discarded comment directive must be the template's only meaningful head item."
         ),
-        (
-            "[$doc, $fresh]",
-            "`$doc` cannot be combined with `$fresh` because a documentation directive must be the template's only meaningful head item.",
-        ),
-    ] {
-        let error = template_parse_error(source);
-        assert!(
-            error.contains(expected),
-            "unexpected comment-directive pair reason for '{source}': {error}"
-        );
-    }
+        "unexpected note-directive pair reason: {error}"
+    );
 }
 
 #[test]
@@ -1279,177 +1257,6 @@ fn non_formatter_and_formatter_directives_can_coexist() {
     .expect("non-formatter and formatter directives should coexist in the same head");
 
     assert_eq!(effective_tir_style(&template, &context).id, "markdown");
-}
-
-#[test]
-fn doc_templates_treat_brackets_as_literal_text() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let mut expression_builder = AstExpressionBuilder::new().unwrap();
-    let mut const_values = ConstValueStore::default();
-    let file_tokens = template_tokens_from_source(
-        "[$doc:\n[value]\n]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let source_path = file_tokens.source_path;
-    let context = runtime_template_context(
-        &source_path,
-        &mut expression_builder,
-        &mut const_values,
-        &mut string_table,
-        &mut path_fork,
-    );
-    let canonical_owner = file_tokens.canonical_owner();
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    token_stream
-        .set_position(file_tokens.opener_index)
-        .expect("test token stream position must remain in canonical range");
-    // With suppress_child_templates, brackets are balanced literal text,
-    // not nested child templates. Parsing succeeds even with a runtime context.
-    let template = Template::new(
-        &mut token_stream,
-        source_path,
-        &context,
-        &mut expression_builder,
-        &mut const_values,
-        vec![],
-        &mut string_table,
-        &mut path_fork,
-    )
-    .expect("doc template should parse brackets as literal text");
-
-    let folded = fold_template_in_context(
-        &template,
-        &context,
-        &mut string_table,
-        &mut expression_builder,
-        &mut const_values,
-    );
-    let result = string_table.resolve(folded);
-    // Each bracket and the symbol become separate atoms, each markdown-formatted
-    // as individual paragraphs. The key assertion is that all three appear in the output.
-    assert!(
-        result.contains("["),
-        "Opening bracket should appear as literal text: {result}"
-    );
-    assert!(
-        result.contains("value"),
-        "Inner symbol should appear as literal text: {result}"
-    );
-    assert!(
-        result.contains("]"),
-        "Closing bracket should appear as literal text: {result}"
-    );
-}
-
-#[test]
-fn doc_templates_are_markdown_formatted_by_default() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let mut expression_builder = AstExpressionBuilder::new().unwrap();
-    let mut const_values = ConstValueStore::default();
-    let file_tokens = template_tokens_from_source(
-        "[$doc:\n# Heading\n]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let source_path = file_tokens.source_path;
-    let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens.canonical_owner();
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    token_stream
-        .set_position(file_tokens.opener_index)
-        .expect("test token stream position must remain in canonical range");
-    let template = Template::new(
-        &mut token_stream,
-        source_path,
-        &context,
-        &mut expression_builder,
-        &mut const_values,
-        vec![],
-        &mut string_table,
-        &mut path_fork,
-    )
-    .expect("doc template should parse");
-    assert!(matches!(
-        effective_tir_kind(&template, &context),
-        TemplateType::Comment(CommentDirectiveKind::Doc)
-    ));
-
-    let folded = fold_template_in_context(
-        &template,
-        &context,
-        &mut string_table,
-        &mut expression_builder,
-        &mut const_values,
-    );
-    assert!(string_table.resolve(folded).contains("<h1>Heading</h1>"));
-}
-
-#[test]
-fn doc_brackets_remain_literal_text() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let mut expression_builder = AstExpressionBuilder::new().unwrap();
-    let mut const_values = ConstValueStore::default();
-    let file_tokens = template_tokens_from_source(
-        "[$doc:\n[else][break][continue]\n]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let source_path = file_tokens.source_path;
-    let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens.canonical_owner();
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    token_stream
-        .set_position(file_tokens.opener_index)
-        .expect("test token stream position must remain in canonical range");
-    let template = Template::new(
-        &mut token_stream,
-        source_path,
-        &context,
-        &mut expression_builder,
-        &mut const_values,
-        vec![],
-        &mut string_table,
-        &mut path_fork,
-    )
-    .expect("doc template should parse");
-
-    let folded = fold_template_in_context(
-        &template,
-        &context,
-        &mut string_table,
-        &mut expression_builder,
-        &mut const_values,
-    );
-    let result = string_table.resolve(folded);
-    // Direct source markers remain intact when `$doc` suppresses child-template parsing.
-    for marker in ["[else]", "[break]", "[continue]"] {
-        assert!(
-            result.contains(marker),
-            "suppressed body should preserve literal marker {marker:?}: {result}"
-        );
-    }
 }
 
 #[test]

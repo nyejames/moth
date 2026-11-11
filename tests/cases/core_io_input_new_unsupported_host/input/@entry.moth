@@ -10,4 +10,4 @@ result = new_input() catch |err|:
     ~code = err.code
     then "unsupported"
 ;
-[: core_io_input_new [result] code=[code]]
+~[: core_io_input_new [result] code=[code]]

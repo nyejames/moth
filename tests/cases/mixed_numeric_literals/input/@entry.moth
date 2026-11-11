@@ -9,4 +9,4 @@ render_numeric_literals || -> String:
     return [:mixed_numeric_literals int=[int_var] float=[float_var]]
 ;
 
-[:[render_numeric_literals()]]
+~[:[render_numeric_literals()]]

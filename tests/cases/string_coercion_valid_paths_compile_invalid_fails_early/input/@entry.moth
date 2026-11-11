@@ -14,7 +14,7 @@ io.line([: [true]])
 
 -- Valid Char (via template)
 c = 'A'
-[:char_value [c]]
+~[:char_value [c]]
 
 -- Valid template passed to io
 message ~= [:template_test]

@@ -14,4 +14,4 @@ status_label |input ImportedStatus| -> String:
 
 label = status_label(status)
 
-[:semantic dispatch value=[box.value] status=[label] label=[box.label]]
+~[:semantic dispatch value=[box.value] status=[label] label=[box.label]]

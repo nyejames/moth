@@ -138,4 +138,4 @@ c125 #= c124 + 1
 c126 #= c125 + 1
 c127 #= c126 + 1
 
-[:constant-chain-128 last=[c127]]
+~[:constant-chain-128 last=[c127]]

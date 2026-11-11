@@ -11,14 +11,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Wiring"]]
-#[$in description:["Wire and Route parameter contracts, capability positions and channel boundaries."]]
-#[$in head:[language_theme_head]]
+[$in title:["Wiring"]]
+[$in description:["Wire and Route parameter contracts, capability positions and channel boundaries."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Wiring
 
     Wiring describes parameter contracts for binding identity and choice
@@ -30,7 +30,7 @@ init_docs_sidebar()!
     for the complete contracts.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:wiring-introduction]
         [$in title:Introduction and detailed reference]
@@ -40,7 +40,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:wiring-wires]
         [$in title:Wires]
@@ -50,7 +50,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:wiring-routes]
         [$in title:Routes]
@@ -60,7 +60,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:wiring-scope-and-future]
         [$in title:Scope and channels]
@@ -70,7 +70,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../traits/]
         [$in previous_title:Traits]

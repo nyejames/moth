@@ -1,30 +1,21 @@
-//! Top-level const fragment collection and doc fragment extraction.
+//! Top-level const fragment collection and declaration-attached doc metadata.
 //!
-//! WHAT: collects folded top-level const string fragments and extracts doc fragments from
-//! comment templates.
-//! WHY: builders consume ordered const fragments (with runtime insertion indices) and doc
-//! metadata; all runtime template handling moves into the compiler-owned entry body via
-//! PushStartRuntimeFragment nodes.
+//! WHAT: collects folded top-level const string fragments and owns the AST doc-fragment records
+//! attached by source-directive parsing.
+//! WHY: builders consume ordered const fragments with runtime insertion indices, while module
+//! metadata consumes documentation joined to its declaration identity. Runtime template handling
+//! stays in the compiler-owned entry body via PushStartRuntimeFragment nodes.
 
-use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
-use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
-use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
-use crate::compiler_frontend::ast::templates::doc_fragments;
-use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::builder_root_slots::ConstFragmentDestination;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::StringId;
 
 use rustc_hash::FxHashMap;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 // -------------------------
 //  Fragment Types
@@ -51,41 +42,33 @@ pub struct AstConstTopLevelFragment {
 
 /// Folded value for a top-level const template.
 ///
-/// WHAT: carries the already-folded string value produced from the template's
-///       shared TIR authority, including unresolved structural pieces, and the validated
-///       destination the emitter assigned.
-/// WHY: top-level fragment collection is keyed by source file and consumes the folded value
-///      after AST emission has already validated and folded the template.
+/// WHAT: carries the already-folded string value and validated destination, or records that the
+///       template produced no output at all.
+/// WHY: `[$note: ...]` must disappear rather than become an empty String fragment. The explicit
+///      no-output variant lets fragment collection skip it without inventing a value.
 #[derive(Clone, Debug)]
-pub(crate) struct FoldedConstTemplateResult {
-    value: ConstStringValue,
-    destination: ConstFragmentDestination,
+pub(crate) enum FoldedConstTemplateResult {
+    Output {
+        value: ConstStringValue,
+        destination: ConstFragmentDestination,
+    },
+    NoOutput,
 }
 
 impl FoldedConstTemplateResult {
     pub(crate) fn new(value: ConstStringValue, destination: ConstFragmentDestination) -> Self {
-        Self { value, destination }
-    }
-
-    /// Returns a copy of the folded string value.
-    pub(crate) fn value(&self) -> ConstStringValue {
-        self.value.clone()
-    }
-
-    /// Returns the validated fragment destination.
-    pub(crate) fn destination(&self) -> ConstFragmentDestination {
-        self.destination.clone()
+        Self::Output { value, destination }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AstDocFragmentKind {
-    Doc,
-}
-
+/// One compile-time documentation record attached to its declaration.
+///
+/// WHAT: carries the target declaration path, the folded text and the directive operand span.
+/// WHY: documentation is declaration metadata, not an unattached page fragment. The declaration
+/// path is the stable module-local identity later consumers join on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AstDocFragment {
-    pub kind: AstDocFragmentKind,
+    pub target: PathId,
     pub value: StringId,
     pub span: Option<SourceSpan>,
 }
@@ -117,36 +100,22 @@ pub(crate) fn collect_const_top_level_fragments(
                 )
             })?;
 
+        let (value, destination) = match folded {
+            FoldedConstTemplateResult::Output { value, destination } => {
+                (value.clone(), destination.clone())
+            }
+            FoldedConstTemplateResult::NoOutput => continue,
+        };
+
         result.push(AstConstTopLevelFragment {
             runtime_insertion_index: fragment.runtime_insertion_index,
             span: fragment.span,
-            destination: folded.destination(),
-            value: folded.value(),
+            destination,
+            value,
         });
     }
 
     Ok(result)
-}
-
-/// Extracts documentation fragments from comment templates and removes the comments from the AST.
-pub(crate) fn collect_and_strip_comment_templates(
-    ast_nodes: &mut [AstNode],
-    expression_builder: &mut AstExpressionBuilder,
-    const_values: &mut ConstValueStore,
-    string_table: &mut StringTable,
-    external_package_registry: Option<&ExternalPackageRegistry>,
-    template_const_loop_iteration_limit: usize,
-    template_ir_store: Rc<RefCell<TemplateIrStore>>,
-) -> Result<Vec<AstDocFragment>, TemplateError> {
-    doc_fragments::collect_and_strip_comment_templates(
-        ast_nodes,
-        expression_builder,
-        const_values,
-        string_table,
-        external_package_registry,
-        template_const_loop_iteration_limit,
-        template_ir_store,
-    )
 }
 
 #[cfg(test)]

@@ -6,4 +6,4 @@ mixed_forward ||:
     mixed = {small, large}
 ;
 
-[:concrete_i32_u64_elements_rejected]
+~[:concrete_i32_u64_elements_rejected]

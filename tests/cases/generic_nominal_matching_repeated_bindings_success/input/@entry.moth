@@ -8,4 +8,4 @@ good Pair of I32 = Pair(1, 2)
 io.line([: [good.left]])
 io.line([: [good.right]])
 
-[: generic matching repeated bindings success]
+~[: generic matching repeated bindings success]

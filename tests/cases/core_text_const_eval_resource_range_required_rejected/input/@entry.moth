@@ -1,5 +1,5 @@
 @core/text
 
-#[loop 0 to text.length(@assets/value.txt) |i|:
+[loop 0 to text.length(@assets/value.txt) |i|:
     [i]
 :]

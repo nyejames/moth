@@ -1,14 +1,14 @@
 @styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
 
-#[$in title:["Memory management"]]
-#[$in description:["Reference semantics, borrow validation, lifetime topology, declared regions and collector-free backend lowering."]]
-#[$in head:[theme_head]]
+[$in title:["Memory management"]]
+[$in description:["Reference semantics, borrow validation, lifetime topology, declared regions and collector-free backend lowering."]]
+[$in head:[theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
 
-#[section, $md:
+[section, $md:
     # Memory management
 
     **Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
@@ -20,7 +20,7 @@ init_docs_sidebar()!
     Garbage collection is a permitted representation of a topology that is already proven legal. It is not the correctness baseline, and release builds on backends that advertise full memory control lower every accepted program without a tracing collector.
 ]
 
-#[section, $md:
+[section, $md:
     ## Shared access vs copy
 
     Existing values use shared, read-only access by default. Binding a new name to an existing value doesn't copy it. Use `copy` when you need an independent value.
@@ -52,7 +52,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## Exclusive access
 
     Prefix an existing-place write with `~`, as in `~count = 1`. An existing mutable place passed to a mutable parameter also needs `~`, including in a named argument. Mutable receivers use `~items.push(value)` and require an existing mutable place. Fresh values and `copy place` satisfy ordinary mutable parameters without `~`. A mutable alias uses `writer ~= original` with an unmarked source. `~` isn't a move marker or a type identity.
@@ -62,7 +62,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## Lifetime owners
 
     Every runtime allocation family has exactly one semantic lifetime owner. Multiple bindings or fields may alias that allocation without becoming additional owners.
@@ -76,7 +76,7 @@ init_docs_sidebar()!
     Declared `name:` / `into name` syntax is accepted end-state design with implementation deferred. It is the only source mechanism for reference cycles. See @./declared-regions (Declared regions) for the source contract and @./lifetime-regions-and-escape-validation (Lifetime regions and escape validation) for the general topology model.
 ]
 
-#[section, $md:
+[section, $md:
     ## How the compiler layers it
 
     [codeblock, $code "text":
@@ -98,7 +98,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## Detailed pages
 
     - @./access-and-aliasing (Access and aliasing): shared reads, explicit copies and `~` access
@@ -113,7 +113,7 @@ init_docs_sidebar()!
     - @./native-host-abi (Native host ABI): the physical Wasm32 boundary between compiled Moth and native Rust host code
 ]
 
-#[section, $md:
+[section, $md:
     ## Current support
 
     See @../../docs/progress (Progress matrix) for what is implemented today. Most of this model is accepted design with implementation deferred. Checked proof-budget scopes remain an open proposal and are intentionally absent from the progress matrix.

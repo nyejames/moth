@@ -3,4 +3,4 @@
 negated #= -length("a😊b")
 inverted #= not is_empty("")
 
-[:negated=[negated] inverted=[inverted]]
+~[:negated=[negated] inverted=[inverted]]

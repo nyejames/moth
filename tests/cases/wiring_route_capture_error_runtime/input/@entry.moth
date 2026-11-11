@@ -24,4 +24,4 @@ first = attempt("present") catch |error|:
 second = attempt("missing") catch |error|:
     then "failed"
 ;
-[:[first] [second]]
+~[:[first] [second]]

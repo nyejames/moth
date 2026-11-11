@@ -127,4 +127,4 @@ log1p_below_value = invalid_log1p_below_minus_one() catch |log1p_below_err|:
     then 0
 ;
 
-[:core_math_float_boundary_validation finite=[finite_direct] namespace=[finite_namespace] alias=[alias_ok] errors=[sqrt_code]/[exp_code]/[alias_exp_code]/[log_zero_code]/[log_negative_code]/[asin_above_code]/[asin_below_code]/[acos_above_code]/[acosh_below_code]/[atanh_at_one_code]/[atanh_beyond_code]/[log1p_at_minus_one_code]/[log1p_below_code]]
+~[:core_math_float_boundary_validation finite=[finite_direct] namespace=[finite_namespace] alias=[alias_ok] errors=[sqrt_code]/[exp_code]/[alias_exp_code]/[log_zero_code]/[log_negative_code]/[asin_above_code]/[asin_below_code]/[acos_above_code]/[acosh_below_code]/[atanh_at_one_code]/[atanh_beyond_code]/[log1p_at_minus_one_code]/[log1p_below_code]]

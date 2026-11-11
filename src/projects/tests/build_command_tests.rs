@@ -129,7 +129,7 @@ fn single_file_project_entry_dir_reports_missing_parent_as_filesystem_failure() 
 fn build_command_writes_the_validated_directory_output_plan() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temp = tempfile::tempdir().expect("should create temporary project");
-    write_directory_project(temp.path(), "#[:<h1>Compiler Build Service</h1>]\n");
+    write_directory_project(temp.path(), "[:<h1>Compiler Build Service</h1>]\n");
 
     let completion = run_build_command(
         &test_project_builder(),

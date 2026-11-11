@@ -22,10 +22,9 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 use crate::compiler_frontend::ast::expressions::parse_expression_input::ExpressionParseResources;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::styles::markdown::markdown_formatter;
 use crate::compiler_frontend::ast::templates::styles::raw::configure_raw_style;
 use crate::compiler_frontend::ast::templates::template::{
-    BodyWhitespacePolicy, CommentDirectiveKind, SlotDeclaration, SlotKey, Style, TemplateType,
+    BodyWhitespacePolicy, SlotDeclaration, SlotKey, Style, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -473,19 +472,8 @@ pub(super) fn parse_core_style_directive(
 
         CoreStyleDirectiveKind::Note => {
             reject_directive_operand(directive_name_id, token_stream)?;
-            build_state.kind = TemplateType::Comment(CommentDirectiveKind::Note);
+            build_state.kind = TemplateType::Comment;
             build_state.style = Style::default();
-        }
-
-        CoreStyleDirectiveKind::Todo => {
-            reject_directive_operand(directive_name_id, token_stream)?;
-            build_state.kind = TemplateType::Comment(CommentDirectiveKind::Todo);
-            build_state.style = Style::default();
-        }
-
-        CoreStyleDirectiveKind::Doc => {
-            reject_directive_operand(directive_name_id, token_stream)?;
-            apply_doc_comment_defaults(build_state);
         }
 
         CoreStyleDirectiveKind::Slot
@@ -502,22 +490,6 @@ pub(super) fn parse_core_style_directive(
     }
 
     Ok(())
-}
-
-pub(crate) fn apply_doc_comment_defaults(build_state: &mut TemplateBuildState) {
-    build_state.kind = TemplateType::Comment(CommentDirectiveKind::Doc);
-    build_state.style = Style::default();
-
-    // Doc comments use Markdown formatting with balanced bracket escaping.
-    // Nested child templates are suppressed — `[...]` brackets in the body are
-    // treated as literal text.
-    apply_markdown_style(build_state);
-    build_state.style.suppress_child_templates = true;
-}
-
-fn apply_markdown_style(build_state: &mut TemplateBuildState) {
-    build_state.style.id = "markdown";
-    build_state.style.formatter = Some(markdown_formatter());
 }
 
 pub(super) fn mark_template_body_whitespace_style_controlled(build_state: &mut TemplateBuildState) {

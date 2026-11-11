@@ -596,7 +596,7 @@ fn check_single_file_selected_root_keeps_its_authored_role_in_a_triple_root_dire
         "$export\nsupport_label #= \"support\"\n",
     )
     .expect("should write support facade");
-    fs::write(dir.join("@entry.moth"), "#[:triple]\n").expect("should write entry root");
+    fs::write(dir.join("@entry.moth"), "[:triple]\n").expect("should write entry root");
     fs::write(dir.join("helper.moth"), "helper #= 1\n").expect("should write shared helper");
 
     // Selecting one root in a triple-root directory compiles exactly that authored role as the

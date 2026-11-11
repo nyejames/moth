@@ -9,4 +9,4 @@ parse |text String| -> Bool:
 yes = if parse("true") then "yes" else "no"
 no = if parse("TRUE") then "yes" else "no"
 
-[: runtime string bool cast: [yes]/[no]]
+~[: runtime string bool cast: [yes]/[no]]

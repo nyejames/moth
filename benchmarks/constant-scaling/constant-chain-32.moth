@@ -42,4 +42,4 @@ c029 #= c028 + 1
 c030 #= c029 + 1
 c031 #= c030 + 1
 
-[:constant-chain-32 last=[c031]]
+~[:constant-chain-32 last=[c031]]

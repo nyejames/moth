@@ -10,4 +10,4 @@ render || -> String:
     return [:fixed_collection_named_constant_arithmetic_success first=[first] length=[len]]
 ;
 
-[:[render()]]
+~[:[render()]]

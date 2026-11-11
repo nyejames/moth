@@ -431,7 +431,7 @@ fn declaration_initializer_reference_member_return_and_variant_spans_retain_orig
 
 #[test]
 fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
-    let source = "$config\nrelease_version #I32 = 1\n#[if show_banner: Hello]\n";
+    let source = "$config\nrelease_version #I32 = 1\n[if show_banner: Hello]\n";
     let canonical = PathBuf::from("src/@entry.moth");
     let mut strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();

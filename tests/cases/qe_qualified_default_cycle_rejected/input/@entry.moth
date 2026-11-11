@@ -3,4 +3,4 @@
 -- type already orders `title` after `Resource`.
 value = @settings title
 
-[: [value.title] ]
+~[: [value.title] ]

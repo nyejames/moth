@@ -35,4 +35,4 @@ loop i < 4:
     ;
 ;
 
-[:adversarial_match_result_option_flow sum=[sum]]
+~[:adversarial_match_result_option_flow sum=[sum]]

@@ -7,4 +7,4 @@ first = receive_f32(value)
 duplicate = copy value
 second = receive_f32(duplicate)
 
-[:unreachable]
+~[:unreachable]

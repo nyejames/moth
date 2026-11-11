@@ -1043,7 +1043,7 @@ fn fold_tir_dynamic_expression(
         // Comments are compile-time metadata and intentionally contribute no
         // rendered output. Slot inserts remain composition helpers and must be
         // rejected if they reach this final nested-value fold boundary.
-        if matches!(template_kind, TemplateType::Comment(_)) {
+        if matches!(template_kind, TemplateType::Comment) {
             return Ok(());
         }
         reject_slot_insert_template(template_kind)?;

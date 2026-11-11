@@ -64,7 +64,7 @@ Root builder slots use the same file-path expressions as other source code.
 A tracked favicon remains a resource-bearing `String`:
 
 [codeblock, $code "moth":
-    #[$in favicon:[@assets/favicon.svg]]
+    [$in favicon:[@assets/favicon.svg]]
 ]
 
 The path resolves from the owning module root, enters the normal resource

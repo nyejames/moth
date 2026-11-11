@@ -45,4 +45,4 @@ render_assignment_leaf_constraints || -> String:
     return [:assignment_leaf_constraints collection_before=[before_text] collection_first=[first_text] collection_second=[second_text] collection_missing=[missing] collection_len=[len] map_before=[old_text] map_top=[top_text] map_absent=[absent] map_len=[map_len]]
 ;
 
-[:[render_assignment_leaf_constraints()]]
+~[:[render_assignment_leaf_constraints()]]

@@ -8,4 +8,4 @@ draw |x I32, y I32| -> I32:
 value = draw(cast "1", cast "2")
 assert(value is 3)
 
-[: concrete function parameter plain cast: [value]]
+~[: concrete function parameter plain cast: [value]]

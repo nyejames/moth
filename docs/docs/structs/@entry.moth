@@ -16,14 +16,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Structs"]]
-#[$in description:["Nominal structs, construction, fields, deferred anonymous records and receiver methods in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Structs"]]
+[$in description:["Nominal structs, construction, fields, deferred anonymous records and receiver methods in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Structs
 
     A struct creates a nominal type with named fields. Two structs remain
@@ -37,7 +37,7 @@ init_docs_sidebar()!
     types keep nominal identity and use the shared MON construction notation.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:struct-declarations]
         [$in title:Struct declarations]
@@ -47,7 +47,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:construction-and-fields]
         [$in title:Construction and fields]
@@ -57,7 +57,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:anonymous-records]
         [$in title:Runtime anonymous records]
@@ -67,7 +67,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:receiver-methods]
         [$in title:Receiver methods]
@@ -77,7 +77,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:mutable-receivers]
         [$in title:Mutable receivers]
@@ -87,7 +87,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../loops/]
         [$in previous_title:Loops]

@@ -17,4 +17,4 @@ tiny_negative = power_tiny(-0.1, 2147483647)
 
 float_profile = add_float(16777216.0, 1.0)
 
-[:Dec large exponents even=[positive_unity] odd=[negative_unity] zero=[zero] tiny_positive=[tiny_positive] tiny_negative=[tiny_negative] float32=[float_profile]]
+~[:Dec large exponents even=[positive_unity] odd=[negative_unity] zero=[zero] tiny_positive=[tiny_positive] tiny_negative=[tiny_negative] float32=[float_profile]]

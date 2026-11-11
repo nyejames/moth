@@ -1,2 +1,2 @@
 flag = true
-[:flag=[flag]]
+~[:flag=[flag]]

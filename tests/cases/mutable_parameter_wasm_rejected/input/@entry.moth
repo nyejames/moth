@@ -5,4 +5,4 @@ rhs_i32 |calls ~I32, increment I32| -> I32:
 
 calls ~I32 = 0
 result = rhs_i32(~calls, 42)
-[: [result]/[calls]]
+~[: [result]/[calls]]

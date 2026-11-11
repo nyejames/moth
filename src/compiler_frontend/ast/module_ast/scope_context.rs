@@ -50,6 +50,7 @@ use crate::compiler_frontend::ast::numeric_known_shape::{
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ParameterContract};
 use crate::compiler_frontend::ast::templates::template_folding::TirFoldContext;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
+use crate::compiler_frontend::ast::templates::top_level_templates::AstDocFragment;
 use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAlias;
 use crate::compiler_frontend::build_config::{
     BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
@@ -454,6 +455,18 @@ pub struct ScopeShared {
     /// Missing entries, including bodies still being parsed, remain conservative candidates.
     pub(crate) known_infallible_functions: Option<Rc<RefCell<FxHashSet<PathId>>>>,
     pub(crate) source_file_scope: Option<PathId>,
+    /// Declaration-attached source documentation emitted by this module.
+    ///
+    /// WHAT: one shared ledger for top-level and local `$doc` records.
+    /// WHY: body parsing runs inside nested scope contexts, while module metadata is assembled by
+    ///      the emitter. One sink keeps both owners recording into the same ordered metadata
+    ///      without attaching non-HIR state to executable nodes.
+    pub(crate) source_docs: Rc<RefCell<Vec<AstDocFragment>>>,
+    /// Whether authored `$doc` records reach the module documentation ledger.
+    ///
+    /// WHAT: generated generic instances validate directive operands but must not republish the
+    ///       authored declaration's documentation under an instance-specific target.
+    pub(crate) publish_source_docs: bool,
     pub(crate) source_build_config_values: Option<Arc<ResolvedBuildConfigMap>>,
     /// Names of source `$config` contracts declared by this module.
     pub(crate) source_build_config_contract_names: Option<Arc<FxHashSet<BuildInputName>>>,
@@ -924,6 +937,8 @@ impl ScopeContext {
             choice_variant_shells_by_path: None,
             resolved_module_constants_override: None,
             emitted_warnings: Rc::new(RefCell::new(Vec::new())),
+            source_docs: Rc::new(RefCell::new(Vec::new())),
+            publish_source_docs: true,
             generic_function_instantiation_requests: Rc::new(RefCell::new(Vec::new())),
             known_infallible_functions: None,
             source_file_scope: None,

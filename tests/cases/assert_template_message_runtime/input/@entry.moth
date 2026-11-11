@@ -15,4 +15,4 @@ result = check_count(count) catch:
     then "caught"
 ;
 
-[: [result]]
+~[: [result]]

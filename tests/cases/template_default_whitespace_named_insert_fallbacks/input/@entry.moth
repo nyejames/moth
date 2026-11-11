@@ -31,4 +31,4 @@ emptied = [card:
 head_whitespace = [box, " ":[$in title:Space]]
 head_empty = [box, "":[$in title:Empty]]
 
-[:named=[named]|default=[default_fallback]|paired=[paired]|box_paired=[box_paired]|runtime=[runtime]|emptied=[emptied]|space=[head_whitespace]|empty=[head_empty]]
+~[:named=[named]|default=[default_fallback]|paired=[paired]|box_paired=[box_paired]|runtime=[runtime]|emptied=[emptied]|space=[head_whitespace]|empty=[head_empty]]

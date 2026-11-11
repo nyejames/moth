@@ -3,4 +3,4 @@ hide_optional_ordering ||:
     right U8? = none
     result = left < right
 ;
-[:optional fixed-width ordering rejected]
+~[:optional fixed-width ordering rejected]

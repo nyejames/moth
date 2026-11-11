@@ -1,4 +1,4 @@
 @wrap identity
 
 value = identity("private")
-[:[value]]
+~[:[value]]

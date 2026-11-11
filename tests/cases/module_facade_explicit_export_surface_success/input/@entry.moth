@@ -16,4 +16,4 @@ error_text String = render_card_or_error(card, true) catch |render_error|:
     then render_error.message
 ;
 
-[:module_facade_explicit_export_surface_success [text] [checked_text] [error_text]]
+~[:module_facade_explicit_export_surface_success [text] [checked_text] [error_text]]

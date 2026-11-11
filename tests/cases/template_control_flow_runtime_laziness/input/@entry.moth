@@ -20,4 +20,4 @@ inactive_result = render_fallible(false) catch:
     then "caught inactive branch"
 ;
 
-[:template_control_flow_runtime_laziness [selected_result] [inactive_result]]
+~[:template_control_flow_runtime_laziness [selected_result] [inactive_result]]

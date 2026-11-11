@@ -11,4 +11,4 @@ occurrence = 2
 reason = "invalid_template_structure.template_const_loop_expansion_limit_exceeded"
 path = "input/collection/@entry.moth"
 line = 2
-column = 3
+column = 2

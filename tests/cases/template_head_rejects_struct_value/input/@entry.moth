@@ -6,4 +6,4 @@ Point = |
 |
 
 point = Point(1, 2)
-[: [point]]
+~[: [point]]

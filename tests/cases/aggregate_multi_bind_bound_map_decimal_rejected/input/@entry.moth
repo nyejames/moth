@@ -7,4 +7,4 @@ render |choose_first Bool| -> String:
     rows = {chosen, {0 = 2.5}}
     return [:count=[count]]
 ;
-[:[render(true)]]
+~[:[render(true)]]

@@ -3,4 +3,4 @@ unused_helper || -> I32:
     return scores.length
 ;
 
-[:hashmap unreachable]
+~[:hashmap unreachable]

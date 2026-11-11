@@ -5,6 +5,7 @@
 //! WHY: module lowering defines the global HIR shape that backends traverse; regressions here
 //!      affect code generation and symbol emission.
 
+use crate::compiler_frontend::ast::AstDocFragment;
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstStringValue, ConstTemplateValue, ConstValuePayload, ConstValueStore,
@@ -15,7 +16,6 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff,
 };
-use crate::compiler_frontend::ast::{AstDocFragment, AstDocFragmentKind};
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -26,7 +26,6 @@ use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirFunctionOriginLookup};
 use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::module_metadata::ModuleDocFragmentKind;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
@@ -224,7 +223,7 @@ fn registers_declarations_and_allocates_the_entry_function() {
 #[test]
 fn authored_start_function_stays_a_normal_function_beside_the_entry() {
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(
-        "start || -> I32:\n    return 41\n;\n\nvalue = start()\n[:Value: [value]]\n",
+        "start || -> I32:\n    return 41\n;\n\nvalue = start()\n~[:Value: [value]]\n",
     );
     let (module, _) = lower_ast(
         ast,
@@ -706,6 +705,12 @@ fn extracts_ast_doc_fragments_into_module_metadata() {
     let mut string_table = StringTable::new();
     let first_doc = string_table.intern("First doc");
     let second_doc = string_table.intern("Second doc");
+    let first_target = path_fork
+        .try_intern_child(PathId::ROOT, string_table.intern("first"))
+        .expect("test path fits");
+    let second_target = path_fork
+        .try_intern_child(PathId::ROOT, string_table.intern("second"))
+        .expect("test path fits");
 
     let start_function = super::entry_start_node(
         FunctionSignature {
@@ -726,12 +731,12 @@ fn extracts_ast_doc_fragments_into_module_metadata() {
     );
     ast.doc_fragments = vec![
         AstDocFragment {
-            kind: AstDocFragmentKind::Doc,
+            target: first_target,
             value: first_doc,
             span: None,
         },
         AstDocFragment {
-            kind: AstDocFragmentKind::Doc,
+            target: second_target,
             value: second_doc,
             span: None,
         },
@@ -746,10 +751,10 @@ fn extracts_ast_doc_fragments_into_module_metadata() {
     .expect("HIR lowering should succeed");
     let doc_fragments = &lowering.metadata.doc_fragments;
     assert_eq!(doc_fragments.len(), 2);
-    assert!(matches!(doc_fragments[0].kind, ModuleDocFragmentKind::Doc));
-    assert!(matches!(doc_fragments[1].kind, ModuleDocFragmentKind::Doc));
     assert_eq!(doc_fragments[0].rendered_text, "First doc");
     assert_eq!(doc_fragments[1].rendered_text, "Second doc");
+    assert_eq!(doc_fragments[0].target, first_target);
+    assert_eq!(doc_fragments[1].target, second_target);
     assert_eq!(doc_fragments[0].span, None);
     assert_eq!(doc_fragments[1].span, None);
 }

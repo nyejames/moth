@@ -4561,3 +4561,29 @@ fn repeated_bounded_forwarding_preserves_bodyless_receiver_parameter_owner() {
         identity = issued.remove(0).identity;
     }
 }
+
+#[test]
+fn materialised_generic_body_does_not_republish_local_docs() {
+    let (build_result, path_fork, mut strings) = parse_single_file_ast_build_result(concat!(
+        "draw type T |value T| -> String:\n",
+        "    $doc [:Authored local docs.]\n",
+        "    text #String = \"x\"\n",
+        "    return text\n",
+        ";\n",
+    ))
+    .expect("the generic declaration should build");
+    let mut paths = path_fork;
+    let preparation = prepare_closure_fixture(build_result, &paths);
+    let identity = closure_request(&preparation, "draw");
+    let materialised = materialise_closure_request(
+        &preparation,
+        &preparation,
+        &identity,
+        &mut strings,
+        &mut paths,
+    );
+    assert!(
+        materialised.build_result.ast.doc_fragments.is_empty(),
+        "generated bodies must validate directive operands without republishing authored docs"
+    );
+}

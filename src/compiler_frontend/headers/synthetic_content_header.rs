@@ -92,6 +92,7 @@ pub(crate) fn synthetic_content_header(
         export_mode: HeaderExportMode::Private,
         local_ordering_hints: HashSet::new(),
         name_span: None,
+        source_directives: Vec::new(),
         synthetic_content_payload: Some(input.payload),
         tokens: input.initializer_range,
         declaration_path: header_path,

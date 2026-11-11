@@ -21,4 +21,4 @@ reboxed Box of U64 = Box(above)
 passed_big U64 = passed
 reboxed_value U64 = reboxed.value
 
-[:uint int64 huge=[huge] above=[above_signed] maxsigned=[max_signed] imported=[big]/[above] generic=[passed_big] boxed=[reboxed_value]]
+~[:uint int64 huge=[huge] above=[above_signed] maxsigned=[max_signed] imported=[big]/[above] generic=[passed_big] boxed=[reboxed_value]]

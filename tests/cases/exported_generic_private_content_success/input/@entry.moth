@@ -2,4 +2,4 @@
 
 value = render("x")
 
-[: [value] ]
+~[: [value] ]

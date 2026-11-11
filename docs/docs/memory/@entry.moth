@@ -16,14 +16,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Memory and lifetimes"]]
-#[$in description:["Reference semantics, explicit copies, lifetimes, retained edges and declared regions in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Memory and lifetimes"]]
+[$in description:["Reference semantics, explicit copies, lifetimes, retained edges and declared regions in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Memory and lifetimes
 
     Moth shares existing values by default, requires explicit copies and infers
@@ -36,7 +36,7 @@ init_docs_sidebar()!
     These pages explain source behaviour. The @../../developer-docs/memory-management (memory model) defines borrow validation and backend lowering.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:reference-semantics]
         [$in title:Reference semantics]
@@ -46,7 +46,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:copy-and-exclusive-access]
         [$in title:Copy and exclusive access]
@@ -56,7 +56,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:lifetimes-and-result-shapes]
         [$in title:Lifetimes and result shapes]
@@ -66,7 +66,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:automatic-cleanup-and-retained-edges]
         [$in title:Automatic cleanup and retained edges]
@@ -76,7 +76,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:declared-regions]
         [$in title:Declared regions]
@@ -86,7 +86,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../wiring/]
         [$in previous_title:Wiring]

@@ -13,4 +13,4 @@ to_text |value U64| -> String:
     return cast value
 ;
 
-[:[basic.complex_const] [to_text(basic.full_range)]]
+~[:[basic.complex_const] [to_text(basic.full_range)]]

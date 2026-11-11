@@ -3,4 +3,4 @@ hide_optional_arithmetic ||:
     fixed_value U8 = 1
     result = optional_value + fixed_value
 ;
-[:optional fixed-width arithmetic rejected]
+~[:optional fixed-width arithmetic rejected]

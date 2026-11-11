@@ -61,6 +61,7 @@ fn trait_header(
         export_mode,
         local_ordering_hints: std::collections::HashSet::new(),
         name_span: Some(root_span()),
+        source_directives: Vec::new(),
         synthetic_content_payload: None,
         tokens: TokenRange::new(SourceId::COMPILATION_ROOT, token_index, token_index)
             .expect("equal token indexes always form a valid range"),
@@ -90,6 +91,7 @@ fn function_header(
         export_mode,
         local_ordering_hints: std::collections::HashSet::new(),
         name_span: Some(root_span()),
+        source_directives: Vec::new(),
         synthetic_content_payload: None,
         tokens: TokenRange::new(SourceId::COMPILATION_ROOT, token_index, token_index)
             .expect("equal token indexes always form a valid range"),

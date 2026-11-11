@@ -6,4 +6,4 @@ render_literal || -> String:
     return [:fixed_collection_literal_success value=[value]]
 ;
 
-[:[render_literal()]]
+~[:[render_literal()]]

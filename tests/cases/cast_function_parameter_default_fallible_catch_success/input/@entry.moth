@@ -6,4 +6,4 @@ draw |x I32 = cast "4" catch:
 
 value = draw()
 
-[: function parameter fallible default cast: [value]]
+~[: function parameter fallible default cast: [value]]

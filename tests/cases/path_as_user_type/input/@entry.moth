@@ -4,4 +4,4 @@ Path = |
 
 p #= Path(text = "ok")
 
-#[$html:<p>[p.text]</p>]
+[$html:<p>[p.text]</p>]

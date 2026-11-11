@@ -11,4 +11,4 @@ authored_failure |fail Bool| -> String, Error!:
 message = authored_failure(true) catch |err|:
     then [:recovered=[err.message] code=[err.code]]
 ;
-[:[message]]
+~[:[message]]

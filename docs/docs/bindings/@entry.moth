@@ -16,14 +16,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Values and bindings"]]
-#[$in description:["Bindings, mutability, shared access, explicit copies and shadowing in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Values and bindings"]]
+[$in description:["Bindings, mutability, shared access, explicit copies and shadowing in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Values and bindings
 
     A binding gives a value a name. Unlike languages that copy small values and
@@ -34,7 +34,7 @@ init_docs_sidebar()!
     only when you need an independent value. The same rules apply to every type.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:bindings]
         [$in title:Bindings]
@@ -44,7 +44,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:mutable-bindings]
         [$in title:Mutable bindings]
@@ -54,7 +54,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:shared-access]
         [$in title:Shared access]
@@ -64,7 +64,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:explicit-copies]
         [$in title:Explicit copies]
@@ -74,7 +74,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:shadowing]
         [$in title:Shadowing]
@@ -84,13 +84,13 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section, $md:
+[section, $md:
     ## Related design
 
     See @../../developer-docs/memory-management (Memory management) for borrow validation, ownership analysis and backend lowering.
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../language-overview/]
         [$in previous_title:Language basics]

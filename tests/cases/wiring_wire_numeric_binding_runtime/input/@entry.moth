@@ -9,4 +9,4 @@ forward_number |value Wire of I32| -> I32:
 n = 1
 direct = read_number(n)
 forwarded = forward_number(n)
-[:wire-numeric direct=[direct] forwarded=[forwarded]]
+~[:wire-numeric direct=[direct] forwarded=[forwarded]]

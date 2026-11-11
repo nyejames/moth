@@ -198,4 +198,4 @@ assert(int_to_i64(2147483647) is 2147483647)
 assert(u64_u32_divide(18446744073709551615, 1) is 18446744073709551616.0)
 assert(int_divide(3, 2) is 1.5)
 
-[:wasm-checked-float-runtime-ok]
+~[:wasm-checked-float-runtime-ok]

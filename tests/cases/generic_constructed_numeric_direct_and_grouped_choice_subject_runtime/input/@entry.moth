@@ -25,4 +25,4 @@ concrete_text String = if delivery is:
     Ready(value as payload) => then read_u64(payload)
     Waiting => then "waiting"
 ;
-[:direct-choice-subject direct=[direct_text] grouped=[grouped_text] label=[label_text] concrete=[concrete_text]]
+~[:direct-choice-subject direct=[direct_text] grouped=[grouped_text] label=[label_text] concrete=[concrete_text]]

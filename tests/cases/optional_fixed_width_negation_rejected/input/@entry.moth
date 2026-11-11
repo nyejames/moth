@@ -2,4 +2,4 @@ hide_optional_negation ||:
     optional_value I8? = none
     result = -optional_value
 ;
-[:optional fixed-width negation rejected]
+~[:optional fixed-width negation rejected]

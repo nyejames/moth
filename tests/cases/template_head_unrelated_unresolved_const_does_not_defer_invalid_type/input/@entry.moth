@@ -9,4 +9,4 @@ point #= Point(1, 2)
 bad #= [point]
 later #= 42
 
-[: [bad]]
+~[: [bad]]

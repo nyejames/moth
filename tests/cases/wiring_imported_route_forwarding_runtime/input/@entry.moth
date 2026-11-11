@@ -6,4 +6,4 @@ inferred_input = accept_input(AppMessage::Editor(3))
 inferred_output = accept_output(EditorMessage::Changed)
 generated = build_route(4)
 
-[:imported direct=[direct] forwarded=[forwarded] input=[inferred_input] output=[inferred_output] generated=[generated]]
+~[:imported direct=[direct] forwarded=[forwarded] input=[inferred_input] output=[inferred_output] generated=[generated]]

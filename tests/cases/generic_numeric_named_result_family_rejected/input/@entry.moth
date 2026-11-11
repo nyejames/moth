@@ -12,4 +12,4 @@ read_f32 |value F32| -> String:
 forwarded = identity(1)
 text = read_f32(forwarded)
 
-[: [text]]
+~[: [text]]

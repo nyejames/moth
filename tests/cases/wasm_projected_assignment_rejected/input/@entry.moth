@@ -8,4 +8,4 @@ rename_label |source Label| -> String:
     return label.text
 ;
 
-[:write [rename_label(Label("ok"))]]
+~[:write [rename_label(Label("ok"))]]

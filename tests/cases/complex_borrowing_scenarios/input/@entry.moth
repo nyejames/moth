@@ -32,4 +32,4 @@ render_complex_borrowing || -> String:
     return [:complex_borrowing_scenarios welcome=[welcome_msg] status=[status_msg] scope=[scope_msg] final_name=[final_name] final_score=[final_score]]
 ;
 
-[:[render_complex_borrowing()]]
+~[:[render_complex_borrowing()]]

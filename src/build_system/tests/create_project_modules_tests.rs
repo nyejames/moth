@@ -1681,7 +1681,7 @@ fn write_cross_module_project(
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(module_a.join("@entry.moth"), "@module_b\n#[:pageA]\n").expect("should write pageA");
+    fs::write(module_a.join("@entry.moth"), "@module_b\n[:pageA]\n").expect("should write pageA");
     fs::write(module_b.join("@mod.moth"), "$export\nb #= 1\n").expect("should write module_b root");
     fs::write(module_b.join("impl.moth"), "impl #= 1\n").expect("should write module_b impl");
 
@@ -1800,7 +1800,7 @@ fn direct_selection_resolves_cross_module_child_facade() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@child greet\n#[:entry]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@child greet\n[:entry]\n").expect("should write entry");
     fs::write(
         src.join("child/@mod.moth"),
         "$export\ngreet || -> String:\n    return \"hi\"\n;\n",
@@ -2014,7 +2014,7 @@ fn direct_selection_resolves_source_package_facade() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@helper add\n#[:entry]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@helper add\n[:entry]\n").expect("should write entry");
     fs::write(
         package_root.join("@mod.moth"),
         "$export\nadd |a I32, b I32| -> I32:\n    return a + b\n;\n",
@@ -2082,7 +2082,7 @@ fn underscore_prefixed_source_package_prefix_precedes_hidden_directory_rejection
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@_vendor/toolkit add\n#[:entry]\n")
+    fs::write(src.join("@entry.moth"), "@_vendor/toolkit add\n[:entry]\n")
         .expect("should write entry");
     fs::write(
         package_root.join("@mod.moth"),

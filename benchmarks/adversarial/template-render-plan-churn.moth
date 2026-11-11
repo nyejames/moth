@@ -3,7 +3,7 @@
 -- slots, inserts, before/after wrappers, and runtime template rebuilding.
 
 page_title #= "Template Render Plan Churn"
-#[$in title:[page_title]]
+[$in title:[page_title]]
 
 -- Many small templates to expand the render plan graph.
 t_1 #= [: a1 ]

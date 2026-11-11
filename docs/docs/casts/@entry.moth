@@ -14,14 +14,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Casts"]]
-#[$in description:["Explicit cast syntax, target contexts, fallible conversion and cast evidence in Moth."]]
-#[$in head:[language_theme_head]]
+[$in title:["Casts"]]
+[$in description:["Explicit cast syntax, target contexts, fallible conversion and cast evidence in Moth."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Casts
 
     `cast` converts a value for an immediate concrete typed destination. Its
@@ -31,7 +31,7 @@ init_docs_sidebar()!
     for current compiler and backend support.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:cast-syntax]
         [$in title:Cast syntax]
@@ -41,7 +41,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:cast-targets]
         [$in title:Cast targets]
@@ -51,7 +51,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:fallible-casts]
         [$in title:Fallible casts]
@@ -61,7 +61,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:cast-evidence]
         [$in title:Cast evidence]
@@ -71,7 +71,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../numbers/]
         [$in previous_title:Numbers]

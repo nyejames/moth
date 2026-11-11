@@ -27,4 +27,4 @@ render_optional_slots || -> String:
     return [:multi_bind_optional_slots name=[name_state] count=[count_state]]
 ;
 
-[:[render_optional_slots()]]
+~[:[render_optional_slots()]]

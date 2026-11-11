@@ -12,4 +12,4 @@ unchanged |this Counter| -> Counter:
 c = Counter(1)
 stable_count = (c.unchanged().unchanged().count) catch then 0
 assert(stable_count is 1)
-[:struct_chained_immutable_receiver_method_call value=[c.bumped().bumped().count]]
+~[:struct_chained_immutable_receiver_method_call value=[c.bumped().bumped().count]]

@@ -14,4 +14,4 @@ names |this Person| -> Names:
 ;
 
 p = Person("Priya")
-[: named count [p.names().length()]]
+~[: named count [p.names().length()]]

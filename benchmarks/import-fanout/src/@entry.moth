@@ -11,7 +11,7 @@
 @pages/about render_about
 
 page_title #= [: [app_name] v[app_version]]
-#[$in title:[page_title]]
+[$in title:[page_title]]
 
 user ~= User("admin", "admin@example.com", Status::Active)
 profile ~= UserProfile("Admin User", "Administrator", Priority::High)
@@ -19,7 +19,7 @@ profile ~= UserProfile("Admin User", "Administrator", Priority::High)
 card_a = Card(format_label("Home"), render_home(user))
 card_b = Card(format_label("About"), render_about(profile))
 
-[:
+~[:
     [render_header(page_title)]
     <main>
         [render_card(card_a)]

@@ -4,4 +4,4 @@ assert_condition |condition Bool| -> String:
 ;
 
 result = assert_condition(false)
-[: [result]]
+~[: [result]]

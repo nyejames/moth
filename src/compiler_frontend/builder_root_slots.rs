@@ -3,7 +3,7 @@
 //! WHAT: the statically registered named destinations a builder exposes for direct top-level
 //!       const contributions, plus the destination vocabulary carried by the const-fragment
 //!       handoff.
-//! WHY: the frontend must validate direct root `#[$in name: ...]` targets without depending on
+//! WHY: the frontend must validate direct root `[$in name: ...]` targets without depending on
 //!      a project builder, arbitrary callbacks or builder-specific names. A builder registers
 //!      these names once through its surface; the compiler treats the set as read-only input.
 

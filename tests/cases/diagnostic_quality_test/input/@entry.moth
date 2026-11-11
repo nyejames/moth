@@ -1,7 +1,7 @@
 -- Test diagnostic message quality for various error types
 
 -- Syntax error
-["unclosed string
+~["unclosed string
 
 -- Type error  
 numeric_value = 42

@@ -6,4 +6,4 @@ load_name |missing Bool| -> String, Error!:
 ;
 
 name = load_name(true)!
-[: This must not be published: [name]]
+~[: This must not be published: [name]]

@@ -8,4 +8,4 @@ out #= [$code banner:
 loop x
 ]
 
-[out]
+~[out]

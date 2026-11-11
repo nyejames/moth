@@ -1,3 +1,3 @@
 logo #= @assets/logo.svg
 flag #= logo is "plain"
-[:unreachable]
+~[:unreachable]

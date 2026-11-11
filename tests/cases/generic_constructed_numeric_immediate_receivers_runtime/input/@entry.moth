@@ -22,4 +22,4 @@ float_text = read_f32(float_packet.value)
 decimal_text = read_decimal(decimal_packet.value)
 byte_text = read_byte(byte_packet.value)
 
-[:generic_constructed_numeric_immediate_receivers_runtime f32=[float_text] dec=[decimal_text] byte=[byte_text]]
+~[:generic_constructed_numeric_immediate_receivers_runtime f32=[float_text] dec=[decimal_text] byte=[byte_text]]

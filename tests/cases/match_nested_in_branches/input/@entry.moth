@@ -11,4 +11,4 @@ if outer is:
     else => ~result = "other"
 ;
 
-[:match_nested_in_branches result=[result]]
+~[:match_nested_in_branches result=[result]]

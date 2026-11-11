@@ -16,4 +16,4 @@ Box type T is DISPLAY_TEXT = |
 
 bad Box of Plain = Box(Plain("method only"))
 
-[:unreachable [bad.value.display()]]
+~[:unreachable [bad.value.display()]]

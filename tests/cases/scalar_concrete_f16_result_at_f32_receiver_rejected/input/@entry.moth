@@ -4,4 +4,4 @@ left F16 = 1.0
 right F16 = 0.5
 sum F32 = left + right
 
-[:unreachable]
+~[:unreachable]

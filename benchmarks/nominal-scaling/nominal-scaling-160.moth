@@ -1738,4 +1738,4 @@ Signal0039 ::
     Batch2 | items {small_capacity I32}, tag String |,
 ;
 
-[:nominal-scaling structs=160 choices=40]
+~[:nominal-scaling structs=160 choices=40]

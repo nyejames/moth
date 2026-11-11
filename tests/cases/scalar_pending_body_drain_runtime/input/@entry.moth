@@ -31,4 +31,4 @@ protected I16 = left + right catch:
     then fallback
 ;
 
-[:scalar pending body drain branch=[pick_value(true)]/[pick_value(false)] protected=[protected]]
+~[:scalar pending body drain branch=[pick_value(true)]/[pick_value(false)] protected=[protected]]

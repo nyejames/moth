@@ -14,8 +14,9 @@ use crate::compiler_frontend::style_directives::compatibility::{
 };
 use crate::compiler_frontend::style_directives::specs::{
     CONFIG_DIRECTIVE_NAME, CoreStyleDirectiveKind, DOC_DIRECTIVE_NAME, EXPORT_DIRECTIVE_NAME,
-    INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME, SourceModifierTarget, StyleDirectiveArgumentType,
-    StyleDirectiveContexts, StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveSpec,
+    INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME, SourceModifierOperand, SourceModifierTarget,
+    StyleDirectiveArgumentType, StyleDirectiveContexts, StyleDirectiveEffects,
+    StyleDirectiveHandlerSpec, StyleDirectiveSpec, TODO_DIRECTIVE_NAME,
 };
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 
@@ -89,36 +90,6 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
                 ),
             },
             CoreStyleDirectiveKind::Note,
-        ),
-        StyleDirectiveSpec::core(
-            "todo",
-            TemplateBodyMode::DiscardBalanced,
-            StyleDirectiveContexts::TEMPLATE_HEAD,
-            TemplateHeadCompatibility {
-                presence_tags: TemplateHeadTag::MEANINGFUL_ITEM
-                    | TemplateHeadTag::COMMENT_DIRECTIVE,
-                required_absent_tags: TemplateHeadTag::MEANINGFUL_ITEM,
-                blocks_future_tags: TemplateHeadTag::MEANINGFUL_ITEM,
-                conflict_reason: Some(
-                    TemplateHeadConflictReason::DiscardedCommentDirectiveMustBeOnlyMeaningfulItem,
-                ),
-            },
-            CoreStyleDirectiveKind::Todo,
-        ),
-        StyleDirectiveSpec::core(
-            DOC_DIRECTIVE_NAME,
-            TemplateBodyMode::Normal,
-            StyleDirectiveContexts::TEMPLATE_HEAD,
-            TemplateHeadCompatibility {
-                presence_tags: TemplateHeadTag::MEANINGFUL_ITEM
-                    | TemplateHeadTag::COMMENT_DIRECTIVE,
-                required_absent_tags: TemplateHeadTag::MEANINGFUL_ITEM,
-                blocks_future_tags: TemplateHeadTag::MEANINGFUL_ITEM,
-                conflict_reason: Some(
-                    TemplateHeadConflictReason::DocumentationDirectiveMustBeOnlyMeaningfulItem,
-                ),
-            },
-            CoreStyleDirectiveKind::Doc,
         ),
         StyleDirectiveSpec::core(
             "raw",
@@ -229,10 +200,22 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::source_modifier(
             EXPORT_DIRECTIVE_NAME,
             SourceModifierTarget::ExportablePublicApiItem,
+            SourceModifierOperand::None,
         ),
         StyleDirectiveSpec::source_modifier(
             CONFIG_DIRECTIVE_NAME,
             SourceModifierTarget::ExplicitTypedCompileTimeBinding,
+            SourceModifierOperand::None,
+        ),
+        StyleDirectiveSpec::source_modifier(
+            DOC_DIRECTIVE_NAME,
+            SourceModifierTarget::DeclarationDocumentation,
+            SourceModifierOperand::RequiredSingleString,
+        ),
+        StyleDirectiveSpec::source_modifier(
+            TODO_DIRECTIVE_NAME,
+            SourceModifierTarget::DeclarationOrStatementTodo,
+            SourceModifierOperand::RequiredSingleString,
         ),
     ]
 }

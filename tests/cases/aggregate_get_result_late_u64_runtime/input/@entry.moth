@@ -17,4 +17,4 @@ render_get_result_late_u64 || -> String:
     return [:get_result value=[read_u64(got)] fallback=[read_u64(fallback)] len=[len]]
 ;
 
-[:[render_get_result_late_u64()]]
+~[:[render_get_result_late_u64()]]

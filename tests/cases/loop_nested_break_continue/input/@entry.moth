@@ -40,4 +40,4 @@ loop stride_outer by 2 |outer_item, outer_index|:
     ;
 ;
 
-[:loop_nested_break_continue total=[total] strided-total=[strided_total] strided-seen=[strided_seen]]
+~[:loop_nested_break_continue total=[total] strided-total=[strided_total] strided-seen=[strided_seen]]

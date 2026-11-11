@@ -197,7 +197,7 @@ if value is:
     else => ~result = \"other\"
 ;
 
-[:pattern_unreachable_after_duplicate_literal_warning result=[result]]
+~[:pattern_unreachable_after_duplicate_literal_warning result=[result]]
 ";
     let (_temporary, root) = write_page_project("warning_capacity_failure", warning_source);
     let (messages, _) = execute_check_messages_with_record_limit(
@@ -274,7 +274,7 @@ fn check_rejects_unselected_runtime_template_as_non_root_source() {
     )
     .expect("should write config file");
     fs::write(source_root.join("@entry.moth"), "value = 1\n").expect("should write page source");
-    fs::write(source_root.join("helper.moth"), "[\"hello\"]\n")
+    fs::write(source_root.join("helper.moth"), "~[\"hello\"]\n")
         .expect("should write non-root source");
 
     let outcome = execute_check(
@@ -600,7 +600,7 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
             "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
         )
         .expect("should write config");
-        fs::write(root.join("@entry.moth"), "#[:<h1>Check</h1>]\n").expect("should write source");
+        fs::write(root.join("@entry.moth"), "[:<h1>Check</h1>]\n").expect("should write source");
 
         let outcome = execute_check(
             root.to_str()
@@ -709,7 +709,7 @@ if value is:
     else => ~result = \"other\"
 ;
 
-[:pattern_unreachable_after_duplicate_literal_warning result=[result]]
+~[:pattern_unreachable_after_duplicate_literal_warning result=[result]]
 ";
     let (_warning_temp, warning_root) =
         write_page_project("check_build_parity_warning", warning_source);
@@ -1656,7 +1656,7 @@ warn || -> I32:
 #[test]
 fn eager_check_only_preparation_stops_at_stage0_before_the_project_cutoff() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let (_temp, root) = write_page_project("eager_preparation", "#[:site]\n");
+    let (_temp, root) = write_page_project("eager_preparation", "[:site]\n");
     let source_root = root.to_path_buf();
     fs::write(
         root.join("config.moth"),

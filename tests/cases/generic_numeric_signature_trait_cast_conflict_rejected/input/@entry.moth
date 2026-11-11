@@ -18,4 +18,4 @@ converted F16 = cast forwarded
 first = receive_u32(forwarded)
 second = receive_i64(origin)
 
-[:unreachable]
+~[:unreachable]

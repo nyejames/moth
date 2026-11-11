@@ -114,4 +114,4 @@ remainder_mixed_case = remainder_mixed(-5.25, 2)
 i64_exact_case = mix_i64_extreme(-9223372036854775808, 9223372036854775807)
 i64_order_case = compare_number0_i64(9223372036854775806, 9223372036854775807)
 
-[:mixed Dec integers I32=[int_case] I8=[i8_case] I16=[i16_case] I32=[i32_case] I64=[i64_case] U8=[u8_case] U16=[u16_case] U32=[u32_case] U64max=[u64_case] scale-mixed-less=[scale_mixed_comparison] float32=[float_profile] sub-mixed=[sub_mixed_case] div-mixed=[divide_mixed_case] rem-mixed=[remainder_mixed_case] i64-exact=[i64_exact_case] i64-order=[i64_order_case]]
+~[:mixed Dec integers I32=[int_case] I8=[i8_case] I16=[i16_case] I32=[i32_case] I64=[i64_case] U8=[u8_case] U16=[u16_case] U32=[u32_case] U64max=[u64_case] scale-mixed-less=[scale_mixed_comparison] float32=[float_profile] sub-mixed=[sub_mixed_case] div-mixed=[divide_mixed_case] rem-mixed=[remainder_mixed_case] i64-exact=[i64_exact_case] i64-order=[i64_order_case]]

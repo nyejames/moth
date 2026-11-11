@@ -19,4 +19,4 @@ just_above_signed U64 = 9223372036854775807
 optional_same = maybe_huge is huge
 optional_different = maybe_huge is just_above_signed
 
-[:uint_int64_choice_equality same=[same] different=[different] above_signed=[above_signed] above_not_max=[above_not_max] optional_same=[optional_same] optional_different=[optional_different]]
+~[:uint_int64_choice_equality same=[same] different=[different] above_signed=[above_signed] above_not_max=[above_not_max] optional_same=[optional_same] optional_different=[optional_different]]

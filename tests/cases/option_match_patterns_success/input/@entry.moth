@@ -26,4 +26,4 @@ if score is:
     none => ~score_label = "missing"
 ;
 
-[:option_match_patterns_success name=[name_label] user=[user_label] score=[score_label]]
+~[:option_match_patterns_success name=[name_label] user=[user_label] score=[score_label]]

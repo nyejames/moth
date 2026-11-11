@@ -17,4 +17,4 @@ plain = [card]
 filled = [card:[$in local:[identity("Chosen")]]]
 emptied = [card:[$in imported:[identity("")]]]
 
-[:const=[const_plain]|plain=[plain]|filled=[filled]|emptied=[emptied]]
+~[:const=[const_plain]|plain=[plain]|filled=[filled]|emptied=[emptied]]

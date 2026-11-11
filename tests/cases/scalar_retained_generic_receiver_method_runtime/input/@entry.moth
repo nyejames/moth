@@ -29,4 +29,4 @@ label_box ~= make_label_box(seed)
 projected String = label_box.label().text
 chosen String = label_box.choose(fallback = Label(text = "fallback")).text
 
-[:retained generic method result=[result] projection=[projected] choose=[chosen]]
+~[:retained generic method result=[result] projection=[projected] choose=[chosen]]

@@ -42,4 +42,4 @@ right_seen ~= ""
 right_value = observe_right(true, ~right_seen)
 right_report = copy right_seen
 ok = pick(left_producer(false), right_producer(false)) catch then 0 - 3
-[: custom shared left=[left_value] lreport=[left_report] right=[right_value] rreport=[right_report] ok=[ok]]
+~[: custom shared left=[left_value] lreport=[left_report] right=[right_value] rreport=[right_report] ok=[ok]]

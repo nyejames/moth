@@ -4,4 +4,4 @@ hidden ||:
     value = small + natural
 ;
 
-[:unreachable]
+~[:unreachable]

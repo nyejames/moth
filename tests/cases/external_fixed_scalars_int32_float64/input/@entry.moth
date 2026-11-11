@@ -95,4 +95,4 @@ f32_overflow_code = f32_failure(4)
 f32_nan_code = f32_failure(6)
 f32_positive_inf_code = f32_failure(7)
 f32_negative_inf_code = f32_failure(8)
-[:fixed scalar zero=[zero] maximum=[maximum_matches] loaded=[loaded_matches] f32=[fraction_matches]/[rounded_matches] overflow=[boundary_code] native=[native_int]/[native_uint]/[native_float] raw=[f32_half]/[f32_tenth]/[f32_large]/[f32_subnormal]/[f32_zero] codes=[f32_overflow_code]/[f32_nan_code]/[f32_positive_inf_code]/[f32_negative_inf_code]]
+~[:fixed scalar zero=[zero] maximum=[maximum_matches] loaded=[loaded_matches] f32=[fraction_matches]/[rounded_matches] overflow=[boundary_code] native=[native_int]/[native_uint]/[native_float] raw=[f32_half]/[f32_tenth]/[f32_large]/[f32_subnormal]/[f32_zero] codes=[f32_overflow_code]/[f32_nan_code]/[f32_positive_inf_code]/[f32_negative_inf_code]]

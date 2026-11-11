@@ -9,4 +9,4 @@ if value is:
     else => ~result = "other"
 ;
 
-[:pattern_relational_overlap_no_warning result=[result]]
+~[:pattern_relational_overlap_no_warning result=[result]]

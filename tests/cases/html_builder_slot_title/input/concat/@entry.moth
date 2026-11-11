@@ -1,5 +1,5 @@
 -- Multiple title contributions concatenate in source order without a separator.
-#[$in title:["Alpha"]]
-#[$in title:[" & Beta"]]
+[$in title:["Alpha"]]
+[$in title:[" & Beta"]]
 
-#[:<main>Concat</main>]
+[:<main>Concat</main>]

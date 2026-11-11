@@ -3,4 +3,4 @@ compute || -> I32, Error!:
     return local
 ;
 
-[: [compute()!]]
+~[: [compute()!]]

@@ -13,4 +13,4 @@ packet = Packet(origin + origin)
 packet_text = read_u64(packet.value)
 origin_text = read_u64(origin)
 
-[:generic_constructed_numeric_forward_arithmetic_runtime packet=[packet_text] origin=[origin_text]]
+~[:generic_constructed_numeric_forward_arithmetic_runtime packet=[packet_text] origin=[origin_text]]

@@ -8,4 +8,4 @@ if value is:
     1 => ~result = "second"
 ;
 
-[:should_not_reach=[result]]
+~[:should_not_reach=[result]]

@@ -35,4 +35,4 @@ offset_minute_value = parse_offset_minute() catch |offset_minute_err|:
     then 0
 ;
 
-[: timestamp_parse_field_out_of_range code=[hour_code] offset_hour_code=[offset_hour_code] offset_minute_code=[offset_minute_code]]
+~[: timestamp_parse_field_out_of_range code=[hour_code] offset_hour_code=[offset_hour_code] offset_minute_code=[offset_minute_code]]

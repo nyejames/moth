@@ -131,7 +131,7 @@ wide_mul = u32_wide_product(4294967295)
 power_boundary = power_u8(2, 31)
 retained_add = i32_pair_add(2147483646, 1)
 
-[:bounded proofs u8=[u8_add] i16=[i16_add] i8sub=[i8_sub] i16u16sub=[i16u16_sub] wide-high=[wide_sub_high] wide-low=[wide_sub_low] i8mul=[i8_mul] u16mul=[u16_mul] i16u16mul=[i16u16_mul] neg-min=[neg_min_i8] neg-zero=[neg_zero_i8] halve=[halve_i16] lastbit=[odd_bit_u16]/[even_bit_u16] halve64=[halve_i64] parity64=[parity_i64] i64min=[identity_i64_min] i64max=[identity_i64_max] u64max=[identity_u64_max] u64third=[third_u64] u64parity=[parity_u64] widemul=[wide_mul] power=[power_boundary] retained=[retained_add]]
+~[:bounded proofs u8=[u8_add] i16=[i16_add] i8sub=[i8_sub] i16u16sub=[i16u16_sub] wide-high=[wide_sub_high] wide-low=[wide_sub_low] i8mul=[i8_mul] u16mul=[u16_mul] i16u16mul=[i16u16_mul] neg-min=[neg_min_i8] neg-zero=[neg_zero_i8] halve=[halve_i16] lastbit=[odd_bit_u16]/[even_bit_u16] halve64=[halve_i64] parity64=[parity_i64] i64min=[identity_i64_min] i64max=[identity_i64_max] u64max=[identity_u64_max] u64third=[third_u64] u64parity=[parity_u64] widemul=[wide_mul] power=[power_boundary] retained=[retained_add]]
 narrow_add |left U8, right U8| -> U8, Error!:
     return left + right
 ;
@@ -179,4 +179,4 @@ safe_add = narrow_add(200, 55) catch:
     then 0
 ;
 mixed_sum = safe_mixed(-128, 255)
-[:D15 narrow safe=[safe_add] mixed=[mixed_sum] codes=[add_code]/[sub_code]/[mul_code]/[neg_code]/[power_code] results=[failed_add]/[failed_sub]/[failed_mul]/[failed_neg]/[failed_power]]
+~[:D15 narrow safe=[safe_add] mixed=[mixed_sum] codes=[add_code]/[sub_code]/[mul_code]/[neg_code]/[power_code] results=[failed_add]/[failed_sub]/[failed_mul]/[failed_neg]/[failed_power]]

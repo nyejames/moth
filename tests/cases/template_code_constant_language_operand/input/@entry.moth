@@ -16,7 +16,7 @@ third #= [$code fallback:
 let mut
 ]
 
-#[: [first]
-[second]
-[third]
+[: [first]
+~[second]
+~[third]
 ]

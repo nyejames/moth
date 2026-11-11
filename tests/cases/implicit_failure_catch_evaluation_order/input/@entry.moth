@@ -108,4 +108,4 @@ spent_j U32 = trace_j
 first_k = fetch(~trace_k, ok).get(1) catch then 0 - 10
 spent_k U32 = trace_k
 
-[: order a=[first_a] ac=[code_a] as=[spent_a] b=[first_b] bc=[code_b] bs=[spent_b] c=[first_c] cc=[code_c] cs=[spent_c] d=[first_d] dc=[code_d] ds=[spent_d] e=[first_e] ec=[code_e] es=[spent_e] f=[first_f] fc=[code_f] fs=[spent_f] g=[first_g] gc=[code_g] gs=[spent_g] h=[first_h] hc=[code_h] hs=[spent_h] i=[first_i] is=[spent_i] js=[spent_j] k=[first_k] ks=[spent_k]]
+~[: order a=[first_a] ac=[code_a] as=[spent_a] b=[first_b] bc=[code_b] bs=[spent_b] c=[first_c] cc=[code_c] cs=[spent_c] d=[first_d] dc=[code_d] ds=[spent_d] e=[first_e] ec=[code_e] es=[spent_e] f=[first_f] fc=[code_f] fs=[spent_f] g=[first_g] gc=[code_g] gs=[spent_g] h=[first_h] hc=[code_h] hs=[spent_h] i=[first_i] is=[spent_i] js=[spent_j] k=[first_k] ks=[spent_k]]

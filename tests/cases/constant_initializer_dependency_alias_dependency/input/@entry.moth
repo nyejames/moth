@@ -2,4 +2,4 @@
 
 total #I32 = value + 1
 
-[:[total]]
+~[:[total]]

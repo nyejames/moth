@@ -1,4 +1,4 @@
 card #= [:title=[$slot title = "Stored fallback"]|body=[$slot = "Stored body fallback"]]
 stored_title #= [$in title:Stored title]
 rendered #= [card:[stored_title]]
-[:rendered=[rendered]]
+~[:rendered=[rendered]]

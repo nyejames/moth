@@ -2,4 +2,4 @@
 
 plain #= [card]
 filled #= [card:[$in title:Local title]]
-[:plain=[plain]|filled=[filled]]
+~[:plain=[plain]|filled=[filled]]

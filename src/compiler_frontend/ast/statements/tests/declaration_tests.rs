@@ -63,11 +63,6 @@ fn prefixed_statement_probe_respects_nested_syntax_and_boundaries() {
             "invalid_assignment_target.mutable_marker_requires_existing_place",
         ),
         (
-            "~[label = 1]",
-            "MOTH-RULE-0047",
-            "invalid_receiver_call.mutable_marker_on_non_receiver_call",
-        ),
-        (
             "~true\nnext = 1",
             "MOTH-RULE-0047",
             "invalid_receiver_call.mutable_marker_on_non_receiver_call",
@@ -1214,4 +1209,246 @@ fn rejects_discarded_comparison_statement_with_comparison_reason() {
         "MOTH-SYNTAX-0025",
         Some("invalid_standalone_statement.comparison"),
     );
+}
+
+#[test]
+fn doc_attaches_to_an_entry_local_declaration() {
+    let (ast, path_fork, string_table) = parse_single_file_ast("$doc [:Local docs.]\nvalue = 1\n");
+    assert_eq!(
+        ast.doc_fragments.len(),
+        1,
+        "the declaration should retain one attached doc record"
+    );
+    let target = ast.doc_fragments[0].target;
+    let target_name = path_fork
+        .try_component(target)
+        .expect("the doc target is a declaration path");
+    assert_eq!(string_table.resolve(target_name), "value");
+    assert_eq!(
+        string_table.resolve(ast.doc_fragments[0].value),
+        "Local docs."
+    );
+    assert!(
+        ast.doc_fragments[0].span.is_some(),
+        "source docs retain their authored operand span"
+    );
+}
+
+#[test]
+fn todo_attaches_to_a_return_statement_without_runtime_work() {
+    let (ast, _path_fork, _string_table) = parse_single_file_ast(
+        "calculate || -> I32:\n    $todo [: Implement the rest.]\n    return 1\n;\n",
+    );
+    assert!(
+        ast.doc_fragments.is_empty(),
+        "`$todo` is validation-only and publishes no metadata"
+    );
+}
+
+#[test]
+fn todo_before_a_top_level_runtime_fragment_is_accepted() {
+    let (ast, _path_fork, _string_table) =
+        parse_single_file_ast("$todo [: Runtime review.]\n~[: [1]]\n");
+    assert!(
+        ast.doc_fragments.is_empty(),
+        "`$todo` never becomes documentation metadata"
+    );
+}
+
+#[test]
+fn doc_before_a_top_level_runtime_fragment_is_wrong_target() {
+    let source = "$doc [: Runtime docs.]\n~[: [1]]\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.wrong_target"),
+    );
+}
+
+#[test]
+fn adjacent_source_directive_operands_are_rejected() {
+    let source = "calculate || -> I32:\n    $todo [: one] [: two]\n    return 1\n;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.unexpected_arguments"),
+    );
+}
+
+#[test]
+fn runtime_marker_rejects_a_note_template() {
+    let failure = parse_single_file_ast_diagnostic("~[$note: hidden]\n");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.wrong_context"),
+    );
+}
+
+#[test]
+fn direct_note_produces_no_fragment() {
+    let (ast, _path_fork, _string_table) = parse_single_file_ast("[$note: hidden]\n");
+    assert!(
+        ast.const_top_level_fragments.is_empty(),
+        "a direct note must not become an empty const body fragment"
+    );
+}
+
+#[test]
+fn template_inside_an_executable_block_is_not_direct_metadata() {
+    let source = "if false:\n[:unexpected]\n;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0025",
+        Some("invalid_standalone_statement.standalone_template"),
+    );
+}
+
+#[test]
+fn removed_hash_template_spelling_is_rejected() {
+    let source = "#[: removed]\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(&failure, "MOTH-SYNTAX-0002", None);
+}
+
+#[test]
+fn doc_attaches_to_a_function_local_declaration() {
+    let source =
+        "calculate || -> I32:\n    $doc [:Local docs.]\n    value = 1\n    return value\n;\n";
+    let (ast, _path_fork, string_table) = parse_single_file_ast(source);
+    assert_eq!(ast.doc_fragments.len(), 1);
+    assert_eq!(
+        string_table.resolve(ast.doc_fragments[0].value),
+        "Local docs."
+    );
+}
+
+#[test]
+fn doc_operand_accepts_a_compile_time_string_binding() {
+    let source = "label #= \"Constant docs\"\n$doc label\ncalculate || -> I32:\n    return 1\n;\n";
+    let (ast, _path_fork, string_table) = parse_single_file_ast(source);
+    assert_eq!(ast.doc_fragments.len(), 1);
+    assert_eq!(
+        string_table.resolve(ast.doc_fragments[0].value),
+        "Constant docs"
+    );
+}
+
+#[test]
+fn template_head_doc_and_todo_forms_are_rejected() {
+    for source in ["[$doc: text]\n", "[$todo: text]\n"] {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_diagnostic(
+            &failure,
+            "MOTH-SYNTAX-0021",
+            Some("invalid_template_directive.wrong_context"),
+        );
+    }
+}
+
+#[test]
+fn local_source_directive_target_must_start_on_a_later_line() {
+    let failure = parse_single_file_ast_diagnostic("f ||:\n    $doc [:x] value = 1\n;\n");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.dangling_modifier"),
+    );
+}
+
+#[test]
+fn local_multiline_directive_run_attaches_each_annotation() {
+    let (ast, _path_fork, string_table) =
+        parse_single_file_ast("f ||:\n    $doc [:First.]\n    $todo [:Later.]\n    value = 1\n;\n");
+    assert_eq!(ast.doc_fragments.len(), 1);
+    assert_eq!(string_table.resolve(ast.doc_fragments[0].value), "First.");
+}
+
+#[test]
+fn local_multiline_duplicate_directives_are_rejected() {
+    let failure = parse_single_file_ast_diagnostic(
+        "f ||:\n    $todo [:First.]\n    $todo [:Second.]\n    value = 1\n;\n",
+    );
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.duplicate_modifier"),
+    );
+}
+
+#[test]
+fn local_doc_attaches_to_explicitly_typed_declaration() {
+    let (ast, _path_fork, string_table) =
+        parse_single_file_ast("f ||:\n    $doc [:Typed docs.]\n    text #String = \"x\"\n;\n");
+    assert_eq!(ast.doc_fragments.len(), 1);
+    assert_eq!(
+        string_table.resolve(ast.doc_fragments[0].value),
+        "Typed docs."
+    );
+}
+
+#[test]
+fn generic_body_local_docs_publish_one_authored_fragment() {
+    let (ast, _path_fork, string_table) = parse_single_file_ast(
+        "draw type T |name T| -> String:\n    $doc [:Local docs.]\n    text #String = \"x\"\n    return text\n;\nfirst = draw(1)\nsecond = draw(\"a\")\n",
+    );
+    assert_eq!(
+        ast.doc_fragments.len(),
+        1,
+        "a generic body must publish its authored local docs once, not once per instance"
+    );
+    assert_eq!(
+        string_table.resolve(ast.doc_fragments[0].value),
+        "Local docs."
+    );
+}
+
+#[test]
+fn same_line_runtime_fragments_fall_back_to_ordinary_grammar() {
+    let failure = parse_single_file_ast_diagnostic("~[:one] ~[:two]\n");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0047",
+        Some("invalid_receiver_call.mutable_marker_on_non_receiver_call"),
+    );
+}
+
+#[test]
+fn local_doc_attaches_to_a_nominally_typed_declaration() {
+    let source = "Note = |text String|\nf || -> String:\n    $doc [:Nominal docs.]\n    note Note = Note(text = \"x\")\n    return note.text\n;\n";
+    let (ast, _path_fork, string_table) = parse_single_file_ast(source);
+    assert_eq!(ast.doc_fragments.len(), 1);
+    assert_eq!(
+        string_table.resolve(ast.doc_fragments[0].value),
+        "Nominal docs."
+    );
+}
+
+#[test]
+fn source_directive_at_a_match_arm_boundary_is_dangling() {
+    let source = "Signal ::\n    Ready,\n    Waiting,\n;\nf || -> String:\n    value = Signal::Ready\n    if value is:\n        Ready =>\n            $todo [:dangling]\n        Waiting => return \"waiting\"\n    ;\n;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.dangling_modifier"),
+    );
+}
+
+#[test]
+fn nested_entry_block_doc_attaches_to_the_local_declaration() {
+    let source = "if false:\n    $doc [:Block docs.]\n    value #String = \"x\"\n;\n";
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+    assert_eq!(ast.doc_fragments.len(), 1);
+    assert_eq!(
+        string_table.resolve(ast.doc_fragments[0].value),
+        "Block docs."
+    );
+    let target_name = path_fork
+        .try_component(ast.doc_fragments[0].target)
+        .expect("the nested local declaration owns its doc target");
+    assert_eq!(string_table.resolve(target_name), "value");
 }

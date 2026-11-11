@@ -24,7 +24,7 @@ use std::path::Path;
 const CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n)\n";
 
 /// The smallest page that compiles without diagnostics.
-const PAGE_SOURCE: &str = "#[:<h1>About</h1>]\n";
+const PAGE_SOURCE: &str = "[:<h1>About</h1>]\n";
 
 /// Config that limits diagnostic discovery to one retained error per module.
 const MODULE_LIMIT_CONFIG_SOURCE: &str =
@@ -58,7 +58,7 @@ if value is:
     else => ~result = "other"
 ;
 
-[:pattern_unreachable_after_duplicate_literal_warning result=[result]]
+~[:pattern_unreachable_after_duplicate_literal_warning result=[result]]
 "#;
 
 const INVALID_DEFINITION_MESSAGE: &str = "The test definition is invalid.";

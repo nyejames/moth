@@ -9,4 +9,4 @@ read_u64 |value U64| -> String:
 origin = bounded_identity(4294967296)
 text = read_u64(origin)
 
-[:[text]]
+~[:[text]]

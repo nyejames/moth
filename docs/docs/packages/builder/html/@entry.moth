@@ -8,14 +8,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["@html"]]
-#[$in description:["Compile-time HTML helpers and canvas wrapper from the HTML builder."]]
-#[$in head:[language_theme_head]]
+[$in title:["@html"]]
+[$in description:["Compile-time HTML helpers and canvas wrapper from the HTML builder."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # @html
 
     `@html` provides compile-time layout and formatting helpers through a
@@ -23,7 +23,7 @@ init_docs_sidebar()!
     constant that folds into a `String`, rather than a hidden HTML syntax layer.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:html-helpers]
         [$in title:HTML helpers]
@@ -33,7 +33,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../]
         [$in previous_title:Builder packages]

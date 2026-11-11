@@ -10,4 +10,4 @@ big = parse_float("1e+21") catch: then 0.0;
 small = parse_float("1e-6") catch: then 0.0;
 under = parse_float("1_000.5e-2") catch: then 0.0;
 
-[: [one]|[ptfive]|[neg]|[exp]|[big]|[small]|[under]]
+~[: [one]|[ptfive]|[neg]|[exp]|[big]|[small]|[under]]

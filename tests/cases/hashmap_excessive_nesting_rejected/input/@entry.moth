@@ -1,2 +1,2 @@
 bad {String = {I32 = {Bool = {Char = String}}}} = {}
-[:test]
+~[:test]

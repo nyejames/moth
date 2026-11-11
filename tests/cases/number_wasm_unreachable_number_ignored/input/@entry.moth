@@ -11,4 +11,4 @@ visible_control || -> I32:
 ;
 
 result = visible_control()
-[: number unreachable regions ignored [result]]
+~[: number unreachable regions ignored [result]]

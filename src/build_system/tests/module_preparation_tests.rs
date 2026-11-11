@@ -337,7 +337,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let file_b = temp_dir.path().join("b.moth");
     // File A is the entry file with a runtime statement and a const template (which generates
     // a synthetic header name during header parsing).
-    fs::write(&file_a, "alpha = 1\n#[hello]\n").unwrap();
+    fs::write(&file_a, "alpha = 1\n[hello]\n").unwrap();
     // File B is a normal source file with an exported constant declaration.
     fs::write(&file_b, "beta #= 2\n").unwrap();
 
@@ -475,7 +475,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
 
     // Prepare file A (entry) — tokenization creates "alpha" and "hello"; header parsing
     // creates the synthetic "#const_template0" name for the const template.
-    let output_a = prepare_and_merge("alpha = 1\n#[hello]\n", &canonical_a, 0, 0)
+    let output_a = prepare_and_merge("alpha = 1\n[hello]\n", &canonical_a, 0, 0)
         .expect("file A preparation should succeed");
 
     // Prepare file B — tokenization creates "beta".
@@ -1299,7 +1299,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let file_c = temp_dir.path().join("c.moth");
 
     // File A is the entry file with a runtime template, a const template, and a declaration.
-    fs::write(&file_a, "alpha = 1\n#[hello]\n[runtime]\n").unwrap();
+    fs::write(&file_a, "alpha = 1\n[hello]\n~[runtime]\n").unwrap();
     // File B is a normal source file with an exported constant (PascalCase produces a warning).
     fs::write(&file_b, "Beta #= 2\n").unwrap();
     // File C is a normal source file with another exported constant (PascalCase produces a warning).
@@ -1318,7 +1318,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     )
     .expect("source file table should build");
     for (path, source) in [
-        (&canonical_a, "alpha = 1\n#[hello]\n[runtime]\n"),
+        (&canonical_a, "alpha = 1\n[hello]\n~[runtime]\n"),
         (&canonical_b, "Beta #= 2\n"),
         (&canonical_c, "Gamma #= 3\n"),
     ] {
@@ -1341,7 +1341,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     )
     .expect("span owner source table should build");
     for (path, source) in [
-        (&canonical_a, "alpha = 1\n#[hello]\n[runtime]\n"),
+        (&canonical_a, "alpha = 1\n[hello]\n~[runtime]\n"),
         (&canonical_b, "Beta #= 2\n"),
         (&canonical_c, "Gamma #= 3\n"),
     ] {
@@ -1380,7 +1380,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
             frontend.style_directives,
             &mut frontend.string_table,
             canonical_a.clone(),
-            "alpha = 1\n#[hello]\n[runtime]\n",
+            "alpha = 1\n[hello]\n~[runtime]\n",
             &mut span_builder_a,
         ),
         tokenized_moth_prepared_input(

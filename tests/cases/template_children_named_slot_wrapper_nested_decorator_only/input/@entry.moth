@@ -16,4 +16,4 @@ skip_condition = 2
 loop_limit = 2
 empty_limit = 0
 
-[sections:[$in row_style:background: red;][:contributed][if identity(show_condition) < 2:[:shown]][if identity(skip_condition) < 2:[:hidden]][loop 0 to identity(loop_limit) |loop_item|:[:row-[loop_item]]][loop 0 to identity(empty_limit) |empty_item|:[:row-no-output]]]
+~[sections:[$in row_style:background: red;][:contributed][if identity(show_condition) < 2:[:shown]][if identity(skip_condition) < 2:[:hidden]][loop 0 to identity(loop_limit) |loop_item|:[:row-[loop_item]]][loop 0 to identity(empty_limit) |empty_item|:[:row-no-output]]]

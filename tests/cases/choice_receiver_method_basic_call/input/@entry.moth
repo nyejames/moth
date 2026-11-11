@@ -12,4 +12,4 @@ label |this Status| -> String:
 ;
 
 selected Status = Status::Busy
-[:choice_receiver_method_basic_call value=[selected.label()]]
+~[:choice_receiver_method_basic_call value=[selected.label()]]

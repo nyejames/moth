@@ -26,4 +26,4 @@ render_ordered_runtime_operations || -> String:
     return [:collection_ordered_runtime_operations removed=[removed] first=[first] second=[second] third=[third] len=[len]]
 ;
 
-[:[render_ordered_runtime_operations()]]
+~[:[render_ordered_runtime_operations()]]

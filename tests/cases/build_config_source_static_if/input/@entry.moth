@@ -6,4 +6,4 @@ if enabled:
 else
     ~result = 2
 ;
-[:source_config result=[result]]
+~[:source_config result=[result]]

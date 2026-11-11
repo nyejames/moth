@@ -18,4 +18,4 @@ length_mid = scores.length
 ~scores.clear()
 length_after = scores.length
 -- The removed owned value is still usable after set and clear.
-[:[captured] length_mid=[length_mid] length_after=[length_after] still=[removed]]
+~[:[captured] length_mid=[length_mid] length_after=[length_after] still=[removed]]

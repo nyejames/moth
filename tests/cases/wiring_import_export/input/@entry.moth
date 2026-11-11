@@ -5,4 +5,4 @@ render || -> String:
     return [provider.read_text(value)]
 ;
 
-[:cross-module wire=[render()]]
+~[:cross-module wire=[render()]]

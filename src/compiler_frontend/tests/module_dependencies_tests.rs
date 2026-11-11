@@ -221,7 +221,7 @@ fn sorts_strict_top_level_dependencies_before_dependents_and_appends_start_last(
 #[test]
 fn dependency_sort_preserves_root_activity_metadata() {
     let (headers, mut string_table, mut path_fork) =
-        parse_module_headers(&[("src/a.moth", "#[static]\n[runtime]\n")], "src/a.moth");
+        parse_module_headers(&[("src/a.moth", "[static]\n~[runtime]\n")], "src/a.moth");
 
     let sorted = resolve_module_dependencies(
         headers,
@@ -1436,7 +1436,7 @@ fn content_value_in_parameter_and_field_defaults_orders_before_consumers() {
 fn repeated_content_value_occurrences_share_one_resolved_graph_edge() {
     let (parsed, content_source_targets, string_table, path_fork) =
         parse_module_headers_with_content_sources(
-            &[("@entry.moth", "#[: [@docs/intro.mtf] [@docs/intro.mtf]]\n")],
+            &[("@entry.moth", "[: [@docs/intro.mtf] [@docs/intro.mtf]]\n")],
             &[("docs/intro.mtf", "intro template body")],
             &[],
             "@entry.moth",

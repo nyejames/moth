@@ -5,4 +5,4 @@ left I8 = 1
 right I8 = 2
 sum I32 = left + right
 
-[:unreachable]
+~[:unreachable]

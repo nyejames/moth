@@ -18,4 +18,4 @@ fresh ~= fresh_counter()
 
 -- A re-exported mutable parameter succeeds with authored `~` and the mutation is observed.
 bump(~c)
-[:[summary_prefix] after-mutate=9 fresh-step=[fresh.step] bumped=[c.step]]
+~[:[summary_prefix] after-mutate=9 fresh-step=[fresh.step] bumped=[c.step]]

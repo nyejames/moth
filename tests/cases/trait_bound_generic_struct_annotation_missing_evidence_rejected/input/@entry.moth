@@ -12,4 +12,4 @@ Box type T is DISPLAY_TEXT = |
 
 bad Box of Plain = Box(Plain("no evidence"))
 
-[:unreachable [bad.value.text]]
+~[:unreachable [bad.value.text]]

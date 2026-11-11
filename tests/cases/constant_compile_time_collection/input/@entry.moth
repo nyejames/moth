@@ -2,4 +2,4 @@
 
 names #{String} = {"hello", "world"}
 
-[:[names.length()]]
+~[:[names.length()]]

@@ -11,4 +11,4 @@ else
     ~count = invalid
 ;
 received = receive_u64(count)
-[:unreachable]
+~[:unreachable]

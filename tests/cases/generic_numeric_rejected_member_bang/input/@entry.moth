@@ -14,4 +14,4 @@ read_item || -> String, Error!:
     return packet.get_values().missing!
 ;
 text = read_item() catch then "failed"
-[:[text]]
+~[:[text]]

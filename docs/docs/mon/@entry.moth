@@ -8,14 +8,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["MON format"]]
-#[$in description:["The MON serialised literal-data format: root framing, literal values, strict conversion and schema validation."]]
-#[$in head:[language_theme_head]]
+[$in title:["MON format"]]
+[$in description:["The MON serialised literal-data format: root framing, literal values, strict conversion and schema validation."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # The MON format
 
     MON means Moth Object Notation. **MON syntax** names Moth's shared
@@ -38,7 +38,7 @@ init_docs_sidebar()!
     Moth source inference and defaults.
 ]
 
-#[section, $md:
+[section, $md:
     ## Use MON from Rust
 
     Supply a schema rather than a compiler type or a file path. This example
@@ -89,7 +89,7 @@ init_docs_sidebar()!
     executable example with defaults, fixed-width values and encoding.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:mon-format]
         [$in title:MON format]

@@ -8,4 +8,4 @@ code = "MOTH-SYNTAX-0022"
 reason = "invalid_template_structure.template_loop_step_no_progress"
 path = "input/@entry.moth"
 line = 1
-column = 22
+column = 21

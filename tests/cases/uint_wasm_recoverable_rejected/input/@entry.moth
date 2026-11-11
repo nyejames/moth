@@ -15,4 +15,4 @@ just_above U32 = add_guarded(2147483648, 1) catch:
 top_text String = cast top
 above_text String = cast just_above
 
-[:uint recoverable top=[top]/[top_text] above=[just_above]/[above_text]]
+~[:uint recoverable top=[top]/[top_text] above=[just_above]/[above_text]]

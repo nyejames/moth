@@ -2,7 +2,7 @@
 
 section_content #String = section.content
 
-[$md:
+~[$md:
 # Hello World @#hello-world
 
 Jump @#hello-world (Hello World), @#paragraph (Paragraph), @#parent (Parent), @#child (Child), @#imported-section (Imported Section), @#imported-body (Imported body) and @#anchor (Anchor).
@@ -15,4 +15,4 @@ Jump @#hello-world (Hello World), @#paragraph (Paragraph), @#parent (Parent), @#
 @#anchor
 ]
 
-[:[section_content]]
+~[:[section_content]]

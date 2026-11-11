@@ -9,7 +9,7 @@ use crate::compiler_frontend::semantic_identity::ModuleRootFiles;
 fn api_only_normal_root_keeps_exportable_headers_and_rejects_runtime_body() {
     let errors = expect_header_error(
         parse_single_file_headers_with_entry(
-            "$export\nButton = | label String |\n[ Button(\"ignored\") ]\n",
+            "$export\nButton = | label String |\n~[ Button(\"ignored\") ]\n",
             "src/@mod.moth",
             "src/@entry.moth",
         ),
@@ -52,7 +52,7 @@ fn api_only_normal_root_keeps_exportable_headers_and_rejects_runtime_body() {
     // API-only roots have no start-body AST consumer, so preparation must diagnose an
     // unclosed runtime template while rejecting the body, including inside a collection.
     for file_path in ["src/@mod.moth", "src/@entry.moth"] {
-        for source in ["[: broken", "values = {\n[: broken"] {
+        for source in ["~[: broken", "values = {\n~[: broken"] {
             let errors = expect_header_error(
                 parse_single_file_headers_with_entry(source, file_path, "src/@entry.moth"),
                 &format!(
@@ -98,7 +98,7 @@ fn api_only_normal_root_keeps_exportable_headers_and_rejects_runtime_body() {
 fn api_only_normal_root_rejects_const_root_fragments() {
     let errors = expect_header_error(
         parse_single_file_headers_with_entry(
-            "#[html.head: [\"ignored\"]]\n",
+            "[html.head: [\"ignored\"]]\n",
             "src/@mod.moth",
             "src/@entry.moth",
         ),
@@ -174,7 +174,7 @@ fn reached_root_rejects_direct_runtime_statement() {
 fn reached_root_rejects_runtime_fragments() {
     let errors = expect_header_error(
         parse_single_file_headers_with_reached_role(
-            "[: [\"discarded\"]]\n",
+            "~[: [\"discarded\"]]\n",
             "src/widgets/@mod.moth",
             FileRole::ReachedApiFacadeRoot(ModuleRootRole::Normal),
         ),
@@ -197,7 +197,7 @@ fn reached_root_rejects_runtime_fragments() {
 fn reached_root_rejects_const_fragments() {
     let errors = expect_header_error(
         parse_single_file_headers_with_reached_role(
-            "#[html.head: [\"discarded\"]]\n",
+            "[html.head: [\"discarded\"]]\n",
             "src/widgets/@mod.moth",
             FileRole::ReachedApiFacadeRoot(ModuleRootRole::Normal),
         ),
@@ -220,7 +220,7 @@ fn reached_root_rejects_const_fragments() {
 fn entry_root_synthesizes_start_without_export_surface() {
     let headers = expect_header_success(
         parse_single_file_headers_with_options(
-            "greeting #= \"hello\"\n[greeting]\n",
+            "greeting #= \"hello\"\n~[greeting]\n",
             Path::new("src/@entry.moth"),
             entry_root_options(),
         ),
@@ -274,7 +274,7 @@ fn empty_entry_root_keeps_one_start_and_no_fragments() {
 fn metadata_only_entry_root_keeps_start_and_const_fragment() {
     let headers = expect_header_success(
         parse_single_file_headers_with_options(
-            "#[$in title: \"metadata only\"]\n",
+            "[$in title: \"metadata only\"]\n",
             Path::new("src/@entry.moth"),
             entry_root_options(),
         ),
@@ -406,7 +406,7 @@ fn entry_root_cannot_resolve_a_normal_root_local_declaration() {
     let sources = [
         ("theme #= \"dark\"\n".to_owned(), "src/@mod.moth".to_owned()),
         (
-            "@\"@mod\" theme\n\n[: [theme]]\n".to_owned(),
+            "@\"@mod\" theme\n\n~[: [theme]]\n".to_owned(),
             "src/@entry.moth".to_owned(),
         ),
     ];
@@ -427,7 +427,7 @@ fn entry_root_cannot_resolve_a_normal_root_local_declaration() {
 fn helper_file_cannot_resolve_an_entry_root_local_declaration() {
     let sources = [
         (
-            "greeting #= \"hello\"\n[greeting]\n".to_owned(),
+            "greeting #= \"hello\"\n~[greeting]\n".to_owned(),
             "src/@entry.moth".to_owned(),
         ),
         (
@@ -456,7 +456,7 @@ fn helper_file_cannot_resolve_an_entry_root_local_declaration() {
 fn helper_cannot_bind_an_entry_root_namespace() {
     let sources = [
         (
-            "greeting #= \"hello\"\n[greeting]\n".to_owned(),
+            "greeting #= \"hello\"\n~[greeting]\n".to_owned(),
             "src/@entry.moth".to_owned(),
         ),
         (
@@ -481,7 +481,7 @@ fn helper_cannot_bind_an_entry_root_namespace() {
 fn normal_root_export_cannot_reexport_an_entry_root_declaration() {
     let sources = [
         (
-            "greeting #= \"hello\"\n[greeting]\n".to_owned(),
+            "greeting #= \"hello\"\n~[greeting]\n".to_owned(),
             "src/@entry.moth".to_owned(),
         ),
         (
@@ -543,7 +543,7 @@ fn one_helper_declaration_binds_from_all_three_root_roles() {
             "src/@package.moth".to_owned(),
         ),
         (
-            "@shared helper\n\n[: [\"ok\"]]\n".to_owned(),
+            "@shared helper\n\n~[: [\"ok\"]]\n".to_owned(),
             "src/@entry.moth".to_owned(),
         ),
     ];
@@ -609,7 +609,7 @@ fn same_spelled_root_local_declarations_in_two_roots_stay_independent() {
 fn normal_root_colocated_with_entry_root_is_api_only() {
     let errors = expect_header_error(
         parse_single_file_headers_with_options(
-            "[greeting]\n",
+            "~[greeting]\n",
             Path::new("src/@mod.moth"),
             normal_root_colocated_with_entry_options(),
         ),

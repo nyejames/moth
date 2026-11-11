@@ -164,7 +164,7 @@ pub(super) fn handle_template_value_in_template_head(
         .into());
     }
 
-    if matches!(&template_kind, TemplateType::Comment(_)) {
+    if matches!(&template_kind, TemplateType::Comment) {
         return Ok(());
     }
 

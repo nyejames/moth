@@ -7,4 +7,4 @@ loop items |item|:
     ~copied.push(item)
 ;
 
-[:loop_borrow_independent_roots original=[items.length()] other=[other.length()] copied=[copied.length()]]
+~[:loop_borrow_independent_roots original=[items.length()] other=[other.length()] copied=[copied.length()]]

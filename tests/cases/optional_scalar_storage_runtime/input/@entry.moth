@@ -45,4 +45,4 @@ wide_origin = 4294967334
 wide_alias U64? = wide_origin
 wide_alias_text = read_optional_u64(wide_alias)
 
-[:optional-scalar-storage annotated=[annotated_text] alias=[alias_text] directed=[directed_text] directed_capture=[directed_capture] absent=[absent_text] raw_wide=[raw_wide_text] wide_alias=[wide_alias_text]]
+~[:optional-scalar-storage annotated=[annotated_text] alias=[alias_text] directed=[directed_text] directed_capture=[directed_capture] absent=[absent_text] raw_wide=[raw_wide_text] wide_alias=[wide_alias_text]]

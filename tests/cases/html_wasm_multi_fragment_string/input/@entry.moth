@@ -3,4 +3,4 @@ greeting || -> String:
 ;
 
 greeting()
-#[:entry]
+[:entry]

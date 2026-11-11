@@ -1902,7 +1902,7 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
             return load(operand(value)) catch |failure| then 0\n;\n\
         check(\"safe\")\n\
         recovered = recover(1)\n\
-        result = forward(1, recovered, false) catch then 0\n[: result=[result]]\n";
+        result = forward(1, recovered, false) catch then 0\n~[: result=[result]]\n";
 
     for single_file in [false, true] {
         let (frontend, warning_owner) = compile_owned_service_fixture(SOURCE, single_file, &[]);
@@ -2370,7 +2370,7 @@ fn active_and_inert_generic_message_share_one_completed_service_identity() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     const SOURCE: &str = "message type T |value T| -> T:\n    return value\n;\n\
         check |value String|:\n    assert(true, message(value))\n;\n\
-        check(\"safe\")\nactive_message = message(\"live\")\n[: result=[active_message]]\n";
+        check(\"safe\")\nactive_message = message(\"live\")\n~[: result=[active_message]]\n";
     for single_file in [false, true] {
         let (frontend, _) = compile_owned_service_fixture(SOURCE, single_file, &[]);
         let CompilationOutcome::Success {
@@ -2492,7 +2492,7 @@ fn final_generated_failure_lanes_keep_external_candidates_without_validation_onl
         active_message type T |marker T| -> String:\n    return assertion_message()\n;\n\
         assert(ready(), active_message(\"active assertion\"))\n\
         assert(true, message(\"checked\"))\n\
-        result = execute(\"active\", 2) catch then 0\n[:[result]]\n";
+        result = execute(\"active\", 2) catch then 0\n~[:[result]]\n";
     const LIVE: &str = "/** @moth.sig touch || -> */\n\
         export function touch() {}\n\
         /** @moth.sig ready || -> Bool */\n\

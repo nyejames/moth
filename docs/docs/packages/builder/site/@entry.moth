@@ -8,21 +8,21 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["@web/site"]]
-#[$in description:["Static site URL helpers from the HTML builder."]]
-#[$in head:[language_theme_head]]
+[$in title:["@web/site"]]
+[$in description:["Static site URL helpers from the HTML builder."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # @web/site
 
     `@web/site` provides compile-time helpers for static site URLs. It uses the
     structural site root rather than reading the browser or the current page.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:site]
         [$in title:Static site URLs]
@@ -32,7 +32,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../graphics/]
         [$in previous_title:@web/graphics]

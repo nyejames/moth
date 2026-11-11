@@ -21,4 +21,4 @@ render_u64 || -> String, Error!:
 
 default_text = render_default() catch then "failed"
 u64_text = render_u64() catch then "failed"
-[:cyclic_forward [default_text] [u64_text]]
+~[:cyclic_forward [default_text] [u64_text]]

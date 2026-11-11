@@ -15,4 +15,4 @@ part_before = observe(score, length_before)
 ~scores.set("Linus", "seven") catch:
 ;
 length_after = scores.length
-[:[part_before] length_after=[length_after]]
+~[:[part_before] length_after=[length_after]]

@@ -60,4 +60,4 @@ private_text = private_number_text(0)
 signed_zero Dec256 = -0e-99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
 signed_zero_text String = cast signed_zero
 
-[: number transport control=[control] huge=[huge_text] copy=[runtime_direct]/[copy_current_text] equal=[same_scale_equal] less=[same_scale_less] box=[box_text] collection=[first_text] option=[optional_text] scale256=[tiny_text] zero=[signed_zero_text] template-equal=[runtime_format_equal] generic-private=[private_text]]
+~[: number transport control=[control] huge=[huge_text] copy=[runtime_direct]/[copy_current_text] equal=[same_scale_equal] less=[same_scale_less] box=[box_text] collection=[first_text] option=[optional_text] scale256=[tiny_text] zero=[signed_zero_text] template-equal=[runtime_format_equal] generic-private=[private_text]]

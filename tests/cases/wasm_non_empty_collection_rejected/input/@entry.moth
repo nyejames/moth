@@ -1,2 +1,2 @@
 names = {"a", "b"}
-[:names done]
+~[:names done]

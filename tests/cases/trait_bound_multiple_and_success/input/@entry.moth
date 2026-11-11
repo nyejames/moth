@@ -25,4 +25,4 @@ identity type T is DISPLAY_TEXT and HAS_NAME |value T| -> T:
 ;
 
 label = identity(Label("both"))
-[:trait_bound_multiple_and_success [label.display()] [label.name()]]
+~[:trait_bound_multiple_and_success [label.display()] [label.name()]]

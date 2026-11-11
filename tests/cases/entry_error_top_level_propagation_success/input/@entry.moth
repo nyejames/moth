@@ -6,11 +6,11 @@ load_name |missing Bool| -> String, Error!:
 ;
 
 name = load_name(false)!
-[: Hello [name]]
+~[: Hello [name]]
 
 nested_name = if name is "Priya":
     then load_name(false)!
 else
     then "fallback"
 ;
-[: Nested hello [nested_name]]
+~[: Nested hello [nested_name]]

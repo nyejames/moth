@@ -73,7 +73,7 @@ mixed_bucket_result = mutate_mixed_field(~mixed_bucket, ~mixed_bucket_rhs_calls,
 ;
 mixed_bucket_text String = cast mixed_bucket.value
 
-[:compound atomicity i8=[ok_local_i8_result_text]/[ok_local_i8_rhs_calls] failed-i8=[failed_local_i8_error]/[failed_local_i8_text]/[failed_local_i8_rhs_calls] field=[ok_bucket_result_text]/[ok_bucket_rhs_calls] failed-field=[failed_bucket_error]/[failed_bucket_text]/[failed_bucket_rhs_calls] mixed-field=[mixed_bucket_error]/[mixed_bucket_text]/[mixed_bucket_rhs_calls]]
+~[:compound atomicity i8=[ok_local_i8_result_text]/[ok_local_i8_rhs_calls] failed-i8=[failed_local_i8_error]/[failed_local_i8_text]/[failed_local_i8_rhs_calls] field=[ok_bucket_result_text]/[ok_bucket_rhs_calls] failed-field=[failed_bucket_error]/[failed_bucket_text]/[failed_bucket_rhs_calls] mixed-field=[mixed_bucket_error]/[mixed_bucket_text]/[mixed_bucket_rhs_calls]]
 
 -- Same-domain U16 overflow is arithmetic failure, while U16 + U32 first
 -- succeeds in U32 and then fails conversion. Neither may commit a store.
@@ -106,4 +106,4 @@ mixed_u16_result = mutate_mixed_u16(~mixed_u16, ~mixed_u16_calls, 1) catch |mixe
     ~mixed_u16_code = mixed_u16_error.code
     then 0
 ;
-[:compound u16 ok=[ok_u16_result]/[ok_u16_calls] failed=[failed_u16_code]/[failed_u16]/[failed_u16_calls]/[failed_u16_result] mixed=[mixed_u16_code]/[mixed_u16]/[mixed_u16_calls]/[mixed_u16_result]]
+~[:compound u16 ok=[ok_u16_result]/[ok_u16_calls] failed=[failed_u16_code]/[failed_u16]/[failed_u16_calls]/[failed_u16_result] mixed=[mixed_u16_code]/[mixed_u16]/[mixed_u16_calls]/[mixed_u16_result]]

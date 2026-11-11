@@ -47,4 +47,4 @@ overflow_seen ~= ""
 overflow_value = observe_overflow(true, 2147483647, ~overflow_seen)
 overflow_report = copy overflow_seen
 ok = first_error(false) + second_error(false) + overflow_term(false, 1) catch then 0 - 4
-[: preservation first=[first_value] freport=[first_report] second=[second_value] sreport=[second_report] overflow=[overflow_value] oreport=[overflow_report] ok=[ok]]
+~[: preservation first=[first_value] freport=[first_report] second=[second_value] sreport=[second_report] overflow=[overflow_value] oreport=[overflow_report] ok=[ok]]

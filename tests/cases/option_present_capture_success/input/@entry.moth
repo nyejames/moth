@@ -11,4 +11,4 @@ if value is:
     none => ~result = "missing"
 ;
 
-[:option_present_capture_success result=[result]]
+~[:option_present_capture_success result=[result]]

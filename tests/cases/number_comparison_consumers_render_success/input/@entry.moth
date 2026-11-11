@@ -62,4 +62,4 @@ same_amount = compare_amounts(same_amount_left, same_amount_right)
 different_payload_amount = compare_amounts(same_amount_left, different_amount_right)
 distinct_tag_amount = compare_amounts(same_amount_left, empty_amount)
 
-[: number comparison direct=[direct_below]/[direct_negative_boundary]/[direct_above]/[direct_positive_boundary]/[direct_middle] optional=[optional_absent]/[optional_zero]/[optional_negative]/[optional_positive] options=[same_option]/[different_option]/[some_none_option] choices=[same_amount]/[different_payload_amount]/[distinct_tag_amount]]
+~[: number comparison direct=[direct_below]/[direct_negative_boundary]/[direct_above]/[direct_positive_boundary]/[direct_middle] optional=[optional_absent]/[optional_zero]/[optional_negative]/[optional_positive] options=[same_option]/[different_option]/[some_none_option] choices=[same_amount]/[different_payload_amount]/[distinct_tag_amount]]

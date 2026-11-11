@@ -8,4 +8,4 @@ int_value = unbox(int_box)
 string_value = unbox(string_box)
 float_value = unbox(float_box)
 
-[: [int_value] [string_value] [float_value]]
+~[: [int_value] [string_value] [float_value]]

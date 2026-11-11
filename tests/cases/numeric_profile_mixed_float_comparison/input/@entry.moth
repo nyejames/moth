@@ -9,4 +9,4 @@ constant_converted #F32 = cast constant_integer
 constant_equal #Bool = constant_converted is constant_real
 runtime_equal = equal_after_float_rounding(16777217, 16777216.0)
 
-[: float32 mixed comparison const=[constant_equal] runtime=[runtime_equal]]
+~[: float32 mixed comparison const=[constant_equal] runtime=[runtime_equal]]

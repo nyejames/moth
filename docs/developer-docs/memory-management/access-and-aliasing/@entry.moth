@@ -1,18 +1,18 @@
 @access-and-aliasing content as reference_content
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-#[$in title:["Access and aliasing"]]
-#[$in description:["How Moth shares, copies and requests exclusive access to values."]]
-#[$in head:[theme_head]]
+[$in title:["Access and aliasing"]]
+[$in description:["How Moth shares, copies and requests exclusive access to values."]]
+[$in head:[theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
 
-#[section, $md:
+[section, $md:
     **Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
 
     Existing values are shared by default. Copies are explicit. `~` requests exclusive access to a mutable place.
 ]
 
-#[section, reference_content]
+[section, reference_content]

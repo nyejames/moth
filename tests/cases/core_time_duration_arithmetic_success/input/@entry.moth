@@ -29,4 +29,4 @@ back_millis = as_milliseconds(back)
 reversed = timestamp_difference(offset, base)
 reversed_millis = as_milliseconds(reversed)
 
-[:duration_arithmetic added=[added_millis] subtracted=[subtracted_millis] scaled=[scaled_millis] offset_back=[back_millis] reversed=[reversed_millis]]
+~[:duration_arithmetic added=[added_millis] subtracted=[subtracted_millis] scaled=[scaled_millis] offset_back=[back_millis] reversed=[reversed_millis]]

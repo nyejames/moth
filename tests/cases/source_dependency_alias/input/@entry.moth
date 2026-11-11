@@ -3,4 +3,4 @@ io.line([: [sum(1, 2)]])
 @hidden hidden
 @namespaced namespaced
 
-[: hidden=[hidden(2)];namespace=[namespaced(3)]]
+~[: hidden=[hidden(2)];namespace=[namespaced(3)]]

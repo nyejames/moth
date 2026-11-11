@@ -17,11 +17,11 @@ reason = "invalid_template_structure.template_loop_step_is_zero"
 occurrence = 2
 path = "input/named_zero_step/@entry.moth"
 line = 5
-column = 36
+column = 35
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.zero_loop_step"
 path = "input/@entry.moth"
 line = 1
-column = 22
+column = 21

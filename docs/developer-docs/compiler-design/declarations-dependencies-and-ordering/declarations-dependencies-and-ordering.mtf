@@ -142,7 +142,7 @@ Final prose and rendering of diagnostics wait for the diagnostics article. Here 
 
 - **Accepted design:** `PreparedHeaderSyntax`, `BoundModuleHeaders` and distinct relationship classes.
 - **Current implementation:** header and dependency progress rows.
-- **Delivered:** `$config` and `$export` source modifiers attach to their eligible top-level targets, with retained input and visibility facts. General same-line directive runs, `$doc`/`$todo` source annotations and const-default direct entry templates are accepted design but require the planned compiler cutover. Use the progress matrix for current support.
+- **Delivered:** `$config`, `$export`, `$doc` and `$todo` source modifiers attach through one contiguous directive run to their eligible targets, with retained input, visibility and declaration documentation facts. Bare direct entry templates are const-required and explicit `~` templates are runtime fragments. Use the progress matrix for current support.
 - **Deferred or outside scope:** this page does not teach body type checking.
 
 ## Compiler references

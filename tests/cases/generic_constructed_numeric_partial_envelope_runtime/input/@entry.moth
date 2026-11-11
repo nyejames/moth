@@ -29,4 +29,4 @@ narrow {F32} = bundle.items
 narrow_text = [:[loop narrow |item|:[read_float(item)]]]
 wide_text = read_u64(bundle.whole)
 
-[:generic_constructed_numeric_partial_envelope_runtime left=[left_text] right=[right_text] narrow=[narrow_text] wide=[wide_text]]
+~[:generic_constructed_numeric_partial_envelope_runtime left=[left_text] right=[right_text] narrow=[narrow_text] wide=[wide_text]]

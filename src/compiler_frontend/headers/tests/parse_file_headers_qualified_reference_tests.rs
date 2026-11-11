@@ -383,3 +383,27 @@ fn call_argument_commas_separate_two_occurrences() {
         source_span_for(source, "cosine", 0)
     );
 }
+
+#[test]
+fn config_declaration_directive_operand_records_qualified_occurrence() {
+    let source = "$config\n$doc @math square\napi_url #String = \"https://example.test\"\n";
+    let mut string_table = StringTable::new();
+    let (output, _span_builder) = prepare_single_file(
+        source,
+        &PathBuf::from("src/helper.moth"),
+        &PathBuf::from("src/@entry.moth"),
+        &mut string_table,
+    );
+
+    let occurrences = occurrences(&output);
+    assert_eq!(occurrences.len(), 1);
+    assert!(
+        occurrences[0].const_required,
+        "a source-directive operand fold must retain its declaration-ordering edge"
+    );
+    assert_eq!(string_table.resolve(occurrences[0].selected), "square");
+    assert!(
+        output.structural_file_references.references().is_empty(),
+        "the qualified operand path is a reference, not a file value"
+    );
+}

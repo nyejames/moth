@@ -1,4 +1,4 @@
 $config
 limit #Byte
 
-[:unsupported config]
+~[:unsupported config]

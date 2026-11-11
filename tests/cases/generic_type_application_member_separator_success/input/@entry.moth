@@ -65,4 +65,4 @@ choice_label = if choice is:
     Missing => then "missing"
 ;
 
-[: generic-type-application-member-separator [second]|[pair_label]|[box_label]|[compact_label]|[int_pair_label]|[choice_label]]
+~[: generic-type-application-member-separator [second]|[pair_label]|[box_label]|[compact_label]|[int_pair_label]|[choice_label]]

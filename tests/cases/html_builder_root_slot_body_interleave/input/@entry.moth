@@ -1,18 +1,18 @@
 -- Direct root inserts route to builder destinations while body fragments keep source order.
 nested #= [:<aside>[$slot note]</aside>]
 
-#[$in title:Builder direct title sentinel]
-#[$in description:Builder direct description sentinel]
-#[$in head:<meta name="builder-direct" content="builder-root-head-sentinel">]
-#[:<p>body alpha</p>]
+[$in title:Builder direct title sentinel]
+[$in description:Builder direct description sentinel]
+[$in head:<meta name="builder-direct" content="builder-root-head-sentinel">]
+[:<p>body alpha</p>]
 
 runtime_message || -> String:
     return "runtime omega"
 ;
 
 message = runtime_message()
-[: [message]]
-#[$in title:Builder direct title tail]
-#[:<p>body beta</p>]
-#[:<section>[nested:[$in note:nested body note]]</section>]
-#[:<p>body gamma</p>]
+~[: [message]]
+[$in title:Builder direct title tail]
+[:<p>body beta</p>]
+[:<section>[nested:[$in note:nested body note]]</section>]
+[:<p>body gamma</p>]

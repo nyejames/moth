@@ -1,14 +1,14 @@
 @html center
 @styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
 
-#[$in title:["Core packages"]]
-#[$in description:["Overview of Moth Core packages and their current HTML/JS support."]]
-#[$in head:[language_theme_head]]
+[$in title:["Core packages"]]
+[$in description:["Overview of Moth Core packages and their current HTML/JS support."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Core packages
 
     Core packages provide typed capabilities owned by the compiler and selected
@@ -38,7 +38,7 @@ init_docs_sidebar()!
     - @./time (Core time)
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../]
         [$in previous_title:Packages and dependencies]

@@ -14,8 +14,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionB
 use crate::compiler_frontend::ast::templates::create_template_node::TemplatePathTables;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
-    CommentDirectiveKind, SlotPlaceholder, Style, Template, TemplateParsingMode,
-    TemplateSegmentOrigin, TemplateType,
+    SlotPlaceholder, Style, Template, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
@@ -153,13 +152,12 @@ pub(crate) struct TemplateBodyParseRequest<'a, 'types> {
 
 /// Options that stay stable for one template node while its head and body are parsed.
 ///
-/// WHAT: groups parsing mode, control-flow validation, preparation and style defaults for
-/// recursive template construction.
+/// WHAT: groups control-flow validation, preparation and style defaults for recursive template
+///        construction.
 /// WHY: nested template construction preserves source-kind defaults and the owning validation
 /// boundary without inheriting body-parser state.
 #[derive(Clone)]
 pub(crate) struct NestedTemplateParseOptions {
-    pub(crate) parsing_mode: TemplateParsingMode,
     pub(crate) control_flow_validation: TemplateControlFlowValidationMode,
     /// Preparation mode for this template node only. Nested nodes stay in value mode so a
     /// const-required parent performs the single authoritative const traversal over its complete
@@ -171,7 +169,6 @@ pub(crate) struct NestedTemplateParseOptions {
 impl NestedTemplateParseOptions {
     pub(crate) fn runtime_capable() -> Self {
         Self {
-            parsing_mode: TemplateParsingMode::Standard,
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
             preparation_mode: TemplatePreparationMode::Value,
             default_style: None,
@@ -180,7 +177,6 @@ impl NestedTemplateParseOptions {
 
     pub(crate) fn const_required() -> Self {
         Self {
-            parsing_mode: TemplateParsingMode::Standard,
             control_flow_validation: TemplateControlFlowValidationMode::ConstRequired,
             preparation_mode: TemplatePreparationMode::ConstRequired,
             default_style: None,
@@ -479,14 +475,6 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
         let nested_direct_child_wrappers = input.build_state.child_wrappers.to_owned();
 
         let parse_options = NestedTemplateParseOptions {
-            parsing_mode: if matches!(
-                input.build_state.kind,
-                TemplateType::Comment(CommentDirectiveKind::Doc)
-            ) {
-                TemplateParsingMode::DocComment
-            } else {
-                TemplateParsingMode::Standard
-            },
             control_flow_validation: self.control_flow_validation,
             preparation_mode: TemplatePreparationMode::Value,
             default_style: self.default_style.clone(),
@@ -549,7 +537,7 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                 TemplateType::SlotInsert(_) => {
                     record_parser_tir_insert_contribution(construction_context, &child_template);
                 }
-                TemplateType::Comment(_) | TemplateType::SlotDefinition(_) => {}
+                TemplateType::Comment | TemplateType::SlotDefinition(_) => {}
                 _ => {
                     record_parser_tir_child_template(construction_context, &child_template);
                 }
@@ -559,7 +547,7 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
         // The already-known child kind owns dispatch: control-flow children are
         // ordinary child templates recorded above, so no TIR search is needed.
         match &child_kind {
-            TemplateType::Comment(_) => {
+            TemplateType::Comment => {
                 return Ok(());
             }
 

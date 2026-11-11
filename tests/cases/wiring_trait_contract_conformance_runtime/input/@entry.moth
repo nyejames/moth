@@ -29,4 +29,4 @@ label = Label("label")
 text = "trait"
 result = label.read_text(text)
 dispatched = run_consumer(label, text)
-[:trait-contract [result] [dispatched]]
+~[:trait-contract [result] [dispatched]]

@@ -187,7 +187,7 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "#[:entry]\n").expect("should write project entry");
+    fs::write(src.join("@entry.moth"), "[:entry]\n").expect("should write project entry");
     fs::write(package_root.join("@mod.moth"), "value #= 1\n")
         .expect("should write helper package root");
 
@@ -462,7 +462,7 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
     // Entry file imports a .js file explicitly.
     fs::write(
         src.join("@entry.moth"),
-        "-- é🦋\n@drawing.js as drawing\n#[:ok]\n",
+        "-- é🦋\n@drawing.js as drawing\n[:ok]\n",
     )
     .expect("should write entry");
 
@@ -579,7 +579,7 @@ fn explicit_moth_extension_still_reports_moth_import_0020() {
     )
     .expect("should write config");
 
-    fs::write(src.join("@entry.moth"), "@helper.moth\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@helper.moth\n[:ok]\n").expect("should write entry");
 
     fs::write(
         src.join("helper.moth"),
@@ -624,7 +624,7 @@ fn unsupported_moth_template_dependency_without_builder_support_reports_moth_imp
     )
     .expect("should write config");
 
-    fs::write(src.join("@entry.moth"), "@intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro\n[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.mtf"), "hello\n").expect("should write moth template file");
 
     let mut config = Config::new(root.clone());
@@ -664,7 +664,7 @@ fn direct_moth_template_extension_dependency_reports_moth_import_0024() {
     )
     .expect("should write config");
 
-    fs::write(src.join("@entry.moth"), "@intro.mtf\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro.mtf\n[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.mtf"), "hello\n").expect("should write moth template file");
 
     let mut config = Config::new(root.clone());
@@ -707,7 +707,7 @@ fn moth_template_files_are_reachable_without_dependency_scanning() {
     )
     .expect("should write config");
 
-    fs::write(src.join("@entry.moth"), "@intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro\n[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.mtf"), "@missing\n").expect("should write moth template file");
 
     let mut config = Config::new(root.clone());
@@ -751,7 +751,7 @@ fn unreferenced_moth_template_file_under_entry_root_is_ignored() {
     )
     .expect("should write config");
 
-    fs::write(src.join("@entry.moth"), "#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.mtf"), "hello\n").expect("should write moth template file");
 
     let mut config = Config::new(root.clone());
@@ -796,7 +796,7 @@ fn extensionless_moth_dependency_and_virtual_package_dependency_still_work() {
 
     // Normal extensionless dependencies still resolve as Moth source files, while virtual package
     // dependencies continue to stay out of Stage 0 filesystem traversal.
-    fs::write(src.join("@entry.moth"), "@helper\n@core/io line\n#[:ok]\n")
+    fs::write(src.join("@entry.moth"), "@helper\n@core/io line\n[:ok]\n")
         .expect("should write entry");
 
     fs::write(
@@ -844,7 +844,7 @@ fn indexed_module_inventory_includes_referenced_markdown_without_scanning_its_bo
     )
     .expect("should write config");
 
-    fs::write(src.join("@entry.moth"), "@intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro\n[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "@missing\n").expect("should write markdown file");
 
     let mut config = Config::new(root.clone());
@@ -890,7 +890,7 @@ fn indexed_module_inventory_excludes_unrelated_module_root_from_markdown_owner()
     )
     .expect("should write config");
 
-    fs::write(src.join("@entry.moth"), "@intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro\n[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
     fs::write(src.join("other/@mod.moth"), "$export\nx #= 1\n")
         .expect("should write other module root");
@@ -939,7 +939,7 @@ fn indexed_module_inventory_ignores_unreferenced_markdown_file() {
     )
     .expect("should write config");
 
-    fs::write(src.join("@entry.moth"), "#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
 
     let mut config = Config::new(root.clone());
@@ -983,7 +983,7 @@ fn indexed_module_inventory_rejects_direct_markdown_extension_dependency() {
     )
     .expect("should write config");
 
-    fs::write(src.join("@entry.moth"), "@intro.md\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro.md\n[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
 
     let mut config = Config::new(root.clone());
@@ -1041,7 +1041,7 @@ fn indexed_module_inventory_rejects_unsupported_markdown_dependency() {
     )
     .expect("should write config");
 
-    fs::write(src.join("@entry.moth"), "@intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro\n[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
 
     let mut config = Config::new(root.clone());

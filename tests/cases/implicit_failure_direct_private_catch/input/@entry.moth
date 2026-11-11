@@ -21,4 +21,4 @@ bound = double(2) catch |bound_err|:
     then 0 - 1
 ;
 
-[: direct private catch direct=[direct] ok=[direct_ok] helper=[via_helper] bound=[bound] code=[bound_code]]
+~[: direct private catch direct=[direct] ok=[direct_ok] helper=[via_helper] bound=[bound] code=[bound_code]]

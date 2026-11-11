@@ -4,7 +4,7 @@ positional=[$slot 1]
 default=[$slot]
 ]
 
-[wrapper, "P1":
+~[wrapper, "P1":
     [$in title: Mixed Example]
     Body Text
 ]

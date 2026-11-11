@@ -3,7 +3,7 @@
 -- Unsupported language aliases are rejected with a diagnostic that names the
 -- offending alias and the supported list.
 
-#[$md:
+[$md:
     [codeblock, $code "rustt":
         value = 42
     ]

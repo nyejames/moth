@@ -19,4 +19,4 @@ count = 4_294_967_296
 count.unsupported()
 received = take_u64(count)
 
-[:unreachable]
+~[:unreachable]

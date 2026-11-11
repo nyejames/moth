@@ -119,4 +119,4 @@ next_decimal #Dec2 = 4294967296.00
 max_is_dec Bool = max_const is max_decimal
 max_less_dec Bool = max_const < next_decimal
 
-[:uint casts int=[small_uint]/[neg_uint]/[back_int]/[big_back]/[generic_back] float=[neg_half]/[neg_one]/[truncated]/[as_float] fixed32=[f32_truncated] text=[as_text]/[parsed]/[parsed_neg_zero]/[parsed_bad] fixed=[wide]/[back_wide]/[narrowed]/[narrow_fail]/[widened] dec=[scaled]/[scaled_back]/[scaled_fraction]/[scaled_range]/[max_dec]/[max_is_dec]/[max_less_dec]]
+~[:uint casts int=[small_uint]/[neg_uint]/[back_int]/[big_back]/[generic_back] float=[neg_half]/[neg_one]/[truncated]/[as_float] fixed32=[f32_truncated] text=[as_text]/[parsed]/[parsed_neg_zero]/[parsed_bad] fixed=[wide]/[back_wide]/[narrowed]/[narrow_fail]/[widened] dec=[scaled]/[scaled_back]/[scaled_fraction]/[scaled_range]/[max_dec]/[max_is_dec]/[max_less_dec]]

@@ -4,7 +4,7 @@ render |maybe_name String?| -> String:
     ]
 ;
 
-[:
+~[:
     template_if_option_present_capture
     [render("Priya")]
 ]

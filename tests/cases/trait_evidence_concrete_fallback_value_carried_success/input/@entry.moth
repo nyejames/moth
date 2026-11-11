@@ -2,4 +2,4 @@
 @widget PublicLabel, make_label
 
 value PublicLabel = make_label("fallback")
-[:trait_evidence_concrete_fallback_value_carried_success value=[value.display()]]
+~[:trait_evidence_concrete_fallback_value_carried_success value=[value.display()]]

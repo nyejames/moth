@@ -96,7 +96,7 @@ pub(crate) fn refresh_kind_from_preparation(
 ) {
     if matches!(
         *kind,
-        TemplateType::SlotInsert(_) | TemplateType::SlotDefinition(_) | TemplateType::Comment(_)
+        TemplateType::SlotInsert(_) | TemplateType::SlotDefinition(_) | TemplateType::Comment
     ) {
         return;
     }

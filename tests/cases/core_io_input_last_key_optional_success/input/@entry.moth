@@ -16,4 +16,4 @@ read_last | | -> String, Error!:
 result = read_last() catch:
     then "error"
 ;
-[:core_io_input_last_key_optional_success [result]]
+~[:core_io_input_last_key_optional_success [result]]

@@ -8,4 +8,4 @@ bad_key | | -> String, Error!:
 result = bad_key() catch:
     then "error"
 ;
-[:result [result]]
+~[:result [result]]

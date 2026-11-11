@@ -3,7 +3,7 @@
 -- Regression: the $before value declares a named `row_style` slot, and the
 -- wrapper has an implicit child slot. The enclosing application supplies
 -- row_style; every direct child must render in a <tr> whose opening tag carries it.
-[rows:
+~[rows:
     [$in row_style:background: red;][:first]
     [:second]
 ]

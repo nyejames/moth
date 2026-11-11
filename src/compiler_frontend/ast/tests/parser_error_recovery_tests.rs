@@ -713,7 +713,7 @@ fn diagnostic_recovery_scope_boundary_const_template() {
     let source = "\
 first || -> I32:
     return missing;
-#[: [also_missing]]
+[: [also_missing]]
 ";
     let result = parse_single_file_ast_diagnostic(source);
 

@@ -23,4 +23,4 @@ starts = starts_with(greeting, "h")
 ends = ends_with(greeting, "lo")
 empty = is_empty(blank)
 
-[:len=[len] next=[next] passed=[passed] has_needle=[flag_value(has_needle)] starts=[flag_value(starts)] ends=[flag_value(ends)] empty=[flag_value(empty)] nested=[length(greeting)]]
+~[:len=[len] next=[next] passed=[passed] has_needle=[flag_value(has_needle)] starts=[flag_value(starts)] ends=[flag_value(ends)] empty=[flag_value(empty)] nested=[length(greeting)]]

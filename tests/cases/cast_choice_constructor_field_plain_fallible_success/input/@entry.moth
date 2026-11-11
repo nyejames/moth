@@ -14,4 +14,4 @@ if value is:
 
 assert(code_value is 1)
 
-[: choice constructor field plain cast: [code_value]]
+~[: choice constructor field plain cast: [code_value]]

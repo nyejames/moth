@@ -3,4 +3,4 @@ parsed #U8 = cast "255" catch:
 ;
 n #I32 = cast parsed
 
-[: parsed text: [n]]
+~[: parsed text: [n]]

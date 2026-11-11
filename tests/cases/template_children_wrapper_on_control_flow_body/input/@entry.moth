@@ -1,4 +1,4 @@
-[:template_children_wrapper_on_control_flow_body
+~[:template_children_wrapper_on_control_flow_body
     [:if:]
     [$before [:<b>], $after [:</b>], if true:
         [:A]

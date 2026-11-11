@@ -24,4 +24,4 @@ linus_score = get_score(p, "Linus")
 p2 = Person("Bo", scores)
 bo_score = get_score(p2, "Linus")
 
-[:alias_struct_param priya=[priya_score] linus=[linus_score] bo=[bo_score]]
+~[:alias_struct_param priya=[priya_score] linus=[linus_score] bo=[bo_score]]

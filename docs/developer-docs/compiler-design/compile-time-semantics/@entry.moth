@@ -2,21 +2,21 @@
 @styles navbar, section, theme_css, sidebar, init_docs_sidebar
 @diagrams css as diagrams_css
 
-#[$in title:["08. Compile-time semantics"]]
-#[$in description:["How AST-owned static work becomes concrete data and requests."]]
-#[$in head:<style>[theme_css] [diagrams_css]</style>]
+[$in title:["08. Compile-time semantics"]]
+[$in description:["How AST-owned static work becomes concrete data and requests."]]
+[$in head:<style>[theme_css] [diagrams_css]</style>]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
 
-#[section, $md:
+[section, $md:
     Folded constants, concrete generic requests, static trait evidence and explicit casts finish before HIR begins.
 ]
 
-#[section, reference_content]
+[section, reference_content]
 
-#[section, $md:
+[section, $md:
     @../ (Compiler design) / @../ast-semantics-and-types (Previous) / @../templates-and-tir (Next)
 ]
 

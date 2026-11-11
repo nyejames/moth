@@ -4,4 +4,4 @@ render_forward || -> String:
     return ""
 ;
 
-[:[render_forward()]]
+~[:[render_forward()]]

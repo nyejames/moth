@@ -67,4 +67,4 @@ absolute_value = read_absolute_not_a_number() catch |absolute_err|:
     then 0
 ;
 
-[:duration_overflow opaque=[opaque] code=[overflow_code] recovered=[recovered] nan_negative=[not_a_number_negative] nan_clamp_code=[clamped_code] nan_abs_code=[absolute_code]]
+~[:duration_overflow opaque=[opaque] code=[overflow_code] recovered=[recovered] nan_negative=[not_a_number_negative] nan_clamp_code=[clamped_code] nan_abs_code=[absolute_code]]

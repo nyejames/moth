@@ -53,4 +53,4 @@ loop 1 to 6 |number|:
     ~total = total + calculate_score(number)
 ;
 
-[:control_flow if=[if_result] nested=[nested_result] match=[match_result] sum=[sum] total=[total]]
+~[:control_flow if=[if_result] nested=[nested_result] match=[match_result] sum=[sum] total=[total]]

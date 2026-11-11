@@ -79,4 +79,4 @@ receiver_ok = ~receiver_ok_counter.bump(succeed_argument(pending)) catch then 0
 dependent_amount = 1
 custom_recovered = outer_infallible(fail_custom(), dependent_amount) catch |err| then recover_custom(err)
 
-[:scalar nested protected source=[source_recovered] source_calls=[source_counter.calls] source_ok=[source_ok] source_ok_calls=[source_ok_counter.calls] receiver=[receiver_recovered] receiver_calls=[counter.calls] receiver_ok=[receiver_ok] receiver_ok_calls=[receiver_ok_counter.calls] custom=[custom_recovered]]
+~[:scalar nested protected source=[source_recovered] source_calls=[source_counter.calls] source_ok=[source_ok] source_ok_calls=[source_ok_counter.calls] receiver=[receiver_recovered] receiver_calls=[counter.calls] receiver_ok=[receiver_ok] receiver_ok_calls=[receiver_ok_counter.calls] custom=[custom_recovered]]

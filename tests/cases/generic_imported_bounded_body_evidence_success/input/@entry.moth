@@ -3,4 +3,4 @@
 first = Box(Label(text = "a")).render()
 second = wrap(Label(text = "42"))
 third = Box(Label(text = "b")).render()
-[:[first] [second] [third]]
+~[:[first] [second] [third]]

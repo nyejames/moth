@@ -9,4 +9,4 @@ message = [:
 ]
 
 io.line([: [message]])
-[:<section>[message]</section>]
+~[:<section>[message]</section>]

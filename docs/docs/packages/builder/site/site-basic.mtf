@@ -6,7 +6,7 @@
 
     home #= site.root
     guide #= [site.url:docs/getting-started/]
-    #[:home=[home] guide=[guide]]
+    [:home=[home] guide=[guide]]
 ]
 
 Don't start the suffix with `/`. The root follows the project's configured

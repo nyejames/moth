@@ -9,4 +9,4 @@ recovered = parse_int(maybe) catch then 0
 assert(value is 7)
 assert(recovered is 0)
 
-[: cast statement boundary values [value]/[recovered]]
+~[: cast statement boundary values [value]/[recovered]]

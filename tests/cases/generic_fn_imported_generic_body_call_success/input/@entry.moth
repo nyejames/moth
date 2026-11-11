@@ -3,4 +3,4 @@
 first = same("a")
 second = render(42)
 third = render("b")
-[:[first] [second] [third]]
+~[:[first] [second] [third]]

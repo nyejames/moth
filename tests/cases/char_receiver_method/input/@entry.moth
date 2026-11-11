@@ -5,4 +5,4 @@ is_letter_a |this Char| -> Bool:
 c = 'a'
 d = 'b'
 
-[:char_receiver_method c=[c.is_letter_a()] d=[d.is_letter_a()]]
+~[:char_receiver_method c=[c.is_letter_a()] d=[d.is_letter_a()]]

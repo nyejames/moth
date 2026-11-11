@@ -10,4 +10,4 @@ render || -> String:
     return "parenthesised numeric receivers"
 ;
 
-[:[render()]]
+~[:[render()]]

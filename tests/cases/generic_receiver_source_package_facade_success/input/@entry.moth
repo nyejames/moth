@@ -2,4 +2,4 @@
 
 value = make_wrapper(42)
 
-[: [value.label()]]
+~[: [value.label()]]

@@ -7,4 +7,4 @@ if current is:
     Ready => ~label = "ready"
     Busy => ~label = "busy"
 ;
-[:choice_assignment_flow result=[label]]
+~[:choice_assignment_flow result=[label]]

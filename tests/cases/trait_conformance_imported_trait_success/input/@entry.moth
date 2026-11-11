@@ -11,4 +11,4 @@ render |this Card| -> String:
 Card must RENDERABLE
 
 card = Card("imported")
-[:trait_conformance_imported_trait_success [card.render()]]
+~[:trait_conformance_imported_trait_success [card.render()]]

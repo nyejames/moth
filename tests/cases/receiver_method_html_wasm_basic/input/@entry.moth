@@ -3,4 +3,4 @@ double |this I32| -> I32:
 ;
 
 value = 21
-[:receiver_method_html_wasm_basic result=[value.double()]]
+~[:receiver_method_html_wasm_basic result=[value.double()]]

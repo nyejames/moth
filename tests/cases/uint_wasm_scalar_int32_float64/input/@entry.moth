@@ -44,4 +44,4 @@ explicit_from_uint F64 = explicit_to_float(carry)
 fmt_carry String = cast carry
 fmt_top String = cast top
 
-[:uint wasm32 wide=[just_below]/[just_above]/[top]/[carry]/[small_diff]/[boundary_product]/[third]/[rest] compare=[above_text]/[top_text]/[neg_zero_text]/[neg_top_text]/[wide_max_text]/[top_neg_text] float=[converted_from_uint]/[explicit_from_uint] fmt=[fmt_carry]/[fmt_top]]
+~[:uint wasm32 wide=[just_below]/[just_above]/[top]/[carry]/[small_diff]/[boundary_product]/[third]/[rest] compare=[above_text]/[top_text]/[neg_zero_text]/[neg_top_text]/[wide_max_text]/[top_neg_text] float=[converted_from_uint]/[explicit_from_uint] fmt=[fmt_carry]/[fmt_top]]

@@ -13,4 +13,4 @@ display |this Label| -> String:
 Label must DISPLAY_TEXT
 
 label = Label("ok")
-[:trait_conformance_struct_success [label.display()]]
+~[:trait_conformance_struct_success [label.display()]]

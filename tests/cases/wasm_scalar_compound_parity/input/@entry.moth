@@ -37,4 +37,4 @@ i8_result = compound_i8_widen(10, -128)
 u16_result = compound_u16_widen(1, 65535)
 u64_result = compound_u64(9223372036854775808, 1)
 
-[:compound i32=[i32_result] i8-to-i32=[i8_result] u16-to-i32=[u16_result] u64-high=[u64_result]]
+~[:compound i32=[i32_result] i8-to-i32=[i8_result] u16-to-i32=[u16_result] u64-high=[u64_result]]

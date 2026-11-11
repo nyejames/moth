@@ -5,4 +5,4 @@ helper |param String| -> I32:
     return value
 ;
 
-[:[helper("moth")]]
+~[:[helper("moth")]]

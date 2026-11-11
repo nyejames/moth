@@ -2,4 +2,4 @@ read_decimal |value Dec2| -> String:
     return "decimal"
 ;
 text = [:items=[loop {1.25} |item|:[read_decimal(item)];]]
-[:[text]]
+~[:[text]]

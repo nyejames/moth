@@ -33,4 +33,4 @@ render_structs_and_collections || -> String:
     return [:structs_and_collections p1=[p1.x]-[p1.y] person=[person.name]-[person.age] p2=[p2.x]-[p2.y] lens=[empty_len]-[numbers_len]-[matrix_rows] first_name=[first_name]]
 ;
 
-[:[render_structs_and_collections()]]
+~[:[render_structs_and_collections()]]

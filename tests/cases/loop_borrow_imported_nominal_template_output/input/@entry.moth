@@ -5,4 +5,4 @@ card = Card("one")
 cards = {card}
 rendered = render_listing(cards)
 
-[:loop_borrow_imported_nominal_template_output [rendered]]
+~[:loop_borrow_imported_nominal_template_output [rendered]]

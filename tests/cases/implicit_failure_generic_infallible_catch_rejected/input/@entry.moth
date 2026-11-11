@@ -5,4 +5,4 @@ recover |value I32| -> I32:
     return identity(value) catch then 0
 ;
 
-[: eligibility]
+~[: eligibility]

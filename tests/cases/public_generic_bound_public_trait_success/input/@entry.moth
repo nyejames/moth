@@ -11,4 +11,4 @@ display |this Label| -> String:
 Label must PUBLIC_DISPLAY
 
 label = identity(Label("public"))
-[:public_generic_bound_public_trait_success [label.text]]
+~[:public_generic_bound_public_trait_success [label.text]]

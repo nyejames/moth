@@ -2,21 +2,21 @@
 @styles navbar, section, theme_css, sidebar, init_docs_sidebar
 @diagrams css as diagrams_css
 
-#[$in title:["07. AST semantics and types"]]
-#[$in description:["How parsed syntax becomes typed semantic structure."]]
-#[$in head:<style>[theme_css] [diagrams_css]</style>]
+[$in title:["07. AST semantics and types"]]
+[$in description:["How parsed syntax becomes typed semantic structure."]]
+[$in head:<style>[theme_css] [diagrams_css]</style>]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
 
-#[section, $md:
+[section, $md:
     Name resolution, type identity and receiving-boundary rules turn ordered shells into typed semantic structure.
 ]
 
-#[section, reference_content]
+[section, reference_content]
 
-#[section, $md:
+[section, $md:
     @../ (Compiler design) / @../declarations-dependencies-and-ordering (Previous) / @../compile-time-semantics (Next)
 ]
 

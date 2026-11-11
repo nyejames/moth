@@ -2,4 +2,4 @@
 
 resource_length #= text.length(@assets/value.txt)
 
-[:unreachable]
+~[:unreachable]

@@ -2,4 +2,4 @@ value = 1 + 2 catch:
     fallback_map = {1 = 2}
     then fallback_map.length
 ;
-[:value=[value]]
+~[:value=[value]]

@@ -2,7 +2,7 @@ list #= [$before [:<li class="parent-wrapper">], $after [:</li>]:
     <ul>[$slot]</ul>
 ]
 
-[list:
+~[list:
     [$fresh, if true:
         fresh child
     ]

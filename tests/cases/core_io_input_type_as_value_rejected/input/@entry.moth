@@ -1,2 +1,2 @@
 value = io.input.Input
-[:value [value]]
+~[:value [value]]

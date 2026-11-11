@@ -6,4 +6,4 @@ hide_byte_option_equality ||:
     present Byte? = raw
     present_equal = present is raw
 ;
-[:Byte option equality succeeds]
+~[:Byte option equality succeeds]

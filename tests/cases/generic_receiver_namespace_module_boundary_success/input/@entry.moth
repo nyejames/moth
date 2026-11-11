@@ -2,4 +2,4 @@
 
 value = provider.make_box(42)
 
-[: [value.label()]]
+~[: [value.label()]]

@@ -6,4 +6,4 @@ accept type T |route Route of T -> Message| -> String:
     return "route generic"
 ;
 
-[:route-input-only-generic accepted]
+~[:route-input-only-generic accepted]

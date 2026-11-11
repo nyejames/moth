@@ -5,4 +5,4 @@ identity_update || -> I32:
     return value
 ;
 
-[: mutable local self update result=[identity_update()]]
+~[: mutable local self update result=[identity_update()]]

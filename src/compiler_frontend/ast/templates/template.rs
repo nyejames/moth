@@ -68,14 +68,6 @@ impl SlotDeclaration {
 //  Directive Kinds
 // -------------------------
 
-/// Category of comment directive within a template.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CommentDirectiveKind {
-    Note,
-    Todo,
-    Doc,
-}
-
 /// High-level classification of a template node.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TemplateType {
@@ -94,17 +86,8 @@ pub enum TemplateType {
     /// immediate parent template can consume during slot composition.
     SlotInsert(SlotKey),
 
-    /// A comment or documentation directive.
-    Comment(CommentDirectiveKind),
-}
-
-/// Classifies the context in which a template is being parsed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TemplateParsingMode {
-    /// Standard template parsing.
-    Standard,
-    /// Parsing inside a documentation comment (`$doc`), which has stricter constant requirements.
-    DocComment,
+    /// A `$note` comment whose balanced body is discarded without output.
+    Comment,
 }
 
 /// Classifies how "constant" a template value is during AST evaluation.

@@ -17,7 +17,6 @@ pub(crate) mod dependency_target;
 mod file_dependency_clauses;
 mod file_parser;
 mod file_state;
-mod hash_items;
 mod header_dispatch;
 pub(crate) mod module_symbols;
 pub(crate) mod moth_template_prepare;

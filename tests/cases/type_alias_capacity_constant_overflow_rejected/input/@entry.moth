@@ -5,4 +5,4 @@ MoreNames as Names
 
 names MoreNames = {"a", "b", "c"}
 
-[: [names.length()]]
+~[: [names.length()]]

@@ -20,4 +20,4 @@ updated = scores.get("Linus") catch:
     then ""
 ;
 -- The independent copy remains usable after the map is mutated.
-[:[part_before] copy=[snapshot] updated=[updated] length_after=[length_after]]
+~[:[part_before] copy=[snapshot] updated=[updated] length_after=[length_after]]

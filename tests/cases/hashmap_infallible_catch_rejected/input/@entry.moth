@@ -2,4 +2,4 @@ scores ~{String = I32} = {"Priya" = 10}
 has_priya = scores.contains("Priya") catch:
     then false
 ;
-[:test]
+~[:test]

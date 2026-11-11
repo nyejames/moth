@@ -42,4 +42,4 @@ text_f32 String = cast result_f32
 result_f64 F64 = negate_f64(3) catch then 0
 text_f64 String = cast result_f64
 
-[:exact unary I8=[text_i8] I16=[text_i16] I32=[text_i32] I64=[text_i64] F16=[text_f16] F32=[text_f32] F64=[text_f64]]
+~[:exact unary I8=[text_i8] I16=[text_i16] I32=[text_i32] I64=[text_i64] F16=[text_f16] F32=[text_f32] F64=[text_f64]]

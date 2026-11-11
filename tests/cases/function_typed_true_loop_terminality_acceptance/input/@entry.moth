@@ -33,4 +33,4 @@ choose |ready Bool| -> I32:
     return value
 ;
 
-[:function_typed_true_loop_terminality_acceptance [choose(true)]]
+~[:function_typed_true_loop_terminality_acceptance [choose(true)]]

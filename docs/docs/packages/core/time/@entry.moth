@@ -8,14 +8,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Core time"]]
-#[$in description:["Duration, TimeMark and Timestamp helpers in @core/time."]]
-#[$in head:[language_theme_head]]
+[$in title:["Core time"]]
+[$in description:["Duration, TimeMark and Timestamp helpers in @core/time."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Core time
 
     `@core/time` separates monotonic elapsed time from UTC wall-clock time. Many
@@ -23,7 +23,7 @@ init_docs_sidebar()!
     clock changes. Moth gives each domain an opaque type.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:time-helpers]
         [$in title:Time helpers]
@@ -33,7 +33,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../random/]
         [$in previous_title:Core random]

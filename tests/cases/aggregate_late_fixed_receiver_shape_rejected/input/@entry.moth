@@ -8,4 +8,4 @@ read_fixed |items {2 U64}| -> String:
 values = {1, 2}
 message = read_fixed(values)
 
-[:unreachable]
+~[:unreachable]

@@ -122,4 +122,4 @@ rebound_result = rebound(4294967295) catch |rebound_error|:
 left_calls ~I32 = 0
 once_sum = u8_sum(record_once(~left_calls, 200), 55)
 
-[:bounded recovery codes=[pinned_code]/[rebound_code]/[mutation_code]/[order_code]/[zero_code]/[narrow_fail_code]/[double_overflow_code] results=[pinned_result]/[rebound_result]/[mutation_result]/[order_result]/[zero_result]/[narrow_rejected]/[double_rejected] holder=[holder] narrow-ok=[narrow_ok] round-trip=[round_trip] double=[double_small] once=[once_sum]/[left_calls]]
+~[:bounded recovery codes=[pinned_code]/[rebound_code]/[mutation_code]/[order_code]/[zero_code]/[narrow_fail_code]/[double_overflow_code] results=[pinned_result]/[rebound_result]/[mutation_result]/[order_result]/[zero_result]/[narrow_rejected]/[double_rejected] holder=[holder] narrow-ok=[narrow_ok] round-trip=[round_trip] double=[double_small] once=[once_sum]/[left_calls]]

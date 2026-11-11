@@ -962,10 +962,8 @@ pub enum TemplateHeadConflictReason {
     MultipleFormatters,
     /// A directive may appear at most once in one head.
     DuplicateExclusiveDirective,
-    /// `$note` and `$todo` discard their body, so nothing else may be rendered in the head.
+    /// `$note` discards its body, so nothing else may be rendered in the head.
     DiscardedCommentDirectiveMustBeOnlyMeaningfulItem,
-    /// `$doc` marks the template as documentation, so nothing else may be rendered in the head.
-    DocumentationDirectiveMustBeOnlyMeaningfulItem,
     /// A slot declaration must be the only meaningful item in its template head.
     SlotDirectiveMustBeExclusive,
 }
@@ -1058,7 +1056,6 @@ pub enum InvalidTemplateStructureReason {
     NestedTemplateNotAllowed,
     HelperInConstTemplate,
     NonFoldableConstTemplate,
-    NonFoldableDocComment,
     FallibleValueInTemplateHead,
     UnsupportedTypeInTemplateHead {
         type_id: TypeId,

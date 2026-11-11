@@ -53,4 +53,4 @@ nominal = Packet(Duo(4294967303, 9))
 floating_text = read_u64(nominal.value.floating)
 whole_text = read_u64(nominal.value.whole)
 
-[:generic_constructed_numeric_retention_runtime packet=[packet_text] tagged=[tagged_text] label=[label_text] box=[box_text] choice=[outcome_text] nested=[nested_text] map=[map_text] floating=[floating_text] whole=[whole_text]]
+~[:generic_constructed_numeric_retention_runtime packet=[packet_text] tagged=[tagged_text] label=[label_text] box=[box_text] choice=[outcome_text] nested=[nested_text] map=[map_text] floating=[floating_text] whole=[whole_text]]

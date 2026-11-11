@@ -7,4 +7,4 @@ unused_generic_runtime || -> String:
     return box.value
 ;
 
-[: html wasm skips unreachable generic runtime value]
+~[: html wasm skips unreachable generic runtime value]

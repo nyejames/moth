@@ -13,4 +13,4 @@ float_result = divide_float(10.0, 0.0) catch:
     then -8.5
 ;
 
-[: numeric failure recovered int=[int_result] float=[float_result]]
+~[: numeric failure recovered int=[int_result] float=[float_result]]

@@ -7,12 +7,17 @@ use crate::compiler_frontend::ast::templates::template::Formatter;
 use crate::compiler_frontend::style_directives::compatibility::TemplateHeadCompatibility;
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 
-/// The core `$doc` directive name.
+/// The `$doc` source directive name.
 ///
-/// A `$doc` body suppresses child templates, so header-stage token scans must recognise this
-/// name to treat its brackets as literal text. Both the directive registry and those scans read
-/// the name from here so they cannot drift apart.
+/// Both the registry and AST metadata owners read the name from here so recognition and
+/// diagnostic wording cannot drift apart.
 pub(crate) const DOC_DIRECTIVE_NAME: &str = "doc";
+
+/// The `$todo` source directive name.
+///
+/// Both the registry and AST validation owners read the name from here so recognition and
+/// diagnostic wording cannot drift apart.
+pub(crate) const TODO_DIRECTIVE_NAME: &str = "todo";
 
 /// The core `$slot` directive name.
 ///
@@ -99,6 +104,46 @@ pub enum SourceModifierTarget {
     ExplicitTypedCompileTimeBinding,
     /// One authored public declaration or direct-selection dependency clause.
     ExportablePublicApiItem,
+    /// One following declaration, including an eligible local declaration.
+    DeclarationDocumentation,
+    /// One following declaration or complete executable statement.
+    DeclarationOrStatementTodo,
+}
+
+/// Semantic role of one recognised source directive.
+///
+/// WHAT: separates the retained syntax kind from its target contract.
+/// WHY: attachment handles every directive in one run, then each kind applies its own meaning
+/// without re-resolving names or branching on spelling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SourceDirectiveKind {
+    Config,
+    Export,
+    Doc,
+    Todo,
+}
+
+impl SourceModifierTarget {
+    pub(crate) fn directive_kind(self) -> SourceDirectiveKind {
+        match self {
+            Self::ExplicitTypedCompileTimeBinding => SourceDirectiveKind::Config,
+            Self::ExportablePublicApiItem => SourceDirectiveKind::Export,
+            Self::DeclarationDocumentation => SourceDirectiveKind::Doc,
+            Self::DeclarationOrStatementTodo => SourceDirectiveKind::Todo,
+        }
+    }
+}
+
+/// Operand shape a source directive requires after its name.
+///
+/// WHAT: `None` accepts no operand; `RequiredSingleString` requires exactly one compile-time
+///       String expression whose tokens the AST owner parses and folds.
+/// WHY: the header and statement attachment owners read one contract per directive instead of
+///      hard-coding operand acceptance by directive name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceModifierOperand {
+    None,
+    RequiredSingleString,
 }
 
 /// Core language directive behavior handled directly by compiler-owned template parsing.
@@ -110,8 +155,6 @@ pub enum CoreStyleDirectiveKind {
     Slot,
     In,
     Note,
-    Todo,
-    Doc,
     Raw,
 }
 
@@ -183,8 +226,11 @@ impl StyleDirectiveHandlerSpec {
 pub enum StyleDirectiveKind {
     Core(CoreStyleDirectiveKind),
     Handler(StyleDirectiveHandlerSpec),
-    /// A source-only modifier whose eligible target the spec states.
-    SourceModifier(SourceModifierTarget),
+    /// A source-only directive whose eligible target and operand shape the spec states.
+    SourceModifier {
+        target: SourceModifierTarget,
+        operand: SourceModifierOperand,
+    },
 }
 
 /// Frontend-owned contract for one style directive.
@@ -237,14 +283,18 @@ impl StyleDirectiveSpec {
         }
     }
 
-    /// Internal helper for source-modifier directives.
-    pub(crate) fn source_modifier(name: &str, target: SourceModifierTarget) -> Self {
+    /// Internal helper for source-directive names.
+    pub(crate) fn source_modifier(
+        name: &str,
+        target: SourceModifierTarget,
+        operand: SourceModifierOperand,
+    ) -> Self {
         Self {
             name: name.to_string(),
             body_mode: TemplateBodyMode::Normal,
             head_compatibility: TemplateHeadCompatibility::default(),
             contexts: StyleDirectiveContexts::SOURCE_MODIFIER,
-            kind: StyleDirectiveKind::SourceModifier(target),
+            kind: StyleDirectiveKind::SourceModifier { target, operand },
         }
     }
 }

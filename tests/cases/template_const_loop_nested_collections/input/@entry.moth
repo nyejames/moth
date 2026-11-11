@@ -1,4 +1,4 @@
-#[loop {{"red", "green"}, {}, {"blue"}} |row|:
+[loop {{"red", "green"}, {}, {"blue"}} |row|:
     [loop row |color|:
         [color];
     ]

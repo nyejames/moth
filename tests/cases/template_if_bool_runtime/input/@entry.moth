@@ -4,7 +4,7 @@ render |show_details Bool| -> String:
     ]
 ;
 
-[:
+~[:
     template_if_bool_runtime
     [render(true)]
     [render(false)]

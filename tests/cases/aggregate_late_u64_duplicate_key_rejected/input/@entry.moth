@@ -9,4 +9,4 @@ render_duplicate_late_u64_key || -> I32:
     return read_scores(scores)
 ;
 
-[:[render_duplicate_late_u64_key()]]
+~[:[render_duplicate_late_u64_key()]]

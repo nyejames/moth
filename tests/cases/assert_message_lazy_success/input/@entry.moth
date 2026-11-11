@@ -14,4 +14,4 @@ assert(
     make_condition(),
     make_message()
 )
-[:assert_message_lazy_success]
+~[:assert_message_lazy_success]

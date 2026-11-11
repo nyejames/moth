@@ -37,4 +37,4 @@ wrapped_empty = [probe:[if flag(true):[shell_empty:[if flag(false):hidden]]]]
 runtime_rows = [rows:[:[identity("first")]][:[identity("second")]]]
 runtime_rows_empty = [rows:[$in row_style:[empty_style]][:[identity("first")]]]
 
-[:plain=[plain]|filled=[filled]|emptied=[emptied]|conditional=[conditional]|whitespace=[conditional_whitespace]|empty=[wrapped_empty]|rows=[runtime_rows]|rows_empty=[runtime_rows_empty]]
+~[:plain=[plain]|filled=[filled]|emptied=[emptied]|conditional=[conditional]|whitespace=[conditional_whitespace]|empty=[wrapped_empty]|rows=[runtime_rows]|rows_empty=[runtime_rows_empty]]

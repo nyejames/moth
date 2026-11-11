@@ -4,4 +4,4 @@ scale_zero_boundary || -> Dec0:
     return integral
 ;
 
-[: scale-zero fractional Dec literal rejected]
+~[: scale-zero fractional Dec literal rejected]

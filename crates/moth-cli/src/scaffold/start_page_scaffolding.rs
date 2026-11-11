@@ -26,7 +26,7 @@ html #= ()
 
 /// Return the exact starter content for the root-level `@entry.moth`.
 pub fn page_template() -> &'static str {
-    r#"#[$in title:Welcome]
+    r#"[$in title:Welcome]
 starter_head #= [$html:
     <style>
         [$css:
@@ -37,7 +37,7 @@ starter_head #= [$html:
         ]
     </style>
 ]
-#[$in head:[starter_head]]
+[$in head:[starter_head]]
 
 [$md:
     # Welcome to Moth

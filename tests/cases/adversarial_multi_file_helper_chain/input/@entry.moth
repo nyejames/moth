@@ -3,4 +3,4 @@
 message = compose("hello", 1)
 alternate = compose("world", 2)
 recovered = compose("again", -1)
-[:[message]|[alternate]|[recovered]]
+~[:[message]|[alternate]|[recovered]]

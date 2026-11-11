@@ -4,4 +4,4 @@ wrap type T |value T| -> String:
     return make_box().render()
 ;
 
-[:receiver_value_carried_generic_method_named_bound_success result=[wrap(1)]]
+~[:receiver_value_carried_generic_method_named_bound_success result=[wrap(1)]]

@@ -23,4 +23,4 @@ assert(single > double)
 assert(selected is origin)
 half_marker = if half is identity_f16(1.0009765625) then "true" else "false"
 precision_marker = if single > double then "true" else "false"
-[:types i8=[small] u32=[unsigned] u64=[selected] half=[half_marker] precision=[precision_marker]]
+~[:types i8=[small] u32=[unsigned] u64=[selected] half=[half_marker] precision=[precision_marker]]

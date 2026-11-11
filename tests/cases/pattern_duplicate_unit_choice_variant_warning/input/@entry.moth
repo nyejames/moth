@@ -10,4 +10,4 @@ if current is:
     Offline => ~result = "offline"
 ;
 
-[:pattern_duplicate_unit_choice_variant_warning result=[result]]
+~[:pattern_duplicate_unit_choice_variant_warning result=[result]]

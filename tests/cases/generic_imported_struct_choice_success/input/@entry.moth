@@ -8,4 +8,4 @@ result ResultShape of String, Error = ResultShape::Ok("world")
 
 io.line([: [str_box.value]])
 
-[: generic imported success]
+~[: generic imported success]

@@ -18,4 +18,4 @@ incremented = increment(~numeric_value)
 message = "hello"
 echoed = echo_text(message)
 
-[:borrow_checker_function_calls incremented=[incremented] echoed=[echoed] message=[message]]
+~[:borrow_checker_function_calls incremented=[incremented] echoed=[echoed] message=[message]]

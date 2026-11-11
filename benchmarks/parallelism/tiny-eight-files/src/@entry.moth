@@ -6,7 +6,7 @@
 @parts/f label_f
 @parts/g label_g
 
-[:
+~[:
     <ol>
         <li>[label_a]</li>
         <li>[label_b]</li>

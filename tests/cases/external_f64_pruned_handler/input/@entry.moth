@@ -17,4 +17,4 @@ compare || -> Bool:
 
 comparison = compare()
 assert(comparison is true)
-[: pruned external float]
+~[: pruned external float]

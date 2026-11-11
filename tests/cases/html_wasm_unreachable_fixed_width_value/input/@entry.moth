@@ -6,4 +6,4 @@ hidden_octet |flag Byte| -> {Byte}:
     return {flag}
 ;
 
-[:html wasm skips unreachable fixed width values]
+~[:html wasm skips unreachable fixed width values]

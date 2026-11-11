@@ -2,7 +2,7 @@ list #= [$before [:<li class="skipped-child">], $after [:</li>]:
     <ul>[$slot]</ul>
 ]
 
-[list:
+~[list:
     [if false:
         hidden child
     ]

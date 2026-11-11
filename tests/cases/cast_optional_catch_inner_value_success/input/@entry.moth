@@ -9,4 +9,4 @@ maybe I32? = parse_optional("not a number")
 assert(maybe is 42)
 
 text = if maybe is |value| then value else -1
-[: optional cast catch: [text]]
+~[: optional cast catch: [text]]

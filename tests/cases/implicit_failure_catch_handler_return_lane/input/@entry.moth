@@ -25,4 +25,4 @@ failed = safe_bump(2) catch |fail_err|:
     then 0 - 1
 ;
 
-[: handler return recovered=[recovered] exact=[exact] failed=[failed] code=[fail_code]]
+~[: handler return recovered=[recovered] exact=[exact] failed=[failed] code=[fail_code]]

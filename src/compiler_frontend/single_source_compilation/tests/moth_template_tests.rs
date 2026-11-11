@@ -167,7 +167,7 @@ fn direct_template_tail_finalizes_extended_diagnostic_spans() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let directory = tempfile::tempdir().expect("the direct template directory should exist");
     let source_path = directory.path().join("wide.mtf");
-    let source_code = format!("{}\n[:[3_000_000_000]]", " ".repeat(4 * 1024 * 1024 + 1));
+    let source_code = format!("{}\n~[:[3_000_000_000]]", " ".repeat(4 * 1024 * 1024 + 1));
     fs::write(&source_path, &source_code).expect("the direct template should be written");
 
     let mut string_table = StringTable::new();
@@ -249,7 +249,7 @@ fn direct_template_tail_finalizes_extended_diagnostic_spans() {
         "the direct service tail should retain the exact diagnostic span"
     );
     let rendered = render_compilation_result_html(&failure, directory.path());
-    assert!(rendered.contains(r#"<span class="source-line">[:[3_000_000_000]]</span>"#));
+    assert!(rendered.contains(r#"<span class="source-line">~[:[3_000_000_000]]</span>"#));
     assert!(!rendered.contains("mutated direct template"));
 }
 

@@ -5,7 +5,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 fn multi_file_parsing_aggregates_headers_const_fragments_and_runtime_count() {
     let sources = vec![
         (
-            "[runtime1]\n#[const1]\n[runtime2]\n".to_owned(),
+            "~[runtime1]\n[const1]\n~[runtime2]\n".to_owned(),
             "src/@entry.moth".to_owned(),
         ),
         (
@@ -169,11 +169,11 @@ fn per_file_fork_merge_remaps_non_identity_strings_across_multiple_files() {
     // that local ID past the first file's generated string in the module table.
     let sources = [
         (
-            "Foo #= \"a\"\n#[public_surface_fragment]\n".to_owned(),
+            "Foo #= \"a\"\n[public_surface_fragment]\n".to_owned(),
             "src/helper_a.moth".to_owned(),
         ),
         (
-            "Bar #= \"b\"\n#[const_fragment]\n".to_owned(),
+            "Bar #= \"b\"\n[const_fragment]\n".to_owned(),
             "src/helper.moth".to_owned(),
         ),
     ];
@@ -602,7 +602,7 @@ fn api_only_active_roots_reject_every_root_activity_form() {
         ModuleRootRole::Support,
         ModuleRootRole::SyntheticProjectContext,
     ] {
-        for source in ["value = 1\n", "[3]\n", "#[3]\n"] {
+        for source in ["value = 1\n", "[3]\n", "~[3]\n"] {
             let mut string_table = StringTable::new();
             let mut path_fork = PathInternerFork::empty();
             let file_path = PathBuf::from("src/styles/@package.moth");

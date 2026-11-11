@@ -33,4 +33,4 @@ flipped_text #String = cast flipped
 raw #Byte = 200
 raw_ordered #= raw > 100
 
-[: folded: [sum_text] [mixed_text] [half_text] [truncated_text] [remainder_text] [ordered] [float_sum_text] [flipped_text] [raw_ordered]]
+~[: folded: [sum_text] [mixed_text] [half_text] [truncated_text] [remainder_text] [ordered] [float_sum_text] [flipped_text] [raw_ordered]]

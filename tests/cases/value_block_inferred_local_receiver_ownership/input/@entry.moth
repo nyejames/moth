@@ -171,7 +171,7 @@ too_large = validated(101) catch |size_err|:
     then Summary(size_err.message, Role::Scout, 0)
 ;
 
-[:low=[low.label]/[role_name(low.role)]/[low.size]
+~[:low=[low.label]/[role_name(low.role)]/[low.size]
 middle=[middle.label]/[role_name(middle.role)]/[middle.size]
 high=[high.label]/[role_name(high.role)]/[high.size]
 checked=[negative.label]/[small_checked.label]

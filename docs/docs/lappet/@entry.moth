@@ -1,14 +1,14 @@
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 @lappet content as lappet_content
 
-#[$in title:["Lappet"]]
-#[$in description:["Moth's planned native runtime, Rust embedding and package infrastructure."]]
-#[$in head:[theme_head]]
+[$in title:["Lappet"]]
+[$in description:["Moth's planned native runtime, Rust embedding and package infrastructure."]]
+[$in head:[theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Lappet
 
     Use an official native environment or embed Moth in a Rust application.
@@ -16,4 +16,4 @@ init_docs_sidebar()!
     application-facing tooling staying behind the Moth CLI.
 ]
 
-#[section, lappet_content]
+[section, lappet_content]

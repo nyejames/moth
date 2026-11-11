@@ -44,4 +44,4 @@ missing_text U32 = if maybe_missing is |value| then value else 0
 present_text U32 = if maybe_present is |value| then value else 0
 chosen_count U32 = if chosen is Choice::Count(value) then value else 0
 
-[:uint transport small=[small] separated=[separated] zero=[zero] missing=[missing_text] present=[present_text] point=[origin.x]/[origin.y] choice=[chosen_count] first=[picked] alias=[aliased] boxed=[boxed.value] kept=[kept] shared=[shared_count]]
+~[:uint transport small=[small] separated=[separated] zero=[zero] missing=[missing_text] present=[present_text] point=[origin.x]/[origin.y] choice=[chosen_count] first=[picked] alias=[aliased] boxed=[boxed.value] kept=[kept] shared=[shared_count]]

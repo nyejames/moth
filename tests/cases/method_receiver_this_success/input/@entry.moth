@@ -11,4 +11,4 @@ reset |this ~Vector2|:
 vec ~= Vector2(12.0, 87.0)
 ~vec.reset()
 
-[: method_receiver_this_success x=[vec.x] y=[vec.y]]
+~[: method_receiver_this_success x=[vec.x] y=[vec.y]]

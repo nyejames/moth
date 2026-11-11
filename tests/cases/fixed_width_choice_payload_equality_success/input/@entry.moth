@@ -8,4 +8,4 @@ hide_choice_equality ||:
     right Status = Status::Value(7)
     equal = left is right
 ;
-[:fixed-width choice payload equality succeeds]
+~[:fixed-width choice payload equality succeeds]

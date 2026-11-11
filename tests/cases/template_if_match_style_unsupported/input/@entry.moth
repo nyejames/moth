@@ -1,5 +1,5 @@
 show = true
 
-[if show is:
+~[if show is:
     unreachable
 ]

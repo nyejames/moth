@@ -54,14 +54,14 @@ the compiler has already validated the destination against the builder's
 registered set and preserved the structural value and authored span. A nested
 or aliased insert never appears as a named destination.
 
-A bare direct top-level `[...]` template is const-required and already folded when it reaches assembly. An explicit `~[...]` remains a runtime entry fragment, even if its content is compile-time foldable. Only the executable entry-root direct form has this requirement. Ordinary expression and nested templates use their normal const/runtime semantics. It may still
+A bare direct top-level [$html:<code>&#91;...&#93;</code>] template is const-required and already folded when it reaches assembly. An explicit [$html:<code>~&#91;...&#93;</code>] remains a runtime entry fragment, even if its content is compile-time foldable. Only the executable entry-root direct form has this requirement. Ordinary expression and nested templates use their normal const/runtime semantics. It may still
 contain structural resource or site-root pieces whose final characters depend
 on output placement. Use the context's structural-string rendering service to
 resolve those pieces. Plain-text extraction is valid only when every piece has
 concrete characters.
 
 A runtime template is executable Moth code that produces a string. It isn't a
-second build-time template evaluator. Explicit `~[...]` runtime top-level templates contribute to
+second build-time template evaluator. Explicit [$html:<code>~&#91;...&#93;</code>] runtime top-level templates contribute to
 the normal entry's fragment result collection. Compiler-owned `$doc` metadata
 attaches to declaration identities, while `$todo` has no output and `$note`
 discards a comment template. None becomes a body fragment or builder slot.

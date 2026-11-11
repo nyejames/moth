@@ -6,4 +6,4 @@ value #I32 = cast "bad" catch:
     ;
 ;
 
-[: [value]]
+~[: [value]]

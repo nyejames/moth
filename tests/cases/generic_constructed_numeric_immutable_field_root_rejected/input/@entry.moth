@@ -11,4 +11,4 @@ packet = Packet(1)
 ~packet.value = 4294967301
 packet_text = read_u64(packet.value)
 
-[:generic_constructed_numeric_immutable_field_root_rejected [packet_text]]
+~[:generic_constructed_numeric_immutable_field_root_rejected [packet_text]]

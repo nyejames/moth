@@ -3,4 +3,4 @@ maybe I32? = cast "42" catch:
 ;
 
 text = if maybe is |value| then value else -1
-[: optional cast catch none: [text]]
+~[: optional cast catch none: [text]]

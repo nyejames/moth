@@ -11,4 +11,4 @@ number, label = pair(50000, 50000) catch |multi_err|:
 multi_report = copy multi_info
 exact_number, exact_label = pair(6, 7)
 
-[: number=[number] label=[label] report=[multi_report] exact=[exact_number] elabel=[exact_label]]
+~[: number=[number] label=[label] report=[multi_report] exact=[exact_number] elabel=[exact_label]]

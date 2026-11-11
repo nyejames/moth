@@ -4,15 +4,15 @@
 @assemblies-and-runtime content as assembly_content
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-#[$in title:["Create a project builder in Rust"]]
-#[$in description:["Define Moth builder capabilities, expose checked Rust host packages and assemble validated application output."]]
-#[$in head:[theme_head]]
+[$in title:["Create a project builder in Rust"]]
+[$in description:["Define Moth builder capabilities, expose checked Rust host packages and assemble validated application output."]]
+[$in head:[theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
 
-#[section, $md:
+[section, $md:
     # Create a project builder in Rust
 
     A project builder connects Moth to an application environment. This guide
@@ -31,7 +31,7 @@ init_docs_sidebar()!
     for their source and lifetime contracts.
 ]
 
-#[section, builder_content]
-#[section, host_content]
-#[section, capability_content]
-#[section, assembly_content]
+[section, builder_content]
+[section, host_content]
+[section, capability_content]
+[section, assembly_content]

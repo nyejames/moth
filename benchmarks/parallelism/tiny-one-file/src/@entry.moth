@@ -1,7 +1,7 @@
 page_title #= "Tiny one file"
-#[$in title:[page_title]]
+[$in title:[page_title]]
 
-[:
+~[:
     <main>
         <h1>[page_title]</h1>
         <p>Single file frontend scheduling baseline.</p>

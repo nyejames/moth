@@ -4,4 +4,4 @@ scores ~{String = I32} = {key = 10}
 stored = scores.get(key) catch:
     then 0
 ;
-[:map_literal_stored_non_copy_key_later_use key=[key] stored=[stored]]
+~[:map_literal_stored_non_copy_key_later_use key=[key] stored=[stored]]

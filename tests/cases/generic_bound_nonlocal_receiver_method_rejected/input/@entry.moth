@@ -8,4 +8,4 @@ display |this Label| -> String:
 
 Label must DISPLAY_TEXT
 
-[:generic_bound_nonlocal_receiver_method_rejected [render(Label("local"))]]
+~[:generic_bound_nonlocal_receiver_method_rejected [render(Label("local"))]]

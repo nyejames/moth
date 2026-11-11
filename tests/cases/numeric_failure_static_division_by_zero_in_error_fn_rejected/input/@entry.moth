@@ -5,4 +5,4 @@ divide || -> I32, Error!:
 recovered = divide() catch:
     then 0
 ;
-[: [recovered]]
+~[: [recovered]]

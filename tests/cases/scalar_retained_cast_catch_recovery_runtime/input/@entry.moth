@@ -78,5 +78,5 @@ assert(mutable_failure_handler is 206)
 assert(failure_group is 207)
 assert(mutable_failure_group is 208)
 
-[:retained cast success inline=[immutable_inline]/[mutable_inline] block=[immutable_block]/[mutable_block] handler=[immutable_handler]/[mutable_handler] group=[immutable_group]/[mutable_group] collection=[loop immutable_collection |immutable_item|:[immutable_item];]/[loop mutable_collection |mutable_item|:[mutable_item];]]
-[:retained cast failure inline=[failure_inline]/[mutable_failure_inline] block=[failure_block]/[mutable_failure_block] handler=[failure_handler]/[mutable_failure_handler] group=[failure_group]/[mutable_failure_group] collection=[loop failure_collection |failure_item|:[failure_item];]/[loop mutable_failure_collection |mutable_failure_item|:[mutable_failure_item];]]
+~[:retained cast success inline=[immutable_inline]/[mutable_inline] block=[immutable_block]/[mutable_block] handler=[immutable_handler]/[mutable_handler] group=[immutable_group]/[mutable_group] collection=[loop immutable_collection |immutable_item|:[immutable_item];]/[loop mutable_collection |mutable_item|:[mutable_item];]]
+~[:retained cast failure inline=[failure_inline]/[mutable_failure_inline] block=[failure_block]/[mutable_failure_block] handler=[failure_handler]/[mutable_failure_handler] group=[failure_group]/[mutable_failure_group] collection=[loop failure_collection |failure_item|:[failure_item];]/[loop mutable_failure_collection |mutable_failure_item|:[mutable_failure_item];]]

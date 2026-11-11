@@ -35,4 +35,4 @@ absent = read_absent() catch then none
 present_text = if present is |found| then receive_u64(found) else "none"
 absent_text = if absent is |found| then receive_u64(found) else "none"
 
-[:aggregate optional present=[present_text] absent=[absent_text]]
+~[:aggregate optional present=[present_text] absent=[absent_text]]

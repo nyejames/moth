@@ -23,4 +23,4 @@ counter ~I32 = 5
 snapshot F32 = cast counter
 ~counter = 7
 
-[:coerced small=[small]/[small_explicit]/[folded_eq]/[dynamic_eq]/[explicit_eq] snapshot=[snapshot]/[counter]]
+~[:coerced small=[small]/[small_explicit]/[folded_eq]/[dynamic_eq]/[explicit_eq] snapshot=[snapshot]/[counter]]

@@ -5,4 +5,4 @@ Response type Ok, Err ::
 response = Response::Done(error = "bad", value = 42)
 same Response of I32, String = response
 
-[: named choice generic inference]
+~[: named choice generic inference]

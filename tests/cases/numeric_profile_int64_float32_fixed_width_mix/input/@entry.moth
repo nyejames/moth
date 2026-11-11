@@ -15,4 +15,4 @@ wide_float F64 = cast profile_float
 round_trip_text String = cast round_trip_integer
 wide_float_text String = cast wide_float
 
-[:profile fixed carrier mix narrowed=[narrowed] error=[narrow_code] i64=[round_trip_text] float64=[wide_float_text]]
+~[:profile fixed carrier mix narrowed=[narrowed] error=[narrow_code] i64=[round_trip_text] float64=[wide_float_text]]

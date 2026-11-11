@@ -22,4 +22,4 @@ count NamedCount = Pair("items", 4)
 io.line([: [raw_text.value]])
 io.line([: [count.left]])
 
-[: concrete generic alias]
+~[: concrete generic alias]

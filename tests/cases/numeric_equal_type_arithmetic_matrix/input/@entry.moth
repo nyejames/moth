@@ -258,4 +258,4 @@ f64_f64_folded #= [:[f64_f64_add]/[f64_f64_subtract]/[f64_f64_multiply]/[f64_f64
 f64_f64_runtime = check_f64_f64(2, 2)
 f64_f64_matches = f64_f64_runtime is f64_f64_folded
 
-[:i8_i8=[i8_i8_runtime]/[i8_i8_matches] i16_i16=[i16_i16_runtime]/[i16_i16_matches] i32_i32=[i32_i32_runtime]/[i32_i32_matches] i64_i64=[i64_i64_runtime]/[i64_i64_matches] u8_u8=[u8_u8_runtime]/[u8_u8_matches] u16_u16=[u16_u16_runtime]/[u16_u16_matches] u32_u32=[u32_u32_runtime]/[u32_u32_matches] u64_u64=[u64_u64_runtime]/[u64_u64_matches] f16_f16=[f16_f16_runtime]/[f16_f16_matches] f32_f32=[f32_f32_runtime]/[f32_f32_matches] f64_f64=[f64_f64_runtime]/[f64_f64_matches]]
+~[:i8_i8=[i8_i8_runtime]/[i8_i8_matches] i16_i16=[i16_i16_runtime]/[i16_i16_matches] i32_i32=[i32_i32_runtime]/[i32_i32_matches] i64_i64=[i64_i64_runtime]/[i64_i64_matches] u8_u8=[u8_u8_runtime]/[u8_u8_matches] u16_u16=[u16_u16_runtime]/[u16_u16_matches] u32_u32=[u32_u32_runtime]/[u32_u32_matches] u64_u64=[u64_u64_runtime]/[u64_u64_matches] f16_f16=[f16_f16_runtime]/[f16_f16_matches] f32_f32=[f32_f32_runtime]/[f32_f32_matches] f64_f64=[f64_f64_runtime]/[f64_f64_matches]]

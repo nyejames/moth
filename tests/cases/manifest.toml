@@ -7281,8 +7281,8 @@ contract = "language.templates.unclosed_delimiter_rejected"
 role = "boundary"
 
 [[case]]
-id = "template_unclosed_doc_body_rejected"
-path = "template_unclosed_doc_body_rejected"
+id = "template_unclosed_note_body_rejected"
+path = "template_unclosed_note_body_rejected"
 tags = ["integration","templates","diagnostics"]
 contract = "language.templates.unclosed_delimiter_rejected"
 role = "boundary"

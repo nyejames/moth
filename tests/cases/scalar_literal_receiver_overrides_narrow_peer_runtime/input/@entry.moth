@@ -9,4 +9,4 @@ narrow = retain_u8(small)
 left U16 = (small + 300)
 right U16 = (300 + small)
 
-[:scalar literal receiver overrides peer narrow=[narrow] sums=[left]/[right]]
+~[:scalar literal receiver overrides peer narrow=[narrow] sums=[left]/[right]]

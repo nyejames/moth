@@ -1737,7 +1737,7 @@ fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic()
         "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    page_url_style = \"slashy\",\n)\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(src.join("@entry.moth"), "[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = HtmlProjectBuilder::new();
     let result = build_project(
@@ -2404,7 +2404,7 @@ fn empty_directory_output_setting_is_rejected() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"\",\n)\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(src.join("@entry.moth"), "[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = HtmlProjectBuilder::new();
     let result = build_project(
@@ -2431,7 +2431,7 @@ fn absolute_output_setting_is_rejected() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"/absolute/path\",\n)\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(src.join("@entry.moth"), "[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = HtmlProjectBuilder::new();
     let result = build_project(
@@ -2451,7 +2451,7 @@ fn hidden_output_inside_source_root_is_accepted_and_visible_output_is_rejected()
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    fs::write(root.join("@entry.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(root.join("@entry.moth"), "[:<h1>Home</h1>]\n").expect("should write home page");
 
     let write_config = |dev_output: &str| {
         fs::write(
@@ -2509,7 +2509,7 @@ fn identical_dev_and_release_folders_are_rejected() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"output\",\n    release_output = \"output\",\n)\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(src.join("@entry.moth"), "[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = HtmlProjectBuilder::new();
     let result = build_project(
@@ -2534,7 +2534,7 @@ fn valid_distinct_output_folders_resolve_to_hidden_roots() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write config");
-    fs::write(root.join("@entry.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(root.join("@entry.moth"), "[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = HtmlProjectBuilder::new();
     let build_result = successful_compilation_value(
@@ -2580,7 +2580,7 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
              \"one\" => ~result = \"one\"\n\
              else => ~result = \"other\"\n\
          ;\n\
-         #[:<h1>Home</h1>]\n",
+         [:<h1>Home</h1>]\n",
     )
     .expect("should write warning-producing home page");
 
@@ -2711,7 +2711,7 @@ fn first_dev_and_release_builds_create_independent_owned_manifests() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write config");
-    fs::write(root.join("@entry.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(root.join("@entry.moth"), "[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = HtmlProjectBuilder::new();
     let dev_build = successful_compilation_value(

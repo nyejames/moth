@@ -4,4 +4,4 @@ Shape ::
 ;
 
 shape = Shape::Circle("ok")
-[:variant_payload made]
+~[:variant_payload made]

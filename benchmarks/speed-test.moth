@@ -10,7 +10,7 @@
 -- - runtime template construction in function bodies
 
 page_title #= "Moth Frontend Speed Test"
-#[$in title:[page_title]]
+[$in title:[page_title]]
 accent #= "hsl(273, 92%, 63%)"
 accent_2 #= "hsl(196, 91%, 58%)"
 accent_3 #= "hsl(22, 96%, 60%)"
@@ -1094,7 +1094,7 @@ runtime_pair_foot #= [$in foot:
     one helper function returns two values which are unpacked in a loop
 ]
 
-[page_shell, global_styles:
+~[page_shell, global_styles:
     [page_title]
 
     [$in body:
@@ -1137,8 +1137,8 @@ runtime_pair_foot #= [$in foot:
     ]
 ]
 
-#[: random comptile time top level template]
-#[: random comptile time top level template 2]
-[: random runtime time top level template in the middle]
-#["random comptile time top level template":  3]
-[: random runtime time top level template 2]
+[: random comptile time top level template]
+[: random comptile time top level template 2]
+~[: random runtime time top level template in the middle]
+["random comptile time top level template":  3]
+~[: random runtime time top level template 2]

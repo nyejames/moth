@@ -12,4 +12,4 @@ new_input | | -> String, Error!:
 result = new_input() catch:
     then "error"
 ;
-[:core_io_input_signature_success [result]]
+~[:core_io_input_signature_success [result]]

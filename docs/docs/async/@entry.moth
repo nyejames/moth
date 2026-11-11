@@ -1,16 +1,16 @@
 @html center
 @styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
 
-#[$in title:["Coroutines and Async in Moth"]]
-#[$in description:["Design draft for structured async, coroutines, channels and explicit suspension in Moth."]]
-#[$in head:[theme_head]]
+[$in title:["Coroutines and Async in Moth"]]
+[$in description:["Design draft for structured async, coroutines, channels and explicit suspension in Moth."]]
+[$in head:[theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[title, center: COROUTINES AND ASYNC IN MOTH]
+[title, center: COROUTINES AND ASYNC IN MOTH]
 
-#[section, $md:
+[section, $md:
     **Design draft:** This page is a future-facing design document for language and compiler planning.
     It is not final user-facing documentation, and the syntax, semantics and implementation details may change before this feature is implemented.
     `$async:` is the agreed future spelling for a compiler-owned directive block, not builder metadata. Its block semantics remain deferred, and this page delivers no implementation.
@@ -31,7 +31,7 @@ init_docs_sidebar()!
     The goal is async code that remains readable, predictable and analysable.
 ]
 
-#[section, $md:
+[section, $md:
     ## Core idea
 
     The draft uses these primitives:
@@ -84,7 +84,7 @@ init_docs_sidebar()!
     > Async is structured control flow plus safe message passing.
 ]
 
-#[section, $md:
+[section, $md:
     ## Channels
 
     Coroutines should not share mutable state by default.
@@ -111,7 +111,7 @@ init_docs_sidebar()!
     You can think of this as a one-way pipe for values of a specific type.
 ]
 
-#[section, $md:
+[section, $md:
     ## Sending values
 
     Values are sent into a channel with `>>`.
@@ -127,7 +127,7 @@ init_docs_sidebar()!
     This is an intentional visible suspension point.
 ]
 
-#[section, $md:
+[section, $md:
     ## Memory prerequisites - accepted, deferred with the rest of async
 
     Channels are the point where Moth's memory model and its concurrency model meet, so the memory rules are locked even though async itself is deferred.
@@ -146,7 +146,7 @@ init_docs_sidebar()!
     @../../developer-docs/memory-management (Memory management).
 ]
 
-#[section, $md:
+[section, $md:
     ## Receiving values
 
     Values are received from a channel with `<<`.
@@ -162,7 +162,7 @@ init_docs_sidebar()!
     Like sending, this is a visible suspension point.
 ]
 
-#[section, $md:
+[section, $md:
     ## Coroutines
 
     A coroutine is a function that can suspend and resume execution.
@@ -183,7 +183,7 @@ init_docs_sidebar()!
     complete coroutine function signature is implemented here.
 ]
 
-#[section, $md:
+[section, $md:
     ## Yield
 
     `yield` explicitly suspends the current coroutine and allows other coroutines to run.
@@ -215,7 +215,7 @@ init_docs_sidebar()!
     There are no hidden pause points.
 ]
 
-#[section, $md:
+[section, $md:
     ## Structured async scopes
 
     Coroutines run inside a `$async:` scope. `$async:` is compiler-owned
@@ -243,7 +243,7 @@ init_docs_sidebar()!
     This makes the intended concurrency boundary visible and bounded.
 ]
 
-#[section, $md:
+[section, $md:
     ## Why not viral async types?
 
     Moth should avoid making async infect every function type by default.
@@ -263,7 +263,7 @@ init_docs_sidebar()!
     The goal is to make async local and visible.
 ]
 
-#[section, $md:
+[section, $md:
     ## Safety model
 
     The async model should preserve Moth's normal safety rules.
@@ -281,7 +281,7 @@ init_docs_sidebar()!
     Mutable shared state may be possible later through specific safe abstractions, but it should not be the default async model.
 ]
 
-#[section, $md:
+[section, $md:
     ## Full example
 
     A larger producer/consumer example is intentionally omitted. Its
@@ -306,7 +306,7 @@ init_docs_sidebar()!
     No implementation is delivered by this design page.
 ]
 
-#[section, $md:
+[section, $md:
     ## Compiler lowering
 
     The exact lowering strategy is not final.
@@ -332,7 +332,7 @@ init_docs_sidebar()!
     Async should be represented semantically before backend-specific lowering.
 ]
 
-#[section, $md:
+[section, $md:
     ## Backend considerations
 
     This design depends on backend capabilities.
@@ -349,7 +349,7 @@ init_docs_sidebar()!
     The user-facing syntax should remain stable even if backend strategies differ.
 ]
 
-#[section, $md:
+[section, $md:
     ## Deferred design questions
 
     Several details should be deliberately deferred until the basic model is proven:
@@ -368,7 +368,7 @@ init_docs_sidebar()!
     These should be designed as extensions, not packed into the first implementation.
 ]
 
-#[section, $md:
+[section, $md:
     ## Current status
 
     This design is not implemented yet.

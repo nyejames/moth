@@ -3,4 +3,4 @@ hide_option_equality ||:
     large U16? = none
     result = small is large
 ;
-[:different fixed options are not equal]
+~[:different fixed options are not equal]

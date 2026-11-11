@@ -153,9 +153,30 @@ fn constant_initializer_content_value_records_content_hint() {
 }
 
 #[test]
+fn source_directive_operand_records_content_hint() {
+    let (output, mut strings, _span_builder, mut path_fork) =
+        prepare_source("$doc [@docs/intro.mtf]\nvalue #= 1\n");
+
+    let header = header_of_kind(&output.headers, "constant", |kind| {
+        matches!(kind, HeaderKind::Constant { .. })
+    });
+
+    let occurrences = occurrences_of_class(&output, PreparedFileReferenceClass::ContentSource);
+    assert_eq!(occurrences.len(), 1);
+    let mut expected = HashSet::new();
+    expected.insert(content_hint(
+        "docs/intro.mtf/content",
+        occurrences[0],
+        &mut strings,
+        &mut path_fork,
+    ));
+    assert_hints(header, &expected);
+}
+
+#[test]
 fn repeated_content_values_in_one_shell_retain_each_occurrence_hint() {
     let (output, mut strings, _span_builder, mut path_fork) =
-        prepare_source("#[: [@docs/intro.mtf] [@docs/intro.mtf]]\n");
+        prepare_source("[: [@docs/intro.mtf] [@docs/intro.mtf]]\n");
 
     let fragment_header = header_of_kind(&output.headers, "const-template", |kind| {
         matches!(kind, HeaderKind::ConstTemplate { .. })
@@ -223,7 +244,7 @@ fn struct_field_default_records_content_hint() {
 #[test]
 fn top_level_const_fragment_records_content_hint() {
     let (output, mut strings, _span_builder, mut path_fork) =
-        prepare_source("#[: [@docs/intro.md]]\n");
+        prepare_source("[: [@docs/intro.md]]\n");
 
     let fragment_header = header_of_kind(&output.headers, "const-template", |kind| {
         matches!(kind, HeaderKind::ConstTemplate { .. })
@@ -365,4 +386,26 @@ fn recollecting_content_hints_deduplicates_into_the_hint_set() {
             .eq(std::iter::repeat_n(1usize, 2)),
         "each shell with one content value should hold exactly one hint"
     );
+}
+
+#[test]
+fn config_declaration_directive_operand_records_content_hint() {
+    let (output, mut strings, _span_builder, mut path_fork) = prepare_source(
+        "$config\n$doc [@docs/intro.mtf]\napi_url #String = \"https://example.test\"\n",
+    );
+
+    let header = header_of_kind(&output.headers, "constant", |kind| {
+        matches!(kind, HeaderKind::Constant { .. })
+    });
+
+    let occurrences = occurrences_of_class(&output, PreparedFileReferenceClass::ContentSource);
+    assert_eq!(occurrences.len(), 1);
+    let mut expected = HashSet::new();
+    expected.insert(content_hint(
+        "docs/intro.mtf/content",
+        occurrences[0],
+        &mut strings,
+        &mut path_fork,
+    ));
+    assert_hints(header, &expected);
 }

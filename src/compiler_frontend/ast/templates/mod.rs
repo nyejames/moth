@@ -53,7 +53,6 @@
 //! | `template_renderability.rs` | Resolve template-head renderability from semantic types |
 //! | `runtime_handoff.rs` | Define neutral owned runtime-template and slot payloads for HIR |
 //! | `tir/` | Own module-local TIR storage, views, preparation, folding, formatting, and materialization |
-//! | `doc_fragments.rs` | Build AST documentation-fragment metadata |
 //! | `error.rs` | Define the local template diagnostic/infrastructure boundary |
 
 // -------------------------
@@ -94,7 +93,6 @@ pub(crate) use runtime_handoff::{
 //  Private Modules
 // -------------------------
 
-mod doc_fragments;
 pub(crate) mod error;
 
 #[cfg(test)]

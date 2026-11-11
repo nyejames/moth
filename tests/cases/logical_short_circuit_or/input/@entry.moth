@@ -9,4 +9,4 @@ lhs = true
 calls ~= 0
 value = lhs or rhs_or(~calls)
 
-[:logical_short_circuit_or value=[value] calls=[calls]]
+~[:logical_short_circuit_or value=[value] calls=[calls]]

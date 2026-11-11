@@ -1,4 +1,4 @@
 $config
 limit #U32 = 7
 
-[:unsigned config [limit]]
+~[:unsigned config [limit]]

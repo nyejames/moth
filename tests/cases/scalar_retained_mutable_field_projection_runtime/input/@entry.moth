@@ -18,4 +18,4 @@ appended = holder.items.get(1) catch:
     then 0
 ;
 
-[:retained projected mutable receiver initial=[initial] final=[final] appended=[appended]]
+~[:retained projected mutable receiver initial=[initial] final=[final] appended=[appended]]

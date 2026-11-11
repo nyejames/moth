@@ -4,4 +4,4 @@ Cfg = |
 |
 
 c = Cfg()
-[:struct_constructor_all_defaults a=[c.a] b=[c.b]]
+~[:struct_constructor_all_defaults a=[c.a] b=[c.b]]

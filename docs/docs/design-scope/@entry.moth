@@ -14,14 +14,14 @@
     sidebar,
     init_docs_sidebar
 
-#[$in title:["Design scope"]]
-#[$in description:["Moth's design principles, deferred features, open questions and intentionally excluded language families."]]
-#[$in head:[language_theme_head]]
+[$in title:["Design scope"]]
+[$in description:["Moth's design principles, deferred features, open questions and intentionally excluded language families."]]
+[$in head:[language_theme_head]]
 
-#[navbar]
-#[sidebar]
+[navbar]
+[sidebar]
 init_docs_sidebar()!
-#[section, $md:
+[section, $md:
     # Design scope
 
     Moth distinguishes three outcomes for a proposed feature. Accepted
@@ -34,7 +34,7 @@ init_docs_sidebar()!
     static traits over broader mechanisms found in other languages.
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:design-principles]
         [$in title:Design principles]
@@ -44,7 +44,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:deferred-and-outside-scope]
         [$in title:Deferred, open and outside scope]
@@ -54,7 +54,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:checked-proof-budget-blocks-proposal]
         [$in title:Future proposal: checked proof-budget blocks]
@@ -64,7 +64,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_level:
         [$in key:excluded-language-families]
         [$in title:Excluded language families]
@@ -74,7 +74,7 @@ init_docs_sidebar()!
     ]
 ]
 
-#[section:
+[section:
     [doc_pager:
         [$in previous_path:../markdown/]
         [$in previous_title:Plain Markdown]

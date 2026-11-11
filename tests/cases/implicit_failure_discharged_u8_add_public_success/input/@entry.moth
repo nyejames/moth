@@ -2,4 +2,4 @@
 
 result = wide_add(127, 255)
 
-[: discharged u8 add sum=[result]]
+~[: discharged u8 add sum=[result]]

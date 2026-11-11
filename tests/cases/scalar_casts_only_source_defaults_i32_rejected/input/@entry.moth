@@ -20,4 +20,4 @@ wide = receive_u64(cast source)
 signed = receive_i64(cast source)
 same_default = receive_i32(cast source)
 
-[:unreachable]
+~[:unreachable]

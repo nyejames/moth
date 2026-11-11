@@ -20,6 +20,6 @@ assert(message is "provider")
 assert(direct is "direct")
 assert(ticket_message is "ticket|neighbour(note)")
 
-[:cast_generic_imported_user_evidence_success [render(Card("provider"))]]
-[:imported generic nominal box: [render(Box(Card("boxed")))]]
-[:imported same-name receiver evidence: [ticket_message]]
+~[:cast_generic_imported_user_evidence_success [render(Card("provider"))]]
+~[:imported generic nominal box: [render(Box(Card("boxed")))]]
+~[:imported same-name receiver evidence: [ticket_message]]

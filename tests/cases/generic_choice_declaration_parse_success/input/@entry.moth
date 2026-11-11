@@ -3,4 +3,4 @@ Result type T, E ::
     Err | error E |,
 ;
 
-[: generics parsed]
+~[: generics parsed]

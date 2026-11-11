@@ -1,4 +1,4 @@
 @utils Box
 
 boxed = Box("private")
-[:[boxed.value]]
+~[:[boxed.value]]

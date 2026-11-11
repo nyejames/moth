@@ -18,4 +18,4 @@ loop stride_items by -2 |item|:
     ~reverse = [:[reverse][item],]
 ;
 
-[:loop_collection_iteration sum=[sum] forward=[forward] reverse=[reverse]]
+~[:loop_collection_iteration sum=[sum] forward=[forward] reverse=[reverse]]

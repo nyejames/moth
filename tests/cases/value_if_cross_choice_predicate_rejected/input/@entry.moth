@@ -11,4 +11,4 @@ score |value LeftStatus| -> I32:
     return result
 ;
 
-[:[score(LeftStatus::Ready)]]
+~[:[score(LeftStatus::Ready)]]

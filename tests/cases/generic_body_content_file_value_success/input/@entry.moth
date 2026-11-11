@@ -4,4 +4,4 @@ render type T |name T| -> String:
 
 value = render("x")
 
-[: [value] ]
+~[: [value] ]

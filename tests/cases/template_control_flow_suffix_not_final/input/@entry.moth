@@ -1,5 +1,5 @@
 show = true
 
-[if show, $raw:
+~[if show, $raw:
     Visible
 ]

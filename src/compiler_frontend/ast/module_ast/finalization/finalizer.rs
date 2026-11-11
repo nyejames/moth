@@ -30,9 +30,7 @@ use crate::compiler_frontend::ast::statements::terminality::{
     NeverProofNode, never_proof_cycle, terminality_policy_for_signature,
     validate_function_body_terminality, validate_function_body_terminality_with_exits,
 };
-use crate::compiler_frontend::ast::templates::top_level_templates::{
-    collect_and_strip_comment_templates, collect_const_top_level_fragments,
-};
+use crate::compiler_frontend::ast::templates::top_level_templates::collect_const_top_level_fragments;
 use crate::compiler_frontend::ast::{
     Ast, AstBuildResult, AstChoiceDefinition, AstPublicInterfaceProjectionInput,
 };
@@ -148,19 +146,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // ----------------------------
         //  Collect doc fragments
         // ----------------------------
-        let doc_fragments = collect_and_strip_comment_templates(
-            &mut emitted.ast,
-            &mut self.context.expression_builder,
-            &mut self.context.const_values,
-            string_table,
-            Some(self.context.external_package_registry.as_ref()),
-            self.context.template_const_loop_iteration_limit,
-            Rc::clone(&self.context.template_ir_store),
-        )
-        .map_err(TemplateNormalizationError::from)
-        .map_err(|error| {
-            self.template_normalization_error_messages(error, &mut emitted.warnings, string_table)
-        })?;
+        let doc_fragments = std::mem::take(&mut emitted.doc_fragments);
 
         // ----------------------------
         //  Collect const top-level fragments

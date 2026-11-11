@@ -37,4 +37,4 @@ render_independent_map_leaf_alias || -> String:
     return [:independent_map_leaf_alias before=[before_text] after=[after] lower=[lower] top_found=[top_found] len=[len] later=[later_text]]
 ;
 
-[:[render_independent_map_leaf_alias()]]
+~[:[render_independent_map_leaf_alias()]]

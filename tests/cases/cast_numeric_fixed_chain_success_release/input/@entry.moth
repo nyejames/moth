@@ -15,5 +15,5 @@ big #I64 = 9007199254740993
 double #F64 = cast big
 double_float #F64 = double
 
-[: fixed numeric chain: [total]]
-[: fixed float rounding: [half_float] [double_float]]
+~[: fixed numeric chain: [total]]
+~[: fixed float rounding: [half_float] [double_float]]

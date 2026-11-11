@@ -6,4 +6,4 @@ mixed_reverse ||:
     mixed = {large, small}
 ;
 
-[:concrete_u64_i32_elements_rejected]
+~[:concrete_u64_i32_elements_rejected]

@@ -2,4 +2,4 @@ hidden ||:
     v U64 = 18446744073709551616 + 1
 ;
 
-[:unreachable]
+~[:unreachable]

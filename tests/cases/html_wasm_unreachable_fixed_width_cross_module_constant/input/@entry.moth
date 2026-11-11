@@ -4,4 +4,4 @@ hidden ||:
     got U64 = limit
 ;
 
-[:unreachable fixed width cross module constant]
+~[:unreachable fixed width cross module constant]

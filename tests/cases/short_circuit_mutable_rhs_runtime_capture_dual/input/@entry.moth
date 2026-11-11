@@ -9,4 +9,4 @@ lhs = false
 calls ~= 0
 value = lhs and rhs_capture_dual(~calls)
 
-[:short_circuit_mutable_rhs_runtime_capture_dual value=[value] calls=[calls]]
+~[:short_circuit_mutable_rhs_runtime_capture_dual value=[value] calls=[calls]]

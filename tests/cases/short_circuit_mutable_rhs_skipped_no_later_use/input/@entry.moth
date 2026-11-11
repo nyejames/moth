@@ -8,4 +8,4 @@ rhs_skipped |calls ~I32| -> Bool:
 lhs = false
 calls ~= 0
 value = lhs and rhs_skipped(~calls)
-[:short_circuit_mutable_rhs_skipped_no_later_use value=[value] calls=[calls]]
+~[:short_circuit_mutable_rhs_skipped_no_later_use value=[value] calls=[calls]]

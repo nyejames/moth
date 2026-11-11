@@ -11,4 +11,4 @@ whole = identity(1)
 floating F32 = identity(1)
 selected = choose_same(whole, floating)
 text = read_float(selected)
-[:[text]]
+~[:[text]]
