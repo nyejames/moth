@@ -1,0 +1,100 @@
+A component abstraction should remain **ordinary Moth data**.
+Its author chooses its public type and const functions. A page decides where
+that data becomes output.
+
+### A deliberately small result type
+
+This is an illustrative source-backed `@html` design, not a committed
+constructor or public signature:
+
+[codeblock, $code "moth":
+    HtmlPart = |
+        body String = "",
+        stylesheets String = "",
+    |
+
+    html_page #|parts {HtmlPart}| -> HtmlPart:
+        body ~= ""
+        stylesheets ~= ""
+
+        loop parts |part|:
+            ~body = [body, part.body]
+            ~stylesheets = [stylesheets, part.stylesheets]
+        ;
+
+        return HtmlPart(
+            body = body,
+            stylesheets = stylesheets
+        )
+    ;
+]
+
+A template is the normal way to concatenate Strings in Moth. The composite
+result contains HTML and a structural String of stylesheet references. There
+is no hidden page registration, renderer instance or component lifecycle.
+
+A real library will also need a way to carry independent `head`
+contributions. Their representation remains an API decision: concatenating
+head snippets into one String loses the boundaries needed for the HTML
+builder to deduplicate them individually. Do not assume the `HtmlPart` shape
+above is complete.
+
+### Keep local slots local
+
+The Basic example's `card` owns its named `title` slot. An imported
+or reused card cannot reach an enclosing page's builder slots. That
+parent-only routing rule keeps deep composition predictable and prevents
+an intermediate component from silently changing where inserts go.
+
+Const functions can compose several finished `HtmlPart` values across
+file and module boundaries. They evaluate under the compiler's constant
+rules, never call runtime DOM functions and cannot invent new declarations
+or source code.
+
+### Carry resources, not generated URLs
+
+A component's `stylesheets` field can be formed from file values such as
+`@sidebar.css`. The String retains resource origins through composition.
+The builder later resolves URLs for the destination document and deduplicates
+stylesheets by stable origin, preserving first use order.
+
+There is a remaining builder contract to implement: today's
+`stylesheets` slot accepts exactly **one** CSS resource per direct insert.
+The composed multi-resource String used on the Basic page is proposed final
+behaviour, not accepted by the current slot validator. It must retain each
+CSS origin and refuse stray text, site-root pieces and non-CSS resources.
+
+Generic helpers should not compare structural Strings to guess whether they
+refer to the same resource. A URL is output-context dependent. CSS rules that
+all instances share belong in a separate resource. Inline `$css` suits
+small values specific to one instance, such as a CSS custom property.
+
+### Types and boundaries keep reuse safe
+
+A nominal `HtmlPart` is a useful library contract, not an automatic
+conversion from an arbitrary record. Const construction checks every field
+and every called function. Reusable source packages publish only their
+selected declarations through `$export`.
+
+Runtime components and browser handles still obey Moth's shared/exclusive
+access rules and mandatory lifetime analysis. Returning a String from a
+const function grants no retained DOM reference and no implicit subscription.
+Explicit `Error!` contracts and ordinary recovery handle expected runtime
+failures. Rejected or unsupported compile-time evaluation is not silently
+treated as runtime work for a const function.
+
+Future constrained directives may improve local contracts for required or
+unique template contributions. Such constraints should check ordinary
+semantics rather than introduce macros or hidden global routing. Their
+source grammar must be accepted before examples teach it.
+
+### When to use the pattern
+
+Use reusable `HtmlPart` results for a navbar, sidebar, tabbed docs section
+or pager that owns markup and resource dependencies. A straightforward
+article can stay a direct top-level `[$md: ...]` fragment. Keep runtime
+behaviour in a separately invoked function, explored in
+@../browser-behaviour/ (Browser behaviour).
+
+See @../../constants (Constants), @../../resources (Resources) and
+@../../packages/builder/html/ (@html).

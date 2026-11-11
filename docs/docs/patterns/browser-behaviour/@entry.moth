@@ -1,7 +1,9 @@
-@styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
+@browser-behaviour-basic content as browser_basic
+@browser-behaviour content as browser_advanced
+@styles navbar, section, language_theme_head, doc_level, doc_pager, sidebar, init_docs_sidebar
 
 [$in title:Browser behaviour]
-[$in description:Separate static components from runtime DOM operations and future typed events.]
+[$in description:Separate static HTML from runtime DOM operations and future typed event delivery.]
 [$in head:[language_theme_head]]
 
 [navbar]
@@ -11,12 +13,24 @@ init_docs_sidebar()!
 [section, $md:
     # Browser behaviour
 
-    Static HTML remains a value. Runtime functions may use browser capabilities
-    to work with the live document. Later, typed event messages and Channels
-    will connect browser inputs to Moth application logic.
+    Static components describe the page. Ordinary runtime functions
+    interact with the live browser. Moth's intended DOM and Events
+    packages make that separation explicit, while keeping application
+    logic in Moth rather than handwritten JavaScript.
 
-    This pattern describes the final architectural direction. Its Basic and
-    Advanced examples are being developed in this section.
+    The synchronous `@web/dom` package and the later event-to-Channel
+    bridge are future design. See the @../../progress (progress matrix)
+    for current capabilities.
+]
+
+[section:
+    [doc_level:
+        [$in key:browser-behaviour]
+        [$in title:Adding browser behaviour]
+        [$in advanced:[browser_advanced]]
+
+        [browser_basic]
+    ]
 ]
 
 [section:
