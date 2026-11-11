@@ -39,6 +39,7 @@ fn declaration_semantics_preserves_missing_template_authority() {
                         context: TemplateViewContext::default(),
                     },
                     span: None,
+                    comment_directive_span: None,
                 },
                 ValueMode::ImmutableOwned,
             )

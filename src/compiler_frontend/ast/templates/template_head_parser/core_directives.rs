@@ -471,9 +471,11 @@ pub(super) fn parse_core_style_directive(
         }
 
         CoreStyleDirectiveKind::Note => {
+            let directive_span = token_stream.current_span();
             reject_directive_operand(directive_name_id, token_stream)?;
             build_state.kind = TemplateType::Comment;
             build_state.style = Style::default();
+            build_state.comment_directive_span = Some(directive_span);
         }
 
         CoreStyleDirectiveKind::Slot

@@ -1,8 +1,8 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains_in_order = ["ORDER_RUNTIME_IF", "ORDER_RUNTIME_LOOP_A", "ORDER_RUNTIME_LOOP_B"]
-rendered_output_contains_exactly_once = ["ORDER_RUNTIME_IF", "ORDER_RUNTIME_LOOP_A", "ORDER_RUNTIME_LOOP_B"]
+rendered_output_contains_in_order = ["ORDER_RUNTIME_IF", "ORDER_RUNTIME_LOOP_A", "ORDER_RUNTIME_LOOP_B", "note", "identifier-value", "ORDER_RUNTIME_NESTED_BEFOREORDER_RUNTIME_NESTED_AFTER"]
+rendered_output_contains_exactly_once = ["ORDER_RUNTIME_IF", "ORDER_RUNTIME_LOOP_A", "ORDER_RUNTIME_LOOP_B", "note", "identifier-value", "ORDER_RUNTIME_NESTED_BEFOREORDER_RUNTIME_NESTED_AFTER"]
 
 [[backends.html.artifact_assertions]]
 path = "index.html"

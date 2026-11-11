@@ -1273,6 +1273,7 @@ fn prepared_handoff_preserves_structural_and_nested_value_contexts_after_tir_rel
                 context: nested_context,
             },
             span: None,
+            comment_directive_span: None,
         };
         let nested_expression = expressions
             .template(nested_template, ValueMode::ImmutableOwned)
@@ -1311,6 +1312,7 @@ fn prepared_handoff_preserves_structural_and_nested_value_contexts_after_tir_rel
                 context: parent_context,
             },
             span: None,
+            comment_directive_span: None,
         };
         let root_expression = expressions
             .template(root_template, ValueMode::ImmutableOwned)

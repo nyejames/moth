@@ -268,6 +268,7 @@ fn option_capture_classifies_same_store_payload_under_active_fold_borrow() {
             context: TemplateViewContext::default(),
         },
         span: None,
+        comment_directive_span: None,
     };
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
@@ -347,6 +348,7 @@ fn coerced_template_with_no_bindings_returns_exact_inner_template() {
             context: TemplateViewContext::default(),
         },
         span: None,
+        comment_directive_span: None,
     };
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();

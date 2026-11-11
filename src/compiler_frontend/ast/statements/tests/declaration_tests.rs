@@ -1288,6 +1288,30 @@ fn runtime_marker_rejects_a_note_template() {
 }
 
 #[test]
+fn runtime_marker_rejects_a_multiline_note_at_the_authored_directive() {
+    let source = "~[\n    $note: hidden\n]\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.wrong_context"),
+    );
+    let mut spans = ExtendedSpanBuilder::new();
+    let note = LocalSpan::exact(
+        source
+            .find("$note")
+            .expect("fixture contains the directive") as u32,
+        "$note".len() as u32,
+        &mut spans,
+    )
+    .expect("directive span fits");
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, note)),
+    );
+}
+
+#[test]
 fn direct_note_produces_no_fragment() {
     let (ast, _path_fork, _string_table) = parse_single_file_ast("[$note: hidden]\n");
     assert!(

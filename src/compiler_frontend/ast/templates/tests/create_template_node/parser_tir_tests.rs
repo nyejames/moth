@@ -1050,6 +1050,7 @@ fn build_template_with_direct_tir_root(
             context,
         },
         span,
+        comment_directive_span: None,
     }
 }
 

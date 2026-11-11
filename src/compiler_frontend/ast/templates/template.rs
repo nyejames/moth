@@ -294,4 +294,11 @@ pub struct Template {
 
     /// Exact authored source range for this template, when available.
     pub span: Option<SourceSpan>,
+
+    /// Authored `$note` token span when this template is a discarded comment.
+    ///
+    /// WHAT: keeps the directive location beside the durable template handle.
+    /// WHY: wrong-context diagnostics for explicit runtime comment templates must point at the
+    ///      authored directive, not at the template opener.
+    pub(crate) comment_directive_span: Option<SourceSpan>,
 }

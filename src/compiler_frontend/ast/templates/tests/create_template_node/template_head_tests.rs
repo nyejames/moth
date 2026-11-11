@@ -244,6 +244,7 @@ fn template_head_expression_preserves_infrastructure_failure() {
             context: TemplateViewContext::default(),
         },
         span: None,
+        comment_directive_span: None,
     };
     let stale_value = expression_builder
         .template(stale_template, ValueMode::ImmutableOwned)

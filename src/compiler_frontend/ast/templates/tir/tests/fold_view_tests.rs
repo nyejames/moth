@@ -1562,6 +1562,7 @@ fn fold_dynamic_ast_template_with_missing_root_authority() -> TemplateError {
                 context,
             },
             span: None,
+            comment_directive_span: None,
         };
 
         let nested_expression = expressions

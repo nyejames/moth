@@ -40,7 +40,7 @@ use crate::compiler_frontend::ast::statements::value_production::{
     ProducedValues, ThenValueContinuation, ThenValueSlot, ValueReceiverKind,
     is_missing_produced_value_boundary, parse_retained_produced_values,
 };
-use crate::compiler_frontend::ast::templates::template::Template;
+use crate::compiler_frontend::ast::templates::template::{Template, TemplateType};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -328,19 +328,6 @@ pub(crate) fn parse_function_body_statements(
         {
             token_stream.advance();
             let fragment_span = Some(token_stream.current_span());
-            let note_name = token_stream
-                .token_ref_at_offset(1)
-                .and_then(|token| token.string_id())
-                .filter(|name| string_table.resolve(*name) == "note");
-            if let Some(name_id) = note_name {
-                return Err(statement_dispatch_error(
-                    templates::invalid_template_directive(
-                        Some(name_id),
-                        InvalidTemplateDirectiveReason::WrongContext,
-                        fragment_span,
-                    ),
-                ));
-            }
             let template = Template::new_with_type_interner(
                 token_stream,
                 context.scope,
@@ -352,6 +339,30 @@ pub(crate) fn parse_function_body_statements(
                 string_table,
                 path_fork,
             )?;
+            // The root kind is authoritative after parsing: a direct comment cannot publish a
+            // runtime fragment, while a literal or identifier merely spelled `note` can.
+            let is_comment = {
+                let store = context.template_ir_store.borrow();
+                store
+                    .get_template(template.tir_reference.root)
+                    .map(|template_ir| matches!(template_ir.kind, TemplateType::Comment))
+                    .ok_or_else(|| {
+                        InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            "parsed runtime template kind was missing from its module-local TIR store.",
+                        )
+                    })?
+            };
+            if is_comment {
+                let note_name = string_table.intern("note");
+                return Err(statement_dispatch_error(
+                    templates::invalid_template_directive(
+                        Some(note_name),
+                        InvalidTemplateDirectiveReason::WrongContext,
+                        template.comment_directive_span.or(fragment_span),
+                    ),
+                ));
+            }
             let expression = expression_builder.template(template, ValueMode::MutableOwned)?;
 
             draft.push_node(AstNode {

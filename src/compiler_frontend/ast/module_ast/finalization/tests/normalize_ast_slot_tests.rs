@@ -64,6 +64,7 @@ fn build_resolved_slot_template_store() -> (Template, Rc<RefCell<TemplateIrStore
             context,
         },
         span: None,
+        comment_directive_span: None,
     };
 
     (template, store_handle)

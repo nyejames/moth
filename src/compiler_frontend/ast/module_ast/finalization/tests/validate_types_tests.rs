@@ -680,6 +680,7 @@ fn template_with_dynamic_overlay(
             context,
         },
         span: None,
+        comment_directive_span: None,
     }
 }
 
@@ -767,6 +768,7 @@ fn validation_reports_missing_template_root() {
             context: TemplateViewContext::default(),
         },
         span: None,
+        comment_directive_span: None,
     };
     let type_environment = TypeEnvironment::new();
     let context = TypeValidationContext {
@@ -813,6 +815,7 @@ fn finalized_template_with_site_overlay(
             context,
         },
         span: None,
+        comment_directive_span: None,
     }
 }
 

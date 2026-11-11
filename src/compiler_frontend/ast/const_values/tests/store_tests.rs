@@ -152,6 +152,7 @@ fn ingest_template(folded: ConstStringValue) -> (ConstValueStore, ConstValueId) 
             context: TemplateViewContext::default(),
         },
         span: None,
+        comment_directive_span: None,
     };
     let template = builder
         .append_template(template, None)

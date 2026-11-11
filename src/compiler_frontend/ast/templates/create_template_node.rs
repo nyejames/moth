@@ -676,6 +676,7 @@ impl Template {
         let template = Template {
             tir_reference,
             span: construction_span,
+            comment_directive_span: build_state.comment_directive_span,
         };
 
         if matches!(
