@@ -1,0 +1,29 @@
+@styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
+
+[$in title:Browser behaviour]
+[$in description:Separate static components from runtime DOM operations and future typed events.]
+[$in head:[language_theme_head]]
+
+[navbar]
+[sidebar]
+init_docs_sidebar()!
+
+[section, $md:
+    # Browser behaviour
+
+    Static HTML remains a value. Runtime functions may use browser capabilities
+    to work with the live document. Later, typed event messages and Channels
+    will connect browser inputs to Moth application logic.
+
+    This pattern describes the final architectural direction. Its Basic and
+    Advanced examples are being developed in this section.
+]
+
+[section:
+    [doc_pager:
+        [$in previous_path:../components/]
+        [$in previous_title:HTML components]
+        [$in next_path:../../project-structure/]
+        [$in next_title:Project structure]
+    ]
+]

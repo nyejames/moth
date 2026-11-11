@@ -1,0 +1,50 @@
+@styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
+
+[$in title:Moth Patterns]
+[$in description:How Moth's language features and packages fit together in larger projects.]
+[$in head:[language_theme_head]]
+
+[navbar]
+[sidebar]
+init_docs_sidebar()!
+
+[section, $md:
+    # Moth Patterns
+
+    A Moth application grows from ordinary values, functions, templates and
+    modules. These guides show how to combine them into larger projects without
+    introducing a separate component language or framework.
+
+    The examples describe Moth's **final design**. Some parts are planned rather
+    than implemented. Use the @../progress (progress matrix) for current support
+    and the @../cheatsheet (language cheatsheet) for the intended syntax.
+
+    ## Explore the patterns
+
+    1. @./websites/ (Website structure) - organize entries, modules, shared
+       packages and authored content across a site.
+    2. @./components/ (HTML components) - assemble reusable HTML values with
+       templates, const functions and explicit resource dependencies.
+    3. @./browser-behaviour/ (Browser behaviour) - add typed DOM operations and,
+       later, events without embedding JavaScript in components.
+
+    Start with website structure, then follow the component and browser guides.
+    Each guide has a short Basic view and a deeper Advanced view explaining the
+    design choices.
+
+    ## Beyond websites
+
+    The same separation of computation, reusable values, capabilities and
+    entry-owned work also guides future interactive applications and other
+    project builders. HTML is our first concrete example, not a new language
+    boundary.
+]
+
+[section:
+    [doc_pager:
+        [$in previous_path:../project-structure/]
+        [$in previous_title:Project structure]
+        [$in next_path:websites/]
+        [$in next_title:Website structure]
+    ]
+]

@@ -1,0 +1,29 @@
+@styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
+
+[$in title:Website structure]
+[$in description:An idiomatic multi-page Moth website from entries and shared packages.]
+[$in head:[language_theme_head]]
+
+[navbar]
+[sidebar]
+init_docs_sidebar()!
+
+[section, $md:
+    # Website structure
+
+    Start with a site folder, a shared package and one `@entry.moth` in
+    each directory that produces a page.
+
+    This pattern covers final-design module boundaries, shared declarations
+    and where static and runtime work belong. Its Basic and Advanced examples
+    are being developed in this section.
+]
+
+[section:
+    [doc_pager:
+        [$in previous_path:../]
+        [$in previous_title:Moth Patterns]
+        [$in next_path:../components/]
+        [$in next_title:HTML components]
+    ]
+]

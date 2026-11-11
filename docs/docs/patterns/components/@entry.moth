@@ -1,0 +1,29 @@
+@styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
+
+[$in title:HTML components]
+[$in description:Compose reusable HTML, styles and dependencies using ordinary Moth values.]
+[$in head:[language_theme_head]]
+
+[navbar]
+[sidebar]
+init_docs_sidebar()!
+
+[section, $md:
+    # HTML components
+
+    Templates produce HTML strings, while const functions build reusable
+    component values. An entry explicitly sends the final page content and
+    dependencies to the HTML builder.
+
+    This pattern describes the intended component library design. Its Basic
+    and Advanced examples are being developed in this section.
+]
+
+[section:
+    [doc_pager:
+        [$in previous_path:../websites/]
+        [$in previous_title:Website structure]
+        [$in next_path:../browser-behaviour/]
+        [$in next_title:Browser behaviour]
+    ]
+]
