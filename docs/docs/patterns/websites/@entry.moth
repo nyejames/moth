@@ -1,4 +1,6 @@
-@styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
+@website-structure-basic content as website_basic
+@website-structure content as website_advanced
+@styles navbar, section, language_theme_head, doc_level, doc_pager, sidebar, init_docs_sidebar
 
 [$in title:Website structure]
 [$in description:An idiomatic multi-page Moth website from entries and shared packages.]
@@ -11,12 +13,22 @@ init_docs_sidebar()!
 [section, $md:
     # Website structure
 
-    Start with a site folder, a shared package and one `@entry.moth` in
-    each directory that produces a page.
+    Start with a project directory, one entry for each page and a small
+    shared package for code used across pages. Moth's source tree determines
+    which modules may depend on each other and which entries produce output.
 
-    This pattern covers final-design module boundaries, shared declarations
-    and where static and runtime work belong. Its Basic and Advanced examples
-    are being developed in this section.
+    These examples use the final language design. The
+    @../../progress (progress matrix) records current implementation support.
+]
+
+[section:
+    [doc_level:
+        [$in key:website-structure]
+        [$in title:A multi-page website]
+        [$in advanced:[website_advanced]]
+
+        [website_basic]
+    ]
 ]
 
 [section:

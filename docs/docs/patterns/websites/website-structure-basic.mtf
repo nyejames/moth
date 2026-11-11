@@ -1,0 +1,80 @@
+A larger Moth website is a tree of pages and shared code. Each page has an
+`@entry.moth` file. Reusable navigation and layout helpers can live in a
+scoped support package.
+
+### One site, several pages
+
+[codeblock, $code "text":
+    moth-site/
+      config.moth
+      @entry.moth
+      components/
+        @package.moth
+        navigation.moth
+        sidebar.moth
+        sidebar.css
+      docs/
+        @entry.moth
+        functions/
+          @entry.moth
+          introduction.mtf
+]
+
+Each directory containing `@entry.moth` produces a page. The HTML builder
+derives its route from the directory. `docs/functions/@entry.moth` produces
+`docs/functions/index.html`.
+
+The `components/` directory publishes `@components` to its permitted
+consumers. Page files import its public declarations without copying source
+or running the package as a page.
+
+### The Functions page
+
+[codeblock, $code "moth":
+    -- docs/functions/@entry.moth
+
+    @components navbar, sidebar
+    @introduction content as introduction
+
+    [$in title:Functions]
+    [$in description:Functions, parameters and returns.]
+
+    [navbar]
+    [sidebar]
+
+    [$md:
+        # Functions
+
+        Functions declare their parameters and results.
+    ]
+
+    [introduction]
+]
+
+The page mixes authored Markdown with imported templates. A `.mtf` asset
+supplies a compile-time `content` value, so a longer chapter can remain in
+`introduction.mtf` rather than making the entry file unwieldy.
+
+Direct entry templates are **constant by default**. A direct `~[...]`
+fragment explicitly requests runtime evaluation. Both are different from a
+named template stored in a binding.
+
+### Build a public helper surface
+
+The support package facade exposes only what pages should use:
+
+[codeblock, $code "moth":
+    -- components/@package.moth
+
+    $export
+    @navigation navbar
+
+    $export
+    @sidebar sidebar
+]
+
+Each `$export` publishes the selected declaration. Private helpers remain
+inside the component package.
+
+Start with this shape. Add a new module only when it represents a useful
+visibility or ownership boundary, not for every template or stylesheet.

@@ -1,0 +1,67 @@
+The important division is between **source ownership** and
+**entry activation**. A root file selects a role. Importing a public
+declaration never runs an imported module's entry.
+
+### Who owns each piece?
+
+- `config.moth` supplies optional project and builder settings. It is not
+  a module and has no runtime entry.
+- `@entry.moth` owns one selected page's direct fragments, builder slots and
+  runtime start. It publishes no API.
+- `@package.moth` publishes a scoped support surface to eligible sibling
+  branches and their descendants.
+- `@mod.moth` publishes a normal module surface to its parent.
+- Ordinary `.moth` files contain shared implementation inside their
+  module. They are not implicitly public.
+- `.mtf` files produce compile-time String content through the normal
+  source-kind adapter. They do not read the entry's private bindings.
+
+A directory can have any subset of the three root files. Each root keeps
+its own declaration scope even when the files share one structural module.
+`$export` belongs to the two facade roles and cannot expose entry work.
+
+### Keep module dependencies deliberate
+
+The example's `@components` support package is visible to the site root,
+the `docs` branch and its child pages because of the scoped package's
+position. It is not a universal global import. Other support packages in
+the same scope cannot import it just because they are siblings.
+
+A dependency clause selects names, not a runnable file. Organise components
+under a facade when several pages need the same public surface. Keep private
+markup helpers close to the package's implementation. Move a declaration
+into a child module when that module has its own meaningful public API.
+
+Do not use an old `+*.moth` root or invent page names such as
+`@functions.moth`. Only `@mod.moth`, `@package.moth` and
+`@entry.moth` establish root roles.
+
+### Why the entry stays simple
+
+Direct top-level `[...]` fragments must fold at compilation. The compiler
+preserves their source order and the builder assembles them into the final
+document. This avoids constructing static content during page startup.
+
+A direct `~[...]` fragment opts into runtime output. The page's entry
+runs once when selected. Runtime fragments are published after successful
+startup, so a failed start cannot publish half of that invocation's dynamic
+fragments. Earlier static fragments remain.
+
+Use `#=` when a folded template needs a name, a field or an importable value.
+That binding remains data: it does not emit a page merely by being declared.
+
+### HTML belongs to the builder
+
+The HTML builder owns directory routes, metadata destinations, resource
+output and URL rendering. Only a **direct** entry-root
+`[$in title:...]` or other registered builder contribution reaches it.
+An ordinary nested `$in` targets its immediate template receiver.
+
+Resources remain structural Strings until the consuming output has a URL
+context. A shared component can carry a stylesheet reference without
+guessing the URL for each page. Reusing that same resource origin on several
+pages does not require duplicating the resource file.
+
+See @../../project-structure (Project structure),
+@../../packages (Packages) and @../../constants (Constants) for the
+precise source and builder contracts.
