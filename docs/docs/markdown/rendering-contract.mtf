@@ -1,6 +1,6 @@
 The plain Markdown renderer uses a CommonMark-compatible parser with GFM extensions. This is a different renderer from Moth's md renderer.
 
-Plain `.md` uses the separate renderer below and gets no `$md` automatic heading IDs.
+Plain `.md` uses the separate renderer below and does not understand `$md` section markers.
 
 ### Supported features
 

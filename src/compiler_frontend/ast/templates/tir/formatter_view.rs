@@ -27,6 +27,7 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
 };
 use crate::compiler_frontend::ast::templates::styles::whitespace::{
     TemplateBodyRunPosition, TemplateWhitespacePassProfile, apply_whitespace_passes_to_input,
+    apply_whitespace_passes_to_input_preserving_spans,
 };
 use crate::compiler_frontend::ast::templates::template::{
     BodyWhitespacePolicy, Style, TemplateSegmentOrigin,
@@ -908,6 +909,13 @@ fn process_formatter_run(
         Some(fmt) => {
             let formatter_input = if pre_format_passes.is_empty() {
                 input
+            } else if fmt.formatter.requires_authored_text_spans() {
+                apply_whitespace_passes_to_input_preserving_spans(
+                    input,
+                    pre_format_passes,
+                    run_position,
+                    string_table,
+                )
             } else {
                 let whitespace_output = apply_whitespace_passes_to_input(
                     input,

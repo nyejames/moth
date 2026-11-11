@@ -511,6 +511,12 @@ pub(crate) fn invalid_template_structure_message(reason: InvalidTemplateStructur
         InvalidTemplateStructureReason::BuilderRootSlotNotRegistered => {
             "A direct top-level `$in name: ...` contribution targets a builder destination that the active builder does not register.".to_string()
         }
+        InvalidTemplateStructureReason::InvalidMarkdownSectionMarker => {
+            "A Markdown section marker does not follow the `@#id` grammar.".to_string()
+        }
+        InvalidTemplateStructureReason::DuplicateMarkdownSectionMarker { .. } => {
+            "This Markdown block already has a section marker.".to_string()
+        }
     }
 }
 
@@ -551,6 +557,20 @@ pub(crate) fn render_invalid_template_structure(
                 builder_root_slot_not_registered_message(diagnostic, context.string_table);
             (message, guidance)
         }
+        InvalidTemplateStructureCode::InvalidMarkdownSectionMarker => (
+            "A Markdown section marker does not follow the `@#id` grammar.".to_string(),
+            vec![
+                "Write the ID with a leading letter, then letters, digits, `_` or `-`, and separate the marker from surrounding text with whitespace. For example: `@#getting-started`."
+                    .to_string(),
+            ],
+        ),
+        InvalidTemplateStructureCode::DuplicateMarkdownSectionMarker => (
+            "This Markdown block already has a section marker.".to_string(),
+            vec![
+                "A heading, paragraph or list item can carry one `@#id` marker. Remove the extra marker."
+                    .to_string(),
+            ],
+        ),
         reason => {
             let reason = reason
                 .to_reason(None, facts.limit)

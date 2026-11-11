@@ -192,6 +192,13 @@ pub enum TemplateSegmentOrigin {
 /// read-only across parallel tokenization/header parsing workers. A factory's produced
 /// `Formatter` is stored on the parsed template's `Style`.
 pub(crate) trait TemplateFormatter: Send + Sync {
+    /// Whether this formatter reports source diagnostics against text after pre-format
+    /// whitespace. When true, the adapter retains each text piece's authored span through
+    /// that pass so diagnostics keep exact source locations.
+    fn requires_authored_text_spans(&self) -> bool {
+        false
+    }
+
     fn format(
         &self,
         input: FormatterInput,

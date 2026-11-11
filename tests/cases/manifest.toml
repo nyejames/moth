@@ -6672,6 +6672,13 @@ contract = "language.templates.markdown_heading_section_links"
 role = "boundary"
 
 [[case]]
+id = "template_markdown_section_marker_invalid_span"
+path = "template_markdown_section_marker_invalid_span"
+tags = ["integration","templates","markdown","diagnostics"]
+contract = "language.templates.markdown_section_marker_diagnostics"
+role = "primary"
+
+[[case]]
 id = "template_markdown_path_first_separator"
 path = "template_markdown_path_first_separator"
 tags = ["integration","templates","markdown"]

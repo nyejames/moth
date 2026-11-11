@@ -1092,6 +1092,12 @@ pub enum InvalidTemplateStructureReason {
     },
     /// A direct top-level `$in name` target is not registered by the active builder.
     BuilderRootSlotNotRegistered,
+    /// A `$md` section marker does not follow the `@#id` grammar.
+    InvalidMarkdownSectionMarker,
+    /// Two section markers appear on the same Markdown heading, paragraph or list item.
+    DuplicateMarkdownSectionMarker {
+        earlier_span: Option<SourceSpan>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

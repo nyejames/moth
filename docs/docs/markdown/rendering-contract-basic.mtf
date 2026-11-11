@@ -12,4 +12,4 @@ Plain Markdown supports common formatting through a CommonMark-compatible render
 
 Moth template syntax is not interpreted. Dollar-prefixed directives are plain text. Bracket-delimited template bodies are plain text. Use moth template files if you need Moth-aware content.
 
-Plain `.md` uses a separate renderer and gets no `$md` automatic heading IDs.
+Plain `.md` uses a separate renderer and does not understand `$md` section markers.

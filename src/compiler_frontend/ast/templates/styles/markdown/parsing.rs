@@ -1,16 +1,18 @@
-//! Markdown parsing helpers: list items, headings, links, and atom utilities.
+//! Markdown parsing helpers: list items, headings, links, markers and atom utilities.
 //!
-//! WHAT: parses markdown line structures and inline link syntax from atom streams.
+//! WHAT: parses markdown line structures and inline reference syntax from atom streams.
 //! WHY: separating parsing from rendering keeps the grammar rules in one place
-//!      and makes the renderer's control flow easier to follow.
+//!      and makes the renderer's control flow easier to follow. Link and marker
+//!      candidates share one target/separator scan so the two spellings cannot drift.
 
 use super::{
-    MarkdownInlineAtom, MarkdownLine, MarkdownListKind, ParsedMarkdownHeadingLine,
-    ParsedMarkdownLink, ParsedMarkdownListItemLine, atom_char,
+    JoinedMarkdownAtoms, MarkdownAtomsRef, MarkdownInlineAtom, MarkdownLine, MarkdownListKind,
+    MarkdownMarkerOrigin, ParsedMarkdownHeadingLine, ParsedMarkdownLink,
+    ParsedMarkdownListItemLine, ParsedMarkdownMarker, ParsedMarkdownReference, atom_char,
 };
 
 pub(super) fn parse_heading_line(line: &MarkdownLine) -> Option<ParsedMarkdownHeadingLine<'_>> {
-    let start = skip_leading_horizontal_whitespace(&line.atoms);
+    let start = MarkdownAtomsRef::whole(line).skip_leading_horizontal_whitespace();
     let mut index = start;
     let mut level = 0usize;
 
@@ -23,6 +25,12 @@ pub(super) fn parse_heading_line(line: &MarkdownLine) -> Option<ParsedMarkdownHe
         return None;
     }
 
+    // The documented flavour stops at `h6`. A longer run is ordinary paragraph text,
+    // never an `h7` element.
+    if level > 6 {
+        return None;
+    }
+
     let separator = atom_char(&line.atoms, index)?;
     if !separator.is_whitespace() {
         return None;
@@ -30,7 +38,7 @@ pub(super) fn parse_heading_line(line: &MarkdownLine) -> Option<ParsedMarkdownHe
 
     Some(ParsedMarkdownHeadingLine {
         level,
-        content: &line.atoms[index + 1..],
+        content: MarkdownAtomsRef::whole(line).slice(index + 1, line.atoms.len()),
     })
 }
 
@@ -38,11 +46,11 @@ pub(super) fn parse_heading_line(line: &MarkdownLine) -> Option<ParsedMarkdownHe
 pub(super) fn parse_list_item_line(line: &MarkdownLine) -> Option<ParsedMarkdownListItemLine<'_>> {
     let (indent_width, start_index) = consume_line_indentation(&line.atoms);
 
-    if let Some(item) = parse_unordered_list_item(&line.atoms, start_index, indent_width) {
+    if let Some(item) = parse_unordered_list_item(line, start_index, indent_width) {
         return Some(item);
     }
 
-    parse_ordered_list_item(&line.atoms, start_index, indent_width)
+    parse_ordered_list_item(line, start_index, indent_width)
 }
 
 fn consume_line_indentation(atoms: &[MarkdownInlineAtom]) -> (usize, usize) {
@@ -67,17 +75,17 @@ fn consume_line_indentation(atoms: &[MarkdownInlineAtom]) -> (usize, usize) {
     (indent_width, index)
 }
 
-fn parse_unordered_list_item(
-    atoms: &[MarkdownInlineAtom],
+fn parse_unordered_list_item<'a>(
+    line: &'a MarkdownLine,
     start_index: usize,
     indent_width: usize,
-) -> Option<ParsedMarkdownListItemLine<'_>> {
-    let marker = atom_char(atoms, start_index)?;
+) -> Option<ParsedMarkdownListItemLine<'a>> {
+    let marker = atom_char(&line.atoms, start_index)?;
     if !matches!(marker, '-' | '*' | '+') {
         return None;
     }
 
-    let separator = atom_char(atoms, start_index + 1)?;
+    let separator = atom_char(&line.atoms, start_index + 1)?;
     if !separator.is_whitespace() {
         return None;
     }
@@ -85,18 +93,20 @@ fn parse_unordered_list_item(
     Some(ParsedMarkdownListItemLine {
         indent_width,
         kind: MarkdownListKind::Unordered,
-        content: trim_atoms(&atoms[start_index + 2..]),
+        content: MarkdownAtomsRef::whole(line)
+            .slice(start_index + 2, line.atoms.len())
+            .trimmed(),
     })
 }
 
-fn parse_ordered_list_item(
-    atoms: &[MarkdownInlineAtom],
+fn parse_ordered_list_item<'a>(
+    line: &'a MarkdownLine,
     start_index: usize,
     indent_width: usize,
-) -> Option<ParsedMarkdownListItemLine<'_>> {
+) -> Option<ParsedMarkdownListItemLine<'a>> {
     let mut index = start_index;
 
-    while let Some(ch) = atom_char(atoms, index) {
+    while let Some(ch) = atom_char(&line.atoms, index) {
         if !ch.is_ascii_digit() {
             break;
         }
@@ -107,12 +117,12 @@ fn parse_ordered_list_item(
         return None;
     }
 
-    let marker = atom_char(atoms, index)?;
+    let marker = atom_char(&line.atoms, index)?;
     if !matches!(marker, '.' | ')') {
         return None;
     }
 
-    let separator = atom_char(atoms, index + 1)?;
+    let separator = atom_char(&line.atoms, index + 1)?;
     if !separator.is_whitespace() {
         return None;
     }
@@ -120,7 +130,9 @@ fn parse_ordered_list_item(
     Some(ParsedMarkdownListItemLine {
         indent_width,
         kind: MarkdownListKind::Ordered,
-        content: trim_atoms(&atoms[index + 2..]),
+        content: MarkdownAtomsRef::whole(line)
+            .slice(index + 2, line.atoms.len())
+            .trimmed(),
     })
 }
 
@@ -128,60 +140,114 @@ fn parse_ordered_list_item(
 ///
 /// Each line boundary stays a `'\n'` atom so every inline construct can enforce its own
 /// newline rule. Inline code rejects it and a link separator accepts at most one. Inline
-/// rendering prints each boundary as exactly one visible space.
-pub(super) fn join_paragraph_lines(lines: &[&[MarkdownInlineAtom]]) -> Vec<MarkdownInlineAtom> {
-    let mut joined = Vec::new();
+/// rendering prints each boundary as exactly one visible space. Marker origins move with
+/// their atoms so a marker keeps its authored piece and byte offset.
+pub(super) fn join_paragraph_lines(lines: &[MarkdownAtomsRef<'_>]) -> JoinedMarkdownAtoms {
+    let mut joined = JoinedMarkdownAtoms::default();
 
     for (index, line) in lines.iter().enumerate() {
         if index > 0 {
-            joined.push(MarkdownInlineAtom::Char('\n'));
+            joined.atoms.push(MarkdownInlineAtom::Char('\n'));
         }
-        joined.extend_from_slice(line);
+
+        let atom_base = joined.atoms.len();
+        joined.atoms.extend_from_slice(line);
+        for origin in line.marker_origins {
+            let Some(relative_index) = origin.atom_index.checked_sub(line.atom_base) else {
+                continue;
+            };
+            if relative_index >= line.len() {
+                continue;
+            }
+
+            joined.marker_origins.push(MarkdownMarkerOrigin {
+                atom_index: atom_base + relative_index,
+                atom_end: atom_base + (origin.atom_end - line.atom_base),
+                ..*origin
+            });
+        }
     }
 
     joined
 }
 
-pub(super) fn trim_atoms(atoms: &[MarkdownInlineAtom]) -> &[MarkdownInlineAtom] {
-    let mut start = 0usize;
-    let mut end = atoms.len();
-
-    while start < end && matches!(atoms[start], MarkdownInlineAtom::Char(ch) if ch.is_whitespace())
-    {
-        start += 1;
-    }
-
-    while end > start
-        && matches!(atoms[end - 1], MarkdownInlineAtom::Char(ch) if ch.is_whitespace())
-    {
-        end -= 1;
-    }
-
-    &atoms[start..end]
+/// Returns the char atom at `index` if it is plain text.
+fn target_char(atoms: &[MarkdownInlineAtom], index: usize) -> Option<char> {
+    atom_char(atoms, index)
 }
 
-pub(super) fn trim_leading_horizontal_whitespace(
-    atoms: &[MarkdownInlineAtom],
-) -> &[MarkdownInlineAtom] {
-    &atoms[skip_leading_horizontal_whitespace(atoms)..]
-}
-
-pub(super) fn skip_leading_horizontal_whitespace(atoms: &[MarkdownInlineAtom]) -> usize {
-    let mut index = 0usize;
-    while let Some(MarkdownInlineAtom::Char(' ' | '\t')) = atoms.get(index) {
-        index += 1;
-    }
-    index
+/// One scanned `@` candidate before deciding whether it is a link, marker or literal.
+struct ReferenceCandidate {
+    target_start: usize,
+    target_end: usize,
+    /// Present only when at least one separator and then `(` follow the target.
+    label_open: Option<usize>,
 }
 
 /// Parses `@target (label)` starting at the `@` atom.
 ///
 /// Returns `None` without consuming anything when the candidate is malformed, so the
 /// renderer prints it as literal text and keeps scanning for later constructs.
+#[cfg(test)]
 pub(super) fn try_parse_link_at_atoms(
     atoms: &[MarkdownInlineAtom],
     at_index: usize,
 ) -> Option<ParsedMarkdownLink> {
+    let candidate = scan_reference_candidate(atoms, at_index)?;
+    parse_link_label(atoms, at_index, &candidate)
+}
+
+/// Decides one `@` candidate as a labelled link, a bare section marker or literal text.
+///
+/// Labelled links take precedence. A recognised label introducer that fails to parse keeps
+/// the existing literal fallback for the whole candidate, even when the target looks like a
+/// marker. A `#` target without an introducer is a marker candidate; its ID grammar is
+/// independent of the greedy URL target scan.
+pub(super) fn try_parse_reference_at_atoms(
+    atoms: MarkdownAtomsRef<'_>,
+    at_index: usize,
+    closing_emphasis_strength: Option<usize>,
+) -> ParsedMarkdownReference {
+    let Some(candidate) = scan_reference_candidate(&atoms, at_index) else {
+        return ParsedMarkdownReference::Literal;
+    };
+
+    if candidate.label_open.is_some() {
+        return match parse_link_label(&atoms, at_index, &candidate) {
+            Some(link) => ParsedMarkdownReference::Link(link),
+            None => ParsedMarkdownReference::Literal,
+        };
+    }
+
+    let target = &atoms[candidate.target_start..candidate.target_end];
+    if target.first() != Some(&MarkdownInlineAtom::Char('#')) {
+        return ParsedMarkdownReference::Literal;
+    }
+
+    match parse_marker_id(target, closing_emphasis_strength) {
+        Ok((id, consumed_id_chars)) => {
+            let consumed_atoms = 2 + consumed_id_chars;
+            ParsedMarkdownReference::Marker(ParsedMarkdownMarker {
+                id,
+                span: atoms.source_span_for_atoms(at_index, consumed_atoms),
+                consumed_atoms,
+            })
+        }
+        Err(consumed_atoms) => ParsedMarkdownReference::InvalidMarker {
+            span: atoms.source_span_for_atoms(at_index, consumed_atoms),
+        },
+    }
+}
+
+/// Scans the target and optional label introducer shared by links and markers.
+///
+/// The target scan keeps the existing URL-prefix and non-whitespace rules. The separator
+/// scan stops at an invalid character instead of rejecting the whole candidate, which lets
+/// the caller distinguish a label introducer from ordinary following text.
+fn scan_reference_candidate(
+    atoms: &[MarkdownInlineAtom],
+    at_index: usize,
+) -> Option<ReferenceCandidate> {
     if atom_char(atoms, at_index)? != '@' {
         return None;
     }
@@ -198,35 +264,51 @@ pub(super) fn try_parse_link_at_atoms(
     }
     let target_end = cursor;
 
-    // The separator is spaces or tabs with at most one soft line boundary, so a wrapped
-    // paragraph can put the label on the next line. A second boundary would mean a blank
-    // line, and an opaque anchor could render as anything, so both reject the candidate.
     let separator_start = cursor;
     let mut crossed_line_boundary = false;
     while let Some(atom) = atoms.get(cursor) {
         match atom {
             MarkdownInlineAtom::Char(' ' | '\t') => cursor += 1,
 
-            MarkdownInlineAtom::Char('\n') if !crossed_line_boundary => {
+            MarkdownInlineAtom::Char('\r' | '\n') if !crossed_line_boundary => {
                 crossed_line_boundary = true;
-                cursor += 1;
+                cursor = consume_soft_newline(atoms, cursor);
             }
 
-            MarkdownInlineAtom::Char('\n') | MarkdownInlineAtom::Opaque(_) => return None,
-
-            MarkdownInlineAtom::Char(_) => break,
+            _ => break,
         }
     }
-    if separator_start == cursor {
-        return None;
-    }
 
-    if atom_char(atoms, cursor)? != '(' {
-        return None;
-    }
-    cursor += 1;
+    let label_open = if cursor > separator_start && atom_char(atoms, cursor) == Some('(') {
+        Some(cursor)
+    } else {
+        None
+    };
 
+    Some(ReferenceCandidate {
+        target_start,
+        target_end,
+        label_open,
+    })
+}
+
+/// Consumes one LF, CRLF or CR separator and returns the atom after it.
+pub(super) fn consume_soft_newline(atoms: &[MarkdownInlineAtom], index: usize) -> usize {
+    if atom_char(atoms, index) == Some('\r') && atom_char(atoms, index + 1) == Some('\n') {
+        index + 2
+    } else {
+        index + 1
+    }
+}
+
+fn parse_link_label(
+    atoms: &[MarkdownInlineAtom],
+    at_index: usize,
+    candidate: &ReferenceCandidate,
+) -> Option<ParsedMarkdownLink> {
+    let mut cursor = candidate.label_open? + 1;
     let label_start = cursor;
+
     while let Some(atom) = atoms.get(cursor) {
         match atom {
             MarkdownInlineAtom::Char(')') => break,
@@ -244,13 +326,75 @@ pub(super) fn try_parse_link_at_atoms(
         return None;
     }
 
-    let target = collect_plain_chars(&atoms[target_start..target_end]);
+    let target = collect_plain_chars(&atoms[candidate.target_start..candidate.target_end]);
 
     Some(ParsedMarkdownLink {
         target,
         label,
         consumed_atoms: cursor + 1 - at_index,
     })
+}
+
+/// Parses a `#id` marker target.
+///
+/// Returns the ID and the number of body atoms it consumed, or the number of atoms in the
+/// malformed marker candidate to locate in a diagnostic. A trailing star run is accepted
+/// only when it is long enough to close the emphasis state already active at the marker.
+fn parse_marker_id(
+    target: &[MarkdownInlineAtom],
+    closing_emphasis_strength: Option<usize>,
+) -> Result<(String, usize), usize> {
+    if target.first() != Some(&MarkdownInlineAtom::Char('#')) {
+        return Err(2);
+    }
+
+    let body = &target[1..];
+    if body.is_empty() {
+        return Err(2);
+    }
+
+    let mut id = String::new();
+    let mut consumed_chars = 0usize;
+
+    for (index, atom) in body.iter().enumerate() {
+        let MarkdownInlineAtom::Char(ch) = atom else {
+            return Err(2 + index);
+        };
+
+        let is_valid = if index == 0 {
+            ch.is_alphabetic()
+        } else {
+            ch.is_alphanumeric() || matches!(ch, '_' | '-')
+        };
+        if !is_valid {
+            break;
+        }
+
+        id.push(*ch);
+        consumed_chars += 1;
+    }
+
+    if consumed_chars == body.len() {
+        return Ok((id, consumed_chars));
+    }
+
+    // A marker must carry an ID, even when a following star could close emphasis.
+    if consumed_chars == 0 {
+        return Err(2 + 1.min(body.len()));
+    }
+
+    // A closing emphasis delimiter is a valid terminator when it can close the active state.
+    let remaining = &body[consumed_chars..];
+    let remaining_chars_are_stars = remaining
+        .iter()
+        .all(|atom| matches!(atom, MarkdownInlineAtom::Char('*')));
+    if remaining_chars_are_stars
+        && closing_emphasis_strength.is_some_and(|strength| remaining.len() >= strength)
+    {
+        return Ok((id, consumed_chars));
+    }
+
+    Err(2 + consumed_chars + 1)
 }
 
 fn collect_plain_chars(atoms: &[MarkdownInlineAtom]) -> String {
@@ -272,7 +416,7 @@ fn target_prefix_length(atoms: &[MarkdownInlineAtom], start: usize) -> Option<us
         }
     }
 
-    match atom_char(atoms, start)? {
+    match target_char(atoms, start)? {
         '/' | '#' | '?' => Some(1),
         ch if ch.is_ascii_alphabetic() => scheme_prefix_length(atoms, start),
         _ => None,
@@ -282,14 +426,14 @@ fn target_prefix_length(atoms: &[MarkdownInlineAtom], start: usize) -> Option<us
 /// Returns the length of a `scheme:` prefix whose first letter is already known to be alphabetic.
 fn scheme_prefix_length(atoms: &[MarkdownInlineAtom], start: usize) -> Option<usize> {
     let mut cursor = start + 1;
-    while let Some(ch) = atom_char(atoms, cursor) {
+    while let Some(ch) = target_char(atoms, cursor) {
         if !is_scheme_char(ch) {
             break;
         }
         cursor += 1;
     }
 
-    if atom_char(atoms, cursor)? != ':' {
+    if target_char(atoms, cursor)? != ':' {
         return None;
     }
 
@@ -300,7 +444,7 @@ fn starts_with_chars(atoms: &[MarkdownInlineAtom], start: usize, prefix: &str) -
     prefix
         .chars()
         .enumerate()
-        .all(|(offset, expected)| atom_char(atoms, start + offset) == Some(expected))
+        .all(|(offset, expected)| target_char(atoms, start + offset) == Some(expected))
 }
 
 fn is_scheme_char(ch: char) -> bool {

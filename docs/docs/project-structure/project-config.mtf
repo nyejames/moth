@@ -83,7 +83,7 @@ The record's recognised settings schema is closed. Arbitrary fields, misspelled 
 
 `name`, `template_const_loop_iteration_limit`, `max_errors_per_module` and `max_errors_per_project` remain fixed-only, including through helper constants. An omitted `name` defaults to the selected directory name and is validated as a Moth project identifier; it is never silently rewritten. Omitted `version` means unversioned.
 
-### Diagnostic limits
+### Diagnostic limits @#diagnostic-limits
 
 `max_errors_per_module` is a strict allowance of primary errors retained for each module. File preparation keeps the first errors in source order up to the allowance. Ordinary-body diagnostic recovery admits a further eligible body after the first failed one only while the retained primary error count stays below the allowance. Check-only files attributed to one module share that module's allowance.
 
