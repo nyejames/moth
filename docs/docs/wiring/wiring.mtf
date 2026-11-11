@@ -263,8 +263,8 @@ Composing it with an input-to-child route is a separate design question, with no
 V1 application or composition syntax.
 
 Messages remain ordinary choice values consumed by ordinary update functions.
-This self-contained snippet uses currently executable Moth syntax; its update
-function receives an ordinary choice value and does not use Wire or Route:
+This self-contained message-handling example receives an ordinary choice value
+and does not use Wire or Route:
 
 [codeblock, $code "moth":
     TodoMessage ::

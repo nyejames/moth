@@ -188,10 +188,10 @@ alias unless the operation inserts it as a new stored key.
 | `clear` | removes all stored key and value obligations |
 | map destruction | removes all stored key and value obligations and destroys the backing-storage domain |
 
-For the initial direct-handle implementation, a stored scalar commonly
-contributes zero obligations and a direct heap-backed value commonly contributes
-one. The general summary supports aggregates and nested retention without a new
-map vocabulary.
+A stored scalar contributes no direct obligation, a directly heap-backed value
+contributes one, and an inline aggregate contributes one per physically stored
+handle. Nested retention remains a description rather than an additional count,
+so the summary covers aggregates without new map vocabulary.
 
 ### Committed and failed map operations
 

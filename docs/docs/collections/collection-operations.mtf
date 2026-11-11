@@ -124,7 +124,11 @@ The table describes each operation's successful path.
 | collection destruction | removes all element obligations and destroys the backing-storage domain |
 | growth or reallocation | replaces backing storage while preserving logical element summaries |
 
-For the initial direct-handle implementation, an element commonly contributes zero or one direct obligation. The general summary supports aggregate and nested retention without changing the collection contract.
+An element contributes zero or more direct obligations: a scalar contributes
+none, a directly heap-backed value contributes one, and an inline aggregate
+contributes one per physically stored handle. Nested retention remains a
+description rather than an additional count, so the summary supports aggregates
+without changing the collection contract.
 
 ### Committed and failed collection operations
 

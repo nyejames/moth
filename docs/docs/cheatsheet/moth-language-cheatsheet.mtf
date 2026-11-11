@@ -1248,7 +1248,7 @@ Format other types with templates:
     io.line([: Count: [count]])
 ]
 
-`io.set_title(text)` is an accepted future runtime title mutation and is not implemented. Set a static page title with the direct const `title` builder slot.
+`io.set_title(text)` changes live title text on a host that advertises the title capability; it takes one `String` and returns no source-visible result. The direct const `title` builder slot supplies the initial static page title.
 
 Foreign packages depend on the selected builder and target. For example, the HTML builder can bind JavaScript files to typed Moth functions:
 
