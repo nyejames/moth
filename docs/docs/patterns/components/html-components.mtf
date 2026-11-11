@@ -1,0 +1,95 @@
+A component abstraction should stay **ordinary Moth data**. Its author chooses
+the public type and const functions. A page decides where that data becomes
+output.
+
+### A deliberately small result type
+
+This is an illustrative source-backed `@html` design, not a committed
+constructor or public signature:
+
+[codeblock, $code "moth":
+    HtmlPart = |
+        body String = "",
+        stylesheets String = "",
+    |
+
+    html_page #|parts {HtmlPart}| -> HtmlPart:
+        body ~= ""
+        stylesheets ~= ""
+
+        loop parts |part|:
+            ~body = [body, part.body]
+            ~stylesheets = [stylesheets, part.stylesheets]
+        ;
+
+        return HtmlPart(
+            body = body,
+            stylesheets = stylesheets
+        )
+    ;
+]
+
+A template is the normal way to concatenate Strings in Moth. The composite
+result carries HTML and a structural String of stylesheet references. It holds
+no hidden page registration, renderer instance or component lifecycle.
+
+A real library will also need a way to carry independent `head` contributions.
+That representation remains an API decision. Concatenating head snippets into
+one String loses the boundaries the builder needs to deduplicate them
+individually, so treat `HtmlPart` as a starting shape rather than a finished
+contract.
+
+### Keep local slots local
+
+The Basic example's `card` owns its named `title` slot. An imported or reused
+card cannot reach an enclosing page's builder slots. That parent-only routing
+rule keeps deep composition predictable and stops an intermediate component
+from silently changing where inserts go.
+
+Const functions compose finished `HtmlPart` values across file and module
+boundaries. They run under the compiler's constant rules, never call runtime DOM
+functions and cannot invent new declarations or source code.
+
+### Carry resources, not generated URLs
+
+A component's `stylesheets` field can come from file values such as
+`@sidebar.css`. Composition preserves the resource origin inside the String.
+The builder later resolves URLs for the destination document and deduplicates
+stylesheets by stable origin, keeping first-use order.
+
+One builder contract still needs implementation. Today's `stylesheets` slot
+accepts exactly **one** CSS resource per direct insert. The composed
+multi-resource String on the Basic page describes an intended extension under
+investigation, not what the current slot validator accepts. That validator must
+keep each CSS origin and refuse stray text, site-root pieces and non-CSS
+resources.
+
+Don't compare resource strings to test whether two components use the same
+file. A URL depends on the output context. CSS rules shared by every instance
+belong in a separate resource. Inline `$css` suits one instance's small value,
+such as a CSS custom property.
+
+### Types and boundaries keep reuse safe
+
+A nominal `HtmlPart` gives the library a checked contract. It never converts an
+arbitrary record automatically. Const construction checks every field and every
+called function. Reusable source packages publish only selected declarations
+through `$export`.
+
+Runtime components and browser handles still obey Moth's shared and exclusive
+access rules and mandatory lifetime analysis. Returning a String from a const
+function grants no retained DOM reference and no implicit subscription.
+Explicit `Error!` contracts and ordinary recovery handle expected runtime
+failures. A const function that the compiler cannot evaluate reports a
+diagnostic instead of quietly becoming runtime work.
+
+### When to use the pattern
+
+Reach for a reusable `HtmlPart` result when a navbar, sidebar, tabbed docs
+section or pager owns markup plus resource dependencies. A straightforward
+article can stay a direct top-level `["[$md: ...]"]` fragment. Keep runtime
+behaviour in a separately invoked function, covered in
+@../browser-behaviour/ (Browser behaviour).
+
+See @../../constants (Constants), @../../resources (Resources) and
+@../../packages/builder/html/ (@html).

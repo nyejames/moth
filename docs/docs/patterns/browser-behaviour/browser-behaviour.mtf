@@ -1,0 +1,101 @@
+The important boundary is **when** Moth code runs. A folded template produces an
+ordinary String. It owns no DOM element, listener or rerender job.
+
+### Synchronous DOM work
+
+A small `@web/dom` API should expose browser primitives, not
+`sync_docs_sidebar()`-style application helpers. The docs package can then
+implement navigation synchronisation and geometry calculations in ordinary
+Moth.
+
+The current sidebar splits its work across two JavaScript paths.
+`@web/page`'s `sync_navigation()` marks active links and builds breadcrumbs,
+while `sidebar.js` measures the navbar, aligns the current category heading and
+schedules updates on scroll and resize. A full migration moves those algorithms
+into Moth and leaves only generic host bindings in JavaScript.
+
+DOM operations must distinguish normal absence from a failed operation. "No
+previous sibling" is an optional result. A malformed selector is an error. A
+`require_by_id()`-style source helper could turn a missing required element into
+`Error!` while the low-level lookup keeps serving optional elements.
+
+DOM element handles represent browser-owned identity. A Moth record containing a
+handle neither owns nor extends the element's DOM lifetime. Mutation follows the
+handle's explicit access contract, and source ownership, borrow validation and
+lifetime topology still apply. The foreign runtime must define explicit teardown
+rules for retained resources.
+
+The first binding should stay deliberately small: ID and selector lookup,
+attributes and text, checkbox state, classes, element creation and child
+mutation, bounding boxes, computed CSS and scroll position. Prefer one cohesive
+operation when repeated scalar calls would cause excessive host crossings. The
+DOM plan must settle the exact opaque, optional and result ABI shapes, so don't
+guess them in a user example.
+
+### Typed event delivery
+
+The intended data flow:
+
+[codeblock, $code "text":
+    browser scroll or resize
+      -> host listener and coalescing
+      -> construct an ordinary Moth message
+      -> Channel writer
+      -> scheduled Moth consumer
+      -> @web/dom update
+]
+
+A message domain can use an ordinary choice:
+
+[codeblock, $code "moth":
+    -- Illustrative future event domain
+
+    SidebarEvent ::
+        Scrolled,
+        Resized,
+        Expanded | open Bool |,
+    ;
+]
+
+The accepted Channel direction provides separate reader and writer endpoints:
+
+[codeblock, $code "moth":
+    -- Accepted form, deferred runtime
+
+    reader, writer Channel of SidebarEvent = Channel()
+]
+
+A `Route of SidebarEvent` or `Route of Bool -> SidebarEvent` is a **function
+parameter contract** for completing a known choice constructor. It holds no
+Channel destination, cannot be stored as a normal component field and never
+runs an arbitrary callback. A `Wire of T` preserves a named binding identity,
+not an event observer.
+
+A host subscription will need an explicit writer destination, a validated
+message constructor route and an owned subscription lifetime. It also needs
+host-to-Moth re-entry, task scheduling, cancellation and safe retained capture.
+The final user-facing subscription signature is not designed yet.
+
+### Scheduling and failure
+
+For high-frequency scroll events, request at most one geometry update per
+browser animation frame. Share that scheduling primitive with the future
+`@web/graphics.frame` rather than duplicating it inside DOM and Events. Raw
+events should not force a layout read for every browser notification.
+
+Page startup handles its own `Error!` outcome. Later event-handler errors happen
+**after** startup and need an independent policy for reporting or recovery.
+Closing a Channel or removing a component must cancel its listeners. JavaScript
+garbage collection cannot decide when a Moth subscription ends.
+
+Use ordinary functions and explicit activation for predictable lifecycle
+ownership. A future interactive application can combine typed choices, Channels,
+DOM operations and state without closures or an implicit rerendering framework.
+
+The first implementation milestone is synchronous `@web/dom`. Typed
+`@web/events` waits for the Channel, async and host-ingress contracts. HTML-JS
+can support the first package before other target backends, with unsupported
+reachable calls diagnosed by the compiler.
+
+See @../../memory (Memory and lifetimes), @../../errors (Errors) and
+@../../packages/builder/graphics/ (@web/graphics).

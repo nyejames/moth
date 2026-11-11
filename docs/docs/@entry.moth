@@ -50,6 +50,10 @@ init_docs_sidebar()!
     - @./mon (MON format)
     - @./design-scope (Design scope)
 
+    ## Moth Patterns
+
+    - @./patterns/ (Moth Patterns): larger projects, reusable components and browser applications
+
     ## Quick reference
 
     - @./cheatsheet (Language cheatsheet): the whole language surface on one page

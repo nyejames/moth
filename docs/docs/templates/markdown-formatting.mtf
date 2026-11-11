@@ -112,6 +112,23 @@ Not supported:
 
 Use `$code "language"` for highlighted code blocks.
 
+### Literal template syntax in inline code
+
+Backticks format Markdown after Moth has parsed nested templates. They do not
+protect square brackets from Moth's template parser. To show Moth syntax
+literally inside inline code, insert a quoted String:
+
+[codeblock, $code "text":
+    -- Source in a .mtf file or a $md template body:
+    Static fragment: `["[...]"]`
+    Runtime fragment: `["~[...]"]`
+    Builder slot: `["[$in title:...]"]`
+]
+
+For example, `["~[...]"]` displays the literal runtime-fragment syntax
+without interpreting it as a nested template. Backslashes in template bodies
+are ordinary text, so they cannot escape template brackets.
+
 ### Dynamic content boundaries
 
 A dynamic expression anchor may appear inside a parent-authored code span.

@@ -1,0 +1,94 @@
+A larger Moth website is a tree of pages and shared code. Each page has an
+`@entry.moth` file. Reusable navigation and layout helpers live in a scoped
+support package.
+
+### One site, several pages
+
+[codeblock, $code "text":
+    moth-site/
+      config.moth
+      @entry.moth
+      components/
+        @package.moth
+        navigation.moth
+        sidebar.moth
+        sidebar.css
+      docs/
+        @entry.moth
+        functions/
+          @entry.moth
+          introduction.mtf
+]
+
+Each directory containing `@entry.moth` produces a page. The HTML builder
+derives the route from the directory, so `docs/functions/@entry.moth` produces
+`docs/functions/index.html`.
+
+`config.moth` holds optional build settings. It never becomes a page or joins
+the module graph.
+
+The `components/` directory holds an `@package.moth` root, which makes
+`@components` a scoped support package. Pages import its exported declarations
+without copying source or running the package as a page.
+
+### A page that composes content
+
+[codeblock, $code "moth":
+    -- docs/functions/@entry.moth
+
+    @components navbar, sidebar
+    @introduction content as introduction
+
+    [$in title:Functions]
+    [$in description:Functions, parameters and returns.]
+
+    [navbar]
+    [sidebar]
+
+    [$md:
+        # Functions
+
+        Functions declare their parameters and results.
+    ]
+
+    [introduction]
+]
+
+The page mixes authored Markdown with imported templates. A `.mtf` asset
+supplies a compile-time `content` String, so a longer chapter can stay in
+`introduction.mtf` instead of making the entry file unwieldy.
+
+Direct entry templates fold at compile time. A direct `["~[...]"]` fragment
+asks for runtime evaluation instead. A template stored in a binding stays an
+ordinary String value, and it becomes page output only when something inserts
+it.
+
+### Publish a small helper surface
+
+The support package facade exposes only what pages should use:
+
+[codeblock, $code "moth":
+    -- components/@package.moth
+
+    $export
+    @navigation navbar
+
+    $export
+    @sidebar sidebar
+]
+
+Each `$export` publishes one declaration or one selected re-export. Private
+helpers stay inside the package.
+
+### Where shared code goes
+
+Templates and constants used by several pages belong in the support package.
+Functions that only the package calls belong in ordinary `.moth` files beside
+it.
+
+`@mod.moth` publishes a normal API to the parent module, while `@package.moth`
+publishes a scoped support API. Both facades use `$export`, and neither can
+expose entry work.
+
+Start with this shape. Add a module only when it marks a real visibility or
+ownership boundary, not for every template or stylesheet.

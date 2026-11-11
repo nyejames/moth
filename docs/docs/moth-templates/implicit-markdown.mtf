@@ -27,6 +27,11 @@ Moth template files escape HTML characters in Markdown text. Raw HTML tags such 
 
 In `$md`, backticks delimit inline code, not raw strings. Empty spans, repeated backtick runs, unmatched backticks, multiline spans, variable-length delimiters and fenced code blocks are not part of the `$md` flavour.
 
+Backticks do not escape Moth template brackets. To display literal template
+syntax in inline code, insert a quoted String. For example,
+`["~[...]"]` displays the runtime-fragment syntax. See
+@../templates/#markdown-formatting (Markdown formatting) for the full example.
+
 ### Links use Moth-aware syntax
 
 Use `@/docs/packages (Packages)` for internal routes or `@https://example.com (Example)` for external links. Ordinary ["[label](path)"] Markdown links belong to Plain Markdown and aren't parsed as links by a moth template's `$md` formatter.

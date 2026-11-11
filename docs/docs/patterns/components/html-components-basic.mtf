@@ -1,0 +1,111 @@
+A component can be an ordinary value holding its HTML and the stylesheets it
+needs. A const function constructs that value. Another const function combines
+several parts into one page.
+
+This is the intended `@html` component API, **not yet a shipped package
+surface**. Const functions and combined stylesheet contributions still need
+their planned implementation.
+
+### Compose a documentation page
+
+[codeblock, $code "moth":
+    -- docs/functions/@entry.moth
+    -- Proposed @html component helpers
+
+    @html HtmlPart, html_page
+    @components site_navbar, docs_sidebar, docs_topic
+    @introduction content as introduction
+
+    article #= HtmlPart(
+        body = [introduction]
+    )
+
+    page #= html_page({
+        site_navbar(),
+        docs_sidebar("Documentation"),
+        docs_topic("Functions", article)
+    })
+
+    [$in title:Functions]
+    [$in description:Function declarations and calls.]
+
+    -- Proposed multi-resource stylesheet contribution.
+    [$in stylesheets:[page.stylesheets]]
+
+    [page.body]
+]
+
+The entry owns the final document. Each component returns its body and
+stylesheet references, while `html_page()` assembles the parts in order. The
+page forwards those dependencies to the builder rather than letting a nested
+template insert into a distant `head` or `stylesheets` slot.
+
+A small page can skip `html_page()` and write its main content directly:
+
+[codeblock, $code "moth":
+    @components sidebar
+
+    [sidebar]
+
+    [$md:
+        # Getting started
+
+        Write an ordinary Moth program first.
+    ]
+]
+
+Use the abstraction where it saves work. A component system should not make a
+simple page harder to read.
+
+### Build a component value
+
+A sidebar can become a const function in the shared component package. Its
+return type says what the page receives:
+
+[codeblock, $code "moth":
+    -- components/sidebar.moth
+    -- Proposed @html type and const function
+
+    @html HtmlPart
+
+    docs_sidebar #|heading String| -> HtmlPart:
+        return HtmlPart(
+            body = [$html:
+                <aside class="docs-sidebar">
+                    <h2>[heading]</h2>
+                </aside>
+            ],
+            stylesheets = [@sidebar.css]
+        )
+    ;
+]
+
+A different page can call `docs_sidebar("Reference")` and receive the same
+markup and the same stylesheet reference. The CSS dependency is declared once.
+The returned path stays a tracked resource, not a guessed URL.
+
+### Use a named template slot
+
+A smaller helper can stay a template rather than become a new type:
+
+[codeblock, $code "moth":
+    card #= [$html:
+        <article class="card">
+            <h2>[$slot title]</h2>
+            [$slot]
+        </article>
+    ]
+
+    [card:
+        [$in title:Functions]
+        Body content
+    ]
+]
+
+The `title` insert fills the card's own named slot. It never searches ancestor
+templates or sends a builder message. Body content lands in the default slot.
+
+Keep using slots while a helper needs no typed result and no resource
+dependency. Reach for a component value when the page needs both.
+
+See @../../templates (Templates) for other slot and wrapper forms.

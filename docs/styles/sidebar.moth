@@ -296,6 +296,12 @@ sidebar #= [$html:
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/markdown/">Markdown</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/mon/">MON format</a>
 
+            <p class="docs-sidebar__group" style="[sidebar_group_style]">Moth Patterns</p>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/patterns/">Overview</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/patterns/websites/">Website structure</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/patterns/components/">HTML components</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/patterns/browser-behaviour/">Browser behaviour</a>
+
             <p class="docs-sidebar__group" style="[sidebar_group_style]">Reference</p>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/cheatsheet/">Language cheatsheet</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/progress/">Compiler progress</a>
