@@ -31,7 +31,7 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 - todo plan: `$export` directive to replace current `export:` block.
 
-- [Const-default direct top-level templates](./plans/const-default-top-level-templates-plan.md) - Queued after the `$export` parser change. Refresh this branch from main before implementation. Bare direct entry templates become const-required, with `~[...]` for runtime output.
+- [Const-default entry templates and source documentation directives](./plans/const-default-top-level-templates-plan.md) - Queued after `$export`. Refresh from main before implementing bare const-required entry fragments, explicit `~[...]` runtime fragments and `$doc`/`$todo` source annotations. Retire old template-comment extraction.
 
 - [Const functions and shared compile-time evaluation](./plans/const-functions-plan.md) - explicit `#|...|` compile-time-only callable contracts, a unified constant/function dependency graph, bounded shared function evaluation, cross-module const body publication, release-only ordinary function folding and low-priority budget suggestions. The first active slice is the Stage 4 ownership and early-HIR feasibility gate.
 
