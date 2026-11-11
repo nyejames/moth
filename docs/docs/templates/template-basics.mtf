@@ -1,5 +1,6 @@
 **Entries and page fragments.** HTML pages come from directories that contain
-`@entry.moth`. A direct top-level template in that file contributes page output.
+`@entry.moth`. A bare direct top-level `[...]` must fold into static page output, while
+`~[...]` deliberately publishes a runtime body fragment.
 Direct const root `$in` inserts supply builder metadata. See @../project-structure/#entry-config (Entry metadata and builder slots) for their rules.
 
 Templates create owned `String` values.
@@ -22,7 +23,8 @@ A colon separates the template head from its body.
     ["prefix": body]
 ]
 
-The head may contain:
+The head separates each meaningful item with a comma, including directives.
+Source directives use separate attachment rules. The head may contain:
 
 - a value or helper template
 - directives
@@ -86,9 +88,10 @@ Unevaluated template syntax is not a MON string literal. A folded compile-time t
 
 A direct top-level template contributes output only in `@entry.moth`.
 
-- top-level runtime templates run through the entry runtime in source order
-- direct top-level const templates fold into compile-time fragments
-- a direct top-level const `$in` insert routes to a builder-registered destination
+- direct bare `[...]` must be compile-time foldable and becomes a static fragment
+- direct `~[...]` reserves a runtime fragment slot, even if its content can fold
+- a bare direct fragment with runtime-dependent content is an error rather than an implicit runtime fallback
+- a direct bare `[$in name: ...]` insert routes to a builder-registered destination; a runtime-marked named insert is invalid
 - ordinary direct const fragments and runtime body fragments render into the page body
 - a template assigned to a binding or returned from a function remains a `String`
   value and does not become a page fragment by itself
@@ -96,6 +99,10 @@ A direct top-level template contributes output only in `@entry.moth`.
 Only a direct root insert reaches builder routing. A nested or stored insert stays
 ordinary template composition. Runtime top-level named builder inserts are not
 part of the contract.
+
+A direct `[$note: ...]` discards a comment without creating a fragment. Ordinary
+assigned, returned and nested templates keep their own const/runtime rules.
+The old direct `#[...]` entry-fragment spelling is removed.
 
 Page assembly is owned by Project Structure. Const-template rules, including
 builder slot contributions, are owned by @../constants/#const-templates (Const

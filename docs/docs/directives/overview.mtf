@@ -14,8 +14,8 @@ This index routes contributors to the canonical directive contract and its compi
 
 - `docs/compiler-design-overview.md` owns Stage 1 tokenization, Stage 2 header syntax, Stage 4 semantics and entry metadata. Directive recognition must retain a known name and precise authored span before context validation.
 - `docs/build-system-design.md` owns selected configuration, root-role facts and builder entry selection.
-- Source modifiers have contiguous next-item attachment. `$export` accepts declarations or direct-selection clauses in public facades. `$config` accepts explicitly typed `#` bindings in config. Template directives use the containing template.
-- Placement errors must distinguish known invalid contexts, unknown names, deferred features, invalid operands, duplicate modifiers and attachment broken by an empty physical line. Use existing compiler diagnostic owners and avoid a second lexer/header grammar.
+- Source annotations attach in one contiguous run to the same following-line declaration or statement. Different directive names may share a line without commas and are order-independent. Repeated names are always invalid. `$export` accepts declarations or strict direct-selection clauses in public facades, `$config` accepts explicitly typed `#` bindings and `$doc`/`$todo` use compile-time String operands. Template-head directives use comma-separated head items and `$note` alone discards comment templates.
+- Placement errors must distinguish known invalid contexts, unknown names, invalid operand/target contracts, repeated names with two source sites and attachment broken by an empty physical line. The next source directive terminates an operand only at outer depth. Reuse existing expression and template parsers without a second lexer/header grammar.
 
 ## Status
 

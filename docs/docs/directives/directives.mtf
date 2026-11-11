@@ -1,55 +1,106 @@
-Directives modify an existing construct. Template-head directives modify their containing template. Source directives attach to the next eligible top-level declaration or dependency clause.
+Directives modify existing constructs. Template-head directives modify the containing
+template. Source directives annotate the following declaration or statement when
+their own target contract permits it. The compiler owns all directives.
 
 ### Template-head directives
 
-Put a template directive in the head of the template it modifies:
+A template-head directive belongs to the template that contains it:
 
 [codeblock, $code "moth":
     message #= [$md: Hello from Moth]
 ]
 
-`$md` formats this template's body, not its parent's. Other template directives control slots, contributions and formatting. See @../templates/#template-directives (Template directives).
+Template heads separate meaningful items with commas, including directives and
+expressions. Each head directive has its own operand and compatibility rules.
+See @../templates/#template-directives (Template directives).
 
 ### Source directives
 
-Source directives occupy their own line and each has a specific target.
-
-`$export` publishes a declaration or a direct-selection dependency clause in `@mod.moth` or `@package.moth`:
+Source directives attach to one following construct:
 
 [codeblock, $code "moth":
-    $export
+    $export $doc [$md: Public greeting.]
     greeting #= "Hello"
 
-    $export
-    @helpers render_greeting
+    $doc [: Parses input text.]
+    parse_text |source String| -> String:
+        $todo [: Add Unicode escapes.]
+        return source
+    ;
 ]
 
-`$config` marks one explicitly typed top-level compile-time `#` binding in `config.moth` or a selected source module as a build input:
+`$export` publishes a declaration or strict direct-selection dependency clause
+in `@mod.moth` or `@package.moth`. It cannot export an entry, ordinary runtime
+statement, whole namespace or `$config` input. See
+@../project-structure/#public-api (Public API) and
+@../packages/#public-reexports (Public re-exports).
+
+`$config` marks one explicitly typed top-level compile-time `#` binding in
+`config.moth` or a selected source module as a build input:
 
 [codeblock, $code "moth":
     $config
     api_url #String = "https://example.com"
 ]
 
-The name is the input key, the declared type is its contract and the initializer is its fallback. Only a `$config` binding may omit an initializer. See @../project-structure/#build-inputs (Build configuration values).
+Its name is the input key, its type is the contract and its initializer is
+the fallback. Only a marked input can omit its initializer. See
+@../project-structure/#build-inputs (Build configuration values).
 
-### Attachment
+`$doc value` documents a declaration, including an eligible local declaration.
+Its operand must evaluate at compile time to a `String`. The compiler attaches
+the resolved text to the declaration's semantic identity as documentation
+metadata. It does not publish a template fragment or emit runtime work.
+`$doc` does not format its argument automatically. Use `$doc [$md: ...]`
+for Markdown or `$doc [: ...]` for ordinary template content.
 
-A source directive attaches to the next eligible item with no blank physical line between them. Comment-only lines are allowed:
+`$todo value` annotates a declaration or a complete executable statement,
+including a branch, loop or return. It also requires a compile-time `String`
+operand. It is validated and discarded for now, without a runtime effect,
+builder output or automatic diagnostic. A future consumer can add a use without
+changing its source syntax.
+
+`$doc` and `$todo` are source directives, not template-head directives.
+`$note` is the template-only comment directive. Neither source annotations nor
+a discarded note contribute an entry page fragment.
+
+### Attachment and stacking
+
+A contiguous run of source directives attaches to the **immediately following**
+declaration or statement. All directives in the run attach to that same
+construct independently. Their order does not change the target or meaning.
+
+Different directives may occupy separate consecutive lines or share a line,
+separated by whitespace. Commas are not used:
 
 [codeblock, $code "moth":
-    $export
-    -- Public name for other modules.
-    page_title #= "Welcome"
+    $doc [: Returns a greeting.] $todo [: Consider localisation.]
+    greeting || -> String:
+        return "Hello"
+    ;
 ]
 
-An empty or whitespace-only line breaks attachment. A directive cannot skip an unrelated item, cross a scope boundary or reach past the end of the file. LF and CRLF line endings obey the same rule. At most one source modifier may attach to an item.
+The target construct begins on a later line, never after the final directive
+on the same line. A comment-only line may intervene. A blank physical line,
+scope boundary or end of file breaks attachment, and an intervening unrelated
+construct cannot be skipped. LF and CRLF follow the same rules.
 
-`$export` and `$config` take no operands. `$export` cannot modify a namespace dependency, ordinary runtime statement or `$config` binding. `$config` cannot modify a dependency clause. Neither directive is valid in a template head.
+A directive consumes at most one permitted operand. Another source directive
+terminates that operand only at its outer expression boundary. A nested template
+directive, such as `$md` in `$doc [$md: text]`, remains part of that template.
+No source directive can be the operand of another.
 
-### Directive operands
+**Each directive name may occur at most once in one attachment run.** Every
+duplicate is an error, even if the operands match or repetition would otherwise
+be harmless. Diagnostics identify both authored occurrences. The same directive
+may annotate a different following construct. There is no blanket pairwise
+compatibility hierarchy: each distinct directive validates its own eligible
+target and semantic requirements. Constraint directives therefore evaluate
+the resulting program semantics independently of source order.
 
-The compiler defines each directive's supported operands. A directive may take a bare compile-time value or one named value:
+### Operands and diagnostics
+
+The general directive surface is:
 
 [codeblock, $code "text":
     $name
@@ -57,19 +108,25 @@ The compiler defines each directive's supported operands. A directive may take a
     $name key = value
 ]
 
-A named value has one key and value, without a type annotation. Parenthesized calls such as `$name(...)` are not directive syntax. For example, `$slot title` declares a slot, `$slot title = "Untitled"` gives it a default and `$code "moth"` selects syntax highlighting.
+The directive contract selects which of these forms is legal. A named operand
+has exactly one key and value, without a type annotation. Operands use the
+ordinary compile-time expression rules and may contain balanced nested
+templates. `$export` and `$config` accept no operand. Parenthesized calls
+such as `$name(...)` are not directive syntax.
 
-Template-head directives are `$before`, `$after`, `$fresh`, `$slot`, `$in`, `$note`, `$todo`, `$doc`, `$raw`, `$md`, `$html`, `$css`, `$escape_html` and `$code`. Source directives are `$export` and `$config`.
+The compiler diagnoses unknown names, wrong locations, invalid operands,
+nonconstant required values, duplicate names, missing targets and unsuitable
+targets at their authored sites. It never searches past an invalid target to
+find a later eligible one. A known directive in the wrong context is a
+placement error, not an unknown name.
 
-### Context and ownership
-
-The compiler rejects unknown names, unexpected operands, duplicate source modifiers, missing targets and directives used in the wrong context. An invalid target is an error even if the directive name is known.
-
-Module roles are assigned by `@mod.moth`, `@package.moth` and `@entry.moth` filenames, not directives. Project and builder settings are ordinary records in `config.moth`. Moth programs and builders cannot register new directives or use them as macros.
-
-See @../project-structure/#public-api (Public API), @../project-structure/#module-roots (Module roots) and @../project-structure/#project-config (Project configuration).
+Module roles come from `@mod.moth`, `@package.moth` and `@entry.moth`
+filenames. Project and builder settings are ordinary records in
+`config.moth`. Source files and builders cannot register directives or use
+them as macros.
 
 ### Compiler references
 
-- @https://github.com/nyejames/moth/blob/main/src/compiler_frontend/style_directives/specs.rs (Directive specification and target kinds)
-- @https://github.com/nyejames/moth/blob/main/src/compiler_frontend/headers/file_parser.rs (Source directive attachment)
+- @https://github.com/nyejames/moth/blob/main/src/compiler_frontend/style_directives/specs.rs (Directive specification)
+- @https://github.com/nyejames/moth/blob/main/src/compiler_frontend/headers/file_parser.rs (Top-level attachment)
+- @https://github.com/nyejames/moth/blob/main/src/compiler_frontend/ast/statements/body_dispatch.rs (Statement attachment)

@@ -22,8 +22,11 @@ Common directives include:
 - `$fresh` to skip one parent wrapper
 - `$md` for Moth Markdown
 - `$raw` for unformatted text
-- `$note` and `$todo` for ignored template notes
+- `$note` for discarded comment templates
 - `$html`, `$css`, `$escape_html` and `$code` under every builder
+
+Template heads separate expressions and directives with commas. `$doc` and
+`$todo` are source annotations, not template-head directives.
 
 A slot declaration occupies its head alone. Each `$in` directive fills one named
 slot. See @../templates/#template-slots (Template slots) and
