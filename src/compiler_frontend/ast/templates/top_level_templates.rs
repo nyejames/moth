@@ -1,10 +1,9 @@
-//! Top-level const fragment collection and declaration-attached doc metadata.
+//! Top-level const fragment collection.
 //!
-//! WHAT: collects folded top-level const string fragments and owns the AST doc-fragment records
-//! attached by source-directive parsing.
-//! WHY: builders consume ordered const fragments with runtime insertion indices, while module
-//! metadata consumes documentation joined to its declaration identity. Runtime template handling
-//! stays in the compiler-owned entry body via PushStartRuntimeFragment nodes.
+//! WHAT: collects folded top-level const string fragments.
+//! WHY: builders consume ordered const fragments with runtime insertion indices. Declaration
+//! documentation is source metadata owned by the AST result, not template output. Runtime
+//! template handling stays in the compiler-owned entry body via PushStartRuntimeFragment nodes.
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::builder_root_slots::ConstFragmentDestination;
@@ -13,7 +12,6 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use crate::compiler_frontend::symbols::string_interning::StringId;
 
 use rustc_hash::FxHashMap;
 
@@ -59,18 +57,6 @@ impl FoldedConstTemplateResult {
     pub(crate) fn new(value: ConstStringValue, destination: ConstFragmentDestination) -> Self {
         Self::Output { value, destination }
     }
-}
-
-/// One compile-time documentation record attached to its declaration.
-///
-/// WHAT: carries the target declaration path, the folded text and the directive operand span.
-/// WHY: documentation is declaration metadata, not an unattached page fragment. The declaration
-/// path is the stable module-local identity later consumers join on.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AstDocFragment {
-    pub target: PathId,
-    pub value: StringId,
-    pub span: Option<SourceSpan>,
 }
 
 // -------------------------

@@ -316,8 +316,7 @@ impl Template {
         )
     }
 
-    /// Internal constructor that supports doc comment context propagation.
-    /// Called recursively for nested templates in the body parser.
+    /// Internal constructor for nested templates parsed from a template body.
     #[allow(
         clippy::too_many_arguments,
         reason = "recursive parsing keeps stream, scope, interner, builders, options and tables separate"

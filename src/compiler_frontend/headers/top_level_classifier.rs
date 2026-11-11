@@ -19,7 +19,7 @@ pub(super) enum HeaderFileItem {
     /// A `~`-marked top-level template captured as one runtime body fragment.
     RuntimeTemplate,
     ReservedTraitSyntax,
-    /// A registered `$name` directive token on its own top-level line.
+    /// A registered `$name` directive token at a top-level statement boundary.
     StyleDirective(StringId),
     Eof,
     StartBodyToken,

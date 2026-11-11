@@ -6,6 +6,7 @@
 //!      contract, one depth rule and one constant-folding lane. Keeping both here prevents a
 //!      second directive scanner or a documentation-specific formatter.
 
+use crate::compiler_frontend::ast::AstDocFragment;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::binding::resolve_const_expression_content;
 use crate::compiler_frontend::ast::const_values::store::{
@@ -18,7 +19,6 @@ use crate::compiler_frontend::ast::expressions::parse_expression::create_express
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
-use crate::compiler_frontend::ast::templates::top_level_templates::AstDocFragment;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;

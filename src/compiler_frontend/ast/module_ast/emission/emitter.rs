@@ -10,6 +10,7 @@
 //! Constants and choices are handled in earlier passes; they do not emit nodes here.
 //! Struct node emission reads the resolved field table produced by environment construction.
 
+use crate::compiler_frontend::ast::AstDocFragment;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::cursor::AstCursor;
@@ -40,9 +41,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparationOutcome, TemplateTirPhase, TirView, fold_prepared_root_slot,
     fold_prepared_template,
 };
-use crate::compiler_frontend::ast::templates::top_level_templates::{
-    AstDocFragment, FoldedConstTemplateResult,
-};
+use crate::compiler_frontend::ast::templates::top_level_templates::FoldedConstTemplateResult;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builder_root_slots::ConstFragmentDestination;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;

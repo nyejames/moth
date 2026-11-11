@@ -202,11 +202,7 @@ impl ScopeContext {
 
     pub fn with_source_doc_sink(
         mut self,
-        sink: Rc<
-            RefCell<
-                Vec<crate::compiler_frontend::ast::templates::top_level_templates::AstDocFragment>,
-            >,
-        >,
+        sink: Rc<RefCell<Vec<crate::compiler_frontend::ast::AstDocFragment>>>,
     ) -> ScopeContext {
         Rc::make_mut(&mut self.shared).source_docs = sink;
         self

@@ -222,9 +222,9 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
     ///
     /// All body content — literal text, newlines, nested templates, and slots
     /// is emitted exclusively into parser TIR through `TemplateConstructionContext`.
-    /// `$doc` suppresses nested template parsing, so balanced brackets in documentation bodies
-    /// remain literal text. A body ends only at its own template close or its owner's donor
-    /// boundary.
+    /// Nested templates are parsed unless the active style suppresses child templates, in which
+    /// case balanced bracket groups remain literal text. A body ends only at its own template
+    /// close or its owner's donor boundary.
     fn parse_content(
         &mut self,
         input: BodyParseInput<'_, '_>,
@@ -650,7 +650,7 @@ fn finalize_tir_body_builder(
 // -------------------------
 
 /// Consumes a `[...]` bracketed region directly into parser TIR as literal text
-/// when child templates are suppressed (e.g. in `$doc` bodies). Tracks bracket
+/// when child templates are suppressed (for example, by `$code`). Tracks bracket
 /// nesting depth so balanced brackets are included in the literal output.
 ///
 /// Accepts pre-interned `StringId`s for newline and bracket literals so the

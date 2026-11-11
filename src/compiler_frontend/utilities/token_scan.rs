@@ -688,8 +688,9 @@ impl TemplateBalance {
 /// Tracks template nesting for header-stage scans.
 ///
 /// WHAT: balances `TEMPLATE_HEAD`/`TEMPLATE_CLOSE` tokens.
-/// WHY: header-stage scanners run before AST body parsing but no template directive suppresses
-/// child-template parsing, so ordinary token balance is the whole contract.
+/// WHY: header-stage scanners run before AST body parsing and only need the token-level balance
+/// that tokenization guarantees. Whether a balanced bracket group later becomes literal text
+/// under a suppressing style is a body-parser decision, not a header-scan exception.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TemplateNestingTracker {
     balance: TemplateBalance,
