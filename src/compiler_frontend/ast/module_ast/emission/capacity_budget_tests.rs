@@ -23,6 +23,22 @@ fn scope_frame_capacity_budget_handles_even_distribution() {
 }
 
 #[test]
+fn annotated_header_metadata_fold_keeps_the_body_reservation() {
+    let mut annotated = ScopeFrameCapacityBudget::new(12, 2);
+    assert_eq!(annotated.next_metadata_fold_capacity(), 0);
+    let annotated_body = annotated.next_root_capacity();
+
+    let mut plain = ScopeFrameCapacityBudget::new(12, 2);
+    let plain_body = plain.next_root_capacity();
+
+    // The annotated function's body receives exactly what the unannotated control receives.
+    assert_eq!(annotated_body, plain_body);
+    assert_eq!(annotated.remaining_frames, plain.remaining_frames);
+    assert_eq!(annotated.remaining_roots, plain.remaining_roots);
+    assert_eq!(annotated.next_root_capacity(), 6);
+}
+
+#[test]
 fn scope_frame_capacity_budget_returns_zero_without_roots_or_frames() {
     let mut no_roots = ScopeFrameCapacityBudget::new(8, 0);
     assert_eq!(no_roots.next_root_capacity(), 0);

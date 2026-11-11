@@ -183,6 +183,17 @@ impl ScopeFrameCapacityBudget {
         self.remaining_roots -= 1;
         capacity
     }
+
+    /// Returns the reservation for one header metadata fold without spending body capacity.
+    ///
+    /// WHAT: always zero and deliberately leaves `remaining_frames` and `remaining_roots` alone.
+    /// WHY: `$doc`/`$todo` folding owns a separate arena at a non-counted root. Spending a slice
+    ///      here would starve the annotated executable root that follows. The metadata arena still
+    ///      grows normally when an operand contains control flow; a plain String operand needs its
+    ///      single root frame only.
+    fn next_metadata_fold_capacity(&mut self) -> usize {
+        0
+    }
 }
 
 /// Rebase each parameter's [`PathId`] from a bare name to a fully qualified path
@@ -213,8 +224,8 @@ fn rebase_signature_parameters(
 /// template body; start headers and top-level const templates also parse in their own root
 /// contexts.
 /// WHY: the module-wide capacity estimate must be distributed over root parse contexts that can
-/// consume it once. Header kinds handled entirely by environment construction or metadata
-/// validation do not allocate root body arenas here.
+/// consume it once. Metadata-only source-directive folding starts an unreserved arena and is
+/// deliberately outside this distribution, so it cannot starve the executable root it annotates.
 fn count_root_scope_arena_consumers(headers: &[Header]) -> usize {
     headers
         .iter()
@@ -696,7 +707,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     &header,
                     source_file_scope,
                     Arc::clone(&visibility),
-                    scope_frame_capacity_budget.next_root_capacity(),
+                    scope_frame_capacity_budget.next_metadata_fold_capacity(),
                     string_table,
                 )?;
             }
