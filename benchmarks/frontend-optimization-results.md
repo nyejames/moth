@@ -7425,3 +7425,28 @@ No additional owner was selected. The only two-sigma movement on the current che
 borrow convergence on the synthetic `numeric_generic_failure_chain_512` case recorded above, which
 belongs to the production borrow performance owner. No borrow algorithm, template fold scheduler
 or Stage 0 cache was changed in this follow-up.
+
+### Slice 4: final verification
+
+Clean completion checkpoint `239daff11`. `just validate-full` passed: formatting and Clippy for
+the workspace and feature matrix, source and first-party dependency audits, 7079 unit tests,
+3279/3279 integration executions, docs check, 17/17 feature lanes, honesty audit with 0 hard
+findings, all 14 scaling series within budget and a clean no-timer artifact. The first full run
+stopped at `clippy-features` on two `field_reassign_with_default` warnings in the new ordering-hint
+test helpers; struct-update initialisation fixed both, and the rerun passed.
+
+Final clean measurements on the same host and protocol:
+
+- End-to-end CLI suite: 23.403 ms average, `73/74` comparable cases, no measurable change
+  (avg 0 ms). The clean run reported module semantics, boundary compile and single-file frontend
+  each about 23-24 ms higher, so the stage summary does not support a speed claim.
+- Focused frontend suite: 139.269 ms average. The automatic comparison had no comparable
+  unchanged workloads (`76` current, `42` previous). The adjacent pre-change comparison was
+  137.76 ms to 134.28 ms, but same-code repeats span several milliseconds and the final clean run
+  is 5 ms above the latter, so this is drift rather than an attributable delta.
+- Scaling: all 14 series within budget, with the largest fitted exponent `n^0.97` among the
+  numeric series.
+
+The completion checkpoint repeats the baseline conclusion: the confirmed changes remove work and
+data movement, and run-level drift remains larger than any attributable per-case movement. This
+follow-up claims no wall-time win.
