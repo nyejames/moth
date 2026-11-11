@@ -731,7 +731,7 @@ Binding-backed Never requires explicit `@moth.sig ... -> !`. Mixed annotation fo
 
 #### Constants, build configuration and const records
 
-Header preparation discovers constant dependencies. AST checks and folds them. `$config` is the only source modifier; it marks one following explicitly typed top-level compile-time binding in `config.moth` or a selected source module as an input contract. The binding name is the input key, the declared type is the contract and the initializer is the fallback; only a marked binding may omit one. Project fields and ordinary helpers never supply or block inputs implicitly.
+Header preparation discovers constant dependencies. AST checks and folds them. `$config` and `$export` are the source modifiers. `$config` marks one following explicitly typed top-level compile-time binding in `config.moth` or a selected source module as an input contract. `$export` marks one eligible public declaration or direct-selection dependency clause in `@mod.moth` or `@package.moth`. The binding name is the input key, the declared type is the contract and the initializer is the fallback; only a `$config`-marked binding may omit one. Project fields and ordinary helpers never supply or block inputs implicitly.
 
 Bootstrap defaults fold within the config service. Source defaults remain self-contained primitive literals or `none`, resolved after graph discovery and before module AST semantics. The resolved value is an ordinary folded constant, with no runtime wrapper, HIR category or visibility rule. The build document owns the exact domain, precedence and matching contract.
 
