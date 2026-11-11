@@ -5,9 +5,11 @@
 //! WHY: one authored clause owns one dependency shell. Stage 0 and later header stages must
 //!      consume that ownership instead of receiving one provider row per selected name.
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerStage, DependencyClauseKind, InvalidDependencyClauseReason,
+};
 
 use crate::compiler_frontend::headers::dependency_clause_syntax::{
     DependencyClauseParseError, RetainedDependencyPath, ScannedDependencyBinding,
@@ -23,7 +25,7 @@ use crate::compiler_frontend::headers::types::{
     HeaderParseContext, HeaderParseFailure, RetainedDependencyClause,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -50,38 +52,22 @@ fn dependency_clause_token_index(
 
 pub(super) fn parse_and_record_dependency(
     cursor: &mut TokenCursor<'_>,
-    file_id: crate::compiler_frontend::source::SourceId,
+    file_id: SourceId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     export_mode: HeaderExportMode,
     clause_span: SourceSpan,
 ) -> FileDependencyClauseResult<()> {
     if context.is_config_file {
-        return Err(project_config::invalid_dependency_clause(crate::compiler_frontend::compiler_messages::DependencyClauseKind::Namespace,
-        crate::compiler_frontend::compiler_messages::InvalidDependencyClauseReason::DependencyClauseNotAllowed,
-        Some(clause_span),)
+        return Err(project_config::invalid_dependency_clause(
+            DependencyClauseKind::Namespace,
+            InvalidDependencyClauseReason::DependencyClauseNotAllowed,
+            Some(clause_span),
+        )
         .into());
     }
-    parse_and_record_dependency_clause(
-        cursor,
-        file_id,
-        state,
-        context,
-        export_mode,
-        clause_span,
-        dependency_clause_token_index(cursor)?,
-    )
-}
 
-fn parse_and_record_dependency_clause(
-    cursor: &mut TokenCursor<'_>,
-    file_id: crate::compiler_frontend::source::SourceId,
-    state: &mut HeaderFileParseState,
-    context: &mut HeaderParseContext<'_>,
-    export_mode: HeaderExportMode,
-    clause_span: SourceSpan,
-    clause_token_index: TokenIndex,
-) -> FileDependencyClauseResult<()> {
+    let clause_token_index = dependency_clause_token_index(cursor)?;
     let source_tokens = cursor.source_tokens();
     if source_tokens.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
@@ -136,9 +122,11 @@ fn parse_and_record_dependency_clause(
         ScannedDependencyBinding::Namespace { alias: None }
     ) && matches!(target, DependencyTargetKind::ExternalProvider { .. })
     {
-        return Err(project_config::invalid_dependency_clause(crate::compiler_frontend::compiler_messages::DependencyClauseKind::Namespace,
-        crate::compiler_frontend::compiler_messages::InvalidDependencyClauseReason::ProviderRequiresBinding,
-        Some(parsed.provider.path_span),)
+        return Err(project_config::invalid_dependency_clause(
+            DependencyClauseKind::Namespace,
+            InvalidDependencyClauseReason::ProviderRequiresBinding,
+            Some(parsed.provider.path_span),
+        )
         .into());
     }
 

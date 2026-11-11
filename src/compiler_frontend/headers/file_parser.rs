@@ -105,11 +105,12 @@ fn record_start_body_token_from_source(
 // comes only from `$export`-marked facade items. Non-declaration statements are collected into
 // the compiler-owned entry header for that file.
 
-/// One source modifier that has been read and is waiting for its eligible declaration.
+/// One source modifier that has been read and is waiting for its eligible attachment target.
 ///
 /// WHAT: the directive's name, its authored span and the eligible target its spec declares.
 /// WHY: a source modifier occupies its own line, so the header walk must retain the pending
-///      attachment across line-break tokens while it looks for the next top-level declaration.
+///      attachment across line-break tokens while it looks for the next top-level declaration
+///      or dependency clause.
 #[derive(Clone, Copy)]
 struct PendingSourceModifier {
     name_id: StringId,
@@ -117,7 +118,7 @@ struct PendingSourceModifier {
     target: SourceModifierTarget,
 }
 
-/// Build the diagnostic for a source modifier that never reached an eligible declaration.
+/// Build the diagnostic for a source modifier that never reached an eligible target.
 fn dangling_source_modifier(name_id: StringId, span: SourceSpan) -> DiagnosticDraft {
     templates::invalid_template_directive(
         Some(name_id),
@@ -138,7 +139,8 @@ fn wrong_target_source_modifier(name_id: StringId, span: SourceSpan) -> Diagnost
 /// Whether this file may author the modifier's declared target at all.
 ///
 /// WHAT: `$export` belongs only to an API facade root; `$config` keeps its existing placement
-///       contract, which its declaration-level target check owns.
+///       contract, which its declaration-level target check owns. Dependency-clause attachment
+///       is validated separately by the dependency parser.
 /// WHY: an ineligible file is a placement failure at the directive, not a missing or wrong target
 ///      on the next item.
 fn source_modifier_allowed_in_file(
@@ -190,7 +192,8 @@ fn source_modifier_target_for(
 ///
 /// WHAT: compares the built declaration kind against the spec's eligible-target contract.
 /// WHY: attachment is a syntactic fact, but recording the modifier on an ineligible declaration
-///      would hand a later stage a target its contract cannot accept.
+///      would hand a later stage a target its contract cannot accept. Dependency clauses are
+///      validated by their own parser because they never build a declaration header.
 fn header_accepts_source_modifier(kind: &HeaderKind, target: SourceModifierTarget) -> bool {
     match target {
         SourceModifierTarget::ExplicitTypedCompileTimeBinding => {
@@ -246,7 +249,8 @@ fn parse_headers_in_file_inner(
     // Declaration handlers consume their own balanced regions. Track only runtime tokens left
     // to this walk, where a physical newline inside an expression is not a file boundary.
     let mut runtime_nesting = NestingDepth::default();
-    // One source-modifier run awaiting the next eligible top-level declaration.
+    // One source-modifier run awaiting the next eligible top-level declaration or dependency
+    // clause.
     let mut pending_source_modifier: Option<PendingSourceModifier> = None;
     loop {
         let current_index = cursor.position();
@@ -558,12 +562,6 @@ fn handle_symbol_item(
         )
     };
 
-    if export_mode.is_public() && !starts_duplicate {
-        return Err(diagnostic_failure(
-            generics_traits_api::invalid_export_target(Some(current_span)),
-        ));
-    }
-
     if let Some(first_span) = state.encountered_symbols.get(&name_id) {
         let is_conformance_declaration =
             (follower_tag == TokenTag::MUST && !starts_trait) || starts_specialized;
@@ -639,17 +637,8 @@ fn handle_symbol_item(
         )));
     }
 
-    if export_mode.is_public()
-        && matches!(
-            &header.kind,
-            HeaderKind::TraitConformance { .. } | HeaderKind::TraitIncompatibility { .. }
-        )
-    {
-        return Err(diagnostic_failure(
-            generics_traits_api::invalid_export_target(Some(current_span)),
-        ));
-    }
-
+    // Structural modifier targets are already settled by the pending-directive preflight and
+    // `header_accepts_source_modifier`; only receiver-method ownership needs an extra check.
     if export_mode.is_public()
         && let HeaderKind::Function { signature, .. } = &header.kind
         && is_receiver_method_candidate(signature, context.string_table, context.path_fork)

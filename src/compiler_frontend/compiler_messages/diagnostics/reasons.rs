@@ -895,11 +895,12 @@ pub enum InvalidTemplateDirectiveReason {
     InvalidChildDecoratorValue,
     /// A known directive appeared in a context its definition does not allow.
     WrongContext,
-    /// The same source modifier was attached twice to one declaration.
+    /// The same source modifier was attached twice to one item.
     DuplicateModifier,
-    /// A source modifier reached end of file or a non-declaration item instead of a target.
+    /// A source modifier reached a blank line or file end before an eligible target.
     DanglingModifier,
-    /// A source modifier attached to a declaration its contract does not accept.
+    /// A source modifier attached to a declaration or dependency clause its contract does not
+    /// accept.
     WrongTarget,
 }
 
