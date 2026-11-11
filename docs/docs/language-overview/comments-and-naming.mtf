@@ -15,7 +15,7 @@ Inside a template body, `--` is ordinary body text. A moth template `.mtf` file 
 the body of an implicit compile-time Markdown template, so `--` is text there
 too.
 
-Use `[$note: ...]` to discard template-authored comment content. `$todo`
+Use [$html:<code>&#91;$note: ...&#93;</code>] to discard template-authored comment content. `$todo`
 annotates the next source statement or declaration and is not a template
 comment. `$doc` likewise annotates declarations. See @../directives (Directives).
 

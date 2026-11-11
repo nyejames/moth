@@ -18,7 +18,7 @@ See @#project-config (Project configuration) for the field contract and @#build-
 
 ### HTML builder slots
 
-Use bare direct top-level `[$in name: ...]` inserts in `@entry.moth` to supply document metadata. These templates are const-required without a `#` prefix:
+Use bare direct top-level [$html:<code>&#91;$in name: ...&#93;</code>] inserts in `@entry.moth` to supply document metadata. These templates are const-required without a `#` prefix:
 
 [codeblock, $code "moth":
     [$in title:Moth]
@@ -32,7 +32,7 @@ Use bare direct top-level `[$in name: ...]` inserts in `@entry.moth` to supply d
 
 The HTML builder registers `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and `head`. Ordinary top-level const and runtime fragments render into the body. A nested or aliased `$in` remains a template composition helper, not a builder message. Helper files, API facades and imported modules do not contribute to the selected entry.
 
-An entry with only these direct const contributions still produces a complete document. Only explicitly marked `~[...]` entry templates contribute runtime body fragments. Unmarked direct output must fold, while ordinary assigned or nested templates retain their usual rules. Runtime named builder slots are not supported.
+An entry with only these direct const contributions still produces a complete document. Only explicitly marked [$html:<code>~&#91;...&#93;</code>] entry templates contribute runtime body fragments. Unmarked direct output must fold, while ordinary assigned or nested templates retain their usual rules. Runtime named builder slots are not supported.
 
 The compiler accepts the active builder's read-only destination schema. It validates that a direct root insert targets a registered name and folds the contribution to a structural value, but it does not know HTML slot meaning. The builder validates slot-specific content and assembles the document. Both the JavaScript and HTML-Wasm paths consume the same builder slot plan, so metadata fallbacks, stylesheet order and body output remain equivalent.
 

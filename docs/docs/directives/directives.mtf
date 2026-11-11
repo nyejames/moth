@@ -52,8 +52,8 @@ the fallback. Only a marked input can omit its initializer. See
 Its operand must evaluate at compile time to a `String`. The compiler attaches
 the resolved text to the declaration's semantic identity as documentation
 metadata. It does not publish a template fragment or emit runtime work.
-`$doc` does not format its argument automatically. Use `$doc [$md: ...]`
-for Markdown or `$doc [: ...]` for ordinary template content.
+`$doc` does not format its argument automatically. Use [$html:<code>$doc &#91;$md: ...&#93;</code>]
+for Markdown or [$html:<code>$doc &#91;: ...&#93;</code>] for ordinary template content.
 
 `$todo value` annotates a declaration or a complete executable statement,
 including a branch, loop or return. It also requires a compile-time `String`
@@ -88,7 +88,7 @@ construct cannot be skipped. LF and CRLF follow the same rules.
 
 A directive consumes at most one permitted operand. Another source directive
 terminates that operand only at its outer expression boundary. A nested template
-directive, such as `$md` in `$doc [$md: text]`, remains part of that template.
+directive, such as `$md` in [$html:<code>$doc &#91;$md: text&#93;</code>], remains part of that template.
 No source directive can be the operand of another.
 
 **Each directive name may occur at most once in one attachment run.** Every

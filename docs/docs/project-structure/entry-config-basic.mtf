@@ -26,7 +26,7 @@ HTML also accepts `description`, `lang`, `favicon`, `body_style` and `head`. Rep
 
 `head` inserts raw HTML after built-in head content. Identical complete head contributions render once. Old `page_*` constants have no implicit metadata effect. JavaScript and HTML-Wasm documents use the same slot plan.
 
-A metadata-only entry still produces a page. Explicit `~[...]` runtime top-level templates contribute only to the body; bare direct `[...]` must fold. Runtime named builder slots are not supported. Only direct inserts in `@entry.moth` reach the builder. API facades, helper files and imported modules cannot contribute.
+A metadata-only entry still produces a page. Explicit [$html:<code>~&#91;...&#93;</code>] runtime top-level templates contribute only to the body; bare direct [$html:<code>&#91;...&#93;</code>] must fold. Runtime named builder slots are not supported. Only direct inserts in `@entry.moth` reach the builder. API facades, helper files and imported modules cannot contribute.
 
 ### Entry selection
 

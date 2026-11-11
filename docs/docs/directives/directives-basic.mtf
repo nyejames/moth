@@ -21,7 +21,7 @@ top-level compile-time binding as a build input.
 `$doc` documents a declaration. `$todo` annotates a declaration or
 statement. Both take a compile-time `String` value, often written as a
 template. `$doc` records declaration documentation. `$todo` has no runtime
-or builder effect. Use `$doc [$md: ...]` to request Markdown explicitly.
+or builder effect. Use [$html:<code>$doc &#91;$md: ...&#93;</code>] to request Markdown explicitly.
 
 ### Stacking and operands
 

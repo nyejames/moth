@@ -19,11 +19,11 @@ returned from a function remains a value and does not become a page fragment by 
 
 ### Direct top-level const fragments
 
-Every bare direct `[...]` fragment in `@entry.moth` is const-required by default.
+Every bare direct [$html:<code>&#91;...&#93;</code>] fragment in `@entry.moth` is const-required by default.
 It must fold even if an ordinary template expression in the same position would
-be runtime-dependent. Use direct `~[...]` to request a runtime body fragment.
+be runtime-dependent. Use direct [$html:<code>~&#91;...&#93;</code>] to request a runtime body fragment.
 The file's presence makes its directory entry-eligible, so metadata-only pages
-remain valid. The removed direct `#[...]` spelling has no compatibility alias.
+remain valid. The removed direct [$html:<code>#&#91;...&#93;</code>] spelling has no compatibility alias.
 
 [codeblock, $code "moth":
     [$md:
@@ -35,7 +35,7 @@ The bare direct form in the entry file:
 
 - is valid only as top-level entry fragment syntax
 - must fully fold, reporting a constant-required diagnostic for runtime dependence
-- records its position relative to explicit `~[...]` runtime fragments
+- records its position relative to explicit [$html:<code>~&#91;...&#93;</code>] runtime fragments
 - is handed to the project builder
 - never becomes HIR runtime code
 
@@ -68,7 +68,7 @@ The HTML destinations are:
 - `head`: raw additional head HTML, appended after the builder's dedicated head content
 - the implicit default destination: ordered body fragments
 
-A direct named insert must fold to a compile-time value. `~[$in name: ...]`
+A direct named insert must fold to a compile-time value. [$html:<code>~&#91;$in name: ...&#93;</code>]
 is not a runtime named builder contribution. A nonconstant
 contribution and a name the builder has not registered are diagnosed at their
 authored source. Nested, stored and aliased inserts remain ordinary template

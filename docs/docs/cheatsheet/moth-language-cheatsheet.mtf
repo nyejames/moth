@@ -769,7 +769,7 @@ A source/target pair can conform to only one of the infallible or fallible varia
 ]
 
 `{T}` grows dynamically. `{N T}` has fixed maximum capacity `N`, which is part of its type. `N` is a positive `I32` literal or bare `#I32` constant.
-Length, capacity and indexes use `I32`. Collections have no `[]` indexing or builtin equality.
+Length, capacity and indexes use `I32`. Collections have no [$html:<code>&#91;&#93;</code>] indexing or builtin equality.
 
 Non-empty literals have one element type. Raw numeric literals can receive that type from context.
 A collection can't promote already typed elements to a new storage type. Empty collections require an explicit type at declaration or field default.
@@ -1232,8 +1232,8 @@ Ordinary const and runtime fragments render into the body. Scalar metadata contr
 Only direct root inserts route. Nested, stored and aliased inserts remain template composition. Runtime top-level named builder inserts are not supported. Old `page_*` names are ordinary constants with no implicit metadata effect.
 Helpers, `@mod.moth` and `@package.moth` facades and `config.moth` cannot supply entry contributions.
 
-Bare direct `[...]` is const-required and becomes static HTML; `~[...]` is a runtime fragment even when foldable. Runtime-dependent bare
-entry fragments are errors, not runtime fallbacks. The former direct `#[...]` spelling is removed. Ordinary assigned or nested templates keep
+Bare direct [$html:<code>&#91;...&#93;</code>] is const-required and becomes static HTML; [$html:<code>~&#91;...&#93;</code>] is a runtime fragment even when foldable. Runtime-dependent bare
+entry fragments are errors, not runtime fallbacks. The former direct [$html:<code>#&#91;...&#93;</code>] spelling is removed. Ordinary assigned or nested templates keep
 their own const/runtime rules. Runtime work runs once at page startup and publishes runtime fragments only after success.
 An error leaves static fragments in place but doesn't roll back earlier side effects.
 The release page shows a generic failure notice, not application error text.

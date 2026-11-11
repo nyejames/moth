@@ -23,10 +23,10 @@ comment content without producing output.
 
 Direct top-level templates in `@entry.moth` become fragments:
 
-- Bare `[...]` must fold and becomes static HTML.
-- Explicit `~[...]` runs through the entry, even if its content can fold.
+- Bare [$html:<code>&#91;...&#93;</code>] must fold and becomes static HTML.
+- Explicit [$html:<code>~&#91;...&#93;</code>] runs through the entry, even if its content can fold.
 
-The removed `#[...]` spelling is invalid. A nonconstant bare entry fragment is
+The removed [$html:<code>#&#91;...&#93;</code>] spelling is invalid. A nonconstant bare entry fragment is
 an error instead of an implicit runtime fragment.
 
 The builder keeps static and runtime fragments in source order. Assigned or returned templates are ordinary values. Helpers cannot create page fragments.

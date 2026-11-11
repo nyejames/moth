@@ -20,9 +20,9 @@ Only a direct top-level const `$in` on the entry reaches the builder. A nested o
 documentation metadata. `$todo value` annotates a following declaration or
 executable statement and is validated without generating runtime work. Both are
 source directives, not template fragments. Only `$note` is a template-comment
-directive. A direct `[$note: ...]` discards its balanced body and contributes
+directive. A direct [$html:<code>&#91;$note: ...&#93;</code>] discards its balanced body and contributes
 no output or runtime slot, unlike an ordinary template that emits an empty
-String. `~[$note: ...]` is invalid because a note cannot publish runtime output.
+String. [$html:<code>~&#91;$note: ...&#93;</code>] is invalid because a note cannot publish runtime output.
 
 Assigned or returned template values remain ordinary values, not direct output.
 Their containing runtime code follows normal entry placement rules. See
@@ -36,11 +36,11 @@ The entry file's top-level runtime code becomes a dormant compiler-owned entry. 
 
 Two forms of direct top-level template in `@entry.moth` become page fragments:
 
-- A bare direct `[...]` is a const-required fragment. It must fold and is emitted as static HTML; runtime-dependent content is an error, not a fallback.
-- An explicitly marked direct `~[...]` is a runtime body fragment. It reserves a runtime slot even when its content happens to fold. The entry evaluates it on activation, then publishes it only on success.
+- A bare direct [$html:<code>&#91;...&#93;</code>] is a const-required fragment. It must fold and is emitted as static HTML; runtime-dependent content is an error, not a fallback.
+- An explicitly marked direct [$html:<code>~&#91;...&#93;</code>] is a runtime body fragment. It reserves a runtime slot even when its content happens to fold. The entry evaluates it on activation, then publishes it only on success.
 
-`~ [...]` may include horizontal space after `~`, but no newline may separate
-its marker from `[`. The old direct `#[...]` syntax is removed. These fragment
+[$html:<code>~ &#91;...&#93;</code>] may include horizontal space after `~`, but no newline may separate
+its marker from [$html:<code>&#91;</code>]. The old direct [$html:<code>#&#91;...&#93;</code>] syntax is removed. These fragment
 rules apply only to direct top-level entry templates, not ordinary expression
 or nested templates. Runtime named `$in` destinations are unsupported.
 
