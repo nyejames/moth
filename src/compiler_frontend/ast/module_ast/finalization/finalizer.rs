@@ -153,7 +153,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // ----------------------------
         let const_top_level_fragments = collect_const_top_level_fragments(
             top_level_const_fragments,
-            &emitted.const_templates_by_path,
+            &mut emitted.const_templates_by_path,
         )
         .map_err(|error| self.error_messages(error, &mut emitted.warnings, string_table))?;
 

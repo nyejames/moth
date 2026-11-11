@@ -314,17 +314,17 @@ pub(crate) fn parse_function_body_statements(
         }
 
         // Statement-boundary `~[...]` is the explicit runtime fragment in the compiler-owned
-        // entry body. Consume the marker so the template parser sees the opening head.
-        let runtime_marker_at_statement_boundary = token_stream.previous().is_none_or(|token| {
-            matches!(
-                token.tag(),
-                TokenTag::MODULE_START | TokenTag::NEWLINE | TokenTag::END
-            )
-        });
+        // entry body. Consume the marker so the template parser sees the opening head. The
+        // previous-token check runs only for this marker, not for every authored statement.
         if current_tag == TokenTag::MUTABLE
             && context.kind == ContextKind::Module
-            && runtime_marker_at_statement_boundary
             && token_stream.peek_next_tag() == Some(TokenTag::TEMPLATE_HEAD)
+            && token_stream.previous().is_none_or(|token| {
+                matches!(
+                    token.tag(),
+                    TokenTag::MODULE_START | TokenTag::NEWLINE | TokenTag::END
+                )
+            })
         {
             token_stream.advance();
             let fragment_span = Some(token_stream.current_span());

@@ -332,12 +332,16 @@ fn split_runtime_ranges_around_const_required(
         // Every validated range shares this source, so gap construction cannot mix owners.
         let source = range.range.source();
         let mut uncovered_start = range.range.start();
-        for covered in &merged {
-            if covered.end() <= uncovered_start {
-                continue;
-            }
+        // Merged intervals are ordered and disjoint, so everything before this partition ends at
+        // or before the runtime range and cannot contribute a gap or consume a token.
+        let first_candidate =
+            merged.partition_point(|covered| covered.end() <= range.range.start());
+        for covered in &merged[first_candidate..] {
             if covered.start() >= range.range.end() {
                 break;
+            }
+            if covered.end() <= uncovered_start {
+                continue;
             }
             if covered.start() > uncovered_start {
                 split.push(HeaderExpressionRange {

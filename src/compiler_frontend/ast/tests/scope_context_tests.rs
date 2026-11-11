@@ -1,7 +1,7 @@
 //! Unit tests for `ScopeContext` construction invariants.
 //!
 //! WHAT: validates builder-pattern behaviour, context-kind transitions, and
-//! visibility-gate synchronisation for the most commonly misused paths.
+//! visibility-gate isolation for the most commonly misused paths.
 //! WHY: dropping an inherited callable contract silently changes nested exit semantics.
 
 use super::environment::TopLevelDeclarationTable;
@@ -57,11 +57,11 @@ fn scope_context_new_leaves_no_visibility_gate() {
 }
 
 // ---------------------------------------------------------------------------
-// add_var — gate synchronisation
+// add_var — local frame isolation from the gate
 // ---------------------------------------------------------------------------
 
 #[test]
-fn add_var_extends_visibility_gate_when_gate_is_set() {
+fn add_var_keeps_the_installed_visibility_gate_unchanged() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
 
     use crate::compiler_frontend::value_mode::ValueMode;
@@ -80,11 +80,13 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
         0,
     );
 
-    // Install an empty visibility gate.
-    context = context.with_visible_declarations(Arc::new(FxHashSet::default()));
+    // Install an empty file-level visibility gate.
+    let visibility_gate = Arc::new(FxHashSet::default());
+    context = context.with_visible_declarations(Arc::clone(&visibility_gate));
 
+    let variable_name = string_table.intern("my_var");
     let variable_path = path_fork
-        .try_intern_components(&[string_table.intern("my_var")])
+        .try_intern_components(&[variable_name])
         .expect("test path fits");
     let declaration = Declaration {
         id: variable_path.to_owned(),
@@ -98,12 +100,28 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
     context.add_var(declaration, None, &path_fork);
 
     assert!(
-        context
+        !visibility_gate.contains(&variable_path),
+        "add_var must not write a body-local declaration into the shared file visibility gate"
+    );
+    assert!(
+        !context
             .visible_declaration_ids
             .as_ref()
             .unwrap()
             .contains(&variable_path),
-        "add_var must insert the new variable into the visibility gate"
+        "the context gate must remain the file-level set"
+    );
+    let reference = context
+        .get_value_reference(&variable_name, None)
+        .expect("ordinary local lookup must be valid")
+        .expect("a body-local declaration must resolve through its frame");
+    assert_eq!(
+        reference
+            .ready_declaration()
+            .expect("a plain local reference must be ready")
+            .id,
+        variable_path,
+        "local lookup must not depend on the visibility gate"
     );
     assert_eq!(
         context.local_declarations().len(),
@@ -113,7 +131,7 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
 }
 
 #[test]
-fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
+fn add_compile_time_var_keeps_the_installed_visibility_gate_unchanged() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
 
     use crate::compiler_frontend::value_mode::ValueMode;
@@ -149,12 +167,12 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
     context.add_compile_time_var(declaration, None, &path_fork);
 
     assert!(
-        context
+        !context
             .visible_declaration_ids
             .as_ref()
             .unwrap()
             .contains(&constant_path),
-        "add_compile_time_var must keep the visibility gate synchronized"
+        "add_compile_time_var must not write a body-local declaration into the visibility gate"
     );
     let reference = context
         .get_value_reference(&constant_name, None)
@@ -672,7 +690,7 @@ fn new_child_control_flow_inherits_visibility_gate() {
 }
 
 #[test]
-fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
+fn child_scope_local_stays_out_of_the_shared_visibility_gate() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
 
     use crate::compiler_frontend::value_mode::ValueMode;
@@ -691,14 +709,14 @@ fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
         0,
     );
 
-    // The gate every scope starts from is the header-built set, shared by handle. A child that
-    // declares a local must copy it before writing, or the local would become visible to every
-    // other scope in the module.
+    // The gate every scope starts from is the header-built set, shared by handle. Body locals
+    // resolve through the scope arena, so the gate must stay untouched by local declarations.
     let shared_gate = Arc::new(FxHashSet::default());
     context = context.with_visible_declarations(Arc::clone(&shared_gate));
 
+    let local_name = string_table.intern("branch_local");
     let local_path = path_fork
-        .try_intern_components(&[string_table.intern("branch_local")])
+        .try_intern_components(&[local_name])
         .expect("test path fits");
     let declaration = Declaration {
         id: local_path.to_owned(),
@@ -716,16 +734,20 @@ fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
     child.add_var(declaration, None, &path_fork);
 
     assert!(
-        child
+        child.get_reference(&local_name).is_some(),
+        "the declaring child must resolve its own local through the frame"
+    );
+    assert!(
+        !shared_gate.contains(&local_path),
+        "a child local must not be written into the shared header-built gate"
+    );
+    assert!(
+        !child
             .visible_declaration_ids
             .as_ref()
             .unwrap()
             .contains(&local_path),
-        "the declaring child must see its own local"
-    );
-    assert!(
-        !shared_gate.contains(&local_path),
-        "a child local must not be written back into the shared header-built gate"
+        "the child gate must remain the file-level set"
     );
     assert!(
         !context

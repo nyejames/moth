@@ -9,19 +9,17 @@ impl ScopeContext {
 
     /// Add a body-local declaration to the current scope frame.
     ///
-    /// WHAT: records the declaration in the current frame, updates the visibility
-    ///       gate if one is installed, and updates the frame-local name index.
-    /// WHY: child scopes inherit ancestor frames by parent link, so additions must
-    ///      stay in the current frame and never leak into the parent.
+    /// WHAT: records the declaration in the current frame and updates the frame-local name index.
+    /// WHY: child scopes inherit ancestor frames by parent link, so additions must stay in the
+    ///      current frame and never leak into the parent. The visibility gate stays the shared
+    ///      header-built set: it gates top-level declarations, while locals resolve through the
+    ///      scope arena.
     pub fn add_var(
         &mut self,
         declaration: Declaration,
         binding_span: Option<SourceSpan>,
         path_fork: &PathInternerFork,
     ) {
-        if let Some(visible_declarations) = self.visible_declaration_ids.as_mut() {
-            Arc::make_mut(visible_declarations).insert(declaration.id);
-        }
         self.arena
             .borrow_mut()
             .frame_mut(self.current_frame_id)
@@ -40,9 +38,6 @@ impl ScopeContext {
         binding_span: Option<SourceSpan>,
         path_fork: &PathInternerFork,
     ) {
-        if let Some(visible_declarations) = self.visible_declaration_ids.as_mut() {
-            Arc::make_mut(visible_declarations).insert(declaration.id);
-        }
         self.arena
             .borrow_mut()
             .frame_mut(self.current_frame_id)

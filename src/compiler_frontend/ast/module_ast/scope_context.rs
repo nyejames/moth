@@ -564,7 +564,7 @@ pub struct ScopeContext {
     unavailable_assignment_targets: FxHashSet<StringId>,
     pending_catch_assignment_targets: FxHashSet<StringId>,
 
-    // Optional file-local visibility gate over declarations.
+    // Optional file-local gate over top-level declaration paths.
     pub visible_declaration_ids: Option<Arc<FxHashSet<PathId>>>,
     /// Result types of the immediate receiving site, such as an annotated declaration
     /// or a call argument. Empty when the receiver infers its own type.

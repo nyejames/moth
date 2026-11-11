@@ -106,8 +106,8 @@ fn collects_const_top_level_fragments_from_tir_result_record() {
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     }];
 
-    let collected =
-        collect_const_top_level_fragments(&fragments, &results).expect("collection should succeed");
+    let collected = collect_const_top_level_fragments(&fragments, &mut results)
+        .expect("collection should succeed");
 
     assert_eq!(collected.len(), 1);
     assert_eq!(collected[0].runtime_insertion_index, 0);
@@ -140,8 +140,8 @@ fn collects_const_top_level_fragments_from_folded_value() {
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     }];
 
-    let collected =
-        collect_const_top_level_fragments(&fragments, &results).expect("collection should succeed");
+    let collected = collect_const_top_level_fragments(&fragments, &mut results)
+        .expect("collection should succeed");
 
     assert_eq!(collected.len(), 1);
     assert_eq!(collected[0].runtime_insertion_index, 2);
@@ -191,8 +191,8 @@ fn collects_mixed_const_top_level_fragments_in_source_order() {
         },
     ];
 
-    let collected =
-        collect_const_top_level_fragments(&fragments, &results).expect("collection should succeed");
+    let collected = collect_const_top_level_fragments(&fragments, &mut results)
+        .expect("collection should succeed");
 
     assert_eq!(collected.len(), 2);
     assert_eq!(collected[0].runtime_insertion_index, 1);
@@ -292,8 +292,8 @@ fn collects_piece_bearing_and_plain_const_top_level_fragments_unchanged() {
         },
     ];
 
-    let collected =
-        collect_const_top_level_fragments(&fragments, &results).expect("collection should succeed");
+    let collected = collect_const_top_level_fragments(&fragments, &mut results)
+        .expect("collection should succeed");
 
     assert_eq!(collected.len(), 3);
     assert_eq!(collected[0].runtime_insertion_index, 1);
@@ -312,6 +312,32 @@ fn collects_piece_bearing_and_plain_const_top_level_fragments_unchanged() {
 }
 
 #[test]
+fn no_output_const_top_level_fragment_is_consumed_without_a_value() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("note.moth", &mut string_table)
+        .expect("test path fits");
+
+    let mut results = FxHashMap::<PathId, FoldedConstTemplateResult>::default();
+    results.insert(path, FoldedConstTemplateResult::NoOutput);
+    let fragments = vec![TopLevelConstFragment {
+        runtime_insertion_index: 0,
+        header_path: path,
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+    }];
+
+    let collected = collect_const_top_level_fragments(&fragments, &mut results)
+        .expect("no-output fragments are skipped, not missing");
+
+    assert!(collected.is_empty());
+    assert!(
+        results.is_empty(),
+        "collecting a fragment must consume its emitting-map entry"
+    );
+}
+
+#[test]
 fn missing_const_top_level_fragment_result_returns_infrastructure_failure() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -319,14 +345,14 @@ fn missing_const_top_level_fragment_result_returns_infrastructure_failure() {
         .try_intern_portable_path("main.moth", &mut string_table)
         .expect("test path fits");
 
-    let results = FxHashMap::<PathId, FoldedConstTemplateResult>::default();
+    let mut results = FxHashMap::<PathId, FoldedConstTemplateResult>::default();
     let fragments = vec![TopLevelConstFragment {
         runtime_insertion_index: 0,
         header_path: path,
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     }];
 
-    let error = collect_const_top_level_fragments(&fragments, &results)
+    let error = collect_const_top_level_fragments(&fragments, &mut results)
         .expect_err("missing result should fail");
 
     assert!(

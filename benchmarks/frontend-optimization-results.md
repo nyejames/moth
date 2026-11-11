@@ -7299,3 +7299,156 @@ from benchmark history, so those historical comparisons do not establish a speed
 The generated fixtures and raw measurements live in ignored `tmp/wrapper-cost/` and
 `tmp/discovery-experiment/`; they are not reproduced by a checked-in harness.
 
+
+## Recent Compiler Performance and Redundancy Follow-up (2026-11-11)
+
+### Baseline identity
+
+- Branch `perf/recent-compiler-performance`, baseline commit `d7fcf7b28`, clean worktree.
+- Host macOS Apple Silicon `6D851D` (Apple M1 Pro, 10 cores, 16 GiB), Darwin `27.0.0` ARM64.
+- Rust `1.99.0` (`b940084d7`), LLVM `23.1.1`, host `aarch64-apple-darwin`.
+- CLI suite builds the release `moth` compiler with `--features timers` and runs with
+  `MOTH_TIMERS=bench`, `MOTH_COUNTERS=off` and `RAYON_NUM_THREADS` unset (default threads).
+- Frontend suite runs in-process in the dev-built xtask with the same timer and counter settings.
+- Read-only evidence schema `moth_benchmark_read_only_v1`, benchmark protocol 4, timing schema 2,
+  one preflight warmup and ten measured iterations per case.
+- Commands: `just bench-check`, `just bench-frontend-check` and `just bench-scaling`. None wrote
+  history or summaries.
+
+### Baseline results
+
+- CLI suite: 74 cases, suite average 23.20 ms, case spread 35.84 ms.
+- Frontend suite: 76 cases, suite average 137.76 ms on `frontend_total_ms`.
+- Scaling: all 14 declared series within budget. The numeric series fitted `n^0.67` to `n^0.97`
+  and generic materialisation fitted `n^1.09` against its `n^1.70` budget.
+
+Representative per-case stage means in milliseconds. Stage metrics are nested and not additive.
+
+| Case | Median | prepare | bind | order | AST | emit | finalise | HIR | borrow initial | borrow converge |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `speed_test_check` | 17.84 | 0.05 | 0.10 | 0.05 | 5.35 | 2.03 | 1.10 | 0.92 | 1.41 | 2.35 |
+| `docs_check` | 161.86 | 19.84 | 12.16 | 0.55 | 89.27 | 23.56 | 3.26 | 1.58 | 0.97 | 0.08 |
+| `template_stress_check` | 9.71 | 0.04 | 0.07 | 0.02 | 1.32 | 0.44 | 0.22 | 0.20 | 0.28 | 0.43 |
+| `default_parameters_32_check` | 9.02 | 0.03 | 0.05 | 0.02 | 1.11 | 0.47 | 0.26 | 0.32 | 0.30 | 0.34 |
+| `import_fanout_check` | 12.73 | 0.68 | 0.49 | 0.04 | 1.40 | 0.39 | 0.24 | 0.35 | 0.31 | 0.26 |
+| `module_graph_check` | 10.20 | 0.48 | 0.22 | 0.02 | 0.98 | 0.23 | 0.14 | 0.21 | 0.19 | 0.20 |
+
+The docs workload is dominated by AST environment construction (62.16 ms), of which constant
+header resolution is 55.79 ms. Header ordering and range work is a small part of `bind` and is not
+a credible explanation for a suite-wide regression.
+
+### Historical comparison
+
+The `2026-11-11T13:52` recorded run on `84923ba4` remains historical evidence; it is not a
+reproducible benchmark claim. It used the same host, protocol and timing schema.
+
+- `f94100ae` to `84923ba4`: 24 of 74 cases changed source fingerprints, covering 18 of 68
+  workloads. The 50 comparable cases moved from a 21.33 ms to a 23.05 ms suite average, with
+  2 faster and 48 slower per-case medians, a +1.07 ms median delta and a +96.09 ms sum of
+  median deltas. This reproduces the reported regression shape against that earlier checkpoint.
+- `84923ba4` to `d7fcf7b28`: 73 of 74 workload fingerprints match; only `docs` source bytes
+  changed, so its case is excluded. The suite average moved from 23.05 ms to 23.20 ms. Per-case
+  medians gave 29 faster and 44 slower, a +0.093 ms median delta and a +20.39 ms sum. One case
+  exceeded twice the combined standard deviation: `numeric_generic_failure_chain_512_check`
+  (+8.54 ms), dominated by `frontend.borrow.converge` (+8.25 ms). Other apparent movements,
+  including `speed_test_check` (+1.57 ms with 2.45 ms standard deviation), are within noise.
+
+The small reported regression is therefore not reproducible at suite level on the current
+checkpoint. The only two-sigma movement belongs to borrow convergence on a synthetic generic
+failure chain, which the production borrow performance owner tracks. Confirmed cleanups in this
+follow-up are work and data-movement reductions; a wall-time win is not claimed for them.
+
+### Slice 1: one-pass qualified ordering and bounded range split
+
+P1 replaces the per-header filter over each source's complete occurrence list with one visit per
+const-required occurrence. With `H` headers and `Q` occurrences for a source, the candidate
+inspections fall from `O(H * Q)` to `O(H + Q)`. The collector reuses symbol collection's
+module-rebased `owning_header_index`, checks the owning source and index contract, and keeps the
+early no-resolved-target fast path. A synthetic same-module environment is justified here because
+provider binding has its own owner; the regression covers rebased indexes, multiple occurrences per
+header, runtime-only occurrences, missing targets, non-constant targets and a 16+16-header fixture.
+Cycle witnesses remain Stage 3's existing integration cases.
+
+P2 replaces the complete merged-interval scan for every runtime range with a `partition_point`
+prefix skip, then visits only possibly overlapping intervals. The dense-default regression checks
+adjacent const-required intervals and the overlapping runtime body keep their existing
+classifications. No second interval index was added.
+
+P3 was rejected. `dependency_path_for_local_name` runs during provider-independent header
+preparation, where no bound canonical name-to-path table exists yet. A file-local index would add
+state and construction work to save a very small per-shell walk; import-fanout preparation measured
+2.51 ms and binding 2.16 ms in the frontend suite, and no profile attributes material time to the
+repeated clause walk. The existing helper stays.
+
+Measurements on the same host and protocol as the baseline:
+
+- CLI suite: 23.204 ms baseline to 22.790 ms after, 35 faster and 38 slower per-case medians,
+  +0.023 ms median delta and -27.67 ms sum of median deltas across 73 comparable cases. Unrelated
+  borrow convergence moved by -24.4 ms in the aggregate, so run-level drift dominates this change.
+- Frontend adjacent repeats: 136.38 ms to 136.43 ms, 55 faster and 21 slower, -0.325 ms median
+  delta and +16.6 ms sum. A same-code repeat moved the suite by -1.38 ms, more than the candidate
+  delta. `frontend.prepare` summed +3.13 ms and `frontend.bind_headers` +0.14 ms across cases.
+- The change is neutral within run-to-run drift. This is a work and complexity reduction, not a
+  claimed wall-time improvement.
+
+### Slice 2: ownership and dispatch cleanup
+
+- P4: `collect_const_top_level_fragments` now removes each result from the emitting map, moving
+  `ConstStringValue` and `ConstFragmentDestination` into the ordered fragment instead of cloning
+  both. `finalize` has no later consumer of the map. Existing fragment tests cover plain text,
+  piecewise structural strings, resources, named destinations and ordered output; the
+  missing-result compiler invariant remains.
+- P5: `flatten_source_string` borrows `&ConstStringValue`, returns the existing `StringId` for a
+  plain value and joins borrowed pieces. The const-value store is read-only at this boundary.
+- P6: removed the per-function copy of `visibility.visible_declaration_paths` and its parameter
+  insertion at the ordinary, generic-validation and generated-instance sites. Parameters resolve
+  through the current scope frame; the file gate remains the header-built `Arc`. A review
+  follow-up also removed the remaining write from `add_var` and `add_compile_time_var`: body
+  locals resolve through the scope arena, so the file-level gate is now never copied or mutated
+  during body parsing. `with_visible_declarations` is now a test-only builder.
+  2176 AST unit tests and the selected constant/runtime, generic, receiver and function
+  integration cases pass.
+- P7: the statement-boundary previous-token lookup now runs only for a `MUTABLE` token in module
+  context whose next token is a template head. Ordinary statements skip it.
+- Remaining P7 and P8 candidates were rejected. Merging the nesting counters would conflate
+  balanced expression delimiters with entry-body block markers. Sharing source-directive
+  registration would duplicate AST statement attachment semantics. Caching per-header directive
+  fold contexts needs profile evidence and risks cross-header diagnostic state. A combined
+  structural-file, qualified-reference and content token walker would be a second scanner.
+- Frontend measurement: 136.43 ms to 134.28 ms suite average, 53 faster and 22 slower per-case
+  medians, -0.335 ms median delta. Affected cases were neutral: environment-stress AST emit moved
+  1.461 to 1.395 ms, type-stress 4.348 to 4.310 ms and default-parameters 3.607 to 3.605 ms.
+  Numeric-case drift dominates the suite sum. No wall-time win is claimed for these ownership
+  changes.
+
+### Slice 3: profile-directed follow-up
+
+No additional owner was selected. The only two-sigma movement on the current checkpoint remains
+borrow convergence on the synthetic `numeric_generic_failure_chain_512` case recorded above, which
+belongs to the production borrow performance owner. No borrow algorithm, template fold scheduler
+or Stage 0 cache was changed in this follow-up.
+
+### Slice 4: final verification
+
+Clean completion checkpoint `239daff11`. `just validate-full` passed: formatting and Clippy for
+the workspace and feature matrix, source and first-party dependency audits, 7079 unit tests,
+3279/3279 integration executions, docs check, 17/17 feature lanes, honesty audit with 0 hard
+findings, all 14 scaling series within budget and a clean no-timer artifact. The first full run
+stopped at `clippy-features` on two `field_reassign_with_default` warnings in the new ordering-hint
+test helpers; struct-update initialisation fixed both, and the rerun passed.
+
+Final clean measurements on the same host and protocol:
+
+- End-to-end CLI suite: 23.403 ms average, `73/74` comparable cases, no measurable change
+  (avg 0 ms). The clean run reported module semantics, boundary compile and single-file frontend
+  each about 23-24 ms higher, so the stage summary does not support a speed claim.
+- Focused frontend suite: 139.269 ms average. The automatic comparison had no comparable
+  unchanged workloads (`76` current, `42` previous). The adjacent pre-change comparison was
+  137.76 ms to 134.28 ms, but same-code repeats span several milliseconds and the final clean run
+  is 5 ms above the latter, so this is drift rather than an attributable delta.
+- Scaling: all 14 series within budget, with the largest fitted exponent `n^0.98` among the
+  numeric series.
+
+The completion checkpoint repeats the baseline conclusion: the confirmed changes remove work and
+data movement, and run-level drift remains larger than any attributable per-case movement. This
+follow-up claims no wall-time win.

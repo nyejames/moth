@@ -1,11 +1,11 @@
 # November 2026 Summary
 
 ## End-to-end CLI / macOS Apple Silicon (6D851D)
-Change since initial benchmark: 0ms avg; 0 faster, 1 slower; 57/74 cases; workload changed: 17 cases (speed_test_check, speed_test_build, docs_check, template_stress_check, code_highlighter_stress_check, one_module_kitchen_sink_check, template_render_plan_churn_check, module_graph_check, module_graph_build, import_fanout_check, import_fanout_build, external_js_imports_check, external_js_imports_build, module_root_stress_check, module_root_stress_build, import_external_churn_check, import_external_churn_build)
+Change since initial benchmark: +1ms avg; 0 faster, 3 slower; 49/74 cases; workload changed: 25 cases (root_single_file_check, speed_test_check, speed_test_build, docs_check, template_stress_check, code_highlighter_stress_check, constant_chain_32_check, constant_chain_128_check, constant_chain_512_check, nominal_scaling_40_check, nominal_scaling_80_check, nominal_scaling_160_check, nominal_scaling_320_check, one_module_kitchen_sink_check, template_render_plan_churn_check, module_graph_check, module_graph_build, import_fanout_check, import_fanout_build, external_js_imports_check, external_js_imports_build, module_root_stress_check, module_root_stress_build, import_external_churn_check, import_external_churn_build)
 Timing schema: 2
 Initial: all ~21ms, Core ~14ms, Docs ~163ms, Stress ~22ms, Module ~11ms, Borrow ~8ms
-Latest: all ~21ms, Core ~14ms, Docs ~154ms, Stress ~22ms, Module ~10ms, Borrow ~8ms
-Case spread latest: ~33ms
+Latest: all ~22ms, Core ~14ms, Docs ~155ms, Stress ~22ms, Module ~11ms, Borrow ~8ms
+Case spread latest: ~34ms
 
 ---------------------
 
@@ -26,3 +26,9 @@ Timing schema: 2
 **-3ms avg**; 8 faster, 0 slower; 57/74 cases; workload changed: 17 cases (speed_test_check, speed_test_build, docs_check, template_stress_check, code_highlighter_stress_check, one_module_kitchen_sink_check, template_render_plan_churn_check, module_graph_check, module_graph_build, import_fanout_check, import_fanout_build, external_js_imports_check, external_js_imports_build, module_root_stress_check, module_root_stress_build, import_external_churn_check, import_external_churn_build)
 Avg: all ~21ms, Core ~14ms, Docs ~154ms, Stress ~22ms, Module ~10ms, Borrow ~8ms
 Stage movement: check total -110ms, frontend -105ms, single-file frontend -105ms
+
+# End-to-end CLI / macOS Apple Silicon (6D851D): November 11th - 19:30
+Timing schema: 2
+**-1ms avg**; 1 faster, 0 slower; 73/74 cases; workload changed: 1 case (docs_check)
+Avg: all ~22ms, Core ~14ms, Docs ~155ms, Stress ~22ms, Module ~11ms, Borrow ~8ms
+Stage movement: check total -44ms, frontend -39ms, single-file frontend -37ms
