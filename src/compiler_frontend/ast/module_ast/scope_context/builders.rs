@@ -84,13 +84,13 @@ impl ScopeContext {
     //  Visibility and binding environment
     // --------------------------
 
-    /// Restrict declaration resolution to the provided path set.
+    /// Install a custom declaration-path gate.
     ///
-    /// WHAT: when present, only declarations whose paths are in this set are
-    /// resolvable by name. When absent, any declaration in the module may be
-    /// resolved.
-    /// WHY: file/start contexts set this to enforce dependency-binding semantics and
-    /// prevent same-file references from bypassing the visibility system.
+    /// WHAT: restricts declaration resolution to the supplied path set.
+    /// WHY: production contexts adopt the header-built gate through `with_file_visibility`. This
+    ///      direct builder remains for tests that need an isolated visibility set without a
+    ///      prepared `FileVisibility`.
+    #[cfg(test)]
     pub fn with_visible_declarations(mut self, visible: Arc<FxHashSet<PathId>>) -> ScopeContext {
         self.visible_declaration_ids = Some(visible);
         self

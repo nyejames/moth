@@ -65,21 +65,22 @@ impl FoldedConstTemplateResult {
 
 /// Collects const top-level fragments from folded template result records.
 ///
-/// WHAT: maps each header-parsed const fragment to its folded string value using the
-/// const template result map produced during AST emission.
-/// WHY: const fragments are folded during emit; this function gathers the results into the
-/// ordered `AstConstTopLevelFragment` list. HIR never consumes fragments: module compilation
-/// converts each one into an owned structural string on the module metadata, which builders read
-/// to render entry fragments.
+/// WHAT: removes each header-parsed const fragment's folded result from the emitting map and
+/// returns the ordered `AstConstTopLevelFragment` list.
+/// WHY: const fragments are folded during emit; this function transfers their owned values into
+/// the ordered list. HIR never consumes fragments: module compilation converts each one into an
+/// owned structural string on the module metadata, which builders read to render entry fragments.
+/// The map has no later consumer on this path, so removing an entry moves its value instead of
+/// cloning the string pieces and destination.
 pub(crate) fn collect_const_top_level_fragments(
     top_level_const_fragments: &[TopLevelConstFragment],
-    const_templates_by_path: &FxHashMap<PathId, FoldedConstTemplateResult>,
+    const_templates_by_path: &mut FxHashMap<PathId, FoldedConstTemplateResult>,
 ) -> Result<Vec<AstConstTopLevelFragment>, InfrastructureFailure> {
     let mut result = Vec::with_capacity(top_level_const_fragments.len());
 
     for fragment in top_level_const_fragments {
         let folded = const_templates_by_path
-            .get(&fragment.header_path)
+            .remove(&fragment.header_path)
             .ok_or_else(|| {
                 InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "Top-level const fragment has no corresponding folded template value. This is a compiler bug.",
@@ -87,9 +88,7 @@ pub(crate) fn collect_const_top_level_fragments(
             })?;
 
         let (value, destination) = match folded {
-            FoldedConstTemplateResult::Output { value, destination } => {
-                (value.clone(), destination.clone())
-            }
+            FoldedConstTemplateResult::Output { value, destination } => (value, destination),
             FoldedConstTemplateResult::NoOutput => continue,
         };
 

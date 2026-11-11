@@ -4,9 +4,9 @@
 
 ```text
 STATUS: ACTIVE - dedicated performance branch
-CURRENT_SLICE: 2 - ownership and local dispatch cleanup
+CURRENT_SLICE: 4 - full verification and completion
 BLOCKERS: none
-NEXT_ACTION: apply P5 and P4 as separate ownership changes, then simplify the runtime marker predicate and review P6 visibility clones
+NEXT_ACTION: run the final code gates and benchmarks, perform the Slice review, then retire the plan and its roadmap entry
 ```
 
 Branch: `perf/recent-compiler-performance`

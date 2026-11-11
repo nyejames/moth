@@ -279,11 +279,11 @@ fn source_directive_text(
         match const_values.payload(value) {
             Some(ConstValuePayload::Coerced(inner)) => value = *inner,
             Some(ConstValuePayload::String(text)) => {
-                return flatten_source_string(text.clone(), string_table, span);
+                return flatten_source_string(text, string_table, span);
             }
             Some(ConstValuePayload::Template {
                 folded: Some(text), ..
-            }) => return flatten_source_string(text.clone(), string_table, span),
+            }) => return flatten_source_string(text, string_table, span),
             Some(ConstValuePayload::Template { folded: None, .. }) | Some(_) | None => {
                 return Err(templates::invalid_template_directive(
                     Some(name_id),
@@ -609,18 +609,25 @@ fn statement_declaration_target(
     }
     Ok(path_fork.try_intern_child(context.scope, symbol_id))
 }
+
+/// Flatten an already-folded source-directive operand into final text.
+///
+/// WHAT: returns a plain value's existing `StringId` or joins structural pieces in authored order,
+///       spelling the site root and rejecting resource pieces that need builder URL context.
+/// WHY: the const-value store is read-only here and the string table is independently mutable, so
+///      borrowing the payload avoids copying every text run before flattening.
 fn flatten_source_string(
-    text: ConstStringValue,
+    text: &ConstStringValue,
     string_table: &mut StringTable,
     span: SourceSpan,
 ) -> Result<StringId, ExpressionParseError> {
     match text {
-        ConstStringValue::Text(value) => Ok(value),
+        ConstStringValue::Text(value) => Ok(*value),
         ConstStringValue::Pieces(pieces) => {
             let mut output = String::new();
             for piece in pieces {
                 match piece {
-                    ConstStringPiece::Text(value) => output.push_str(string_table.resolve(value)),
+                    ConstStringPiece::Text(value) => output.push_str(string_table.resolve(*value)),
                     ConstStringPiece::SiteRoot => output.push_str("@/"),
                     ConstStringPiece::Resource(_) => {
                         let operation = string_table.intern("source directive");

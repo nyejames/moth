@@ -1100,10 +1100,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 .visibility_for(&template.source_file)
                 .map_err(|error| self.error_messages(error, string_table))?,
         );
-        let mut visible_declarations = (*visibility.visible_declaration_paths).clone();
-        for parameter in &signature.parameters {
-            visible_declarations.insert(parameter.id.to_owned());
-        }
 
         let mut active_instance_stack = active_stack.to_vec();
         active_instance_stack.push(request.key.clone());
@@ -1121,7 +1117,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 source_file_scope: template.source_file,
                 scope_frame_capacity: 0,
             })
-            .with_visible_declarations(Arc::new(visible_declarations))
             .with_active_generic_type_context(generic_type_context)
             .with_generic_function_instantiation_stack(active_instance_stack.clone());
         if let Some(facts) = body.resolution_facts() {
@@ -1283,22 +1278,15 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // --------------------------
         //  Build validation context and run check
         // --------------------------
-        let mut visible_declarations = (*visibility.visible_declaration_paths).clone();
-        for parameter in &resolved_signature.signature.parameters {
-            visible_declarations.insert(parameter.id.to_owned());
-        }
-
-        let mut context = self
-            .build_base_scope_context(BaseScopeContextInput {
-                kind: ContextKind::Function,
-                scope: header.declaration_path,
-                top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
-                visibility,
-                declaring_file_id: header.tokens.source(),
-                source_file_scope,
-                scope_frame_capacity,
-            })
-            .with_visible_declarations(Arc::new(visible_declarations));
+        let mut context = self.build_base_scope_context(BaseScopeContextInput {
+            kind: ContextKind::Function,
+            scope: header.declaration_path,
+            top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
+            visibility,
+            declaring_file_id: header.tokens.source(),
+            source_file_scope,
+            scope_frame_capacity,
+        });
         let generic_type_context = self.build_active_generic_type_context(
             template.generic_parameter_list_id,
             None,
@@ -1383,24 +1371,18 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // --------------------------
         //  Build body parsing context
         // --------------------------
-        let mut visible_declarations = (*visibility.visible_declaration_paths).clone();
-        for parameter in &resolved_signature.signature.parameters {
-            visible_declarations.insert(parameter.id.to_owned());
-        }
-
-        // Top-level declarations are shared via Rc (no data copy);
-        // parameters live in the function's current scope frame.
-        let mut context = self
-            .build_base_scope_context(BaseScopeContextInput {
-                kind: ContextKind::Function,
-                scope: header.declaration_path,
-                top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
-                visibility,
-                declaring_file_id: header.tokens.source(),
-                source_file_scope,
-                scope_frame_capacity,
-            })
-            .with_visible_declarations(Arc::new(visible_declarations));
+        // Top-level declarations are shared via Rc (no data copy). Parameters live in the
+        // function's current scope frame, so the file-visible gate stays the shared header-built
+        // set and copies only when a body-local declaration mutates it.
+        let mut context = self.build_base_scope_context(BaseScopeContextInput {
+            kind: ContextKind::Function,
+            scope: header.declaration_path,
+            top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
+            visibility,
+            declaring_file_id: header.tokens.source(),
+            source_file_scope,
+            scope_frame_capacity,
+        });
         context.enclosing_callable = Some(enclosing_callable_contract(
             &resolved_signature.signature,
             EnclosingCallableOwner::Function,

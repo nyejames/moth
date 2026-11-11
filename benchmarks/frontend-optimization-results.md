@@ -7390,3 +7390,38 @@ Measurements on the same host and protocol as the baseline:
   delta. `frontend.prepare` summed +3.13 ms and `frontend.bind_headers` +0.14 ms across cases.
 - The change is neutral within run-to-run drift. This is a work and complexity reduction, not a
   claimed wall-time improvement.
+
+### Slice 2: ownership and dispatch cleanup
+
+- P4: `collect_const_top_level_fragments` now removes each result from the emitting map, moving
+  `ConstStringValue` and `ConstFragmentDestination` into the ordered fragment instead of cloning
+  both. `finalize` has no later consumer of the map. Existing fragment tests cover plain text,
+  piecewise structural strings, resources, named destinations and ordered output; the
+  missing-result compiler invariant remains.
+- P5: `flatten_source_string` borrows `&ConstStringValue`, returns the existing `StringId` for a
+  plain value and joins borrowed pieces. The const-value store is read-only at this boundary.
+- P6: removed the per-function copy of `visibility.visible_declaration_paths` and its parameter
+  insertion at the ordinary, generic-validation and generated-instance sites. Parameters resolve
+  through the current scope frame; the file gate remains the header-built `Arc` and copies only
+  when a body-local declaration mutates it. `with_visible_declarations` is now a test-only builder.
+  2176 AST unit tests and the selected constant/runtime, generic, receiver and function
+  integration cases pass.
+- P7: the statement-boundary previous-token lookup now runs only for a `MUTABLE` token in module
+  context whose next token is a template head. Ordinary statements skip it.
+- Remaining P7 and P8 candidates were rejected. Merging the nesting counters would conflate
+  balanced expression delimiters with entry-body block markers. Sharing source-directive
+  registration would duplicate AST statement attachment semantics. Caching per-header directive
+  fold contexts needs profile evidence and risks cross-header diagnostic state. A combined
+  structural-file, qualified-reference and content token walker would be a second scanner.
+- Frontend measurement: 136.43 ms to 134.28 ms suite average, 53 faster and 22 slower per-case
+  medians, -0.335 ms median delta. Affected cases were neutral: environment-stress AST emit moved
+  1.461 to 1.395 ms, type-stress 4.348 to 4.310 ms and default-parameters 3.607 to 3.605 ms.
+  Numeric-case drift dominates the suite sum. No wall-time win is claimed for these ownership
+  changes.
+
+### Slice 3: profile-directed follow-up
+
+No additional owner was selected. The only two-sigma movement on the current checkpoint remains
+borrow convergence on the synthetic `numeric_generic_failure_chain_512` case recorded above, which
+belongs to the production borrow performance owner. No borrow algorithm, template fold scheduler
+or Stage 0 cache was changed in this follow-up.
