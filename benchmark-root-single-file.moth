@@ -9,4 +9,4 @@ render || -> String:
     ]
 ;
 
-[render()]
+~[render()]
