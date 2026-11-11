@@ -1,3 +1,9 @@
+//! Export-specific header parsing tests.
+//!
+//! WHAT: covers private-by-default declarations, duplicate detection and distinct retained
+//!       public/private dependency shells.
+//! WHY: authored visibility and retained dependency shape are separate header contracts.
+
 use super::*;
 
 // ------------------------------
@@ -86,53 +92,5 @@ fn public_dependency_and_private_dependency_keep_distinct_retained_shells() {
             .dependency_shell_id
             .ordinal,
         1
-    );
-}
-#[test]
-fn capacity_references_extract_value_refs_without_treating_element_type_as_value_ref() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/test.moth");
-    let source = "make |items ~{capacity MyType}| -> I32:\n    return 1\n;\n";
-    let (output, mut span_builder) = prepare_single_file_with_fork(
-        source,
-        &file_path,
-        &file_path,
-        &mut string_table,
-        &mut path_fork,
-    );
-
-    let headers = prepare_and_bind_headers_result(
-        vec![output],
-        std::slice::from_mut(&mut span_builder),
-        &ExternalPackageRegistry::new(),
-        &ExternalImportResolutionTable::default(),
-        None,
-        &mut string_table,
-        &mut path_fork,
-    )
-    .expect("headers should parse");
-
-    let make_header = headers
-        .headers
-        .iter()
-        .find(|h| {
-            matches!(h.kind, HeaderKind::Function { .. }) && h.declaration_path != PathId::ROOT
-        })
-        .expect("make header should exist");
-
-    let capacity_names: Vec<_> = make_header
-        .capacity_references
-        .iter()
-        .map(|r| string_table.resolve(r.name))
-        .collect();
-
-    assert!(
-        capacity_names.contains(&"capacity"),
-        "bare capacity syntax should reference the capacity constant"
-    );
-    assert!(
-        !capacity_names.contains(&"MyType"),
-        "element type name must not be treated as a capacity value reference"
     );
 }
