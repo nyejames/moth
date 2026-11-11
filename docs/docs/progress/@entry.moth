@@ -575,9 +575,8 @@ only `$note` for discarded template comments. Presentation-only roles cover fina
             [: Frontend]
             [$md: [$html:<code>$</code>] is the general marker. Directives are compiler-owned: builders provide schemas, packages, source capabilities and output policies but do not register, name or parse directives. Directives occur only in a template head or on their own source line before the next eligible declaration or dependency clause; a blank physical line breaks attachment while comment-only lines do not. A directive takes at most one optional compile-time operand, written as a bare value or one named [$html:<code>key = value</code>] where its contract allows; an operand starts on the directive line and may continue while balanced, and the call spelling [$html:<code>$name(...)</code>] is rejected. [$html:<code>$config</code>] and [$html:<code>$export</code>] are the source modifiers and accept no operand. [$html:<code>$config</code>] marks one explicitly typed top-level compile-time [$html:<code>#</code>] binding in [$html:<code>config.moth</code>] or a selected source module. [$html:<code>$export</code>] marks one eligible public declaration or strict direct-selection dependency clause in [$html:<code>@mod.moth</code>] or [$html:<code>@package.moth</code>]. [$html:<code>$project</code>], [$html:<code>$builder</code>], [$html:<code>$html_builder</code>] and [$html:<code>$page</code>] are not directives. The final source directive design adds same-line independent stacking without commas,
 rejects every repeated name and attaches `$doc` to declarations and `$todo` to
-statements or declarations with compile-time String operands. Direct bare entry
-`[...]` also becomes const-required while `~[...]` explicitly selects runtime
-publication. These cutovers are queued, so this Supported row describes current
+statements or declarations with compile-time String operands. Bare direct entry templates will become const-required, with explicit
+tilde-marked runtime fragments. These cutovers are queued, so this Supported row describes current
 `$export` and `$config` behavior, not the new grammar. See @../directives (Directives).]
         ]
 
