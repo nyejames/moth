@@ -483,7 +483,7 @@ fn reexported_js_final_calls_retain_provider_runtime_candidate() {
     .expect("should write page");
     fs::write(
         dir.join("components/@mod.moth"),
-        "export:\n    @background-animation.js animate_canvas, observed\n;\n",
+        "$export\n@background-animation.js animate_canvas, observed\n",
     )
     .expect("should write facade");
     fs::write(
@@ -890,7 +890,7 @@ fn linked_module_js_lowering_is_observed_separately() {
     .expect("should write page");
     fs::write(
         package_root.join("@mod.moth"),
-        "export:\n    helper || -> I32:\n        return 7\n    ;\n;\n",
+        "$export\nhelper || -> I32:\n    return 7\n;\n",
     )
     .expect("should write package module");
 

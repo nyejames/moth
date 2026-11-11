@@ -1,88 +1,47 @@
-The `export:` block can re-export selected dependency bindings from other files, creating a public API surface that exposes declarations under controlled names.
+A facade can re-export declarations from another source file or package without defining a wrapper. Place `$export` immediately before a direct-selection dependency clause in `@mod.moth` or `@package.moth`.
 
-### Direct-selection re-export
-
-[codeblock, $code "moth":
-    export:
-        @components/card CardData as Card, render_card
-
-        @core/math PI, sin
-    ;
-]
-
-`Card`, `render_card`, `PI` and `sin` become accessible to cross-module dependency clauses. A leaf alias inside `export:` becomes the public name. The original `CardData` name is not also exported unless it is listed separately.
-
-### Re-export list termination
-
-The path and the first selected name must start on the same physical line. A comma explicitly
-continues the selection list across a following newline:
+### Direct-selection re-exports
 
 [codeblock, $code "moth":
-    export:
-        @components/card CardData,
-            render_card
-    ;
+    $export
+    @components/card CardData as Card, render_card
+
+    $export
+    @core/math PI, sin
 ]
 
-Without a comma, a newline ends the re-export clause. A trailing comma is invalid because a comma
-always promises another selected name.
+This publishes `Card`, `render_card`, `PI` and `sin` through the facade. `CardData` remains available under its original name only if the facade also selects it without an alias. A leaf `as` alias is both the local selected name and the public name.
+
+One directive applies to all names on the following clause. An ordinary unmarked dependency clause stays private:
 
 [codeblock, $code "moth":
-    export:
-        -- Error
-        @components/card CardData, render_card,
-    ;
+    @components/card CardData as LocalCard
 ]
 
-### Renamed public re-export
+`LocalCard` is now bound in this file, but is not public.
 
-The `as` alias inside an export-block re-export defines the public API name. The original source name is what the module binds privately. The alias is what other modules see when depending on the module's public surface.
+### Selection syntax
 
-### Re-export rules
+The provider path and first selected name must begin on the same physical line. A comma continues the list across a newline:
 
-- Only explicit non-empty direct-selection lists are valid dependency re-exports.
-- Whole namespaces cannot be re-exported implicitly.
-- Clause-level namespace `as` is invalid inside `export:`.
-- Leaf aliases define public API names.
-- Selected names are flat identifiers and may not qualify nested declarations.
-- Non-leaf namespace aliases are invalid because namespace exports remain deferred.
-- Re-exports preserve declaration origins.
-- Re-export syntax does not create namespace values.
+[codeblock, $code "moth":
+    $export
+    @components/card CardData,
+        render_card
+]
 
-### Exported dependency types, constants and functions
+Without a comma, a newline ends the clause. A trailing comma is invalid because another selected name is required.
 
-Any bindable declaration can be re-exported: functions, structs, choices, type aliases, traits and compile-time constants.
+Re-exports require a nonempty list of flat, explicit selections. Whole namespaces, namespace aliases, nested selections, wildcard exports and export lists are unsupported. Receiver methods remain attached to their receiver type and cannot be re-exported as separate selected names.
 
-Re-exporting a callable exposes its closed error contract. A private callable
-without an error slot cannot leak inferred numeric failure through a re-export;
-it must discharge that failure or declare a compatible error slot. The same
-rule applies to package facades and exposed receiver methods. See
-@../project-structure/#public-api (Public API) and @../progress (Progress).
+### Public identity and validation
 
-### Re-export does not make a local alias automatically public
+Re-exports preserve the selected declaration's origin, type and callable error contract. They cannot expose an unknown or inaccessible private declaration. Exported names must be unique across direct declarations and re-exported selections in one facade.
 
-A private `@path Symbol as LocalName` clause outside the export block creates a file-local alias. It does not become public. Only a dependency clause inside the `export:` block creates a public re-export.
+A private callable's inferred implicit failure cannot escape through a public callable without an appropriate declared error slot or local handling. See @../project-structure/#public-api (Public API) for the public contract.
 
-### Public name collisions
+### Related references
 
-Public names in the export block must not collide with each other. Duplicate public names are rejected.
-
-### Invalid unknown or private targets
-
-Re-exporting a symbol that does not exist in the target file is rejected. Re-exporting a private declaration that is not visible in the target file is rejected.
-
-`export:` is the implemented public-API marker. The accepted later direction is a
-`$export` migration that replaces it rather than permanently duplicating the syntax;
-the directive block form remains undecided. Do not treat both spellings as a stable
-alternative pair.
-
-
-### No legacy inline export syntax
-
-Legacy inline `export` syntax (without the `:` block delimiter) is rejected with `MOTH-SYNTAX-0001`. The strict `export:` block is the only public API marker. See @../project-structure/#public-api (Public API) for the full export-block rules.
-
-### Concepts related to public re-exports
-
-- For the export block see @../project-structure/#public-api (Public API).
-- For visibility rules see @#module-visibility (Module visibility).
-- For dependency alias rules see @../aliases/#dependency-aliases (Dependency aliases).
+- @#dependency-clauses (Dependency clauses)
+- @../aliases/#dependency-aliases (Dependency aliases)
+- @#module-visibility (Module visibility)

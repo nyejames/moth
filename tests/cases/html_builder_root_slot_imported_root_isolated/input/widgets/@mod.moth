@@ -1,3 +1,2 @@
-export:
-    widget_label #= "<span>imported widget</span>"
-;
+$export
+widget_label #= "<span>imported widget</span>"

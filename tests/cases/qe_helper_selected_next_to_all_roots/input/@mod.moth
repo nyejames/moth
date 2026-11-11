@@ -1,3 +1,2 @@
-export:
-    public_value #= "facade"
-;
+$export
+public_value #= "facade"

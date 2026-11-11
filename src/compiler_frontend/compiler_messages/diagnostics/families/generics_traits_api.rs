@@ -9,7 +9,7 @@ use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
     CountFact, FactCapacityError, FactCodec, IdRemap, OptStringFact, OptTokenFact, OptTypeFact,
-    OptUnitFact, PathFact, StringFact, TypeFact, UnitCode, UnitFact, unit_code,
+    OptUnitFact, StringFact, TypeFact, UnitCode, UnitFact, unit_code,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
     LabelDraftMessage, LabelMessageCode,
@@ -19,18 +19,18 @@ use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
 };
 use crate::compiler_frontend::compiler_messages::render::{
     render_duplicate_public_export, render_duplicate_trait_requirement,
-    render_export_outside_module_root, render_generic_bound_private_surface_leak,
-    render_invalid_function_signature, render_invalid_generic_application,
-    render_invalid_generic_instantiation, render_invalid_generic_parameter,
-    render_invalid_parameter_contract, render_invalid_receiver_declaration,
-    render_invalid_this_usage, render_invalid_trait_conformance,
-    render_invalid_trait_incompatibility, render_invalid_trait_keyword_usage,
-    render_private_type_in_exported_api, render_title_only, render_trait_name_used_as_type,
-    render_trait_private_surface_leak, render_unknown_trait, render_unsupported_trait_feature,
+    render_generic_bound_private_surface_leak, render_invalid_function_signature,
+    render_invalid_generic_application, render_invalid_generic_instantiation,
+    render_invalid_generic_parameter, render_invalid_parameter_contract,
+    render_invalid_receiver_declaration, render_invalid_this_usage,
+    render_invalid_trait_conformance, render_invalid_trait_incompatibility,
+    render_invalid_trait_keyword_usage, render_private_type_in_exported_api, render_title_only,
+    render_trait_name_used_as_type, render_trait_private_surface_leak, render_unknown_trait,
+    render_unsupported_trait_feature,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticSeverity, ExportOutsideModuleRootReason, GenericApplicationErrorReason,
-    GenericInferenceSubject, InvalidFunctionSignatureReason, InvalidGenericInstantiationReason,
+    DiagnosticSeverity, GenericApplicationErrorReason, GenericInferenceSubject,
+    InvalidFunctionSignatureReason, InvalidGenericInstantiationReason,
     InvalidGenericParameterReason, InvalidParameterContractReason,
     InvalidReceiverDeclarationReason, InvalidThisUsageReason, InvalidTraitConformanceReason,
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, ParameterContractKind,
@@ -39,7 +39,6 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 unit_code! {
@@ -1556,54 +1555,12 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    EXPORT_OUTSIDE_MODULE_ROOT {
-        internal: 3077,
-        stable: "MOTH-RULE-0077",
-        category: DiagnosticCategory::Rule,
-        severity: DiagnosticSeverity::Error,
-        title: "`export:` is only valid in an API facade root file (`@mod.moth` or `@package.moth`)",
-        facts: [
-            file: PathFact,
-            reason: UnitFact<ExportOutsideModuleRootReason>,
-        ],
-        labels: [],
-        extra: None,
-        ctor: manual,
-        view: ExportOutsideModuleRootView,
-        render: render_export_outside_module_root,
-    }
-}
-
-unit_code! {
-    impl ExportOutsideModuleRootReason {
-        NoExportSurface = 1,
-        EntryRoot = 2,
-    }
-}
-
-/// Stores an `export:` role rejection, the offending source file and its typed reason.
-///
-/// WHY: the entry-root reason must name the selected file. That file can be any explicitly
-///      selected single-file source, not only `@entry.moth`.
-pub(crate) fn export_outside_module_root(
-    file: PathId,
-    reason: ExportOutsideModuleRootReason,
-    span: Option<SourceSpan>,
-) -> DiagnosticDraft {
-    DiagnosticDraft::with_facts(&EXPORT_OUTSIDE_MODULE_ROOT, span, |cursor| {
-        cursor.push::<PathFact>(&file)?;
-        cursor.push::<UnitFact<ExportOutsideModuleRootReason>>(&reason)?;
-        Ok(())
-    })
-}
-
-diagnostic_family! {
     INVALID_EXPORT_TARGET {
         internal: 3080,
         stable: "MOTH-RULE-0080",
         category: DiagnosticCategory::Rule,
         severity: DiagnosticSeverity::Error,
-        title: "`export:` contains an invalid module API item",
+        title: "Invalid public re-export target",
         facts: [],
         labels: [],
         extra: None,
@@ -1679,22 +1636,6 @@ diagnostic_family! {
         reason_key: reason,
         view: InvalidTraitIncompatibilityView,
         render: render_invalid_trait_incompatibility,
-    }
-}
-
-diagnostic_family! {
-    DUPLICATE_EXPORT_BLOCK {
-        internal: 3085,
-        stable: "MOTH-RULE-0085",
-        category: DiagnosticCategory::Rule,
-        severity: DiagnosticSeverity::Error,
-        title: "Duplicate export block",
-        facts: [],
-        labels: [],
-        extra: None,
-        ctor: generated duplicate_export_block,
-        view: DuplicateExportBlockView,
-        render: render_title_only,
     }
 }
 
@@ -1829,10 +1770,8 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES:
     GENERIC_BOUND_PRIVATE_SURFACE_LEAK,
     TRAIT_NAME_USED_AS_TYPE,
     INVALID_TRAIT_KEYWORD_USAGE,
-    EXPORT_OUTSIDE_MODULE_ROOT,
     INVALID_EXPORT_TARGET,
     DUPLICATE_PUBLIC_EXPORT,
     PRIVATE_TYPE_IN_EXPORTED_API,
     INVALID_TRAIT_INCOMPATIBILITY,
-    DUPLICATE_EXPORT_BLOCK,
 ];

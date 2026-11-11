@@ -1,7 +1,6 @@
 @d call_alpha
 
-export:
-    beta |x I32| -> I32:
-        return call_alpha(x)
-    ;
+$export
+beta |x I32| -> I32:
+    return call_alpha(x)
 ;

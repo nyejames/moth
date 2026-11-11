@@ -1,3 +1,2 @@
-export:
-    shared_total #U32 = 40 + 2
-;
+$export
+shared_total #U32 = 40 + 2

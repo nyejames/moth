@@ -1,9 +1,9 @@
-export:
-    try_to_i32 type T is TRY_CASTABLE_TO_I32 |value T| -> I32, Error!:
-        return cast value
-    ;
+$export
+try_to_i32 type T is TRY_CASTABLE_TO_I32 |value T| -> I32, Error!:
+    return cast value
+;
 
-    recovered_to_i32 type T is TRY_CASTABLE_TO_I32 |value T| -> I32:
-        return cast value catch then -7
-    ;
+$export
+recovered_to_i32 type T is TRY_CASTABLE_TO_I32 |value T| -> I32:
+    return cast value catch then -7
 ;

@@ -1,13 +1,14 @@
-export:
-    Request ::
-        Query,
-    ;
+$export
+Request ::
+    Query,
+;
 
-    Message ::
-        Done,
-    ;
+$export
+Message ::
+    Done,
+;
 
-    accept |route Route of Request -> Message| -> String:
-        return "route imported"
-    ;
+$export
+accept |route Route of Request -> Message| -> String:
+    return "route imported"
 ;

@@ -130,9 +130,6 @@ belong to the selected builder, not to the language-level occurrence default
 rule. See @../constants/#const-templates (Const templates) and
 @../project-structure/#entry-config (Entry metadata and builder slots).
 
-Runtime top-level named builder inserts are not supported. Their final design
-remains unsettled.
-
 ### Stored named inserts
 
 Named inserts can be prepared in a binding and passed as loose contributions
@@ -167,13 +164,3 @@ nonempty.
 Unresolved slot or insert artefacts after routing are invalid template
 structure.
 
-### Deferred slot constraints
-
-`$required` and `$unique` are deferred and not implemented. Loop-level
-uniqueness is excluded, and const function syntax is not implemented. The
-proposed forms are not accepted by the current parser:
-
-[codeblock, $code "moth":
-    [$slot title, $required]   -- not implemented
-    [$slot styles, $unique]    -- not implemented
-]

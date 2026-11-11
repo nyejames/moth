@@ -272,8 +272,7 @@ fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
         "@module_b\n@module_b\n#[:pageA]\n",
     )
     .expect("should write pageA");
-    fs::write(module_b.join("@mod.moth"), "export:\n    b #= 1\n;\n")
-        .expect("should write module_b root");
+    fs::write(module_b.join("@mod.moth"), "$export\nb #= 1\n").expect("should write module_b root");
     fs::write(module_b.join("impl.moth"), "impl #= 1\n").expect("should write module_b impl");
 
     let mut config = Config::new(root.clone());
@@ -562,7 +561,7 @@ fn canonical_module_job_excludes_cross_module_donor_sources() {
     )
     .expect("should write consumer root");
     fs::write(src.join("z_local.moth"), "local #= 1\n").expect("should write local source");
-    fs::write(provider.join("@mod.moth"), "export:\n    value #= 1\n;\n")
+    fs::write(provider.join("@mod.moth"), "$export\nvalue #= 1\n")
         .expect("should write provider root");
 
     let mut config = Config::new(root.clone());
@@ -650,7 +649,7 @@ fn indexed_namespace_rejects_direct_nested_child_root_dependency() {
     .expect("should write config");
     fs::write(src.join("@entry.moth"), "@child/@home symbol\n#[:page]\n")
         .expect("should write parent root");
-    fs::write(child.join("@entry.moth"), "export:\n    symbol #= 1\n;\n")
+    fs::write(child.join("@entry.moth"), "$export\nsymbol #= 1\n")
         .expect("should write child root");
 
     let mut config = Config::new(root.clone());
@@ -1244,7 +1243,7 @@ fn facade_content_constant_qualified_reference_orders_provider_first() {
     // The child facade re-exports its own `.mtf` content under a public name.
     fs::write(
         module_b.join("@mod.moth"),
-        "export:\n    @intro content as intro\n;\n",
+        "$export\n@intro content as intro\n",
     )
     .expect("should write module_b root");
     fs::write(module_b.join("intro.mtf"), "hello from the child\n")

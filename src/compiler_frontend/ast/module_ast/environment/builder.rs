@@ -90,8 +90,8 @@ pub(in crate::compiler_frontend::ast) mod import_projection;
 #[cfg(test)]
 pub(crate) use import_projection::imported_nominal_path;
 
-/// Collect the set of source declaration paths re-exported through the root's `export:` block
-/// from private files in the same module.
+/// Collect the set of source declaration paths re-exported through the root's public export
+/// surface from private files in the same module.
 ///
 /// WHAT: iterates the header-built public export maps and collects every
 /// `PublicExportTarget::SourceDeclaration`
@@ -680,8 +680,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // handoff and never enter a cross-module artefact.
 
         // Build the set of re-exported source declaration paths targeted by public export entries.
-        // These are declarations from private files re-exported through the root's `export:`
-        // block. They are not in the active root file, so the directly-defined pass excludes them.
+        // These are declarations from private files re-exported through the root's public
+        // export surface. They are not in the active root file, so the directly-defined pass excludes them.
         let reexport_target_paths =
             collect_reexport_target_paths(&self.context.entry_dir, &self.module_symbols);
         let active_root_file_id = self

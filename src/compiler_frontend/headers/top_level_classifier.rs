@@ -14,8 +14,6 @@ pub(super) enum HeaderFileItem {
     Symbol(StringId),
     BuiltinTypeConformanceTarget(&'static str),
     Dependency,
-    Export,
-    ExportBlock,
     Hash {
         at_statement_boundary: bool,
     },
@@ -58,16 +56,6 @@ pub(super) fn classify_tagged_item(
 
     if current_tag == TokenTag::PATH && at_statement_boundary {
         return HeaderFileItem::Dependency;
-    }
-
-    if current_tag == TokenTag::EXPORT {
-        if at_statement_boundary {
-            if follower_tag == Some(TokenTag::COLON) {
-                return HeaderFileItem::ExportBlock;
-            }
-            return HeaderFileItem::Export;
-        }
-        return HeaderFileItem::StartBodyToken;
     }
 
     if current_tag == TokenTag::HASH {
@@ -116,24 +104,6 @@ pub(super) fn classify_current_item_ref(
         current.string_id(),
         follower.map(|token| token.tag()),
         at_boundary,
-    )
-}
-
-/// Export-block classification with its established top-level boundary.
-///
-/// WHAT: lets the `export:` block parse its first item even when placed directly
-///       after the block colon without a newline.
-/// WHY: shares `classify_tagged_item` with ordinary source-view classification without a second
-///       classification table.
-pub(super) fn classify_export_block_item_ref(
-    current: TokenRef<'_>,
-    follower: Option<TokenRef<'_>>,
-) -> HeaderFileItem {
-    classify_tagged_item(
-        current.tag(),
-        current.string_id(),
-        follower.map(|token| token.tag()),
-        true,
     )
 }
 

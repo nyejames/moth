@@ -113,7 +113,7 @@ fn write_project(project_root: &Path, page_source: &str, with_facade: bool) {
     if with_facade {
         fs::write(
             project_root.join("@package.moth"),
-            "export:\n    label #= \"facade\"\n;\n",
+            "$export\nlabel #= \"facade\"\n",
         )
         .expect("should write package facade");
     }
@@ -282,7 +282,7 @@ fn write_ui_paired_package(package_root: &Path) {
     .expect("should write normal package root");
     fs::write(
         package_root.join("@package.moth"),
-        "export:\n    @impl greeting\n;\n",
+        "$export\n@impl greeting\n",
     )
     .expect("should write support package facade");
     fs::write(package_root.join("impl.moth"), "greeting #= \"support\"\n")
@@ -293,7 +293,7 @@ fn write_ui_paired_package(package_root: &Path) {
 fn write_ui_support_package(package_root: &Path) {
     fs::write(
         package_root.join("@package.moth"),
-        "export:\n    @impl value, Message\n;\n",
+        "$export\n@impl value, Message\n",
     )
     .expect("should write support package facade");
     fs::write(
@@ -307,7 +307,7 @@ fn write_ui_support_package(package_root: &Path) {
 fn write_ui_package(package_root: &Path) {
     fs::write(
         package_root.join("@mod.moth"),
-        "export:\n    greet || -> I32:\n        return 1\n    ;\n;\n",
+        "$export\ngreet || -> I32:\n    return 1\n;\n",
     )
     .expect("should write package module");
 }

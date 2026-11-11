@@ -1,3 +1,2 @@
-export:
-    value #= "parts"
-;
+$export
+value #= "parts"

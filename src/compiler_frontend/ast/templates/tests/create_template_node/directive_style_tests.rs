@@ -1396,11 +1396,7 @@ fn doc_templates_are_markdown_formatted_by_default() {
         &mut expression_builder,
         &mut const_values,
     );
-    assert!(
-        string_table
-            .resolve(folded)
-            .contains("<h1 id=\"heading\">Heading</h1>")
-    );
+    assert!(string_table.resolve(folded).contains("<h1>Heading</h1>"));
 }
 
 #[test]

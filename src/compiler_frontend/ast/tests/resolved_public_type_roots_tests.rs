@@ -501,7 +501,7 @@ fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_indepe
     // The private method header for the public receiver precedes the public struct in
     // sorted-header order. This proves the two-pass design collects the complete public
     // nominal set before selecting methods, so order does not affect method admission.
-    // Real methods on a public receiver are normally private headers outside `export:`.
+    // Real methods on a public receiver are normally private headers without `$export`.
     let headers = vec![
         header(
             function_kind(),

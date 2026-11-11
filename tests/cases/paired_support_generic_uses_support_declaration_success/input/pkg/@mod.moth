@@ -1,3 +1,2 @@
-export:
-    normal_value #= "normal"
-;
+$export
+normal_value #= "normal"

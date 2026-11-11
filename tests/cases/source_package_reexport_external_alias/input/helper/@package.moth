@@ -1,3 +1,2 @@
-export:
-    @core/math sin as sine
-;
+$export
+@core/math sin as sine

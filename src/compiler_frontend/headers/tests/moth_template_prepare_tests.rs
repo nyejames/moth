@@ -416,14 +416,17 @@ impl MothTemplateScopeFixture {
         // Moth template implicit scope proves it is filtering by source declaration kind.
         fs::write(
             &html_root_file,
-            r#"export:
-    p #String = "<p>"
-    collision #= "html"
-    html_defaults #= HtmlDefaults(color = "green")
-    HtmlDefaults = | color String |
-    render_html || -> String:
-        return "runtime"
-    ;
+            r#"$export
+p #String = "<p>"
+$export
+collision #= "html"
+$export
+html_defaults #= HtmlDefaults(color = "green")
+$export
+HtmlDefaults = | color String |
+$export
+render_html || -> String:
+    return "runtime"
 ;
 "#,
         )
@@ -1225,7 +1228,7 @@ fn simple_markdown_body_folds_like_markdown_template() {
 
     assert_eq!(
         folded_content_value(&ast, &string_table, &path_fork),
-        "<h1 id=\"heading\">Heading</h1>"
+        "<h1>Heading</h1>"
     );
 }
 
@@ -1235,7 +1238,7 @@ fn nested_moth_template_defaults_to_markdown_formatting() {
 
     assert_eq!(
         folded_content_value(&ast, &string_table, &path_fork),
-        "<h1 id=\"nested\">Nested</h1>"
+        "<h1>Nested</h1>"
     );
 }
 
@@ -1364,7 +1367,7 @@ fn module_root_export_syntax_can_target_moth_template_content() {
     let entry_path = PathBuf::from("src/@entry.moth");
 
     let (root_output, _span_builder) = prepare_moth_source(
-        "export:\n    @intro content as intro\n;\n",
+        "$export\n@intro content as intro\n",
         &root_file_path,
         &entry_path,
         &mut string_table,
@@ -1460,7 +1463,7 @@ fn moth_template_does_not_see_same_directory_facade_exported_constant() {
     let fixture = MothTemplateScopeFixture::new(&[
         (
             "src/docs/@mod.moth",
-            "export:\n    local_label #= \"from root\"\n;\n",
+            "$export\nlocal_label #= \"from root\"\n",
         ),
         ("src/docs/intro.mtf", "[local_label]"),
     ]);
@@ -1481,7 +1484,7 @@ fn moth_template_qualified_root_local_declaration_is_not_addressable() {
     let fixture = MothTemplateScopeFixture::new(&[
         (
             "src/docs/@mod.moth",
-            "export:\n    local_label #= \"from root\"\n;\n",
+            "$export\nlocal_label #= \"from root\"\n",
         ),
         ("src/docs/intro.mtf", "[@mod local_label]"),
     ]);
@@ -1686,7 +1689,7 @@ fn moth_dependency_binds_template_content_as_folded_string_constant() {
 
     assert_eq!(
         folded_constant_value(&ast, &string_table, &path_fork, "from_intro"),
-        "<h1 id=\"intro\">Intro</h1>"
+        "<h1>Intro</h1>"
     );
 }
 
@@ -1711,7 +1714,7 @@ fn moth_namespace_dependency_binds_template_content_as_folded_string_constant() 
 
     assert_eq!(
         folded_constant_value(&ast, &string_table, &path_fork, "from_intro"),
-        "<h1 id=\"intro\">Intro</h1>"
+        "<h1>Intro</h1>"
     );
 }
 

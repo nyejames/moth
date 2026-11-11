@@ -26,7 +26,7 @@ Because the file body is a template body, `--` is content text, not a Moth comme
 
 ### Source file path and module ownership
 
-A `.mtf` file belongs to the module that contains its directory. Same-module files can bind its generated `content` constant, and the module root can re-export that constant through its `export:` block.
+A `.mtf` file belongs to its surrounding module. Same-module files can bind its generated `content` constant. A public facade can re-export it using `$export` on a direct-selection dependency clause.
 
 ### Target and builder availability
 

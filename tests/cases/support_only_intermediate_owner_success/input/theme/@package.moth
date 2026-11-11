@@ -1,3 +1,2 @@
-export:
-    theme_value #= "theme"
-;
+$export
+theme_value #= "theme"

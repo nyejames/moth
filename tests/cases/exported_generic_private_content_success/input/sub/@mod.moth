@@ -1,6 +1,5 @@
-export:
-    render type T |name T| -> String:
-        return [: exported private content [@private.mtf] ]
-    ;
+$export
+render type T |name T| -> String:
+    return [: exported private content [@private.mtf] ]
 ;
 

@@ -1,3 +1,2 @@
-export:
-    app_value #= 1
-;
+$export
+app_value #= 1

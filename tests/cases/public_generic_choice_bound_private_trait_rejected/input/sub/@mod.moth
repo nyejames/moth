@@ -1,8 +1,7 @@
 @internal PRIVATE_DISPLAY
 
-export:
-    Pick type U is PRIVATE_DISPLAY ::
-        Some | value U |,
-        Empty,
-    ;
+$export
+Pick type U is PRIVATE_DISPLAY ::
+    Some | value U |,
+    Empty,
 ;

@@ -268,12 +268,12 @@ fn frontend_benchmark_retains_source_package_warning() {
     std::fs::write(src.join("@entry.moth"), "value = 1\n").expect("should write project root");
     std::fs::write(
         package.join("@package.moth"),
-        "export:\n    run || -> I32:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => ~result = \"one\"\n            \"one\" => ~result = \"one\"\n            else => ~result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
+        "$export\nrun || -> I32:\n    value ~= \"hello\"\n    result ~= \"unset\"\n\n    if value is:\n        \"one\" => ~result = \"one\"\n        \"one\" => ~result = \"one\"\n        else => ~result = \"other\"\n    ;\n    return 1\n;\n",
     )
     .expect("should write warning package root");
     std::fs::write(
         clean_package.join("@package.moth"),
-        "export:\n    run || -> I32:\n        return 1\n    ;\n;\n",
+        "$export\nrun || -> I32:\n    return 1\n;\n",
     )
     .expect("should write diagnostic-free package root");
 

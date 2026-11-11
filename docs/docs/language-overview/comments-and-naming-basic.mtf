@@ -29,7 +29,6 @@ Use `PascalCase` for named types:
 Clear names beat short names. `player_score` is easier to understand than
 `ps`, especially when the code grows.
 
-The retired input qualifier no longer parses. `Config` and its shadows remain
-reserved by the shared source-word inventory; identifier reclamation is a separate
-change from the `$config` directive. Directive spellings do not reserve ordinary
-identifiers.
+`Config` and spellings differing only by case or leading underscores
+are reserved by the shared naming rules. `export` is an ordinary identifier
+even though `$export` is a compiler directive.

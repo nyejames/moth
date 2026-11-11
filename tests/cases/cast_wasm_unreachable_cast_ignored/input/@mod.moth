@@ -1,5 +1,4 @@
 @impl compare
 
-export:
-    @impl compare
-;
+$export
+@impl compare

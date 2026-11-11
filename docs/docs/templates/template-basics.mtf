@@ -1,8 +1,6 @@
 **Entries and page fragments.** HTML pages come from directories that contain
 `@entry.moth`. A direct top-level template in that file contributes page output.
-Direct const root `$in` inserts supply builder metadata. Exact entry and metadata rules live in Project Structure. This
-page describes the template and value boundary; current support is tracked in
-@../progress (Progress) and @../progress/packages-and-builders (Packages and builders).
+Direct const root `$in` inserts supply builder metadata. See @../project-structure/#entry-config (Entry metadata and builder slots) for their rules.
 
 Templates create owned `String` values.
 
@@ -16,7 +14,7 @@ They use square brackets. Collections and maps use braces.
     ]
 ]
 
-### Head and body
+### Head and body @#head-and-body
 
 A colon separates the template head from its body.
 
@@ -64,8 +62,7 @@ a string slice:
     content = [: ["[literal]"]]
 ]
 
-The current compiler does not support backtick raw string slices, so string
-insertion is the supported way to emit literal square brackets.
+Use string insertion when a template needs literal square brackets.
 
 ### Compile-time and runtime forms
 
@@ -83,7 +80,7 @@ Moth formatter.
 
 ### MON data boundary
 
-Unevaluated template syntax is not a MON string literal. A folded compile-time template and an evaluated runtime template are each an ordinary serialisable `String` for their producer; which side produced the text never changes document validity. There is no automatic MON interpolation and no runtime template producer is exported by the Rust codec. That contract is Rust-only serialised-data documentation. See @../mon/#mon-format (MON format).
+Unevaluated template syntax is not a MON string literal. A folded compile-time template and an evaluated runtime template are each an ordinary serialisable `String` for their producer; which side produced the text never changes document validity. There is no automatic MON interpolation. See @../mon/#mon-format (MON format).
 
 ### Page fragments
 

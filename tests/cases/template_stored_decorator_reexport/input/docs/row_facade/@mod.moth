@@ -1,5 +1,4 @@
 @impl prefix_source
 
-export:
-    prefix #= prefix_source
-;
+$export
+prefix #= prefix_source

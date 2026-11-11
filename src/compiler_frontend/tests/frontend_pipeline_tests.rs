@@ -1395,7 +1395,7 @@ fn failure_project(source: &str) -> FrontendProject {
     )
 }
 
-/// A single-file fixture whose root owns an `export:` surface and no runtime body.
+/// A single-file fixture whose root owns an `$export` surface and no runtime body.
 fn failure_api_project(source: &str) -> FrontendProject {
     FrontendProject::new_with_role(
         &[("src/@mod.moth", source)],
@@ -3768,11 +3768,11 @@ fn implicit_failure_catch_rejects_inner_argument_group_condition_template_and_co
 
 #[test]
 fn implicit_failure_catch_remains_ineligible_for_literal_or_infallible_call() {
-    for prefix in ["", "export:\n"] {
-        let closing_export = if prefix.is_empty() { "" } else { ";\n" };
+    for is_exported in [false, true] {
+        let export_directive = if is_exported { "$export\n" } else { "" };
         for expression in ["3", "identity(value)"] {
             let mut project = failure_api_project(&format!(
-                "{prefix}    identity |value I32| -> I32:\n        return value\n    ;\n{closing_export}\
+                "{export_directive}identity |value I32| -> I32:\n    return value\n;\n\
                  bad |value I32| -> I32:\n    return {expression} catch then 0\n;\n"
             ));
             let failure = project
@@ -4087,8 +4087,8 @@ fn implicit_failure_dormant_generic_assertion_message_rejects_private_failure() 
     for error_slot in ["", " -> Error!"] {
         let mut project = failure_api_project(&format!(
             "message |left I32, right I32| -> String:\n    value = left * right\n    return [value]\n;\n\
-             export:\n    validate type T |marker T, left I32, right I32, ready Bool|{error_slot}:\n\
-                 assert(ready, message(left, right))\n    ;\n;\n"
+             $export\nvalidate type T |marker T, left I32, right I32, ready Bool|{error_slot}:\n\
+                 assert(ready, message(left, right))\n;\n"
         ));
         let failure = project.ast_result().expect_ast_failure(
             "dormant generic assertion messages must be validated before discard",
@@ -4163,8 +4163,8 @@ fn implicit_failure_cannot_escape_dormant_generic_never_body() {
 #[test]
 fn implicit_failure_dormant_generic_contracts_validate_before_instantiation() {
     let mut project = failure_api_project(
-        "export:\n    product type T |marker T, left I32, right I32| -> I32:\n\
-                 return left * right\n    ;\n;\n",
+        "$export\nproduct type T |marker T, left I32, right I32| -> I32:\n\
+                 return left * right\n;\n",
     );
     let failure = project
         .ast_result()
@@ -4199,11 +4199,11 @@ fn implicit_failure_dormant_generic_contracts_validate_before_instantiation() {
     assert_eq!(labels.len(), 1);
     assert!(labels[0].is_some(), "numeric origin should remain labeled");
 
-    for (prefix, error_slot) in [("export:\n", ", Error!"), ("", "")] {
-        let closing_export = if prefix.is_empty() { "" } else { ";\n" };
+    for (is_exported, error_slot) in [(true, ", Error!"), (false, "")] {
+        let export_directive = if is_exported { "$export\n" } else { "" };
         let mut project = failure_api_project(&format!(
-            "{prefix}    product type T |marker T, left I32, right I32| -> I32{error_slot}:\n\
-                 return left * right\n    ;\n{closing_export}"
+            "{export_directive}product type T |marker T, left I32, right I32| -> I32{error_slot}:\n\
+                 return left * right\n;\n"
         ));
         let ast = project.ast();
         assert!(
@@ -4258,9 +4258,9 @@ fn implicit_failure_range_loop_witnesses_retain_origin_labels() {
 
         // Dormant generic boundary: the finalizer reads the AST contributor directly.
         let mut project = failure_api_project(&format!(
-            "export:\n    walk type T |marker T, start {scalar}, step {scalar}| -> {scalar}:\n\
+            "$export\nwalk type T |marker T, start {scalar}, step {scalar}| -> {scalar}:\n\
                      loop start to {end} by step |value|:\n            return value\n        ;\n\
-                     return {zero}\n    ;\n;\n"
+                     return {zero}\n;\n"
         ));
         let failure = project
             .ast_result()
@@ -4287,8 +4287,8 @@ fn implicit_failure_range_loop_witnesses_retain_origin_labels() {
 fn implicit_failure_dormant_complete_recursive_graph_without_numeric_origin_is_infallible() {
     let mut project = failure_api_project(
         "identity |value I32| -> I32:\n    return identity(value)\n;\n\
-         export:\n    wrapper type T |marker T, value I32| -> I32:\n\
-                 return identity(value)\n    ;\n;\n",
+         $export\nwrapper type T |marker T, value I32| -> I32:\n\
+                 return identity(value)\n;\n",
     );
     // Match concrete HIR convergence: stack exhaustion is fatal, not numeric failure.
     project.ast();
@@ -4307,9 +4307,8 @@ fn implicit_failure_dormant_private_generic_identity_and_transitive_chain_are_in
             "identity"
         };
         for helper_first in [true, false] {
-            let wrapper = format!(
-                "export:\n    forward type T |value T| -> T:\n        return {target}(value)\n    ;\n;\n"
-            );
+            let wrapper =
+                format!("$export\nforward type T |value T| -> T:\n    return {target}(value)\n;\n");
             let source = if helper_first {
                 format!("{helpers}{wrapper}")
             } else {
@@ -4341,8 +4340,8 @@ fn implicit_failure_dormant_private_numeric_helper_retains_active_numeric_witnes
          multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\
          private_product type U |marker U, left I32, right I32| -> I32:\n\
              return multiply(left, right)\n;\n\
-         export:\n    product type T |marker T, left I32, right I32| -> I32:\n\
-                 retained = identity(marker)\n        return private_product(retained, left, right)\n    ;\n;\n",
+         $export\nproduct type T |marker T, left I32, right I32| -> I32:\n\
+                 retained = identity(marker)\n        return private_product(retained, left, right)\n;\n",
     );
     let failure = project
         .ast_result()
@@ -4369,8 +4368,8 @@ fn implicit_failure_dormant_recursive_chain_with_numeric_origin_is_rejected() {
     let mut project = failure_api_project(
         "recursive |value I32, ready Bool| -> I32:\n\
              if ready:\n        return value * 2\n    ;\n    return recursive(value, ready)\n;\n\
-         export:\n    wrapper type T |marker T, value I32, ready Bool| -> I32:\n\
-                 return recursive(value, ready)\n    ;\n;\n",
+         $export\nwrapper type T |marker T, value I32, ready Bool| -> I32:\n\
+                 return recursive(value, ready)\n;\n",
     );
     let failure = project
         .ast_result()
@@ -4555,7 +4554,7 @@ fn implicit_failure_self_recursive_back_edge_keeps_overflow_origin_at_both_bound
 
     // The dormant generic boundary exercises the AST finalizer over the same helper shape.
     let mut project = failure_api_project(&format!(
-        "{HELPER}export:\n    wrapper type T |marker T, value I32, ready Bool| -> I32:\nreturn helper(value, ready)\n    ;\n;\n"
+        "{HELPER}$export\nwrapper type T |marker T, value I32, ready Bool| -> I32:\nreturn helper(value, ready)\n;\n"
     ));
     let failure = project
         .ast_result()
@@ -4596,7 +4595,7 @@ fn implicit_failure_mutual_recursive_back_edge_keeps_overflow_origin_at_both_bou
     assert_recursive_witness_fixture_sites(&witness, &concrete_source, "first");
 
     let mut project = failure_api_project(&format!(
-        "{HELPERS}export:\n    wrapper type T |marker T, value I32, ready Bool| -> I32:\nreturn first(value, ready)\n    ;\n;\n"
+        "{HELPERS}$export\nwrapper type T |marker T, value I32, ready Bool| -> I32:\nreturn first(value, ready)\n;\n"
     ));
     let failure = project
         .ast_result()
@@ -4941,8 +4940,8 @@ fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
 #[test]
 fn implicit_failure_rhs_caught_compound_update_reports_writeback_origin() {
     const ESCAPING_SOURCE: &str = "risky |amount U16| -> U16, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
-         export:\n    bump type T |marker T, extra U16| -> U8:\n\
-                 total ~U8 = 250\n        ~total += risky(extra) catch then extra\n        return total\n    ;\n;\n";
+         $export\nbump type T |marker T, extra U16| -> U8:\n\
+                 total ~U8 = 250\n        ~total += risky(extra) catch then extra\n        return total\n;\n";
     const AST_SOURCE: &str = "risky |amount U16| -> U16, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
          bump |extra U16| -> U8:\n    total ~U8 = 250\n    ~total += risky(extra) catch then extra\n    return total\n;\n";
     let mut project = failure_api_project(ESCAPING_SOURCE);
@@ -5014,8 +5013,8 @@ fn implicit_failure_uncaught_compound_update_reports_writeback_origin() {
     let mut project = failure_api_project(
         // `y` is a genuinely wider U16 so the uncaught write-back stays a mixed-domain
         // conversion with its own compound write-back producer.
-        "export:\n    bump type T |marker T, x U8, y U16| -> U8:\n\
-                 total ~U8 = x\n        ~total += y\n        return total\n    ;\n;\n",
+        "$export\nbump type T |marker T, x U8, y U16| -> U8:\n\
+                 total ~U8 = x\n        ~total += y\n        return total\n;\n",
     );
     let failure = project
         .ast_result()
@@ -5032,8 +5031,8 @@ fn implicit_failure_uncaught_compound_update_reports_writeback_origin() {
 #[test]
 fn implicit_failure_plain_return_arithmetic_keeps_operation_origin() {
     let mut project = failure_api_project(
-        "export:\n    bump type T |marker T, x I32, y I32| -> I32:\n\
-                 return x + y\n    ;\n;\n",
+        "$export\nbump type T |marker T, x I32, y I32| -> I32:\n\
+                 return x + y\n;\n",
     );
     let failure = project
         .ast_result()

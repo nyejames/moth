@@ -1,9 +1,9 @@
 @status Status
 
-export:
-    @status Status
+$export
+@status Status
 
-    make_ready || -> Status:
-        return Status::Ready
-    ;
+$export
+make_ready || -> Status:
+    return Status::Ready
 ;

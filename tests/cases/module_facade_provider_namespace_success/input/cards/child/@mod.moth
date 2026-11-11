@@ -1,8 +1,8 @@
-export:
-    greet || -> String:
-        return "source-member"
-    ;
-    friendly || -> String:
-        return "facade-name-member"
-    ;
+$export
+greet || -> String:
+    return "source-member"
+;
+$export
+friendly || -> String:
+    return "facade-name-member"
 ;

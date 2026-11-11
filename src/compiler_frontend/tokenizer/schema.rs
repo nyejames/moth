@@ -362,7 +362,6 @@ const TOKEN_DOUBLE_COLON_ADJACENCY_FLAGS: u16 =
 token_schema! {
     (ModuleStart, MODULE_START, 1, "module start", Static, 0, 0, None),
     (Eof, EOF, 2, "end of file", Static, 0, TOKEN_CLASS_DELIMITER, None),
-    (Export, EXPORT, 3, "`export`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (Hash, HASH, 4, "`#`", Static, 0, 0, None),
     (Arrow, ARROW, 6, "`->`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, None),
     (

@@ -1,6 +1,6 @@
-**Current support.** The compiler uses `$config` for build-input contracts. It marks one explicitly typed top-level `#` binding; see @../project-structure/#build-inputs (Build configuration values).
+`#` marks a compile-time constant. `$config` marks an explicitly typed top-level constant as a build input, without changing ordinary constant syntax. See @../project-structure/#build-inputs (Build configuration values).
 
-`$config` is a marker for an input contract, not a replacement for ordinary constants:
+For example:
 
 [codeblock, $code "moth":
     $config
@@ -9,8 +9,6 @@
 
 Only a marked `$config` input can omit an initializer: a required non-optional input
 then reports a missing-input error, while an optional input resolves to absence.
-
-`#` marks a compile-time constant binding.
 
 [codeblock, $code "moth":
     site_name #= "Moth"

@@ -1,4 +1,4 @@
-Project-local source-backed packages are scoped `@package.moth` support packages discovered structurally from the project source tree. The retired `package_folders` config field no longer exists and is rejected. Structural discovery is the only package-root source.
+Project-local source-backed packages are scoped `@package.moth` support packages discovered structurally from the project source tree. Structural discovery determines package roots without configuration.
 
 ### Directory structure
 
@@ -34,7 +34,7 @@ A module with `@mod.moth` or `@entry.moth` occupies the normal-position owner ro
 
 ### Public surface
 
-Outside dependency clauses can only see declarations and direct-selection re-exports marked public by the support root's `export:` block. Internal implementation files are hidden unless the root re-exports them.
+Consumers see only declarations and direct-selection re-exports marked with `$export` in the support facade. Internal implementation files remain private unless the facade re-exports selected declarations.
 
 Shared helpers in a paired directory must obey the intersection of imports legal to every root that can consume them.
 
@@ -42,7 +42,7 @@ Shared helpers in a paired directory must obey the intersection of imports legal
 
 The support facade may depend on ordinary files it owns, any descendant module in its private subtree, support packages from a strictly outer scope and registered packages. It may not depend on its parent, normal sibling consumers or same-scope support siblings.
 
-Consumers see only the support facade's `export:` surface. They cannot address `@markdown/parser` or another implementation path.
+Consumers see only the support facade's `$export` surface. They cannot address `@markdown/parser` or another implementation path.
 
 ### Depended-on package roots do not produce routes
 
@@ -57,5 +57,5 @@ Scoped `@package.moth` packages are ProjectLocal packages backed by Moth source.
 ### Concepts related to project-local packages
 
 - For module root rules see @../project-structure/#module-roots (Module roots).
-- For the export block see @../project-structure/#public-api (Public API).
+- For `$export` rules see @../project-structure/#public-api (Public API).
 - For dependency path resolution see @#dependency-paths (Dependency paths).

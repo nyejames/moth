@@ -68,12 +68,11 @@ Binding a `.mtf` file and inserting its content into a template does not create 
 
 ### Visibility and module boundary
 
-A `.mtf` file's `content` is subject to the same module visibility rules as other declarations. Cross-module dependency clauses can only access `content` if the module root's `export:` block re-exports it.
+A `.mtf` file's `content` follows ordinary module visibility. To make it accessible across a module boundary, re-export it from the relevant facade:
 
 [codeblock, $code "moth":
-    export:
-        @intro content as intro
-    ;
+    $export
+    @intro content as intro
 ]
 
 ### Concepts related to content dependencies

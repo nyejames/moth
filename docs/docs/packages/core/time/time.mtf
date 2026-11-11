@@ -286,17 +286,11 @@ Every `F64` reaching this package is already finite, because `NaN` and the infin
 
 `Duration`, `TimeMark` and `Timestamp` support no equality, no ordering and no use as map keys. Compare durations through `as_milliseconds` and timestamps through `unix_milliseconds`.
 
-Every failure this package itself detects is observable in Moth as a returned `Error!`. The one failure it delegates is a non-finite `F64` result at the shared external boundary. That Moth-owned check is a fatal integrity guard, not implicit built-in failure: it halts unless a declared builtin `Error!` contract returns it. Safety-catch eligibility does not turn this guard into a recoverable failure. No function in this package throws a host error of its own. See @../../../progress (Progress) for current support.
+Every failure this package itself detects is observable in Moth as a returned `Error!`. The one failure it delegates is a non-finite `F64` result at the shared external boundary. That Moth-owned check is a fatal integrity guard, not implicit built-in failure: it halts unless a declared builtin `Error!` contract returns it. Safety-catch eligibility does not turn this guard into a recoverable failure. No function in this package throws a host error of its own. 
 
 ### Access and return contracts
 
 All parameters use shared access. No function requires mutable access. All return values stay fresh. `timestamp_from_iso_string` returns through `Error!` on text outside the accepted ISO format and on accepted text whose offset-adjusted instant leaves the renderable window. `to_iso_string` returns through `Error!` when the instant lies outside that window. Every other function declares no typed error slot; a non-finite `F64` at that shared boundary still halts unless a declared builtin `Error!` contract returns it.
-
-### Backend behaviour
-
-HTML-JS lowers `mark_now` to `globalThis.performance.now()`. `timestamp_now` lowers to `Date.now()`. `timestamp_from_iso_string` and `to_iso_string` lower to validating runtime helpers. Every other function, including the Duration and Timestamp construction helpers and the arithmetic functions, lowers to an inline JavaScript expression.
-
-HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (progress matrix) for current target availability.
 
 ### Unsupported source forms
 
@@ -306,9 +300,9 @@ HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (pro
 - Do not inspect opaque type fields directly.
 - The package does not expose receiver methods.
 
-### Deferred surfaces
+### API boundaries
 
-Calendar date types, time zones, local-time conversion, locale-aware formatting, timers, sleep, intervals, animation callbacks and non-JS lowerings remain deferred. Browser animation-frame integration belongs in a future web-specific package rather than `@core/time`. See @../../../progress (progress matrix) for current status.
+Calendar date types, time zones, local-time conversion, locale-aware formatting, timers, sleep, intervals and animation callbacks are outside the `@core/time` API. Animation-frame integration belongs in a web-specific package.
 
 ### Related concepts
 

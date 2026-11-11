@@ -8,5 +8,5 @@ diagnostic_codes = ["MOTH-RULE-0023"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0023"
 path = "input/sub/@mod.moth"
-line = 7
+line = 6
 column = 1

@@ -6,7 +6,7 @@ Origin describes ownership and distribution:
 
 - **Core**: compiler-owned packages such as `@core/io` and `@core/math`.
 - **Builder**: packages selected by a project builder, including `@html` and `@web/canvas`.
-- **ProjectLocal**: scoped `+*.moth` support packages, the project-root package facade and annotated project-local JavaScript files.
+- **ProjectLocal**: scoped `@package.moth` support packages, the project-root package facade and annotated project-local JavaScript files.
 - **Dependency**: reserved for future package-system support.
 
 ### Package backing
@@ -28,12 +28,12 @@ Backing is semantic, not a file-format choice. Precompiling or emitting a `MothS
     [td: [:`@html`, `@web/site`] [: Builder] [: MothSource]]
     [td: [:`@core/collections`, `@core/io`, `@core/math`, `@core/text`, `@core/random`, `@core/time`] [: Core] [: ExternalBinding]]
     [td: [:`@web/canvas`, `@web/graphics`, `@web/page`] [: Builder] [: ExternalBinding]]
-    [td: [: Scoped `+*.moth` support package] [: ProjectLocal] [: MothSource]]
-    [td: [: Project-root `+*.moth` facade] [: ProjectLocal] [: MothSource]]
+    [td: [: Scoped `@package.moth` support package] [: ProjectLocal] [: MothSource]]
+    [td: [: Project-root `@package.moth` facade] [: ProjectLocal] [: MothSource]]
     [td: [: Annotated project-local `.js` file] [: ProjectLocal] [: ExternalBinding]]
 ]
 
-Origin and backing don't change dependency clause syntax or module visibility. Source-backed packages contain ordinary modules with strict `export:` public surfaces. Binding-backed packages expose typed external symbols registered by the builder.
+Origin and backing don't change dependency clause syntax or module visibility. Source-backed packages publish their public surface with `$export` in their API facade. Binding-backed packages expose typed external symbols registered by the builder.
 
 ### Prelude is visibility policy
 
@@ -69,7 +69,7 @@ The HTML-Wasm mode has a stricter backend surface. A reachable JS-backed package
 
 ### No package manager yet
 
-There is no remote fetching, lockfile or version resolution yet. Use `+*.moth` support packages for project-local source-backed packages, builder-provided package dependency clauses for built-in capabilities and annotated `.js` wrappers for direct browser integration.
+There is no remote fetching, lockfile or version resolution yet. Use `@package.moth` support facades for project-local source-backed packages, builder-provided package dependency clauses for built-in capabilities and annotated `.js` wrappers for direct browser integration.
 
 ### Concepts related to package origins and backing
 

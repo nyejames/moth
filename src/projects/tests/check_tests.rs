@@ -431,7 +431,7 @@ fn check_retains_source_package_warning() {
     fs::write(src.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package.join("@package.moth"),
-        "export:\n    run || -> I32:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => ~result = \"one\"\n            \"one\" => ~result = \"one\"\n            else => ~result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
+        "$export\nrun || -> I32:\n    value ~= \"hello\"\n    result ~= \"unset\"\n\n    if value is:\n        \"one\" => ~result = \"one\"\n        \"one\" => ~result = \"one\"\n        else => ~result = \"other\"\n    ;\n    return 1\n;\n",
     )
     .expect("should write warning package root");
 
@@ -517,7 +517,7 @@ fn check_accepts_a_directory_with_only_an_api_facade() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
     fs::write(root.join("config.moth"), DEFAULT_PAGE_CONFIG).expect("should write project config");
-    fs::write(root.join("@mod.moth"), "export:\n    answer #= 42\n;\n")
+    fs::write(root.join("@mod.moth"), "$export\nanswer #= 42\n")
         .expect("should write the API facade");
 
     let completion = run_check_command(
@@ -1197,7 +1197,7 @@ fn check_source_on_budgeted_thread(source: String) -> (Vec<String>, usize) {
     // The exported-root stack fixture needs an API facade role, which only a directory project
     // assigns by root filename; runtime-only stack fixtures are ordinary selected files. The
     // source shape is the only channel the child re-execution has.
-    let check_target = if source.contains("\nexport:\n") {
+    let check_target = if source.contains("$export\n") {
         let root = temp.path().to_path_buf();
         fs::write(root.join("config.moth"), DEFAULT_PAGE_CONFIG)
             .expect("should write project config");
@@ -1274,9 +1274,9 @@ fn chained_const_record_source(depth: usize) -> String {
         node = format!("node_{level}");
         source.push_str(&format!("{node} #= (child = node_{})\n", level - 1));
     }
-    source.push_str("\nexport:\nroot #= (child = ");
+    source.push_str("\n$export\nroot #= (child = ");
     source.push_str(&node);
-    source.push_str(")\n;\n");
+    source.push_str(")\n");
     source
 }
 

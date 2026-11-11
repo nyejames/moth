@@ -1,3 +1,2 @@
-export:
-    @counter Counter
-;
+$export
+@counter Counter

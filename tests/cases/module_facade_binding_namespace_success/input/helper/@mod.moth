@@ -1,3 +1,2 @@
-export:
-    @binding sin as cos
-;
+$export
+@binding sin as cos

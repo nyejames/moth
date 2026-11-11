@@ -1,5 +1,4 @@
 secret #= "root-local"
 
-export:
-    public_value #= "public"
-;
+$export
+public_value #= "public"

@@ -1,7 +1,3 @@
-### Accepted deferred syntax
-
-The following is accepted end-state syntax. Implementation is deferred and must not be treated as current source support.
-
 ### Declared region syntax
 
 `name:` creates a declared hard lifetime region in runtime statement position. Values placed into a declared region belong to that declared region for their full lifetime. No declared-region-owned value, projection or alias may outlive the declared region.
@@ -209,10 +205,6 @@ Hidden result destinations do not become source signature parameters.
 ### Why declared regions exist
 
 Declared regions give authors explicit control over one allocation and cleanup domain without exposing reference types, pointer syntax or manual memory management. Their defining performance property comes from predictable bulk cleanup: the compiler can reclaim the declared region together at exit instead of releasing children one by one. The compiler validates declared region topology as part of its mandatory lifetime-region analysis.
-
-### Current implementation status
-
-Declared-region semantics and `into` placement are not implemented yet. The compiler reserves valid `name:` headers with a targeted deferred-feature diagnostic, rejects exact `_:` and treats `block`, `group` and `region` as ordinary identifiers. There is no authored general lexical-block parser.
 
 ### Read next on declared regions
 

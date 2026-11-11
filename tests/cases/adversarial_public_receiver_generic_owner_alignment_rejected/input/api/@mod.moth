@@ -1,6 +1,5 @@
-export:
-    Record = |value I32|
-;
+$export
+Record = |value I32|
 
 invalid_receiver type T |this Record, item T| -> T:
     return item

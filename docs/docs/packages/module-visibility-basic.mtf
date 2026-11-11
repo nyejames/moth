@@ -1,38 +1,24 @@
-Declarations are private to their module. An `export:` block in `@mod.moth` or `@package.moth` makes them public.
+Module boundaries expose only names marked with `$export` in the appropriate facade.
 
-### An internal helper file
+### Shared helpers
 
 [codeblock, $code "moth":
     -- components/utils.moth
     internal_value #= 42
 ]
 
-### The child root uses it directly
-
 [codeblock, $code "moth":
     -- components/@mod.moth
+    $export
     @utils internal_value
-
-    export:
-        @utils internal_value
-    ;
 ]
 
-Same-module dependencies see helper declarations. No export block is needed inside the helper.
+A parent module may now bind `@components internal_value`. It cannot bypass the child facade with `@components/utils`.
 
-### Root declarations stay in their root
+### Separate root scopes
 
-A declaration written directly in `@mod.moth`, `@package.moth` or `@entry.moth` belongs to that file only. Helper files cannot see it. Another root file cannot see it. Name the module folder in a dependency instead of the root file.
+Declarations authored in `@mod.moth`, `@package.moth` or `@entry.moth` remain local to that root. Shared code belongs in ordinary helper files.
 
-### Other modules need the export block
+`@mod.moth` publishes the normal API and `@package.moth` publishes the support API. `@entry.moth` publishes none. Resolution never falls back from one facade to another.
 
-[codeblock, $code "moth":
-    -- @entry.moth
-    @components internal_value
-]
-
-Now the parent module can bind `internal_value` through the `@components` public surface. It cannot bypass that surface with `@components/utils`.
-
-An entry-only folder has no public surface to bind. A support-only folder is reachable only through its `@package.moth` surface by eligible consumers.
-
-`export:` remains the current public marker. A later `$export` migration will keep it only in `@mod.moth` and `@package.moth`.
+See @#module-visibility (Module visibility) and @#project-local-packages (Project-local packages).

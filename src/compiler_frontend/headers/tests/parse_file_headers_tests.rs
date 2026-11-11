@@ -390,7 +390,7 @@ fn private_dependency_clause_propagates_path_lookup_infrastructure_failure() {
 #[test]
 fn public_dependency_clause_propagates_path_lookup_infrastructure_failure() {
     expect_prepare_infrastructure(
-        prepare_tampered_path_clause("export:\n    @core/math sin\n;\n", "src/@mod.moth"),
+        prepare_tampered_path_clause("$export\n@core/math sin\n", "src/@mod.moth"),
         "public dependency clause",
     );
 }
@@ -841,6 +841,55 @@ fn compile_time_constant_headers_are_parsed() {
             .iter()
             .any(|header| matches!(header.kind, HeaderKind::Constant { .. })),
         "expected compile-time constant header"
+    );
+}
+
+#[test]
+fn capacity_references_extract_value_refs_without_treating_element_type_as_value_ref() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let file_path = PathBuf::from("src/test.moth");
+    let source = "make |items ~{capacity MyType}| -> I32:\n    return 1\n;\n";
+    let (output, mut span_builder) = prepare_single_file_with_fork(
+        source,
+        &file_path,
+        &file_path,
+        &mut string_table,
+        &mut path_fork,
+    );
+
+    let headers = prepare_and_bind_headers_result(
+        vec![output],
+        std::slice::from_mut(&mut span_builder),
+        &ExternalPackageRegistry::new(),
+        &ExternalImportResolutionTable::default(),
+        None,
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("headers should parse");
+
+    let make_header = headers
+        .headers
+        .iter()
+        .find(|h| {
+            matches!(h.kind, HeaderKind::Function { .. }) && h.declaration_path != PathId::ROOT
+        })
+        .expect("make header should exist");
+
+    let capacity_names: Vec<_> = make_header
+        .capacity_references
+        .iter()
+        .map(|r| string_table.resolve(r.name))
+        .collect();
+
+    assert!(
+        capacity_names.contains(&"capacity"),
+        "bare capacity syntax should reference the capacity constant"
+    );
+    assert!(
+        !capacity_names.contains(&"MyType"),
+        "element type name must not be treated as a capacity value reference"
     );
 }
 

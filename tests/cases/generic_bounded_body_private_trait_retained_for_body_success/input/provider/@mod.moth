@@ -2,18 +2,19 @@ LOCAL_DISPLAY must:
     display |This| -> String
 ;
 
-export:
-    PUBLIC_LABEL must:
-        label |This| -> String
-    ;
+$export
+PUBLIC_LABEL must:
+    label |This| -> String
+;
 
-    Label = |
-        text String,
-    |
+$export
+Label = |
+    text String,
+|
 
-    outer type T |value T| -> String:
-        return private_render(Label("private evidence retained only for body"))
-    ;
+$export
+outer type T |value T| -> String:
+    return private_render(Label("private evidence retained only for body"))
 ;
 
 display |this Label| -> String:

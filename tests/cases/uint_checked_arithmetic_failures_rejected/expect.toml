@@ -43,7 +43,7 @@ occurrence = 1
 reason = "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function"
 path = "input/exported_plain/@mod.moth"
 line = 2
-column = 5
+column = 1
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0053"

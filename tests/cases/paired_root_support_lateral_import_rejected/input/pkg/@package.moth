@@ -1,3 +1,2 @@
-export:
-    value #= "pkg"
-;
+$export
+value #= "pkg"

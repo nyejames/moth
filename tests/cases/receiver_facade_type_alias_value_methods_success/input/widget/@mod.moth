@@ -1,11 +1,12 @@
 @impl Counter, make_counter_impl
 
-export:
-    @impl Counter
+$export
+@impl Counter
 
-    PublicCounter as Counter
+$export
+PublicCounter as Counter
 
-    make_counter || -> PublicCounter:
-        return make_counter_impl()
-    ;
+$export
+make_counter || -> PublicCounter:
+    return make_counter_impl()
 ;

@@ -3,6 +3,5 @@
 $config
 label #String = "a😊b"
 
-export:
-    len #I32 = length(label)
-;
+$export
+len #I32 = length(label)

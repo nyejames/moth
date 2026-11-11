@@ -17,6 +17,7 @@ fn non_word_spellings_stay_unclassified() {
         "int",
         "fn",
         "config",
+        "export",
         "return!",
         "block",
         "_block",

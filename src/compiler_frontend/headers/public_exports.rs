@@ -1,15 +1,15 @@
 //! Public export and file-membership data for header dependencies.
 //!
-//! WHAT: derives source-backed package and module-root public export maps from parsed headers and strict
-//! `export:` block dependencies.
+//! WHAT: derives source-backed package and module-root public export maps from parsed headers and
+//! public dependency records.
 //! WHY: header binding environment preparation needs a single header-owned view of which declarations are
 //! exposed across module-root boundaries and which source files belong to each boundary.
 //!
 //! ## Export map construction
 //!
 //! Public exports come from two sources:
-//! 1. Public authored headers in the module-root file's `export:` block.
-//! 2. Public direct-selection dependency records from that same strict `export:` block.
+//! 1. Authored headers marked with `$export` in the module-root file.
+//! 2. Public direct-selection dependency records marked with `$export`.
 //!
 //! Because public dependencies may re-export symbols from other module roots, construction is
 //! two-pass:
@@ -119,7 +119,7 @@ fn intern_public_surface_path(
 
 /// Whether a header is a public authored module-root export.
 ///
-/// WHAT: only declarations marked public by a strict module-root file `export:` block become
+/// WHAT: only declarations marked public with `$export` in an export-capable module root become
 ///       public export entries. The shared declaration gate also excludes source `$config`
 ///       contract shells, which are resolved before ordinary declarations exist.
 /// WHY: the stage-local file-role and export-mode policy remains here while declaration-kind and
@@ -180,7 +180,7 @@ pub(super) fn build_public_exports(
         path_fork,
     )?;
 
-    // Pass 2: resolve strict `export:` dependencies against the completed authored export maps.
+    // Pass 2: resolve `$export`-marked dependencies against the completed authored export maps.
     build_source_package_public_dependencies(
         module_symbols,
         &source_package_locations,

@@ -237,9 +237,8 @@ html #= ()
 [:project=[project_value()]|package=[package_value()]]
 
 -- package/@mod.moth
-export:
-    @binding.js provider_value as package_value
-;
+$export
+@binding.js provider_value as package_value
 ```
 
 ```js

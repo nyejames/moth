@@ -1,5 +1,4 @@
-export:
-    normal_label || -> String:
-        return "api"
-    ;
+$export
+normal_label || -> String:
+    return "api"
 ;

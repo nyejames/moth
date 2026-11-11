@@ -1,3 +1,2 @@
-export:
-    @impl greet
-;
+$export
+@impl greet

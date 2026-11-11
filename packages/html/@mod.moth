@@ -24,87 +24,115 @@ stroke_rect |this ~Canvas, x F64, y F64, width F64, height F64|:
     raw_stroke_rect(~this.context, x, y, width, height)
 ;
 
-export:
-    -- Basic tags
-    p #String = [$html:<p style="[$slot style]">[$slot]</p>]
-    h1 #String = [$html:<h1 style="[$slot style]">[$slot]</h1>]
-    h2 #String = [$html:<h2 style="[$slot style]">[$slot]</h2>]
-    h3 #String = [$html:<h3 style="[$slot style]">[$slot]</h3>]
-    h4 #String = [$html:<h4 style="[$slot style]">[$slot]</h4>]
-    h5 #String = [$html:<h5 style="[$slot style]">[$slot]</h5>]
-    h6 #String = [$html:<h6 style="[$slot style]">[$slot]</h6>]
-    
-    small #String = [$html:<small style="[$slot style]">[$slot]</small>]
-    large #String = [$html:<large style="[$slot style]">[$slot]</large>]
+-- Basic tags
+$export
+p #String = [$html:<p style="[$slot style]">[$slot]</p>]
+$export
+h1 #String = [$html:<h1 style="[$slot style]">[$slot]</h1>]
+$export
+h2 #String = [$html:<h2 style="[$slot style]">[$slot]</h2>]
+$export
+h3 #String = [$html:<h3 style="[$slot style]">[$slot]</h3>]
+$export
+h4 #String = [$html:<h4 style="[$slot style]">[$slot]</h4>]
+$export
+h5 #String = [$html:<h5 style="[$slot style]">[$slot]</h5>]
+$export
+h6 #String = [$html:<h6 style="[$slot style]">[$slot]</h6>]
 
-    img #String = [$html:<img src="[$slot 1]" style="[$slot style]" alt="[$slot]">]
+$export
+small #String = [$html:<small style="[$slot style]">[$slot]</small>]
+$export
+large #String = [$html:<large style="[$slot style]">[$slot]</large>]
 
-    -- Formatting helpers
-    bold #String = [$html:<b style="[$slot style]">[$slot]</b>]
-    italic #String = [$html:<i style="[$slot style]">[$slot]</i>]
-    underline #String = [$html:<u style="[$slot style]">[$slot]</u>]
-    strikethrough #String = [$html:<s style="[$slot style]">[$slot]</s>]
+$export
+img #String = [$html:<img src="[$slot 1]" style="[$slot style]" alt="[$slot]">]
 
-    -- Structure
-    div #String = [$html:<div style="[$slot style]">[$slot]</div>]
-    span #String = [$html:<span style="[$slot style]">[$slot]</span>]
+-- Formatting helpers
+$export
+bold #String = [$html:<b style="[$slot style]">[$slot]</b>]
+$export
+italic #String = [$html:<i style="[$slot style]">[$slot]</i>]
+$export
+underline #String = [$html:<u style="[$slot style]">[$slot]</u>]
+$export
+strikethrough #String = [$html:<s style="[$slot style]">[$slot]</s>]
 
-    -- Code blocks
-    codeblock #= [$html:
-        <pre style="[$slot style]">[$slot]</pre>
-    ]
+-- Structure
+$export
+div #String = [$html:<div style="[$slot style]">[$slot]</div>]
+$export
+span #String = [$html:<span style="[$slot style]">[$slot]</span>]
 
-    -- Basic table components
-    table #String = [$html:
-        <table style="[$slot style]">
-            [$note: The first row can be styled differently to the rest of the table rows.]
-            <tr style="[$slot header_style]">
-                [$slot 1]
-            </tr>
+-- Code blocks
+$export
+codeblock #= [$html:
+    <pre style="[$slot style]">[$slot]</pre>
+]
 
-            [$note: Each remaining row can be styled differently.]
-            [$before [$html:<tr style="[$slot row_style]">], $after [$html:</tr>]:
-                [$slot]
-            ]
-        </table>
-    ]
+-- Basic table components
+$export
+table #String = [$html:
+    <table style="[$slot style]">
+        [$note: The first row can be styled differently to the rest of the table rows.]
+        <tr style="[$slot header_style]">
+            [$slot 1]
+        </tr>
 
-    td #= [$html:
-        [$before [$html: <td style="[$slot style]">], $after [$html:</td>]:
+        [$note: Each remaining row can be styled differently.]
+        [$before [$html:<tr style="[$slot row_style]">], $after [$html:</tr>]:
             [$slot]
         ]
+    </table>
+]
+
+$export
+td #= [$html:
+    [$before [$html: <td style="[$slot style]">], $after [$html:</td>]:
+        [$slot]
     ]
+]
 
-    th #= [$html:
-        [$before [$html:<th scope="col" style="[$slot style]">], $after [$html:</th>]:
-            [$slot]
-        ]
+$export
+th #= [$html:
+    [$before [$html:<th scope="col" style="[$slot style]">], $after [$html:</th>]:
+        [$slot]
     ]
+]
 
-    -- Utility style inserts
-    center #String = [$in style:text-align: center;]
-    right #String = [$in style:text-align: right;]
-    left #String = [$in style:text-align: left;]
-    smaller #String = [$in style:font-size: smaller;]
-    medium #String = [$in style:font-size: medium;]
-    larger #String = [$in style:font-size: larger;]
+-- Utility style inserts
+$export
+center #String = [$in style:text-align: center;]
+$export
+right #String = [$in style:text-align: right;]
+$export
+left #String = [$in style:text-align: left;]
+$export
+smaller #String = [$in style:font-size: smaller;]
+$export
+medium #String = [$in style:font-size: medium;]
+$export
+larger #String = [$in style:font-size: larger;]
 
-    -- Basic Canvas component
-    canvas #String = [$html:<canvas id="[$slot id]" style="[$slot style]"></canvas>]
+-- Basic Canvas component
+$export
+canvas #String = [$html:<canvas id="[$slot id]" style="[$slot style]"></canvas>]
 
-    -- Get the basic canvas element and 2D context for drawing (opaque JS interop)
-    get_canvas_context |id String| -> Canvas2d, Error!:
-        canvas_element = raw_get_canvas(id)!
-        return raw_context_2d(canvas_element)!
-    ;
+-- Get the basic canvas element and 2D context for drawing (opaque JS interop)
+$export
+get_canvas_context |id String| -> Canvas2d, Error!:
+    canvas_element = raw_get_canvas(id)!
+    return raw_context_2d(canvas_element)!
+;
 
-    -- Source-owned wrapper that provides method-style canvas drawing ergonomics.
-    Canvas = |
-        context Canvas2d,
-    |
+-- Source-owned wrapper that provides method-style canvas drawing ergonomics.
+$export
+Canvas = |
+    context Canvas2d,
+|
 
-    get_canvas |id String| -> Canvas, Error!:
-        context = get_canvas_context(id)!
-        return Canvas(context)
-    ;
+$export
+get_canvas |id String| -> Canvas, Error!:
+    context = get_canvas_context(id)!
+    return Canvas(context)
 ;

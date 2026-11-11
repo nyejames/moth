@@ -1,11 +1,11 @@
-export:
-    Helper = |
-        label String,
-    |
+$export
+Helper = |
+    label String,
+|
 
-    make_helper |label String| -> Helper:
-        return Helper(label)
-    ;
+$export
+make_helper |label String| -> Helper:
+    return Helper(label)
 ;
 
 text |this Helper| -> String:

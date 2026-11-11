@@ -171,7 +171,7 @@ A rooted directory is one structural module with one `ModuleId` and one compilat
 
 Each present root is a separate root-local declaration and visibility scope. Its top-level declarations stay private to that file. Ordinary helper files are shared, prepared once and cannot see a root-local declaration. A root may bind helper declarations through ordinary dependency clauses, but it cannot read another root directly. Same-spelling declarations in disjoint roots remain independent.
 
-`@mod` and `@package` permit declarations and function bodies but reject top-level runtime statements, direct compile-time fragments and builder slots. `@entry` permits private declarations, top-level runtime work, direct compile-time fragments, runtime fragments and registered direct builder slots, and rejects every export surface, including current `export:` blocks. `$export` is the accepted future declaration modifier for `@mod` and `@package` only. Its operand and attachment grammar remain unsettled. No export syntax is accepted in `@entry`, helpers, templates or config.
+`@mod` and `@package` permit declarations and function bodies but reject top-level runtime statements, direct compile-time fragments and builder slots. They publish only items marked by the operand-free `$export` source modifier. It attaches to one eligible declaration or strict direct-selection dependency clause and never marks a whole file public. `@entry` permits private declarations, top-level runtime work, direct compile-time fragments, runtime fragments and registered direct builder slots, but cannot publish an interface. `$export` is invalid in `@entry`, helpers, templates and config.
 
 The compiler publishes an interface only for a present facade. Normal and support interfaces have separate role-qualified origins, visibility scopes and consumer positions. `@mod` and `@entry` sources occupy normal positions and `@package` sources occupy strict support positions. An entry-only module can own a support-only child, but it never gains an importable normal interface. The project package surface consumes build-supplied visibility and remains an ordinary immutable module artefact. Registered Core and Builder source packages keep their existing normal-or-support public-root contract. Only an external project package requires project-root `@package`. No dependency activates another module's entry.
 
@@ -731,7 +731,7 @@ Binding-backed Never requires explicit `@moth.sig ... -> !`. Mixed annotation fo
 
 #### Constants, build configuration and const records
 
-Header preparation discovers constant dependencies. AST checks and folds them. `$config` is the only source modifier; it marks one following explicitly typed top-level compile-time binding in `config.moth` or a selected source module as an input contract. The binding name is the input key, the declared type is the contract and the initializer is the fallback; only a marked binding may omit one. Project fields and ordinary helpers never supply or block inputs implicitly.
+Header preparation discovers constant dependencies. AST checks and folds them. `$config` and `$export` are the source modifiers. `$config` marks one following explicitly typed top-level compile-time binding in `config.moth` or a selected source module as an input contract. `$export` marks one eligible public declaration or direct-selection dependency clause in `@mod.moth` or `@package.moth`. The binding name is the input key, the declared type is the contract and the initializer is the fallback; only a `$config`-marked binding may omit one. Project fields and ordinary helpers never supply or block inputs implicitly.
 
 Bootstrap defaults fold within the config service. Source defaults remain self-contained primitive literals or `none`, resolved after graph discovery and before module AST semantics. The resolved value is an ordinary folded constant, with no runtime wrapper, HIR category or visibility rule. The build document owns the exact domain, precedence and matching contract.
 
@@ -848,7 +848,11 @@ Missing roots, phases, overlays or exact-view authority are compiler bugs. Templ
 
 Dec formatting uses the common value-to-string path. It does not add Dec-specific TIR nodes.
 
-The `$md` formatter owns automatic heading IDs. It derives each heading's `id` during formatting from the heading's complete static visible label, and omits the `id` when the label contains a dynamic expression or child template. IDs add no TIR node, anchor kind or metadata, and builders never scan rendered HTML to recreate them.
+The `$md` formatter owns explicit section IDs. A bare `@#id` marker requires block start or whitespace before `@`; the ID starts with a Unicode alphabetic character and continues with Unicode alphanumeric characters, `_` or `-`. A closing star run belongs to surrounding emphasis. The marker is zero-width and labels no target, so it adds no rendered text.
+
+A labelled link keeps precedence: `@target (label)` follows the existing link grammar, and marker-like text inside a link label, code span or opaque anchor stays literal. A marker assigns its ID to the heading, paragraph or list item that owns the surrounding block. A paragraph containing only a marker leaves no element, so an authored marker emits a standalone empty `span`; a synthetic marker with no source span emits nothing. One block reports a source diagnostic for a malformed marker or a second marker. Different blocks may reuse an ID without suffixing.
+
+Unmarked headings have no `id`. IDs add no TIR node, anchor kind or metadata, and builders never scan rendered HTML to recreate them.
 
 #### File values and resources
 

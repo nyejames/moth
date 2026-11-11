@@ -198,7 +198,7 @@ fn single_file_without_source_package_dependencies_skips_registered_package_mate
     fs::create_dir_all(&package_root).expect("should create registered package root");
     fs::write(
         package_root.join("@mod.moth"),
-        "export:\n    unused || -> I32:\n        return missing_package_value\n    ;\n;\n",
+        "$export\nunused || -> I32:\n    return missing_package_value\n;\n",
     )
     .expect("should write semantically invalid unused package");
 
@@ -432,7 +432,7 @@ fn single_file_project_cutoff_after_package_work_refuses_module_admission() {
     fs::create_dir_all(&package_root).expect("should create registered package root");
     fs::write(
         package_root.join("@mod.moth"),
-        "export:\n    render || -> I32:\n        return shared_missing\n    ;\n;\n",
+        "$export\nrender || -> I32:\n    return shared_missing\n;\n",
     )
     .expect("should write diagnostically invalid package");
     let moth_path = dir.join("main.moth");
@@ -588,12 +588,12 @@ fn check_single_file_selected_root_keeps_its_authored_role_in_a_triple_root_dire
     let dir = _temp.path().to_path_buf();
     fs::write(
         dir.join("@mod.moth"),
-        "export:\n    normal_label #= \"normal\"\n;\n",
+        "$export\nnormal_label #= \"normal\"\n",
     )
     .expect("should write normal facade");
     fs::write(
         dir.join("@package.moth"),
-        "export:\n    support_label #= \"support\"\n;\n",
+        "$export\nsupport_label #= \"support\"\n",
     )
     .expect("should write support facade");
     fs::write(dir.join("@entry.moth"), "#[:triple]\n").expect("should write entry root");

@@ -2,13 +2,12 @@ PRIVATE_VIEW must:
     view |This| -> Point
 ;
 
-export:
-    outer type T |value T| -> I32:
-        holder ~= Holder(Point(1))
-        seen = helper(holder)
-        ~holder.point.x = 2
-        return seen.x
-    ;
+$export
+outer type T |value T| -> I32:
+    holder ~= Holder(Point(1))
+    seen = helper(holder)
+    ~holder.point.x = 2
+    return seen.x
 ;
 
 Point = |

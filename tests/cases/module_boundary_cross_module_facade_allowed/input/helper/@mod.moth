@@ -2,8 +2,7 @@ internal || -> String:
     return "hello"
 ;
 
-export:
-    greet || -> String:
-        return internal()
-    ;
+$export
+greet || -> String:
+    return internal()
 ;

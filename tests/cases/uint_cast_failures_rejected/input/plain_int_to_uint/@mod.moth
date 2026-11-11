@@ -1,5 +1,4 @@
-export:
-    widen |value I32| -> U32:
-        return cast value
-    ;
+$export
+widen |value I32| -> U32:
+    return cast value
 ;

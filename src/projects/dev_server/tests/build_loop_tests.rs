@@ -1974,14 +1974,14 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
     )
     .expect("write independent page");
 
-    const PUBLIC_API: &str = "\nexport:\n\
+    const PUBLIC_API: &str = "\n$export\n\
         product |value I32| -> I32, Error!:\n\
             return multiply(value)\n\
         ;\n\
+        $export\n\
         success_only |value I32| -> I32:\n\
             return plain(value)\n\
-        ;\n\
-    ;\n";
+        ;\n";
     let helper_path = source.join("support/@package.moth");
     let successful = format!(
         "multiply |value I32| -> I32:\n    return value\n;\n\

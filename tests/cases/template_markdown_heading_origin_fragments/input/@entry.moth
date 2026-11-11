@@ -1,4 +1,4 @@
 #[$md:
-# Hello
+# Hello @#hello
 Site-root @/docs/message#hello (Hello) and relative @./message#hello (Hello).
 ]

@@ -1,11 +1,11 @@
-export:
-    Wrapper type T = |
-        value T,
-    |
+$export
+Wrapper type T = |
+    value T,
+|
 
-    make_wrapper type T |value T| -> Wrapper of T:
-        return Wrapper(value)
-    ;
+$export
+make_wrapper type T |value T| -> Wrapper of T:
+    return Wrapper(value)
 ;
 
 label type T |this Wrapper of T| -> String:

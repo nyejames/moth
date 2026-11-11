@@ -1,5 +1,3 @@
-**Current support.** The compiler accepts `$config` inputs. The marker sits before a typed `#` binding; ordinary constant folding and ordinary `if` syntax remain the language mechanisms.
-
 A constant initializer must fully evaluate during AST construction.
 
 [codeblock, $code "moth":
@@ -19,7 +17,7 @@ A constant may depend on:
 - foldable casts
 - foldable struct construction
 - foldable templates
-- other compile-time values accepted by the current language surface
+- other compile-time values
 
 It may not depend on:
 

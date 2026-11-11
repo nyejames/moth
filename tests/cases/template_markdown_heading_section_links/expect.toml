@@ -6,5 +6,16 @@ warnings = "forbid"
 rendered_output_contains = [
     "<h1 id=\"hello-world\">Hello World</h1>",
     "<a href=\"#hello-world\">Hello World</a>",
+    "<p id=\"paragraph\">A paragraph.</p>",
+    "<a href=\"#paragraph\">Paragraph</a>",
+    "<li id=\"parent\">Parent",
+    "<a href=\"#parent\">Parent</a>",
+    "<li id=\"child\">Child</li>",
+    "<a href=\"#child\">Child</a>",
+    "<span id=\"anchor\"></span>",
+    "<a href=\"#imported-section\">Imported Section</a>",
+    "<a href=\"#imported-body\">Imported body</a>",
+    "<a href=\"#anchor\">Anchor</a>",
     "<h1 id=\"imported-section\">Imported Section</h1>",
+    "<p id=\"imported-body\">Imported body.</p>",
 ]

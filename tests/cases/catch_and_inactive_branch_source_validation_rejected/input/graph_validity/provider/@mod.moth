@@ -1,7 +1,6 @@
-export:
-    fallback || -> I32:
-        return 0
-    ;
+$export
+fallback || -> I32:
+    return 0
 ;
 
 invalid_private ||:

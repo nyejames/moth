@@ -40,8 +40,8 @@ the route, register an event or provide a UI callback. Those runtime
 operations are outside the accepted foundation.
 
 Choice values still describe application state changes in the ordinary way.
-This self-contained example uses currently executable Moth syntax; the update
-function receives an ordinary choice value and does not use Wire or Route:
+This self-contained message-handling example receives an ordinary choice value
+and does not use Wire or Route:
 
 [codeblock, $code "moth":
     TodoMessage ::

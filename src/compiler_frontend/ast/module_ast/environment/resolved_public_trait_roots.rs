@@ -83,7 +83,7 @@ pub(crate) struct ResolvedTraitRequirementFact {
 /// `this_type` is the trait-local synthetic generic parameter owned by the resolved trait
 /// definition; the projection validates every requirement receiver embedded `this_type`
 /// against this value before mapping self access. Only traits authored directly in the active
-/// module root under `export:` are admitted.
+/// module root as public exports are admitted.
 /// WHY: the public-interface draft projection needs resolved trait facts available
 /// immediately before HIR lowering without reconstructing trait semantics from HIR or
 /// source. Donor-local `TypeId`s and `StringId`s stay inside this transient fact and

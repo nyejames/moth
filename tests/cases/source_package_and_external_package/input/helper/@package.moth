@@ -1,5 +1,4 @@
-export:
-    double |x I32| -> I32:
-        return x * 2 catch then 0
-    ;
+$export
+double |x I32| -> I32:
+    return x * 2 catch then 0
 ;

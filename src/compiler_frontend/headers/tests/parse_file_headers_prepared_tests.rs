@@ -359,7 +359,7 @@ fn preparation_related_labels_keep_the_continuation_comma_and_name() {
 #[test]
 fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
     let quoted = "x".repeat(1500);
-    let source = format!("value = \"{quoted}\"\nexport:\n;\n");
+    let source = format!("value = \"{quoted}\"\n$export\n");
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@entry.moth");
@@ -412,7 +412,7 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
         &mut span_builder,
     ) {
         Err(FileFrontendPrepareFailure::Diagnosed(error)) => error,
-        Ok(_) => panic!("an empty export block should diagnose during header preparation"),
+        Ok(_) => panic!("a dangling `$export` should diagnose during header preparation"),
         Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
             panic!("header syntax should diagnose, not fail infrastructure: {error:?}")
         }
@@ -420,21 +420,21 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
 
     assert!(
         error.warnings.as_slice().is_empty(),
-        "empty export block should not emit preparation warnings"
+        "a dangling `$export` should not emit preparation warnings"
     );
     let diagnostic_bag = diagnostic_view_for_test(error.diagnostic);
     let diagnostic = diagnostic_bag
         .first()
-        .expect("empty export diagnostic should compact");
+        .expect("dangling `$export` diagnostic should compact");
     let diagnostic_span = diagnostic_primary_span(diagnostic)
-        .expect("empty export block should retain its source span");
+        .expect("a dangling `$export` should retain its source span");
     assert_eq!(diagnostic_span.source(), source_id);
     let diagnostic_range =
         diagnostic_span.resolve_with(span_builder.resolver_for(diagnostic_span.source()));
     assert_eq!(
         source.get(diagnostic_range.start() as usize..diagnostic_range.end() as usize),
-        Some("export"),
-        "the empty export diagnostic should cover the authored export keyword"
+        Some("$export"),
+        "the dangling export diagnostic should cover the authored directive keyword"
     );
     let retained_range = long_span.resolve_with(span_builder.resolver_for(source_id));
     assert_eq!(retained_range, expected_range);

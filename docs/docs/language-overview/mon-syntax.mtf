@@ -1,7 +1,3 @@
-MON syntax is implemented for supplied arguments and compile-time anonymous
-const records, including inline nested values. Runtime anonymous records remain
-a separate deferred feature. See @../progress (Progress) for current support.
-
 MON means Moth Object Notation. **MON syntax** names Moth's shared parenthesised
 argument and value-construction notation. **The MON format** is the separate
 serialised-data profile with its own supported values and serialisation rules.
@@ -178,13 +174,6 @@ Intentional data/source differences include:
 - MON applies codec text, nesting, node and materialisation budgets. These are
   not source grammar limits.
 
-Accepted but undelivered source capabilities remain named test gaps and
-progress/roadmap items. See @../progress (Progress) for current support.
-
-Moth-source `{=}` empty-map literals, Unicode escapes and contextual
-`::Variant` construction remain undelivered. MON's corresponding data forms do
-not deliver those source capabilities.
-
 This contract does not make an arbitrary MON document pasteable anywhere in
 Moth. Document framing, supplied schema information and legal source receiving
 contexts still matter. An anonymous source record does not implicitly construct
@@ -205,9 +194,7 @@ construction.
 
 The standalone `moth_mon` codec serves independent Rust callers. Compiler
 clients can use the same API and Rust types through the convenience re-export
-`moth::mon`. See @../progress (Progress) for current support. Moth-native
-`$mon`, automatic schema extraction and the static project builder remain
-deferred separately. The engine or application supplies its own data schema.
+`moth::mon`. The engine or application supplies its own data schema.
 
 Full compile-time Moth authoring expressions and the self-contained serialised
 representation are distinct surfaces.

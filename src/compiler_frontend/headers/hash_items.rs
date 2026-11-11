@@ -6,7 +6,6 @@
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::headers::const_fragments::create_top_level_const_template;
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
@@ -90,10 +89,6 @@ pub(super) fn handle_hash_item(
 
     match source_tag_at_cursor(cursor, file_id)? {
         TokenTag::TEMPLATE_HEAD => {
-            if state.export_mode.is_public() {
-                return Err(generics_traits_api::invalid_export_target(Some(current_span)).into());
-            }
-
             handle_top_level_const_template(cursor, source_file, state, context, current_span)
         }
 

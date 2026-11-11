@@ -1,3 +1,2 @@
-export:
-    @internal Counter, alias_of, fresh_counter, bump
-;
+$export
+@internal Counter, alias_of, fresh_counter, bump

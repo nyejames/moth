@@ -1,3 +1,2 @@
-export:
-    five #I32 = 5
-;
+$export
+five #I32 = 5

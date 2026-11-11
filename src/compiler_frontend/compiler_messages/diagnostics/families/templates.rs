@@ -373,6 +373,8 @@ unit_code! {
         TemplateLoopStepIsZero = 33,
         TemplateLoopStepNoProgress = 34,
         BuilderRootSlotNotRegistered = 35,
+        InvalidMarkdownSectionMarker = 36,
+        DuplicateMarkdownSectionMarker = 37,
     }
 }
 
@@ -510,6 +512,12 @@ impl InvalidTemplateStructureCode {
             InvalidTemplateStructureReason::BuilderRootSlotNotRegistered => {
                 (Self::BuilderRootSlotNotRegistered, None, None)
             }
+            InvalidTemplateStructureReason::InvalidMarkdownSectionMarker => {
+                (Self::InvalidMarkdownSectionMarker, None, None)
+            }
+            InvalidTemplateStructureReason::DuplicateMarkdownSectionMarker { .. } => {
+                (Self::DuplicateMarkdownSectionMarker, None, None)
+            }
         }
     }
 
@@ -610,6 +618,12 @@ impl InvalidTemplateStructureCode {
             Self::BuilderRootSlotNotRegistered => {
                 InvalidTemplateStructureReason::BuilderRootSlotNotRegistered
             }
+            Self::InvalidMarkdownSectionMarker => {
+                InvalidTemplateStructureReason::InvalidMarkdownSectionMarker
+            }
+            // The duplicate marker's earlier location is a label, not a fact word, so the
+            // reason cannot be rebuilt from the compact record.
+            Self::DuplicateMarkdownSectionMarker => return None,
         })
     }
 }
@@ -710,6 +724,7 @@ diagnostic_family! {
             LabelMessageCode::EARLIER_TEMPLATE_HEAD_ITEM,
             LabelMessageCode::TEMPLATE_STARTS_HERE,
             LabelMessageCode::CONFLICTS_WITH_EARLIER_HEAD_ITEM,
+            LabelMessageCode::EARLIER_SECTION_MARKER,
         ],
         extra: StringIds,
         ctor: manual,
@@ -837,6 +852,12 @@ pub(crate) fn invalid_template_structure(
         InvalidTemplateStructureReason::IncompatibleHeadItem { conflict } => Some(conflict),
         _ => None,
     };
+    let earlier_marker_span = match reason {
+        InvalidTemplateStructureReason::DuplicateMarkdownSectionMarker { earlier_span } => {
+            earlier_span
+        }
+        _ => None,
+    };
     let head_conflict = InvalidTemplateStructureCode::head_conflict(&reason);
     let primary_span = conflict.map_or(span, |conflict| Some(conflict.incoming_span));
     let (reason, type_id, limit) = InvalidTemplateStructureCode::split(reason);
@@ -846,14 +867,21 @@ pub(crate) fn invalid_template_structure(
         cursor.push::<OptCountFact>(&limit)?;
         cursor.push::<OptTemplateHeadConflictFact>(&head_conflict)
     });
-    match conflict {
-        Some(conflict) => draft
+    if let Some(conflict) = conflict {
+        return draft
             .with_primary_label(LabelDraftMessage::ConflictsWithEarlierHeadItem)
             .with_label(
                 Some(conflict.earlier_span),
                 Some(LabelDraftMessage::EarlierTemplateHeadItem),
             )
-            .with_string_ids(conflict.head_item_names()),
+            .with_string_ids(conflict.head_item_names());
+    }
+
+    match earlier_marker_span {
+        Some(earlier_span) => draft.with_label(
+            Some(earlier_span),
+            Some(LabelDraftMessage::EarlierSectionMarker),
+        ),
         None => draft,
     }
 }

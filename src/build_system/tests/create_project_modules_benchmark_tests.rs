@@ -109,7 +109,7 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
     let entry_source = "@docs/intro\n@child greet\n@core/io line\n@drawing.js draw\n#[:entry]\n";
     let intro_source = "intro #= \"intro\"\n";
     let ownership_source = "ownership #= \"ownership\"\n";
-    let child_source = "export:\n    greet || -> String:\n        return \"hi\"\n    ;\n;\n";
+    let child_source = "$export\ngreet || -> String:\n    return \"hi\"\n;\n";
     fs::create_dir_all(src.join("docs/guides")).expect("should create docs folders");
     fs::create_dir_all(src.join("child")).expect("should create child module dir");
 

@@ -1,3 +1,2 @@
-export:
-    @c label as label
-;
+$export
+@c label as label

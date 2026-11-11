@@ -1,22 +1,16 @@
-The export block can re-export dependency-bound symbols so other modules can use them.
-
-### A public re-export
+A facade re-exports declarations by marking a direct-selection dependency clause with `$export`.
 
 [codeblock, $code "moth":
-    export:
-        @components/card CardData as Card, render_card
-    ;
+    $export
+    @components/card CardData as Card, render_card
 ]
 
-Other modules can now depend on `Card` and `render_card` through the module's public surface. `CardData` is not also exported unless the block lists it separately.
+Consumers can bind `Card` and `render_card`. `CardData` is not also published unless selected separately.
 
-### Local alias is not public
+Without `$export`, an import stays private to its source file:
 
 [codeblock, $code "moth":
     @components/card CardData as LocalCard
 ]
 
-`LocalCard` is file-local. It is not public. Only dependency selections inside the `export:` block become public re-exports.
-
-`export:` is current. A later `$export` migration will replace it; directive-block
-support is undecided, so both spellings are not a permanent pair.
+A re-export needs explicit selected names. Whole namespaces and namespace aliases cannot be exported. See @#public-reexports (Public re-exports).

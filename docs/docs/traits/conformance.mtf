@@ -44,7 +44,7 @@ module; resolved evidence includes the concrete failure in the enclosing body's
 analysis. An exported method without an error slot must discharge it. Private
 propagation does not add an unlisted trait return channel.
 See @../functions/#returns-and-multiple-values (Returns and multiple values)
-and @../progress (Progress) for the contract and current support.
+for the contract.
 
 ### Multiple traits
 

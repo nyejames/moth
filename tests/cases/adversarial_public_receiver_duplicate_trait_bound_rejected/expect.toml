@@ -7,5 +7,5 @@ diagnostic_codes = ["MOTH-SYNTAX-0020"]
 code = "MOTH-SYNTAX-0020"
 reason = "invalid_generic_parameter.duplicate_trait_bound"
 path = "input/api/@mod.moth"
-line = 5
+line = 4
 column = 50

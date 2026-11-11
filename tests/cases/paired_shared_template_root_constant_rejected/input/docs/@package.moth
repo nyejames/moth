@@ -1,9 +1,10 @@
 @intro content as intro_content
 @other content as other_content
-export:
-    @intro content as intro_content
+$export
+@intro content as intro_content
 
-    @other content as other_content
+$export
+@other content as other_content
 
-    support_only #= "support"
-;
+$export
+support_only #= "support"

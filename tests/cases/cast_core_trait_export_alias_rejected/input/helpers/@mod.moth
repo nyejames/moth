@@ -1,3 +1,2 @@
-export:
-    @trait USER_TRAIT as CASTABLE_TO_STRING
-;
+$export
+@trait USER_TRAIT as CASTABLE_TO_STRING

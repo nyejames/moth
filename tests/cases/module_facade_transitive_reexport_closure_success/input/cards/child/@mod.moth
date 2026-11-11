@@ -1,17 +1,19 @@
-export:
-    HiddenLabel = |
-        text String,
-    |
+$export
+HiddenLabel = |
+    text String,
+|
 
-    PublicCard = |
-        label HiddenLabel,
-    |
+$export
+PublicCard = |
+    label HiddenLabel,
+|
 
-    make_card |text String| -> PublicCard:
-        return PublicCard(HiddenLabel(text))
-    ;
+$export
+make_card |text String| -> PublicCard:
+    return PublicCard(HiddenLabel(text))
+;
 
-    render_card |card PublicCard| -> String:
-        return card.label.text
-    ;
+$export
+render_card |card PublicCard| -> String:
+    return card.label.text
 ;

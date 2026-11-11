@@ -402,14 +402,14 @@ while a custom `E!` requires local recovery or explicit mapping.
         return left * right  -- implicit failure can travel through private calls
     ;
 
-    export:
-        checked_product |left I32, right I32| -> I32, Error!:
-            return product(left, right)
-        ;
+    $export
+    checked_product |left I32, right I32| -> I32, Error!:
+        return product(left, right)
+    ;
 
-        product_or_zero |left I32, right I32| -> I32:
-            return product(left, right) catch then 0
-        ;
+    $export
+    product_or_zero |left I32, right I32| -> I32:
+        return product(left, right) catch then 0
     ;
 ]
 
@@ -879,9 +879,8 @@ Formatters apply to their own templates, and incompatible formatters can't share
 `$slot`, `$slot name` and `$slot 1` declare default, named and positional slots. Each occurrence may carry a `= <compile-time String>` default. `$in name:` fills one named slot. Names and positions are bare tokens, so `$in` has no String-expression or positional form.
 A routed contribution, including an explicitly empty one, suppresses the occurrence default. Missing slots without a default render empty, repeated slots replay content, multiple named contributions concatenate and unassigned loose content is an error.
 An application with content closes its own unfilled defaults; a head-only reference stays open for later composition.
-`$before` and `$after` take one bare operand and wrap direct children with a compile-time String or constant template. Their values may contain named slots only, an explicit default or positional slot is rejected, and the removed `$before = value` / `$after = value` spellings are not accepted. Each directive may appear once per head. `$fresh` skips one parent wrapper. Structurally absent output produces no wrapper, while a selected empty String is wrapped.
+`$before` and `$after` take one bare operand and wrap direct children with a compile-time String or constant template. Their values may contain named slots only, an explicit default or positional slot is rejected, Each directive may appear once per head. `$fresh` skips one parent wrapper. Structurally absent output produces no wrapper, while a selected empty String is wrapped.
 Direct top-level const `$in` inserts on an active entry root are builder slots, not ordinary template slots. See Pages and top-level work.
-`$required` and `$unique` are deferred candidates, not implemented directives. Loop-level uniqueness is excluded; const function syntax is outside this work.
 
 ### Template control flow
 
@@ -917,7 +916,7 @@ The same helpers are available automatically in `.mtf` files:
     ]
 ]
 
-Static headings receive kebab-case IDs, linkable with `@#hello (Hello)`.
+A bare `@#id` marker on a heading, paragraph or list item sets its HTML `id`; the marker is zero-width. A marker-only paragraph renders a standalone empty `span`. IDs preserve authored case and Unicode, and the compiler does not check page-wide uniqueness or resolve fragment targets. A labelled link such as `@#hello (Hello)` stays a link. Unmarked headings have no `id`; plain `.md` does not use section markers.
 
 Links use `@./path (label)`, `@/route (label)` or `@https://example.com (label)`.
 The target and label may be separated by spaces, tabs and **at most one newline** (including CRLF). Other content breaks the link.
@@ -1052,23 +1051,24 @@ Helpers in ordinary `.moth` files are shared by every root, while each root keep
 [codeblock, $code "moth":
     private_label #= "Moth"
 
-    export:
-        greeting #= "Hello"
+    $export
+    greeting #= "Hello"
 
-        render || -> String:
-            return [: [greeting], [private_label]]
-        ;
-
-        @core/math PI
+    $export
+    render || -> String:
+        return [: [greeting], [private_label]]
     ;
+
+    $export
+    @core/math PI
 ]
 
-A facade can have one non-empty `export:` block for public declarations and direct re-exports.
+A facade uses `$export` before each public declaration or direct-selection re-export. Unmarked items stay private.
 Runtime statements, fragments and whole namespaces aren't exports. Public signatures can't expose private types or required private trait evidence.
 Methods are visible wherever their receiver type is visible. They can't be imported or exported separately.
 
 An `@package.moth` root creates a named support package, such as `shared/@package.moth` exposed as `@shared`.
-Its `export:` facade lets normal sibling modules share code, while preserving private implementation boundaries.
+Its `$export` declarations let normal sibling modules share selected code while keeping helpers private.
 It is visible to its nearest normal-position owner and normal siblings/descendants in that scope. An entry-only owner still counts as normal-position.
 Same-scope support siblings can't depend on each other.
 
@@ -1122,9 +1122,9 @@ See @../project-structure (Project structure) and @../packages (Package visibili
 
 ## Directives and project configuration
 
-Template-head directives modify their template. The source modifier `$config` starts its own line and attaches to the next eligible declaration;
-comment-only lines may intervene, but a blank physical line breaks attachment. Each directive takes at most one optional compile-time operand, which
-starts on the directive line and may continue while balanced. Directives are provided by the compiler, not defined in source.
+Template-head directives modify their containing template. Source directives `$export` and `$config` occupy their own lines and attach to one
+eligible declaration or dependency clause. Comments may intervene, but a blank physical line breaks attachment. Both take no operands.
+Other compiler-owned directives may accept a bare compile-time operand, never a function-style argument list.
 
 An authored project-root `config.moth` contains compile-time values and configuration. It uses ordinary named records for the project and the selected
 builder. Source imports, functions and runtime work belong in ordinary modules:
@@ -1139,14 +1139,13 @@ builder. Source imports, functions and runtime work belong in ordinary modules:
 `project` accepts an optional `name`, `version` and the other predefined fields. An omitted name uses the selected directory name, which must be a
 valid Moth project identifier. There is no `entry_root`; the selected directory is the source root.
 `html #= ()` configures HTML output, not source-level target selection. Its default output folders are `_dev` and `_release`, with `origin = "/"`.
-There are no `$project`, `$builder` or `$html_builder` directives.
 
 ### Build inputs
 
 `$config` marks one **explicitly typed top-level compile-time `#` binding**, in `config.moth` or a selected source module, as a build input.
 The binding name is the input key, its declared type is the receiving contract and the initializer supplies the fallback. Without an initializer,
 an ordinary input is required while an optional input defaults to `none`. `$config` takes no operand and only a marked binding may omit its initializer.
-The retired `#Config of T` input qualifier does not parse; use `$config` with an ordinary `#T` annotation.
+Input contracts use an ordinary `#T` annotation.
 
 [codeblock, $code "moth":
     $config
@@ -1249,7 +1248,7 @@ Format other types with templates:
     io.line([: Count: [count]])
 ]
 
-`io.set_title(text)` is an accepted future runtime title mutation and is not implemented. Set a static page title with the direct const `title` builder slot.
+`io.set_title(text)` changes live title text on a host that advertises the title capability; it takes one `String` and returns no source-visible result. The direct const `title` builder slot supplies the initial static page title.
 
 Foreign packages depend on the selected builder and target. For example, the HTML builder can bind JavaScript files to typed Moth functions:
 
