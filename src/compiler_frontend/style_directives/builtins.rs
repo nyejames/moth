@@ -46,12 +46,10 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
             "fresh",
             TemplateBodyMode::Normal,
             StyleDirectiveContexts::TEMPLATE_HEAD,
-            TemplateHeadCompatibility {
-                presence_tags: TemplateHeadTag::MEANINGFUL_ITEM | TemplateHeadTag::FRESH_DIRECTIVE,
-                required_absent_tags: TemplateHeadTag::empty(),
-                blocks_future_tags: TemplateHeadTag::empty(),
-                conflict_reason: None,
-            },
+            TemplateHeadCompatibility::blocks_same(
+                TemplateHeadTag::FRESH_DIRECTIVE,
+                TemplateHeadConflictReason::DuplicateExclusiveDirective,
+            ),
             CoreStyleDirectiveKind::Fresh,
         ),
         StyleDirectiveSpec::core(

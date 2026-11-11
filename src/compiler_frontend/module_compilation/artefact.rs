@@ -229,10 +229,14 @@ impl ModuleCompilerMetadata {
         })
     }
 
-    /// WHY: entry metadata owns every remapped field; `entry_point` is a `PathBuf`, const-fragment
+    /// WHY: entry metadata owns its remapped fields; `entry_point` is a `PathBuf`, const-fragment
     ///      spans are global, values are already owned folded strings and root activity has no
-    ///      interned fields. Only the materialisation context carries path identities.
+    ///      interned fields. Documentation targets and the materialisation context carry path
+    ///      identities, so both are rewritten through the supplied remap.
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        for fragment in &mut self.doc_fragments {
+            fragment.target = remap.get(fragment.target);
+        }
         if let Some(context) = &mut self.materialisation_context {
             Arc::make_mut(context).remap_path_ids(remap);
         }
@@ -283,4 +287,41 @@ pub(crate) struct ModuleExternalImport {
     pub(crate) package_id: ExternalPackageId,
     pub(crate) runtime_asset: Option<RuntimeAssetIdentity>,
     pub(crate) required_runtime_imports: Vec<RequiredRuntimeImport>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compiler_frontend::symbols::path_interner::PathId;
+
+    #[test]
+    fn non_identity_remap_rewrites_documentation_targets() {
+        let authored_target =
+            PathId::try_from_index(2).expect("the test declaration path should fit");
+        let remapped_target =
+            PathId::try_from_index(7).expect("the destination declaration path should fit");
+        let mut metadata = ModuleCompilerMetadata {
+            entry: None,
+            doc_fragments: vec![ModuleDocFragment {
+                target: authored_target,
+                rendered_text: "Public documentation.".to_owned(),
+                span: None,
+            }],
+            materialisation_context: None,
+        };
+        let remap = PathIdRemap::from_full(vec![
+            PathId::ROOT,
+            PathId::try_from_index(1).expect("the intermediate path should fit"),
+            remapped_target,
+        ]);
+
+        metadata.remap_path_ids(&remap);
+
+        assert_eq!(metadata.doc_fragments.len(), 1);
+        assert_eq!(metadata.doc_fragments[0].target, remapped_target);
+        assert_eq!(
+            metadata.doc_fragments[0].rendered_text,
+            "Public documentation."
+        );
+    }
 }

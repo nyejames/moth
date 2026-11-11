@@ -214,10 +214,11 @@ fn emit_symbol(
 fn emit_style_directive(
     stream: &mut TokenStream<'_>,
     value: crate::compiler_frontend::symbols::string_interning::StringId,
+    attached: bool,
 ) -> TokenizeResult<TokenTag> {
     let source = stream.file_id;
     stream
-        .emit_style_directive(value)
+        .emit_style_directive(value, attached)
         .map_err(|error| map_token_emit_error(error, source))
 }
 
@@ -1027,7 +1028,8 @@ fn get_token_tag(
         // -------------------
 
         if current_char == '$' && stream.peek() != Some(&'(') {
-            return tokenize_style_directive(stream, style_directives, string_table);
+            let attached = !context.has_leading_whitespace(whitespace_before_current);
+            return tokenize_style_directive(stream, style_directives, string_table, attached);
         }
 
         if current_char == END_SCOPE_CHAR {
@@ -1587,6 +1589,7 @@ fn tokenize_style_directive(
     stream: &mut TokenStream<'_>,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
+    attached: bool,
 ) -> TokenizeResult<TokenTag> {
     let Some(&first_char) = stream.peek() else {
         return Err(token_lexical::unexpected_end_of_file(
@@ -1644,7 +1647,7 @@ fn tokenize_style_directive(
     };
 
     stream.mark_current_template_body_mode(body_mode);
-    emit_style_directive(stream, directive)
+    emit_style_directive(stream, directive, attached)
 }
 
 // ----------------------

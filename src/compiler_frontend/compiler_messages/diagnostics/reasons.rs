@@ -902,6 +902,8 @@ pub enum InvalidTemplateDirectiveReason {
     /// A source modifier attached to a declaration or dependency clause its contract does not
     /// accept.
     WrongTarget,
+    /// Two same-line source directives were written without whitespace between them.
+    MissingSeparator,
 }
 
 impl InvalidTemplateDirectiveReason {

@@ -145,7 +145,11 @@ fn record_pending_run_for_statement(
 struct PendingSourceDirectiveRun {
     start_index: TokenIndex,
     annotations: Vec<SourceDirectiveAnnotation>,
-    /// Set when the walk observes the authored line break between the run and its target.
+    /// Set when the walk observes a line break after the most recent directive.
+    ///
+    /// WHAT: resets when the run gains another directive.
+    /// WHY: the target must start on a later line than the final directive, not merely later than
+    ///      the first one.
     saw_line_break: bool,
 }
 
@@ -652,6 +656,15 @@ fn parse_headers_in_file_inner(
                         ),
                     ));
                 }
+                if pending_source_directive.is_some()
+                    && current.shape().style_directive_is_attached()
+                {
+                    return Err(diagnostic_failure(templates::invalid_template_directive(
+                        Some(name_id),
+                        InvalidTemplateDirectiveReason::MissingSeparator,
+                        Some(current_span),
+                    )));
+                }
 
                 let operand = capture_source_directive_operand(
                     cursor,
@@ -666,7 +679,10 @@ fn parse_headers_in_file_inner(
                     operand,
                 };
                 match &mut pending_source_directive {
-                    Some(pending) => pending.annotations.push(annotation),
+                    Some(pending) => {
+                        pending.annotations.push(annotation);
+                        pending.saw_line_break = false;
+                    }
                     None => {
                         pending_source_directive = Some(PendingSourceDirectiveRun {
                             start_index: current_index,

@@ -438,6 +438,7 @@ define_stable_reason_keys! {
         &InvalidTemplateDirectiveCode::DuplicateModifier => "invalid_template_directive.duplicate_modifier",
         &InvalidTemplateDirectiveCode::DanglingModifier => "invalid_template_directive.dangling_modifier",
         &InvalidTemplateDirectiveCode::WrongTarget => "invalid_template_directive.wrong_target",
+        &InvalidTemplateDirectiveCode::MissingSeparator => "invalid_template_directive.missing_separator",
     },
     CssTemplateWarning => {
         @delegate(reason => CssTemplateWarningCode::of(reason).stable_reason_key());

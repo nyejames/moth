@@ -920,6 +920,81 @@ fn doc_and_todo_stack_on_one_line_before_a_declaration() {
 }
 
 #[test]
+fn parenthesized_doc_call_is_rejected() {
+    let source = "$doc(\"Description\")\ncalculate || -> I32:\n    return 1\n;\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
+        "the documented call spelling must not be accepted as a directive operand",
+    );
+
+    assert_directive_reason(&errors, InvalidTemplateDirectiveCode::UnexpectedArguments);
+}
+
+#[test]
+fn parenthesized_todo_call_is_rejected() {
+    let source = "$todo(\"Follow up\")\ncalculate || -> I32:\n    return 1\n;\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
+        "the documented call spelling must not be accepted as a directive operand",
+    );
+
+    assert_directive_reason(&errors, InvalidTemplateDirectiveCode::UnexpectedArguments);
+}
+
+#[test]
+fn whitespace_separated_grouped_doc_operand_is_accepted() {
+    let source = "$doc (\"Description\")\ncalculate || -> I32:\n    return 1\n;\n";
+    let headers = expect_header_success(
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
+        "whitespace keeps a grouped expression distinct from a directive call",
+    );
+    let header = headers
+        .headers
+        .iter()
+        .find(|header| !header.source_directives.is_empty())
+        .expect("the declaration should retain its source directive run");
+    assert_eq!(header.source_directives[0].kind, SourceDirectiveKind::Doc);
+}
+
+#[test]
+fn adjacent_same_line_directives_require_whitespace() {
+    let source = "$doc \"first\"$todo \"second\"\ncalculate || -> I32:\n    return 1\n;\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
+        "two directives on one line must be separated by whitespace",
+    );
+
+    assert_directive_reason(&errors, InvalidTemplateDirectiveCode::MissingSeparator);
+}
+
+#[test]
+fn adjacent_directives_after_an_earlier_line_break_require_whitespace() {
+    let source = "$config\n$doc \"first\"$todo \"second\"\ngreeting #= \"hello\"\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
+        "an earlier newline must not hide adjacency between later directives",
+    );
+
+    assert_directive_reason(&errors, InvalidTemplateDirectiveCode::MissingSeparator);
+}
+
+#[test]
+fn adjacent_statement_directives_require_whitespace() {
+    let failure = parse_single_file_ast_diagnostic(
+        "greeting || -> String:\n    $doc \"first\"$todo \"second\"\n    name #String = \"hello\"\n    return name\n;\n",
+    );
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.missing_separator"),
+    );
+    let facts = diagnostic
+        .family_view::<InvalidTemplateDirectiveView>()
+        .expect("the statement directive keeps its typed facts");
+    assert_eq!(facts.reason, InvalidTemplateDirectiveCode::MissingSeparator);
+}
+
+#[test]
 fn duplicate_doc_on_one_line_cites_the_first_directive() {
     let source =
         "$doc \"first\" $doc \"second\"\ncalculate |value I32| -> I32:\n    return value\n;\n";

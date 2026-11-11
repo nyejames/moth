@@ -541,6 +541,11 @@ pub(crate) fn invalid_template_directive_message(
                 "`${name}` must immediately precede an eligible declaration or dependency clause.\n                 Add an eligible item on the following line, or remove the directive."
             ),
         },
+        InvalidTemplateDirectiveReason::MissingSeparator => {
+            format!(
+                "`${name}` must be separated from the previous directive by whitespace. Add a space before `${name}`, or put it on its own line."
+            )
+        }
         InvalidTemplateDirectiveReason::WrongTarget => match name {
             "config" => {
                 "`$config` must modify one explicitly typed top-level compile-time `#` binding."

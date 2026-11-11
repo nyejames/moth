@@ -84,11 +84,7 @@ fn flat_token_payloads_remap_correctly() {
         .push_symbol(TokenTag::SYMBOL, alpha_local, LocalSpan::source_start())
         .expect("symbol fixture token should build");
     builder
-        .push_symbol(
-            TokenTag::STYLE_DIRECTIVE,
-            beta_local,
-            LocalSpan::source_start(),
-        )
+        .push_style_directive(beta_local, true, LocalSpan::source_start())
         .expect("style directive fixture token should build");
     builder
         .push_symbol(
@@ -115,6 +111,10 @@ fn flat_token_payloads_remap_correctly() {
 
     let style = token_at(owner.as_ref(), 1);
     assert_eq!(style.tag(), TokenTag::STYLE_DIRECTIVE);
+    assert!(
+        style.shape().style_directive_is_attached(),
+        "string-ID remapping must retain directive adjacency"
+    );
     assert_eq!(remapped_string(style, &remap, &global_table), "beta");
 
     let string_lit = token_at(owner.as_ref(), 2);

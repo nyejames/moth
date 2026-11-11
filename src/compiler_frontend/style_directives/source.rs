@@ -104,6 +104,13 @@ pub(crate) fn capture_source_directive_operand(
                     Some(directive_span),
                 ));
             }
+            if first.is_some_and(|token| token.shape().open_parenthesis_is_attached()) {
+                return Err(templates::invalid_template_directive(
+                    Some(name_id),
+                    InvalidTemplateDirectiveReason::UnexpectedArguments,
+                    first.map(|token| token.source_span()),
+                ));
+            }
 
             let mut depth = NestingDepth::default();
             while let Some(token) = cursor.current() {
@@ -376,8 +383,9 @@ pub(crate) fn parse_statement_source_directive_run(
         };
         // `capture_source_directive_operand` leaves a bare directive on its own token and
         // advances a directive with an operand to the next boundary. Normalize both shapes so a
-        // contiguous run advances exactly once per directive.
-        if cursor.position() == operand_start {
+        // contiguous run advances exactly once per directive. A following directive stays in
+        // place so the separator check can inspect its authored adjacency.
+        if cursor.position() == operand_start && cursor.current_tag() != TokenTag::STYLE_DIRECTIVE {
             cursor.advance();
         }
         annotations.push(SourceDirectiveAnnotation {
@@ -401,6 +409,23 @@ pub(crate) fn parse_statement_source_directive_run(
             cursor.advance();
         }
         if cursor.current_tag() == TokenTag::STYLE_DIRECTIVE {
+            if !saw_line_break
+                && cursor
+                    .current()
+                    .is_some_and(|token| token.shape().style_directive_is_attached())
+            {
+                let Some(incoming_name_id) = cursor.current_string_id_in(string_table)? else {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "adjacent statement directive token had no string payload",
+                    )
+                    .into());
+                };
+                return Err(missing_source_directive_separator(
+                    incoming_name_id,
+                    cursor.current_span(),
+                ));
+            }
             continue;
         }
         if matches!(
@@ -503,6 +528,15 @@ pub(crate) fn parse_statement_source_directive_run(
     }
 
     Ok(())
+}
+
+fn missing_source_directive_separator(name_id: StringId, span: SourceSpan) -> ExpressionParseError {
+    templates::invalid_template_directive(
+        Some(name_id),
+        InvalidTemplateDirectiveReason::MissingSeparator,
+        Some(span),
+    )
+    .into()
 }
 
 fn dangling_statement_directive(annotations: &[SourceDirectiveAnnotation]) -> ExpressionParseError {
