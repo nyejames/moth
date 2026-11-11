@@ -378,6 +378,16 @@ fn export_modifier_marks_a_direct_selection_dependency_public() {
         .expect("the exported clause retains its selections");
     assert_eq!(selections.len(), 2);
     assert_eq!(
+        string_table.resolve(selections[0].source_name),
+        "Button",
+        "an unaliased selection keeps its source name"
+    );
+    assert_eq!(
+        string_table.resolve(selections[1].source_name),
+        "render",
+        "an aliased selection keeps its authored source name"
+    );
+    assert_eq!(
         string_table.resolve(selections[1].local_name()),
         "render_button"
     );
@@ -664,6 +674,44 @@ $export\ntyped #I32 = 2\n";
         public_headers.len(),
         7,
         "function, struct, choice, alias, trait and both constant shapes are public"
+    );
+    assert!(
+        public_headers
+            .iter()
+            .any(|header| matches!(header.kind, HeaderKind::Function { .. })),
+        "the exported function must be public"
+    );
+    assert!(
+        public_headers
+            .iter()
+            .any(|header| matches!(header.kind, HeaderKind::Struct { .. })),
+        "the exported struct must be public"
+    );
+    assert!(
+        public_headers
+            .iter()
+            .any(|header| matches!(header.kind, HeaderKind::Choice { .. })),
+        "the exported choice must be public"
+    );
+    assert!(
+        public_headers
+            .iter()
+            .any(|header| matches!(header.kind, HeaderKind::TypeAlias { .. })),
+        "the exported transparent alias must be public"
+    );
+    assert!(
+        public_headers
+            .iter()
+            .any(|header| matches!(header.kind, HeaderKind::Trait { .. })),
+        "the exported trait must be public"
+    );
+    assert_eq!(
+        public_headers
+            .iter()
+            .filter(|header| matches!(header.kind, HeaderKind::Constant { .. }))
+            .count(),
+        2,
+        "both exported constant shapes must be public"
     );
 }
 
