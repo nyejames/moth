@@ -4,9 +4,9 @@
 
 ```text
 STATUS: ACTIVE - dedicated performance branch
-CURRENT_SLICE: 1 - one-pass ordering and range work
+CURRENT_SLICE: 2 - ownership and local dispatch cleanup
 BLOCKERS: none
-NEXT_ACTION: implement P1 from the rebased occurrence index, then evaluate P2 and P3 against measured work
+NEXT_ACTION: apply P5 and P4 as separate ownership changes, then simplify the runtime marker predicate and review P6 visibility clones
 ```
 
 Branch: `perf/recent-compiler-performance`

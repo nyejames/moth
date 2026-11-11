@@ -6,21 +6,33 @@
 //! WHY: direct `.mtf`/`.md` value paths reuse the synthetic `content` constant, so the shells that
 //!       fold before body emission must carry the ordering fact at token level.
 
-use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
-use crate::compiler_frontend::headers::parse_file_headers::{
-    Header, HeaderKind, LocalDeclarationOrderingHint, prepare_file_from_tokens,
+use crate::compiler_frontend::headers::binding_environment::{
+    HeaderBindingEnvironment, QualifiedReferenceTargets, ResolvedQualifiedReference,
+    ResolvedQualifiedTarget,
 };
-use crate::compiler_frontend::headers::types::SourceTokenOwner;
+use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
+use crate::compiler_frontend::headers::ordering_hints::{
+    collect_content_source_ordering_hints, collect_qualified_reference_ordering_hints,
+};
+use crate::compiler_frontend::headers::parse_file_headers::{
+    Header, HeaderKind, LocalDeclarationOrderingHint, LocalDeclarationOrderingHintOrigin,
+    PreparedHeaderSyntax, prepare_file_from_tokens, prepare_header_syntax,
+};
+use crate::compiler_frontend::headers::types::{
+    FileFrontendPrepareOutput, FileRole, HeaderParseOptions, SourceTokenOwner,
+};
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
+use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 
 fn prepare_source(
     source: &str,
@@ -408,4 +420,360 @@ fn config_declaration_directive_operand_records_content_hint() {
         &mut path_fork,
     ));
     assert_hints(header, &expected);
+}
+
+// ------------------------
+//  Qualified-reference ordering across rebased file headers
+// ------------------------
+
+fn prepare_module_file(
+    source: &str,
+    file_path: &str,
+    source_id: SourceId,
+    role: Option<FileRole>,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> FileFrontendPrepareOutput {
+    let file_path = Path::new(file_path);
+    let interned_path = path_fork
+        .try_intern_filesystem_path(file_path, string_table)
+        .expect("test path should be UTF-8");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let lexed = tokenize(
+        source,
+        interned_path,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        string_table,
+        path_fork,
+        source_id,
+        &mut span_builder,
+    )
+    .expect("source should tokenize");
+    let owner = SourceTokenOwner::new(lexed.tokens);
+    let options = match role {
+        Some(role) => HeaderParseOptions {
+            selected_file: Some((source_id, role)),
+            ..Default::default()
+        },
+        None => HeaderParseOptions::default(),
+    };
+    prepare_file_from_tokens(
+        owner,
+        interned_path,
+        lexed.path_syntax,
+        &options,
+        string_table,
+        0,
+        0,
+        &mut span_builder,
+        path_fork,
+    )
+    .expect("preparation should succeed")
+}
+
+fn prepare_qualified_hint_module(
+    sources: &[(&str, &str, SourceId, Option<FileRole>)],
+) -> (PreparedHeaderSyntax, StringTable, PathInternerFork) {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut outputs = Vec::with_capacity(sources.len());
+    for (source, file_path, source_id, role) in sources {
+        outputs.push(prepare_module_file(
+            source,
+            file_path,
+            *source_id,
+            *role,
+            &mut string_table,
+            &mut path_fork,
+        ));
+    }
+
+    let mut capture = |source, diagnostic: &mut crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft| {
+        crate::compiler_frontend::compiler_messages::diagnostics::draft::validate_preparation_draft_spans(
+            diagnostic, source,
+        )
+    };
+    let prepared = prepare_header_syntax(
+        &mut outputs,
+        &mut string_table,
+        &mut capture,
+        &mut path_fork,
+    )
+    .expect("module headers should prepare");
+    (prepared, string_table, path_fork)
+}
+
+fn declaration_paths_by_name(
+    headers: &[Header],
+    string_table: &StringTable,
+    path_fork: &PathInternerFork,
+) -> FxHashMap<String, PathId> {
+    let mut paths = FxHashMap::default();
+    for header in headers {
+        let Some(name) = path_fork.component(header.declaration_path) else {
+            continue;
+        };
+        paths.insert(
+            string_table.resolve(name).to_owned(),
+            header.declaration_path,
+        );
+    }
+    paths
+}
+
+/// Build a synthetic binding environment from the module's prepared occurrences.
+///
+/// WHAT: resolves every selected name with a same-module declaration to a `Source` target.
+/// WHY: this test isolates header-index ownership in ordering-hint collection; provider binding
+///      semantics are covered by the binding-environment and namespace tests.
+fn qualified_targets_for_module(
+    module_symbols: &ModuleSymbols,
+    declaration_paths: &FxHashMap<String, PathId>,
+    string_table: &StringTable,
+) -> QualifiedReferenceTargets {
+    let mut targets = QualifiedReferenceTargets::default();
+    for occurrences in module_symbols.qualified_references_by_source.values() {
+        for occurrence in occurrences {
+            let Some(declaration_path) =
+                declaration_paths.get(string_table.resolve(occurrence.selected))
+            else {
+                continue;
+            };
+            targets.insert(
+                (
+                    occurrence.selected_span.source(),
+                    occurrence.dependency.path_syntax,
+                ),
+                ResolvedQualifiedReference {
+                    target: ResolvedQualifiedTarget::Source {
+                        declaration_path: *declaration_path,
+                    },
+                    selected_span: occurrence.selected_span,
+                },
+            );
+        }
+    }
+    targets
+}
+
+fn header_named<'a>(
+    headers: &'a [Header],
+    string_table: &StringTable,
+    path_fork: &PathInternerFork,
+    name: &str,
+) -> &'a Header {
+    headers
+        .iter()
+        .find(|header| {
+            path_fork
+                .component(header.declaration_path)
+                .is_some_and(|component| string_table.resolve(component) == name)
+        })
+        .unwrap_or_else(|| panic!("expected a header named {name}"))
+}
+
+fn qualified_hint_paths(header: &Header) -> Vec<PathId> {
+    let mut paths: Vec<PathId> = header
+        .local_ordering_hints
+        .iter()
+        .filter(|hint| hint.origin() == LocalDeclarationOrderingHintOrigin::QualifiedReference)
+        .map(LocalDeclarationOrderingHint::path)
+        .collect();
+    paths.sort();
+    paths
+}
+
+#[test]
+fn qualified_hints_follow_rebased_header_indexes_and_const_eligibility() {
+    let entry_source = "\
+a_target #= 1
+b_target #= 2
+c_target #= 3
+d_target #= 4
+runtime_target #= 5
+helper_fn || -> I32:
+    return 1
+;
+alpha #= @helper a_target
+beta #= [: [@helper b_target] [@helper c_target] ]
+delta #= @helper d_target
+missing_ref #= @helper absent_target
+function_ref #= @helper helper_fn
+render || -> String:
+    return [: [@helper runtime_target] ]
+;
+";
+    let helper_source = "\
+e_target #= 6
+gamma #= @helper e_target
+";
+    let (prepared, string_table, path_fork) = prepare_qualified_hint_module(&[
+        (
+            entry_source,
+            "src/@entry.moth",
+            SourceId::COMPILATION_ROOT,
+            Some(FileRole::ActiveEntryRoot),
+        ),
+        (
+            helper_source,
+            "src/helper.moth",
+            SourceId::from_index(1),
+            None,
+        ),
+    ]);
+    let PreparedHeaderSyntax {
+        mut headers,
+        mut module_symbols,
+        ..
+    } = prepared;
+
+    let declaration_paths = declaration_paths_by_name(&headers, &string_table, &path_fork);
+    for header in &headers {
+        if matches!(header.kind, HeaderKind::Constant { .. }) {
+            module_symbols
+                .constant_paths
+                .insert(header.declaration_path);
+        }
+    }
+
+    let mut environment = HeaderBindingEnvironment::default();
+    environment.qualified_reference_targets = Arc::new(qualified_targets_for_module(
+        &module_symbols,
+        &declaration_paths,
+        &string_table,
+    ));
+    assert!(
+        environment
+            .qualified_reference_targets
+            .keys()
+            .any(|(source, _)| *source == SourceId::from_index(1)),
+        "the helper file must contribute a rebased occurrence"
+    );
+
+    collect_qualified_reference_ordering_hints(&mut headers, &module_symbols, &environment)
+        .expect("valid rebased indexes should collect");
+
+    // Every const-required, resolved constant target records exactly one hint on its own shell.
+    assert_eq!(
+        qualified_hint_paths(header_named(&headers, &string_table, &path_fork, "alpha")),
+        vec![declaration_paths["a_target"]]
+    );
+    assert_eq!(
+        qualified_hint_paths(header_named(&headers, &string_table, &path_fork, "beta")),
+        vec![declaration_paths["b_target"], declaration_paths["c_target"]]
+    );
+    assert_eq!(
+        qualified_hint_paths(header_named(&headers, &string_table, &path_fork, "delta")),
+        vec![declaration_paths["d_target"]]
+    );
+
+    // The rebased helper-file index must attach to the helper shell, not an entry shell.
+    let gamma = header_named(&headers, &string_table, &path_fork, "gamma");
+    assert_eq!(
+        qualified_hint_paths(gamma),
+        vec![declaration_paths["e_target"]],
+        "a rebased occurrence must land on its own file's header"
+    );
+    assert!(
+        gamma.local_ordering_hints.iter().all(|hint| hint
+            .occurrence_span()
+            .is_some_and(|span| span.source() == SourceId::from_index(1))),
+        "the helper shell must retain the authored helper-file span"
+    );
+
+    // Missing targets, non-constant targets and runtime-only occurrences add no ordering edge.
+    for name in ["missing_ref", "function_ref", "render", "runtime_target"] {
+        assert!(
+            qualified_hint_paths(header_named(&headers, &string_table, &path_fork, name))
+                .is_empty(),
+            "{name} must not carry a qualified ordering hint"
+        );
+    }
+    assert_eq!(
+        headers
+            .iter()
+            .map(|header| qualified_hint_paths(header).len())
+            .sum::<usize>(),
+        5,
+        "exactly the five const-required constant targets emit hints"
+    );
+}
+
+#[test]
+fn qualified_hints_cover_many_headers_without_cross_attachment() {
+    let mut entry_source = String::new();
+    let mut helper_source = String::new();
+    let mut expected_refs = Vec::new();
+    for index in 0..16 {
+        entry_source.push_str(&format!("entry_target_{index} #= {index}\n"));
+        helper_source.push_str(&format!("helper_target_{index} #= {index}\n"));
+    }
+    for index in 0..16 {
+        entry_source.push_str(&format!(
+            "entry_ref_{index} #= @helper entry_target_{index}\n"
+        ));
+        helper_source.push_str(&format!(
+            "helper_ref_{index} #= @helper helper_target_{index}\n"
+        ));
+        expected_refs.push(format!("entry_ref_{index}"));
+        expected_refs.push(format!("helper_ref_{index}"));
+    }
+
+    let (prepared, string_table, path_fork) = prepare_qualified_hint_module(&[
+        (
+            &entry_source,
+            "src/@entry.moth",
+            SourceId::COMPILATION_ROOT,
+            Some(FileRole::ActiveEntryRoot),
+        ),
+        (
+            &helper_source,
+            "src/helper.moth",
+            SourceId::from_index(1),
+            None,
+        ),
+    ]);
+    let PreparedHeaderSyntax {
+        mut headers,
+        mut module_symbols,
+        ..
+    } = prepared;
+    let declaration_paths = declaration_paths_by_name(&headers, &string_table, &path_fork);
+    for header in &headers {
+        if matches!(header.kind, HeaderKind::Constant { .. }) {
+            module_symbols
+                .constant_paths
+                .insert(header.declaration_path);
+        }
+    }
+
+    let mut environment = HeaderBindingEnvironment::default();
+    environment.qualified_reference_targets = Arc::new(qualified_targets_for_module(
+        &module_symbols,
+        &declaration_paths,
+        &string_table,
+    ));
+
+    collect_qualified_reference_ordering_hints(&mut headers, &module_symbols, &environment)
+        .expect("many rebased indexes should collect");
+
+    for reference in &expected_refs {
+        let expected_target = if reference.starts_with("entry_ref") {
+            format!(
+                "entry_target_{}",
+                reference.trim_start_matches("entry_ref_")
+            )
+        } else {
+            format!(
+                "helper_target_{}",
+                reference.trim_start_matches("helper_ref_")
+            )
+        };
+        assert_eq!(
+            qualified_hint_paths(header_named(&headers, &string_table, &path_fork, reference)),
+            vec![declaration_paths[&expected_target]],
+            "{reference} must point at {expected_target}"
+        );
+    }
 }

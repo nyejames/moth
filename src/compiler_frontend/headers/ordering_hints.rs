@@ -207,14 +207,15 @@ pub(super) fn dependency_path_for_local_name(
 
 /// Record declaration-ordering hints for const-required expression-qualified occurrences.
 ///
-/// WHAT: reads the prepared occurrences owned by each header and records their already-resolved
-/// targets as local ordering hints when the occurrence's producing range folds before the
-/// declaration is prepared.
+/// WHAT: visits each prepared occurrence once and records its already-resolved target on the
+/// header shell named by its module-rebased `owning_header_index`.
 /// WHY: a qualified reference in a compile-time shell is a real declaration dependency even
 ///      though it installed no local name. Imported targets keep the provider-interface path so
 ///      Stage 3 classifies them through the existing provider edge arm instead of fabricating a
 ///      local header. A runtime function or start body never contributes, even when the same
-///      header shell also owns a const-required default.
+///      header shell also owns a const-required default. Symbol collection already rebased every
+///      occurrence against the aggregated header order, so a per-header occurrence scan would
+///      visit the same list once per header and multiply work by header count.
 pub(super) fn collect_qualified_reference_ordering_hints(
     headers: &mut [Header],
     module_symbols: &ModuleSymbols,
@@ -224,23 +225,28 @@ pub(super) fn collect_qualified_reference_ordering_hints(
         return Ok(());
     }
 
-    for (header_index, header) in headers.iter_mut().enumerate() {
-        let source = header.tokens.source();
-        let Some(occurrences) = module_symbols
-            .source_paths_by_source_id
-            .get(&source)
-            .and_then(|source_path| {
-                module_symbols
-                    .qualified_references_by_source
-                    .get(source_path)
-            })
-        else {
-            continue;
-        };
+    // Occurrence lists are file-owned and map order is not observable here: insertion targets a
+    // per-header hint set and this pass produces no diagnostic that could select a witness.
+    for occurrences in module_symbols.qualified_references_by_source.values() {
+        for occurrence in occurrences {
+            if !occurrence.const_required {
+                continue;
+            }
 
-        for occurrence in occurrences.iter().filter(|occurrence| {
-            occurrence.owning_header_index == header_index && occurrence.const_required
-        }) {
+            let source = occurrence.dependency.dependency_shell_id.source;
+            let Some(header) = headers.get_mut(occurrence.owning_header_index) else {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
+                    "qualified-reference header index exceeded the aggregated header vector",
+                ));
+            };
+            if header.tokens.source() != source {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
+                    "qualified-reference header index resolved to a different source",
+                ));
+            }
+
             let Some(resolved) = binding_environment
                 .qualified_reference_target(source, occurrence.dependency.path_syntax)
             else {

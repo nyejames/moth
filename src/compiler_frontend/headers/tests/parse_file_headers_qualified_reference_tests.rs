@@ -407,3 +407,38 @@ fn config_declaration_directive_operand_records_qualified_occurrence() {
         "the qualified operand path is a reference, not a file value"
     );
 }
+
+#[test]
+fn dense_const_defaults_stay_const_required_while_the_overlapping_body_stays_runtime() {
+    // The signature defaults and the body share one retained header token range. Splitting must
+    // subtract every merged const-required interval from that range without letting an earlier
+    // interval hide a later default or promoting the remaining body tokens to compile-time work.
+    let source = "pick |first String = [: [@math one] ], second String = [: [@math two] ], third String = [: [@math three] ]| -> String:\n    return [: [@math body] ]\n;\n";
+    let mut string_table = StringTable::new();
+    let (output, _span_builder) = prepare_single_file(
+        source,
+        &PathBuf::from("src/helper.moth"),
+        &PathBuf::from("src/@entry.moth"),
+        &mut string_table,
+    );
+
+    let classified: Vec<(&str, bool)> = occurrences(&output)
+        .iter()
+        .map(|occurrence| {
+            (
+                string_table.resolve(occurrence.selected),
+                occurrence.const_required,
+            )
+        })
+        .collect();
+    assert_eq!(
+        classified,
+        vec![
+            ("one", true),
+            ("two", true),
+            ("three", true),
+            ("body", false),
+        ],
+        "adjacent defaults keep their compile-time ranges and the body stays runtime"
+    );
+}

@@ -7357,3 +7357,36 @@ The small reported regression is therefore not reproducible at suite level on th
 checkpoint. The only two-sigma movement belongs to borrow convergence on a synthetic generic
 failure chain, which the production borrow performance owner tracks. Confirmed cleanups in this
 follow-up are work and data-movement reductions; a wall-time win is not claimed for them.
+
+### Slice 1: one-pass qualified ordering and bounded range split
+
+P1 replaces the per-header filter over each source's complete occurrence list with one visit per
+const-required occurrence. With `H` headers and `Q` occurrences for a source, the candidate
+inspections fall from `O(H * Q)` to `O(H + Q)`. The collector reuses symbol collection's
+module-rebased `owning_header_index`, checks the owning source and index contract, and keeps the
+early no-resolved-target fast path. A synthetic same-module environment is justified here because
+provider binding has its own owner; the regression covers rebased indexes, multiple occurrences per
+header, runtime-only occurrences, missing targets, non-constant targets and a 16+16-header fixture.
+Cycle witnesses remain Stage 3's existing integration cases.
+
+P2 replaces the complete merged-interval scan for every runtime range with a `partition_point`
+prefix skip, then visits only possibly overlapping intervals. The dense-default regression checks
+adjacent const-required intervals and the overlapping runtime body keep their existing
+classifications. No second interval index was added.
+
+P3 was rejected. `dependency_path_for_local_name` runs during provider-independent header
+preparation, where no bound canonical name-to-path table exists yet. A file-local index would add
+state and construction work to save a very small per-shell walk; import-fanout preparation measured
+2.51 ms and binding 2.16 ms in the frontend suite, and no profile attributes material time to the
+repeated clause walk. The existing helper stays.
+
+Measurements on the same host and protocol as the baseline:
+
+- CLI suite: 23.204 ms baseline to 22.790 ms after, 35 faster and 38 slower per-case medians,
+  +0.023 ms median delta and -27.67 ms sum of median deltas across 73 comparable cases. Unrelated
+  borrow convergence moved by -24.4 ms in the aggregate, so run-level drift dominates this change.
+- Frontend adjacent repeats: 136.38 ms to 136.43 ms, 55 faster and 21 slower, -0.325 ms median
+  delta and +16.6 ms sum. A same-code repeat moved the suite by -1.38 ms, more than the candidate
+  delta. `frontend.prepare` summed +3.13 ms and `frontend.bind_headers` +0.14 ms across cases.
+- The change is neutral within run-to-run drift. This is a work and complexity reduction, not a
+  claimed wall-time improvement.
