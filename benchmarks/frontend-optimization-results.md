@@ -7444,7 +7444,7 @@ Final clean measurements on the same host and protocol:
   unchanged workloads (`76` current, `42` previous). The adjacent pre-change comparison was
   137.76 ms to 134.28 ms, but same-code repeats span several milliseconds and the final clean run
   is 5 ms above the latter, so this is drift rather than an attributable delta.
-- Scaling: all 14 series within budget, with the largest fitted exponent `n^0.97` among the
+- Scaling: all 14 series within budget, with the largest fitted exponent `n^0.98` among the
   numeric series.
 
 The completion checkpoint repeats the baseline conclusion: the confirmed changes remove work and
