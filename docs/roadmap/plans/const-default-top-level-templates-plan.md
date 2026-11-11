@@ -2,9 +2,9 @@
 
 ## Status and purpose
 
-- Status: Queued behind `feature/export-directive`
-- Current slice: Accepted design and agent implementation plan, no compiler changes
-- Next: When requested, refresh this branch from merged main and recheck header and directive owners before implementation
+- Status: Queued for compiler implementation; `$export` prerequisite merged
+- Current slice: Branch merged with main; canonical language, compiler and builder documentation updated, no compiler changes
+- Next: Reinspect current `$export` header/AST ownership and begin Phase 0 inventory and implementation when activated
 
 Deliver two related cleanups in one breaking change:
 
@@ -95,7 +95,7 @@ Stage 2 classifies top-level declarations and direct entry fragments; AST statem
 
 ### Phase 0 - Refresh and audit
 
-1. **Only after `feature/export-directive` merges**, refresh this PR branch from main when requested. Read `AGENTS.md`, the current style/test/validation guides, `docs/developer-docs/language/overview.mtf` and its canonical unsuffixed directive/template/constant/entry references, plus relevant compiler/build design handoffs. Recheck merged `$export` registration, attachment and metadata ownership before editing.
+1. The `feature/export-directive` work has merged and this PR branch now includes main. Read `AGENTS.md`, the current style/test/validation guides, `docs/developer-docs/language/overview.mtf` and its canonical unsuffixed directive/template/constant/entry references, plus relevant compiler/build design handoffs. Recheck merged `$export` registration, attachment and metadata ownership before writing compiler code. Refresh again only if main advances.
 2. Inventory `[$doc`, `[$todo`, `[$note`, standalone `$doc`/`$todo`, direct `#[`, unmarked runtime entry fragments and consumer tests across source, test cases, docs, examples, scaffolds, packages and benchmarks. Classify matches by actual syntax context. Rust attributes, quoted snippets and intentional invalid cases must not be blindly rewritten.
 3. Select existing test owners and obtain focused baseline evidence. Preserve current docs/entry roles and builder capabilities.
 
@@ -126,7 +126,7 @@ Extend existing header/AST directive tests (including `parse_file_headers_entry_
 
 Migrate real old entry `#[...]` to `[...]`, bare runtime entry fragments to `~[...]` and template-head `[$doc]`/`[$todo]` to declaration/statement-attached source directives where the intent is clear. Where an old standalone doc fragment has **no evident target**, determine its intended owner rather than silently attaching it to the next unrelated construct. Replace template `[$todo]` comments inside template content with `[$note]`. Update docs-site source, sample generators, packages, benchmarks and expected assertions with the owning implementation slices.
 
-Update the canonical unsuffixed `docs/docs/directives/directives.mtf`, `docs/docs/templates/template-directives.mtf`, `docs/docs/project-structure/entry-runtime-and-fragments.mtf`, `docs/docs/constants/const-templates.mtf`, related Basic pages, cheatsheet and compiler/build descriptions. Remove old documentation-formatter exceptions and explain the directive stacking contract. Regenerate documentation outputs rather than hand-editing `docs/_release`. Reconcile the deferred constraints plan's blanket direct `$safe_math`/`$fast_math` incompatibility with semantic constraint validation. Check progress, index and audit staleness rules only where warranted.
+The final-design canonical references, paired Basic pages, cheatsheet and compiler/build architecture descriptions were updated proactively on this planning branch. During implementation reconcile every changed behavior, new diagnostic and actual target with those authorities rather than recreating parallel documentation. Remove old formatter exceptions and obsolete examples where any remain. Regenerate documentation outputs rather than hand-editing `docs/_release`. Reconcile the deferred constraints plan's blanket direct `$safe_math`/`$fast_math` incompatibility with semantic constraint validation. Check progress, index and audit staleness rules only where warranted.
 
 ### Phase 4 - Validation and Slice review
 

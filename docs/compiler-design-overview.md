@@ -163,7 +163,7 @@ Separate four consumer lanes:
 
 The local lanes share a publication lifetime. Other modules consume the public interface rather than donor-local semantic state. Linkers and lowerers may consume the validated executable and link lanes through explicit handoffs. Retained compact identities remain paired with their lookup context.
 
-Compile-time entry fragments never live in HIR. Frontend preparation checks folded fragment values and entry-root activity, and validates builder-slot destinations against the builder schema before publication. The ordered fragment handoff retains runtime insertion indexes. HIR validation checks executable fragment operations only.
+Compile-time entry fragments never live in HIR. A bare direct entry `[...]` is const-required, while `~[...]` explicitly creates a runtime body fragment, even if its content can fold. Frontend preparation checks folded fragments and entry-root activity, and validates direct bare `[$in name: ...]` destinations against the builder schema before publication. The ordered fragment handoff retains runtime insertion indexes. HIR validates only explicit runtime fragment operations. Documentation annotations belong to non-HIR metadata, not to the fragment list.
 
 ### Module root semantic roles
 
@@ -171,7 +171,7 @@ A rooted directory is one structural module with one `ModuleId` and one compilat
 
 Each present root is a separate root-local declaration and visibility scope. Its top-level declarations stay private to that file. Ordinary helper files are shared, prepared once and cannot see a root-local declaration. A root may bind helper declarations through ordinary dependency clauses, but it cannot read another root directly. Same-spelling declarations in disjoint roots remain independent.
 
-`@mod` and `@package` permit declarations and function bodies but reject top-level runtime statements, direct compile-time fragments and builder slots. They publish only items marked by the operand-free `$export` source modifier. It attaches to one eligible declaration or strict direct-selection dependency clause and never marks a whole file public. `@entry` permits private declarations, top-level runtime work, direct compile-time fragments, runtime fragments and registered direct builder slots, but cannot publish an interface. `$export` is invalid in `@entry`, helpers, templates and config.
+`@mod` and `@package` permit declarations and function bodies but reject top-level runtime statements, direct compile-time fragments and builder slots. They publish only items marked by the operand-free `$export` source directive. It attaches to one eligible declaration or strict direct-selection dependency clause and never marks a whole file public. `@entry` permits private declarations, top-level runtime work, bare const-required `[...]` fragments, explicit `~[...]` runtime fragments and registered direct builder slots, but cannot publish an interface. `$export` is invalid in `@entry`, helpers, templates and config. `$doc` attaches documentation to declarations and `$todo` annotates declarations or executable statements without creating output.
 
 The compiler publishes an interface only for a present facade. Normal and support interfaces have separate role-qualified origins, visibility scopes and consumer positions. `@mod` and `@entry` sources occupy normal positions and `@package` sources occupy strict support positions. An entry-only module can own a support-only child, but it never gains an importable normal interface. The project package surface consumes build-supplied visibility and remains an ordinary immutable module artefact. Registered Core and Builder source packages keep their existing normal-or-support public-root contract. Only an external project package requires project-root `@package`. No dependency activates another module's entry.
 
@@ -181,7 +181,7 @@ The form, syntax and attachment details of root-local isolation belong to Stage 
 
 The `@entry` root's implicit entry is compiler-owned, non-exported and unavailable to dependency binding. Project entry eligibility is `@entry.moth` presence. Empty, static-only and metadata-only entries are eligible. The selected command and builder decide which eligible entries apply. A module without `@entry.moth`, such as one with only `@mod` or `@package`, never becomes an active entry, and a separately compiled dependency entry never activates. An `@entry.moth` that contains only declarations remains an eligible entry like any other.
 
-The entry owns dormant runtime work and produces runtime fragment strings in source order. Entry assembly activates it at most once after compilation. Dependency binding, package assembly and compilation never activate it.
+The entry owns dormant runtime work and produces strings only for explicit `~[...]` runtime fragments in source order. Entry assembly activates it at most once after compilation. Dependency binding, package assembly and compilation never activate it.
 
 Frontend semantics gives every entry root, including a synthetic single-file root, built-in `Error!` alongside the existing fragment-collection success slots. Implicit checked failure materialises as `Error`. Typed `Error!` propagates with `!`; custom errors require explicit recovery.
 
@@ -427,8 +427,8 @@ Preparation is the sole owner of module-wide top-level declaration discovery. `P
 - tokens or source-kind payloads and source locations
 - dependency/re-export clauses, direct selections and aliases
 - declaration shells for constants, functions, structs, choices, aliases, traits and conformances
-- declaration modifiers, including `$config` input-contract shells
-- entry-root slot contributions with balanced argument ranges
+- source directive runs and their authored names, operand ranges and target attachment, including `$config` input-contract shells, `$export` visibility and `$doc`/`$todo` annotation syntax
+- entry-root const fragments and slot contributions with balanced template ranges
 - root-local declaration and visibility scope facts for each present root
 - dormant entry-root body separation and compile-time fragment placement information
 - structural provider references and structural file references
@@ -437,7 +437,9 @@ Preparation is the sole owner of module-wide top-level declaration discovery. `P
 
 Source-kind adapters may synthesise ordinary declarations. The `@mod` and `@package` roles reject authored root runtime/output activity. `@entry` retains the corresponding dormant work and fragment facts.
 
-Preparation neither checks executable bodies nor folds expressions. It retains directive arguments without parsing a parallel argument language. The shared argument owner parses them semantically once the receiving context is known. File classification reads the tokenizer's dense path rows, not surrounding expressions.
+Preparation neither checks executable bodies nor folds expressions. It attaches one contiguous run of distinct source directives to the immediately following header declaration or eligible dependency clause. Multiple directives may share a line without commas. Every repeated name is rejected with both source sites. A new directive terminates a previous operand only at the outer source-expression depth, while the target must begin on a following line. Blank lines and scope boundaries break attachment. AST statement parsing owns equivalent annotation runs inside executable bodies, without introducing a second header scan. Each directive validates its own target and semantic requirements independently of other directives and source order.
+
+At an executable direct entry-root statement boundary, a bare `TEMPLATE_HEAD` begins a const-required synthetic fragment declaration. A `~` marker followed on the same line by a template head begins the existing runtime capture, with the marker consumed before AST sees the template. No runtime fallback is inferred from an unmarked template and the old direct `#[...]` spelling is invalid. Preparation retains directive operands and template ranges for their existing AST expression/TIR owners rather than parsing a parallel argument language. File classification reads retained tokens and dense path rows, not surrounding expressions.
 
 Input-contract shells do not create provider edges. Config compilation precedes source-graph construction, so an authored file-value path in `config.moth` is diagnosed rather than resolved into a graph edge.
 
@@ -731,7 +733,7 @@ Binding-backed Never requires explicit `@moth.sig ... -> !`. Mixed annotation fo
 
 #### Constants, build configuration and const records
 
-Header preparation discovers constant dependencies. AST checks and folds them. `$config` and `$export` are the source modifiers. `$config` marks one following explicitly typed top-level compile-time binding in `config.moth` or a selected source module as an input contract. `$export` marks one eligible public declaration or direct-selection dependency clause in `@mod.moth` or `@package.moth`. The binding name is the input key, the declared type is the contract and the initializer is the fallback; only a `$config`-marked binding may omit one. Project fields and ordinary helpers never supply or block inputs implicitly.
+Header preparation discovers constant dependencies. AST checks and folds them. Source directives include `$config`, `$export`, `$doc` and `$todo`. `$config` marks an explicitly typed top-level compile-time binding in `config.moth` or a selected source module as an input contract. `$export` publishes an eligible declaration or strict direct-selection dependency clause in `@mod.moth` or `@package.moth`. `$doc` attaches one compile-time String to a declaration's stable semantic identity as documentation metadata, including eligible local declarations. `$todo` validates one compile-time String on a declaration or complete executable statement, then discards it without runtime work, builder output or retained TODO metadata. The binding name is a `$config` input key, its declared type is its contract and its initializer is the fallback; only a `$config`-marked binding may omit one. Project fields and ordinary helpers never supply or block inputs implicitly. Source directive names cannot repeat on one target.
 
 Bootstrap defaults fold within the config service. Source defaults remain self-contained primitive literals or `none`, resolved after graph discovery and before module AST semantics. The resolved value is an ordinary folded constant, with no runtime wrapper, HIR category or visibility rule. The build document owns the exact domain, precedence and matching contract.
 
@@ -831,7 +833,9 @@ Folding and runtime handoff consume the same exact `TirViewIdentity` accepted by
 
 AST finalisation:
 
-- folds fully constant templates into strings
+- requires all direct unmarked entry templates to fold, without an opportunistic runtime fallback
+- retains explicit `~[...]` as a runtime fragment even when foldable
+- folds fully constant ordinary template expressions into strings
 - preserves runtime conditional and loop bodies for lazy lowering
 - prepares runtime slot source and site plans
 - removes helper-only artefacts
@@ -840,7 +844,7 @@ AST finalisation:
 
 The TIR store is dropped before the completed AST leaves the stage.
 
-Root-local builder slot contributions and documentation metadata fold through this AST path into `ModuleCompilerMetadata`, retaining their destination, authored span and structural value. TIR does not cross that boundary, and HIR does not recover metadata by scanning constant names.
+Root-local bare `[$in name: ...]` builder contributions fold through this AST/TIR path into `ModuleCompilerMetadata`, retaining their destination, authored span and structural value. Declaration-attached `$doc` operands also fold through ordinary const expression/template evaluation. Their compiled documentation text retains the declaration's stable identity and authored span in non-HIR metadata, not a detached entry fragment. `$todo` is validated and discarded. `$note` discards a balanced template body without producing even an empty fragment; an explicit runtime `~[$note: ...]` is invalid. No `$doc` or `$todo` template-head form or special runtime-fragment extraction survives. TIR does not cross this boundary and HIR does not recover metadata by scanning constant names.
 
 No TIR store, ID, view, overlay, preparation type or registry crosses into a completed module, public interface, HIR or backend.
 

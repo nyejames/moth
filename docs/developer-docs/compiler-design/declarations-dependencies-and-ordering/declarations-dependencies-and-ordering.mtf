@@ -13,7 +13,7 @@ From located tokens, syntax preparation extracts **shells**:
 - const-template, entry-root body and trait-incompatibility shells
 - entry-root activity and fragment-placement metadata
 - structural provider references and structural file references for the graph
-- retained source directives, `$config` input contracts and per-item `$export` visibility
+- retained runs of independently attached source directives with unique names, `$config` input contracts, per-item `$export` visibility and `$doc`/`$todo` operand ranges
 - local declaration-ordering hints
 - source locations and remap information
 
@@ -142,7 +142,7 @@ Final prose and rendering of diagnostics wait for the diagnostics article. Here 
 
 - **Accepted design:** `PreparedHeaderSyntax`, `BoundModuleHeaders` and distinct relationship classes.
 - **Current implementation:** header and dependency progress rows.
-- **Delivered:** a `$config` source modifier attaches to one typed compile-time binding, and the declaration shell retains the single contract fact the input stage consumes. Canonical module compilation, dependency binding and typed project values already landed. Use the progress matrix for remaining partial coverage.
+- **Delivered:** `$config` and `$export` source modifiers attach to their eligible top-level targets, with retained input and visibility facts. General same-line directive runs, `$doc`/`$todo` source annotations and const-default direct entry templates are accepted design but require the planned compiler cutover. Use the progress matrix for current support.
 - **Deferred or outside scope:** this page does not teach body type checking.
 
 ## Compiler references

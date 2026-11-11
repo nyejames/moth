@@ -86,7 +86,7 @@ If a fact is missing, an upstream owner failed. The builder should not open `gre
 
 Assembly plans route and document metadata, then builds a shell.
 
-**Compile-time fragments** insert at recorded indexes first. They are already strings. The greeting's static paragraph wants this path when everything folded.
+**Compile-time fragments** are bare direct entry `[...]` templates that must fold. They insert at recorded indexes first. An explicit `~[...]` fragment stays runtime even if its content can fold. The builder receives those completed facts and never chooses the phase from the text itself.
 
 **Runtime path:** invoke the entry once for the activated root and branch on its typed outcome. Its built-in `Error!` channel sits alongside the fragment-collection success slots. Stage that invocation's runtime fragment results and publish them, in source order, only after success. On error, discard unpublished results and never read undefined success slots.
 
