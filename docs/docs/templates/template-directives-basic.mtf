@@ -25,7 +25,8 @@ Common directives include:
 - `$note` for discarded comment templates
 - `$html`, `$css`, `$escape_html` and `$code` under every builder
 
-Template heads separate expressions and directives with commas. `$doc` and
+Template heads separate expressions and directives with commas, and a directive
+name cannot repeat in one head. `$doc` and
 `$todo` are source annotations, not template-head directives.
 
 A slot declaration occupies its head alone. Each `$in` directive fills one named

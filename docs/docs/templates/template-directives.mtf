@@ -1,5 +1,5 @@
 `$` is the general directive marker. This page owns template-specific directive
-semantics; general ownership, context, argument and diagnostic rules live in
+semantics. General ownership, context, argument and diagnostic rules live in
 @../directives (Directives).
 
 Template-head directives modify their containing template, regardless of whether
@@ -18,10 +18,10 @@ builder extension point, so availability never depends on the selected builder:
 
 `$before value` and `$after value`:
 
-- add a prefix and suffix to each direct child; either directive may be omitted
+- add a prefix and suffix to each direct child. Either directive may be omitted
 - each may appear once per head, so a repeated `$before` or `$after` is rejected
 - accept a compile-time String or constant template wrapper and reject runtime-dependent values
-- values may contain named slots, but not default or positional slots; child insertion is implicit
+- values may contain named slots but not default or positional slots. Child insertion is implicit
 - produce no wrapper for structurally absent output, but wrap a selected empty String
 - wrap a direct child loop's aggregate output once
 
@@ -94,8 +94,8 @@ The compiler owns these template-formatting directives. They are available under
 - suppresses nested child-template interpretation inside the code content
 
 
-Formatter directives remain constrained to formatting and composition contracts;
-they cannot rewrite functions, change nominal identity, mutate HIR or weaken language
+Formatter directives remain constrained to formatting and composition contracts.
+They cannot rewrite functions, change nominal identity, mutate HIR or weaken language
 safety. For the shared directive grammar and its single-operand rule, see
 @../directives (Directives).
 
@@ -115,7 +115,8 @@ Moth template files are the exception:
 
 A template head can hold several **comma-separated** items, including expressions
 and directives. Unlike source directive runs, template heads always require
-commas between meaningful items. Most directives combine freely with other
+commas between meaningful items. Every directive name may appear at most once
+in the same head, including `$fresh`. Most directives combine freely with other
 items, but structural directives can require the whole head.
 
 `$slot` and `$note` must be the only meaningful item in their head. A slot

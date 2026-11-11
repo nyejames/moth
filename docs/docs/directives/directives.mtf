@@ -11,7 +11,8 @@ A template-head directive belongs to the template that contains it:
 ]
 
 Template heads separate meaningful items with commas, including directives and
-expressions. Each head directive has its own operand and compatibility rules.
+expressions. Each head directive has its own operand and compatibility rules. A directive
+name may occur only once per template head.
 See @../templates/#template-directives (Template directives).
 
 ### Source directives
