@@ -1,0 +1,56 @@
+A static HTML component produces markup. Its behaviour starts only
+when the selected page's runtime code asks for it.
+
+### Start with the browser features already available
+
+Moth's documentation sidebar uses an explicit runtime call after its
+static fragments:
+
+[codeblock, $code "moth":
+    @styles sidebar, init_docs_sidebar
+
+    [sidebar]
+
+    init_docs_sidebar()!
+]
+
+The sidebar template doesn't run a script when it is imported or rendered.
+Its initializer uses the existing `@web/page` browser package to
+synchronise the active navigation link and breadcrumb.
+
+A checkbox and CSS can manage the sidebar's simple open/closed state
+without Moth receiving an event. Use browser-native HTML and CSS for
+behaviour that needs no application logic.
+
+### The intended DOM boundary
+
+The planned `@web/dom` package will provide typed operations for finding
+elements, reading properties and geometry, setting attributes and updating
+the live document. Ordinary Moth functions will own the page-specific
+algorithm.
+
+[codeblock, $code "text":
+    const component -> static HTML and tracked CSS
+    @entry runtime -> explicit init function
+    init function -> @web/dom operations
+    browser DOM -> visible page update
+]
+
+For example, a future sidebar initializer can measure the navbar and set a
+CSS custom property controlling the sidebar's top edge. That algorithm
+belongs to the docs package, not the generic DOM binding.
+
+This is a **future package boundary**, not a claim that `@web/dom` is
+available today. The browser adapter will still use JavaScript internally.
+Application code should not need to embed JavaScript source or script
+listeners in its component templates.
+
+### Later: event-driven updates
+
+The intended `@web/events` package will connect browser events to typed
+Moth messages and Channels. It will let a sidebar react to scroll, resize
+and expansion without an authored JavaScript file. Until the Channel and
+host-ingress runtime exists, that behaviour remains deferred.
+
+See @../../packages/builder/page/ (@web/page) and
+@../../wiring (Wiring).
