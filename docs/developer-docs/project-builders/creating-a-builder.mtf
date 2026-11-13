@@ -27,7 +27,7 @@ Wasm compilation, artefact/output APIs, macros and executable Rust host
 adapters describe accepted target design, not current SDK APIs. See
 @../../docs/progress/packages-and-builders (Packages and Builders Progress)
 and
-@https://github.com/nyejames/moth/blob/lappet-and-packages-work/docs/roadmap/plans/lappet-native-binding-handoff-plan.md (native-binding handoff plan).
+@https://github.com/nyejames/moth/blob/main/docs/roadmap/plans/lappet-native-binding-handoff-plan.md (native-binding handoff plan).
 
 ### A Wasm package builder
 

@@ -73,7 +73,7 @@ protocol itself is defined by the native host ABI.
 - Ticket values are nonzero, unique within the instance and never reused while
   it lives. They encode no host address.
 - Entries have per-entry and per-instance byte limits, chosen with the runtime
-  resource policy in milestone 3. Exceeding a limit is a host fault, not a Moth
+  runtime policy checkpoint. Exceeding a limit is a host fault, not a Moth
   error.
 - A take removes its entry. A failed take is a boundary fault.
 - Lappet tracks live tickets so it can fault when the guest enters another
@@ -128,9 +128,9 @@ aborts the process instead, and Lappet gives no Moth-level guarantee.
 
 A fault ends the guest call and the faulting instance is quarantined. Lappet
 then calls no guest helper, clears the staging table and discards values
-already copied from the call. The runtime checkpoint in milestone 3 decides
-fault disposition. The V1 helper set has no reset helper, so until a later ABI
-version adds one, a faulted instance is dropped. Host IO already performed is never rolled back.
+already copied from the call. The V1 helper set has no reset helper, so until
+a later ABI version adds one, a faulted instance is dropped. Host IO already
+performed is never rolled back.
 
 ## Calling Moth exports
 
@@ -144,20 +144,33 @@ compiler freezes its signature. It reports a guest trap.
 
 ## Deferred tests
 
-These need emitted Wasm and a Wasmtime store. They stay blocked until the
-compiler prerequisites on the ABI page exist and milestone 5's gate opens.
+Each test needs a Wasmtime store. The marker after each test says what else it
+waits for:
+
+- **Fixture:** a hand-authored core Wasm fixture that follows the V1 protocol
+  can exercise Lappet's table and fault mechanics once the runtime foundation
+  exists. A fixture never proves that compiled Moth follows the ABI.
+- **Descriptor:** needs the shared host descriptor contract and the adapter
+  conversions built on it.
+- **Compiler:** needs Wasm emitted by the Moth backend, so it waits for the
+  compiler prerequisites on the ABI page and the real-application gate.
+
+Every fixture-level test is repeated against compiled Moth when that gate
+opens.
 
 1. `U8` and `Byte` descriptors with identical carriers reject each other's
-   implementations and out-of-range values.
+   implementations and out-of-range values. **Descriptor.**
 2. `none`, `Some("")`, status `1` with code `0` and a boundary fault stay
-   distinguishable from Rust.
+   distinguishable from Rust. **Compiler.**
 3. A two-slot export result keeps slot order, and the error edge never reads
-   success fields.
+   success fields. **Compiler.**
 4. A Rust `String` result is copied into guest storage. A failed take, or a live
    ticket at another import or at entry return, faults without leaking the entry.
+   **Fixture** for the ticket lifetime and take checks.
 5. Stale, closed, other-instance, wrong-type and conflicting tokens are rejected
-   before the Rust function runs.
+   before the Rust function runs. **Fixture.**
 6. Missing, extra and mismatched imports fail before guest start under both
-   `OptLevel::None` and `OptLevel::Speed`.
+   `OptLevel::None` and `OptLevel::Speed`. **Fixture** for the module's
+   physical imports. Matching against the manifest is **Compiler.**
 7. A trapping scope helper fails the whole export call and no further guest call
-   runs.
+   runs. **Fixture.**

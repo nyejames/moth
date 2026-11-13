@@ -19,7 +19,9 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 ## Lappet runtime and package infrastructure
 
 - [Lappet crate](crates/lappet/README.md) and [library entry](crates/lappet/src/lib.rs): dependency-free initial workspace library, with no runtime API yet.
-- [Runtime design](crates/lappet/docs/design.md), [package-manager design](crates/lappet/docs/package-manager.md) and [independent roadmap](crates/lappet/roadmap.md): accepted contracts and isolated-worktree implementation checkpoints.
+- [Runtime design](crates/lappet/docs/design.md), [package-manager design](crates/lappet/docs/package-manager.md) and [independent roadmap](crates/lappet/roadmap.md): accepted contracts, milestone order, waits on `main` and isolated-worktree implementation checkpoints.
+- Lappet plans: [Wasmtime runtime foundation](docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md), [host boundary tables](docs/roadmap/plans/lappet-host-boundary-tables-plan.md), [host contract crate](docs/roadmap/plans/lappet-host-contract-crate-plan.md) and [native binding handoff](docs/roadmap/plans/lappet-native-binding-handoff-plan.md). The Lappet roadmap owns their order.
+- [Wasmtime integration reference](crates/lappet/docs/wasmtime-integration.md): the pinned Wasmtime release, the API surface Lappet uses and the excluded features.
 - [Host ABI adapter responsibilities](crates/lappet/docs/host-abi.md): Lappet's installation, conversion, staging-table and resource-table duties over the compiler-owned [native host ABI](docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf).
 - [Wasm optimisation reference](docs/developer-docs/wasm-optimisation/overview.mtf) and [detailed authority](docs/developer-docs/wasm-optimisation/wasm-optimisation.mtf): shared compiler/native-code policy. Its [page](docs/developer-docs/wasm-optimisation/@entry.moth) composes the site.
 - [Lappet introduction](docs/docs/lappet/lappet.mtf) and [page](docs/docs/lappet/@entry.moth): application and embedding overview, with implementation status explicit.

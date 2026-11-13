@@ -1,18 +1,24 @@
 # Lappet native binding handoff plan
 
-This plan delivers Lappet roadmap milestone 2, "Freeze the native binding and
+This plan delivers Lappet roadmap milestone 5, "Finish the native binding and
 artefact handoff". It is the entry point for the agent continuing the work on
-the `lappet-and-packages-work` branch. Delete it in the commit that completes
-the milestone and update `crates/lappet/roadmap.md` in the same commit.
+the `lappet-work` branch. Delete it in the commit that completes the milestone
+and update `crates/lappet/roadmap.md` in the same commit.
 
 ## Status
 
-- Status: active. Phases 0, 1, 2A, 2B.0, 2B.1, 2B.2a, 2B.2b and 2B.2d are delivered.
-- Current slice: Phase 2B.2, builder configuration sections and typed settings.
-- Blockers: none for Phase 2. Executable native Wasm lowering is blocked on the
-  compiler prerequisites listed in the native host ABI. Phase 2 does not need it.
-- Next action: implement the `.config(name, |config| ...)` helper, the generic
-  output roots and `CompiledProject::settings`.
+- Status: paused. Phases 0, 1, 2A, 2B.0, 2B.1, 2B.2a, 2B.2b and 2B.2d are delivered.
+- Current slice: Phase 2B.2c, the builder configuration helper and typed settings.
+- Blockers: const functions landing on `main`. That work edits the project
+  config validation, project settings and builder surface definition that the
+  configuration helper also edits. Phase 3 also waits for the decision on a
+  shared host contract crate, because the import and export requirement types
+  belong wherever the descriptors live. Executable native Wasm lowering is
+  blocked on the compiler prerequisites listed in the native host ABI. Phase 2
+  does not need it.
+- Next action: after syncing with `main`, implement the
+  `.config(name, |config| ...)` helper and `CompiledProject::settings`. The
+  generic output roots are already delivered.
 
 ## Goal
 
@@ -21,7 +27,7 @@ contract with a complete public custom-builder SDK. A separate Rust crate must
 be able to define a builder, compile a real Moth project and publish a
 supported output through the canonical output writer. Do not invent a second
 semantic type system and do not implement the Wasmtime engine. Execution
-belongs to Lappet roadmap milestone 3.
+belongs to Lappet's Wasmtime execution milestone.
 
 ## Read first
 
@@ -37,7 +43,7 @@ authorities this work consumes:
   `#[moth::host_function]` and `moth::host_binding!` spellings are accepted
   future conveniences. Today's descriptors are the manual `moth::host` types.
 - `docs/build-system-design.md` owns builders, configuration and outputs.
-- `crates/lappet/roadmap.md` milestone 2 lists the evidence the milestone needs.
+- `crates/lappet/roadmap.md` milestone 5 lists the evidence the milestone needs.
 
 ## Global constraints
 
@@ -64,7 +70,7 @@ authorities this work consumes:
    validation evidence and the disposition of each finding.
 3. Fix every blocker, rerun the focused tests and commit. Commits are authored
    by Nye only with no attribution lines. Push with
-   `git push -u origin lappet-and-packages-work`. Do not open a pull request.
+   `git push -u origin lappet-work`. Do not open a pull request.
 4. Stop for the user on any unresolved design or public SDK choice.
 
 Update the packages-and-builders progress matrix row "Public Rust builder SDK"
@@ -194,10 +200,12 @@ The user approved these. Do not reopen them without new evidence.
 - [x] Allow a builder section and its fields to be named at runtime, so
   `NamedConfigSectionSchema.name` and `ConfigSchemaField.name` accept a name
   chosen at build time.
+- [x] Decouple `effective_output_settings` from the HTML section so a custom
+  builder's roots come from its own section. It reads the generic
+  `OutputRootSettings`.
 - [ ] Add the builder configuration section helper,
   `.config("game", |config| ...)`, with dynamic section and field names and
-  output-root fields. Decouple `effective_output_settings` from the HTML
-  section so a custom builder's roots come from its own section.
+  the automatic output-root fields, and add `CompiledProject::settings`.
 - [x] Re-export the existing `BuildProfile` enum as `moth::builder::BuildProfile`.
   `BuildRequest::profile` selects it and `BuildContext::profile` reads it.
 - [x] Add error kinds for compilation failure that carry the compiler messages
@@ -244,7 +252,7 @@ Phase 2 is complete only when a real external crate runs the whole workflow.
   missing physical step. Never publish placeholder offsets.
 - [ ] Add a pure-Rust preflight that checks the requirements against declared
   Rust implementations before any guest entry. It is not another type checker
-  or plugin registry. Linker installation stays in milestone 3.
+  or plugin registry. Linker installation stays with Lappet's runtime.
 - [ ] Test capability isolation between two builder definitions and that a
   selected export never exposes every function or `moth_start`.
 
@@ -261,10 +269,10 @@ Phase 2 is complete only when a real external crate runs the whole workflow.
   `just validate` after these public API changes. Record actual results.
 - [ ] Update `crates/lappet/roadmap.md` with delivered status, evidence and the
   exact compiler prerequisites still missing. Update `index.md` for new owners.
-- [ ] Write the milestone 3 handoff. Name the descriptor API, the
-  import/export check, the existing conversions, what is blocked and the first
-  real core Wasm fixtures to run with Cranelift at `OptLevel::None` and
-  `OptLevel::Speed`.
+- [ ] Write the runtime handoff in the roadmap. Name the descriptor API, the
+  import/export check, the existing conversions, what is blocked and how the
+  runtime's fixture-level preflight should move onto the published
+  requirements.
 - [ ] Run an independent end-to-end architecture and test review, then delete
   this plan.
 
@@ -284,8 +292,7 @@ Phase 2 is complete only when a real external crate runs the whole workflow.
 - Documentation follow-ups to report rather than edit: the host manifest is not
   yet described in `docs/build-system-design.md` or
   `docs/compiler-design-overview.md`, the reserved first-party identities are
-  not yet described in `creating-a-builder.mtf`, and the milestone 2 evidence in
-  the Lappet roadmap asks for tests that need emitted Wasm.
+  not yet described in `creating-a-builder.mtf`.
 
 ## Test environment notes
 

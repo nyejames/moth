@@ -6,11 +6,15 @@ manual. [Lappet's design](design.md) owns the accepted V1 boundaries and
 relevant upstream mechanics and limitations. It does not approve a concrete
 Moth ABI or claim that the runtime is implemented.
 
-**Research snapshot:** Wasmtime Rust crate **49.0.3**, released 2026-10-14.
-Read the [v49.0.3 source](https://github.com/bytecodealliance/wasmtime/tree/v49.0.3)
-and versioned rustdoc, not an unversioned development API page. This is
-a **reference version**, not a selected Cargo dependency. Pin the version at
-the roadmap's engine checkpoint and recheck source details when upgrading.
+**Selected release:** Wasmtime Rust crate **50.0.1**, released 2026-10-29.
+Read the [v50.0.1 source](https://github.com/bytecodealliance/wasmtime/tree/v50.0.1)
+and versioned rustdoc, not an unversioned development API page. The runtime
+foundation work pins this exact version in `crates/lappet/Cargo.toml` behind
+Lappet's `runtime` feature. The crate requires Rust 1.97.0 or newer. Take a
+newer 50.0.x patch release when one exists at activation, and recheck every
+source detail below before moving to another major version. The statements
+and line anchors on this page were checked against the published 50.0.1 crate
+source on 2026-11-13.
 
 ## The small API surface Lappet actually needs
 
@@ -32,35 +36,38 @@ definition before this sequence. Lappet does not rediscover them from Wasm.
 
 ## Engine configuration and feature selection
 
-Primary references: [Config](https://docs.rs/wasmtime/49.0.3/wasmtime/struct.Config.html),
-[Strategy](https://docs.rs/wasmtime/49.0.3/wasmtime/enum.Strategy.html),
-[crate features](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/wasmtime/Cargo.toml#L125-L175)
-and [config source](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/wasmtime/src/config.rs).
+Primary references: [Config](https://docs.rs/wasmtime/50.0.1/wasmtime/struct.Config.html),
+[Strategy](https://docs.rs/wasmtime/50.0.1/wasmtime/enum.Strategy.html),
+[crate features](https://github.com/bytecodealliance/wasmtime/blob/v50.0.1/crates/wasmtime/Cargo.toml#L129)
+and [config source](https://github.com/bytecodealliance/wasmtime/blob/v50.0.1/crates/wasmtime/src/config.rs).
 
 - Build a `Config`, select `Strategy::Cranelift` and pass it to
   `Engine::new`. Use `Config::cranelift_opt_level(OptLevel::None)` for
   development and `OptLevel::Speed` for release, pending benchmarks.
   Inconsistent options can fail during engine creation. `Strategy::Auto`
   currently selects Cranelift but is not an explicit V1 strategy policy.
-- Candidate minimal Cargo features are `std`, `runtime` and `cranelift`,
-  with `default-features = false`. **This is not a locked manifest.**
-  Defaults include unrelated features. Measure `cargo tree -e features`,
-  clean Rust build cost and linked size before adding a feature.
-- In v49.0.3 `OptLevel::None` disables most optimisation to favour
+- The selected Cargo features are `std`, `runtime` and `cranelift`, with
+  `default-features = false`. The defaults are `anyhow`, `async`,
+  `backtrace` and `cache`, none of which V1 needs. Measure
+  `cargo tree -e features`, clean Rust build cost and linked size when the
+  dependency lands and before adding any feature. Reference types, typed
+  function references and Wasm GC are compiled only with the `gc` feature,
+  and Wasm threads only with `threads`. V1 selects neither.
+- In v50.0.1 `OptLevel::None` disables most optimisation to favour
   compilation time. `OptLevel::Speed` is the optimising default.
   Keep `RegallocAlgorithm::Backtracking`. The upstream
   `SinglePass` allocator is not production-ready and lacks normal
   security-advisory coverage. `compiler_inlining` defaults to
   `Inlining::No`. Consider `SpeedAndSize` and parallel compilation
   only after independent measurements. Read the
-  [configuration source](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/wasmtime/src/config.rs#L1538-L1587)
-  and [single-pass warning](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/wasmtime/src/config.rs#L3699-L3725).
+  [configuration source](https://github.com/bytecodealliance/wasmtime/blob/v50.0.1/crates/wasmtime/src/config.rs#L1582-L1629)
+  and [single-pass warning](https://github.com/bytecodealliance/wasmtime/blob/v50.0.1/crates/wasmtime/src/config.rs#L3776-L3802).
 - Lappet does not run a Wasm post-optimiser or duplicate Moth's semantic
   passes. The [shared optimisation authority](../../../docs/developer-docs/wasm-optimisation/wasm-optimisation.mtf)
   owns that boundary.
 - Validate the compiler's Wasm proposal requirements against Cranelift
   and the actual host CPU. Multi-value is enabled by default and Memory64
-  is disabled by default in v49.0.3. Do not enable GC, threads or relaxed
+  is disabled by default in v50.0.1. Do not enable GC, threads or relaxed
   SIMD merely because Wasmtime can implement them. No fallback compiler.
 
 - Use the live
@@ -71,11 +78,11 @@ and [config source](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/cr
 
 ## Module, linker and store ownership
 
-Primary references: [Module](https://docs.rs/wasmtime/49.0.3/wasmtime/struct.Module.html),
-[Store](https://docs.rs/wasmtime/49.0.3/wasmtime/struct.Store.html),
-[Linker](https://docs.rs/wasmtime/49.0.3/wasmtime/struct.Linker.html),
-[store identity in source](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/wasmtime/src/runtime/store.rs#L160-L200)
-and [linker sharing rules](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/wasmtime/src/runtime/linker.rs#L51-L82).
+Primary references: [Module](https://docs.rs/wasmtime/50.0.1/wasmtime/struct.Module.html),
+[Store](https://docs.rs/wasmtime/50.0.1/wasmtime/struct.Store.html),
+[Linker](https://docs.rs/wasmtime/50.0.1/wasmtime/struct.Linker.html),
+[store identity in source](https://github.com/bytecodealliance/wasmtime/blob/v50.0.1/crates/wasmtime/src/runtime/store.rs#L183-L196)
+and [linker sharing rules](https://github.com/bytecodealliance/wasmtime/blob/v50.0.1/crates/wasmtime/src/runtime/linker.rs#L52-L85).
 
 - An `Engine` and its compiled `Module` can be shared where useful.
   Each `Store<T>` owns its guests, memories and mutable execution state.
@@ -144,12 +151,12 @@ a separate roadmap deliverable.
 
 ## Host calls and linear memory
 
-Primary references: [Caller](https://docs.rs/wasmtime/49.0.3/wasmtime/struct.Caller.html),
-[Func](https://docs.rs/wasmtime/49.0.3/wasmtime/struct.Func.html),
-[TypedFunc](https://docs.rs/wasmtime/49.0.3/wasmtime/struct.TypedFunc.html),
-[Instance](https://docs.rs/wasmtime/49.0.3/wasmtime/struct.Instance.html),
-[Memory](https://docs.rs/wasmtime/49.0.3/wasmtime/struct.Memory.html)
-and [memory safety source](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/wasmtime/src/runtime/memory.rs#L33-L178).
+Primary references: [Caller](https://docs.rs/wasmtime/50.0.1/wasmtime/struct.Caller.html),
+[Func](https://docs.rs/wasmtime/50.0.1/wasmtime/struct.Func.html),
+[TypedFunc](https://docs.rs/wasmtime/50.0.1/wasmtime/struct.TypedFunc.html),
+[Instance](https://docs.rs/wasmtime/50.0.1/wasmtime/struct.Instance.html),
+[Memory](https://docs.rs/wasmtime/50.0.1/wasmtime/struct.Memory.html)
+and [memory safety source](https://github.com/bytecodealliance/wasmtime/blob/v50.0.1/crates/wasmtime/src/runtime/memory.rs#L33-L213).
 
 - `get_typed_func` checks the **physical Wasm call signature**, not the
   Moth type, result-channel or ownership contracts. The dynamic `Func::call`
@@ -185,11 +192,11 @@ and [memory safety source](https://github.com/bytecodealliance/wasmtime/blob/v49
 
 ## Resource controls and failure handling
 
-Primary references: [ResourceLimiter](https://docs.rs/wasmtime/49.0.3/wasmtime/trait.ResourceLimiter.html),
-[StoreLimitsBuilder](https://docs.rs/wasmtime/49.0.3/wasmtime/struct.StoreLimitsBuilder.html),
-[limiter source](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/wasmtime/src/runtime/limits.rs#L10-L95),
-[Config fuel/epoch source](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/wasmtime/src/config.rs#L627-L791)
-and [Trap](https://docs.rs/wasmtime/49.0.3/wasmtime/enum.Trap.html).
+Primary references: [ResourceLimiter](https://docs.rs/wasmtime/50.0.1/wasmtime/trait.ResourceLimiter.html),
+[StoreLimitsBuilder](https://docs.rs/wasmtime/50.0.1/wasmtime/struct.StoreLimitsBuilder.html),
+[limiter source](https://github.com/bytecodealliance/wasmtime/blob/v50.0.1/crates/wasmtime/src/runtime/limits.rs#L10-L154),
+[Config fuel/epoch source](https://github.com/bytecodealliance/wasmtime/blob/v50.0.1/crates/wasmtime/src/config.rs#L627-L791)
+and [Trap](https://docs.rs/wasmtime/50.0.1/wasmtime/enum.Trap.html).
 
 - A new store places no independent byte ceiling on linear memories.
   The default instance, table and memory count ceilings are **10,000**.
@@ -201,15 +208,18 @@ and [Trap](https://docs.rs/wasmtime/49.0.3/wasmtime/enum.Trap.html).
   `trap_on_grow_failure` can alter that behavior, which must remain
   consistent with Moth's selected memory/allocation contract.
 - `max_wasm_stack` bounds the Wasm stack, not native host recursion
-  or the Rust thread stack.
+  or the Rust thread stack. Its default is 512 KiB.
 - `consume_fuel` instruments guest work for deterministic fuel
   exhaustion. A store starts with zero fuel when enabled and needs a value
   supplied with `Store::set_fuel`. Benchmark the instrumentation under
   both Cranelift optimisation levels.
 - `Config::epoch_interruption` provides lower-overhead external
-  deadline checks with Cranelift in v49.0.3. Configure store deadlines and
-  increment the engine epoch explicitly. Neither mechanism is a Lappet
-  default until its resource-policy checkpoint decides semantics and cost.
+  deadline checks with Cranelift in v50.0.1. Configure store deadlines and
+  increment the engine epoch explicitly. A store on an epoch-enabled engine
+  starts with a deadline of zero, which has already elapsed, so the guest
+  traps at once unless `Store::set_epoch_deadline` runs first. Neither
+  mechanism is a confirmed Lappet default until the runtime policy
+  checkpoint records its semantics and cost.
 - Neither epochs nor fuel interrupts a blocking Rust/C host call.
   Epoch checks have bulk-memory-operation granularity limitations.
   The game and server builders need explicit host IO and timeout policy,
@@ -218,7 +228,8 @@ and [Trap](https://docs.rs/wasmtime/49.0.3/wasmtime/enum.Trap.html).
   unsatisfied imports, instantiation/start trap, exported call trap,
   host adapter error and resource failure. Wasmtime errors may carry
   `Trap` or `WasmBacktrace` context, but that does not define Moth's
-  error channel. Post-trap instance reuse is an **unresolved Lappet gate**.
+  error channel. A trapped or faulted instance is never reused in V1. It
+  is quarantined and dropped, because the V1 helper set has no reset helper.
 
 ## Features Lappet V1 does not need
 
@@ -242,10 +253,11 @@ runtime**, not a requirement to make Wasmtime work on that device.
 
 ## Before implementing or broadening this reference
 
-At the engine checkpoint, choose a concrete release and feature graph.
-Confirm Cranelift proposal and OS/CPU support, compare development/release
-native optimisation settings and establish resource limits, trap disposition
-and host-call policies.
+The release and feature graph above are selected. At the runtime policy
+checkpoint, confirm Cranelift proposal and OS/CPU support, compare
+development/release native optimisation settings and confirm the provisional
+resource limits and host-call policies with recorded evidence. Trap
+disposition is already accepted: a faulted instance is dropped.
 
 Prove `Engine::new` validation, import rejection, start-function traps,
 typed exports, missing memory, invalid buffer spans, guest growth failures,
