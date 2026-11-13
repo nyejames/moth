@@ -1,6 +1,6 @@
-`@html` provides compile-time HTML helpers as a builder source-backed package. It belongs to the Builder origin family with MothSource backing, so the compiler reads ordinary Moth source from `packages/html/@mod.moth`. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+`@html` provides compile-time HTML markup helpers as a universal Core package with MothSource backing. The compiler reads ordinary Moth source from `packages/html/@mod.moth`. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
-`@html` ships as a skeleton. The current export surface covers common HTML tags, a few formatting helpers, table components and a thin canvas wrapper. It will grow as the language stabilises and the first-party packages expand.
+`@html` ships as a skeleton. Its exports cover common HTML tags, formatting helpers and table components. Basic style inserts now belong to `@styles`, while browser drawing stays in the builder-specific `@web/canvas` package.
 
 ### The fixed template prelude
 
@@ -13,7 +13,7 @@ Exported compile-time constants from `@html` are visible flat inside `.mtf` file
     [codeblock, $code "moth": value = 42]
 ]
 
-The prelude is compiler policy, not builder configuration. A builder that enables `.mtf` sources must register the official `@html` package set at its built-in package root. `@html` is reserved for that package set, so a custom source package cannot take the name or substitute different constants. Source packages that contain `.mtf` files order after `@html`.
+The prelude is compiler policy, not builder configuration. Every builder receives the official `@html` and `@styles` Core roots. The remaining migration makes `.mtf` universally available and includes both packages in its flat constant prelude. Source packages that contain `.mtf` files currently order after `@html`.
 
 A `.moth` file that needs specific `@html` symbols binds them explicitly:
 
@@ -136,9 +136,9 @@ All helpers are compile-time `#String` constants that produce HTML strings. They
     ]
 ]
 
-#### Utility style inserts
+#### Utility style inserts from `@styles`
 
-These constants produce CSS property values for style slots.
+These constants now belong to the separate `@styles` Core source package. They produce CSS property values for the `style` slots exposed by `@html`.
 
 [table:
     [th:
@@ -219,60 +219,35 @@ roles for contracts, functions, directives, dependency paths and the `io` namesp
 Moth template bodies stay plain authored text around their highlighted heads and
 nested templates. A body is not re-highlighted by the directive that will format it.
 
-### Canvas wrapper
+### Browser drawing
 
-`@html` exports a `Canvas` struct and two functions that wrap `@web/canvas` into a source-owned method-style API.
-
-[table:
-    [th:
-        [: Name]
-        [: Signature]
-    ]
-
-    [td:
-        [: `Canvas`]
-        [: struct with one field `context Canvas2d`]
-    ]
-
-    [td:
-        [: `get_canvas`]
-        [: `|id String| -> Canvas, Error!`]
-    ]
-
-    [td:
-        [: `get_canvas_context`]
-        [: `|id String| -> Canvas2d, Error!`]
-    ]
-]
-
-The `Canvas` struct provides receiver methods for drawing: `set_fill_style`, `fill_rect`, `clear_rect` and `stroke_rect`. Each takes `~Canvas` (mutable receiver) and delegates to the underlying `@web/canvas` free functions.
+The `canvas` markup helper remains in `@html`. Drawing functions and opaque canvas handles belong to `@web/canvas`, which a web-capable builder must provide.
 
 [codeblock, $code "moth":
-    @html Canvas, get_canvas
+    @web/canvas get_canvas, context_2d, set_fill_style, fill_rect
 
-    canvas ~= get_canvas("my-canvas")!
+    element = get_canvas("my-canvas")!
+    context ~= context_2d(element)!
 
-    ~canvas.set_fill_style("red")
-    ~canvas.fill_rect(10.0, 10.0, 50.0, 50.0)
+    set_fill_style(~context, "red")
+    fill_rect(~context, 10.0, 10.0, 50.0, 50.0)
 ]
-
-Both `get_canvas` and `get_canvas_context` return through `Error!` because the underlying `@web/canvas` functions can fail when the canvas element does not exist or the browser denies a 2D context.
 
 ### Backend behaviour
 
 The compile-time constants need no runtime assets. They fold into HTML strings during compilation.
 
-The canvas wrapper functions call through to `@web/canvas`, which emits JavaScript runtime assets when reachable. See @../canvas (@web/canvas) for the runtime asset contract.
+Calls to `@web/canvas` emit JavaScript runtime assets when reachable. See @../canvas (@web/canvas) for the runtime asset contract.
 
 ### Unsupported source forms
 
 - Direct symbol-path clauses such as `@html/p` face rejection. Use direct selections or a namespace clause.
-- `@html` does not expose opaque types of its own. `Canvas2d` comes from `@web/canvas`.
+- `@html` exposes no runtime canvas types. `Canvas2d` comes from `@web/canvas`.
 - Only compile-time constants are visible inside `.mtf` files. Functions and types require an explicit dependency clause in `.moth` files.
 
 ### Deferred surfaces
 
-`@html` ships as a skeleton. Future expansions include richer tag coverage, form components, accessible widget helpers, layout primitives and broader style utilities. The package grows as the language stabilises and the first-party packages mature. See @../../../progress (progress matrix) for current status.
+`@html` ships as a skeleton. Future expansions include richer semantic tag coverage and standard slots. More style fragments belong to `@styles`, while higher-level layouts and components belong to separate packages. See @../../../progress (progress matrix) for current status.
 
 ### Related concepts
 

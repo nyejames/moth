@@ -1,5 +1,5 @@
 @html-assembly-and-output content as reference_content
-@styles navbar, section, theme_css, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_css, sidebar, init_docs_sidebar
 @diagrams css as diagrams_css
 
 [$in title:["18. HTML assembly and output"]]

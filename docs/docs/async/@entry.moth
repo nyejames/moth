@@ -1,5 +1,5 @@
-@html center
-@styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
+@styles center
+@docs_styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Coroutines and Async in Moth"]]
 [$in description:["Design draft for structured async, coroutines, channels and explicit suspension in Moth."]]

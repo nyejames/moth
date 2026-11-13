@@ -1,4 +1,4 @@
-@styles navbar, section, theme_head, highlight, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, highlight, sidebar, init_docs_sidebar
 @html img, div
 
 [$in title:["What is Moth?"]]

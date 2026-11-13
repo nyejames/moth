@@ -1,4 +1,5 @@
-@html canvas, Canvas, get_canvas
+@html canvas
+@web/canvas as drawing_api
 
 [canvas:
   [$in id:game_canvas]
@@ -9,9 +10,10 @@
 ]
 
 draw || -> String, Error!:
-    drawing ~= get_canvas("game_canvas")!
-    ~drawing.set_fill_style("#202020")
-    ~drawing.fill_rect(0.0, 0.0, 10.0, 10.0)
+    element = drawing_api.get_canvas("game_canvas")!
+    drawing ~= drawing_api.context_2d(element)!
+    drawing_api.set_fill_style(~drawing, "#202020")
+    drawing_api.fill_rect(~drawing, 0.0, 0.0, 10.0, 10.0)
     return "canvas_context_ready"
 ;
 

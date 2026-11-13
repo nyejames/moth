@@ -6,7 +6,7 @@
 @calls-and-access-basic content as calls_and_access_basic
 @returns-and-multiple-values content as returns_and_multiple_values
 @returns-and-multiple-values-basic content as returns_and_multiple_values_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

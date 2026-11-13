@@ -11,7 +11,7 @@
 @assertions content as assertions
 @assertions-basic content as assertions_basic
 @runtime-failures-and-termination content as runtime_failures_and_termination
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

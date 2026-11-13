@@ -1,5 +1,5 @@
 @html table
-@styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
 
 [$in title:["Developer documentation"]]
 [$in description:["Compiler and build-system references for contributors and anyone reading Moth's internals."]]

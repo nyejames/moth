@@ -8,7 +8,7 @@
 @automatic-cleanup-and-retained-edges-basic content as automatic_cleanup_and_retained_edges_basic
 @declared-regions content as declared_regions
 @declared-regions-basic content as declared_regions_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

@@ -1,4 +1,4 @@
-@styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
 @wasm-optimisation content as optimisation_content
 
 [$in title:["Wasm optimisation"]]

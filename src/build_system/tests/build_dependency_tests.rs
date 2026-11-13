@@ -1509,7 +1509,7 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        r#"@html canvas, get_canvas_context
+        r#"@html canvas
 [canvas:
   [$in id:unused_canvas]
   [$in style:
@@ -1656,7 +1656,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "@html get_canvas_context\ndraw || -> String, Error!:\n    context = get_canvas_context(\"game_canvas\")!\n    return \"ok\"\n;\nresult = draw() catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
+        "@web/canvas get_canvas, context_2d\ndraw || -> String, Error!:\n    element = get_canvas(\"game_canvas\")!\n    context = context_2d(element)!\n    return \"ok\"\n;\nresult = draw() catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
     )
     .expect("should write page");
 

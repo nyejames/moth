@@ -8,7 +8,7 @@
 @template-scope-basic content as template_scope_basic
 @moth-template-limits content as moth_template_limits
 @moth-template-limits-basic content as moth_template_limits_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

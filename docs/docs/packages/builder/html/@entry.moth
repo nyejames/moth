@@ -1,6 +1,6 @@
 @html-helpers content as html_advanced
 @html-helpers-basic content as html_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,
@@ -9,7 +9,7 @@
     init_docs_sidebar
 
 [$in title:["@html"]]
-[$in description:["Compile-time HTML helpers and canvas wrapper from the HTML builder."]]
+[$in description:["Compile-time HTML markup helpers from the universal Core source package."]]
 [$in head:[language_theme_head]]
 
 [navbar]
@@ -19,7 +19,7 @@ init_docs_sidebar()!
     # @html
 
     `@html` provides compile-time layout and formatting helpers through a
-    source-backed builder package. Each helper remains an ordinary exported
+    source-backed Core package. Each helper remains an ordinary exported
     constant that folds into a `String`, rather than a hidden HTML syntax layer.
 ]
 

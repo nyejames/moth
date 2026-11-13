@@ -8,8 +8,7 @@
 use crate::build_system::output::{
     DEV_OUTPUT_FIELD, RELEASE_OUTPUT_FIELD, ensure_single_output_root_owner,
 };
-use crate::builder_surface::SourceFileKind;
-use crate::builder_surface::SourcePackageRegistry;
+use crate::builder_surface::{PackageOrigin, SourcePackageRegistry};
 use crate::builder_surface::config_schema::{
     ConfigFieldShape, ConfigSchema, ConfigSchemaField, ConfigSchemas, UnknownFieldPolicy,
 };
@@ -65,29 +64,30 @@ pub(crate) enum BuilderSurfaceValidationError {
 
 const BUILTIN_SOURCE_PACKAGES_DIR: &str = "packages";
 
-/// Source package that supplies the compiler-standard flat `.mtf` helper prelude.
-///
-/// WHAT: one fixed source-package prefix whose public compile-time constants are visible by bare
-///       name inside every `.mtf` body.
-/// WHY: the HTML helper prelude is part of the language surface, not a builder-configurable
-///      capability. The prefix is a compiler constant, and the standard HTML builder package set
-///      registers it from the official `packages/html` directory. An SDK builder cannot substitute
-///      another directory: surface validation requires the registered `html` root to equal
-///      [`BuilderSurface::builtin_source_package_root`], and SDK builders enabling `.mtf` without
-///      that package receive a typed capability error instead of a silently reduced scope.
+/// The existing `.mtf` prelude provider. The follow-up migration extends it to `@styles`.
 pub const TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX: &str = "html";
+pub const CORE_SOURCE_PACKAGE_PREFIXES: [&str; 2] = ["html", "styles"];
 
 impl BuilderSurface {
-    /// Builds a builder surface with mandatory compiler core packages and no source-backed packages.
+    /// Builds a builder surface with mandatory compiler core packages.
     ///
-    /// WHAT: the minimal default every builder starts from: prelude, core IO namespace, compiler-owned
-    /// collection helpers, and error helpers.
+    /// WHAT: the minimal default every builder starts from, including source-only HTML and styles.
     /// WHY: user-facing optional core packages such as `@core/math` and `@core/text`
     /// must be explicit builder opt-ins.
     pub fn with_mandatory_core() -> Self {
+        let mut source_packages = SourcePackageRegistry::new();
+        for prefix in CORE_SOURCE_PACKAGE_PREFIXES {
+            source_packages
+                .register_filesystem_root(
+                    prefix,
+                    Self::builtin_source_package_root(prefix),
+                    PackageOrigin::Core,
+                )
+                .expect("the official Core source packages have distinct reserved roots");
+        }
         Self {
             binding_packages: ExternalPackageRegistry::new(),
-            source_packages: SourcePackageRegistry::default(),
+            source_packages,
             config_schemas: ConfigSchemas::new(compiler_project_record_schema()),
             config_globals: BuilderConfigGlobalSet::new(),
             external_import_providers: ExternalImportProviderRegistry::empty(),
@@ -153,48 +153,20 @@ impl BuilderSurface {
                 }
             }
         }
-        // The template prelude belongs to the standard HTML builder package set. A builder may
-        // register `@html`, but only at the official package directory; an SDK builder cannot
-        // substitute an arbitrary directory of constants under that fixed name.
-        if let Some(html_root) = self
-            .source_packages
-            .get_root(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX)
-        {
-            let ProvidedSourceRoot::Filesystem(html_path) = &html_root.root;
-            let standard_root =
-                BuilderSurface::builtin_source_package_root(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX);
-            if html_path != &standard_root {
+        for prefix in CORE_SOURCE_PACKAGE_PREFIXES {
+            let Some(root) = self.source_packages.get_root(prefix) else {
                 return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
-                    "Source package '@{}' is reserved for the standard HTML builder package set; \
-                     the template prelude can only come from the official package at '{}', not \
-                     '{}'. A builder enabling '{}' must use the standard HTML builder package set.",
-                    TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
-                    standard_root.display(),
-                    html_path.display(),
-                    SourceFileKind::MothTemplate.extension()
+                    "Mandatory Core source package '@{prefix}' is missing."
+                )));
+            };
+            let ProvidedSourceRoot::Filesystem(path) = &root.root;
+            if root.metadata.origin != PackageOrigin::Core
+                || path != &Self::builtin_source_package_root(prefix)
+            {
+                return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
+                    "Core source package '@{prefix}' must use its official source root and Core origin."
                 )));
             }
-        }
-        // A builder that accepts `.mtf` sources must provide the compiler-standard template
-        // prelude. The prelude is not configurable, so a missing standard package is a builder
-        // capability error rather than a silently reduced template scope.
-        if self
-            .source_file_kinds
-            .kind_for_extension(SourceFileKind::MothTemplate.extension())
-            == Some(SourceFileKind::MothTemplate)
-            && self
-                .source_packages
-                .get_root(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX)
-                .is_none()
-        {
-            return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
-                "Source file kind '{}' requires the standard HTML builder package set, which \
-                 registers the official '@{}' source package for the template prelude. A custom \
-                 '@{}' source package cannot supply it.",
-                SourceFileKind::MothTemplate.extension(),
-                TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
-                TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX
-            )));
         }
         let binding_paths = self
             .binding_packages

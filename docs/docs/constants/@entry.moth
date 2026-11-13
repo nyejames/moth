@@ -6,7 +6,7 @@
 @const-records-basic content as const_records_basic
 @const-templates content as const_templates
 @const-templates-basic content as const_templates_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

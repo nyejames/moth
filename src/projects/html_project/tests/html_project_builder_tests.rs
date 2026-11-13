@@ -252,16 +252,18 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
         );
     }
 
-    let html_package = frontend_surface
-        .source_packages
-        .get_root("html")
-        .expect("HTML frontend surface should register @html");
-    assert_eq!(
-        html_package.metadata,
-        crate::builder_surface::PackageMetadata::source(
-            crate::builder_surface::PackageOrigin::Builder,
-        )
-    );
+    for prefix in ["html", "styles"] {
+        let core_source = frontend_surface
+            .source_packages
+            .get_root(prefix)
+            .expect("every builder receives official Core source packages");
+        assert_eq!(
+            core_source.metadata,
+            crate::builder_surface::PackageMetadata::source(
+                crate::builder_surface::PackageOrigin::Core,
+            )
+        );
+    }
 
     let site_package = frontend_surface
         .source_packages

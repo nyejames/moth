@@ -205,49 +205,35 @@ fn dependency_origin_is_representable_in_binding_metadata() {
 }
 
 #[test]
-fn template_prelude_accepts_only_the_official_html_root() {
-    use crate::builder_surface::definition::{
-        BuilderSurfaceValidationError, TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
-    };
-    use crate::builder_surface::{BuilderSurface, SourceFileKind};
+fn mandatory_core_registers_official_source_package_roots() {
+    use crate::builder_surface::BuilderSurface;
+    use crate::builder_surface::definition::CORE_SOURCE_PACKAGE_PREFIXES;
+
+    let surface = BuilderSurface::with_mandatory_core();
+    for prefix in CORE_SOURCE_PACKAGE_PREFIXES {
+        let root = surface.source_packages.get_root(prefix).expect("mandatory Core root");
+        assert_eq!(root.metadata, PackageMetadata::source(PackageOrigin::Core));
+        assert!(matches!(
+            &root.root,
+            ProvidedSourceRoot::Filesystem(path)
+                if path == &BuilderSurface::builtin_source_package_root(prefix)
+        ));
+    }
+    surface.validate().expect("Core surface has official roots");
+}
+
+#[test]
+fn mandatory_core_roots_reject_replacement_and_nested_overlaps() {
+    use crate::builder_surface::BuilderSurface;
 
     let mut surface = BuilderSurface::with_mandatory_core();
-    surface
-        .source_file_kinds
-        .register("mtf", SourceFileKind::MothTemplate);
-    surface
-        .source_packages
-        .register_filesystem_root(
-            TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
-            std::path::PathBuf::from("/tmp/custom-html"),
+    for prefix in ["html", "HTML", "html/docs", "styles", "Styles", "styles/docs"] {
+        let error = surface.source_packages.register_filesystem_root(
+            prefix,
+            std::path::PathBuf::from("/tmp/custom-package"),
             PackageOrigin::Builder,
-        )
-        .expect("the registry accepts the reserved prefix; surface validation owns the policy");
-    let error = surface
-        .validate()
-        .expect_err("a custom @html directory cannot supply the template prelude");
-    let message = match error {
-        BuilderSurfaceValidationError::InvalidDefinition(message) => message,
-        other => panic!("expected an invalid-definition capability error, got {other:?}"),
-    };
-    assert!(
-        message.contains("reserved") && message.contains("standard HTML builder package set"),
-        "{message}"
-    );
-
-    let mut surface = BuilderSurface::with_mandatory_core();
-    surface
-        .source_file_kinds
-        .register("mtf", SourceFileKind::MothTemplate);
-    surface
-        .source_packages
-        .register_filesystem_root(
-            TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
-            BuilderSurface::builtin_source_package_root(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX),
-            PackageOrigin::Builder,
-        )
-        .expect("the official HTML root registers");
-    surface
-        .validate()
-        .expect("the standard HTML builder package set supplies the template prelude");
+        );
+        assert!(error.is_err(), "@{prefix} cannot replace a Core source package");
+    }
+    surface.validate().expect("rejected writes preserve official roots");
 }

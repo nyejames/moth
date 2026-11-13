@@ -1,6 +1,6 @@
 @html-components-basic content as components_basic
 @html-components content as components_advanced
-@styles navbar, section, language_theme_head, doc_level, doc_pager, sidebar, init_docs_sidebar
+@docs_styles navbar, section, language_theme_head, doc_level, doc_pager, sidebar, init_docs_sidebar
 
 [$in title:HTML components]
 [$in description:Compose reusable HTML, styles and dependencies using ordinary Moth values.]

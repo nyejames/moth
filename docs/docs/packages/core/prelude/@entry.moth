@@ -1,6 +1,6 @@
 @prelude content as prelude_advanced
 @prelude-basic content as prelude_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

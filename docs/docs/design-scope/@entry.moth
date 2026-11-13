@@ -6,7 +6,7 @@
 @checked-proof-budget-blocks-proposal-basic content as checked_proof_budget_blocks_proposal_basic
 @excluded-language-families content as excluded_language_families
 @excluded-language-families-basic content as excluded_language_families_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

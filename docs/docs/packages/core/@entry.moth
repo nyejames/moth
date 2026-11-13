@@ -1,5 +1,5 @@
-@html center
-@styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
+@styles center
+@docs_styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
 
 [$in title:["Core packages"]]
 [$in description:["Overview of Moth Core packages and their current HTML/JS support."]]

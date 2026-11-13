@@ -1,5 +1,6 @@
-@html center, span
-@styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
+@html span
+@styles center
+@docs_styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Progress Matrix"]]
 [$in description:["Current implementation status, coverage and feature progress for the Moth compiler."]]
