@@ -62,7 +62,7 @@ fn family_layouts_declare_their_word_counts() {
     assert_eq!(USE_OF_UNINITIALIZED_LOCAL.word_count(), 1);
     assert_eq!(COMPILER_CAPACITY_EXCEEDED.word_count(), 1);
     assert_eq!(UNREACHABLE_MATCH_ARM.word_count(), 0);
-    assert_eq!(COMPILE_TIME_EVALUATION_ERROR.word_count(), 3);
+    assert_eq!(COMPILE_TIME_EVALUATION_ERROR.word_count(), 4);
 }
 
 #[test]

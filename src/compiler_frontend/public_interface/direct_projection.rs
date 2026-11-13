@@ -357,7 +357,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
 
         let function_origin_seeds = callable_seeds
             .iter()
-            .filter(|seed| !seed.generic_template)
+            .filter(|seed| !seed.generic_template && seed.evaluation.has_runtime_body())
             .map(|seed| FunctionOriginSeed {
                 path: seed.path,
                 origin: seed.origin.clone(),
@@ -507,6 +507,7 @@ fn project_declaration_records<'a>(
                 let crate::compiler_frontend::ast::ResolvedPublicTypeRootKind::Function {
                     signature,
                     generic_parameter_list_id,
+                    evaluation,
                 } = &root.kind
                 else {
                     return Err(super::type_projection::origin_category_mismatch_error(
@@ -525,6 +526,7 @@ fn project_declaration_records<'a>(
                     function_origin.clone(),
                     *generic_parameter_list_id,
                     signature,
+                    *evaluation,
                     type_context.type_environment,
                     type_context.type_projection_context,
                     &root_table.trait_source_facts,

@@ -9,7 +9,7 @@ use crate::compiler_frontend::ast::const_eval::{
     fold_expression_with_bindings,
 };
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstStringValue, ConstValuePayload, ConstValueStore,
+    ConstExecutionMeter, ConstStringValue, ConstValuePayload, ConstValueStore,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
@@ -33,12 +33,104 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 
 use rustc_hash::FxHashMap;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+
+/// Executes required const calls in one TIR expression site at the moment the fold selects it.
+///
+/// WHAT: gives the const executor a callback at the exact selected expression site.
+/// WHY: a template call inside a branch or loop body can only run with that site's active
+///      bindings; pre-rewriting every collected site would execute inactive branches and fail
+///      loop-body references before their bindings exist.
+pub(crate) trait RequiredCallSiteRewriter {
+    fn rewrite_site(
+        &mut self,
+        expression: ExprId,
+        expression_builder: &mut AstExpressionBuilder,
+        const_values: &mut ConstValueStore,
+        string_table: &mut StringTable,
+        source_scope: Option<&ScopeContext>,
+        bindings: &[TemplateFoldBinding],
+    ) -> Result<ExprId, ConstantFoldError>;
+}
+
+/// Byte and structural-piece ceilings supplied by a bounded consumer, with the charges already
+/// accumulated against them.
+///
+/// WHY: a template loop can multiply one retained string far beyond the instruction budget. The
+/// reducer checks these before reserving or appending output, so a bounded caller fails at the
+/// owning budget instead of exhausting memory.
+#[derive(Clone, Debug)]
+pub(crate) struct TemplateOutputLimits {
+    /// Remaining byte allowance for this fold.
+    pub(crate) max_bytes: usize,
+    /// Full byte ceiling that controls the remaining allowance.
+    pub(crate) byte_limit: usize,
+    pub(crate) byte_aggregate: bool,
+    /// Remaining structural-piece allowance for this fold.
+    pub(crate) max_structural_pieces: usize,
+    /// Full structural-piece ceiling that controls the remaining allowance.
+    pub(crate) piece_limit: usize,
+    pub(crate) piece_aggregate: bool,
+    pub(crate) span: Option<SourceSpan>,
+    /// Charges accumulated by every reducer output state below this consumer.
+    ///
+    /// WHY: a loop folds each iteration into a fresh output state and wrappers add levels of
+    /// their own. Per-state counters would restart at zero for each of them and let their
+    /// combined output pass the consumer's ceiling.
+    pub(crate) meter: Rc<TemplateOutputMeter>,
+}
+
+/// Running output totals for one bounded template fold.
+///
+/// WHAT: counts the bytes and structural pieces the reducer materialises for one consumer.
+/// WHY: the charge must be cumulative across every iteration and nested level of that fold, while
+/// each retained copy is still charged exactly once: the state that first materialises it pays,
+/// and an enclosing state that concatenates the finished emission does not.
+#[derive(Debug, Default)]
+pub(crate) struct TemplateOutputMeter {
+    pub(crate) retained_bytes: Cell<usize>,
+    pub(crate) retained_pieces: Cell<usize>,
+}
+
+impl TemplateOutputMeter {
+    /// Adds the bytes of one materialised copy and returns the fold's running total.
+    pub(crate) fn charge_bytes(&self, bytes: usize) -> usize {
+        let total = self.retained_bytes.get().saturating_add(bytes);
+        self.retained_bytes.set(total);
+        total
+    }
+
+    /// Adds one retained structural piece and returns the fold's running total.
+    pub(crate) fn charge_piece(&self) -> usize {
+        let total = self.retained_pieces.get().saturating_add(1);
+        self.retained_pieces.set(total);
+        total
+    }
+}
+
+/// Shared work meter for one bounded const-execution template fold.
+///
+/// WHY: template loops can execute many low-output iterations. The reducer charges each iteration
+/// to the same aggregate execution meter required calls use, so total work stays bounded even
+/// when the output ceiling is never reached. Attempt and aggregate limits are read from that
+/// shared meter rather than copied here.
+#[derive(Clone, Debug)]
+pub(crate) struct TemplateWorkBudget {
+    pub(crate) meter: Rc<RefCell<ConstExecutionMeter>>,
+    pub(crate) attempt_steps: Rc<Cell<usize>>,
+    pub(crate) span: Option<SourceSpan>,
+}
 
 pub(crate) struct TirFoldContext<'a> {
     pub string_table: &'a mut StringTable,
     pub expression_builder: &'a mut AstExpressionBuilder,
     pub const_values: &'a mut ConstValueStore,
     pub template_const_loop_iteration_limit: usize,
+    /// Optional output ceiling for a bounded const-execution attempt.
+    pub(crate) template_output_limits: Option<TemplateOutputLimits>,
+    /// Optional work meter for a bounded const-execution template fold.
+    pub(crate) template_work: Option<TemplateWorkBudget>,
     pub(crate) bindings: Vec<TemplateFoldBinding>,
     pub(crate) source_scope: Option<&'a ScopeContext>,
     pub(crate) external_package_registry: Option<&'a ExternalPackageRegistry>,
@@ -53,6 +145,8 @@ pub(crate) struct TirFoldContext<'a> {
     /// and templates without inherited wrappers allocate none.
     pub(crate) prepared_wrapper_slot_routing:
         FxHashMap<TemplateWrapperReference, WrapperSlotRouting>,
+    /// Optional executor callback for selected required-call expression sites.
+    pub(crate) required_call_rewriter: Option<&'a mut dyn RequiredCallSiteRewriter>,
 }
 
 /// Structural no-output is distinct from an emitted empty string for parent wrappers.
@@ -120,9 +214,12 @@ impl<'a> TirFoldContext<'a> {
             const_values,
             external_package_registry,
             template_const_loop_iteration_limit,
+            template_output_limits: None,
+            template_work: None,
             bindings: Vec::new(),
             source_scope: None,
             prepared_wrapper_slot_routing: FxHashMap::default(),
+            required_call_rewriter: None,
         }
     }
 }
@@ -143,9 +240,19 @@ impl TirFoldContext<'_> {
 }
 
 pub(crate) fn resolve_fold_bindings_in_expression(
-    expression: ExprId,
+    mut expression: ExprId,
     fold_context: &mut TirFoldContext<'_>,
 ) -> Result<BindingFoldResult, TemplateError> {
+    if let Some(rewriter) = fold_context.required_call_rewriter.as_deref_mut() {
+        expression = rewriter.rewrite_site(
+            expression,
+            fold_context.expression_builder,
+            fold_context.const_values,
+            fold_context.string_table,
+            fold_context.source_scope,
+            &fold_context.bindings,
+        )?;
+    }
     let original = fold_context.expression_builder.view(expression)?;
     if let ExpressionOperationView::Reference(path) = original.operation()
         && let Some(binding) = fold_context

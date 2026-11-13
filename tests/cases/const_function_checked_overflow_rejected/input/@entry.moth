@@ -1,0 +1,5 @@
+add_one #|value I32| -> I32:
+    return value + 1
+;
+
+result #I32 = add_one(2147483647)

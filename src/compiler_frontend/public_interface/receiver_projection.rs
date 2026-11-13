@@ -33,6 +33,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::semantic_identity::{
@@ -64,6 +65,8 @@ pub(crate) struct CallableSeed {
     pub(crate) path: PathId,
     pub(crate) origin: OriginFunctionId,
     pub(crate) generic_template: bool,
+    /// Whether the callable requires compile-time evaluation.
+    pub(crate) evaluation: CallableEvaluation,
     pub(crate) kind: CallableSeedKind,
 }
 
@@ -137,6 +140,7 @@ pub(crate) fn build_callable_seed_table(
         let root = root_index.take_for_binding(binding)?;
         if let ResolvedPublicTypeRootKind::Function {
             generic_parameter_list_id,
+            evaluation,
             ..
         } = &root.kind
         {
@@ -148,6 +152,7 @@ pub(crate) fn build_callable_seed_table(
                 root.path,
                 function_origin.clone(),
                 generic_parameter_list_id.is_some(),
+                *evaluation,
                 CallableSeedKind::FreeFunction,
             )?;
         }
@@ -226,6 +231,7 @@ pub(crate) fn build_callable_seed_table(
                 entry.function_path,
                 method_origin,
                 generic_template,
+                CallableEvaluation::Runtime,
                 CallableSeedKind::ReceiverMethod {
                     receiver_origin: receiver_origin.clone(),
                     method_index,
@@ -251,6 +257,7 @@ fn push_seed(
     path: PathId,
     origin: OriginFunctionId,
     generic_template: bool,
+    evaluation: CallableEvaluation,
     kind: CallableSeedKind,
 ) -> Result<(), InfrastructureFailure> {
     if seeds.iter().any(|existing| existing.origin == origin) {
@@ -275,6 +282,7 @@ fn push_seed(
         path,
         origin,
         generic_template,
+        evaluation,
         kind,
     });
     Ok(())

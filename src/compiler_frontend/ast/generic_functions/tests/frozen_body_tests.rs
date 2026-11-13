@@ -1728,7 +1728,7 @@ fn detachment_releases_recursive_lookup_owners_before_ast_lowering() {
         concrete_call_summaries: Vec::new(),
     };
     let frozen = prepared
-        .freeze(&[&public_interface])
+        .freeze(&[&public_interface], &FxHashMap::default())
         .expect("detached inputs should freeze without their lookup owners")
         .expect("draw retains a frozen provider");
 
@@ -1831,6 +1831,7 @@ fn detachment_releases_recursive_lookup_owners_before_ast_lowering() {
                         build_profile: requester.build_profile,
                         template_const_loop_iteration_limit: requester
                             .template_const_loop_iteration_limit,
+                        const_execution_limits: Default::default(),
                         #[cfg(feature = "timers")]
                         timing_context: None,
                     },
@@ -1941,6 +1942,7 @@ fn published_siblings_materialise_independently_and_leave_the_retained_context_f
                     template_const_loop_iteration_limit: fixture
                         .preparation
                         .template_const_loop_iteration_limit,
+                    const_execution_limits: Default::default(),
                     #[cfg(feature = "timers")]
                     timing_context: None,
                 },
@@ -2148,7 +2150,7 @@ fn resource_default_materialisation_fixture(
         .expect("generic resource default should detach");
     let preparation = prepared.context().clone();
     let context = prepared
-        .freeze(&[&public_interface])
+        .freeze(&[&public_interface], &FxHashMap::default())
         .expect("generic resource default should freeze")
         .expect("the retained generic should produce a materialisation context");
     let identity = GeneratedFunctionIdentity::new(
@@ -2400,7 +2402,7 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
         .expect("generic resource body should detach");
     let preparation = prepared.context().clone();
     let context = prepared
-        .freeze(&[&public_interface])
+        .freeze(&[&public_interface], &FxHashMap::default())
         .expect("generic resource body should freeze")
         .expect("the retained generic should produce a materialisation context");
     let identity = GeneratedFunctionIdentity::new(
@@ -2515,6 +2517,7 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
                 template_const_loop_iteration_limit: fixture
                     .preparation
                     .template_const_loop_iteration_limit,
+                const_execution_limits: Default::default(),
                 #[cfg(feature = "timers")]
                 timing_context: None,
             },
@@ -2647,6 +2650,7 @@ fn const_template_parameter_default_survives_detach_freeze_and_sidecar_local_reb
                 style_directives: &requester.style_directives,
                 build_profile: requester.build_profile,
                 template_const_loop_iteration_limit: requester.template_const_loop_iteration_limit,
+                const_execution_limits: Default::default(),
                 #[cfg(feature = "timers")]
                 timing_context: None,
             },
@@ -2877,6 +2881,7 @@ fn frozen_resource_body_materialises_into_a_sidecar_local_table() {
                 template_const_loop_iteration_limit: fixture
                     .preparation
                     .template_const_loop_iteration_limit,
+                const_execution_limits: Default::default(),
                 #[cfg(feature = "timers")]
                 timing_context: None,
             },
@@ -2968,6 +2973,7 @@ fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
                     template_const_loop_iteration_limit: fixture
                         .preparation
                         .template_const_loop_iteration_limit,
+                    const_execution_limits: Default::default(),
                     #[cfg(feature = "timers")]
                     timing_context: None,
                 },
@@ -3138,6 +3144,7 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
                     template_const_loop_iteration_limit: fixture
                         .preparation
                         .template_const_loop_iteration_limit,
+                    const_execution_limits: Default::default(),
                     #[cfg(feature = "timers")]
                     timing_context: None,
                 },
@@ -3679,6 +3686,7 @@ pub(super) fn materialise_closure_request(
             None,
             strings,
             paths,
+            Default::default(),
             #[cfg(feature = "timers")]
             None,
         )
@@ -4114,6 +4122,7 @@ fn parse_closure_files(files: &[(&str, &str)]) -> (AstBuildResult, PathInternerF
                 public_source_trait_origins: Arc::default(),
                 build_config_values: Arc::new(Default::default()),
                 builder_root_slots: None,
+                provider_materialisations: None,
             },
             #[cfg(feature = "timers")]
             None,
@@ -4482,6 +4491,7 @@ fn repeated_bounded_forwarding_preserves_bodyless_receiver_parameter_owner() {
                 None,
                 &mut strings,
                 &mut paths,
+                Default::default(),
                 #[cfg(feature = "timers")]
                 None,
             )

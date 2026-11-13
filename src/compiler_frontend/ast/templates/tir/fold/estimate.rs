@@ -1,6 +1,7 @@
 //! Output reservation estimates for the TIR fold reducer.
 
 use crate::compiler_frontend::ast::templates::error::TemplateError;
+use crate::compiler_frontend::ast::templates::template_folding::TemplateOutputLimits;
 use crate::compiler_frontend::ast::templates::tir::ids::TemplateIrNodeId;
 use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
@@ -32,6 +33,20 @@ pub(super) fn record_tir_fold_output_estimate_miss(actual_len: usize, estimated_
             AstCounter::TemplateFoldOutputEstimateMissBytes,
             actual_len - estimated_bytes,
         );
+    }
+}
+
+/// Caps a reservation at a bounded consumer's remaining byte allowance.
+///
+/// WHY: const-function template folds must never allocate past the configured memory limit
+///      before the output charge reports exhaustion. Ordinary folds have no limits.
+pub(super) fn bounded_output_estimate(
+    estimated_bytes: usize,
+    limits: Option<&TemplateOutputLimits>,
+) -> usize {
+    match limits {
+        Some(limits) => estimated_bytes.min(limits.max_bytes),
+        None => estimated_bytes,
     }
 }
 

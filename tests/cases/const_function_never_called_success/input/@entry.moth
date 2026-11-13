@@ -1,0 +1,6 @@
+square #|value I32| -> I32:
+    assert(false, "an uncalled const body must never execute")
+    return value * value
+;
+
+~[: const function never called ]

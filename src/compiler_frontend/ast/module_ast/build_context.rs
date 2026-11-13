@@ -28,8 +28,12 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::build_config::{
     BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
 };
+use crate::compiler_frontend::builder_root_slots::BuilderRootSlotSchema;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::module_compilation::{
+    ConstExecutionLimits, ProviderMaterialisationRegistry,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -175,11 +179,21 @@ pub(in crate::compiler_frontend) struct AstBuildContext<'a> {
     /// Named destinations the active builder registers for direct top-level const contributions.
     ///
     /// `None` for AST work with no builder input, such as config-only or generated-only builds.
-    pub builder_root_slots:
-        Option<&'a crate::compiler_frontend::builder_root_slots::BuilderRootSlotSchema>,
+    pub builder_root_slots: Option<&'a BuilderRootSlotSchema>,
+
+    /// Completed provider materialisation contexts published earlier in this compilation
+    /// boundary.
+    ///
+    /// WHAT: lets imported const callables recover their retained provider body before constant
+    ///       initializers fold.
+    /// WHY: generic materialisation resolves this registry after AST construction; const calls
+    ///      fold during environment construction, so the same registry is borrowed here.
+    pub provider_materialisations: Option<&'a ProviderMaterialisationRegistry>,
 
     /// Per-loop expansion limit for compile-time template loops.
     pub template_const_loop_iteration_limit: usize,
+    /// Configured work and retained-memory allowances for const execution.
+    pub const_execution_limits: ConstExecutionLimits,
 
     /// Module-level frontend arena capacity policy gathered before AST construction.
     pub capacity_estimate: FrontendArenaCapacityEstimate,
@@ -216,6 +230,8 @@ pub(crate) struct AstPhaseContext<'a> {
     /// Named destinations the active builder registers for direct top-level const contributions.
     pub(crate) builder_root_slots:
         Option<&'a crate::compiler_frontend::builder_root_slots::BuilderRootSlotSchema>,
+    /// Completed provider materialisation contexts available at environment construction.
+    pub(crate) provider_materialisations: Option<&'a ProviderMaterialisationRegistry>,
     /// Names of source `$config` contracts declared by this module.
     pub(crate) source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
     pub(crate) synthesizes_entry_start: bool,
@@ -263,7 +279,9 @@ impl<'a> AstPhaseContext<'a> {
             config_resolution,
             build_config_values,
             builder_root_slots,
+            provider_materialisations,
             template_const_loop_iteration_limit,
+            const_execution_limits,
             capacity_estimate,
             #[cfg(feature = "timers")]
             timing_context,
@@ -275,6 +293,8 @@ impl<'a> AstPhaseContext<'a> {
             capacity_estimate,
         )));
         let expression_builder = AstExpressionBuilder::with_capacity_estimate(capacity_estimate)?;
+        let mut const_values = ConstValueStore::default();
+        const_values.set_const_execution_limits(const_execution_limits);
         Ok((
             Self {
                 external_package_registry,
@@ -286,12 +306,13 @@ impl<'a> AstPhaseContext<'a> {
                 config_resolution,
                 build_config_values,
                 builder_root_slots,
+                provider_materialisations,
                 source_build_config_contract_names,
                 template_const_loop_iteration_limit,
                 capacity_estimate,
                 template_ir_store,
                 expression_builder,
-                const_values: ConstValueStore::default(),
+                const_values,
                 #[cfg(feature = "timers")]
                 timing_context,
                 #[cfg(feature = "timers")]

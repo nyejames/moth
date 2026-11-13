@@ -1,0 +1,17 @@
+-- Declaring a const function must not force unrelated runtime templates through required-mode
+-- preparation or replace their dynamic loops. The loop input is built at runtime, so a static
+-- replacement would drop or duplicate an item.
+
+helper #|| -> I32:
+    return 1
+;
+
+render |items {I32}| -> String:
+    return [: [loop items |item|:[item];] ]
+;
+
+values ~= {1}
+~values.push(2)
+~values.push(3)
+
+~[: [render(values)] ]

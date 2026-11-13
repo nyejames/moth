@@ -1,0 +1,5 @@
+project #= (
+    name = "release_budget_note",
+    const_work_limit = 100,
+)
+html #= ()

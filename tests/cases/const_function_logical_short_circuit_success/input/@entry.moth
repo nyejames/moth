@@ -1,0 +1,18 @@
+-- A short-circuited right operand must not execute its const call or failing assertion.
+
+verify #|value I32| -> Bool:
+    assert(value > 0, "right operand executed")
+    return true
+;
+
+guard #|flag Bool, value I32| -> Bool:
+    return flag and verify(value)
+;
+
+either #|flag Bool, value I32| -> Bool:
+    return flag or verify(value)
+;
+
+left #Bool = guard(false, 0)
+right #Bool = either(true, 0)
+~[: [left] [right]]

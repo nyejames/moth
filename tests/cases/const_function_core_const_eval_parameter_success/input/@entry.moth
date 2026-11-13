@@ -1,0 +1,9 @@
+@core/text
+
+measure #|value String| -> I32:
+    return text.length(value)
+;
+
+result #I32 = measure("a😊b")
+
+io.line([: length=[result] ])

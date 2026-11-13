@@ -31,12 +31,15 @@ pub(crate) use instances::{
     GenericFunctionInstance, GenericFunctionInstanceKey, GenericFunctionInstantiationRequest,
     GenericRequestRange, GenericRequestSlot, GenericRequestTicket, IfGenericRequestRanges,
 };
+#[cfg(test)]
+pub(crate) use materialisation::reuse_probe;
 pub(crate) use materialisation::{
-    MaterialisedGenericAst, ModuleMaterialisationCapture, ModuleMaterialisationContext,
-    ModuleMaterialisationEnvironmentInput, ModuleMaterialisationInput,
-    ModuleMaterialisationPreparation, ModuleMaterialisationPreparationBuilder,
-    ModuleMaterialisationPreparedBuilder, StableFunctionTarget,
-    bootstrap_call_summary_from_signature,
+    ConstFunctionMaterialisationTarget, MaterialisedGenericAst, ModuleMaterialisationCapture,
+    ModuleMaterialisationContext, ModuleMaterialisationEnvironmentInput,
+    ModuleMaterialisationInput, ModuleMaterialisationPreparation,
+    ModuleMaterialisationPreparationBuilder, ModuleMaterialisationPreparedBuilder,
+    StableFunctionTarget, bootstrap_call_summary_from_signature,
+    materialise_imported_const_function,
 };
 pub(crate) use receiver_method_instantiation::{
     GenericReceiverMethodInstantiationInput, GenericReceiverMethodReceiver,

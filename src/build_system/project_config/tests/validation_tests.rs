@@ -44,6 +44,7 @@ use crate::compiler_frontend::folded_value::{
     PublicConstTemplatePiece, PublicConstTemplateSlot, PublicFoldedField, PublicFoldedValue,
     PublicTemplateSlotKey,
 };
+use crate::compiler_frontend::module_compilation::ConstExecutionLimits;
 use crate::compiler_frontend::single_source_compilation::{
     CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest,
     FoldedConfigDeclaration, compile_config_source,
@@ -1813,6 +1814,67 @@ fn project_loop_limit_preserves_resource_bound_diagnostics() {
     );
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
     assert_eq!(config.template_const_loop_iteration_limit, 1_000_000);
+}
+
+#[test]
+fn const_execution_limits_apply_defaults_and_bounds() {
+    let mut string_table = StringTable::new();
+    let (config, errors) = validate_and_apply(
+        vec![("project", record(vec![("name", text("docs"))]))],
+        &mut string_table,
+    );
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+    assert_eq!(
+        config.const_execution_limits,
+        ConstExecutionLimits::default()
+    );
+
+    let mut string_table = StringTable::new();
+    let (config, errors) = validate_and_apply(
+        vec![(
+            "project",
+            record(vec![
+                ("name", text("docs")),
+                ("const_work_limit", int(10)),
+                ("const_memory_limit_mb", int(2)),
+            ]),
+        )],
+        &mut string_table,
+    );
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+    // Per-attempt allowances and the module-wide totals they derive are pinned to literal
+    // values, so the aggregate multiplier and the clamped constructor cannot drift unnoticed.
+    assert_eq!(config.const_execution_limits.max_attempt_steps, 10);
+    assert_eq!(config.const_execution_limits.max_total_steps, 80);
+    assert_eq!(
+        config.const_execution_limits.max_attempt_memory_bytes,
+        2 * 1024 * 1024
+    );
+    assert_eq!(
+        config.const_execution_limits.max_total_memory_bytes,
+        16 * 1024 * 1024
+    );
+
+    for (key, value) in [
+        ("const_work_limit", 0),
+        ("const_work_limit", 16_000_001),
+        ("const_memory_limit_mb", 0),
+        ("const_memory_limit_mb", 257),
+    ] {
+        let mut string_table = StringTable::new();
+        let (_, errors) = validate_and_apply(
+            vec![(
+                "project",
+                record(vec![("name", text("docs")), (key, int(value))]),
+            )],
+            &mut string_table,
+        );
+        assert_eq!(
+            first_invalid_facts(&errors).reason,
+            InvalidConfigCode::InvalidProjectSettingValue,
+            "expected a bound diagnostic for {key}={value}, got {errors:?}"
+        );
+    }
 }
 
 #[test]

@@ -31,7 +31,9 @@ use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnos
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
-use crate::compiler_frontend::module_compilation::DEFAULT_MAX_ERRORS_PER_MODULE;
+use crate::compiler_frontend::module_compilation::{
+    ConstExecutionLimits, DEFAULT_MAX_ERRORS_PER_MODULE,
+};
 use crate::compiler_frontend::single_source_compilation::{
     CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest, compile_config_source,
 };
@@ -205,6 +207,7 @@ fn reset_project_config_state(config: &mut Config) {
     config.builder_settings = BuilderSettings::default();
     config.max_errors_per_module = Some(DEFAULT_MAX_ERRORS_PER_MODULE);
     config.max_errors_per_project = Some(DEFAULT_MAX_ERRORS_PER_PROJECT);
+    config.const_execution_limits = ConstExecutionLimits::default();
 }
 
 /// Apply the selected directory name as the default project identity.

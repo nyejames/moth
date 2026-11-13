@@ -140,10 +140,16 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 )?;
             }
 
-            TokenTag::TYPE_PARAMETER_BRACKET
+            // `#|` begins a const function signature. The const marker terminates the generic
+            // clause without consuming it, so `name type A #|value A| -> A` parses as one
+            // declaration and the unsupported generic-const form reaches its typed rejection.
+            tag @ (TokenTag::TYPE_PARAMETER_BRACKET
+            | TokenTag::HASH
             | TokenTag::ASSIGN
             | TokenTag::DOUBLE_COLON
-            | TokenTag::AS => {
+            | TokenTag::AS)
+                if !is_bare_hash_separator(tag, token_stream) =>
+            {
                 if parameters.is_empty() {
                     return Err(generics_traits_api::invalid_generic_parameter(
                         InvalidGenericParameterReason::EmptyParameterList,
@@ -362,6 +368,20 @@ fn ensure_trait_bound_name_is_all_caps(
         Some(trait_name),
         span,
     ))
+}
+
+/// Whether this `#` is a bare hash rather than the `#|` const marker.
+///
+/// WHAT: true for a `#` whose next token is not the parameter bracket.
+/// WHY: the terminating arm below runs for every listed tag except a bare `#`. `#|` ends the
+///      generic clause and is left for the signature parser; a bare `#` skips the arm and reaches
+///      the fallback arm, which rejects it. This predicate naming the bare form is what the arm
+///      guard negates.
+fn is_bare_hash_separator(tag: TokenTag, token_stream: &DeclarationCursor<'_>) -> bool {
+    tag == TokenTag::HASH
+        && !token_stream
+            .token_ref_at_offset(1)
+            .is_some_and(|token| token.tag() == TokenTag::TYPE_PARAMETER_BRACKET)
 }
 
 fn with_current_token_span(

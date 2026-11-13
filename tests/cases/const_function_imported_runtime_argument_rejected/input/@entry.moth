@@ -1,0 +1,5 @@
+@square square
+
+runtime_value = 4
+result = square(runtime_value)
+io.line(result)

@@ -1,0 +1,17 @@
+copy_case #|| -> I32:
+    values ~= {1}
+    copied ~= copy values
+    ~copied.push(2)
+    return values.length()
+;
+
+runtime_copy || -> I32:
+    values ~= {1}
+    copied ~= copy values
+    ~copied.push(2)
+    return values.length()
+;
+
+a = copy_case()
+b = runtime_copy()
+~[: a=[a] b=[b]]

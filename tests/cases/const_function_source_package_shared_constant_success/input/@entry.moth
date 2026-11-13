@@ -1,0 +1,6 @@
+@helper add_one, double_add_one
+
+first #I32 = add_one(1)
+second #I32 = double_add_one(1)
+
+[: first=[first] second=[second] ]

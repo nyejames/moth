@@ -1,0 +1,12 @@
+choose #|flag Bool| -> I32:
+    if flag:
+        return 1
+    else
+        return 2
+    ;
+;
+
+first #I32 = choose(true)
+second #I32 = choose(false)
+
+io.line([: first=[first] second=[second] ])

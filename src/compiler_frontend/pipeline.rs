@@ -46,7 +46,9 @@ use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::hir_builder::lower_module_with_owner;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
-use crate::compiler_frontend::module_compilation::{AstRecoveryPolicy, FrontendOptions};
+use crate::compiler_frontend::module_compilation::{
+    AstRecoveryPolicy, FrontendOptions, ProviderMaterialisationRegistry,
+};
 use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, SortedHeaders, resolve_module_dependencies,
 };
@@ -202,6 +204,8 @@ pub(crate) struct AstBuildRequest<'a> {
         Arc<crate::compiler_frontend::build_config::ResolvedBuildConfigMap>,
     /// Named destinations the active builder registers for direct top-level const contributions.
     pub(crate) builder_root_slots: Option<&'a BuilderRootSlotSchema>,
+    /// Provider materialisation contexts published earlier in this boundary.
+    pub(crate) provider_materialisations: Option<&'a ProviderMaterialisationRegistry>,
 }
 
 /// Resolve the registered logical path and source identity for one prepared source path.
@@ -550,6 +554,7 @@ impl<'a> CompilerFrontend<'a> {
             public_source_trait_origins,
             build_config_values,
             builder_root_slots,
+            provider_materialisations,
         } = request;
 
         let entry_dir = match self.source_files.get_by_canonical_path(module_anchor_path) {
@@ -610,9 +615,11 @@ impl<'a> CompilerFrontend<'a> {
                 config_resolution: None,
                 build_config_values,
                 builder_root_slots,
+                provider_materialisations,
                 template_const_loop_iteration_limit: self
                     .options
                     .template_const_loop_iteration_limit,
+                const_execution_limits: self.options.const_execution_limits,
                 capacity_estimate,
                 #[cfg(feature = "timers")]
                 timing_context,

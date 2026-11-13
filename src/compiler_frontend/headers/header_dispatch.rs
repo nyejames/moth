@@ -12,6 +12,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, InvalidConfigReason, InvalidDeclarationReason,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterList;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
@@ -22,7 +23,7 @@ use crate::compiler_frontend::declaration_syntax::declaration_shell::{
 };
 use crate::compiler_frontend::declaration_syntax::generic_parameters::parse_generic_parameter_list_after_type_keyword;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
-    SignatureMemberSyntax, parse_function_signature_syntax,
+    SignatureMemberSyntax, parse_function_signature_syntax_with_evaluation,
 };
 
 use crate::compiler_frontend::declaration_syntax::r#struct::parse_struct_shell;
@@ -208,9 +209,18 @@ pub(super) fn create_header(
     let mut capacity_references: Vec<InitializerReference> = Vec::new();
     let mut local_ordering_hints: HashSet<LocalDeclarationOrderingHint> = HashSet::new();
     let generic_parameters = parse_optional_generic_parameters(cursor, file_id, context)?;
-    let current_tag = source_tag_at_cursor(cursor, file_id)?;
+    let mut current_tag = source_tag_at_cursor(cursor, file_id)?;
     let next_tag = source_next_tag(cursor, file_id)?;
     let mut body_range = empty_token_range(cursor, file_id)?;
+
+    // `#|` marks a const function. The `#` token itself carries no semantic payload, so consume
+    // it and let the ordinary function arm parse the shared parameter and return grammar.
+    let mut evaluation = CallableEvaluation::Runtime;
+    if current_tag == TokenTag::HASH && next_tag == Some(TokenTag::TYPE_PARAMETER_BRACKET) {
+        cursor.advance();
+        current_tag = TokenTag::TYPE_PARAMETER_BRACKET;
+        evaluation = CallableEvaluation::Const;
+    }
 
     if current_tag == TokenTag::OF {
         if !generic_parameters.is_empty() {
@@ -416,12 +426,13 @@ pub(super) fn create_header(
             );
             let (signature, cursor_position) = {
                 let mut declaration_cursor = DeclarationCursor::new(*cursor);
-                let signature = parse_function_signature_syntax(
+                let signature = parse_function_signature_syntax_with_evaluation(
                     &mut declaration_cursor,
                     context.warnings,
                     context.string_table,
                     full_name,
                     context.path_fork,
+                    evaluation,
                 )?;
                 let cursor_position = declaration_cursor.canonical_cursor().position();
                 (signature, cursor_position)

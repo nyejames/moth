@@ -1246,6 +1246,11 @@ pub enum InvalidDeclarationReason {
     TraitIncompatibilitySemicolon,
     MissingInitializerExpression,
     DeclarationRequiresModuleTopLevel,
+    ConstFunctionCannotBeGeneric,
+    ConstFunctionCannotBeReceiverMethod,
+    ConstFunctionUnsupportedParameter { parameter_name: StringId },
+    ConstFunctionCannotReturnError,
+    ConstFunctionCannotReturnNever,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1756,6 +1761,13 @@ pub enum CompileTimeEvaluationErrorReason {
     ConstantSelfReference,
     ConstantNotVisible,
     NonConstantReferenceInConstant,
+    ConstCallRequiresConstantArguments,
+    ConstFunctionRuntimeOperation,
+    ConstFunctionExecutionUnsupported,
+    ConstWorkLimitExceeded,
+    ConstMemoryLimitExceeded,
+    ConstHardSafetyLimitExceeded,
+    ConstAssertionFailed,
     SameFileForwardConstantReference,
     ConstantInitializerNotFoldable,
     ExternalNonScalarConstantInConstantContext,
@@ -2168,6 +2180,7 @@ pub enum InvalidStatementPositionReason {
     UnexpectedOf,
     UnexpectedScopeCloseInExpression,
     UnexpectedScopeCloseInTemplate,
+    UnexpectedScopeCloseAtTopLevel,
 }
 
 /// WHAT: the exact symbolic construct whose whitespace is wrong.

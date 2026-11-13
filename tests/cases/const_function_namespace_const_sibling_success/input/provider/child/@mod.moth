@@ -1,0 +1,9 @@
+$export
+count #|value I32| -> I32:
+    return value + 1
+;
+
+$export
+label #|value I32| -> String:
+    return [:[value]]
+;

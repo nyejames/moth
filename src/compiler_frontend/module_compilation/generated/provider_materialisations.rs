@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::generic_functions::{
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
+use crate::compiler_frontend::semantic_identity::{GeneratedDeclarationIdentity, OriginFunctionId};
 
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
@@ -33,6 +33,15 @@ pub(crate) struct PublishedMaterialisation {
     pub(crate) rebase_required: bool,
 }
 
+/// One published const function body row and the declaring context that owns it.
+#[derive(Clone)]
+pub(crate) struct PublishedConstFunction {
+    pub(crate) context: Arc<ModuleMaterialisationContext>,
+    pub(crate) row_index: usize,
+    /// See [`PublishedMaterialisation::rebase_required`].
+    pub(crate) rebase_required: bool,
+}
+
 /// Every declaring-module materialisation template published in one compilation boundary.
 ///
 /// Entries are shared by `Arc`, so the registry keeps resolving correctly as the build system's
@@ -40,6 +49,7 @@ pub(crate) struct PublishedMaterialisation {
 #[derive(Default)]
 pub(crate) struct ProviderMaterialisationRegistry {
     published: FxHashMap<GeneratedDeclarationIdentity, PublishedMaterialisation>,
+    const_functions: FxHashMap<OriginFunctionId, PublishedConstFunction>,
 }
 
 impl ProviderMaterialisationRegistry {
@@ -116,6 +126,10 @@ impl ProviderMaterialisationRegistry {
         rebase_required: bool,
     ) -> Result<(), InfrastructureFailure> {
         let rows: Vec<_> = context.declaration_rows().collect();
+        let const_rows: Vec<_> = context
+            .const_function_rows()
+            .map(|(origin, row_index)| (origin.clone(), row_index))
+            .collect();
         let mut pending = FxHashMap::default();
         for (identity, template_index) in &rows {
             self.preflight_publish(identity, context, *template_index)?;
@@ -124,7 +138,7 @@ impl ProviderMaterialisationRegistry {
                     return Err(InfrastructureFailure::internal(
                         CompilerStage::ProjectBuildAssembly,
                         format!(
-                            "Generated declaration identity {:?} was published by multiple declaring contexts in one compilation boundary",
+                            "Generated declaration identity {:?} was published by multiple rows in one declaring context",
                             identity
                         ),
                     ));
@@ -133,15 +147,72 @@ impl ProviderMaterialisationRegistry {
                 pending.insert(*identity, *template_index);
             }
         }
+        let mut pending_consts = FxHashMap::default();
+        for (origin, row_index) in &const_rows {
+            self.preflight_const_function(origin, context, *row_index)?;
+            if let Some(&existing_index) = pending_consts.get(origin) {
+                if existing_index != *row_index {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "Const function origin {:?} was published by multiple rows in one declaring context",
+                            origin
+                        ),
+                    ));
+                }
+            } else {
+                pending_consts.insert(origin.clone(), *row_index);
+            }
+        }
+        // Every row passed preflight above, so record them without re-running those checks.
         for (identity, template_index) in rows {
-            self.publish(
-                identity.clone(),
-                Arc::clone(context),
-                template_index,
-                rebase_required,
-            )?;
+            self.published
+                .entry(identity.clone())
+                .or_insert(PublishedMaterialisation {
+                    context: Arc::clone(context),
+                    template_index,
+                    rebase_required,
+                });
+        }
+        for (origin, row_index) in const_rows {
+            self.const_functions
+                .entry(origin)
+                .or_insert(PublishedConstFunction {
+                    context: Arc::clone(context),
+                    row_index,
+                    rebase_required,
+                });
         }
         Ok(())
+    }
+
+    /// Diagnose a const function row collision without mutating the registry.
+    fn preflight_const_function(
+        &self,
+        origin: &OriginFunctionId,
+        context: &Arc<ModuleMaterialisationContext>,
+        row_index: usize,
+    ) -> Result<(), InfrastructureFailure> {
+        if let Some(existing) = self.const_functions.get(origin)
+            && !(Arc::ptr_eq(&existing.context, context) && existing.row_index == row_index)
+        {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Const function origin {:?} was published by multiple declaring contexts in one compilation boundary",
+                    origin
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Resolve one published const function body row by stable origin.
+    pub(crate) fn const_function(
+        &self,
+        origin: &OriginFunctionId,
+    ) -> Option<&PublishedConstFunction> {
+        self.const_functions.get(origin)
     }
 
     fn published_template(

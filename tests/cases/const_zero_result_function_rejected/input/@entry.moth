@@ -1,0 +1,4 @@
+noop #||:
+;
+result = 1
+~[: result=[result]]

@@ -726,6 +726,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         self.environment
             .imported_declarations_by_local_path
             .insert(*local_path, origin.clone());
+        if let Some(span) = local_name_span {
+            self.environment
+                .imported_declaration_spans_by_local_path
+                .insert(*local_path, span);
+        }
 
         let receiver_methods = match &declaration.semantics {
             PublicDeclarationSemantics::Struct(structure) => Some(&structure.receiver_methods),
@@ -1728,6 +1733,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 resolved_by_selection.insert(memo_key, target.clone());
                 target
             };
+
+            // An expression-qualified occurrence has no declaration clause of its own: many
+            // calls share one consumer-local path, and the projected declaration keeps no
+            // occurrence-specific span. A call-site label is therefore omitted rather than
+            // pointing at an arbitrary sibling call.
 
             let key = (
                 occurrence.selected_span.source(),

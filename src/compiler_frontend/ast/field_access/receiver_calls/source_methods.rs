@@ -67,9 +67,11 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::{
     InvalidReceiverCallReason, ValueReceiverContext,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -185,6 +187,18 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         string_table,
         path_fork,
     } = input;
+
+    // Required const bodies may not call runtime receiver methods. V1 const functions are free
+    // functions, so every source receiver dispatch is a runtime operation regardless of whether
+    // the receiver happens to be a const record.
+    if scope_context.is_const_body() {
+        return Err(choices_control_flow::const_body_runtime_operation(
+            Some(member_name),
+            member_span,
+            scope_context.const_declaration_span(),
+        )
+        .into());
+    }
 
     if receiver_node.expression_is_const_record_value(&*expression_builder)? {
         return Err(calls_data::invalid_receiver_call(
@@ -460,6 +474,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
             CallFinishContext {
                 token_stream,
                 context: scope_context,
+                evaluation: CallableEvaluation::Runtime,
                 value_required,
                 allow_boundary_catch: false,
                 warnings: None,

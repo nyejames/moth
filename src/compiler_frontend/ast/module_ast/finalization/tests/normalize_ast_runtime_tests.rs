@@ -1491,6 +1491,7 @@ fn finalization_normalizes_generic_receiver_root_entry_and_retained_function_def
             ResolvedPublicTypeRootKind::Function {
                 signature,
                 generic_parameter_list_id,
+                ..
             } if generic_parameter_list_id.is_some()
                 && path_display_name(root.path, &path_fork, &string_table).as_deref()
                     == Some("pick") =>

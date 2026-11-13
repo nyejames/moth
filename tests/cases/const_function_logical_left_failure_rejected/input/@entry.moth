@@ -1,0 +1,17 @@
+-- The left operand must fail before the right operand can be evaluated.
+
+left_fails #|value I32| -> Bool:
+    assert(value > 0, "left operand failed")
+    return true
+;
+
+right_fails #|value I32| -> Bool:
+    assert(false, "right operand must not run")
+    return true
+;
+
+guard #|value I32| -> Bool:
+    return left_fails(value) and right_fails(value)
+;
+
+result #Bool = guard(0)

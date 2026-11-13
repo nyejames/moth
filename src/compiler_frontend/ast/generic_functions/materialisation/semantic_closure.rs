@@ -1210,6 +1210,13 @@ impl ModuleMaterialisationCapture {
                 }
             }
             self.collect_selected_alias_identities(path, semantic_closure, &mut identities);
+            // Const-only providers carry their selected aliases on the const artefact rather
+            // than in a generic semantic closure, so collect those alias targets here too.
+            if let Some(alias) = self.resolved_type_aliases_by_path.get(path)
+                && let Ok(identity) = self.stable_alias_target_identity(path, alias)
+            {
+                collect_reachable_nominal_identities(&identity, &mut identities);
+            }
         }
         for trait_definition in &semantic_closure.traits {
             for requirement in &trait_definition.requirements {

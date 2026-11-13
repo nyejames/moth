@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = " first=7 difference=8 "
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = " first=7 difference=8 "

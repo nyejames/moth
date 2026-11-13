@@ -42,6 +42,8 @@ pub(crate) enum LabelDraftMessage {
     ReceiverMethodSite,
     EarlierDirective,
     EarlierSectionMarker,
+    ConstCallSite,
+    DependencyCycleParticipant,
     EarlierTemplateHeadItem,
     ConflictsWithEarlierHeadItem,
     TemplateStartsHere,
@@ -98,6 +100,8 @@ impl LabelMessageCode {
     pub(super) const ROOT_LOCAL_DECLARATION_SITE: Self = Self(22);
     pub(super) const EARLIER_DIRECTIVE: Self = Self(23);
     pub(super) const EARLIER_SECTION_MARKER: Self = Self(24);
+    pub(super) const DEPENDENCY_CYCLE_PARTICIPANT: Self = Self(25);
+    pub(super) const CONST_CALL_SITE: Self = Self(26);
 
     /// Whether the label keeps a row in `label_data`. Config origin, substitutions, typed failure producers
     /// and write-back origins carry data; the rest never read the row.
@@ -114,6 +118,7 @@ impl LabelMessageCode {
                 | Self::GENERIC_INSTANTIATION_BODY_SITE
                 | Self::GENERIC_INSTANTIATION_DECLARATION_SITE
                 | Self::GENERIC_INSTANTIATION_SUBSTITUTIONS
+                | Self::CONST_CALL_SITE
         )
     }
 
@@ -148,6 +153,8 @@ impl LabelMessageCode {
             Self::ROOT_LOCAL_DECLARATION_SITE => "ROOT_LOCAL_DECLARATION_SITE",
             Self::EARLIER_DIRECTIVE => "EARLIER_DIRECTIVE",
             Self::EARLIER_SECTION_MARKER => "EARLIER_SECTION_MARKER",
+            Self::CONST_CALL_SITE => "CONST_CALL_SITE",
+            Self::DEPENDENCY_CYCLE_PARTICIPANT => "DEPENDENCY_CYCLE_PARTICIPANT",
             _ => crate::compiler_bug!(
                 CompilerStage::DiagnosticReporting,
                 "label codes are the constants above"
@@ -227,6 +234,9 @@ pub(super) fn encode_label(
         LabelDraftMessage::ReceiverMethodSite => plain(LabelMessageCode::RECEIVER_METHOD_SITE),
         LabelDraftMessage::EarlierDirective => plain(LabelMessageCode::EARLIER_DIRECTIVE),
         LabelDraftMessage::EarlierSectionMarker => plain(LabelMessageCode::EARLIER_SECTION_MARKER),
+        LabelDraftMessage::DependencyCycleParticipant => {
+            plain(LabelMessageCode::DEPENDENCY_CYCLE_PARTICIPANT)
+        }
         LabelDraftMessage::EarlierTemplateHeadItem => {
             plain(LabelMessageCode::EARLIER_TEMPLATE_HEAD_ITEM)
         }
@@ -234,6 +244,7 @@ pub(super) fn encode_label(
             plain(LabelMessageCode::CONFLICTS_WITH_EARLIER_HEAD_ITEM)
         }
         LabelDraftMessage::TemplateStartsHere => plain(LabelMessageCode::TEMPLATE_STARTS_HERE),
+        LabelDraftMessage::ConstCallSite => plain(LabelMessageCode::CONST_CALL_SITE),
         LabelDraftMessage::MissingExportDeclaration => {
             plain(LabelMessageCode::MISSING_EXPORT_DECLARATION)
         }
@@ -422,6 +433,10 @@ impl LabelWord {
             LabelMessageCode::RECEIVER_METHOD_SITE => DurableLabelMessage::ReceiverMethodSite,
             LabelMessageCode::EARLIER_DIRECTIVE => DurableLabelMessage::EarlierDirective,
             LabelMessageCode::EARLIER_SECTION_MARKER => DurableLabelMessage::EarlierSectionMarker,
+            LabelMessageCode::CONST_CALL_SITE => DurableLabelMessage::ConstCallSite,
+            LabelMessageCode::DEPENDENCY_CYCLE_PARTICIPANT => {
+                DurableLabelMessage::DependencyCycleParticipant
+            }
             LabelMessageCode::EARLIER_TEMPLATE_HEAD_ITEM => {
                 DurableLabelMessage::EarlierTemplateHeadItem
             }
@@ -492,6 +507,8 @@ pub(crate) enum DurableLabelMessage<'a> {
     ReceiverMethodSite,
     EarlierDirective,
     EarlierSectionMarker,
+    ConstCallSite,
+    DependencyCycleParticipant,
     EarlierTemplateHeadItem,
     ConflictsWithEarlierHeadItem,
     TemplateStartsHere,

@@ -44,6 +44,7 @@ impl From<ConstantFoldError> for ExpressionTypingError {
         match error {
             ConstantFoldError::Diagnostic(diagnostic)
             | ConstantFoldError::NumericFailure(diagnostic) => Self::Diagnostic(diagnostic),
+            ConstantFoldError::Budget(exhaustion) => Self::Diagnostic(exhaustion.into_diagnostic()),
             ConstantFoldError::Infrastructure(error) => Self::Infrastructure(error),
         }
     }

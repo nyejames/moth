@@ -1,0 +1,5 @@
+bad_error #|value I32| -> I32, Error!:
+    return value
+;
+start ||:
+;

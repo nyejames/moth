@@ -1,0 +1,8 @@
+# Release notes are emitted by the compiler but are not manifest-assertable today; the Note's
+# content is owned by release_speculation_scope_tests.rs. This case owns the runtime fallback: the
+# over-budget call stays an ordinary call and still computes its sum.
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = " 499500"

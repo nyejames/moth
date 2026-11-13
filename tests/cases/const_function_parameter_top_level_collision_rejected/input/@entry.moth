@@ -1,0 +1,7 @@
+read #|value I32| -> I32:
+    return value
+;
+
+value #I32 = read(41)
+
+~[: parameter-cycle=[value]]

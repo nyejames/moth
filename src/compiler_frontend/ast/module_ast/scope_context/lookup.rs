@@ -27,9 +27,11 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidAssignmentTargetReason, InvalidCallShapeReason,
     InvalidThisUsageReason, NameNamespace, ReservedNameOwner,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::value_mode::ValueMode;
+use std::borrow::Cow;
 
 /// Raw declaration lookup distinguishes ordinary values, pending numeric bindings and Route
 /// parameters. Value consumers use `get_value_reference`; only Route argument roots use the
@@ -650,18 +652,34 @@ impl ScopeContext {
         Ok(kind)
     }
 
-    /// Resolve callable metadata for a source declaration.
-    /// Callable contracts belong to the immutable module signature table.
-    pub(crate) fn source_callable_signature(
-        &self,
+    /// Resolve a source declaration's callable contract and execution classification.
+    ///
+    /// WHAT: reads the one resolved row that owns both facts, canonical signature table first and
+    ///       the live pre-signature-pass table second.
+    /// WHY: callers need both facts together; reading them separately lets a found signature pair
+    ///      with a defaulted classification. Canonical rows stay borrowed; a row seen through the
+    ///      live early table is cloned because the map is behind a `RefCell`. Only the one row is
+    ///      copied per lookup, never the map.
+    pub(crate) fn source_callable_contract<'a>(
+        &'a self,
         declaration: &Declaration,
-    ) -> Option<&FunctionSignature> {
-        self.lookups.as_ref().and_then(|lookups| {
-            lookups
+    ) -> Option<(Cow<'a, FunctionSignature>, CallableEvaluation)> {
+        if let Some(lookups) = self.lookups.as_ref()
+            && let Some(resolved) = lookups
                 .resolved_function_signatures_by_path
                 .get(&declaration.id)
-                .map(|resolved| &resolved.signature)
-        })
+        {
+            return Some((Cow::Borrowed(&resolved.signature), resolved.evaluation));
+        }
+        self.shared
+            .early_const_function_signatures
+            .as_ref()
+            .and_then(|signatures| {
+                signatures
+                    .borrow()
+                    .get(&declaration.id)
+                    .map(|resolved| (Cow::Owned(resolved.signature.clone()), resolved.evaluation))
+            })
     }
 
     /// Only local private no-slot calls may contribute inferred failure to an outer expression.

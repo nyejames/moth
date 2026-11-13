@@ -36,6 +36,10 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::expressions::expression_types::{
     ConstRecordState, FallibleExpressionHandling, FallibleHandling,
 };
+use crate::compiler_frontend::ast::expressions::function_calls::{
+    complete_deferred_external_call, resolve_user_function_call_arguments,
+    validate_const_call_arguments,
+};
 use crate::compiler_frontend::ast::expressions::mutation::{
     CompoundAssignmentReadyInput, evaluate_compound_assignment_with_ready_rhs,
 };
@@ -98,6 +102,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraft
 use crate::compiler_frontend::compiler_messages::{
     InvalidAssignmentTargetReason, TypeMismatchContext, ValueReceiverContext,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -2628,7 +2633,7 @@ impl Completion<'_, '_> {
             // resumes through this session's shared call-argument completion service. Its retained
             // record carries the contract-derived completion kind so completion is not re-decided.
             DeferredCall::External(deferred) => {
-                crate::compiler_frontend::ast::expressions::function_calls::complete_deferred_external_call(
+                complete_deferred_external_call(
                     *deferred, self,
                 )
             }
@@ -2675,6 +2680,7 @@ impl Completion<'_, '_> {
     ) -> Result<CompletedExpression, ExpressionParseError> {
         let DeferredSourceCall {
             function_path,
+            evaluation,
             success_result_type_ids,
             error_return_type_id,
             completion,
@@ -2697,7 +2703,7 @@ impl Completion<'_, '_> {
         for argument in arguments {
             completed_arguments.push(self.complete_call_argument(argument)?);
         }
-        let args = crate::compiler_frontend::ast::expressions::function_calls::resolve_user_function_call_arguments(
+        let args = resolve_user_function_call_arguments(
             &function_path,
             completed_arguments,
             &expectations,
@@ -2708,6 +2714,17 @@ impl Completion<'_, '_> {
             self.const_values,
             self.path_fork,
         )?;
+        if evaluation == CallableEvaluation::Const {
+            validate_const_call_arguments(
+                &args,
+                &function_path,
+                call_span,
+                self.context,
+                self.expression_builder,
+                self.const_values,
+                self.path_fork,
+            )?;
+        }
         if let Some(name) = callee_name {
             return Ok(CompletedExpression::NeverCall(Box::new(NeverCall {
                 target: NeverCallTarget::Source(function_path),
@@ -2727,7 +2744,9 @@ impl Completion<'_, '_> {
             call_span,
         };
         let expression = match authored_handling {
-            DeferredCallHandling::Unhandled => self.finish_handled_call(call, error_return_type_id),
+            DeferredCallHandling::Unhandled => {
+                self.finish_handled_call(call, error_return_type_id, evaluation)
+            }
             DeferredCallHandling::Propagate { span } => {
                 // Replay the authored `!` through the same constructor the completed call path
                 // uses; the retention site already validated the callee's error slot and the
@@ -2798,10 +2817,11 @@ impl Completion<'_, '_> {
         &mut self,
         call: HandledFallibleCall,
         error_return_type_id: Option<TypeId>,
+        evaluation: CallableEvaluation,
     ) -> Result<OwnedExpr, ExpressionParseError> {
         let Some(error_return_type_id) = error_return_type_id else {
             let call_path = call.name;
-            let expression = call.into_plain_expression(self.expression_builder)?;
+            let expression = call.into_plain_expression(self.expression_builder, evaluation)?;
             return if self.context.source_call_has_private_failure_lane(call_path) {
                 Ok(self
                     .expression_builder

@@ -54,6 +54,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticVi
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticBag, InvalidFallibleHandlingReason, PreparedFailure,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::external_packages::external_returns;
@@ -544,6 +545,7 @@ impl FrontendProject {
                     public_source_trait_origins: Arc::default(),
                     build_config_values: Arc::new(Default::default()),
                     builder_root_slots,
+                    provider_materialisations: None,
                 },
                 #[cfg(feature = "timers")]
                 None,
@@ -5599,4 +5601,166 @@ fn implicit_failure_same_module_cross_file_call_keeps_canonical_private_failure_
     );
     assert!(report.analysis.public_call_summaries[&helper.id].escapes_builtin_failure);
     assert!(!report.analysis.public_call_summaries[&caller.id].escapes_builtin_failure);
+}
+
+#[test]
+fn const_expression_failure_publishes_no_partial_ast() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@entry.moth",
+            "ok #|| -> I32:\n    return 1\n;\n\
+             fail #|| -> I32:\n    assert(false, \"stop\")\n    return 2\n;\n\
+             value #I32 = ok() + fail()\n",
+        )],
+        "src/@entry.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+    let result = project.ast_result();
+    assert!(
+        matches!(result, Ok(CompilationOutcome::Diagnosed(_))),
+        "a failed later call in one required expression must not publish a partial AST"
+    );
+}
+
+#[cfg(feature = "benchmark_counters")]
+#[test]
+fn const_function_body_is_prepared_once_for_repeated_calls() {
+    use crate::compiler_frontend::instrumentation::{
+        AstCounter, lock_counter_test, reset_ast_counters, test_read_ast_counter,
+    };
+
+    let _guard = lock_counter_test();
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@entry.moth",
+            "square #|value I32| -> I32:\n    return value * value\n;\n\
+             first #I32 = square(7)\n\
+             second #I32 = square(8)\n",
+        )],
+        "src/@entry.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+    reset_ast_counters();
+    project.ast();
+    assert_eq!(
+        test_read_ast_counter(AstCounter::ConstFunctionBodiesPrepared),
+        1,
+        "one const function called twice must still prepare exactly one body"
+    );
+}
+
+#[test]
+fn required_const_call_folds_before_runtime_hir_lowering() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@entry.moth",
+            "square #|value I32| -> I32:\n    return value * value\n;\n\
+             compute || -> I32:\n    return square(4)\n;\n",
+        )],
+        "src/@entry.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+    let ast = project.ast();
+    let body = named_function_body(&project, &ast, "compute");
+    let returned = returned_value(&ast, &body[0]);
+    assert!(
+        matches!(returned.operation(), ExpressionOperationView::Constant(_)),
+        "a required const call must fold before the statement enters the runtime AST"
+    );
+    project
+        .lower_ast_result(ast)
+        .expect("a folded const call must lower as ordinary constant data");
+}
+
+#[test]
+fn composite_argument_accepts_nested_required_const_calls() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@entry.moth",
+            "inner #|| -> I32:\n    return 1\n;\n\
+             outer #|values {I32}| -> I32:\n    return 1\n;\n\
+             compute || -> I32:\n    return outer({inner()})\n;\n",
+        )],
+        "src/@entry.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+    let ast = project.ast();
+    let body = named_function_body(&project, &ast, "compute");
+    let returned = returned_value(&ast, &body[0]);
+    assert!(
+        matches!(returned.operation(), ExpressionOperationView::Constant(_)),
+        "nested const calls inside a composite argument must fold with the outer call"
+    );
+    project
+        .lower_ast_result(ast)
+        .expect("a folded nested const call must lower as ordinary constant data");
+}
+
+#[test]
+fn composite_argument_accepts_nested_const_calls_inside_arithmetic() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@entry.moth",
+            "inner #|| -> I32:\n    return 1\n;\n\
+             outer #|values {I32}| -> I32:\n    return 1\n;\n\
+             compute || -> I32:\n    return outer({inner() + 1})\n;\n",
+        )],
+        "src/@entry.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+    let ast = project.ast();
+    let body = named_function_body(&project, &ast, "compute");
+    let returned = returned_value(&ast, &body[0]);
+    assert!(
+        matches!(returned.operation(), ExpressionOperationView::Constant(_)),
+        "a nested const call inside arithmetic must fold before the outer call executes"
+    );
+    project
+        .lower_ast_result(ast)
+        .expect("a folded arithmetic const argument must lower as ordinary constant data");
+}
+
+#[test]
+fn source_calls_record_the_callee_evaluation_classification() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@entry.moth",
+            "square #|value I32| -> I32:\n    return value * value\n;\n\
+             add |value I32| -> I32:\n    return value + 1\n;\n\
+             compute || -> I32:\n    return square(4)\n;\n\
+             other || -> I32:\n    return add(4)\n;\n",
+        )],
+        "src/@entry.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+    let ast = project.ast();
+    assert!(
+        !ast.nodes.iter().any(|node| matches!(
+            &node.kind,
+            NodeKind::Function(path, _, _)
+                if project
+                    .frontend
+                    .path_fork
+                    .component(*path)
+                    .is_some_and(|name| project.frontend.string_table.resolve(name) == "square")
+        )),
+        "a const function must not enter the runtime AST function set"
+    );
+    let body = named_function_body(&project, &ast, "compute");
+    let returned = returned_value(&ast, &body[0]);
+    assert!(
+        matches!(returned.operation(), ExpressionOperationView::Constant(_)),
+        "a call to a const function must fold before the runtime AST"
+    );
+
+    let body = named_function_body(&project, &ast, "other");
+    let returned = returned_value(&ast, &body[0]);
+    let ExpressionOperationView::Call(ordinary) = returned.operation() else {
+        panic!("other must return the ordinary call directly");
+    };
+    assert_eq!(
+        ordinary.metadata().evaluation,
+        CallableEvaluation::Runtime,
+        "an ordinary function call must remain a runtime call"
+    );
 }

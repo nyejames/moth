@@ -1,0 +1,8 @@
+copy_value #|| -> I32:
+    local = 5
+    return copy local
+;
+
+result #I32 = copy_value()
+
+io.line([: result=[result] ])

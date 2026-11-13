@@ -5,12 +5,14 @@
 //! planning. It does not classify complete template views, slots or insert overlays.
 
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 
 use crate::compiler_frontend::ast::const_eval::registered_external_const_eval_op;
+use crate::compiler_frontend::ast::const_values::const_execution::ConstFunctionExecutable;
 use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    AstExpressionBuilder, ExpressionOperationView, ExpressionView,
+    AstExpressionBuilder, CallView, ExpressionOperationView, ExpressionView, ResolvedCallableTarget,
 };
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
@@ -163,6 +165,7 @@ pub(crate) fn classify_expression_const_evaluable_with_nested_template(
     expression: ExpressionView<'_>,
     loop_binding_paths: &[PathId],
     external_package_registry: Option<&ExternalPackageRegistry>,
+    prepared_const_executables: Option<&FxHashMap<PathId, ConstFunctionExecutable>>,
     nested_template: &mut impl FnMut(TemplateTirReference, &[PathId]) -> Result<bool, TemplateError>,
 ) -> Result<bool, TemplateError> {
     use ExpressionOperationView as V;
@@ -188,6 +191,7 @@ pub(crate) fn classify_expression_const_evaluable_with_nested_template(
                         child,
                         loop_binding_paths,
                         external_package_registry,
+                        prepared_const_executables,
                         nested_template,
                     ) {
                         Ok(value) => evaluable &= value,
@@ -198,9 +202,10 @@ pub(crate) fn classify_expression_const_evaluable_with_nested_template(
             result?;
             Ok(evaluable)
         }
-        V::Call(_)
+        V::Call(call)
             if registered_external_const_eval_op(expression, external_package_registry)
-                .is_some() =>
+                .is_some()
+                || call_targets_prepared_const(call, prepared_const_executables) =>
         {
             let mut evaluable = true;
             let mut result = Ok(());
@@ -210,6 +215,7 @@ pub(crate) fn classify_expression_const_evaluable_with_nested_template(
                         child,
                         loop_binding_paths,
                         external_package_registry,
+                        prepared_const_executables,
                         nested_template,
                     ) {
                         Ok(value) => evaluable &= value,
@@ -222,6 +228,27 @@ pub(crate) fn classify_expression_const_evaluable_with_nested_template(
         }
         _ => Ok(false),
     }
+}
+
+/// Whether this call resolves to a const executable that preparation already installed.
+///
+/// WHAT: a source const call is evaluable here only when its callee's executable exists.
+/// WHY: `ResolvedCall.evaluation == Const` is not enough. A const body may name a helper that the
+///      dependency order has not prepared yet, and structural contribution planning owns no
+///      executables at all. Folding such a call cannot run, so classifying it as evaluable would
+///      turn a deferred call in an inactive branch into a hard failure.
+fn call_targets_prepared_const(
+    call: CallView<'_>,
+    prepared_const_executables: Option<&FxHashMap<PathId, ConstFunctionExecutable>>,
+) -> bool {
+    let Some(executables) = prepared_const_executables else {
+        return false;
+    };
+    let ResolvedCallableTarget::Function(path) = call.metadata().target else {
+        return false;
+    };
+    // The map holds const callables only, so membership is also the call's evaluation fact.
+    executables.contains_key(&path)
 }
 
 pub(crate) fn tir_node_is_const_evaluable_value(
@@ -369,7 +396,8 @@ impl StructuralConstness<'_> {
             expression,
             bindings,
             self.external_package_registry,
-            &mut |reference, nested_bindings| {
+            None,
+            &mut |reference: TemplateTirReference, nested_bindings: &[PathId]| {
                 if reference.context != TemplateViewContext::default() {
                     return Ok(false);
                 }

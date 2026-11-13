@@ -10,9 +10,12 @@
 use super::super::build_context::AstPhaseContext;
 use super::super::emission::AstEmission;
 use super::super::environment::AstModuleEnvironment;
+use super::super::scope_context::{ContextKind, ScopeContext};
 use super::normalize_ast::{TemplateNormalizationError, discard_inactive_assertion_messages};
 use super::static_if_specialization::{StaticIfCandidate, StaticIfSpecialization};
+use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::const_execution::rewrite_release_calls;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStoreError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     ExprId, ExpressionFreezeRoots, PlaceId,
@@ -250,6 +253,26 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 .map_err(|error| self.error_messages(error, &mut emitted.warnings, string_table))?;
         }
 
+        // Const bodies never reach the runtime-template materialization pass, so promote their
+        // retained template handles to the finalized view identity the AST type boundary
+        // requires. Modules without const bodies have no such handle: normalization already
+        // promoted every runtime template. Materialised provider bodies also parse into this
+        // expression store, but they are never validated at that boundary, so the emitted-body
+        // check remains a complete proxy for "a retained handle finalization did not visit".
+        if !emitted.const_function_bodies.is_empty() {
+            self.context
+                .expression_builder
+                .finalize_retained_template_references();
+        }
+
+        // Required const bodies never reach HIR, but their authored types must still be fully
+        // resolved before compile-time execution consumes them.
+        self.validate_no_unresolved_executable_types(
+            &emitted.const_function_bodies,
+            &self.context.const_values,
+        )
+        .map_err(|error| self.error_messages(error, &mut emitted.warnings, string_table))?;
+
         let mut specialization = static_candidate.publish(&mut emitted.ast);
         let static_if_function_provenance = specialization.function_provenance().clone();
 
@@ -281,12 +304,31 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             self.template_normalization_error_messages(error, &mut emitted.warnings, string_table)
         })?;
         specialization.merge(template_specialization);
+        // Const bodies retain their own executable roots, but they must see the same static Bool
+        // specialisation ordinary and generic bodies receive before terminality analysis.
+        let const_specialization = StaticIfSpecialization::run(
+            &mut emitted.const_function_bodies,
+            &mut self.context.const_values,
+            &mut self.context.expression_builder,
+            Rc::clone(&self.context.template_ir_store),
+            string_table,
+            &self.environment.type_environment,
+            Some(self.context.external_package_registry.as_ref()),
+        )
+        .map_err(|error| {
+            self.template_normalization_error_messages(error, &mut emitted.warnings, string_table)
+        })?;
+        specialization.merge(const_specialization);
         // The Never proof graph and per-body terminality need the same exit analysis, so each
         // declared Never body is summarised once and both consumers read that summary. The
         // executable declarations lead the node list and keep their exact call targets; a
         // requester unions them with its generated sidecars' nodes after materialisation.
         let (mut never_proof_nodes, executable_never_count, never_exit_summaries) = self
-            .declared_never_proof_nodes(&emitted.ast, &emitted.validated_generic_template_bodies);
+            .declared_never_proof_nodes(
+                &emitted.ast,
+                &emitted.validated_generic_template_bodies,
+                &emitted.const_function_bodies,
+            );
         self.validate_never_proof_cycles(&never_proof_nodes, &mut emitted.warnings, string_table)?;
         never_proof_nodes.truncate(executable_never_count);
         let exact_never_proofs = never_proof_nodes;
@@ -298,6 +340,12 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         )?;
         self.validate_specialized_function_terminality(
             &emitted.validated_generic_template_bodies,
+            &never_exit_summaries,
+            &mut emitted.warnings,
+            string_table,
+        )?;
+        self.validate_specialized_function_terminality(
+            &emitted.const_function_bodies,
             &never_exit_summaries,
             &mut emitted.warnings,
             string_table,
@@ -377,13 +425,14 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             }
         };
 
-        let retain_materialisation_context = match materialisation_retention {
-            MaterialisationContextRetention::Always => true,
-            MaterialisationContextRetention::ForDeferredRequests => {
-                !committed_generic_requests.executable.is_empty()
-                    || !committed_generic_requests.assertion_validation.is_empty()
-            }
-        };
+        let retain_materialisation_context = !owned_lookups.const_function_body_tokens.is_empty()
+            || match materialisation_retention {
+                MaterialisationContextRetention::Always => true,
+                MaterialisationContextRetention::ForDeferredRequests => {
+                    !committed_generic_requests.executable.is_empty()
+                        || !committed_generic_requests.assertion_validation.is_empty()
+                }
+            };
         let materialisation_context = if retain_materialisation_context {
             let mut materialisation_public_trait_roots = resolved_public_trait_roots.clone();
             if let Some(support_trait_roots) = support_public_trait_roots.as_ref() {
@@ -431,6 +480,36 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         };
 
         // ----------------------------
+        //  Fold release-only ordinary calls
+        // ----------------------------
+        // Speculation runs on the final normalised AST, after static selection and every
+        // validation that establishes runtime semantics, and before expression freezing. A
+        // refused candidate is left byte-for-byte as the runtime call.
+        if self.context.build_profile == FrontendBuildProfile::Release {
+            let scope = ScopeContext::new(
+                ContextKind::Module,
+                PathId::ROOT,
+                Rc::clone(&owned_lookups.declaration_table),
+                Arc::clone(&self.context.external_package_registry),
+                0,
+                Rc::clone(&self.context.template_ir_store),
+            )
+            .with_style_directives(self.context.style_directives)
+            .with_build_profile(self.context.build_profile);
+            let notes = rewrite_release_calls(
+                &mut emitted.ast,
+                &mut self.context.expression_builder,
+                &mut self.context.const_values,
+                &scope,
+                string_table,
+                &type_environment,
+                self.path_fork,
+            )
+            .map_err(PreparedFailure::Infrastructure)?;
+            emitted.warnings.extend(notes);
+        }
+
+        // ----------------------------
         //  Merge builtin AST nodes
         // ----------------------------
         // Generic capture projects nominal inputs from resolved facts, not builtin AST nodes.
@@ -464,6 +543,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // Validation-only roots stay available through every TIR, failure and debug reader.
         // Only completed executable roots enter the consuming freeze after this barrier.
         emitted.validated_generic_template_bodies.clear();
+        emitted.const_function_bodies.clear();
         let AstPhaseContext {
             template_ir_store,
             expression_builder,
@@ -949,6 +1029,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         &self,
         executable: &[AstNode],
         template_bodies: &[AstNode],
+        const_bodies: &[AstNode],
     ) -> (
         Vec<NeverProofNode>,
         usize,
@@ -957,7 +1038,11 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         let mut nodes = Vec::new();
         let mut executable_count = 0;
         let mut summaries = FxHashMap::default();
-        for (is_executable, ast_nodes) in [(true, executable), (false, template_bodies)] {
+        for (is_executable, ast_nodes) in [
+            (true, executable),
+            (false, template_bodies),
+            (false, const_bodies),
+        ] {
             for node in ast_nodes {
                 let NodeKind::Function(path, signature, body) = &node.kind else {
                     continue;

@@ -1,0 +1,5 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0033", "MOTH-RULE-0033"]
+message_contains = ["next declaration in the dependency cycle"]

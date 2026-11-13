@@ -1,0 +1,21 @@
+double #|value I32| -> I32:
+    return value * 2
+;
+
+-- Both a runtime prefix alias type and an unrelated receiver method are declared around the const
+-- function. Preparing the const body must tolerate both without resolving either as its dependency.
+
+capacity #I32 = 2
+Names as {capacity String}
+
+Point = |
+    x I32 = 0,
+|
+
+length |this Point| -> I32:
+    return this.x
+;
+
+result #= double(21)
+
+~[: [result] ]

@@ -6,8 +6,8 @@
 
 use super::environment::TopLevelDeclarationTable;
 use super::scope_context::{
-    ContextKind, EnclosingCallableContract, EnclosingCallableOwner, ScopeContext,
-    ValueDeclarationRef,
+    ContextKind, EarlyConstFunctionSignatures, EnclosingCallableContract, EnclosingCallableOwner,
+    ScopeContext, ValueDeclarationRef,
 };
 use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::statements::value_production::{
@@ -1163,4 +1163,80 @@ fn explicit_constant_lookup_uses_content_owner_and_authored_binding_role() {
         context.explicit_constant_value(&runtime_path, &paths, &constants),
         None
     );
+}
+
+/// A scope's early const signature table is one live shared map, not a per-scope snapshot.
+///
+/// WHAT: builds many child scopes from one context before inserting a callable row, then reads
+///       that late row through every child.
+/// WHY:  Stage 3 publishes each const signature while earlier scopes already exist. A snapshot
+///       would miss the row and copy the whole growing table per declaration; sharing the live
+///       `Rc<RefCell<...>>` keeps lookup current and scope construction O(1).
+#[test]
+fn early_const_signature_lookup_reads_the_live_shared_map() {
+    use crate::compiler_frontend::ast::ast_nodes::Declaration;
+    use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+    use crate::compiler_frontend::ast::type_resolution::ResolvedFunctionSignature;
+    use crate::compiler_frontend::datatypes::{
+        CallableEvaluation, CallableReturnShape, FunctionReturnContract,
+    };
+    use crate::compiler_frontend::value_mode::ValueMode;
+    use rustc_hash::FxHashMap;
+    use std::cell::RefCell;
+
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let scope = empty_scope(&mut path_fork, &mut string_table);
+    let callable_path = path_fork
+        .try_intern_portable_path("callable", &mut string_table)
+        .expect("test callable path should intern");
+
+    let signatures: EarlyConstFunctionSignatures = Rc::new(RefCell::new(FxHashMap::default()));
+    let context = ScopeContext::new_for_tests(
+        ContextKind::Function,
+        scope,
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
+        Arc::new(ExternalPackageRegistry::new()),
+        0,
+    )
+    .with_early_const_function_signatures(Rc::clone(&signatures));
+
+    let declaration = Declaration {
+        id: callable_path,
+        type_id: builtin_type_ids::BOOL,
+        type_syntax: None,
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
+        binding_span: None,
+        config_contract: None,
+    };
+
+    assert!(context.source_callable_contract(&declaration).is_none());
+    let children: Vec<ScopeContext> = (0..128).map(|_| context.clone()).collect();
+
+    signatures.borrow_mut().insert(
+        callable_path,
+        ResolvedFunctionSignature {
+            receiver: None,
+            signature: FunctionSignature {
+                parameters: vec![],
+                return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                    [],
+                    None,
+                )),
+            },
+            evaluation: CallableEvaluation::Const,
+        },
+    );
+
+    for child in &children {
+        let (signature, evaluation) = child
+            .source_callable_contract(&declaration)
+            .expect("a late const signature must stay visible through the shared map");
+        assert!(signature.parameters.is_empty());
+        assert_eq!(evaluation, CallableEvaluation::Const);
+    }
 }

@@ -9,7 +9,9 @@ use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, DeclarationShell, DeclarationValue,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
+use crate::compiler_frontend::ast::generic_functions::{
+    GenericFunctionBody, GenericFunctionTemplate,
+};
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::environment::{
     AstEnvironmentInput, AstModuleEnvironment, AstModuleLookups, BuildResolvedPublicTypeRootsInput,
@@ -17,8 +19,10 @@ use crate::compiler_frontend::ast::module_ast::environment::{
     ResolvedPublicTraitRoot, ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable,
     TopLevelDeclarationTable, build_resolved_public_trait_roots, build_resolved_public_type_roots,
 };
-use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
-use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
+use crate::compiler_frontend::ast::module_ast::scope_context::{
+    ConstFunctionExecutables, ContextKind, EarlyConstFunctionSignatures, ReceiverMethodCatalog,
+    ScopeContext,
+};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_resolution::{
     GenericParameterScopeBuildInput, ResolvedFunctionSignature, ResolvedTypeAlias,
@@ -68,7 +72,7 @@ use crate::compiler_frontend::public_interface::{
     PublicReceiverMethodCategory, PublicStructSemantics,
 };
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedDeclarationIdentity, OriginDeclarationId, OriginTypeId,
+    GeneratedDeclarationIdentity, OriginDeclarationId, OriginFunctionId, OriginTypeId,
 };
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -82,6 +86,7 @@ use crate::compiler_frontend::traits::ids::TraitId;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::timing_scope_attributed;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -316,6 +321,17 @@ struct PendingImportedGenericMethod {
     surfaces: Vec<PublicGenericParameterSurface>,
 }
 
+/// Receiver catalogue cached for const-body preparation.
+///
+/// WHAT: pairs the catalogue with the count of resolved receiver signatures that produced it.
+/// WHY: a receiver signature is the only input that can add a catalogue row after it is built, so
+///      that count is the complete invalidation key; naming the pair keeps the cache entry from
+///      degrading into an unlabelled `(usize, Rc<...>)` tuple.
+pub(super) struct CachedReceiverCatalog {
+    pub(super) receiver_signature_count: usize,
+    pub(super) catalog: Rc<ReceiverMethodCatalog>,
+}
+
 pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) context: &'context mut AstPhaseContext<'services>,
     pub(crate) path_fork: &'context mut PathInternerFork,
@@ -357,6 +373,46 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) struct_source_by_path: FxHashMap<PathId, PathId>,
     pub(crate) choice_source_by_path: FxHashMap<PathId, PathId>,
     pub(crate) resolved_function_signatures_by_path: FxHashMap<PathId, ResolvedFunctionSignature>,
+    /// Receiver-carrying signatures resolved so far.
+    ///
+    /// WHY: const-body preparation needs a receiver catalogue, and each new receiver signature
+    ///      can add a row. Counting them keys the catalogue cache without rescanning every
+    ///      resolved signature before each const body.
+    pub(super) resolved_receiver_signature_count: usize,
+    /// Receiver catalogue reused across const-body preparations, keyed by the receiver-signature
+    /// count it was built from.
+    pub(super) const_body_receiver_catalog: Option<CachedReceiverCatalog>,
+    /// Whether the Stage 3 walk has scanned the function lane for receiver methods.
+    pub(super) receiver_methods_scanned: bool,
+    /// Receiver methods whose signature resolution was deferred to a later constant.
+    pub(super) deferred_receiver_methods: Vec<DeclarationId>,
+    /// Const callables prepared before the whole-module signature pass.
+    ///
+    /// WHY: constant initializers and const bodies parse during the Stage 3 walk, before
+    ///      `resolved_function_signatures_by_path` is complete. These rows give those scopes the
+    ///      canonical callable typing without exposing an incomplete module lookup table.
+    pub(crate) early_const_function_signatures: EarlyConstFunctionSignatures,
+    /// Fully parsed const bodies retained for compiler execution, in Stage 3 order.
+    pub(crate) prepared_const_function_bodies: Vec<AstNode>,
+    /// Retained canonical source view of every prepared const function body.
+    ///
+    /// WHY: a downstream module that folds a call to this provider needs the body syntax, while
+    ///      provider HIR and expression IDs stay module-local. One canonical token owner per
+    ///      source means this map adds no token copy.
+    pub(crate) const_function_body_tokens: FxHashMap<PathId, GenericFunctionBody>,
+    /// Paths whose const body is already in `prepared_const_function_bodies`.
+    pub(crate) prepared_const_function_paths: FxHashSet<PathId>,
+    /// Whether this module declared any const function, even if no executable was prepared.
+    pub(crate) has_const_functions: bool,
+    /// Directly executable const bodies shared with the constant-resolution session.
+    pub(crate) const_function_executables: ConstFunctionExecutables,
+    /// Provider origins whose const closure was already materialised into this environment,
+    /// mapped to the consumer-domain entry path that owns the prepared executable.
+    pub(crate) materialised_const_provider_origins: FxHashMap<OriginFunctionId, PathId>,
+    /// Provider function paths already parsed into this environment's executor store.
+    pub(crate) materialised_const_function_paths: FxHashSet<PathId>,
+    /// Provider constant paths already installed into this environment's const store.
+    pub(crate) materialised_const_constant_paths: FxHashSet<PathId>,
     pub(crate) generic_function_templates_by_path: FxHashMap<PathId, GenericFunctionTemplate>,
     pub(crate) generic_parameter_lists_by_path: FxHashMap<PathId, RegisteredGenericParameterList>,
 
@@ -411,6 +467,19 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             struct_source_by_path: FxHashMap::default(),
             choice_source_by_path: FxHashMap::default(),
             resolved_function_signatures_by_path: FxHashMap::default(),
+            resolved_receiver_signature_count: 0,
+            const_body_receiver_catalog: None,
+            receiver_methods_scanned: false,
+            deferred_receiver_methods: Vec::new(),
+            early_const_function_signatures: Rc::new(RefCell::new(FxHashMap::default())),
+            prepared_const_function_bodies: Vec::new(),
+            const_function_body_tokens: FxHashMap::default(),
+            prepared_const_function_paths: FxHashSet::default(),
+            const_function_executables: Rc::new(RefCell::new(FxHashMap::default())),
+            materialised_const_provider_origins: FxHashMap::default(),
+            materialised_const_function_paths: FxHashSet::default(),
+            materialised_const_constant_paths: FxHashSet::default(),
+            has_const_functions: false,
             generic_function_templates_by_path: FxHashMap::default(),
             generic_parameter_lists_by_path: FxHashMap::default(),
             type_environment: TypeEnvironment::new(),
@@ -867,6 +936,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 resolved_function_signatures_by_path: Rc::new(
                     self.resolved_function_signatures_by_path,
                 ),
+                prepared_const_function_bodies: self.prepared_const_function_bodies,
+                const_function_body_tokens: self.const_function_body_tokens,
+                const_function_executables: self.const_function_executables,
+                has_const_functions: self.has_const_functions,
                 generic_function_templates_by_path: self.generic_function_templates_by_path,
                 resolved_type_aliases_by_path: self.resolved_type_aliases_by_path,
                 choice_variant_shells_by_path: self.choice_variant_shells_by_path,
@@ -1017,6 +1090,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         .with_resolved_type_aliases(Rc::clone(&self.resolved_type_aliases_by_path))
         .with_generic_declarations(Rc::clone(&self.generic_declarations_by_path))
         .with_resolved_struct_fields_by_path(Rc::clone(&self.resolved_struct_fields_by_path))
+        .with_const_function_executables(Rc::clone(&self.const_function_executables))
+        .with_has_const_functions(self.has_const_functions)
         .with_nominal_type_ids_by_path(Rc::clone(&self.nominal_type_ids_by_path))
         .with_source_file_scope(source_file_scope)
         .with_declaring_file_id(header.tokens.source());
@@ -1154,6 +1229,24 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         generic_parameters: Option<&'a GenericParameterScope>,
         trait_environment: Option<&'a TraitEnvironment>,
     ) -> TypeResolutionContext<'a> {
+        let (context, _) = self.type_resolution_context_with_path_fork(
+            visibility,
+            generic_parameters,
+            trait_environment,
+        );
+        context
+    }
+
+    /// Build a type-resolution context beside the immutable path reader it must be paired with.
+    ///
+    /// Callers that resolve declarations needing path names pair these borrows; the disjoint
+    /// field split happens inside this method, so no caller needs a raw pointer.
+    pub(super) fn type_resolution_context_with_path_fork<'a>(
+        &'a mut self,
+        visibility: &'a FileVisibility,
+        generic_parameters: Option<&'a GenericParameterScope>,
+        trait_environment: Option<&'a TraitEnvironment>,
+    ) -> (TypeResolutionContext<'a>, &'a PathInternerFork) {
         let mut context = TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
             declaration_table: &self.declaration_table,
             visible_declaration_ids: Some(&visibility.visible_declaration_paths),
@@ -1173,7 +1266,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         if let Some(gp) = generic_parameters {
             context = context.with_generic_parameters(Some(gp));
         }
-        context
+        (context, &*self.path_fork)
     }
 
     pub(in crate::compiler_frontend::ast) fn resolve_generic_parameter_bounds(

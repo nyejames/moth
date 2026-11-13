@@ -1,0 +1,3 @@
+caller #|| -> I32:
+    return @later later()
+;

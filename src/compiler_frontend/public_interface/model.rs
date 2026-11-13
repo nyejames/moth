@@ -14,6 +14,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
     ExportedGenericParameterIdentity, StableTraitRequirementIdentity,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::external_packages::CanonicalBindingSymbolIdentity;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::public_call_summary::{PublicCallParameterAccess, PublicCallSummary};
@@ -329,6 +330,8 @@ pub(crate) struct PublicFunctionSemantics {
     /// The callable category: concrete-local or generic-template. Concrete-local callables
     /// receive exactly one summary after borrow validation; generic declarations do not.
     pub(crate) category: PublicFunctionCategory,
+    /// Whether every call is required compile-time evaluation.
+    pub(crate) evaluation: CallableEvaluation,
     pub(crate) parameters: Vec<PublicParameterTypeSlot>,
     pub(crate) return_contract: PublicCallableReturnContract,
 }

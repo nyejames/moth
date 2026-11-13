@@ -89,6 +89,11 @@ impl PublicInterfaceDraft {
                             ),
                         ));
                     }
+                    // A const callable's public signature stays in the declaration draft; its
+                    // evaluation facts are published as a const executable contract.
+                    if !semantics.evaluation.has_runtime_body() {
+                        continue;
+                    }
                     match &semantics.category {
                         PublicFunctionCategory::ConcreteLocal => {
                             finalize_callable_summary(

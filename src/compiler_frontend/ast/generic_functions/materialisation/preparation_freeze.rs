@@ -1,16 +1,18 @@
 //! Declaring-module preparation capture and publication freeze.
-use super::super::GenericFunctionTemplate;
+use super::super::{GenericFunctionBody, GenericFunctionTemplate};
 use super::artefact_emit::ModuleMaterialisationContext;
 use super::frozen_syntax::{SharedDonorIdentity, StableBodyCaptureFacts, StableBodySyntax};
 use super::nominal_blueprints::NominalMaterialisationBlueprint;
-use super::semantic_closure::{StableSemanticClosure, stable_body_symbol_names};
+use super::semantic_closure::{
+    StableLocalAlias, StableLocalConstant, StableSemanticClosure, stable_body_symbol_names,
+};
 use super::sidecar_build::bootstrap_call_summary_from_signature;
 use super::stable_types::{
-    GenericTemplateArtefact, MaterialisationNominalOriginResolver, MaterialisationNominalSource,
-    StableCallableBinding, StableFunctionParameter, StableFunctionReturnContract,
-    StableFunctionSignature, StableFunctionTarget, StableGenericCallableContract,
-    StableGenericParameter, StableNominalBinding, StableParameterContract, StableReceiverKey,
-    StableReturns,
+    ConstFunctionArtefact, GenericTemplateArtefact, MaterialisationNominalOriginResolver,
+    MaterialisationNominalSource, StableCallableBinding, StableFunctionParameter,
+    StableFunctionReturnContract, StableFunctionSignature, StableFunctionTarget,
+    StableGenericCallableContract, StableGenericParameter, StableNominalBinding,
+    StableParameterContract, StableReceiverKey, StableReturns,
 };
 use super::visibility::{
     StableExternalSymbol, StableFileVisibility, StableNamespaceBinding, StableReceiverMethod,
@@ -36,13 +38,13 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
+use crate::compiler_frontend::datatypes::{CallableEvaluation, FunctionReturnContract};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     FoldedValueGenericParameterResolver, FoldedValueProjectionContext, OwnedFoldedString,
@@ -107,6 +109,12 @@ pub(crate) struct ModuleMaterialisationCapture {
     pub(crate) resolved_function_signatures_by_path:
         Rc<FxHashMap<PathId, ResolvedFunctionSignature>>,
     pub(crate) generic_function_templates_by_path: FxHashMap<PathId, GenericFunctionTemplate>,
+    /// Const function bodies retained for cross-module compile-time execution.
+    ///
+    /// WHAT: one canonical source view per locally authored const function body.
+    /// WHY: a consuming module reparses this view into its own expression store; retaining the
+    ///      canonical owner avoids a second token representation and keeps provider HIR local.
+    pub(crate) const_function_bodies_by_path: FxHashMap<PathId, GenericFunctionBody>,
     pub(super) generic_template_paths_by_identity: FxHashMap<GeneratedDeclarationIdentity, PathId>,
     pub(crate) resolved_type_aliases_by_path: Rc<FxHashMap<PathId, ResolvedTypeAlias>>,
     pub(crate) nominal_type_ids_by_path: Rc<FxHashMap<PathId, TypeId>>,
@@ -317,9 +325,29 @@ impl ModuleMaterialisationPreparedBuilder {
     pub(crate) fn freeze(
         mut self,
         public_interfaces: &[&PublicSemanticInterface],
+        public_origins_by_path: &FxHashMap<PathId, OriginFunctionId>,
     ) -> Result<Option<ModuleMaterialisationContext>, InfrastructureFailure> {
         // Public convergence replaces owned facts only. AST/default projection ended at detach.
         let context = Arc::make_mut(&mut self.context.stable_context);
+        // The registry resolves one published const row per stable origin, so two retained bodies
+        // must never share an exported origin. Unexported helper rows keep `origin: None` and stay
+        // reachable only through closure edges.
+        let mut published_const_origins = FxHashSet::default();
+        for function in &mut context.const_functions {
+            let Some(origin) = public_origins_by_path.get(&function.function_path) else {
+                continue;
+            };
+            if !published_const_origins.insert(origin.clone()) {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
+                    format!(
+                        "Public const origin {:?} was assigned to more than one retained body",
+                        origin
+                    ),
+                ));
+            }
+            function.origin = Some(origin.clone());
+        }
         let mut declarations = std::mem::take(&mut context.declaration_closure).into_vec();
         for public_interface in public_interfaces {
             for declaration in &public_interface.declarations {
@@ -376,7 +404,7 @@ impl ModuleMaterialisationPreparedBuilder {
             &context.declaration_closure,
             &context.evidence,
         )?;
-        if context.artefacts.is_empty() {
+        if context.artefacts.is_empty() && context.const_functions.is_empty() {
             return Ok(None);
         }
         Ok(Some(Arc::unwrap_or_clone(self.context.stable_context)))
@@ -652,16 +680,41 @@ impl ModuleMaterialisationCapture {
             })
             .collect::<Result<Box<[_]>, InfrastructureFailure>>()?;
         let nominal_bindings = self.stable_nominal_bindings(&self.nominal_blueprints);
+        let const_functions = self.freeze_const_functions(
+            const_values,
+            declarations,
+            &semantic_closure,
+            resources,
+            path_fork,
+        )?;
+        // Const bodies cross module boundaries with retained provider-local paths, so the
+        // consuming domain must rebase every row by spelling. A same-boundary module can be
+        // compiled from a fork whose local path IDs overlap paths later added by the requester,
+        // so numeric equality is not an identity proof even within one build boundary.
+        // Const rows own a private issuing domain. Keep it separate from the context's generic
+        // identity pair: publication and boundary finalisation rebase generic artefacts, while
+        // const rows stay in this original domain until a consumer rebases them by spelling.
+        let (const_path_table, const_source_string_table) = if const_functions.is_empty() {
+            (None, None)
+        } else {
+            (
+                Some(Arc::new(path_fork.snapshot_table())),
+                Some(Arc::new(self.string_table.freeze_snapshot())),
+            )
+        };
         let stable_context = ModuleMaterialisationContext {
             declaration_closure: declaration_closure.into_boxed_slice(),
             evidence: evidence.into_boxed_slice(),
             concrete_call_summaries,
             semantic_closure,
             artefacts: artefacts.into_boxed_slice(),
+            const_functions,
             module_origin: self.module_origin.clone(),
             frozen_identity_handle: self.frozen_identity_handle.clone(),
             path_table: None,
             source_string_table: None,
+            const_path_table,
+            const_source_string_table,
         };
         Ok(ModuleMaterialisationPreparedBuilder {
             context: ModuleMaterialisationPreparation {
@@ -684,6 +737,217 @@ impl ModuleMaterialisationCapture {
         })
     }
 
+    /// Retain every locally authored const function body as one stable publication row.
+    ///
+    /// WHAT: captures source syntax, the stable signature, the body's file visibility and the
+    ///       selected declaration/callable closure for each const body in Stage 3 order.
+    /// WHY: a consumer module reparses these retained bodies through its own expression store.
+    ///      Only stable semantic facts cross the boundary, never provider `ExprId` or HIR state.
+    fn freeze_const_functions(
+        &self,
+        const_values: &ConstValueStore,
+        declarations: &[PublicDeclarationRecord],
+        semantic_closure: &StableSemanticClosure,
+        resources: &ModuleResourceTable,
+        path_fork: &PathInternerFork,
+    ) -> Result<Box<[ConstFunctionArtefact]>, InfrastructureFailure> {
+        let mut bodies = self
+            .const_function_bodies_by_path
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        bodies.sort();
+        let mut artefacts = Vec::with_capacity(bodies.len());
+        for function_path in bodies {
+            if let Some(artefact) = self.freeze_const_function_row(
+                function_path,
+                const_values,
+                declarations,
+                semantic_closure,
+                resources,
+                path_fork,
+            )? {
+                artefacts.push(artefact);
+            }
+        }
+        Ok(artefacts.into_boxed_slice())
+    }
+
+    /// Capture one retained const body, or `None` when the path carries no const evaluation row.
+    fn freeze_const_function_row(
+        &self,
+        function_path: PathId,
+        const_values: &ConstValueStore,
+        declarations: &[PublicDeclarationRecord],
+        semantic_closure: &StableSemanticClosure,
+        resources: &ModuleResourceTable,
+        path_fork: &PathInternerFork,
+    ) -> Result<Option<ConstFunctionArtefact>, InfrastructureFailure> {
+        let Some(resolved) = self
+            .resolved_function_signatures_by_path
+            .get(&function_path)
+        else {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                "Retained const function body has no resolved signature",
+            ));
+        };
+        if resolved.evaluation != CallableEvaluation::Const {
+            return Ok(None);
+        }
+        let body = &self.const_function_bodies_by_path[&function_path];
+        let source_file = path_fork.parent(function_path).unwrap_or(PathId::ROOT);
+        let capture_string_table =
+            body.capture_string_table(self.donor_identity().strings().as_ref());
+        let referenced_names = stable_body_symbol_names(body, capture_string_table)?;
+        let mut selected_paths =
+            self.selected_visible_paths(&source_file, &referenced_names, path_fork)?;
+        let qualified_references =
+            self.stable_qualified_references_for_body(body, &mut selected_paths)?;
+        let signature = self.stable_function_signature(
+            const_values,
+            &resolved.signature,
+            &FxHashMap::default(),
+            resources,
+            path_fork,
+        )?;
+        let visibility = self.stable_file_visibility(
+            const_values,
+            &source_file,
+            &referenced_names,
+            resources,
+            path_fork,
+        )?;
+        let declarations = self.stable_declaration_bindings(&selected_paths, declarations);
+        let callable_paths = selected_paths
+            .iter()
+            .copied()
+            .filter(|path| {
+                self.resolved_function_signatures_by_path
+                    .get(path)
+                    .is_some_and(|resolved| resolved.receiver.is_none())
+            })
+            .collect();
+        let callables =
+            self.stable_callable_bindings(const_values, &callable_paths, resources, path_fork)?;
+        let constants =
+            self.stable_selected_constants(const_values, &selected_paths, resources, path_fork)?;
+        let aliases = self.stable_selected_aliases(&selected_paths)?;
+        let mut closure = selected_paths
+            .iter()
+            .copied()
+            .filter(|path| {
+                *path != function_path && self.const_function_bodies_by_path.contains_key(path)
+            })
+            .collect::<Vec<_>>();
+        closure.sort();
+        let retained_signatures =
+            std::iter::once(&signature).chain(callables.iter().map(|callable| &callable.signature));
+        let nominal_blueprints = self.stable_nominal_blueprints(
+            const_values,
+            &selected_paths,
+            retained_signatures,
+            semantic_closure,
+            resources,
+            path_fork,
+        );
+        let nominals = self.stable_nominal_bindings(&nominal_blueprints);
+        let content_value_at_path = |logical_path: &PathId| {
+            let content_path =
+                self.content_constant_path_for_capture(const_values, logical_path, path_fork)?;
+            self.stable_folded_value_at_path(const_values, &content_path, resources, path_fork)
+        };
+        let stage0_resolution_facts = body
+            .resolution_facts()
+            .map(Arc::as_ref)
+            .or(self.stage0_resolution_facts.as_deref());
+        let frozen_identity_handle = body
+            .frozen_identity_handle()
+            .cloned()
+            .unwrap_or_else(|| self.frozen_identity_handle.clone());
+        let body = StableBodySyntax::capture(
+            body,
+            source_file,
+            path_fork,
+            Some(self.donor_identity()),
+            StableBodyCaptureFacts {
+                qualified_references: &qualified_references,
+                stage0_resolution_facts,
+                frozen_identity_handle,
+            },
+            &content_value_at_path,
+        )?;
+        Ok(Some(ConstFunctionArtefact {
+            origin: None,
+            function_path,
+            body,
+            signature,
+            visibility,
+            declarations,
+            constants,
+            aliases,
+            closure: closure.into_boxed_slice(),
+            callables,
+            nominals,
+            nominal_blueprints,
+        }))
+    }
+
+    /// Retain the selected module constants a const body can name.
+    ///
+    /// WHAT: selected constants can be authored locally or imported, so the retained body names
+    ///       the provider-local binding path for both forms.
+    /// WHY: the consumer reparses the body against its own const store and must bind every
+    ///      provider-local constant path the body can reference.
+    fn stable_selected_constants(
+        &self,
+        const_values: &ConstValueStore,
+        selected_paths: &FxHashSet<PathId>,
+        resources: &ModuleResourceTable,
+        path_fork: &PathInternerFork,
+    ) -> Result<Box<[StableLocalConstant]>, InfrastructureFailure> {
+        let mut constants = Vec::new();
+        for row in const_values.iter_module_constant_views() {
+            if !selected_paths.contains(row.path) {
+                continue;
+            }
+            let type_identity = self.stable_type_identity(row.metadata.type_id)?;
+            let value =
+                self.stable_folded_value_at_path(const_values, row.path, resources, path_fork)?;
+            constants.push(StableLocalConstant {
+                local_path: *row.path,
+                type_identity,
+                value,
+                span: row.metadata.span,
+            });
+        }
+        constants.sort_by_key(|constant| constant.local_path);
+        Ok(constants.into_boxed_slice())
+    }
+
+    /// Retain the selected type aliases a const body can name.
+    fn stable_selected_aliases(
+        &self,
+        selected_paths: &FxHashSet<PathId>,
+    ) -> Result<Box<[StableLocalAlias]>, InfrastructureFailure> {
+        let mut aliases = selected_paths
+            .iter()
+            .filter_map(|path| {
+                let alias = self.resolved_type_aliases_by_path.get(path)?;
+                Some(
+                    self.stable_alias_target_identity(path, alias)
+                        .map(|target_type_identity| StableLocalAlias {
+                            local_path: *path,
+                            target_type_identity,
+                            declaration_span: alias.declaration_span,
+                        }),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        aliases.sort_by_key(|alias| alias.local_path);
+        Ok(aliases.into_boxed_slice())
+    }
+
     fn freeze_template(
         &self,
         const_values: &ConstValueStore,
@@ -691,7 +955,7 @@ impl ModuleMaterialisationCapture {
         declarations: &[PublicDeclarationRecord],
         semantic_closure: &StableSemanticClosure,
         resources: &ModuleResourceTable,
-        path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+        path_fork: &PathInternerFork,
     ) -> Result<GenericTemplateArtefact, InfrastructureFailure> {
         let TemplateDeclarationSelection {
             template,
@@ -823,7 +1087,7 @@ impl ModuleMaterialisationCapture {
     ///      for generated lowering to find it in the declaration table.
     fn stable_qualified_references_for_body(
         &self,
-        body: &super::super::GenericFunctionBody,
+        body: &GenericFunctionBody,
         selected_paths: &mut FxHashSet<PathId>,
     ) -> Result<Vec<(PathSyntaxId, ResolvedQualifiedReference)>, InfrastructureFailure> {
         let donor_file_id = body.donor_source_id();
@@ -1657,7 +1921,8 @@ impl ModuleMaterialisationCapture {
         let mut private_executables = Vec::new();
 
         for (path, resolved) in signatures {
-            if self.imported_functions_by_local_path.contains_key(&path)
+            if resolved.evaluation == CallableEvaluation::Const
+                || self.imported_functions_by_local_path.contains_key(&path)
                 || self.generic_function_templates_by_path.contains_key(&path)
             {
                 continue;
@@ -2030,6 +2295,7 @@ impl ModuleMaterialisationCapture {
                 &lookups.resolved_function_signatures_by_path,
             ),
             generic_function_templates_by_path: lookups.generic_function_templates_by_path.clone(),
+            const_function_bodies_by_path: lookups.const_function_body_tokens.clone(),
             generic_template_paths_by_identity: FxHashMap::default(),
             resolved_type_aliases_by_path: Rc::clone(&lookups.resolved_type_aliases_by_path),
             nominal_type_ids_by_path: Rc::clone(&lookups.nominal_type_ids_by_path),

@@ -1,0 +1,15 @@
+unsupported_handler #|| -> I32:
+    values ~= {1}
+    removed = ~values.remove(0) catch |err|:
+        flag = true
+        if flag is:
+            true => return 1
+            else => return 0
+        ;
+    ;
+    return removed
+;
+
+result = unsupported_handler()
+~[: result=[result]]
+entry = "."

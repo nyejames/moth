@@ -1,0 +1,39 @@
+Point = |
+    values {I32},
+|
+
+const_alias #|| -> I32:
+    root ~= Point(values = {1})
+    alias ~= root.values
+    ~alias.push(2)
+    alias_count = alias.length()
+    return alias_count * 10 + root.values.length()
+;
+
+runtime_alias || -> I32:
+    root ~= Point(values = {1})
+    alias ~= root.values
+    ~alias.push(2)
+    alias_count = alias.length()
+    return alias_count * 10 + root.values.length()
+;
+
+const_copy #|| -> I32:
+    root ~= Point(values = {1})
+    copied ~= copy root.values
+    ~copied.push(2)
+    return root.values.length() * 10 + copied.length()
+;
+
+runtime_copy || -> I32:
+    root ~= Point(values = {1})
+    copied ~= copy root.values
+    ~copied.push(2)
+    return root.values.length() * 10 + copied.length()
+;
+
+a = const_alias()
+b = runtime_alias()
+c = const_copy()
+d = runtime_copy()
+~[: a=[a] b=[b] c=[c] d=[d]]

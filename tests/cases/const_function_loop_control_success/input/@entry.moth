@@ -1,0 +1,17 @@
+sum_skipping #|limit I32| -> I32:
+    sum ~= 0
+    loop to limit |item|:
+        if item is 3:
+            continue
+        ;
+        if item is 5:
+            break
+        ;
+        ~sum = sum + item
+    ;
+    return sum
+;
+
+result #I32 = sum_skipping(8)
+
+io.line([: result=[result] ])

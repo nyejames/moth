@@ -1,0 +1,8 @@
+verified #|value I32| -> I32:
+    assert(value > 0, "positive")
+    return value
+;
+
+result #I32 = verified(4)
+
+io.line([: result=[result] ])

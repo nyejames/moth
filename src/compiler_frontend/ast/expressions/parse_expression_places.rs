@@ -292,7 +292,7 @@ pub(super) fn parse_copy_place_expression(
             };
 
             if context
-                .source_callable_signature(place_declaration)
+                .source_callable_contract(place_declaration)
                 .is_some()
             {
                 let reason = if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {

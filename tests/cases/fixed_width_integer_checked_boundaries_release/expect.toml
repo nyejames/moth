@@ -1,5 +1,9 @@
 entry = "."
 
+# Release folding removes the earlier candidate call sites, so the Wasm backend's first reported
+# recoverable numeric failure is the typed multiplication in `multiply_u32` (136:17) rather than the
+# implicit subtraction in `minus_one_i8` (117:18). The non-release sibling
+# fixed_width_integer_checked_boundaries pins the implicit site, so both mechanisms stay covered.
 [backends.html]
 mode = "success"
 flags = ["release"]
@@ -16,5 +20,5 @@ diagnostic_codes = ["MOTH-RULE-0064"]
 code = "MOTH-RULE-0064"
 reason = "unsupported_backend_feature.recoverable_numeric_failure"
 path = "input/@entry.moth"
-line = 117
-column = 18
+line = 136
+column = 17

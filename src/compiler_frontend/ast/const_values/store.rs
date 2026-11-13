@@ -9,6 +9,9 @@
 //! The store is module-local. Its IDs and rows must never enter a cross-module
 //! interface. Public projection converts them to [`PublicFoldedValue`] before publication.
 
+use crate::compiler_frontend::ast::const_eval::{
+    ConstBudgetCategory, ConstBudgetExhaustion, ConstBudgetUnit,
+};
 use crate::compiler_frontend::ast::expressions::expression_store::{
     CoercionOperation, ConstructorFieldView, ExpressionOperationView, ExpressionView,
 };
@@ -29,6 +32,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::folded_value::PublicConstTemplate;
+use crate::compiler_frontend::module_compilation::ConstExecutionLimits;
 use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -37,6 +41,8 @@ use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterface
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 use rustc_hash::FxHashMap;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 #[cfg(test)]
 #[path = "tests/store_tests.rs"]
@@ -127,6 +133,7 @@ impl From<TemplateError> for ConstValueStoreError {
             | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
                 Self::Diagnostic(diagnostic)
             }
+            TemplateError::Budget(exhaustion) => Self::Diagnostic(exhaustion.into_diagnostic()),
             TemplateError::Infrastructure(error) => Self::Infrastructure(error),
         }
     }
@@ -311,12 +318,77 @@ pub(crate) struct ConstValueFieldVisit<'a, T> {
     pub(crate) value: T,
 }
 
+/// Compiler-owned aggregate work and allocation meter for const execution.
+///
+/// WHAT: one module-scoped accounting object shared by every required and speculative const
+///       evaluation attempt.
+/// WHY: per-attempt limits alone let a module with many call sites multiply the allowed work.
+///      The store owns this meter so all evaluation entry points share one aggregate safeguard.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ConstExecutionMeter {
+    pub(crate) steps: usize,
+    pub(crate) retained_values: usize,
+    pub(crate) retained_memory_bytes: usize,
+    pub(crate) limits: ConstExecutionLimits,
+}
+
+impl ConstExecutionMeter {
+    /// Charge one bounded work step to an attempt and the module aggregate.
+    ///
+    /// WHAT: increments the attempt counter and the aggregate counter in that order, then checks
+    ///       the attempt ceiling before the aggregate one.
+    /// WHY: executor frames and bounded template-fold iterations are the same work. One primitive
+    ///      keeps their counters, limits and refusal shape identical across both subsystems.
+    pub(crate) fn charge_step(
+        &mut self,
+        attempt_steps: &Cell<usize>,
+        span: Option<SourceSpan>,
+    ) -> Result<(), ConstBudgetExhaustion> {
+        let steps = attempt_steps.get().saturating_add(1);
+        attempt_steps.set(steps);
+        self.steps = self.steps.saturating_add(1);
+        if steps > self.limits.max_attempt_steps {
+            return Err(Self::work_limit_exhaustion(
+                self.limits.max_attempt_steps,
+                false,
+                span,
+            ));
+        }
+        if self.steps > self.limits.max_total_steps {
+            return Err(Self::work_limit_exhaustion(
+                self.limits.max_total_steps,
+                true,
+                span,
+            ));
+        }
+        Ok(())
+    }
+
+    fn work_limit_exhaustion(
+        limit: usize,
+        aggregate: bool,
+        span: Option<SourceSpan>,
+    ) -> ConstBudgetExhaustion {
+        ConstBudgetExhaustion {
+            category: ConstBudgetCategory::Work,
+            unit: ConstBudgetUnit::Steps,
+            limit: limit as u64,
+            setting: Some("const_work_limit"),
+            aggregate,
+            span,
+            call_span: None,
+            call_chain: Vec::new(),
+        }
+    }
+}
+
 /// The one module-local folded-value authority.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ConstValueStore {
     values: Vec<ConstValue>,
     rows: Vec<ConstValueRow>,
     values_by_path: FxHashMap<PathId, ConstValueId>,
+    execution_meter: Rc<RefCell<ConstExecutionMeter>>,
 }
 
 /// Producer-local content scratch. Its payload vocabulary is the ordinary constant graph.
@@ -596,6 +668,16 @@ impl StagedRoots for Vec<ConstValueId> {
 }
 
 impl ConstValueStore {
+    /// Install the configured work and memory allowances for this module.
+    pub(crate) fn set_const_execution_limits(&mut self, limits: ConstExecutionLimits) {
+        self.execution_meter.borrow_mut().limits = limits;
+    }
+
+    /// Clone the shared aggregate const-execution meter handle.
+    pub(crate) fn execution_meter(&self) -> Rc<RefCell<ConstExecutionMeter>> {
+        Rc::clone(&self.execution_meter)
+    }
+
     /// Stage ordinary content and move only the selected roots' reachable suffix on acceptance.
     ///
     /// WHY: a multi-root result (one constant row per result slot) commits as one unit. Every
@@ -782,6 +864,18 @@ impl ConstValueStore {
         let id = ConstValueId(index);
         self.values.push(ConstValue { metadata, payload });
         Ok(id)
+    }
+
+    /// Number of values visible in this store.
+    pub(crate) fn value_count(&self) -> usize {
+        self.values.len()
+    }
+
+    /// Resolve one visible dense index back to its value identity.
+    pub(crate) fn value_id_at(&self, index: usize) -> Option<ConstValueId> {
+        let index = u32::try_from(index).ok()?;
+        let id = ConstValueId(index);
+        self.value(id).map(|_| id)
     }
 
     pub(crate) fn insert_resolved(
@@ -1162,6 +1256,7 @@ impl ConstValueStore {
     ) -> Option<ConstValueId> {
         let fields = match self.payload(id)? {
             ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. } => fields,
+            ConstValuePayload::Coerced(inner) => return self.field_value(*inner, field, path_fork),
             _ => return None,
         };
         fields

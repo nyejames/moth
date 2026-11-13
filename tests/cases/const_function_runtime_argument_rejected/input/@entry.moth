@@ -1,0 +1,7 @@
+square #|value I32| -> I32:
+    return value * value
+;
+
+runtime_value = 4
+result = square(runtime_value)
+io.line(result)

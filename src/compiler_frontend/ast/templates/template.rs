@@ -14,7 +14,7 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
 };
 use crate::compiler_frontend::ast::templates::styles::whitespace::TemplateWhitespacePassProfile;
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateTirReference, TemplateWrapperReference,
+    TemplateTirPhase, TemplateTirReference, TemplateWrapperReference,
 };
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
@@ -301,4 +301,23 @@ pub struct Template {
     /// WHY: wrong-context diagnostics for explicit runtime comment templates must point at the
     ///      authored directive, not at the template opener.
     pub(crate) comment_directive_span: Option<SourceSpan>,
+}
+
+impl Template {
+    /// Promotes this handle to the finalized view identity once it is composed.
+    ///
+    /// WHAT: a `Composed` or `Formatted` reference becomes `Finalized`; a `Parsed` reference keeps
+    ///       its phase because it may still receive normalized overlays.
+    /// WHY: runtime templates are promoted by HIR normalization, while const bodies never reach
+    ///      the runtime-template materialization pass and are promoted by the expression-store
+    ///      sweep. Both paths must apply the same gate, so the rule lives on the durable handle.
+    pub(crate) fn mark_reference_finalized(&mut self) {
+        if self
+            .tir_reference
+            .phase
+            .is_at_least(TemplateTirPhase::Composed)
+        {
+            self.tir_reference.phase = TemplateTirPhase::Finalized;
+        }
+    }
 }

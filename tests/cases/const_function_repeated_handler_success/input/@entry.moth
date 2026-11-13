@@ -1,0 +1,103 @@
+empty #|| -> {I32}:
+    return {}
+;
+
+const_removals #|| -> I32:
+    values ~= {1}
+    total ~= 0
+    loop to 3 |i|:
+        removed = ~values.remove(0) catch:
+            then i + 10
+        ;
+        ~total = total + removed
+    ;
+    return total
+;
+
+runtime_removals || -> I32:
+    values ~= {1}
+    total ~= 0
+    loop to 3 |i|:
+        removed = ~values.remove(0) catch:
+            then i + 10
+        ;
+        ~total = total + removed
+    ;
+    return total
+;
+
+const_rewritten #|| -> I32:
+    values ~= empty()
+    removed = ~values.remove(0) catch:
+        then 7
+    ;
+    return removed
+;
+
+runtime_rewritten || -> I32:
+    values ~= empty()
+    removed = ~values.remove(0) catch:
+        then 7
+    ;
+    return removed
+;
+
+zero #|| -> I32:
+    return 0
+;
+
+const_rewritten_index #|| -> I32:
+    values ~= empty()
+    removed = ~values.remove(zero()) catch:
+        then 7
+    ;
+    return removed
+;
+
+runtime_rewritten_index || -> I32:
+    values ~= empty()
+    removed = ~values.remove(zero()) catch:
+        then 7
+    ;
+    return removed
+;
+
+const_rewritten_get #|| -> I32:
+    value = empty().get(0) catch:
+        then 7
+    ;
+    return value
+;
+
+runtime_rewritten_get || -> I32:
+    value = empty().get(0) catch:
+        then 7
+    ;
+    return value
+;
+
+-- Each rewritten catch has its own handler, including a successful read that must not recover.
+const_distinct_handlers #|| -> I32:
+    values = {5}
+    kept = values.get(zero()) catch:
+        then 99
+    ;
+    first = empty().get(zero()) catch:
+        then 11
+    ;
+    second = empty().get(zero()) catch:
+        then 22
+    ;
+    return kept * 10000 + first * 100 + second
+;
+
+a = const_removals()
+b = runtime_removals()
+c = const_rewritten()
+d = runtime_rewritten()
+e = const_rewritten_get()
+f = runtime_rewritten_get()
+g = const_rewritten_index()
+h = runtime_rewritten_index()
+i = const_distinct_handlers()
+~[: a=[a] b=[b] c=[c] d=[d] e=[e] f=[f] g=[g] h=[h] distinct=[i]]

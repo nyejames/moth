@@ -1,0 +1,4 @@
+$export
+offset #|value I32| -> I32:
+    return value + 4
+;

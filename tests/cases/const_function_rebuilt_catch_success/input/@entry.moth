@@ -1,0 +1,71 @@
+-- A catch whose handled read or arithmetic folds is rebuilt under a fresh expression id. The
+-- prepared handler must follow the rebuilt expression on both the success and failure paths.
+
+success_sum #|| -> I32:
+    values = {3, 4, 5}
+    return values.get(0) + 1 catch:
+        then 7
+    ;
+;
+
+success_product #|| -> I32:
+    values = {3, 4, 5}
+    return values.get(1) * 2 catch:
+        then 9
+    ;
+;
+
+success_nested #|| -> I32:
+    values = {3, 4, 5}
+    return values.get(values.length() - 1) + values.get(0) catch:
+        then 1
+    ;
+;
+
+success_binding #|| -> I32:
+    values = {3, 4, 5}
+    x = values.get(1) * 2 catch:
+        then 9
+    ;
+    return x
+;
+
+failure_sum #|| -> I32:
+    values = {3, 4, 5}
+    return values.get(9) + 1 catch:
+        then 7
+    ;
+;
+
+failure_product #|| -> I32:
+    values = {3, 4, 5}
+    return values.get(9) * 2 catch:
+        then 9
+    ;
+;
+
+failure_nested #|| -> I32:
+    values = {3, 4, 5}
+    return values.get(values.length()) + values.get(0) catch:
+        then 1
+    ;
+;
+
+failure_binding #|| -> I32:
+    values = {3, 4, 5}
+    x = values.get(9) * 2 catch:
+        then 9
+    ;
+    return x
+;
+
+success_a #I32 = success_sum()
+success_b #I32 = success_product()
+success_c #I32 = success_nested()
+binding_a #I32 = success_binding()
+binding_b #I32 = failure_binding()
+failure_a #I32 = failure_sum()
+failure_b #I32 = failure_product()
+failure_c #I32 = failure_nested()
+
+~[: success=[success_a],[success_b],[success_c] binding=[binding_a],[binding_b] failure=[failure_a],[failure_b],[failure_c] ]

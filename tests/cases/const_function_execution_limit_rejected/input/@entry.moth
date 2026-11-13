@@ -1,0 +1,7 @@
+spin #|| -> I32:
+    loop true:
+    ;
+    return 0
+;
+
+result #I32 = spin()

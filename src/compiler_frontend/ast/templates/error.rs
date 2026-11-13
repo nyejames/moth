@@ -5,7 +5,7 @@
 //! WHY: template construction and folding sit between AST source diagnostics and project-aware
 //! formatting/folding infrastructure. This boundary keeps that distinction explicit locally.
 
-use crate::compiler_frontend::ast::const_eval::ConstantFoldError;
+use crate::compiler_frontend::ast::const_eval::{ConstBudgetExhaustion, ConstantFoldError};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStoreError;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure;
@@ -17,6 +17,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 pub(crate) enum TemplateError {
     Diagnostic(DiagnosticDraft),
     NonConstantReferenceInConstant(DiagnosticDraft),
+    Budget(ConstBudgetExhaustion),
     Infrastructure(Box<InfrastructureErrors>),
 }
 
@@ -32,6 +33,7 @@ impl TemplateError {
             Self::NonConstantReferenceInConstant(diagnostic) => {
                 Self::NonConstantReferenceInConstant(map(diagnostic))
             }
+            Self::Budget(exhaustion) => Self::Budget(exhaustion),
             Self::Infrastructure(error) => Self::Infrastructure(error),
         }
     }
@@ -107,6 +109,7 @@ impl From<ConstantFoldError> for TemplateError {
         match error {
             ConstantFoldError::Diagnostic(diagnostic)
             | ConstantFoldError::NumericFailure(diagnostic) => Self::Diagnostic(diagnostic),
+            ConstantFoldError::Budget(exhaustion) => Self::Budget(exhaustion),
             ConstantFoldError::Infrastructure(error) => Self::Infrastructure(error),
         }
     }

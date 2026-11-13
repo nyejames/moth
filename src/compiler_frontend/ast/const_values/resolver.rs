@@ -219,6 +219,9 @@ impl<'a> ConstValueResolver<'a> {
             ConstantFoldError::Diagnostic(_) | ConstantFoldError::NumericFailure(_) => {
                 ConstResolutionError::NonFoldableRuntimeExpression
             }
+            ConstantFoldError::Budget(exhaustion) => {
+                ConstResolutionError::TemplateClassification(TemplateError::Budget(exhaustion))
+            }
             ConstantFoldError::Infrastructure(error) => {
                 ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(error))
             }

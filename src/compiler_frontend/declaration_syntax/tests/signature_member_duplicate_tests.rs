@@ -22,10 +22,11 @@ use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContex
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, DiagnosticCategory, ReservedNameOwner,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::record_body::parse_record_body;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
-    SignatureMemberContext, parse_function_signature_syntax,
+    SignatureMemberContext, parse_function_signature_syntax_with_evaluation,
     parse_trait_requirement_signature_syntax,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
@@ -212,12 +213,13 @@ fn duplicate_function_parameters_rejected_by_shared_parser() {
     let (expected_first_span, expected_duplicate_span) =
         duplicate_member_spans(&token_stream, &mut string_table, "value");
     let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream));
-    let error = parse_function_signature_syntax(
+    let error = parse_function_signature_syntax_with_evaluation(
         &mut declaration_cursor,
         &mut warnings,
         &mut string_table,
         function_path,
         &mut path_fork,
+        CallableEvaluation::Runtime,
     )
     .expect_err("duplicate function parameters must be rejected by the shared parser");
 
@@ -404,12 +406,13 @@ fn parameter_default_unclosed_template_uses_missing_closing_bracket() {
     let mut warnings = DiagnosticBag::new();
     let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream));
 
-    let error = parse_function_signature_syntax(
+    let error = parse_function_signature_syntax_with_evaluation(
         &mut declaration_cursor,
         &mut warnings,
         &mut string_table,
         function_path,
         &mut path_fork,
+        CallableEvaluation::Runtime,
     )
     .expect_err("an unclosed template default must fail signature parsing");
 
@@ -471,12 +474,13 @@ fn parameter_default_unclosed_parenthesis_reports_expected_delimiter() {
     let mut warnings = DiagnosticBag::new();
     let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream));
 
-    let error = parse_function_signature_syntax(
+    let error = parse_function_signature_syntax_with_evaluation(
         &mut declaration_cursor,
         &mut warnings,
         &mut string_table,
         function_path,
         &mut path_fork,
+        CallableEvaluation::Runtime,
     )
     .expect_err("an unclosed call in a default must fail signature parsing");
 
@@ -540,12 +544,13 @@ fn reserved_keyword_parameter_rejected_by_shared_parser() {
     let mut warnings = DiagnosticBag::new();
     let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream));
 
-    let error = parse_function_signature_syntax(
+    let error = parse_function_signature_syntax_with_evaluation(
         &mut declaration_cursor,
         &mut warnings,
         &mut string_table,
         function_path,
         &mut path_fork,
+        CallableEvaluation::Runtime,
     )
     .expect_err("a reserved keyword parameter must be rejected by the shared parser");
 

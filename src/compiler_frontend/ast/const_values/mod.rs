@@ -15,6 +15,7 @@
 //!   module does not replace that path.
 
 pub(crate) mod binding;
+pub(crate) mod const_execution;
 pub(crate) mod resolver;
 pub(crate) mod store;
 

@@ -356,7 +356,9 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
             config_resolution: None,
             build_config_values: Arc::new(Default::default()),
             builder_root_slots: None,
+            provider_materialisations: None,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+            const_execution_limits: Default::default(),
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]
             timing_context: None,
@@ -615,7 +617,9 @@ render_html || -> String:
                 config_resolution: None,
                 build_config_values: Arc::new(Default::default()),
                 builder_root_slots: None,
+                provider_materialisations: None,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+                const_execution_limits: Default::default(),
                 capacity_estimate: Default::default(),
                 #[cfg(feature = "timers")]
                 timing_context: None,
@@ -1957,7 +1961,9 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
             config_resolution: None,
             build_config_values: Arc::new(Default::default()),
             builder_root_slots: None,
+            provider_materialisations: None,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+            const_execution_limits: Default::default(),
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]
             timing_context: None,

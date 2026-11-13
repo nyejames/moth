@@ -1,0 +1,4 @@
+project #= (
+    name = "test_project",
+    const_memory_limit_mb = 1)
+html #= ()

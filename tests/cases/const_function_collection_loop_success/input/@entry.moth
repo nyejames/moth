@@ -1,0 +1,11 @@
+sum_values #|values {I32}| -> I32:
+    sum ~= 0
+    loop values |item|:
+        ~sum = sum + item
+    ;
+    return sum
+;
+
+result = sum_values({1, 2, 3})
+
+io.line([: result=[result] ])

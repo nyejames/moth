@@ -1,0 +1,7 @@
+first #|| -> I32:
+    return second()
+;
+
+second #|| -> I32:
+    return first()
+;

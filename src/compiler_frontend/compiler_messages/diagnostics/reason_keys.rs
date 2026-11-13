@@ -648,6 +648,11 @@ define_stable_reason_keys! {
         &InvalidDeclarationCode::TraitIncompatibilityMissingTrait => "invalid_declaration.trait_incompatibility_missing_trait",
         &InvalidDeclarationCode::TraitIncompatibilitySemicolon => "invalid_declaration.trait_incompatibility_semicolon",
         &InvalidDeclarationCode::MissingInitializerExpression => "invalid_declaration.missing_initializer_expression",
+        &InvalidDeclarationCode::ConstFunctionCannotBeGeneric => "invalid_declaration.const_function_cannot_be_generic",
+        &InvalidDeclarationCode::ConstFunctionCannotBeReceiverMethod => "invalid_declaration.const_function_cannot_be_receiver_method",
+        &InvalidDeclarationCode::ConstFunctionUnsupportedParameter => "invalid_declaration.const_function_unsupported_parameter",
+        &InvalidDeclarationCode::ConstFunctionCannotReturnError => "invalid_declaration.const_function_cannot_return_error",
+        &InvalidDeclarationCode::ConstFunctionCannotReturnNever => "invalid_declaration.const_function_cannot_return_never",
     },
 
     InvalidTraitIncompatibilityReason => {
@@ -884,6 +889,13 @@ define_stable_reason_keys! {
     &CompileTimeEvaluationErrorReason::ConstantSelfReference => "compile_time_evaluation_error.constant_self_reference",
     &CompileTimeEvaluationErrorReason::ConstantNotVisible => "compile_time_evaluation_error.constant_not_visible",
     &CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant => "compile_time_evaluation_error.non_constant_reference_in_constant",
+    &CompileTimeEvaluationErrorReason::ConstCallRequiresConstantArguments => "compile_time_evaluation_error.const_call_requires_constant_arguments",
+    &CompileTimeEvaluationErrorReason::ConstFunctionRuntimeOperation => "compile_time_evaluation_error.const_function_runtime_operation",
+    &CompileTimeEvaluationErrorReason::ConstFunctionExecutionUnsupported => "compile_time_evaluation_error.const_function_execution_unsupported",
+    &CompileTimeEvaluationErrorReason::ConstWorkLimitExceeded => "compile_time_evaluation_error.const_work_limit_exceeded",
+    &CompileTimeEvaluationErrorReason::ConstMemoryLimitExceeded => "compile_time_evaluation_error.const_memory_limit_exceeded",
+    &CompileTimeEvaluationErrorReason::ConstHardSafetyLimitExceeded => "compile_time_evaluation_error.const_hard_safety_limit_exceeded",
+    &CompileTimeEvaluationErrorReason::ConstAssertionFailed => "compile_time_evaluation_error.const_assertion_failed",
     &CompileTimeEvaluationErrorReason::SameFileForwardConstantReference => "compile_time_evaluation_error.same_file_forward_constant_reference",
     &CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable => "compile_time_evaluation_error.constant_initializer_not_foldable",
     &CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext => "compile_time_evaluation_error.external_non_scalar_constant_in_constant_context",
@@ -1056,6 +1068,7 @@ define_stable_reason_keys! {
     &InvalidStatementPositionReason::UnexpectedOf => "invalid_statement_position.unexpected_of",
     &InvalidStatementPositionReason::UnexpectedScopeCloseInExpression => "invalid_statement_position.unexpected_scope_close_in_expression",
     &InvalidStatementPositionReason::UnexpectedScopeCloseInTemplate => "invalid_statement_position.unexpected_scope_close_in_template",
+    &InvalidStatementPositionReason::UnexpectedScopeCloseAtTopLevel => "invalid_statement_position.unexpected_scope_close_at_top_level",
     },
 
     CommonSyntaxMistakeReason => {

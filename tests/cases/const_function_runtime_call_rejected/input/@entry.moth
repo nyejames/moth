@@ -1,0 +1,10 @@
+ordinary || -> I32:
+    return 1
+;
+bad #|| -> I32:
+    if false:
+        return ordinary()
+    ;
+    return 1
+;
+io.line("unreachable")

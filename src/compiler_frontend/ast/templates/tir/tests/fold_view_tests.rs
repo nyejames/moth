@@ -108,10 +108,13 @@ fn fold_context<'a>(
         expression_builder,
         const_values,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        template_output_limits: None,
+        template_work: None,
         source_scope: None,
         external_package_registry: None,
         prepared_wrapper_slot_routing: FxHashMap::default(),
         bindings: vec![],
+        required_call_rewriter: None,
     }
 }
 
@@ -271,6 +274,8 @@ fn fold_view_is_deterministic_with_and_without_active_bindings() {
         expression_builder: &mut expressions,
         const_values: &mut const_values,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        template_output_limits: None,
+        template_work: None,
         source_scope: None,
         external_package_registry: None,
         prepared_wrapper_slot_routing: FxHashMap::default(),
@@ -278,6 +283,7 @@ fn fold_view_is_deterministic_with_and_without_active_bindings() {
             path,
             value: active_value,
         }],
+        required_call_rewriter: None,
     };
     fold_prepared_view(&view, &mut active_context)
         .expect("active-binding fold should still succeed");

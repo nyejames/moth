@@ -32,7 +32,11 @@ use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
     PublicFoldedField, PublicFoldedValue,
 };
-use crate::compiler_frontend::module_compilation::DEFAULT_MAX_ERRORS_PER_MODULE;
+use crate::compiler_frontend::module_compilation::{
+    ConstExecutionLimits, DEFAULT_CONST_EXECUTION_MEMORY_LIMIT_BYTES,
+    DEFAULT_CONST_EXECUTION_WORK_LIMIT, DEFAULT_MAX_ERRORS_PER_MODULE,
+    MAX_CONST_EXECUTION_MEMORY_LIMIT_BYTES, MAX_CONST_EXECUTION_WORK_LIMIT,
+};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::projects::settings::{
@@ -286,6 +290,8 @@ fn apply_project_record_fields(
     // a rejected record must not leave one limit changed while the other fails.
     let mut module_error_limit = Some(DEFAULT_MAX_ERRORS_PER_MODULE);
     let mut project_error_limit = Some(DEFAULT_MAX_ERRORS_PER_PROJECT);
+    let mut const_work_limit = DEFAULT_CONST_EXECUTION_WORK_LIMIT;
+    let mut const_memory_limit_bytes = DEFAULT_CONST_EXECUTION_MEMORY_LIMIT_BYTES;
 
     for field in fields {
         if matches!(
@@ -345,6 +351,32 @@ fn apply_project_record_fields(
                 }
             }
 
+            ("const_work_limit", ValidatedConfigValue::FixedScalar(value)) => {
+                match validate_positive_const_limit(
+                    "const_work_limit",
+                    value,
+                    MAX_CONST_EXECUTION_WORK_LIMIT as i64,
+                    field.span,
+                    diagnostic_strings,
+                ) {
+                    Ok(limit) => const_work_limit = limit as usize,
+                    Err(diagnostic) => errors.push(diagnostic),
+                }
+            }
+
+            ("const_memory_limit_mb", ValidatedConfigValue::FixedScalar(value)) => {
+                match validate_positive_const_limit(
+                    "const_memory_limit_mb",
+                    value,
+                    (MAX_CONST_EXECUTION_MEMORY_LIMIT_BYTES / (1024 * 1024)) as i64,
+                    field.span,
+                    diagnostic_strings,
+                ) {
+                    Ok(limit) => const_memory_limit_bytes = (limit as usize) * 1024 * 1024,
+                    Err(diagnostic) => errors.push(diagnostic),
+                }
+            }
+
             ("max_errors_per_module", ValidatedConfigValue::FixedScalar(value)) => {
                 match validate_diagnostic_error_limit(
                     "max_errors_per_module",
@@ -394,6 +426,8 @@ fn apply_project_record_fields(
     if errors.is_empty() {
         config.max_errors_per_module = module_error_limit;
         config.max_errors_per_project = project_error_limit;
+        config.const_execution_limits =
+            ConstExecutionLimits::from_configured(const_work_limit, const_memory_limit_bytes);
         Ok(())
     } else {
         Err(errors)
@@ -1176,16 +1210,50 @@ fn extract_bool_value(value: &PublicFoldedValue) -> Option<bool> {
     }
 }
 
+/// Read a config scalar the project schema already proved to be an exact `I32`.
+///
+/// WHY: every bounded limit validator needs the same schema-owned type assertion; the schema owns
+///      the exact type, so only the numeric range remains a per-setting question.
+fn config_i32_scalar(value: FixedScalarValue) -> i64 {
+    debug_assert_eq!(value.scalar(), FixedScalar::I32);
+    value
+        .as_i64()
+        .expect("the project schema validated an I32 config scalar")
+}
+
+/// Validate one positive const-execution limit against its published bound.
+///
+/// The expected-value text is derived from `maximum` so the bound lives only in the schema-owned
+/// constant rather than in a second hard-coded number.
+fn validate_positive_const_limit(
+    key: &str,
+    value: FixedScalarValue,
+    maximum: i64,
+    span: Option<SourceSpan>,
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+) -> Result<i64, DiagnosticDraft> {
+    let value = config_i32_scalar(value);
+    if value <= 0 || value > maximum {
+        let expected = format!("a positive integer no greater than {maximum}");
+        return Err(config_diagnostic(
+            Some(diagnostic_strings.intern(key)),
+            InvalidConfigReason::InvalidProjectSettingValue {
+                value: diagnostic_strings.intern(&value.to_string()),
+                expected: diagnostic_strings.intern(&expected),
+            },
+            span,
+        ));
+    }
+    Ok(value)
+}
+
 fn validate_template_const_loop_iteration_limit(
     value: FixedScalarValue,
     span: Option<SourceSpan>,
     diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
 ) -> Result<usize, Vec<DiagnosticDraft>> {
     // The project schema guarantees an exact I32 before applying the resource bound.
-    debug_assert_eq!(value.scalar(), FixedScalar::I32);
-    let value = value
-        .as_i64()
-        .expect("the validated loop limit is an I32 scalar");
+    let value = config_i32_scalar(value);
     if value <= 0 {
         return Err(vec![config_diagnostic(
             Some(diagnostic_strings.intern(TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY)),
@@ -1224,10 +1292,7 @@ fn validate_diagnostic_error_limit(
     span: Option<SourceSpan>,
     diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
 ) -> Result<NonZeroU32, DiagnosticDraft> {
-    debug_assert_eq!(value.scalar(), FixedScalar::I32);
-    let value = value
-        .as_i64()
-        .expect("the validated diagnostic limit is an I32 scalar");
+    let value = config_i32_scalar(value);
 
     let Some(limit) = u32::try_from(value).ok().and_then(NonZeroU32::new) else {
         return Err(config_diagnostic(

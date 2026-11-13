@@ -36,6 +36,7 @@ use crate::compiler_frontend::builtins::casts::targets::{
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -280,6 +281,16 @@ impl<'a> HirBuilder<'a> {
         let metadata = call.metadata();
         let span = &expression.span();
         let types = expression.success_types();
+        // A required const call must be folded by the compile-time evaluator before HIR. Letting
+        // it through would resolve a runtime function target for a declaration that owns no
+        // runtime body, so fail closed while the evaluator boundary is incomplete.
+        if metadata.evaluation == CallableEvaluation::Const {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
+                "a required const call reached runtime HIR lowering instead of compile-time evaluation",
+            )
+            .into());
+        }
         let target = match metadata.target {
             ResolvedCallableTarget::Function(path) => self.resolve_call_target_or_error(&path)?,
             ResolvedCallableTarget::Host(id) => CallTarget::External(id),

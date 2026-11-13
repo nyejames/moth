@@ -121,6 +121,7 @@ fn qualified_forward_reference_diagnostics_follow_source_span_order() {
             ConstantPosition {
                 source_file,
                 header_index,
+                kind: OrderedValueKind::Constant,
             },
         );
     }
@@ -199,6 +200,7 @@ fn qualified_self_and_forward_references_emit_in_span_order_with_preserved_reaso
         ConstantPosition {
             source_file,
             header_index: 0,
+            kind: OrderedValueKind::Constant,
         },
     );
     constant_positions.insert(
@@ -206,6 +208,7 @@ fn qualified_self_and_forward_references_emit_in_span_order_with_preserved_reaso
         ConstantPosition {
             source_file,
             header_index: 3,
+            kind: OrderedValueKind::Constant,
         },
     );
 
@@ -266,6 +269,7 @@ fn mtf_content_self_cycle_skip_keeps_the_self_reference_out_of_header_diagnostic
         ConstantPosition {
             source_file,
             header_index: 0,
+            kind: OrderedValueKind::Constant,
         },
     );
 

@@ -31,6 +31,7 @@ use crate::compiler_frontend::compiler_messages::{
     AstCapacityResource, CompileTimeEvaluationErrorReason, InvalidBuiltinCallReason,
     InvalidFallibleHandlingReason,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::number::NumberValue;
@@ -470,6 +471,7 @@ impl AstExpressionBuilder {
     fn call_with_target<'a>(
         &mut self,
         target: ResolvedCallableTarget,
+        evaluation: CallableEvaluation,
         receiver: Option<OwnedExpr>,
         args: impl Into<ExpressionInputs<'a, CallArgument, CallArgument<OwnedExpr>>>,
         slots: Vec<TypeId>,
@@ -488,6 +490,7 @@ impl AstExpressionBuilder {
         let call = self.append_call(
             ResolvedCall {
                 target,
+                evaluation,
                 arguments,
                 handling,
                 requires_external_float_validation: external_validation,
@@ -510,8 +513,31 @@ impl AstExpressionBuilder {
         slots: Vec<TypeId>,
         span: Option<SourceSpan>,
     ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.function_call_with_evaluation_and_typed_arguments(
+            name,
+            CallableEvaluation::Runtime,
+            args,
+            slots,
+            span,
+        )
+    }
+
+    /// Source-function call retaining the callee's compile-time execution classification.
+    ///
+    /// WHAT: one call row carries the callee evaluation fact resolved at call typing.
+    /// WHY: required const calls and ordinary runtime calls share call syntax and argument
+    ///      typing; only the evaluation owner needs to distinguish them later.
+    pub(crate) fn function_call_with_evaluation_and_typed_arguments<'a>(
+        &mut self,
+        name: PathId,
+        evaluation: CallableEvaluation,
+        args: impl Into<ExpressionInputs<'a, CallArgument, CallArgument<OwnedExpr>>>,
+        slots: Vec<TypeId>,
+        span: Option<SourceSpan>,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
         self.call_with_target(
             ResolvedCallableTarget::Function(name),
+            evaluation,
             None,
             args,
             slots,
@@ -531,6 +557,7 @@ impl AstExpressionBuilder {
     ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
         self.call_with_target(
             ResolvedCallableTarget::Function(name),
+            CallableEvaluation::Runtime,
             Some(receiver),
             args,
             slots,
@@ -551,6 +578,7 @@ impl AstExpressionBuilder {
     ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
         self.call_with_target(
             ResolvedCallableTarget::Function(name),
+            CallableEvaluation::Runtime,
             None,
             args,
             slots,
@@ -574,6 +602,7 @@ impl AstExpressionBuilder {
     ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
         self.call_with_target(
             ResolvedCallableTarget::Host(id),
+            CallableEvaluation::Runtime,
             None,
             args,
             slots,
@@ -591,6 +620,7 @@ impl AstExpressionBuilder {
     ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
         self.call_with_target(
             ResolvedCallableTarget::Host(input.id),
+            CallableEvaluation::Runtime,
             None,
             input.args,
             input.result_type_ids,
@@ -982,6 +1012,7 @@ impl AstExpressionBuilder {
             let metadata = call.metadata();
             let mut record = ResolvedCall {
                 target: metadata.target,
+                evaluation: metadata.evaluation,
                 arguments: metadata.arguments,
                 handling: metadata.handling,
                 requires_external_float_validation: metadata.requires_external_float_validation,
@@ -1135,6 +1166,7 @@ impl AstExpressionBuilder {
                 let metadata = call.metadata();
                 let record = ResolvedCall {
                     target: metadata.target,
+                    evaluation: metadata.evaluation,
                     arguments: metadata.arguments,
                     handling: Some(handling),
                     requires_external_float_validation: metadata.requires_external_float_validation,

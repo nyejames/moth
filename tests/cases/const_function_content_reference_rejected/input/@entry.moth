@@ -1,0 +1,7 @@
+-- A template content reference is not a constant the bounded executor can resolve, so declaration
+-- preparation must refuse the body even though nothing calls the function.
+text #|| -> String:
+    return @+notes content
+;
+
+io.line("content const body accepted")

@@ -1,0 +1,6 @@
+verified #|| -> I32:
+    assert(false, "must fail")
+    return 1
+;
+
+result #I32 = verified()

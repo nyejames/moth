@@ -12,16 +12,19 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticBag,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::{
     FileVisibility, HeaderBindingEnvironment, NamespaceTypeMember, NamespaceValueMember,
+    cross_file_root_local_declaration,
 };
 use crate::compiler_frontend::headers::module_symbols::{GenericDeclarationKind, ModuleSymbols};
 use crate::compiler_frontend::headers::parse_file_headers::{
     Header, HeaderKind, HeaderPreparationFailure,
 };
 use crate::compiler_frontend::headers::types::{
-    LocalDeclarationOrderingHint, LocalDeclarationOrderingHintOrigin, SyntheticContentPayload,
+    LocalDeclarationOrderingHint, LocalDeclarationOrderingHintOrigin, SourceTokenOwners,
+    SyntheticContentPayload,
 };
 use crate::compiler_frontend::public_interface::{
     PublicDeclarationRecord, PublicDeclarationSemantics,
@@ -30,7 +33,10 @@ use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::utilities::token_scan::InitializerReference;
+use crate::compiler_frontend::utilities::token_scan::{
+    InitializerReference, TokenFactView, collect_body_local_binding_names,
+    collect_scanned_symbol_references,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub(crate) struct ConstantDependencyInput<'a> {
@@ -39,6 +45,7 @@ pub(crate) struct ConstantDependencyInput<'a> {
     pub(crate) binding_environment: &'a HeaderBindingEnvironment,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork: &'a PathInternerFork,
+    pub(crate) source_token_owners: &'a SourceTokenOwners,
 }
 
 pub(crate) struct ConstantDependencyReport {
@@ -57,11 +64,21 @@ pub(crate) struct ConstantDependencyReport {
 struct ConstantPosition {
     source_file: PathId,
     header_index: usize,
+    kind: OrderedValueKind,
+}
+
+/// Which ordered value participant owns a dependency position.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OrderedValueKind {
+    Constant,
+    ConstFunction,
 }
 
 pub(crate) enum ConstantReferenceResolution {
     SourceConstant { path: PathId },
+    SourceConstFunction { path: PathId },
     ImportedConstant,
+    ImportedConstFunction { _path: PathId },
     SourceNonConstant { _path: PathId },
     SourceTypeAlias { _path: PathId },
     ExternalConstant { _symbol_id: ExternalSymbolId },
@@ -112,6 +129,11 @@ fn push_qualified_reference_diagnostics<'a>(
             continue;
         };
         if position.source_file != current_source_file {
+            continue;
+        }
+        // Const functions may be called before their declaration; the dependency graph owns
+        // their ordering and cycle rejection. Only constants keep the source-order rule.
+        if position.kind == OrderedValueKind::ConstFunction {
             continue;
         }
         let span = hint.occurrence_span().or(name_span);
@@ -226,6 +248,7 @@ pub(crate) fn add_constant_initializer_dependencies(
         binding_environment,
         string_table,
         path_fork,
+        source_token_owners,
     } = input;
 
     let mut diagnostic_bag = DiagnosticBag::new();
@@ -242,6 +265,20 @@ pub(crate) fn add_constant_initializer_dependencies(
 
     for (header_index, header) in headers.iter().enumerate() {
         match &header.kind {
+            HeaderKind::Function { signature, .. }
+                if signature.evaluation == CallableEvaluation::Const =>
+            {
+                constant_positions.insert(
+                    header.declaration_path,
+                    ConstantPosition {
+                        source_file: module_symbols
+                            .source_path_for_header(header)
+                            .expect("header body range has no prepared source-path identity"),
+                        header_index,
+                        kind: OrderedValueKind::ConstFunction,
+                    },
+                );
+            }
             HeaderKind::Constant { .. } => {
                 let path = header.declaration_path;
                 constant_positions.insert(
@@ -251,6 +288,7 @@ pub(crate) fn add_constant_initializer_dependencies(
                             .source_path_for_header(header)
                             .expect("header body range has no prepared source-path identity"),
                         header_index,
+                        kind: OrderedValueKind::Constant,
                     },
                 );
                 if let Some(name) = path_fork.component(path) {
@@ -271,9 +309,93 @@ pub(crate) fn add_constant_initializer_dependencies(
     let mut edges_to_add: Vec<(usize, LocalDeclarationOrderingHint)> = Vec::new();
 
     for (header_index, header) in headers.iter().enumerate() {
+        let mut const_body_references: Vec<InitializerReference>;
         let (initializer_refs, reference_header_index) = match &header.kind {
             HeaderKind::Constant { declaration, .. } => {
                 (&declaration.initializer_references[..], header_index)
+            }
+            HeaderKind::Function { signature, .. }
+                if signature.evaluation == CallableEvaluation::Const =>
+            {
+                let source_path = module_symbols
+                    .source_path_for_header(header)
+                    .expect("header body range has no prepared source-path identity");
+                let source_id = *module_symbols
+                    .source_ids_by_source
+                    .get(&source_path)
+                    .ok_or_else(|| {
+                        HeaderPreparationFailure::Infrastructure(
+                            InfrastructureFailure::internal(
+                                CompilerStage::HeaderParsing,
+                                "const function body header has no prepared source identity",
+                            )
+                            .into(),
+                        )
+                    })?;
+                let owner = source_token_owners.get(&source_id).ok_or_else(|| {
+                    HeaderPreparationFailure::Infrastructure(
+                        InfrastructureFailure::internal(
+                            CompilerStage::HeaderParsing,
+                            "const function body header has no canonical token owner",
+                        )
+                        .into(),
+                    )
+                })?;
+                let view = TokenFactView::from_source_range(owner.tokens_ref(), header.tokens)
+                    .map_err(|error| {
+                        HeaderPreparationFailure::Infrastructure(
+                            InfrastructureFailure::internal(
+                                CompilerStage::HeaderParsing,
+                                format!(
+                                    "const function body token range could not be viewed: {error:?}"
+                                ),
+                            )
+                            .into(),
+                        )
+                    })?;
+                const_body_references =
+                    collect_scanned_symbol_references(view, source_id, string_table);
+                // Parameter and local names belong to the callable's body scope. The shallow
+                // token scan cannot resolve them, so exclude them here before they can create an
+                // edge to a top-level declaration with the same spelling. Moth forbids shadowing,
+                // so a body-local spelling cannot be a top-level reference.
+                let mut local_names = collect_body_local_binding_names(view, string_table)
+                    .map_err(|error| HeaderPreparationFailure::Infrastructure(error.into()))?;
+                let parameter_names: FxHashSet<StringId> = signature
+                    .parameters
+                    .iter()
+                    .filter_map(|parameter| path_fork.component(parameter.id))
+                    .collect();
+                local_names.extend(parameter_names.iter().copied());
+                const_body_references.retain(|reference| !local_names.contains(&reference.name));
+                // A parameter default folds while this signature resolves in Stage 3, before a
+                // later const function body prepares. Record the same ordering edge as a body
+                // reference so the default's callee is prepared first. Defaults cannot name
+                // parameters, so only parameter spellings are excluded from their scan.
+                for parameter in &signature.parameters {
+                    let Some(default_range) = parameter.default_range else {
+                        continue;
+                    };
+                    let default_view =
+                        TokenFactView::from_source_range(owner.tokens_ref(), default_range)
+                            .map_err(|error| {
+                                HeaderPreparationFailure::Infrastructure(
+                                    InfrastructureFailure::internal(
+                                        CompilerStage::HeaderParsing,
+                                        format!(
+                                            "const function parameter default token range could not be viewed: {error:?}"
+                                        ),
+                                    )
+                                    .into(),
+                                )
+                            })?;
+                    const_body_references.extend(
+                        collect_scanned_symbol_references(default_view, source_id, string_table)
+                            .into_iter()
+                            .filter(|reference| !parameter_names.contains(&reference.name)),
+                    );
+                }
+                (const_body_references.as_slice(), header_index)
             }
 
             HeaderKind::ConstTemplate {
@@ -303,8 +425,25 @@ pub(crate) fn add_constant_initializer_dependencies(
 
         let current_path = header.declaration_path;
 
-        let all_refs = initializer_refs.iter().chain(&header.capacity_references);
-        for reference in all_refs {
+        let current_is_const_function = matches!(
+            &header.kind,
+            HeaderKind::Function { signature, .. }
+                if signature.evaluation
+                    == CallableEvaluation::Const
+        );
+        // Signature capacities keep their established source-order rule even on a const
+        // function. Only initializer, const-body and const-function default references may
+        // point forward.
+        let all_refs = initializer_refs
+            .iter()
+            .map(|reference| (reference, current_is_const_function))
+            .chain(
+                header
+                    .capacity_references
+                    .iter()
+                    .map(|reference| (reference, false)),
+            );
+        for (reference, is_const_required_reference) in all_refs {
             let resolution = classify_reference(
                 reference,
                 visibility,
@@ -332,7 +471,9 @@ pub(crate) fn add_constant_initializer_dependencies(
                         ));
                     };
                     if position.source_file == current_source_file {
-                        if position.header_index > reference_header_index {
+                        if position.header_index > reference_header_index
+                            && !is_const_required_reference
+                        {
                             diagnostic_bag.push(same_file_forward_reference_error(
                                 &current_path,
                                 &path,
@@ -352,9 +493,31 @@ pub(crate) fn add_constant_initializer_dependencies(
                     ));
                 }
 
+                // Const functions create ordering edges in either source direction. The graph
+                // walk owns direct and transitive cycles, including a self edge.
+                ConstantReferenceResolution::SourceConstFunction { path } => {
+                    let Some(position) = constant_positions.get(&path) else {
+                        return Err(HeaderPreparationFailure::Infrastructure(
+                            missing_constant_position_error(&path, path_fork, string_table).into(),
+                        ));
+                    };
+                    if position.source_file == current_source_file {
+                        report.same_file_edges += 1;
+                    } else {
+                        report.cross_file_edges += 1;
+                    }
+                    edges_to_add.push((
+                        header_index,
+                        LocalDeclarationOrderingHint::source_owned(path),
+                    ));
+                }
+
                 // Type aliases live in the type namespace. They do not create value dependency edges.
+                // Imported constants and const functions are ordered by the module dependency
+                // graph; their provider executable runs before this consumer.
                 ConstantReferenceResolution::SourceTypeAlias { .. }
                 | ConstantReferenceResolution::ImportedConstant
+                | ConstantReferenceResolution::ImportedConstFunction { .. }
                 | ConstantReferenceResolution::ExternalConstant { .. }
                 | ConstantReferenceResolution::ConstructorLikeSource { .. } => {}
 
@@ -362,7 +525,13 @@ pub(crate) fn add_constant_initializer_dependencies(
                 // External non-constants are deferred to AST because header stage cannot
                 // determine whether an external call is foldable or valid in all contexts.
                 ConstantReferenceResolution::SourceNonConstant { .. } => {
-                    diagnostic_bag.push(non_constant_reference_error(reference));
+                    // A const body's or const-signature default's own eligibility pass reports
+                    // its runtime call or binding with a call-site label; the dependency scan
+                    // must not duplicate it. Signature capacities keep their established
+                    // header-stage diagnostics.
+                    if !is_const_required_reference {
+                        diagnostic_bag.push(non_constant_reference_error(reference));
+                    }
                 }
 
                 // External references are deferred to AST folding validation.
@@ -373,6 +542,13 @@ pub(crate) fn add_constant_initializer_dependencies(
                 // name the root-local isolation rule with both sites instead of the generic
                 // constant-visibility error.
                 ConstantReferenceResolution::NotVisible { name } => {
+                    // A const body may read its own parameter or local, and a const-signature
+                    // default may name a spelling that is not visible here. Scope-aware AST
+                    // resolution owns that decision, so an unresolved header name must not
+                    // become a false dependency error.
+                    if is_const_required_reference {
+                        continue;
+                    }
                     let Some(candidates) = constants_by_name.get(&name) else {
                         // No constant with this name exists anywhere. AST produces a more precise
                         // diagnostic during expression parsing.
@@ -392,7 +568,7 @@ pub(crate) fn add_constant_initializer_dependencies(
                     });
                     match root_local {
                         Some((path, target_source_file)) => {
-                            let diagnostic = crate::compiler_frontend::headers::binding_environment::cross_file_root_local_declaration(
+                            let diagnostic = cross_file_root_local_declaration(
                                 module_symbols,
                                 &current_source_file,
                                 &target_source_file,
@@ -592,6 +768,14 @@ fn classify_source_declaration_reference(
             PublicDeclarationSemantics::Constant(_) => {
                 ConstantReferenceResolution::ImportedConstant
             }
+            PublicDeclarationSemantics::Function(function)
+                if function.evaluation == CallableEvaluation::Const
+                    && reference.followed_by_call =>
+            {
+                ConstantReferenceResolution::ImportedConstFunction {
+                    _path: *target_path,
+                }
+            }
             PublicDeclarationSemantics::Struct(_) | PublicDeclarationSemantics::Choice(_)
                 if reference.followed_by_call || reference.followed_by_choice_namespace =>
             {
@@ -610,9 +794,21 @@ fn classify_source_declaration_reference(
         };
     }
 
-    let is_constant = constant_positions.contains_key(target_path);
+    let position_kind = constant_positions
+        .get(target_path)
+        .map(|position| position.kind);
 
-    if is_constant {
+    if position_kind == Some(OrderedValueKind::ConstFunction) {
+        return if reference.followed_by_call {
+            ConstantReferenceResolution::SourceConstFunction { path: *target_path }
+        } else {
+            ConstantReferenceResolution::SourceNonConstant {
+                _path: *target_path,
+            }
+        };
+    }
+
+    if position_kind.is_some() {
         // Even if the target is a constant, it might be used as a constructor-like
         // nominal if followed by a call or namespace accessor.
         if (reference.followed_by_call || reference.followed_by_choice_namespace)

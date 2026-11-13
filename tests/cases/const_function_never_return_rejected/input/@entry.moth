@@ -1,0 +1,8 @@
+forever #|value I32| -> !:
+    loop
+        value = value + 1
+    ;
+;
+
+start ||:
+;

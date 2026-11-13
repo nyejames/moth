@@ -3352,6 +3352,13 @@ contract = "language.functions.body_stray_comma_rejected"
 role = "primary"
 
 [[case]]
+id = "diagnostic_top_level_stray_scope_close"
+path = "diagnostic_top_level_stray_scope_close"
+tags = ["integration", "diagnostics"]
+contract = "language.syntax.top_level_stray_scope_close_rejected"
+role = "primary"
+
+[[case]]
 id = "diagnostic_recovery_independent_bodies"
 path = "diagnostic_recovery_independent_bodies"
 tags = ["integration", "diagnostics", "functions"]
@@ -19504,4 +19511,661 @@ id = "directive_in_collection_entry_failure"
 path = "directive_in_collection_entry_failure"
 tags = ["integration", "directives", "diagnostics", "collections"]
 contract = "language.directives.directive_in_a_collection_entry_is_a_wrong_target"
+role = "primary"
+
+[[case]]
+id = "const_function_generic_rejected"
+path = "const_function_generic_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_rejects_generic_parameters"
+role = "primary"
+
+[[case]]
+id = "const_function_receiver_rejected"
+path = "const_function_receiver_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_rejects_receiver_methods"
+role = "primary"
+
+[[case]]
+id = "release_ordinary_scalar_alias_mutation_parity"
+path = "release_ordinary_scalar_alias_mutation_parity"
+tags = ["integration", "functions", "release", "aliasing", "const"]
+contract = "language.functions.release_folding_preserves_scalar_alias_mutation"
+role = "primary"
+
+[[case]]
+id = "release_optimisation_budget_note"
+path = "release_optimisation_budget_note"
+tags = ["integration", "functions", "release", "const", "budgets", "diagnostics"]
+contract = "language.functions.release_budget_limited_call_stays_runtime"
+role = "primary"
+
+[[case]]
+id = "release_ordinary_aggregate_alias_parity"
+path = "release_ordinary_aggregate_alias_parity"
+tags = ["integration", "functions", "release", "aliasing", "const"]
+contract = "language.functions.release_refuses_aggregate_returning_candidates"
+role = "primary"
+
+[[case]]
+id = "const_function_surrounding_receivers_success"
+path = "const_function_surrounding_receivers_success"
+tags = ["integration", "functions", "const", "aliases", "receivers"]
+contract = "language.functions.const_function_prepares_with_surrounding_receivers"
+role = "primary"
+
+[[case]]
+id = "const_function_receiver_declaration_reports_source_error"
+path = "const_function_receiver_declaration_reports_source_error"
+tags = ["integration", "functions", "const", "receivers", "diagnostics"]
+contract = "language.functions.const_function_reports_actual_receiver_declaration_error"
+role = "primary"
+
+[[case]]
+id = "const_function_never_return_rejected"
+path = "const_function_never_return_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_rejects_never_return"
+role = "primary"
+
+[[case]]
+id = "const_function_mutable_parameter_rejected"
+path = "const_function_mutable_parameter_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_rejects_mutable_parameters"
+role = "primary"
+
+[[case]]
+id = "const_function_error_return_rejected"
+path = "const_function_error_return_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_rejects_error_returns"
+role = "primary"
+
+[[case]]
+id = "const_function_never_called_success"
+path = "const_function_never_called_success"
+tags = ["integration", "functions", "const", "runtime"]
+contract = "language.functions.const_function_declaration_is_compile_time_only"
+role = "primary"
+
+[[case]]
+id = "const_call_runtime_argument_rejected"
+path = "const_call_runtime_argument_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_call_rejects_runtime_dependent_arguments"
+role = "primary"
+
+[[case]]
+id = "const_function_runtime_call_rejected"
+path = "const_function_runtime_call_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_body_rejects_runtime_calls_in_unreachable_branches"
+role = "primary"
+
+[[case]]
+id = "const_function_host_effect_rejected"
+path = "const_function_host_effect_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_body_rejects_untrusted_host_effects"
+role = "primary"
+
+[[case]]
+id = "const_function_facade_private_helper_success"
+path = "const_function_facade_private_helper_success"
+tags = ["integration", "functions", "const", "imports", "facade"]
+contract = "language.functions.const_facade_private_helper_executes"
+role = "primary"
+
+[[case]]
+id = "const_function_source_package_shared_constant_success"
+path = "const_function_source_package_shared_constant_success"
+tags = ["integration", "functions", "const", "imports", "packages"]
+contract = "language.functions.const_source_package_shared_constant_executes"
+role = "primary"
+
+[[case]]
+id = "const_function_transitive_callee_success"
+path = "const_function_transitive_callee_success"
+tags = ["integration", "functions", "const", "imports", "packages"]
+contract = "language.functions.const_transitive_provider_callee_executes"
+role = "primary"
+
+[[case]]
+id = "const_function_parameter_default_forward_dependency_success"
+path = "const_function_parameter_default_forward_dependency_success"
+tags = ["integration", "functions", "const", "dependencies"]
+contract = "language.functions.const_signature_default_orders_forward_dependencies"
+role = "primary"
+
+[[case]]
+id = "const_function_source_package_resource_success"
+path = "const_function_source_package_resource_success"
+tags = ["integration", "functions", "const", "imports", "packages", "resources"]
+contract = "language.functions.const_source_package_resource_preserves_provider_origin"
+role = "primary"
+
+[[case]]
+id = "const_function_imported_constant_success"
+path = "const_function_imported_constant_success"
+tags = ["integration", "functions", "const", "imports", "packages"]
+contract = "language.functions.const_provider_body_reads_imported_constant"
+role = "primary"
+
+[[case]]
+id = "const_function_generic_sibling_success"
+path = "const_function_generic_sibling_success"
+tags = ["integration", "functions", "const", "generic", "imports", "packages"]
+contract = "language.functions.const_and_generic_siblings_publish_independently"
+role = "primary"
+
+[[case]]
+id = "const_function_private_alias_success"
+path = "const_function_private_alias_success"
+tags = ["integration", "functions", "const", "imports", "packages", "aliases"]
+contract = "language.functions.const_provider_body_restores_private_alias"
+role = "primary"
+
+[[case]]
+id = "const_function_namespace_const_sibling_success"
+path = "const_function_namespace_const_sibling_success"
+tags = ["integration", "functions", "const", "imports", "packages", "namespaces"]
+contract = "language.functions.const_namespace_selects_only_const_dependencies"
+role = "primary"
+
+[[case]]
+id = "const_function_imported_success"
+path = "const_function_imported_success"
+tags = ["integration", "functions", "const", "imports"]
+contract = "language.functions.imported_const_function_retains_compile_time_classification"
+role = "primary"
+
+[[case]]
+id = "const_function_runtime_argument_rejected"
+path = "const_function_runtime_argument_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_call_rejects_runtime_arguments"
+role = "primary"
+
+[[case]]
+id = "const_function_receiver_call_rejected"
+path = "const_function_receiver_call_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_body_rejects_runtime_receiver_calls"
+role = "primary"
+
+[[case]]
+id = "const_function_generic_call_rejected"
+path = "const_function_generic_call_rejected"
+tags = ["integration", "functions", "const", "generics", "diagnostics"]
+contract = "language.functions.const_body_rejects_generic_calls"
+role = "primary"
+
+[[case]]
+id = "const_function_missing_return_rejected"
+path = "const_function_missing_return_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_body_participates_in_terminality_validation"
+role = "primary"
+
+[[case]]
+id = "const_function_imported_runtime_argument_rejected"
+path = "const_function_imported_runtime_argument_rejected"
+tags = ["integration", "functions", "const", "imports", "diagnostics"]
+contract = "language.functions.imported_const_call_rejects_runtime_arguments"
+role = "primary"
+
+[[case]]
+id = "const_function_static_if_terminality_success"
+path = "const_function_static_if_terminality_success"
+tags = ["integration", "functions", "const", "control-flow"]
+contract = "language.functions.const_body_terminality_sees_static_specialisation"
+role = "primary"
+
+[[case]]
+id = "const_function_qualified_cycle_rejected"
+path = "const_function_qualified_cycle_rejected"
+tags = ["integration", "functions", "const", "dependencies", "diagnostics"]
+contract = "language.functions.const_function_qualified_cycle_rejected"
+role = "primary"
+
+[[case]]
+id = "const_function_qualified_forward_success"
+path = "const_function_qualified_forward_success"
+tags = ["integration", "functions", "const", "dependencies"]
+contract = "language.functions.const_function_qualified_forward_reference"
+role = "primary"
+
+[[case]]
+id = "const_function_content_reference_rejected"
+path = "const_function_content_reference_rejected"
+tags = ["integration", "functions", "const", "dependencies", "content", "diagnostics"]
+contract = "language.functions.const_content_reference_rejected"
+role = "primary"
+
+[[case]]
+id = "const_function_parameter_name_not_a_reference_success"
+path = "const_function_parameter_name_not_a_reference_success"
+tags = ["integration", "functions", "const", "dependencies"]
+contract = "language.functions.const_function_parameter_is_not_a_top_level_reference"
+role = "primary"
+
+[[case]]
+id = "const_function_runtime_binding_call_success"
+path = "const_function_runtime_binding_call_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_function_required_call_folds_in_every_binding_context"
+role = "primary"
+
+[[case]]
+id = "const_function_argument_order_success"
+path = "const_function_argument_order_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_function_arguments_bind_in_declaration_order"
+role = "primary"
+
+[[case]]
+id = "const_function_default_call_success"
+path = "const_function_default_call_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_function_call_folds_in_signature_default"
+role = "primary"
+
+[[case]]
+id = "const_function_branch_call_success"
+path = "const_function_branch_call_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_function_executes_static_branch"
+role = "primary"
+
+[[case]]
+id = "const_function_constant_calls_later_success"
+path = "const_function_constant_calls_later_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.constant_may_call_const_function_declared_later"
+role = "primary"
+
+[[case]]
+id = "const_function_while_loop_success"
+path = "const_function_while_loop_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_function_executes_bounded_while_loop"
+role = "primary"
+
+[[case]]
+id = "const_function_range_loop_success"
+path = "const_function_range_loop_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_function_executes_bounded_range_loop"
+role = "primary"
+
+[[case]]
+id = "const_function_collection_loop_success"
+path = "const_function_collection_loop_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_function_executes_bounded_collection_loop"
+role = "primary"
+
+[[case]]
+id = "const_function_loop_control_success"
+path = "const_function_loop_control_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_function_executes_break_and_continue"
+role = "primary"
+
+[[case]]
+id = "const_function_assert_success"
+path = "const_function_assert_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_function_executes_true_assertion"
+role = "primary"
+
+[[case]]
+id = "const_function_assert_failure_rejected"
+path = "const_function_assert_failure_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_false_assertion_rejected"
+role = "primary"
+
+[[case]]
+id = "const_function_collection_read_memory_rejected"
+path = "const_function_collection_read_memory_rejected"
+tags = ["integration", "functions", "const", "budgets", "diagnostics"]
+contract = "language.functions.const_function_collection_read_memory_rejected"
+role = "primary"
+
+[[case]]
+id = "const_function_logical_discovery_success"
+path = "const_function_logical_discovery_success"
+tags = ["integration", "functions", "const", "budgets"]
+contract = "language.functions.const_function_body_preparation_does_not_spend_the_work_limit"
+role = "primary"
+
+[[case]]
+id = "const_function_logical_left_failure_rejected"
+path = "const_function_logical_left_failure_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_logical_left_failure_rejected"
+role = "primary"
+
+[[case]]
+id = "const_function_memory_limit_rejected"
+path = "const_function_memory_limit_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_memory_limit_rejected"
+role = "primary"
+
+[[case]]
+id = "const_function_nested_assertion_chain_rejected"
+path = "const_function_nested_assertion_chain_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_nested_assertion_chain_rejected"
+role = "primary"
+
+[[case]]
+id = "const_function_logical_short_circuit_success"
+path = "const_function_logical_short_circuit_success"
+tags = ["integration", "functions", "const", "expressions"]
+contract = "language.functions.const_function_logical_short_circuit_success"
+role = "primary"
+
+[[case]]
+id = "const_function_execution_limit_rejected"
+path = "const_function_execution_limit_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_execution_limit_rejected"
+role = "primary"
+
+[[case]]
+id = "const_function_checked_overflow_rejected"
+path = "const_function_checked_overflow_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_checked_overflow_rejected"
+role = "primary"
+
+[[case]]
+id = "const_function_statement_partial_failure_rejected"
+path = "const_function_statement_partial_failure_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_failure_publishes_no_partial_build"
+role = "primary"
+
+[[case]]
+id = "const_function_copy_local_success"
+path = "const_function_copy_local_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_function_reads_copied_local"
+role = "primary"
+
+[[case]]
+id = "const_function_assert_inactive_message_success"
+path = "const_function_assert_inactive_message_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_function_passing_assertion_skips_message"
+role = "primary"
+
+[[case]]
+id = "const_function_float_range_stall_rejected"
+path = "const_function_float_range_stall_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_float_range_no_progress_rejected"
+role = "primary"
+
+[[case]]
+id = "const_function_float_range_break_success"
+path = "const_function_float_range_break_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_function_float_range_break_skips_no_progress"
+role = "primary"
+
+[[case]]
+id = "const_function_deep_call_chain_success"
+path = "const_function_deep_call_chain_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_function_deep_call_chain_bounded"
+role = "primary"
+
+[[case]]
+id = "const_function_expression_multi_call_failure_rejected"
+path = "const_function_expression_multi_call_failure_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_expression_failure_publishes_no_partial_result"
+role = "primary"
+
+[[case]]
+id = "const_function_deep_call_chain_limit_rejected"
+path = "const_function_deep_call_chain_limit_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_call_depth_limit_rejected"
+role = "primary"
+
+[[case]]
+id = "const_function_component_resources_success"
+path = "const_function_component_resources_success"
+tags = ["integration", "functions", "const", "templates", "resources"]
+contract = "language.functions.const_function_component_resources_success"
+role = "primary"
+
+[[case]]
+id = "const_function_call_field_projection_success"
+path = "const_function_call_field_projection_success"
+tags = ["integration", "functions", "const", "expressions"]
+contract = "language.functions.const_function_call_field_projection_success"
+role = "primary"
+
+[[case]]
+id = "const_function_parameter_template_success"
+path = "const_function_parameter_template_success"
+tags = ["integration", "functions", "const", "templates", "resources"]
+contract = "language.functions.const_function_parameter_template_success"
+role = "primary"
+
+[[case]]
+id = "const_function_nested_template_call_success"
+path = "const_function_nested_template_call_success"
+tags = ["integration", "functions", "const", "templates"]
+contract = "language.functions.const_function_nested_template_call_success"
+role = "primary"
+
+[[case]]
+id = "const_function_does_not_fold_runtime_templates_success"
+path = "const_function_does_not_fold_runtime_templates_success"
+tags = ["integration", "functions", "const", "templates", "regression"]
+contract = "language.functions.const_function_does_not_fold_runtime_templates_success"
+role = "primary"
+
+[[case]]
+id = "const_function_composite_mutation_success"
+path = "const_function_composite_mutation_success"
+tags = ["integration", "functions", "const", "composites"]
+contract = "language.functions.const_function_composite_mutation_success"
+role = "primary"
+
+[[case]]
+id = "const_function_collection_operations_success"
+path = "const_function_collection_operations_success"
+tags = ["integration", "functions", "const", "composites"]
+contract = "language.functions.const_function_collection_operations_success"
+role = "primary"
+
+[[case]]
+id = "const_function_mutation_handler_return_success"
+path = "const_function_mutation_handler_return_success"
+tags = ["integration", "functions", "const", "composites"]
+contract = "language.functions.const_mutation_handler_return_leaves_the_function"
+role = "primary"
+
+[[case]]
+id = "const_function_rebuilt_catch_success"
+path = "const_function_rebuilt_catch_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_rebuilt_catch_keeps_its_handler"
+role = "primary"
+
+[[case]]
+id = "const_function_constant_call_success"
+path = "const_function_constant_call_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_function_required_call_folds_before_constant_boundary"
+role = "primary"
+
+[[case]]
+id = "const_function_core_const_eval_parameter_success"
+path = "const_function_core_const_eval_parameter_success"
+tags = ["integration", "functions", "const", "constant-evaluation"]
+contract = "language.functions.const_function_executes_trusted_core_const_eval"
+role = "primary"
+
+[[case]]
+id = "const_function_field_name_no_dependency_success"
+path = "const_function_field_name_no_dependency_success"
+tags = ["integration", "functions", "const", "dependencies"]
+contract = "language.functions.const_function_field_name_is_not_a_reference"
+role = "primary"
+
+[[case]]
+id = "const_function_forward_reference_success"
+path = "const_function_forward_reference_success"
+tags = ["integration", "functions", "const", "dependencies"]
+contract = "language.functions.const_function_forward_reference"
+role = "primary"
+
+[[case]]
+id = "const_function_forward_constant_success"
+path = "const_function_forward_constant_success"
+tags = ["integration", "functions", "const", "dependencies"]
+contract = "language.functions.const_function_forward_constant"
+role = "primary"
+
+[[case]]
+id = "const_function_self_cycle_rejected"
+path = "const_function_self_cycle_rejected"
+tags = ["integration", "functions", "const", "dependencies", "diagnostics"]
+contract = "language.functions.const_function_self_cycle_rejected"
+role = "primary"
+
+[[case]]
+id = "const_function_mutual_cycle_rejected"
+path = "const_function_mutual_cycle_rejected"
+tags = ["integration", "functions", "const", "dependencies", "diagnostics"]
+contract = "language.functions.const_function_mutual_cycle_rejected"
+role = "primary"
+
+
+[[case]]
+id = "const_function_parameter_top_level_collision_rejected"
+path = "const_function_parameter_top_level_collision_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_parameter_top_level_collision_rejected"
+role = "primary"
+
+
+[[case]]
+id = "const_function_template_loop_output_memory_rejected"
+path = "const_function_template_loop_output_memory_rejected"
+tags = ["integration", "functions", "const", "budgets", "diagnostics", "templates"]
+contract = "language.functions.const_function_template_loop_output_memory_rejected"
+role = "primary"
+
+[[case]]
+id = "const_function_template_output_memory_rejected"
+path = "const_function_template_output_memory_rejected"
+tags = ["integration", "functions", "const", "diagnostics", "templates"]
+contract = "language.functions.const_function_template_output_memory_rejected"
+role = "primary"
+
+[[case]]
+id = "const_function_unsupported_handler_body_rejected"
+path = "const_function_unsupported_handler_body_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_function_unsupported_body_rejected"
+role = "primary"
+
+[[case]]
+id = "const_function_unsupported_uncalled_body_rejected"
+path = "const_function_unsupported_uncalled_body_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_body_must_be_executable_without_calls"
+role = "primary"
+
+
+[[case]]
+id = "const_function_alias_mutation_parity"
+path = "const_function_alias_mutation_parity"
+tags = ["integration", "functions", "const", "runtime"]
+contract = "language.functions.const_alias_mutation_matches_runtime"
+role = "primary"
+
+[[case]]
+id = "const_function_release_folding_success"
+path = "const_function_release_folding_success"
+tags = ["integration", "functions", "const", "runtime"]
+contract = "language.functions.const_release_folding_preserves_runtime_output"
+role = "primary"
+
+[[case]]
+id = "const_function_projected_alias_composition_parity"
+path = "const_function_projected_alias_composition_parity"
+tags = ["integration", "functions", "const", "runtime"]
+contract = "language.functions.const_projected_alias_composition_matches_runtime"
+role = "primary"
+
+[[case]]
+id = "const_function_parameter_cast_success"
+path = "const_function_parameter_cast_success"
+tags = ["integration", "functions", "const", "runtime"]
+contract = "language.functions.const_parameter_cast_matches_runtime"
+role = "primary"
+
+[[case]]
+id = "const_function_structural_text_refusal_rejected"
+path = "const_function_structural_text_refusal_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_structural_text_refusal"
+role = "primary"
+
+[[case]]
+id = "const_function_projected_alias_mutation_parity"
+path = "const_function_projected_alias_mutation_parity"
+tags = ["integration", "functions", "const", "runtime"]
+contract = "language.functions.const_projected_alias_mutation_matches_runtime"
+role = "primary"
+
+[[case]]
+id = "const_zero_result_function_rejected"
+path = "const_zero_result_function_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_zero_result_function_rejected"
+role = "primary"
+
+
+[[case]]
+id = "const_multiple_result_slots_rejected"
+path = "const_multiple_result_slots_rejected"
+tags = ["integration", "functions", "const", "diagnostics"]
+contract = "language.functions.const_multiple_result_slots_rejected"
+role = "primary"
+
+
+[[case]]
+id = "const_function_explicit_copy_mutation_parity"
+path = "const_function_explicit_copy_mutation_parity"
+tags = ["integration", "functions", "const", "runtime"]
+contract = "language.functions.const_explicit_copy_mutation_matches_runtime"
+role = "primary"
+
+
+[[case]]
+id = "const_function_alias_remove_mutation_parity"
+path = "const_function_alias_remove_mutation_parity"
+tags = ["integration", "functions", "const", "runtime"]
+contract = "language.functions.const_alias_remove_mutation_matches_runtime"
+role = "primary"
+
+[[case]]
+id = "const_function_repeated_handler_success"
+path = "const_function_repeated_handler_success"
+tags = ["integration", "functions", "const", "runtime"]
+contract = "language.functions.const_repeated_handler_execution_matches_runtime"
 role = "primary"

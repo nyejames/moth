@@ -3,6 +3,7 @@
 //!      handoff owns runtime materialization after consuming the prepared result.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::const_execution::ConstFunctionExecutable;
 use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
@@ -44,7 +45,7 @@ use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counte
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 type PreparationNodeKey = (TemplateIrNodeId, TirViewIdentity);
 type PreparationSlotPlanKey = (TemplateSlotPlanId, TirViewIdentity);
@@ -122,6 +123,7 @@ struct PreparationWalk<'scope> {
     external_package_registry: Option<&'scope ExternalPackageRegistry>,
     expressions: &'scope AstExpressionBuilder,
     const_values: &'scope ConstValueStore,
+    prepared_const_executables: Option<&'scope FxHashMap<PathId, ConstFunctionExecutable>>,
 }
 
 struct PreparationFacts {
@@ -224,6 +226,7 @@ impl<'scope> PreparationWalk<'scope> {
         external_package_registry: Option<&'scope ExternalPackageRegistry>,
         expressions: &'scope AstExpressionBuilder,
         const_values: &'scope ConstValueStore,
+        prepared_const_executables: Option<&'scope FxHashMap<PathId, ConstFunctionExecutable>>,
     ) -> Self {
         Self {
             visiting_templates: FxHashSet::default(),
@@ -236,6 +239,7 @@ impl<'scope> PreparationWalk<'scope> {
             external_package_registry,
             expressions,
             const_values,
+            prepared_const_executables,
         }
     }
 
@@ -265,6 +269,35 @@ impl<'scope> PreparationWalk<'scope> {
     }
 }
 
+/// The scope facts one preparation consults.
+///
+/// WHAT: a module view owns its external-package registry; a parser-owned view names the registry
+///       directly because it has no module scope.
+/// WHY: preparation always needs both the module scope and the registry that classifies registered
+///      external constant calls. Pairing them in one value stops a caller passing a registry that
+///      does not belong to its scope.
+#[derive(Clone, Copy)]
+enum PreparationScope<'a> {
+    Module(&'a ScopeContext),
+    Registry(Option<&'a ExternalPackageRegistry>),
+}
+
+impl<'a> PreparationScope<'a> {
+    fn module(self) -> Option<&'a ScopeContext> {
+        match self {
+            Self::Module(scope) => Some(scope),
+            Self::Registry(_) => None,
+        }
+    }
+
+    fn registry(self) -> Option<&'a ExternalPackageRegistry> {
+        match self {
+            Self::Module(scope) => Some(&scope.external_package_registry),
+            Self::Registry(registry) => registry,
+        }
+    }
+}
+
 /// Prepares one exact TIR view into its exclusive preparation facts.
 ///
 /// The registry is the package owner consulted for registered external constant calls, so
@@ -281,8 +314,9 @@ pub(crate) fn prepare_tir_view(
         expressions,
         const_values,
         mode,
+        PreparationScope::Registry(external_package_registry),
+        &[],
         None,
-        external_package_registry,
     )
 }
 
@@ -294,13 +328,42 @@ pub(crate) fn prepare_tir_view_with_source_scope(
     mode: TemplatePreparationMode,
     source_scope: &ScopeContext,
 ) -> Result<TemplatePreparation, TemplateError> {
+    prepare_tir_view_with_source_scope_and_bindings(
+        view,
+        expressions,
+        const_values,
+        mode,
+        source_scope,
+        &[],
+        None,
+    )
+}
+
+/// Prepares a view whose named expression references are supplied by an active fold binding.
+///
+/// WHAT: treats each listed path as a constant reference during preparation, exactly as a const
+///       template loop treats its loop bindings, and classifies a source const call as evaluable
+///       only when the caller's prepared executables contain its callee.
+/// WHY: a const function body is parsed before its parameters have values, so parameter
+///      references classify as runtime until the executor supplies the call-site bindings. Only
+///      the executor owns prepared executables, so only it can authorise folding a nested call.
+pub(crate) fn prepare_tir_view_with_source_scope_and_bindings(
+    view: &TirView<'_>,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+    mode: TemplatePreparationMode,
+    source_scope: &ScopeContext,
+    const_bound_paths: &[PathId],
+    prepared_const_executables: Option<&FxHashMap<PathId, ConstFunctionExecutable>>,
+) -> Result<TemplatePreparation, TemplateError> {
     prepare_tir_view_in_scope(
         view,
         expressions,
         const_values,
         mode,
-        Some(source_scope),
-        Some(&source_scope.external_package_registry),
+        PreparationScope::Module(source_scope),
+        const_bound_paths,
+        prepared_const_executables,
     )
 }
 
@@ -309,8 +372,9 @@ fn prepare_tir_view_in_scope(
     expressions: &AstExpressionBuilder,
     const_values: &ConstValueStore,
     mode: TemplatePreparationMode,
-    source_scope: Option<&ScopeContext>,
-    external_package_registry: Option<&ExternalPackageRegistry>,
+    scope: PreparationScope<'_>,
+    const_bound_paths: &[PathId],
+    prepared_const_executables: Option<&FxHashMap<PathId, ConstFunctionExecutable>>,
 ) -> Result<TemplatePreparation, TemplateError> {
     if !view.phase().is_at_least(TemplateTirPhase::Composed) {
         return Err(InfrastructureFailure::internal(
@@ -327,15 +391,16 @@ fn prepare_tir_view_in_scope(
     increment_ast_counter(AstCounter::TirPreparationAttempts);
     let mut walk = PreparationWalk::new(
         mode,
-        source_scope,
-        external_package_registry,
+        scope.module(),
+        scope.registry(),
         expressions,
         const_values,
+        prepared_const_executables,
     );
     let facts = walk.walk_template(
         view.root_ref(),
         view,
-        &[],
+        const_bound_paths,
         PreparationTraversalRole::default(),
     )?;
     if let Some(diagnostic) = walk.const_diagnostic {
@@ -1107,6 +1172,7 @@ impl PreparationWalk<'_> {
     ) -> Result<PreparationFacts, TemplateError> {
         let expression = self.expressions.view(expression)?;
         let external_package_registry = self.external_package_registry;
+        let prepared_const_executables = self.prepared_const_executables;
         let mut nested_facts = PreparationFacts::const_value();
         let mut visit_nested_template =
             |reference: TemplateTirReference, _nested_binding_paths: &[PathId]| {
@@ -1126,6 +1192,7 @@ impl PreparationWalk<'_> {
             expression,
             const_binding_paths,
             external_package_registry,
+            prepared_const_executables,
             &mut visit_nested_template,
         )?;
         nested_facts.const_evaluable &= expression_const;

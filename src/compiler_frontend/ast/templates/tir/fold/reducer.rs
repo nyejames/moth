@@ -9,8 +9,8 @@
 //! Branch/loop semantics and virtual wrapper insertion live in sibling modules.
 
 use crate::compiler_frontend::ast::const_eval::{
-    ConstantFoldError, ConstantFoldOutcome, ConstantFoldRefusalReason, FoldRequirement,
-    FoldServices, constant_fold,
+    ConstBudgetCategory, ConstBudgetExhaustion, ConstBudgetUnit, ConstantFoldError,
+    ConstantFoldOutcome, ConstantFoldRefusalReason, FoldRequirement, FoldServices, constant_fold,
 };
 use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
 use crate::compiler_frontend::ast::const_values::{ConstValuePayload, ConstValueStore};
@@ -21,7 +21,8 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::template::TemplateType;
 use crate::compiler_frontend::ast::templates::template_folding::{
-    TemplateEmission, TemplateFoldResult, TirFoldContext, resolve_fold_bindings_in_expression,
+    TemplateEmission, TemplateFoldResult, TemplateOutputLimits, TirFoldContext,
+    resolve_fold_bindings_in_expression,
 };
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateWrapperSetId,
@@ -46,13 +47,14 @@ use crate::compiler_frontend::instrumentation::{
     AstCounter, add_ast_counter, increment_ast_counter,
 };
 use crate::compiler_frontend::paths::module_resources::ResourceId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::type_coercion::string::fold_expression_to_string;
 
 use super::control_flow::{fold_tir_conditional_with_insertion, fold_tir_loop};
 use super::estimate::{
-    record_tir_fold_output_estimate_miss, record_tir_fold_output_intern,
+    bounded_output_estimate, record_tir_fold_output_estimate_miss, record_tir_fold_output_intern,
     reserve_tir_fold_output_buffer,
 };
 use super::wrappers::{
@@ -148,6 +150,56 @@ pub(crate) enum FoldedConstTemplatePiece {
     Slot(SlotOccurrenceId),
 }
 
+/// Charge one executed template loop iteration to the shared const-execution meter.
+pub(super) fn charge_template_iteration(
+    fold_context: &TirFoldContext<'_>,
+) -> Result<(), TemplateError> {
+    let Some(work) = &fold_context.template_work else {
+        return Ok(());
+    };
+    work.meter
+        .borrow_mut()
+        .charge_step(&work.attempt_steps, work.span)
+        .map_err(TemplateError::Budget)
+}
+
+fn template_budget_error(
+    span: Option<SourceSpan>,
+    category: ConstBudgetCategory,
+    unit: ConstBudgetUnit,
+    limit: u64,
+    setting: Option<&'static str>,
+    aggregate: bool,
+) -> TemplateError {
+    TemplateError::Budget(ConstBudgetExhaustion {
+        category,
+        unit,
+        limit,
+        setting,
+        aggregate,
+        span,
+        call_span: None,
+        call_chain: Vec::new(),
+    })
+}
+
+fn template_output_limit_error(
+    span: Option<SourceSpan>,
+    unit: ConstBudgetUnit,
+    limit: usize,
+    aggregate: bool,
+    setting: Option<&'static str>,
+) -> TemplateError {
+    template_budget_error(
+        span,
+        ConstBudgetCategory::Memory,
+        unit,
+        limit as u64,
+        setting,
+        aggregate,
+    )
+}
+
 /// Mutable output state shared by recursive TIR fold walkers.
 ///
 /// WHAT: keeps rendered text, structural emission pieces, output presence and semantic provenance
@@ -163,53 +215,140 @@ pub(super) struct FoldOutputState {
     /// Set when a nested fold refused to produce text; every later node then stops folding.
     pub(super) refusal: Option<ConstantFoldRefusalReason>,
     structural_pieces: Option<Vec<ConstStringPiece>>,
+    /// Ceilings supplied by a bounded consumer; ordinary folds leave them open.
+    limits: Option<TemplateOutputLimits>,
 }
 
 impl FoldOutputState {
-    pub(super) fn new(output_buffer: String) -> Self {
-        Self {
-            output_buffer,
-            emitted_output: false,
-            provenance: SyntheticInterfaceProvenance::empty(),
-            projection_pieces: None,
-            refusal: None,
-            structural_pieces: None,
-        }
+    /// Starts one fold level under the fold's output ceilings.
+    ///
+    /// WHAT: reserves `estimated_bytes` (already capped at the consumer's remaining allowance),
+    ///       takes the ceilings from `fold_context` and enables the projection buffer when this
+    ///       traversal projects pieces.
+    /// WHY: every level of a bounded fold is subject to the same consumer ceilings, so
+    ///      construction and ceiling assignment cannot be separate steps a new level can forget.
+    pub(super) fn bounded(
+        estimated_bytes: usize,
+        fold_context: &TirFoldContext<'_>,
+        fold_input: &FoldTraversalInput<'_, '_>,
+    ) -> Self {
+        Self::bounded_with_provenance(
+            estimated_bytes,
+            SyntheticInterfaceProvenance::empty(),
+            fold_context,
+            fold_input,
+        )
     }
 
-    pub(super) fn with_capacity(estimated_bytes: usize) -> Self {
-        Self::new(reserve_tir_fold_output_buffer(estimated_bytes))
+    /// [`Self::bounded`] for a level that begins with an inherited provenance.
+    pub(super) fn bounded_with_provenance(
+        estimated_bytes: usize,
+        provenance: SyntheticInterfaceProvenance,
+        fold_context: &TirFoldContext<'_>,
+        fold_input: &FoldTraversalInput<'_, '_>,
+    ) -> Self {
+        Self::from_parts(
+            reserve_tir_fold_output_buffer(estimated_bytes),
+            provenance,
+            fold_context.template_output_limits.clone(),
+            fold_input.projection_enabled,
+        )
     }
 
-    pub(super) fn with_provenance(
+    /// The single field-by-field constructor behind [`Self::bounded`].
+    fn from_parts(
         output_buffer: String,
         provenance: SyntheticInterfaceProvenance,
+        limits: Option<TemplateOutputLimits>,
+        projection: bool,
     ) -> Self {
         Self {
             output_buffer,
             emitted_output: false,
             provenance,
-            projection_pieces: None,
+            projection_pieces: projection.then(Vec::new),
             refusal: None,
             structural_pieces: None,
+            limits,
         }
     }
 
-    pub(super) fn enable_projection(&mut self) {
-        self.projection_pieces = Some(Vec::new());
+    /// Charge bytes this fold level materialises against the consumer's byte ceiling.
+    ///
+    /// The rule is once per retained copy, owned by the state that first materialises it:
+    ///
+    /// - Text this state appends pays for its output run and, when projection is enabled, for the
+    ///   projection's own copy ([`Self::append_text`], [`Self::append_structural_piece`]).
+    /// - An already-folded child emission or child projection this state concatenates pays nothing.
+    ///   The producing state charged it, so one fixed output keeps one charge no matter how many
+    ///   template levels enclose it ([`Self::append_emission_value`], [`Self::append_pieces`],
+    ///   `append_const_value_projection_pieces`).
+    /// - A slot marker this state originates pays one piece, exactly like the structural anchors
+    ///   its emission owns; a received slot marker does not ([`Self::append_slot`]).
+    ///
+    /// The charge lands in the meter shared by every level of one bounded fold, so loop
+    /// iterations and nested folds draw from the same consumer allowance instead of each starting
+    /// a fresh count.
+    ///
+    /// WHY: `ExecutionBudget` charges one completed value's own allocation
+    /// (`budget::charge_new_value_text`), never once per enclosing template root, so re-charging
+    /// at each enclosing fold state would make identical output reach the const memory limit
+    /// sooner the deeper its templates nest. Projection copies stay charged because they are
+    /// separate owned allocations until the value crosses the public projection boundary.
+    fn charge_text(&mut self, bytes: usize) -> Result<(), TemplateError> {
+        let Some(limits) = &self.limits else {
+            return Ok(());
+        };
+        let retained_bytes = limits.meter.charge_bytes(bytes);
+        if retained_bytes > limits.max_bytes {
+            return Err(template_output_limit_error(
+                limits.span,
+                ConstBudgetUnit::Mib,
+                limits.byte_limit,
+                limits.byte_aggregate,
+                Some("const_memory_limit_mb"),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Charge one piece this fold level retains, following [`Self::charge_text`]'s rule.
+    fn charge_piece(&mut self) -> Result<(), TemplateError> {
+        let Some(limits) = &self.limits else {
+            return Ok(());
+        };
+        let retained_pieces = limits.meter.charge_piece();
+        if retained_pieces > limits.max_structural_pieces {
+            return Err(template_output_limit_error(
+                limits.span,
+                ConstBudgetUnit::Pieces,
+                limits.piece_limit,
+                limits.piece_aggregate,
+                None,
+            ));
+        }
+        Ok(())
     }
 
     /// Append text to the pre-coalesced projection and the current output run.
     ///
     /// WHAT: extends the trailing text run when possible and keeps text in the output buffer until
-    /// a structural anchor forces piece materialization.
+    /// a structural anchor forces piece materialization. Both destinations own their bytes, so each
+    /// pays under [`Self::charge_text`].
     /// WHY: text may coalesce only within one run. `Resource`, `SiteRoot` and `Slot` callers add a
     /// boundary to the projection before later text reaches this method.
-    pub(super) fn append_text(&mut self, text: &str) {
+    pub(super) fn append_text(&mut self, text: &str) -> Result<(), TemplateError> {
+        // Charge both copies before either is written, so no buffer is written when the charge
+        // is refused. The attempted charge stays on the counters, matching the budget owner's
+        // contract.
+        self.charge_text(text.len())?;
+        if self.projection_pieces.is_some() {
+            self.charge_text(text.len())?;
+        }
         self.output_buffer.push_str(text);
 
         let Some(pieces) = &mut self.projection_pieces else {
-            return;
+            return Ok(());
         };
 
         if let Some(FoldedConstTemplatePiece::Text(previous)) = pieces.last_mut() {
@@ -217,6 +356,7 @@ impl FoldOutputState {
         } else if !text.is_empty() {
             pieces.push(FoldedConstTemplatePiece::Text(text.to_owned()));
         }
+        Ok(())
     }
 
     /// Append one module-local structural string piece to fold output and projection output.
@@ -228,8 +368,9 @@ impl FoldOutputState {
     pub(super) fn append_structural_piece(
         &mut self,
         piece: &ConstStringPiece,
-        string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
-    ) {
+        string_table: &mut StringTable,
+    ) -> Result<(), TemplateError> {
+        self.charge_piece()?;
         self.start_structural_output(string_table);
         self.flush_structural_text(string_table);
 
@@ -237,8 +378,8 @@ impl FoldOutputState {
             structural_pieces.push(piece.clone());
         }
 
-        if let Some(projection_pieces) = &mut self.projection_pieces {
-            projection_pieces.push(match piece {
+        if self.projection_pieces.is_some() {
+            let projected = match piece {
                 ConstStringPiece::Text(text) => {
                     FoldedConstTemplatePiece::Text(string_table.resolve(*text).to_owned())
                 }
@@ -246,8 +387,15 @@ impl FoldOutputState {
                     FoldedConstTemplatePiece::Resource(*resource)
                 }
                 ConstStringPiece::SiteRoot => FoldedConstTemplatePiece::SiteRoot,
-            });
+            };
+            if let FoldedConstTemplatePiece::Text(text) = &projected {
+                self.charge_text(text.len())?;
+            }
+            if let Some(projection_pieces) = &mut self.projection_pieces {
+                projection_pieces.push(projected);
+            }
         }
+        Ok(())
     }
 
     /// Append an already folded value without duplicating its projection markers.
@@ -255,11 +403,13 @@ impl FoldOutputState {
     /// WHAT: contributes only the emission value to the output state. Callers append a child
     /// result's separate projection list when projection mode is active.
     /// WHY: child projections include slots that cannot be represented by [`ConstStringValue`], so
-    /// combining both representations here would duplicate text or reorder slot boundaries.
+    /// combining both representations here would duplicate text or reorder slot boundaries. The
+    /// producing fold state already charged these bytes and pieces under [`Self::charge_text`], so
+    /// concatenating them here is not charged again.
     pub(super) fn append_emission_value(
         &mut self,
         value: &ConstStringValue,
-        string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
+        string_table: &mut StringTable,
     ) {
         match value {
             ConstStringValue::Text(text) => {
@@ -284,6 +434,10 @@ impl FoldOutputState {
         }
     }
 
+    /// Append an already charged child projection without charging it again.
+    ///
+    /// The producing state charged these pieces under the piece charge ([`Self::charge_piece`]);
+    /// this state only materialises its own copy of the piece list.
     pub(super) fn append_pieces(
         &mut self,
         pieces_to_append: Option<&[FoldedConstTemplatePiece]>,
@@ -333,16 +487,23 @@ impl FoldOutputState {
         }
     }
 
-    pub(super) fn append_slot(&mut self, occurrence: SlotOccurrenceId) {
+    /// Append one slot marker this fold level originates.
+    ///
+    /// The marker is a retained projection entry, so it pays the piece charge exactly as
+    /// [`Self::append_structural_piece`] does for its own anchors. A slot received from a child
+    /// projection is appended by [`Self::append_pieces`], which does not charge again.
+    pub(super) fn append_slot(
+        &mut self,
+        occurrence: SlotOccurrenceId,
+    ) -> Result<(), TemplateError> {
+        self.charge_piece()?;
         if let Some(pieces) = &mut self.projection_pieces {
             pieces.push(FoldedConstTemplatePiece::Slot(occurrence));
         }
+        Ok(())
     }
 
-    fn start_structural_output(
-        &mut self,
-        string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
-    ) {
+    fn start_structural_output(&mut self, string_table: &mut StringTable) {
         if self.structural_pieces.is_none() {
             let mut pieces = Vec::new();
             if !self.output_buffer.is_empty() {
@@ -355,10 +516,7 @@ impl FoldOutputState {
         }
     }
 
-    fn flush_structural_text(
-        &mut self,
-        string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
-    ) {
+    fn flush_structural_text(&mut self, string_table: &mut StringTable) {
         let Some(structural_pieces) = &mut self.structural_pieces else {
             return;
         };
@@ -372,7 +530,7 @@ impl FoldOutputState {
 
     pub(super) fn into_const_string_value(
         mut self,
-        string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
+        string_table: &mut StringTable,
     ) -> ConstStringValue {
         if self.structural_pieces.is_none() {
             return ConstStringValue::Text(string_table.intern(&self.output_buffer));
@@ -619,11 +777,11 @@ fn fold_tir_template_with_view(
         .into());
     }
 
-    let estimated_bytes = template.summary.estimated_output_bytes;
-    let mut output_state = FoldOutputState::with_capacity(estimated_bytes);
-    if fold_input.projection_enabled {
-        output_state.enable_projection();
-    }
+    let estimated_bytes = bounded_output_estimate(
+        template.summary.estimated_output_bytes,
+        fold_context.template_output_limits.as_ref(),
+    );
+    let mut output_state = FoldOutputState::bounded(estimated_bytes, fold_context, fold_input);
 
     fold_tir_node_into_buffer(
         template.root,
@@ -676,7 +834,8 @@ fn fold_tir_template_with_view(
 /// WHAT: converts text runs and structural anchors without flattening a resource or
 ///       site-root piece into a literal.
 /// WHY: a closed occurrence's fallback is already part of the emission; its public
-///       projection must carry the same structural identity instead of a marker.
+///       projection must carry the same structural identity instead of a marker. The value was
+///       charged when the executor inserted it, so the projection copy is not charged twice.
 fn append_const_value_projection_pieces(
     value: &ConstStringValue,
     output_state: &mut FoldOutputState,
@@ -718,10 +877,7 @@ pub(super) fn fold_tir_node(
     fold_input: &FoldTraversalInput<'_, '_>,
     insertion: FoldInsertion<'_>,
 ) -> Result<TemplateFoldResult, TemplateError> {
-    let mut output_state = FoldOutputState::new(String::new());
-    if fold_input.projection_enabled {
-        output_state.enable_projection();
-    }
+    let mut output_state = FoldOutputState::bounded(0, fold_context, fold_input);
 
     fold_tir_node_into_buffer(
         node_id,
@@ -765,7 +921,7 @@ pub(super) fn fold_tir_node_into_buffer(
 
         TemplateIrNodeKind::Text { text, .. } => {
             let text = fold_context.string_table.resolve(*text);
-            output_state.append_text(text);
+            output_state.append_text(text)?;
             output_state.emitted_output = true;
             Ok(())
         }
@@ -908,7 +1064,7 @@ pub(super) fn fold_tir_node_into_buffer(
                 // An open occurrence keeps a marker so the enclosing application can
                 // still route content into it. The application that composed a closed
                 // occurrence already materialized its fallback above.
-                output_state.append_slot(placeholder.occurrence_id);
+                output_state.append_slot(placeholder.occurrence_id)?;
                 output_state.emitted_output = true;
             }
             Ok(())
@@ -1011,7 +1167,7 @@ fn fold_tir_dynamic_expression(
     expression: ExprId,
     output_state: &mut FoldOutputState,
     fold_context: &mut TirFoldContext<'_>,
-    expression_span: Option<crate::compiler_frontend::source::SourceSpan>,
+    expression_span: Option<SourceSpan>,
     fold_input: &FoldTraversalInput<'_, '_>,
 ) -> Result<(), TemplateError> {
     let store = fold_input.view.store();
@@ -1065,10 +1221,10 @@ fn fold_tir_dynamic_expression(
         for piece in pieces {
             match piece {
                 ConstStringPiece::Text(text) => {
-                    output_state.append_text(fold_context.string_table.resolve(*text));
+                    output_state.append_text(fold_context.string_table.resolve(*text))?;
                 }
                 ConstStringPiece::Resource(_) | ConstStringPiece::SiteRoot => {
-                    output_state.append_structural_piece(piece, fold_context.string_table);
+                    output_state.append_structural_piece(piece, fold_context.string_table)?;
                 }
             }
         }
@@ -1113,7 +1269,7 @@ fn fold_tir_dynamic_expression(
         &*fold_context.string_table,
     )? {
         Some(text) => {
-            output_state.append_text(&text);
+            output_state.append_text(&text)?;
             output_state.emitted_output = true;
             Ok(())
         }
@@ -1409,3 +1565,7 @@ fn missing_wrapper_set_diagnostic(wrapper_set_id: TemplateWrapperSetId) -> Infra
         ),
     )
 }
+
+#[cfg(test)]
+#[path = "tests/reducer_tests.rs"]
+mod reducer_tests;

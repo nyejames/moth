@@ -1,0 +1,141 @@
+-- Const bodies read collection length and indexed values, handle an out-of-range fallback,
+-- grow fixed collections within capacity, and mutate a collection stored in a record field.
+
+Bag = |
+    items {I32},
+|
+
+render #|values {I32}| -> String:
+    return [: [loop values |value|:[value];] ]
+;
+
+render_fixed #|values {3 I32}| -> String:
+    return [: [loop values |value|:[value];] ]
+;
+
+length #|| -> I32:
+    values = {3, 4, 5}
+    return values.length()
+;
+
+first #|| -> I32:
+    values = {3, 4, 5}
+    return values.get(1) catch:
+        then 0
+    ;
+;
+
+fallback #|| -> I32:
+    values = {3, 4, 5}
+    return values.get(9) catch:
+        then 0
+    ;
+;
+
+negative #|| -> I32:
+    values = {3, 4, 5}
+    return values.get(-1) catch:
+        then 5
+    ;
+;
+
+nested_catch #|| -> I32:
+    values = {3, 4, 5}
+    return values.get(9) + 1 catch:
+        then 7
+    ;
+;
+
+handler_return #|| -> I32:
+    values = {3, 4, 5}
+    return values.get(9) catch:
+        return 11
+    ;
+;
+
+error_code #|| -> U32:
+    values {U32} = {1, 2}
+    return values.get(9) catch |err|:
+        then err.code
+    ;
+;
+
+nested_index #|| -> I32:
+    values = {3, 4, 5}
+    return values.get(values.get(9) + 1) catch:
+        then 7
+    ;
+;
+
+double_failure #|| -> I32:
+    values = {3, 4, 5}
+    return values.get(9) + values.get(9) catch:
+        then 7
+    ;
+;
+
+error_message #|| -> String:
+    values {String} = {"a"}
+    return values.get(9) catch |err|:
+        then err.message
+    ;
+;
+
+survives #|| -> I32:
+    made ~{1 I32} = {1}
+    ~made.push(2) catch:
+    ;
+    return 0
+;
+
+inner #|| -> I32:
+    values = {1}
+    return values.get(9) catch:
+        return 11
+    ;
+;
+
+outer #|| -> I32:
+    value = inner()
+    return value + 1
+;
+
+removed #|| -> I32:
+    values ~= {8, 9, 10}
+    return ~values.remove(0) catch:
+        then 0
+    ;
+;
+
+grow #|| -> {3 I32}:
+    made ~{3 I32} = {1, 2}
+    ~made.push(3) catch:
+    ;
+    return made
+;
+
+nested #|| -> Bag:
+    made ~= Bag(items = {1})
+    ~made.items.push(2)
+    return made
+;
+
+length_value #I32 = length()
+first_value #I32 = first()
+fallback_value #I32 = fallback()
+negative_value #I32 = negative()
+nested_catch_value #I32 = nested_catch()
+handler_return_value #I32 = handler_return()
+error_code_value #U32 = error_code()
+error_message_value #String = error_message()
+survives_value #I32 = survives()
+outer_value #I32 = outer()
+nested_index_value #I32 = nested_index()
+double_failure_value #I32 = double_failure()
+removed_value #I32 = removed()
+fixed #{3 I32} = grow()
+bag #Bag = nested()
+fixed_text #String = render_fixed(fixed)
+nested_text #String = render(bag.items)
+
+[: len=[length_value] first=[first_value] fallback=[fallback_value] negative=[negative_value] nested=[nested_catch_value] handler=[handler_return_value] error=[error_code_value] message=[error_message_value] survives=[survives_value] outer=[outer_value] index=[nested_index_value] double=[double_failure_value] removed=[removed_value] fixed=[fixed_text] nested=[nested_text] ]

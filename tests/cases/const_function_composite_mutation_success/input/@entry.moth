@@ -1,0 +1,31 @@
+-- Mutable const locals update nominal records and growable collections through immutable
+-- constant-value replacements.
+
+Point = |
+    x I32,
+    y I32,
+|
+
+build #|| -> Point:
+    values ~= {1}
+    ~values.push(2)
+    made ~= Point(x = 3, y = 4)
+    ~made.x = 7
+    return made
+;
+
+render #|values {I32}| -> String:
+    return [: [loop values |value|:[value];] ]
+;
+
+grow #|| -> {I32}:
+    values ~= {1}
+    ~values.push(2)
+    return values
+;
+
+point #Point = build()
+items #{I32} = grow()
+rendered #String = render(items)
+
+[: x=[point.x] y=[point.y] items=[rendered] ]

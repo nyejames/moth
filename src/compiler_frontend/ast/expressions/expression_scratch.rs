@@ -2,6 +2,7 @@
 //! Candidate handles carry the prefix owner token and serial, while promotion keeps a raw ID map.
 use super::*;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CandidateSerial(u64);
 #[derive(Clone, Copy)]
@@ -26,6 +27,7 @@ pub(crate) enum CandidateEdge<'p> {
 pub(crate) type CandidateRoot<'p> = CandidateEdge<'p>;
 pub(crate) struct CandidateCall<E> {
     pub target: ResolvedCallableTarget,
+    pub evaluation: CallableEvaluation,
     pub arguments: Vec<ResolvedArgument<E>>,
     pub handling: Option<HandlingRecord>,
     pub requires_external_float_validation: bool,

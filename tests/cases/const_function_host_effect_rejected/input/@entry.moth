@@ -1,0 +1,6 @@
+bad #||:
+    if false:
+        io.line("x")
+    ;
+;
+io.line("unreachable")

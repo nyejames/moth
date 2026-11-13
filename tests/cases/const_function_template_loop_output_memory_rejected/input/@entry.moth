@@ -1,0 +1,20 @@
+-- A const template loop over a collection must charge every iteration's output against the
+-- remaining const memory allowance instead of growing an unchecked aggregate.
+
+build #|count I32| -> {I32}:
+    items ~{I32} = {}
+    loop 0 to count |index|:
+        ~items.push(index)
+    ;
+    return items
+;
+
+render #|values {I32}| -> String:
+    return [: [loop values |value|:
+        [loop 0 to 100 |j|:<p>yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy</p>;]
+    ;] ]
+;
+
+bag #{I32} = build(200)
+text #String = render(bag)
+[: marker [text] ]
