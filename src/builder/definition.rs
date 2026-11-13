@@ -8,7 +8,7 @@
 use super::Error;
 use crate::build_system::output::BuilderIdentity;
 use crate::builder_surface::definition::BuilderSurfaceValidationError;
-use crate::builder_surface::{BuilderSurface, PackageOrigin, SourceFileKind};
+use crate::builder_surface::{BuilderSurface, OptionalSourceKind, PackageOrigin};
 use crate::compiler_frontend::external_packages::ExternalRegistrationError;
 use crate::host::HostFunction;
 use std::fmt;
@@ -84,7 +84,7 @@ pub struct BuilderDefinitionDraft {
     identity: String,
     source_packages: Vec<SourcePackage>,
     host_packages: Vec<HostPackage>,
-    source_kinds: Vec<SourceFileKind>,
+    source_kinds: Vec<OptionalSourceKind>,
 }
 
 impl BuilderDefinitionDraft {
@@ -102,7 +102,7 @@ impl BuilderDefinitionDraft {
 
     /// Accepts plain `.md` Markdown content files.
     pub fn markdown(mut self) -> Self {
-        self.source_kinds.push(SourceFileKind::PlainMarkdown);
+        self.source_kinds.push(OptionalSourceKind::PlainMarkdown);
         self
     }
 
@@ -173,7 +173,7 @@ impl BuilderDefinitionDraft {
         }
 
         for kind in self.source_kinds {
-            surface.source_file_kinds.register(kind.extension(), kind);
+            surface.source_file_kinds.register(kind);
         }
 
         match surface.validate() {

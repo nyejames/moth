@@ -422,15 +422,34 @@ fn first_party_builder_identities_are_reserved() {
 }
 
 #[test]
-fn source_kinds_are_opt_in() {
+fn source_kinds_are_opt_in_for_markdown_and_fixed_for_templates() {
     let plain = BuilderDefinition::new("game").finish().expect("valid");
-    assert!(!plain.surface().source_file_kinds.is_supported("mtf"));
-    assert!(!plain.surface().source_file_kinds.is_supported("md"));
+    assert_eq!(
+        plain.surface().source_file_kinds.kind_for_extension("mtf"),
+        Some(crate::builder_surface::SourceFileKind::MothTemplate),
+        "`.mtf` is compiler-supported under a builder that selects no source kinds"
+    );
+    assert_eq!(
+        plain.surface().source_file_kinds.kind_for_extension("md"),
+        None
+    );
 
     let documents = BuilderDefinition::new("game")
         .markdown()
         .finish()
         .expect("markdown needs no template prelude");
-    assert!(!documents.surface().source_file_kinds.is_supported("mtf"));
-    assert!(documents.surface().source_file_kinds.is_supported("md"));
+    assert_eq!(
+        documents
+            .surface()
+            .source_file_kinds
+            .kind_for_extension("mtf"),
+        Some(crate::builder_surface::SourceFileKind::MothTemplate)
+    );
+    assert_eq!(
+        documents
+            .surface()
+            .source_file_kinds
+            .kind_for_extension("md"),
+        Some(crate::builder_surface::SourceFileKind::PlainMarkdown)
+    );
 }

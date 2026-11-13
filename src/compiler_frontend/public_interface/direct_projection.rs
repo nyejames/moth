@@ -36,7 +36,7 @@ use super::type_projection::{
     project_defaults_provenance, project_free_function_semantics, project_struct_parts,
 };
 use crate::compiler_frontend::ast::AstPublicInterfaceProjectionInput;
-use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeProjectionContext;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -447,7 +447,7 @@ struct DeclarationRecordProjectionState<'a, 'b> {
     receiver_seeds_by_receiver: &'b mut FxHashMap<OriginTypeId, Vec<&'a CallableSeed>>,
     receiver_method_signatures:
         &'b FxHashMap<usize, super::type_projection::ProjectedReceiverMethodSignature>,
-    consumed_const_values: &'b mut FxHashSet<ConstValueId>,
+    consumed_const_values: &'b mut FxHashSet<PathId>,
     trait_projection: &'b mut DirectTraitProjection<'a>,
     folded_value_context: &'b FoldedValueJoinContext<'a>,
 }
@@ -803,13 +803,16 @@ fn receiver_methods_for_origin(
 
 /// Fold one public constant root's value by exact defining path and collect its value provenance.
 ///
-/// WHAT: looks up the root's defining `PathId` in the module-local store, marks the
-/// resulting value ID consumed, and converts it through the shared store visitor. The conversion
-/// returns the canonical union of the root metadata and every nested folded value node, while the
-/// public folded payload remains unchanged.
+/// WHAT: looks up the root's defining `PathId` in the module-local store, marks that defining
+/// path consumed, and converts it through the shared store visitor. The conversion returns the
+/// canonical union of the root metadata and every nested folded value node, while the public
+/// folded payload remains unchanged.
+///
+/// Consumption is keyed by defining path, not stored value ID: two distinct exported constants
+/// may alias one immutable store value, and each must still publish its own declaration record.
 fn fold_constant_value(
     defining_path: PathId,
-    consumed_const_values: &mut FxHashSet<ConstValueId>,
+    consumed_const_values: &mut FxHashSet<PathId>,
     context: &FoldedValueJoinContext,
 ) -> Result<(PublicFoldedValue, SyntheticInterfaceProvenance), InfrastructureFailure> {
     let Some(value_id) = context.const_values.value_for_path(&defining_path) else {
@@ -842,11 +845,17 @@ fn fold_constant_value(
         ));
     };
 
-    if !consumed_const_values.insert(value_id) {
+    if !consumed_const_values.insert(defining_path) {
+        let mut scratch = Vec::new();
+        let defining_path = context.path_fork.render_portable(
+            defining_path,
+            context.folded_value_projection_context.string_table,
+            &mut scratch,
+        );
         return Err(InfrastructureFailure::internal(
             CompilerStage::AstConstruction,
             format!(
-                "public-interface draft join: constant export binding {defining_path:?} consumed its finalized store value more than once"
+                "public-interface draft join: constant export binding {defining_path:?} folded more than once"
             ),
         ));
     }

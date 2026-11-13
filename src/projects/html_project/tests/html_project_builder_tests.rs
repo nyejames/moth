@@ -206,24 +206,25 @@ fn prepared_invalid_config_reason(
 }
 
 #[test]
-fn frontend_surface_registers_content_source_kinds() {
+fn frontend_surface_supports_template_and_selected_markdown_kinds() {
     let builder = HtmlProjectBuilder::new();
     let frontend_surface = builder.frontend_surface();
 
     assert_eq!(
         frontend_surface.source_file_kinds.kind_for_extension("mtf"),
-        Some(crate::builder_surface::SourceFileKind::MothTemplate)
+        Some(crate::builder_surface::SourceFileKind::MothTemplate),
+        "`.mtf` is compiler-supported under every builder"
     );
     assert_eq!(
         frontend_surface.source_file_kinds.kind_for_extension("md"),
-        Some(crate::builder_surface::SourceFileKind::PlainMarkdown)
+        Some(crate::builder_surface::SourceFileKind::PlainMarkdown),
+        "the HTML builder selects plain Markdown"
     );
-
     assert_eq!(
         frontend_surface
             .source_file_kinds
             .kind_for_extension("moth"),
-        None
+        Some(crate::builder_surface::SourceFileKind::Moth)
     );
 }
 

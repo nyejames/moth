@@ -487,7 +487,7 @@ fn walk_reachable_sources(
                     return Err(SourceDiscoveryError::from(InfrastructureFailure::filesystem(
                         crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                         canonical,
-                        "content reference resolves to a file whose extension has no registered source kind",
+                        "content reference resolves to a file whose extension has no supported source kind",
                     )));
                 };
                 let content_file = ReachableSourceFile {

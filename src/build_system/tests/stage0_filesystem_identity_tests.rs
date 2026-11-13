@@ -2950,10 +2950,11 @@ mod owned_source_inventory_tests {
         .expect("source tree index should build")
     }
 
+    /// The source-kind registry the HTML builder produces. `.moth` and `.mtf` are
+    /// compiler-supported, so only the optional plain Markdown kind is selected.
     fn html_source_file_kinds() -> SourceFileKindRegistry {
         let mut kinds = SourceFileKindRegistry::new();
-        kinds.register("mtf", SourceFileKind::MothTemplate);
-        kinds.register("md", SourceFileKind::PlainMarkdown);
+        kinds.register(crate::builder_surface::OptionalSourceKind::PlainMarkdown);
         kinds
     }
 
@@ -3102,7 +3103,7 @@ mod owned_source_inventory_tests {
     }
 
     #[test]
-    fn registered_bd_and_md_kinds_are_included() {
+    fn compiler_supported_mtf_and_selected_markdown_are_included() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
@@ -3128,31 +3129,32 @@ mod owned_source_inventory_tests {
         let kinds: Vec<SourceFileKind> = owned_kinds(&index, entry_id);
         assert!(
             kinds.contains(&SourceFileKind::MothTemplate),
-            "registered .mtf files must enter the owned source set: {kinds:?}"
+            "compiler-supported .mtf files must enter the owned source set: {kinds:?}"
         );
         assert!(
             kinds.contains(&SourceFileKind::PlainMarkdown),
-            "registered .md files must enter the owned source set: {kinds:?}"
+            "selected .md files must enter the owned source set: {kinds:?}"
         );
         assert_eq!(
             owned_relative_paths(&index, entry_id),
             vec!["@entry.moth", "content.md", "page.mtf"],
-            "registered builder-supported kinds are owned and sorted by relative path"
+            "compiler-supported and builder-selected kinds are owned and sorted by relative path"
         );
     }
 
     #[test]
-    fn known_but_unselected_sources_are_indexed_as_unsupported() {
+    fn unselected_markdown_is_indexed_as_unsupported() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@entry.moth"), "").expect("should write root file");
-        fs::write(src.join("page.mtf"), "").expect("should write unselected moth template file");
+        fs::write(src.join("page.mtf"), "").expect("should write moth template file");
         fs::write(src.join("content.md"), "").expect("should write unselected markdown file");
         fs::write(src.join("notes.txt"), "").expect("should write unknown-extension file");
 
-        // Empty registry: .moth only. .mtf and .md are known-but-unselected; .txt is unknown.
+        // Empty registry: `.moth` and `.mtf` are compiler-supported. `.md` is
+        // known-but-unselected; `.txt` is unknown.
         let index =
             discover_index_with_kinds(&root, "src", "my-project", &SourceFileKindRegistry::new());
         let table = index.module_identities();
@@ -3178,7 +3180,7 @@ mod owned_source_inventory_tests {
             .filter(|source_id| !index.source(**source_id).supported())
             .map(|source_id| owned_relative_path(&index, *source_id))
             .collect::<Vec<_>>();
-        assert_eq!(unsupported_paths, vec!["content.md", "page.mtf"]);
+        assert_eq!(unsupported_paths, vec!["content.md"]);
         assert!(
             index.unrooted_source_indices().is_empty(),
             "excluded files are not unrooted facts"
@@ -3364,7 +3366,7 @@ mod owned_source_inventory_tests {
     }
 
     #[test]
-    fn unknown_registered_extension_is_excluded() {
+    fn unknown_extension_is_excluded() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
@@ -3372,11 +3374,9 @@ mod owned_source_inventory_tests {
         fs::write(src.join("@entry.moth"), "").expect("should write root file");
         fs::write(src.join("notes.txt"), "").expect("should write unknown-extension file");
 
-        // Registering txt -> Moth template must not admit .txt: it is not a compiler-recognized
-        // extension, so it stays out of owned source sets regardless of the registry entry.
-        let mut kinds = SourceFileKindRegistry::new();
-        kinds.register("txt", SourceFileKind::MothTemplate);
-        let index = discover_index_with_kinds(&root, "src", "my-project", &kinds);
+        // `.txt` is not a compiler-recognized extension, so it stays out of owned source sets.
+        let index =
+            discover_index_with_kinds(&root, "src", "my-project", &SourceFileKindRegistry::new());
         let table = index.module_identities();
         let entry_id = table
             .module_ids()
@@ -3392,55 +3392,11 @@ mod owned_source_inventory_tests {
         assert_eq!(
             owned_relative_paths(&index, entry_id),
             vec!["@entry.moth"],
-            "an arbitrary registered unknown extension must not enter owned source sets"
+            "an unknown extension must not enter owned source sets"
         );
         assert!(
             index.unrooted_source_indices().is_empty(),
-            "an excluded unknown registered extension is not an unrooted fact"
-        );
-    }
-
-    #[test]
-    fn mismatched_known_extension_mapping_is_indexed_as_unsupported() {
-        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-        let root = _tmp_root.path().to_path_buf();
-        let src = root.join("src");
-        fs::create_dir_all(&src).expect("should create entry root");
-        fs::write(src.join("@entry.moth"), "").expect("should write root file");
-        fs::write(src.join("page.mtf"), "").expect("should write moth-template-extension file");
-
-        // Registering mtf -> PlainMarkdown mismatches the compiler-recognized mapping (mtf ->
-        // MothTemplate), so .mtf remains indexed but cannot become a prepared semantic source.
-        let mut kinds = SourceFileKindRegistry::new();
-        kinds.register("mtf", SourceFileKind::PlainMarkdown);
-        let index = discover_index_with_kinds(&root, "src", "my-project", &kinds);
-        let table = index.module_identities();
-        let entry_id = table
-            .module_ids()
-            .find(|id| {
-                table
-                    .record(*id)
-                    .stable_origin()
-                    .logical_module_path()
-                    .is_empty()
-            })
-            .expect("entry root module should exist");
-
-        assert_eq!(
-            owned_relative_paths(&index, entry_id),
-            vec!["@entry.moth", "page.mtf"],
-            "recognized source identity is independent of active builder support"
-        );
-        let page_source_id = index
-            .owned_source_indices(entry_id)
-            .iter()
-            .copied()
-            .find(|source_id| owned_relative_path(&index, *source_id) == "page.mtf")
-            .expect("recognized Moth template should have a source ID");
-        assert!(!index.source(page_source_id).supported());
-        assert!(
-            index.unrooted_source_indices().is_empty(),
-            "an excluded mismatched mapping is not an unrooted fact"
+            "an excluded unknown extension is not an unrooted fact"
         );
     }
 

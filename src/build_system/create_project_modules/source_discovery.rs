@@ -432,9 +432,6 @@ mod tests {
             .expect("should write helper");
 
         let mut surface = BuilderSurface::with_mandatory_core();
-        surface
-            .source_file_kinds
-            .register("mtf", SourceFileKind::MothTemplate);
         let mut string_table = StringTable::new();
         let (
             resolver,
@@ -483,9 +480,6 @@ mod tests {
         fs::write(directory.join("intro.mtf"), "hello\n").expect("should write template");
 
         let mut surface = BuilderSurface::with_mandatory_core();
-        surface
-            .source_file_kinds
-            .register("mtf", SourceFileKind::MothTemplate);
         let mut string_table = StringTable::new();
         let (
             resolver,

@@ -237,11 +237,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let mut source_file_kinds = SourceFileKindRegistry::new();
-    source_file_kinds.register(
-        SourceFileKind::MothTemplate.extension(),
-        SourceFileKind::MothTemplate,
-    );
+    let source_file_kinds = SourceFileKindRegistry::new();
     let project_path_resolver = ProjectPathResolver::new_with_module_roots(
         source_root.clone(),
         source_root,
@@ -449,8 +445,7 @@ render_html || -> String:
             .register_filesystem_root("html", html_root.clone(), PackageOrigin::Builder)
             .expect("test source root should register");
 
-        let mut source_file_kinds = SourceFileKindRegistry::new();
-        source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
+        let source_file_kinds = SourceFileKindRegistry::new();
 
         let module_roots = prepared_module_roots(&entry_root, &canonical_files);
         let mut prep_string_table = StringTable::new();

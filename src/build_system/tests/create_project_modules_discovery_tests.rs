@@ -622,8 +622,7 @@ fn directory_stage0_classifies_not_a_directory_as_typed_path_failure() {
         &style_directives,
     )
     .expect("config should parse");
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let modules = successful_compilation_value(discover_modules_for_test(
@@ -944,8 +943,7 @@ fn synthetic_stage0_resolves_content_and_resource_references() {
 
     let config = Config::new(root.clone());
     let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
-    source_file_kinds.register("md", SourceFileKind::PlainMarkdown);
+    source_file_kinds.register(crate::builder_surface::OptionalSourceKind::PlainMarkdown);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
     let style_directives = test_style_directives();
     let mut string_table = StringTable::new();
@@ -1073,11 +1071,7 @@ fn ordinary_synthetic_stage0_rejects_child_and_support_boundaries() {
     .expect("should write support root");
     fs::write(support.join("existing.svg"), "resource").expect("should write support resource");
 
-    let source_file_kinds = {
-        let mut kinds = crate::builder_surface::SourceFileKindRegistry::new();
-        kinds.register("mtf", SourceFileKind::MothTemplate);
-        kinds
-    };
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let resolver = ProjectPathResolver::new_with_module_roots(
         root.clone(),
         root,
@@ -1161,9 +1155,6 @@ fn compile_single_file_frontend_retains_ordinary_boundary_registry() {
 
     let config = Config::new(entry.clone());
     let mut builder_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
-    builder_surface
-        .source_file_kinds
-        .register("mtf", SourceFileKind::MothTemplate);
     let string_table = StringTable::new();
     let mut warning_owner =
         crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator::with_root_string_table(string_table);
@@ -1227,8 +1218,7 @@ fn directory_stage0_reaches_content_reference_fixed_point() {
         &style_directives,
     )
     .expect("config should parse");
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let modules = successful_compilation_value(discover_modules_for_test(

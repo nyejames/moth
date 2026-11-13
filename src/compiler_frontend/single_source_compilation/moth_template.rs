@@ -252,11 +252,8 @@ pub(crate) fn compile_moth_template_source(
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let mut source_file_kinds = SourceFileKindRegistry::new();
-    source_file_kinds.register(
-        SourceFileKind::MothTemplate.extension(),
-        SourceFileKind::MothTemplate,
-    );
+    // `.mtf` is compiler-supported, so the direct template service needs no optional kinds.
+    let source_file_kinds = SourceFileKindRegistry::new();
     let path_resolver = ProjectPathResolver::new_with_module_roots(
         source_root.clone(),
         source_root,

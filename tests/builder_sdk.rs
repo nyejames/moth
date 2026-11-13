@@ -274,6 +274,50 @@ fn minimal_sdk_builder_imports_official_html_and_styles_without_web_packages() {
     );
 }
 
+/// A page holding an explicit `.mtf` file value and a qualified `content` constant reference.
+const MTF_FILE_VALUE_PAGE: &str =
+    "intro #= @intro.mtf\nbody = @intro content\n~[: [intro] [body] ]\n";
+
+/// A template body that imports a nested `.mtf` and uses a bare `@html` prelude name.
+const INTRO_TEMPLATE_SOURCE: &str = "[: intro [p: nested [@nested.mtf] ] ]\n";
+
+/// The nested template body reached from `intro.mtf`.
+const NESTED_TEMPLATE_SOURCE: &str = "nested template body\n";
+
+/// Proves the public SDK build path compiles `.mtf` content when the builder selects no optional
+/// source kinds. The exact folded text is asserted by the crate-internal
+/// `compiler_supported_mtf_file_value_and_qualified_content_fold_identically` test, which reads
+/// the published constant values.
+#[test]
+fn minimal_sdk_builder_compiles_mtf_file_values_without_kind_selection() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(project_dir.path(), MTF_FILE_VALUE_PAGE, false);
+    fs::write(project_dir.path().join("intro.mtf"), INTRO_TEMPLATE_SOURCE)
+        .expect("should write intro template");
+    fs::write(
+        project_dir.path().join("nested.mtf"),
+        NESTED_TEMPLATE_SOURCE,
+    )
+    .expect("should write nested template");
+    // The minimal SDK builder selects no optional source kinds, so this project proves `.mtf`
+    // support is compiler-owned rather than builder-registered.
+    let builder = RecordingBuildBuilder {
+        build_ran: Cell::new(false),
+    };
+
+    let built = build_project(&builder, BuildRequest::new(project_dir.path()))
+        .expect("`.mtf` file values must compile under a builder that selects no source kinds");
+    assert!(
+        builder.build_ran.get(),
+        "a successful template compilation must reach the builder"
+    );
+    assert!(
+        built.warnings().is_empty(),
+        "the nested template fixture should compile without warnings: {:?}",
+        built.warnings()
+    );
+}
+
 /// Exposes one host function that takes a `Byte`.
 struct ByteParameterBuilder;
 

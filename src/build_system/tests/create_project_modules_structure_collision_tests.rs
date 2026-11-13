@@ -612,46 +612,6 @@ fn explicit_moth_extension_still_reports_moth_import_0020() {
 }
 
 #[test]
-fn unsupported_moth_template_dependency_without_builder_support_reports_moth_import_0025() {
-    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-    let root = _tmp_root.path().to_path_buf();
-    let src = root.join("src");
-    fs::create_dir_all(&src).expect("should create src dir");
-
-    fs::write(
-        root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
-    )
-    .expect("should write config");
-
-    fs::write(src.join("@entry.moth"), "@intro\n[:ok]\n").expect("should write entry");
-    fs::write(src.join("intro.mtf"), "hello\n").expect("should write moth template file");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-    let resolver = configured_resolver(&config);
-
-    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
-
-    let diagnostic = first_error_diagnostic(&failure);
-    assert_eq!(
-        diagnostic.descriptor().code,
-        "MOTH-IMPORT-0025",
-        "expected unsupported source file kind diagnostic, got {}",
-        diagnostic.descriptor().code
-    );
-    diagnostic
-        .family_view::<UnsupportedSourceFileKindView>()
-        .expect("unsupported source file kind should retain typed path facts");
-}
-
-#[test]
 fn direct_moth_template_extension_dependency_reports_moth_import_0024() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
@@ -676,8 +636,7 @@ fn direct_moth_template_extension_dependency_reports_moth_import_0024() {
     )
     .expect("config should parse");
 
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let failure = discover_modules_for_test(&config, &resolver, &style_directives);
@@ -719,8 +678,7 @@ fn moth_template_files_are_reachable_without_dependency_scanning() {
     )
     .expect("config should parse");
 
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let modules = successful_compilation_value(discover_modules_for_test(
@@ -763,8 +721,7 @@ fn unreferenced_moth_template_file_under_entry_root_is_ignored() {
     )
     .expect("config should parse");
 
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let modules = successful_compilation_value(discover_modules_for_test(
@@ -857,8 +814,7 @@ fn indexed_module_inventory_includes_referenced_markdown_without_scanning_its_bo
     .expect("config should parse");
 
     let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
-    source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
+    source_file_kinds.register(crate::builder_surface::OptionalSourceKind::PlainMarkdown);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let modules = successful_compilation_value(discover_modules_for_test(
@@ -905,8 +861,7 @@ fn indexed_module_inventory_excludes_unrelated_module_root_from_markdown_owner()
     .expect("config should parse");
 
     let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
-    source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
+    source_file_kinds.register(crate::builder_surface::OptionalSourceKind::PlainMarkdown);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let modules = successful_compilation_value(discover_modules_for_test(
@@ -952,8 +907,7 @@ fn indexed_module_inventory_ignores_unreferenced_markdown_file() {
     .expect("config should parse");
 
     let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
-    source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
+    source_file_kinds.register(crate::builder_surface::OptionalSourceKind::PlainMarkdown);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let modules = successful_compilation_value(discover_modules_for_test(
@@ -996,7 +950,7 @@ fn indexed_module_inventory_rejects_direct_markdown_extension_dependency() {
     .expect("config should parse");
 
     let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
+    source_file_kinds.register(crate::builder_surface::OptionalSourceKind::PlainMarkdown);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let failure = discover_modules_for_test(&config, &resolver, &style_directives);

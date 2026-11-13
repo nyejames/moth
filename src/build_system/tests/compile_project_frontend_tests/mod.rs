@@ -133,9 +133,9 @@ fn compile_fixture(files: &[(&str, &str)]) -> ProjectFrontendCompilation {
 
 /// Compiles one `.mtf`-bearing directory project through the real HTML builder surface.
 ///
-/// WHY: the HTML builder registers `MothTemplate` source kinds. A fixture that uses `.mtf`
-///      content must compile through the same surface a real HTML project uses, not a bare
-///      mandatory-core surface that would reject the template source.
+/// WHY: these fixtures exercise HTML output and slots, so they compile through the same surface a
+///      real HTML project uses rather than a bare mandatory-core surface. `.mtf` support itself
+///      is compiler-owned and no longer depends on this builder.
 fn compile_template_fixture(files: &[(&str, &str)]) -> ProjectFrontendCompilation {
     compile_template_fixture_with_profile(files, BuildProfile::Dev)
 }

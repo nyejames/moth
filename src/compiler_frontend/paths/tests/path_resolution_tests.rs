@@ -2,7 +2,9 @@
 
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
-use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
+use crate::builder_surface::{
+    OptionalSourceKind, SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry,
+};
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
@@ -341,10 +343,8 @@ fn source_package_prefix_takes_priority_over_entry_root() {
 }
 
 #[test]
-fn extensionless_dependency_resolves_supported_moth_template_candidate() {
-    let mut registry = SourceFileKindRegistry::new();
-    registry.register("mtf", SourceFileKind::MothTemplate);
-    let mut h = TestHarness::with_source_file_kinds(&registry);
+fn extensionless_dependency_resolves_compiler_supported_moth_template_candidate() {
+    let mut h = TestHarness::new();
     fs::create_dir_all(h.project_root.join("src/docs")).unwrap();
     fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
 
@@ -366,39 +366,8 @@ fn extensionless_dependency_resolves_supported_moth_template_candidate() {
 }
 
 #[test]
-fn recognized_unsupported_moth_template_candidate_reports_source_kind_diagnostic() {
-    let mut h = TestHarness::new();
-    fs::create_dir_all(h.project_root.join("src/docs")).unwrap();
-    fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
-
-    let path = h.make_path(&["docs", "intro"]);
-    let declaring_source = h.declaring_source();
-
-    let error = h
-        .resolver
-        .resolve_dependency_to_source_file(
-            path,
-            &h.path_fork,
-            &declaring_source,
-            &mut h.string_table,
-        )
-        .expect_err("unsupported .mtf dependency should fail");
-    let diagnostics = typed_dependency_diagnostic(error);
-    let diagnostic = dependency_view(&diagnostics);
-
-    assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0025");
-    assert!(
-        diagnostic
-            .family_view::<UnsupportedSourceFileKindView>()
-            .is_some(),
-    );
-}
-
-#[test]
 fn direct_moth_template_extension_dependency_is_rejected_as_source_extension() {
-    let mut registry = SourceFileKindRegistry::new();
-    registry.register("mtf", SourceFileKind::MothTemplate);
-    let mut h = TestHarness::with_source_file_kinds(&registry);
+    let mut h = TestHarness::new();
     fs::create_dir_all(h.project_root.join("src/docs")).unwrap();
     fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
 
@@ -427,9 +396,7 @@ fn direct_moth_template_extension_dependency_is_rejected_as_source_extension() {
 
 #[test]
 fn moth_template_and_moth_same_stem_are_ambiguous() {
-    let mut registry = SourceFileKindRegistry::new();
-    registry.register("mtf", SourceFileKind::MothTemplate);
-    let mut h = TestHarness::with_source_file_kinds(&registry);
+    let mut h = TestHarness::new();
     fs::create_dir_all(h.project_root.join("src/docs")).unwrap();
     fs::write(h.project_root.join("src/docs/intro.moth"), "").unwrap();
     fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
@@ -459,9 +426,7 @@ fn moth_template_and_moth_same_stem_are_ambiguous() {
 
 #[test]
 fn moth_template_and_folder_same_stem_are_ambiguous() {
-    let mut registry = SourceFileKindRegistry::new();
-    registry.register("mtf", SourceFileKind::MothTemplate);
-    let mut h = TestHarness::with_source_file_kinds(&registry);
+    let mut h = TestHarness::new();
     fs::create_dir_all(h.project_root.join("src/docs/intro")).unwrap();
     fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();
 
@@ -499,8 +464,7 @@ fn source_dependency_resolution_preserves_moth_template_folder_ambiguity() {
     fs::write(entry_root.join("docs/intro.mtf"), b"hello").unwrap();
     fs::write(entry_root.join("docs/intro/@entry.moth"), b"").unwrap();
 
-    let mut registry = SourceFileKindRegistry::new();
-    registry.register("mtf", SourceFileKind::MothTemplate);
+    let registry = SourceFileKindRegistry::new();
     let source_packages = SourcePackageRegistry::new();
     let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
@@ -1116,9 +1080,9 @@ fn dependency_case_sensitive_symbol_mismatch_rejected() {
 // -----------------------------------------------------------------------
 
 #[test]
-fn markdown_dependency_resolves_when_registered() {
+fn markdown_dependency_resolves_when_selected() {
     let mut registry = SourceFileKindRegistry::new();
-    registry.register("md", SourceFileKind::PlainMarkdown);
+    registry.register(OptionalSourceKind::PlainMarkdown);
     let mut h = TestHarness::with_source_file_kinds(&registry);
     fs::create_dir_all(h.project_root.join("src/docs")).unwrap();
     fs::write(h.project_root.join("src/docs/intro.md"), "# Hello").unwrap();
@@ -1171,7 +1135,7 @@ fn markdown_dependency_rejected_when_unsupported() {
 #[test]
 fn markdown_and_moth_same_stem_are_ambiguous() {
     let mut registry = SourceFileKindRegistry::new();
-    registry.register("md", SourceFileKind::PlainMarkdown);
+    registry.register(OptionalSourceKind::PlainMarkdown);
     let mut h = TestHarness::with_source_file_kinds(&registry);
     fs::create_dir_all(h.project_root.join("src/docs")).unwrap();
     fs::write(h.project_root.join("src/docs/intro.moth"), "").unwrap();
@@ -1202,7 +1166,7 @@ fn markdown_and_moth_same_stem_are_ambiguous() {
 #[test]
 fn markdown_and_folder_same_stem_are_ambiguous() {
     let mut registry = SourceFileKindRegistry::new();
-    registry.register("md", SourceFileKind::PlainMarkdown);
+    registry.register(OptionalSourceKind::PlainMarkdown);
     let mut h = TestHarness::with_source_file_kinds(&registry);
     fs::create_dir_all(h.project_root.join("src/docs/intro")).unwrap();
     fs::write(h.project_root.join("src/docs/intro.md"), "# Hello").unwrap();
@@ -1232,8 +1196,7 @@ fn markdown_and_folder_same_stem_are_ambiguous() {
 #[test]
 fn markdown_and_moth_template_same_stem_are_ambiguous() {
     let mut registry = SourceFileKindRegistry::new();
-    registry.register("mtf", SourceFileKind::MothTemplate);
-    registry.register("md", SourceFileKind::PlainMarkdown);
+    registry.register(OptionalSourceKind::PlainMarkdown);
     let mut h = TestHarness::with_source_file_kinds(&registry);
     fs::create_dir_all(h.project_root.join("src/docs")).unwrap();
     fs::write(h.project_root.join("src/docs/intro.mtf"), "hello").unwrap();

@@ -403,12 +403,12 @@ impl SourceRecord {
         &self.classification
     }
 
-    /// Whether this source's extension is registered in the project's `SourceFileKindRegistry`.
+    /// Whether this source's extension is supported by the active builder.
     ///
-    /// `Moth` is always supported. Other recognized kinds (`MothTemplate`, `PlainMarkdown`) are
-    /// supported only when the builder registered the extension. The namespace checks this flag
-    /// to produce `UnsupportedSourceFileKind` diagnostics for recognized but unsupported dependencies
-    /// without a filesystem probe.
+    /// `.moth` and `.mtf` are compiler-supported under every builder. A recognized optional kind
+    /// (plain Markdown) is supported only when the builder selected it. The namespace checks this
+    /// flag to produce `UnsupportedSourceFileKind` diagnostics for recognized but unsupported
+    /// dependencies without a filesystem probe.
     pub(crate) fn supported(&self) -> bool {
         self.supported
     }
@@ -793,7 +793,9 @@ impl SourceTreeIndex {
                 let is_module_root = file_name_is_module_root_file(file_name);
                 let source_kind = recognized_source_kind(file_name);
                 let source_supported = source_kind.is_some_and(|kind| {
-                    source_file_kinds.supports_recognized_extension(kind.extension())
+                    source_file_kinds
+                        .kind_for_extension(kind.extension())
+                        .is_some()
                 });
                 let provider_extension = source_kind
                     .is_none()
@@ -1686,9 +1688,9 @@ fn source_stem_from_file_name(file_name: &str) -> Option<&str> {
 ///
 /// Returns `Some(kind)` for every recognized extension (`moth`, `mtf`, `md`) regardless of
 /// whether the project's `SourceFileKindRegistry` supports it. The discovery pass computes
-/// `supported` separately from `supports_recognized_extension` so the index can surface
-/// recognized-but-unsupported files for structured dependency diagnostics without a filesystem
-/// probe during dependency resolution.
+/// `supported` by asking the registry for the extension's kind, so the index can surface
+/// recognized-but-unsupported optional files for structured dependency diagnostics without a
+/// filesystem probe during dependency resolution.
 fn recognized_source_kind(file_name: &str) -> Option<SourceFileKind> {
     let extension = Path::new(file_name)
         .extension()

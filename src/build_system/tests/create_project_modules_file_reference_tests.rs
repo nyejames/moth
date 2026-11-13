@@ -2,7 +2,6 @@ use super::super::file_reference_resolution::{
     SingleFileReferenceOutcome, SingleFileReferenceResolver, stable_case_mismatch,
 };
 use super::super::resource_inputs::ResourceInputRegistry;
-use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     InvalidCompileTimePathCode, InvalidCompileTimePathView,
 };
@@ -68,8 +67,7 @@ fn synthetic_physical_resolution_cache_reuses_settled_outcome() {
     let resource_path = resource_directory.join("logo.svg");
     fs::write(&resource_path, "resource").expect("resource should be created");
 
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let mut resource_inputs = ResourceInputRegistry::new();
     let canonical_root = fs::canonicalize(temp.path()).expect("test root should canonicalize");
     let mut resolver = SingleFileReferenceResolver::new(
@@ -161,8 +159,7 @@ fn synthetic_not_a_directory_is_a_typed_path_failure() {
     let blocker = temp.path().join("not_a_directory");
     fs::write(&blocker, "regular file").expect("blocker file should be created");
 
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let mut resource_inputs = ResourceInputRegistry::new();
     let mut resolver = SingleFileReferenceResolver::new(
         fs::canonicalize(temp.path()).expect("test root should canonicalize"),
@@ -230,8 +227,7 @@ fn synthetic_in_owner_dangling_alias_watches_resolved_physical_prefix() {
     symlink(real.join("missing-target"), root.join("alias"))
         .expect("dangling in-owner alias should be created");
 
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let mut resource_inputs = ResourceInputRegistry::new();
     let mut resolver =
         SingleFileReferenceResolver::new(root.clone(), &source_file_kinds, &mut resource_inputs);
@@ -285,8 +281,7 @@ fn synthetic_dangling_alias_resolves_nested_symlink_targets_before_parent_segmen
     symlink("inside/redirect/..", root.join("alias"))
         .expect("nested dangling alias should be created");
 
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let mut resource_inputs = ResourceInputRegistry::new();
     let mut resolver =
         SingleFileReferenceResolver::new(root.clone(), &source_file_kinds, &mut resource_inputs);
@@ -343,8 +338,7 @@ fn synthetic_dangling_symlink_cycles_and_excessive_depth_are_infrastructure_erro
             .expect("deep symlink should be created");
     }
 
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let mut resource_inputs = ResourceInputRegistry::new();
     let mut resolver =
         SingleFileReferenceResolver::new(root.clone(), &source_file_kinds, &mut resource_inputs);
@@ -443,8 +437,7 @@ fn synthetic_rejects_support_and_missing_symlink_boundaries_without_watches() {
     )
     .expect("dangling support alias should be created");
 
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let mut resource_inputs = ResourceInputRegistry::new();
     let mut resolver =
         SingleFileReferenceResolver::new(root.clone(), &source_file_kinds, &mut resource_inputs);
@@ -565,8 +558,7 @@ fn underscore_files_resolve_but_hidden_directories_and_aliases_do_not() {
     symlink(root.join("missing/_private"), root.join("deeper"))
         .expect("dangling alias through a visible missing directory should exist");
 
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let mut resource_inputs = ResourceInputRegistry::new();
     let mut resolver =
         SingleFileReferenceResolver::new(root.clone(), &source_file_kinds, &mut resource_inputs);
