@@ -148,6 +148,7 @@ impl<E: Copy> CompletedOperation<E> {
         fn call<E, F>(c: CandidateCall<E>, map: &mut impl FnMut(E) -> F) -> CandidateCall<F> {
             CandidateCall {
                 target: c.target,
+                evaluation: c.evaluation,
                 arguments: args(c.arguments, map),
                 handling: c.handling,
                 requires_external_float_validation: c.requires_external_float_validation,
@@ -349,6 +350,7 @@ impl CompletedOperation<OwnedExpr> {
             builder.append_call(
                 ResolvedCall {
                     target: c.target,
+                    evaluation: c.evaluation,
                     arguments,
                     handling,
                     requires_external_float_validation: c.requires_external_float_validation,

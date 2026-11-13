@@ -54,6 +54,39 @@ inference never changes a signature or public interface.
 contexts. Generic signature relationships follow the separate bounded rules
 in @../generics (Generics).
 
+### Const functions
+
+A const function declares that every call is executed by the compiler and
+never receives a runtime body.
+
+[codeblock, $code "moth":
+    double #|value I32| -> I32:
+        return value * 2
+    ;
+
+    label #= [: result [double(21)]]
+]
+
+- The `#` between the name and parameter list marks required compile-time
+  evaluation.
+- Every argument must be a compile-time constant.
+- Const functions admit immutable ordinary-value parameters and one ordinary
+  success slot in V1. Mutable references, fallible return channels, receiver
+  methods and recursive dependency cycles are rejected.
+- A call in an ordinary function is folded during compilation. A call that
+  cannot be evaluated is a source error rather than a runtime fallback.
+- Invalid const operations, unresolved runtime arguments and nonterminating
+  dependency cycles report the source call site.
+- A const function with no calls is still type-checked and checked for static
+  eligibility, but its parameterised body does not execute.
+
+Release builds additionally fold ordinary functions whose whole transitive
+body proves const-safe and whose call arguments are known constants. This is
+an optimisation only: a refused or budget-limited call remains a runtime call,
+and required const calls still report errors. Release budget advice is a
+`Note`, not a failure. It names the setting to raise for a configurable
+limit, and asks for a simpler call when a fixed compiler safety limit is hit.
+
 ### Never return contract
 
 A callable that never returns control normally declares one whole return

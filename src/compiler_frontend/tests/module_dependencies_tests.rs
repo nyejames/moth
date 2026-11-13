@@ -173,6 +173,246 @@ fn header_name(
     string_table.resolve(name).to_owned()
 }
 
+/// One const-dependency fixture and the ordering its row protects.
+struct ConstDependencyCase {
+    /// The declaration-graph invariant this row protects.
+    what: &'static str,
+    /// One single-file module source.
+    source: &'static str,
+    /// Every ordering fact the resolved declaration order must satisfy.
+    order: &'static [ExpectedOrder],
+}
+
+/// One ordering fact about a resolved declaration order.
+enum ExpectedOrder {
+    /// Every non-start declaration, in exactly this order.
+    Exact(&'static [&'static str]),
+    /// This declaration must sort first.
+    First(&'static str),
+    /// The first declaration must sort before the second.
+    Before(&'static str, &'static str),
+}
+
+/// A const-body spelling must never hide a real dependency edge, and a real edge must still order.
+///
+/// WHAT: one row per spelling the const dependency graph must read: a later const function, a later
+///       constant, a shadowing local, a loop binding, a multi-bind target, a named argument, a map
+///       key, a renamed payload field and the const-to-const chain.
+/// WHY: each row protects a distinct path through the header dependency scan. One table keeps the
+///      shared resolution harness explicit and the rows comparable instead of twelve near-verbatim
+///      tests.
+const CONST_DEPENDENCY_CASES: &[ConstDependencyCase] = &[
+    ConstDependencyCase {
+        what: "a constant may call a later const function",
+        source: concat!(
+            "answer #I32 = square(7)\n",
+            "square #|value I32| -> I32:\n",
+            "    return value\n",
+            ";\n",
+        ),
+        order: &[ExpectedOrder::Exact(&["square", "answer"])],
+    },
+    ConstDependencyCase {
+        what: "a const function may reference a later constant",
+        source: concat!(
+            "read_later #|value I32| -> I32:\n",
+            "    return later_constant\n",
+            ";\n",
+            "later_constant #I32 = 7\n",
+        ),
+        order: &[ExpectedOrder::Exact(&["later_constant", "read_later"])],
+    },
+    ConstDependencyCase {
+        what: "a body-local name must not create a dependency edge",
+        source: concat!(
+            "imports #I32 = reader(1)\n",
+            "reader #|value I32| -> I32:\n",
+            "    imports ~= value\n",
+            "    return imports\n",
+            ";\n",
+        ),
+        order: &[ExpectedOrder::Exact(&["reader", "imports"])],
+    },
+    ConstDependencyCase {
+        what: "a typed body-local name must not create a dependency edge",
+        source: concat!(
+            "imports #I32 = reader(1)\n",
+            "reader #|value I32| -> I32:\n",
+            "    imports I32 = value\n",
+            "    return imports\n",
+            ";\n",
+        ),
+        order: &[ExpectedOrder::Exact(&["reader", "imports"])],
+    },
+    ConstDependencyCase {
+        what: "a loop binding must not create a dependency edge",
+        source: concat!(
+            "imports #I32 = reader({1})\n",
+            "reader #|values {I32}| -> I32:\n",
+            "    loop values |imports|:\n",
+            "        return imports\n",
+            "    ;\n",
+            "    return 0\n",
+            ";\n",
+        ),
+        order: &[ExpectedOrder::Exact(&["reader", "imports"])],
+    },
+    ConstDependencyCase {
+        what: "a multi-bind target must not create a dependency edge",
+        source: concat!(
+            "imports #I32 = reader(1)\n",
+            "reader #|value I32| -> I32:\n",
+            "    imports, other I32 = value, value\n",
+            "    return imports + other\n",
+            ";\n",
+        ),
+        order: &[ExpectedOrder::Exact(&["reader", "imports"])],
+    },
+    ConstDependencyCase {
+        what: "a named argument must not hide a constant reference",
+        source: concat!(
+            "sum #|left I32, right I32| -> I32:\n",
+            "    return left + right\n",
+            ";\n",
+            "use_name #|| -> I32:\n",
+            "    return sum(a, right = a)\n",
+            ";\n",
+            "a #I32 = 1\n",
+        ),
+        order: &[
+            ExpectedOrder::Before("a", "use_name"),
+            ExpectedOrder::Before("sum", "use_name"),
+        ],
+    },
+    ConstDependencyCase {
+        what: "field and named-argument spellings must not hide a constant reference",
+        source: concat!(
+            "holder #|value I32| -> I32:\n",
+            "    record ~= Holder(x = 0)\n",
+            "    ~record.x = value\n",
+            "    return x\n",
+            ";\n",
+            "x #I32 = 1\n",
+        ),
+        order: &[ExpectedOrder::Exact(&["x", "holder"])],
+    },
+    ConstDependencyCase {
+        what: "map entry spellings must not hide constant references",
+        source: concat!(
+            "map_user #|| -> I32:\n",
+            "    mapping ~= {a = 1, b = 2}\n",
+            "    return a\n",
+            ";\n",
+            "a #I32 = 1\n",
+            "b #I32 = 2\n",
+        ),
+        order: &[
+            ExpectedOrder::First("a"),
+            ExpectedOrder::Before("a", "map_user"),
+        ],
+    },
+    ConstDependencyCase {
+        what: "a renamed payload field must not create a dependency edge",
+        source: concat!(
+            "Status ::\n",
+            "    Failed | value I32 |,\n",
+            ";\n",
+            "holder #|status Status| -> I32:\n",
+            "    if status is:\n",
+            "        Failed(value as captured) => return captured\n",
+            "    ;\n",
+            "    return 0\n",
+            ";\n",
+            "value #I32 = 1\n",
+        ),
+        order: &[ExpectedOrder::Before("holder", "value")],
+    },
+    ConstDependencyCase {
+        what: "a guard argument must remain a dependency reference",
+        source: concat!(
+            "Status ::\n",
+            "    Failed | value I32 |,\n",
+            ";\n",
+            "holder #|status Status| -> I32:\n",
+            "    if status is:\n",
+            "        Failed(value as captured) if positive(threshold) => return captured\n",
+            "    ;\n",
+            "    return 0\n",
+            ";\n",
+            "threshold #I32 = 1\n",
+            "positive #|value I32| -> Bool:\n",
+            "    return value > 0\n",
+            ";\n",
+        ),
+        order: &[
+            ExpectedOrder::Before("threshold", "holder"),
+            ExpectedOrder::Before("positive", "holder"),
+        ],
+    },
+    ConstDependencyCase {
+        what: "an indirect forward constant through a const function is legal",
+        source: concat!(
+            "first #I32 = bridge(1)\n",
+            "bridge #|value I32| -> I32:\n",
+            "    return later\n",
+            ";\n",
+            "later #I32 = 2\n",
+        ),
+        order: &[ExpectedOrder::Exact(&["later", "bridge", "first"])],
+    },
+];
+
+#[test]
+fn const_declaration_dependencies_order_by_the_declaration_graph() {
+    for case in CONST_DEPENDENCY_CASES {
+        let (headers, mut string_table, mut path_fork) =
+            parse_module_headers(&[("src/@entry.moth", case.source)], "src/@entry.moth");
+
+        let sorted = resolve_module_dependencies(
+            headers,
+            &ContentSourceTargets::empty(),
+            &mut string_table,
+            &mut path_fork,
+        )
+        .expect(case.what);
+
+        let order = sorted
+            .headers
+            .iter()
+            .filter(|header| !matches!(header.kind, HeaderKind::StartFunction))
+            .map(|header| header_name(header, &string_table, &path_fork))
+            .collect::<Vec<_>>();
+        let position = |name: &str| {
+            order
+                .iter()
+                .position(|candidate| candidate == name)
+                .unwrap_or_else(|| panic!("{}: {name} is missing from {order:?}", case.what))
+        };
+
+        for expectation in case.order {
+            match expectation {
+                ExpectedOrder::Exact(expected) => assert_eq!(
+                    order.iter().map(String::as_str).collect::<Vec<_>>(),
+                    *expected,
+                    "{}",
+                    case.what
+                ),
+                ExpectedOrder::First(first) => assert_eq!(
+                    order.first().map(String::as_str),
+                    Some(*first),
+                    "{}: {order:?}",
+                    case.what
+                ),
+                ExpectedOrder::Before(first, second) => assert!(
+                    position(first) < position(second),
+                    "{}: {first} must sort before {second}: {order:?}",
+                    case.what
+                ),
+            }
+        }
+    }
+}
+
 #[test]
 fn sorts_strict_top_level_dependencies_before_dependents_and_appends_start_last() {
     let (headers, mut string_table, mut path_fork) = parse_module_headers(

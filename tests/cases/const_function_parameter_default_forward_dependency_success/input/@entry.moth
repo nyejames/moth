@@ -1,0 +1,27 @@
+use_call #|value I32 = one()| -> I32:
+    return value
+;
+
+one #|| -> I32:
+    return 41
+;
+
+use_constant #|value I32 = later| -> I32:
+    return value
+;
+
+later #I32 = 7
+
+use_arguments #|value I32 = twice(3)| -> I32:
+    return value
+;
+
+twice #|n I32| -> I32:
+    return n + n
+;
+
+call_value #I32 = use_call()
+constant_value #I32 = use_constant()
+argument_value #I32 = use_arguments()
+
+~[: call=[call_value] constant=[constant_value] argument=[argument_value]]

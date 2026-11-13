@@ -121,6 +121,7 @@ impl From<TemplateError> for ExpressionParseError {
             TemplateError::NonConstantReferenceInConstant(diagnostic) => {
                 Self::NonConstantReferenceInConstant(diagnostic)
             }
+            TemplateError::Budget(exhaustion) => Self::Diagnostic(exhaustion.into_diagnostic()),
             TemplateError::Infrastructure(error) => Self::Infrastructure(error),
         }
     }

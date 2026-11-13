@@ -8,8 +8,8 @@
 //! ## Stage contract
 //!
 //! Stage 3 resolves retained hints into top-level declaration dependency edges.
-//! Hints include type-surface and constant-initializer references.
-//! Executable function and entry-body references remain excluded.
+//! Hints include type-surface, constant-initializer and const-function body and default
+//! references. Ordinary executable function and entry-body references remain excluded.
 //!
 //! **Entry header excluded from the graph.** `StartFunction` headers are not graph participants —
 //! they have no dependents and cannot be imported. They are appended after the sorted top-level
@@ -20,6 +20,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
@@ -636,10 +637,35 @@ fn visit_node(
     };
 
     if tracker.is_in_current_stack(&resolved_path) {
-        return Err(project_config::circular_dependency(
-            resolved_path,
-            diagnostic_span,
-        ));
+        // Preserve the established primary site: the declaration whose walk entered the cycle.
+        // The retained stack labels every participant in walk order; the re-entered declaration is
+        // the primary site, so it is labelled once there rather than again in the chain.
+        let mut diagnostic = project_config::circular_dependency(resolved_path, diagnostic_span);
+        let Some(cycle_start) = tracker.stack.iter().position(|node| *node == resolved_path) else {
+            crate::compiler_bug!(
+                CompilerStage::DependencyResolution,
+                "dependency ordering re-entered a path that is missing from its own stack"
+            );
+        };
+        let mut labelled_spans = Vec::new();
+        for node in tracker.stack[cycle_start..]
+            .iter()
+            .copied()
+            .chain(std::iter::once(resolved_path))
+        {
+            let Some(header) = graph.header_for_path(&node) else {
+                continue;
+            };
+            if header.name_span == diagnostic_span || labelled_spans.contains(&header.name_span) {
+                continue;
+            }
+            labelled_spans.push(header.name_span);
+            diagnostic = diagnostic.with_label(
+                header.name_span,
+                Some(LabelDraftMessage::DependencyCycleParticipant),
+            );
+        }
+        return Err(diagnostic);
     }
 
     if !tracker.visited.contains(&resolved_path) {

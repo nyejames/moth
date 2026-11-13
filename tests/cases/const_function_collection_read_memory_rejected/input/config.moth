@@ -1,0 +1,6 @@
+project #= (
+    name = "probe_read_memory",
+    const_work_limit = 1000000,
+    const_memory_limit_mb = 1,
+)
+html #= ()

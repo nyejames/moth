@@ -1,0 +1,12 @@
+square #|value I32| -> I32:
+    return value * value
+;
+
+nested #|value I32| -> I32:
+    return square(square(value))
+;
+
+first #I32 = square(7)
+second #I32 = nested(2)
+
+io.line([: first=[first] second=[second] ])

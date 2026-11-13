@@ -156,6 +156,29 @@ impl ScopeArena {
         None
     }
 
+    /// Return whether a declaration identity is a body-local binding or parameter in the
+    /// visible frame chain.
+    pub(crate) fn contains_body_local(
+        &self,
+        frame_id: ScopeFrameId,
+        declaration_id: PathId,
+    ) -> bool {
+        let mut current_id = Some(frame_id);
+        while let Some(id) = current_id {
+            let frame = self.frame(id);
+            if frame.local_declarations.iter().any(|local| {
+                matches!(
+                    &local.slot,
+                    LocalDeclarationSlot::Ready(local) if local.id == declaration_id
+                )
+            }) {
+                return true;
+            }
+            current_id = frame.parent;
+        }
+        false
+    }
+
     /// Return whether a declaration is an explicit compile-time constant in this frame
     /// or any ancestor frame.
     ///

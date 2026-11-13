@@ -1,0 +1,6 @@
+@child offset
+
+$export
+outer #|value I32| -> I32:
+    return offset(value) * 2
+;

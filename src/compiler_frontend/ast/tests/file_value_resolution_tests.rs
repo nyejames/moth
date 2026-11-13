@@ -586,6 +586,7 @@ fn compile_fixture(
                 public_source_trait_origins: Arc::default(),
                 build_config_values: Arc::new(Default::default()),
                 builder_root_slots: None,
+                provider_materialisations: None,
             },
             #[cfg(feature = "timers")]
             None,

@@ -1,0 +1,6 @@
+@child as c
+
+$export
+outer #|value I32| -> I32:
+    return c.count(value)
+;

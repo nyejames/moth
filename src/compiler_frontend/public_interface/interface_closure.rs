@@ -882,6 +882,7 @@ fn collect_concrete_callable_origins(
     match &declaration.semantics {
         PublicDeclarationSemantics::Function(function) => {
             if matches!(function.category, PublicFunctionCategory::ConcreteLocal)
+                && function.evaluation.has_runtime_body()
                 && let OriginDeclarationId::Function(origin) = &declaration.origin
             {
                 origins.push(origin.clone());

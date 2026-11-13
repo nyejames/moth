@@ -135,10 +135,13 @@ impl ScopeContext {
             expression_builder,
             const_values,
             template_const_loop_iteration_limit: self.shared.template_const_loop_iteration_limit,
+            template_output_limits: None,
+            template_work: None,
             bindings: Vec::new(),
             source_scope: Some(self),
             external_package_registry: Some(self.shared.external_package_registry.as_ref()),
             prepared_wrapper_slot_routing: FxHashMap::default(),
+            required_call_rewriter: None,
         }
     }
 }

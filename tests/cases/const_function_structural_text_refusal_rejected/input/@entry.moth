@@ -1,0 +1,9 @@
+@core/text
+
+resource_length #|value String| -> I32:
+    return text.length(value)
+;
+
+result #I32 = resource_length(@assets/value.txt)
+
+~[:unreachable]

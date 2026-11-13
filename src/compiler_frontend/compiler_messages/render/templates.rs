@@ -6,7 +6,9 @@
 
 use super::context::DiagnosticRenderContext;
 use super::named_value_or_default;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::CompileTimeEvaluationErrorView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
+    CompileTimeEvaluationErrorView, ReleaseBudgetScope, ReleaseFoldingBudgetView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     InvalidTemplateSlotView, InvalidTemplateStructureCode, InvalidTemplateStructureView,
 };
@@ -17,6 +19,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidTemplateStructureReason, StoredTemplateHeadConflict, TemplateHeadConflictOwner,
     TemplateHeadConflictReason, TemplateHeadItemKind,
 };
+use crate::compiler_frontend::datatypes::const_budget::ConstBudgetUnit;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
@@ -144,6 +147,7 @@ pub(crate) fn compile_time_evaluation_error_message(
     reason: CompileTimeEvaluationErrorReason,
     operation: Option<StringId>,
     numeric_type: Option<NumericScalar>,
+    limit: Option<usize>,
     string_table: &dyn StringTableResolver,
 ) -> String {
     let operation_text = named_value_or_default(operation, string_table, "this expression");
@@ -153,21 +157,18 @@ pub(crate) fn compile_time_evaluation_error_message(
     let numeric_suffix = numeric_type_text
         .map(|numeric_type| format!(" in {numeric_type}"))
         .unwrap_or_default();
+    let evaluating = format!("evaluating {operation_text}{numeric_suffix}");
 
     match reason {
         CompileTimeEvaluationErrorReason::IntegerOverflow => {
-            format!(
-                "Compile-time integer overflow while evaluating {operation_text}{numeric_suffix}."
-            )
+            format!("Compile-time integer overflow while {evaluating}.")
         }
         CompileTimeEvaluationErrorReason::FloatOverflow => {
-            format!(
-                "Compile-time float overflow or non-finite result while evaluating {operation_text}{numeric_suffix}."
-            )
+            format!("Compile-time float overflow or non-finite result while {evaluating}.")
         }
         CompileTimeEvaluationErrorReason::DecExponentIntegerOverflow => {
             format!(
-                "Compile-time integer overflow while evaluating {operation_text}{numeric_suffix}. A Dec power takes an I32 exponent, so the exponent operand is evaluated as I32 arithmetic before the Dec power runs."
+                "Compile-time integer overflow while {evaluating}. A Dec power takes an I32 exponent, so the exponent operand is evaluated as I32 arithmetic before the Dec power runs."
             )
         }
         CompileTimeEvaluationErrorReason::DivideByZero => "Cannot divide by zero.".to_string(),
@@ -187,6 +188,42 @@ pub(crate) fn compile_time_evaluation_error_message(
             format!(
                 "Constants can only reference other constants. {operation_text} resolves to a non-constant value."
             )
+        }
+        CompileTimeEvaluationErrorReason::ConstCallRequiresConstantArguments => {
+            format!(
+                "Every argument to const function {operation_text} must be a compile-time constant."
+            )
+        }
+        CompileTimeEvaluationErrorReason::ConstFunctionRuntimeOperation => {
+            format!("Const function body cannot use runtime-only operation {operation_text}.")
+        }
+        CompileTimeEvaluationErrorReason::ConstFunctionExecutionUnsupported => {
+            format!(
+                "Const function {operation_text} cannot be executed with the operations supported so far."
+            )
+        }
+        CompileTimeEvaluationErrorReason::ConstWorkLimitExceeded => match limit {
+            Some(limit) => format!(
+                "Const function execution exhausted `const_work_limit` at {}.",
+                budget_quantity_text(ConstBudgetUnit::Steps, limit)
+            ),
+            None => "Const function execution exhausted `const_work_limit`.".to_owned(),
+        },
+        CompileTimeEvaluationErrorReason::ConstMemoryLimitExceeded => match limit {
+            Some(limit) => format!(
+                "Const function execution exhausted `const_memory_limit_mb` at {}.",
+                budget_quantity_text(ConstBudgetUnit::Mib, limit)
+            ),
+            None => "Const function execution exhausted `const_memory_limit_mb`.".to_owned(),
+        },
+        CompileTimeEvaluationErrorReason::ConstHardSafetyLimitExceeded => {
+            // The typed `limit` fact carries the fixed bound, but the family has no fact word for
+            // its unit, so a bare count here would not tell the reader what was exhausted. The
+            // release advice family carries the unit as its own fact.
+            "Const function execution reached a fixed compiler safety limit.".to_owned()
+        }
+        CompileTimeEvaluationErrorReason::ConstAssertionFailed => {
+            "A compile-time assert in this const function failed.".to_owned()
         }
         CompileTimeEvaluationErrorReason::SameFileForwardConstantReference => {
             format!(
@@ -230,6 +267,72 @@ pub(crate) fn compile_time_evaluation_error_message(
     }
 }
 
+/// Spells one budget allowance quantity in its own unit.
+///
+/// WHAT: the one formatter for every allowance number that reaches a user.
+/// WHY: an allowance limit is a raw count in facts, and `MiB` divides while every other unit
+///      counts. Two independent formatters would eventually disagree on rounding or wording.
+fn budget_quantity_text(unit: ConstBudgetUnit, limit: usize) -> String {
+    match unit {
+        ConstBudgetUnit::Steps => format!("{limit} steps"),
+        ConstBudgetUnit::Mib => format!("{} MiB", limit / (1024 * 1024)),
+        ConstBudgetUnit::RetainedValues => format!("{limit} retained values"),
+        ConstBudgetUnit::Pieces => format!("{limit} structural pieces"),
+        ConstBudgetUnit::CallFrames => format!("{limit} call frames"),
+        ConstBudgetUnit::ExpressionLevels => format!("{limit} expression levels"),
+        ConstBudgetUnit::HandlerLevels => format!("{limit} handler levels"),
+        ConstBudgetUnit::ProjectionLevels => format!("{limit} projection levels"),
+    }
+}
+
+/// Renders one release folding budget Note from its typed facts.
+///
+/// WHAT: names the exhausted allowance, its scope and the setting that raises it.
+/// WHY: the runtime call is still emitted, so the reader needs to know that folding stopped, how
+///      much allowance the attempt spent, and which setting or fixed bound owns the refusal.
+pub(crate) fn release_folding_budget_message(
+    unit: ConstBudgetUnit,
+    limit: Option<usize>,
+    setting: Option<&str>,
+    scope: ReleaseBudgetScope,
+) -> String {
+    let scope_text = match scope {
+        ReleaseBudgetScope::Call => "this call",
+        ReleaseBudgetScope::ModuleAggregate => "this module's aggregate allowance",
+    };
+    let quantity_text = limit
+        .map(|limit| format!(" ({})", budget_quantity_text(unit, limit)))
+        .unwrap_or_default();
+    let category = unit.category().label();
+    match setting {
+        Some(setting) => format!(
+            "Release folding stopped: {category} limit for {scope_text}{quantity_text} was exhausted. Raise `{setting}` to allow more compile-time work."
+        ),
+        None => format!(
+            "Release folding stopped: the compiler safety {category} limit for {scope_text}{quantity_text} was reached. Simplify the call to fit the fixed safety allowance."
+        ),
+    }
+}
+
+/// Renders a release folding budget Note from its compact facts.
+pub(crate) fn render_release_folding_budget(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &ReleaseFoldingBudgetView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let setting = facts
+        .setting
+        .map(|setting| context.string_table.resolve(setting));
+    RenderedPayload {
+        message: release_folding_budget_message(facts.unit, facts.limit, setting, facts.scope),
+        // The message already names the setting or the fixed bound, so the guidance states the
+        // one action that applies to either refusal.
+        guidance: vec![
+            "Raise the const execution setting named in the note when there is one, or simplify the call so it fits the current allowance.".to_owned(),
+        ],
+    }
+}
+
 pub(crate) fn compile_time_evaluation_error_suggestion(
     reason: CompileTimeEvaluationErrorReason,
 ) -> &'static str {
@@ -258,6 +361,27 @@ pub(crate) fn compile_time_evaluation_error_suggestion(
         }
         CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant => {
             "Only reference constants in constant declarations and const templates. Add `#` to the binding declaration to make it a compile-time constant."
+        }
+        CompileTimeEvaluationErrorReason::ConstCallRequiresConstantArguments => {
+            "Pass a literal, a compile-time constant or the result of another const function."
+        }
+        CompileTimeEvaluationErrorReason::ConstFunctionRuntimeOperation => {
+            "Use compile-time values, constants and const function calls, or move this operation into an ordinary function."
+        }
+        CompileTimeEvaluationErrorReason::ConstFunctionExecutionUnsupported => {
+            "Use a literal return, parameter arithmetic or another supported const body until the remaining executor forms are implemented."
+        }
+        CompileTimeEvaluationErrorReason::ConstWorkLimitExceeded => {
+            "Raise `const_work_limit` or reduce the call's compile-time work."
+        }
+        CompileTimeEvaluationErrorReason::ConstMemoryLimitExceeded => {
+            "Raise `const_memory_limit_mb` or reduce the call's retained values."
+        }
+        CompileTimeEvaluationErrorReason::ConstHardSafetyLimitExceeded => {
+            "Reduce call depth or the size of the folded value; this fixed safety limit cannot be raised."
+        }
+        CompileTimeEvaluationErrorReason::ConstAssertionFailed => {
+            "Fix the asserted condition or remove the assertion from the const function."
         }
         CompileTimeEvaluationErrorReason::SameFileForwardConstantReference => {
             "Move the referenced constant above this declaration, or bind it from another file."
@@ -301,6 +425,7 @@ pub(crate) fn render_compile_time_evaluation_error(
             facts.reason,
             facts.operation,
             facts.numeric_type,
+            facts.limit,
             context.string_table,
         ),
         guidance: vec![compile_time_evaluation_error_suggestion(facts.reason).to_owned()],

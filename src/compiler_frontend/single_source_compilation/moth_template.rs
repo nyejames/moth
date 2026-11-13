@@ -879,7 +879,9 @@ fn fold_template_ast(
             config_resolution: None,
             build_config_values: Arc::new(Default::default()),
             builder_root_slots: None,
+            provider_materialisations: None,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+            const_execution_limits: Default::default(),
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]
             timing_context: None,

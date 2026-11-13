@@ -1,0 +1,10 @@
+spin || -> I32:
+    total ~I32 = 0
+    loop to 1000 |index|:
+        ~total = total + index
+    ;
+    return total
+;
+
+result = spin()
+~[: [result]]

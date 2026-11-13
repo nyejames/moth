@@ -32,6 +32,7 @@
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::AstDocFragment;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::const_values::const_execution::ConstFunctionExecutable;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionInstanceKey, GenericFunctionInstantiationRequest, GenericRequestRange,
@@ -51,7 +52,9 @@ use crate::compiler_frontend::ast::numeric_known_shape::{
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ParameterContract};
 use crate::compiler_frontend::ast::templates::template_folding::TirFoldContext;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
-use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAlias;
+use crate::compiler_frontend::ast::type_resolution::{
+    ResolvedFunctionSignature, ResolvedTypeAlias,
+};
 use crate::compiler_frontend::build_config::{
     BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
 };
@@ -422,6 +425,21 @@ impl FileValueResolutionServices {
     }
 }
 
+/// Prepared const executables shared by every scope that may contain a required call.
+///
+/// WHAT: one live executables map per module, behind the module's shared `Rc` handle.
+/// WHY: const bodies and their callers read the same prepared executables, so a child scope
+///      clones one pointer instead of the map.
+pub(crate) type ConstFunctionExecutables = Rc<RefCell<FxHashMap<PathId, ConstFunctionExecutable>>>;
+
+/// Const callable signatures published before the whole-module signature pass.
+///
+/// WHAT: the same live map handle the environment builder keeps growing during the Stage 3 walk.
+/// WHY: const bodies parse before the canonical lookup table exists, so they read this table and
+///      must observe rows appended after their scope was cloned.
+pub(crate) type EarlyConstFunctionSignatures =
+    Rc<RefCell<FxHashMap<PathId, ResolvedFunctionSignature>>>;
+
 /// Shared state common to a scope and all its cloned children.
 ///
 /// WHAT: bundles all state that is identical across child scopes so cloning a
@@ -432,6 +450,26 @@ impl FileValueResolutionServices {
 pub struct ScopeShared {
     // Immutable semantic lookup tables.
     pub(crate) lookups: Option<Rc<AstModuleLookups>>,
+    /// Resolved signatures prepared before the whole-module signature pass.
+    ///
+    /// WHY: a const body and the constant initializers that call it parse while the environment
+    ///      is still assembling, so the canonical lookup table is not available yet. The
+    ///      environment builder publishes only the const callable rows those scopes may call.
+    ///      The map stays live in the builder and grows while the Stage 3 walk advances, so each
+    ///      scope receives one shared `Rc` handle instead of a whole-map snapshot.
+    pub(crate) early_const_function_signatures: Option<EarlyConstFunctionSignatures>,
+    /// Whether required source const calls may appear in this module's expressions.
+    ///
+    /// WHAT: true once the module declares or imports a const callable, even while the prepared
+    ///       executables for those calls are still being filled in.
+    /// WHY: ordinary expression completion checks this flag before borrowing the executables map,
+    ///      so modules with no const function pay neither the borrow nor the call rewrite.
+    pub(crate) has_const_functions: bool,
+    /// Prepared const executables available to every expression that may contain a required call.
+    ///
+    /// WHAT: attached once the module's executable table is known, possibly still empty; rows are
+    ///       published as const bodies are prepared.
+    pub(crate) const_function_executables: Option<ConstFunctionExecutables>,
     pub(crate) top_level_declarations: Rc<TopLevelDeclarationTable>,
     pub(crate) nominal_type_ids_by_path: Rc<FxHashMap<PathId, TypeId>>,
 
@@ -439,6 +477,10 @@ pub struct ScopeShared {
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
+    /// Whether this body is a const function body whose operations must all be const-capable.
+    pub(crate) const_body: bool,
+    /// The authored declaration site a const-body eligibility diagnostic points back to.
+    pub(crate) const_declaration_span: Option<SourceSpan>,
 
     // File-local visibility and resolved declarations.
     pub(crate) file_visibility: Option<Arc<FileVisibility>>,
@@ -616,6 +658,18 @@ pub struct ScopeContext {
 
     // Control flow state.
     pub loop_depth: usize,
+}
+
+impl ScopeContext {
+    /// Whether this module declared any const function, even if execution is deferred.
+    pub(crate) fn has_const_functions(&self) -> bool {
+        self.shared.has_const_functions
+    }
+
+    /// Prepared required-call executables attached to this scope, when the module has any.
+    pub(crate) fn const_function_executables(&self) -> Option<ConstFunctionExecutables> {
+        self.shared.const_function_executables.clone()
+    }
 }
 
 impl Clone for ScopeContext {
@@ -900,6 +954,48 @@ impl ScopeContext {
 // --------------------------
 
 impl ScopeContext {
+    /// Mark this context and every child scope as a const function body.
+    pub(crate) fn with_const_body(mut self, declaration_span: Option<SourceSpan>) -> Self {
+        let shared = Rc::make_mut(&mut self.shared);
+        shared.const_body = true;
+        shared.const_declaration_span = declaration_span;
+        self
+    }
+
+    /// Whether expression parsing is currently validating a const function body.
+    pub(crate) fn is_const_body(&self) -> bool {
+        self.shared.const_body
+    }
+
+    /// The const declaration that owns the currently validated body, when one exists.
+    pub(crate) fn const_declaration_span(&self) -> Option<SourceSpan> {
+        self.shared.const_declaration_span
+    }
+
+    /// Whether this const body may not read `declaration`.
+    ///
+    /// WHAT: true only inside a const body, for a declaration that is neither an authored
+    ///       body-local binding/parameter nor an explicit compile-time constant.
+    /// WHY: a const body reads only the compile-time placeholders it owns and authored constants;
+    ///      every module runtime declaration it names is a const-body eligibility error. The
+    ///      predicate keeps that rule single-owned across identifier, namespace and assignment paths.
+    pub(crate) fn const_body_rejects_runtime_declaration(&self, declaration: &Declaration) -> bool {
+        self.is_const_body()
+            && !self.is_body_local_declaration(declaration)
+            && !self.is_explicit_compile_time_constant(declaration)
+    }
+
+    /// Whether a declaration is an authored body-local binding or parameter.
+    ///
+    /// WHAT: scans the visible local frame chain for the same declaration identity.
+    /// WHY: a const body may read its own locals and parameters, which hold compile-time values
+    ///      produced by the executor, but it may not read module runtime declarations.
+    pub(crate) fn is_body_local_declaration(&self, declaration: &Declaration) -> bool {
+        self.arena
+            .borrow()
+            .contains_body_local(self.current_frame_id, declaration.id)
+    }
+
     /// Build a context before the completed AST environment is available.
     ///
     /// WHAT: seeds only the provided declaration table, external package registry and shared
@@ -926,10 +1022,15 @@ impl ScopeContext {
         let trait_evidence_environment = EMPTY_TRAIT_EVIDENCE_ENVIRONMENT.with(Rc::clone);
         let shared = Rc::new(ScopeShared {
             lookups: None,
+            early_const_function_signatures: None,
+            const_function_executables: None,
+            has_const_functions: false,
             top_level_declarations,
             external_package_registry,
             style_directives: StyleDirectiveRegistry::built_ins(),
             build_profile: FrontendBuildProfile::Dev,
+            const_body: false,
+            const_declaration_span: None,
             file_visibility: None,
             resolved_type_aliases: None,
             generic_declarations_by_path: None,

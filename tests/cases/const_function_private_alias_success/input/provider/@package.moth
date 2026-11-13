@@ -1,0 +1,11 @@
+Box = |
+    value I32,
+|
+
+BoxAlias as Box
+
+$export
+outer #|value I32| -> I32:
+    boxed BoxAlias = Box(value)
+    return boxed.value + 1
+;

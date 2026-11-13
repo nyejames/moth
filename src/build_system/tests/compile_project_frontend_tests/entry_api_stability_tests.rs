@@ -1,94 +1,19 @@
 use super::*;
 use crate::build_system::create_project_modules::compiled_boundary::ProjectFrontendCompilation;
-use crate::build_system::create_project_modules::create_project_modules_tests::successful_compilation_value;
-use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::ast::generic_functions::reuse_probe;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::hir::reachability::collect_reachability_from_function_link_facts;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::utils::{collect_reachable_blocks, terminator_targets};
 use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
-
-const CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n";
+use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceClass;
 
 const BASE_HELPER: &str = "compute |value I32| -> I32:\n    return value\n;\n";
 
 const BASE_FACADE: &str = "@impl compute\n\n$export\n@impl compute\n";
 
 const SUPPORT_FACADE: &str = "$export\nsupport_label || -> String:\n    return \"support\"\n;\n";
-
-/// Compiles one directory project from the given `(relative path, source text)` files.
-fn compile_fixture(files: &[(&str, &str)]) -> ProjectFrontendCompilation {
-    successful_compilation_value(compile_fixture_result(files, false))
-}
-
-/// Compiles one `.mtf`-bearing directory project through the real HTML builder surface.
-///
-/// WHY: the HTML builder registers `MothTemplate` source kinds. A fixture that uses `.mtf`
-///      content must compile through the same surface a real HTML project uses, not a bare
-///      mandatory-core surface that would reject the template source.
-fn compile_template_fixture(files: &[(&str, &str)]) -> ProjectFrontendCompilation {
-    successful_compilation_value(compile_fixture_result(files, true))
-}
-
-/// Freezes the diagnostics of a `.mtf`-bearing project that must be rejected as user source.
-fn compile_template_fixture_reports(
-    files: &[(&str, &str)],
-) -> crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet {
-    match compile_fixture_result(files, true) {
-        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
-        Ok(CompilationOutcome::Success { .. }) => {
-            panic!("expected qualified-reference diagnostics")
-        }
-        Err(errors) => {
-            panic!("user-authored qualified input must not reach infrastructure errors: {errors:?}")
-        }
-    }
-}
-
-fn compile_fixture_result(
-    files: &[(&str, &str)],
-    template_surface: bool,
-) -> CompilationResult<ProjectFrontendCompilation> {
-    let temporary_directory = tempfile::tempdir().expect("should create temporary project");
-    let project_root = temporary_directory.path().to_path_buf();
-    fs::create_dir_all(project_root.join("src")).expect("should create project source root");
-    fs::write(project_root.join("config.moth"), CONFIG_SOURCE)
-        .expect("should write project config");
-    for (relative_path, source) in files {
-        let path = project_root.join(relative_path);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("should create fixture source directory");
-        }
-        fs::write(path, source).expect("should write fixture source");
-    }
-
-    let mut config = Config::new(project_root);
-    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
-    if template_surface {
-        let builder =
-            crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new();
-        let style_directives = StyleDirectiveRegistry::built_ins();
-        let mut frontend_surface = builder.frontend_surface();
-        compile_project_frontend(
-            &mut config,
-            BuildProfile::Dev,
-            None,
-            &style_directives,
-            &mut frontend_surface,
-            &mut warning_owner,
-        )
-    } else {
-        let style_directives = StyleDirectiveRegistry::built_ins();
-        compile_project_frontend(
-            &mut config,
-            BuildProfile::Dev,
-            None,
-            &style_directives,
-            &mut BuilderSurface::with_mandatory_core(),
-            &mut warning_owner,
-        )
-    }
-}
 
 /// Returns the single project module artefact for a one-module fixture.
 fn only_project_artifact(frontend: &ProjectFrontendCompilation) -> &CompiledModuleArtifact {
@@ -112,22 +37,6 @@ fn interface_fingerprint_content(interface: &PublicSemanticInterface) -> PublicS
     canonical
 }
 
-/// Returns the artifact that owns the fixture's single entry root.
-fn entry_artifact(frontend: &ProjectFrontendCompilation) -> &CompiledModuleArtifact {
-    let mut entries = frontend
-        .project
-        .successful_artefacts_in_module_id_order()
-        .filter(|artifact| artifact.module.metadata.entry.is_some());
-    let artifact = entries
-        .next()
-        .expect("the fixture should compile one entry module");
-    assert!(
-        entries.next().is_none(),
-        "the fixture should own exactly one entry root"
-    );
-    artifact
-}
-
 /// Returns the facade interface whose portable module path ends with `suffix`.
 fn normal_interface_for<'a>(
     frontend: &'a ProjectFrontendCompilation,
@@ -146,31 +55,23 @@ fn normal_interface_for<'a>(
         .unwrap_or_else(|| panic!("expected a normal facade ending with {suffix:?}"))
 }
 
-/// Returns every fully folded textual const fragment of the entry root in authored order.
-///
-/// WHY: a qualified reference must fold before backend lowering, so the retained const fragment is
-///      the earliest observable dependent content. A resource-bearing value has no text until the
-///      builder assigns URLs and is rejected here because these fixtures are fully textual.
-fn entry_folded_fragments(artifact: &CompiledModuleArtifact) -> Vec<String> {
-    artifact
-        .module
-        .metadata
-        .entry
-        .as_ref()
-        .expect("the fixture owns an entry root")
-        .const_top_level_fragments
-        .iter()
-        .map(|fragment| {
-            fragment
-                .value
-                .clone()
-                .into_text()
-                .expect("the fixture's const fragments must be fully textual")
-        })
-        .collect()
+/// Asserts the entry's complete folded output without accepting extra adjacent values.
+fn assert_entry_folded_output(compiled: &ProjectFrontendCompilation, expected: &str) {
+    let artifact = entry_artifact(compiled);
+    let content = entry_folded_fragments(artifact);
+    assert_eq!(
+        content.concat(),
+        expected,
+        "the entry's complete folded output must match: {content:?}"
+    );
+    assert_eq!(
+        entry_runtime_fragment_pushes(artifact),
+        0,
+        "a fully folded const entry must not retain a runtime fragment push"
+    );
 }
 
-/// Counts runtime-fragment pushes in the entry start function body.
+/// Counts runtime-fragment pushes in every block reachable from the entry start function.
 fn entry_runtime_fragment_pushes(artifact: &CompiledModuleArtifact) -> usize {
     let hir = &artifact.module.executable.hir;
     let start_id = hir
@@ -181,19 +82,42 @@ fn entry_runtime_fragment_pushes(artifact: &CompiledModuleArtifact) -> usize {
         .iter()
         .find(|function| function.id == start_id)
         .expect("the start function must exist in HIR");
-    let entry_block = hir
-        .blocks
+    let reachable = collect_reachable_blocks(start.entry, |block_id| {
+        let block = hir
+            .blocks
+            .iter()
+            .find(|block| block.id == block_id)
+            .ok_or_else(|| format!("reachable block {block_id:?} must exist in HIR"))?;
+        Ok::<_, String>(terminator_targets(&block.terminator))
+    })
+    .expect("the start function's reachable blocks must resolve");
+    reachable
         .iter()
-        .find(|block| block.id == start.entry)
-        .expect("the start function entry block must exist in HIR");
-    entry_block
-        .statements
-        .iter()
+        .filter_map(|block_id| hir.blocks.iter().find(|block| block.id == *block_id))
+        .flat_map(|block| &block.statements)
         .filter(|statement| matches!(statement.kind, HirStatementKind::PushRuntimeFragment { .. }))
         .count()
 }
 
 /// Returns the external functions reachable through the published link facts.
+/// Whether the entry root still reaches a direct ProjectContext dependency in surviving HIR.
+///
+/// WHAT: collects the published link facts from the synthetic start function, falling back to
+///       every HIR function only when a fixture has no start root.
+/// WHY:  a release replacement must preserve authored project/config provenance in the actual
+///       HIR, not merely keep a call count or an AST-side fact.
+fn reachable_project_context(artifact: &CompiledModuleArtifact) -> bool {
+    let hir = &artifact.module.executable.hir;
+    let roots = match hir.start_function {
+        Some(start) => vec![start],
+        None => hir.functions.iter().map(|function| function.id).collect(),
+    };
+    collect_reachability_from_function_link_facts(&artifact.module.link_facts.functions, &roots)
+        .expect("published link facts should cover every HIR function")
+        .reachable_function_provenance()
+        .contains_class(SyntheticInterfaceClass::ProjectContext)
+}
+
 fn reachable_external_functions(
     artifact: &CompiledModuleArtifact,
 ) -> rustc_hash::FxHashSet<ExternalFunctionId> {
@@ -491,6 +415,409 @@ fn qualified_cross_module_constant_edit_changes_the_consumer_and_provider_only()
         interface_fingerprint_content(normal_interface_for(&before, "other")),
         interface_fingerprint_content(normal_interface_for(&after, "other")),
         "an unrelated module interface must stay equal"
+    );
+}
+
+/// WHAT: editing an exported const function's private body changes the consumer's folded result
+///       while the provider's public callable signature stays fixed.
+/// WHY:  a consumer that folded a cross-module const call must re-run the provider closure on the
+///       next compilation. The dependency edge is the exported const declaration, not only its
+///       parameter and return types.
+#[test]
+fn const_function_private_body_edit_changes_consumer_folded_content() {
+    let entry = "@child answer\nresult #I32 = answer(1)\n[: [result] ]\n";
+    let before_provider = "$export\nanswer #|value I32| -> I32:\n    return plus(value)\n;\n\nplus #|value I32| -> I32:\n    return value * 2 + private_increment\n;\n\nprivate_increment #I32 = 1\n";
+    let after_provider = "$export\nanswer #|value I32| -> I32:\n    return plus(value) + 10\n;\n\nplus #|value I32| -> I32:\n    return value * 2 + private_increment\n;\n\nprivate_increment #I32 = 1\n";
+
+    let before = compile_template_fixture(&[
+        ("src/@mod.moth", "$export\nunrelated #= 1\n"),
+        ("src/@entry.moth", entry),
+        ("src/child/@mod.moth", before_provider),
+        ("src/other/@mod.moth", "$export\nstable #= 1\n"),
+    ]);
+    let after = compile_template_fixture(&[
+        ("src/@mod.moth", "$export\nunrelated #= 1\n"),
+        ("src/@entry.moth", entry),
+        ("src/child/@mod.moth", after_provider),
+        ("src/other/@mod.moth", "$export\nstable #= 1\n"),
+    ]);
+
+    assert_entry_folded_output(&before, " 3 ");
+    assert_entry_folded_output(&after, " 13 ");
+    assert_eq!(
+        interface_fingerprint_content(normal_interface_for(&before, "other")),
+        interface_fingerprint_content(normal_interface_for(&after, "other")),
+        "an unrelated module interface must stay equal"
+    );
+}
+
+/// WHAT: editing only a private const helper body reachable from an exported const function
+///       changes the consumer's folded result while the exported body and private constant stay
+///       fixed.
+/// WHY:  the private helper is part of the consumer dependency closure. A regression that only
+///       invalidates direct provider bodies would leave the stale folded result in place.
+#[test]
+fn const_function_private_helper_body_edit_changes_consumer_folded_content() {
+    let entry = "@child answer\nresult #I32 = answer(1)\n[: [result] ]\n";
+    let provider = |helper_body: &str| {
+        format!(
+            "$export\nanswer #|value I32| -> I32:\n    return plus(value)\n;\n\nplus #|value I32| -> I32:\n    {helper_body}\n;\n\nprivate_increment #I32 = 1\n"
+        )
+    };
+    let before = compile_template_fixture(&[
+        ("src/@entry.moth", entry),
+        (
+            "src/child/@mod.moth",
+            &provider("return value * 2 + private_increment"),
+        ),
+        ("src/other/@mod.moth", "$export\nstable #= 1\n"),
+    ]);
+    let after = compile_template_fixture(&[
+        ("src/@entry.moth", entry),
+        (
+            "src/child/@mod.moth",
+            &provider("return value * 3 + private_increment"),
+        ),
+        ("src/other/@mod.moth", "$export\nstable #= 1\n"),
+    ]);
+
+    assert_entry_folded_output(&before, " 3 ");
+    assert_entry_folded_output(&after, " 4 ");
+}
+
+/// WHAT: editing only a private constant reachable from an exported const body changes the
+///       consumer's folded result while the provider's public callable signature stays fixed.
+/// WHY:  the transitive private constant is part of the consumer dependency edge even though it is
+///       not importable. A stale consumer result would prove the edge stops at the exported body.
+#[test]
+fn const_function_private_constant_edit_changes_consumer_folded_content() {
+    let entry = "@child answer\nresult #I32 = answer(1)\n[: [result] ]\n";
+    let provider = |increment: &str| {
+        format!(
+            "$export\nanswer #|value I32| -> I32:\n    return plus(value)\n;\n\nplus #|value I32| -> I32:\n    return value * 2 + private_increment\n;\n\nprivate_increment #I32 = {increment}\n"
+        )
+    };
+    let before = compile_template_fixture(&[
+        ("src/@entry.moth", entry),
+        ("src/child/@mod.moth", &provider("1")),
+        ("src/other/@mod.moth", "$export\nstable #= 1\n"),
+    ]);
+    let after = compile_template_fixture(&[
+        ("src/@entry.moth", entry),
+        ("src/child/@mod.moth", &provider("9")),
+        ("src/other/@mod.moth", "$export\nstable #= 1\n"),
+    ]);
+
+    assert_entry_folded_output(&before, " 3 ");
+    assert_entry_folded_output(&after, " 11 ");
+    assert_eq!(
+        interface_fingerprint_content(normal_interface_for(&before, "other")),
+        interface_fingerprint_content(normal_interface_for(&after, "other")),
+        "an unrelated module interface must stay equal"
+    );
+}
+
+/// WHAT: release folds a pure ordinary call with constant arguments, while debug keeps it and
+///       impure or parameter-dependent bodies stay runtime in both profiles.
+/// WHY:  the speculative rewrite must reduce HIR calls without changing observable runtime work
+///       or accepting a body whose arguments or effects are not proven constant and pure.
+#[test]
+fn release_folds_only_proven_pure_ordinary_calls() {
+    let files = [
+        (
+            "src/@entry.moth",
+            "double |value I32| -> I32:\n    return value * 2\n;\n\ndynamic |value I32| -> I32:\n    return double(value)\n;\n\neffect |value I32| -> I32:\n    io.line(\"effect\")\n    return value\n;\n\nmutate |value ~I32| -> I32:\n    ~value = value + 1\n    return value\n;\n\nlocal_mutate |value I32| -> I32:\n    local ~I32 = 0\n    ~local = value + 1\n    return local\n;\n\ncounter ~= 2\n\n~[: [double(2)] [dynamic(3)] [local_mutate(5)] [effect(4)] [mutate(~counter)] ]\n",
+        ),
+        ("src/config.moth", CONFIG_SOURCE),
+    ];
+    let debug = compile_template_fixture_with_profile(&files, BuildProfile::Dev);
+    let release = compile_template_fixture_with_profile(&files, BuildProfile::Release);
+
+    let debug_calls = entry_hir_local_call_count(entry_artifact(&debug));
+    let release_calls = entry_hir_local_call_count(entry_artifact(&release));
+    assert_eq!(
+        release_calls + 3,
+        debug_calls,
+        "release must fold the direct call, its transitive pure callee and a pure local mutation: debug={debug_calls} release={release_calls}"
+    );
+    assert!(
+        release_calls > 0,
+        "parameter-dependent and impure calls must remain in release HIR"
+    );
+    assert!(
+        !entry_folded_fragments(entry_artifact(&release)).is_empty()
+            || entry_runtime_fragment_pushes(entry_artifact(&release)) > 0,
+        "release must still emit the entry template output path"
+    );
+}
+
+/// WHAT: a mutually recursive ordinary pair never becomes a release candidate.
+/// WHY:  the executor would otherwise recurse until a depth refusal, and a partially evaluated
+///       recursive call must never replace its caller. The acyclic closure rejects both callees.
+#[test]
+fn release_rejects_recursive_ordinary_candidates() {
+    let files = [
+        (
+            "src/@entry.moth",
+            "plus_one |value I32| -> I32:\n    return value + 1\n;\n\nleft |value I32| -> I32:\n    return right(value)\n;\n\nright |value I32| -> I32:\n    return left(value)\n;\n\n~[: [left(1)] [plus_one(2)] ]\n",
+        ),
+        ("src/config.moth", CONFIG_SOURCE),
+    ];
+    let debug = compile_template_fixture_with_profile(&files, BuildProfile::Dev);
+    let release = compile_template_fixture_with_profile(&files, BuildProfile::Release);
+
+    let debug_calls = entry_hir_local_call_count(entry_artifact(&debug));
+    let release_calls = entry_hir_local_call_count(entry_artifact(&release));
+    assert_eq!(
+        release_calls + 1,
+        debug_calls,
+        "release may fold the independent helper but must keep the recursive call: debug={debug_calls} release={release_calls}"
+    );
+}
+
+/// WHAT: a branch-local project dependency survives release folding through the replacement merge.
+/// WHY:  the executed value's own metadata may omit the dependency, so the candidate's complete
+///       effective provenance is attached to the replacement.
+#[test]
+fn release_folds_candidate_and_preserves_branch_local_project_dependency() {
+    let files = [
+        (
+            "src/@entry.moth",
+            "@core/text\n@project name\n\nsubject #|| -> I32:\n    return text.length(name)\n;\n\npick |flag Bool| -> I32:\n    if flag:\n        return subject()\n    else\n        return 1\n    ;\n;\n\n~[: [pick(false)] ]\n",
+        ),
+        ("src/config.moth", CONFIG_SOURCE),
+    ];
+    let debug = compile_template_fixture_with_profile(&files, BuildProfile::Dev);
+    let release = compile_template_fixture_with_profile(&files, BuildProfile::Release);
+
+    let debug_calls = entry_hir_local_call_count(entry_artifact(&debug));
+    let release_calls = entry_hir_local_call_count(entry_artifact(&release));
+    assert!(
+        debug_calls > 0 && release_calls == 0,
+        "the branch candidate must be erased before its replacement provenance is judged: debug={debug_calls} release={release_calls}"
+    );
+    assert!(
+        reachable_project_context(entry_artifact(&debug)),
+        "debug must retain the authored project dependency"
+    );
+    assert!(
+        reachable_project_context(entry_artifact(&release)),
+        "release must not erase the branch-local project dependency from HIR"
+    );
+}
+
+/// WHAT: a transitive callee dependency survives folding the outer ordinary call.
+/// WHY:  the caller's expression occurrences do not include the callee body's project dependency;
+///       the candidate closure propagates it and the replacement merge retains it.
+#[test]
+fn release_folds_outer_candidate_and_preserves_transitive_callee_dependency() {
+    let files = [
+        (
+            "src/@entry.moth",
+            "@core/text\n@project name\n\nsubject #|| -> I32:\n    return text.length(name)\n;\n\nhelper || -> I32:\n    return subject()\n;\n\nouter |flag Bool| -> I32:\n    if flag:\n        helper()\n    else\n        helper()\n    ;\n    return 1\n;\n\n~[: [outer(false)] ]\n",
+        ),
+        ("src/config.moth", CONFIG_SOURCE),
+    ];
+    let debug = compile_template_fixture_with_profile(&files, BuildProfile::Dev);
+    let release = compile_template_fixture_with_profile(&files, BuildProfile::Release);
+
+    let debug_calls = entry_hir_local_call_count(entry_artifact(&debug));
+    let release_calls = entry_hir_local_call_count(entry_artifact(&release));
+    assert!(
+        debug_calls > 0 && release_calls == 0,
+        "the outer call and its helper calls must be erased before transitive provenance is judged: debug={debug_calls} release={release_calls}"
+    );
+    assert!(
+        reachable_project_context(entry_artifact(&debug)),
+        "debug must retain the transitive project dependency"
+    );
+    assert!(
+        reachable_project_context(entry_artifact(&release)),
+        "release must not erase the transitive project dependency from HIR"
+    );
+}
+
+/// WHAT: a short-circuited return retains the project dependency in its skipped operand.
+/// WHY:  evaluation returns the left boolean value; the replacement merge must carry the complete
+///       candidate provenance even though the skipped subtree was not evaluated.
+#[test]
+fn release_folds_short_circuit_and_preserves_skipped_dependency() {
+    let files = [
+        (
+            "src/@entry.moth",
+            "@core/text\n@project name\n\nsubject #|| -> I32:\n    return text.length(name)\n;\n\nprobe |flag Bool| -> Bool:\n    return flag and (subject() > 0)\n;\n\n~[: [probe(false)] ]\n",
+        ),
+        ("src/config.moth", CONFIG_SOURCE),
+    ];
+    let debug = compile_template_fixture_with_profile(&files, BuildProfile::Dev);
+    let release = compile_template_fixture_with_profile(&files, BuildProfile::Release);
+
+    let debug_calls = entry_hir_local_call_count(entry_artifact(&debug));
+    let release_calls = entry_hir_local_call_count(entry_artifact(&release));
+    assert!(
+        debug_calls > 0 && release_calls == 0,
+        "the short-circuit candidate must be erased before its replacement provenance is judged: debug={debug_calls} release={release_calls}"
+    );
+    assert!(
+        reachable_project_context(entry_artifact(&debug)),
+        "debug must retain the short-circuit operand dependency"
+    );
+    assert!(
+        reachable_project_context(entry_artifact(&release)),
+        "release must not erase the skipped short-circuit dependency from HIR"
+    );
+}
+
+/// WHAT: a smaller configured work budget leaves the call at runtime and emits one Note, while a
+///       larger budget folds the same call.
+/// WHY:  budget advice must be actionable and non-fatal, and the configured allowance must reach
+///       the const executor rather than remaining a fixed compiler constant.
+#[test]
+fn release_budget_note_is_deduplicated_and_larger_budget_folds_more() {
+    let entry = "count |limit I32| -> I32:\n    total ~I32 = 0\n    index ~I32 = 0\n    loop index < limit:\n        ~total = total + 1\n        ~index = index + 1\n    ;\n    return total\n;\n\nprobe |value I32| -> I32:\n    return count(20) + value\n;\n\n~[: ]\n";
+    let small_config = "project #= (\n    name = \"docs\",\n    const_work_limit = 1,\n    const_memory_limit_mb = 1,\n)\nhtml #= ()\n";
+    let large_config = "project #= (\n    name = \"docs\",\n    const_work_limit = 1000,\n    const_memory_limit_mb = 1,\n)\nhtml #= ()\n";
+
+    let (small_compiled, small_warnings) = compile_fixture_with_warnings(
+        &[("src/@entry.moth", entry), ("config.moth", small_config)],
+        BuildProfile::Release,
+    );
+    let (large_compiled, large_warnings) = compile_fixture_with_warnings(
+        &[("src/@entry.moth", entry), ("config.moth", large_config)],
+        BuildProfile::Release,
+    );
+    let small_warnings = small_warnings.expect("the small budget must emit a Note");
+    let notes: Vec<_> = small_warnings
+        .iter_severity(DiagnosticSeverity::Note)
+        .map(|(_, view)| view)
+        .collect();
+    assert_eq!(
+        notes.len(),
+        1,
+        "one exhausted call site must produce one deduplicated Note"
+    );
+    let rendered = terse::format_terse_diagnostic_reports(&small_warnings);
+    assert!(
+        rendered
+            .iter()
+            .any(|line| line.contains("const_work_limit")),
+        "the Note must name the setting to raise: {rendered:?}"
+    );
+    assert!(
+        large_warnings.is_none(),
+        "the larger budget must fold without budget advice"
+    );
+    let small_calls = entry_hir_local_call_count(entry_artifact(&small_compiled));
+    let large_calls = entry_hir_local_call_count(entry_artifact(&large_compiled));
+    assert_eq!(
+        small_calls,
+        large_calls + 1,
+        "the larger configured budget must fold the previously refused call"
+    );
+}
+
+/// WHAT: an authored borrow violation remains a user error in both profiles, so release
+///       optimisation cannot erase a call that the borrow checker owns.
+/// WHY:  candidate removal happens before HIR borrow validation. A release-only success would
+///       hide an illegal mutable access.
+#[test]
+fn release_preserves_authored_borrow_diagnostics() {
+    let files = [
+        (
+            "src/@entry.moth",
+            "mutate |value ~I32| -> I32:\n    ~value = value + 1\n    return value\n;\n\ncounter #I32 = 1\n\n~[: [mutate(counter)] ]\n",
+        ),
+        ("src/config.moth", CONFIG_SOURCE),
+    ];
+    let debug = compile_template_fixture_reports_with_profile(&files, BuildProfile::Dev);
+    let release = compile_template_fixture_reports_with_profile(&files, BuildProfile::Release);
+    assert!(
+        debug.counts().errors > 0,
+        "the authored mutable-access violation must fail in debug"
+    );
+    assert!(
+        release.counts().errors > 0,
+        "release must not fold away the authored mutable-access violation"
+    );
+    assert_eq!(
+        terse::format_terse_diagnostic_reports(&debug),
+        terse::format_terse_diagnostic_reports(&release),
+        "profile choice must not change the authored borrow diagnostic"
+    );
+}
+
+/// WHAT: importing an exported const function does not make its retained private helper
+///       importable as ordinary source.
+/// WHY:  the executable closure carries the helper for execution, but publication must not widen
+///       the provider's source visibility. A successful import would expose provider internals.
+#[test]
+fn private_const_helper_closure_is_not_an_importable_declaration() {
+    let reports = compile_template_fixture_reports(&[
+        (
+            "src/@entry.moth",
+            "@helper private_double\nresult #I32 = private_double(2)\n[: [result] ]\n",
+        ),
+        ("src/helper/@mod.moth", "$export\n@internal public_double\n"),
+        (
+            "src/helper/internal.moth",
+            "private_double #|value I32| -> I32:\n    return value * 2\n;\n\npublic_double #|value I32| -> I32:\n    return private_double(value) + 1\n;\n",
+        ),
+    ]);
+
+    assert!(
+        reports.counts().errors > 0,
+        "a private helper must not be importable through its provider module"
+    );
+    let rendered = terse::format_terse_diagnostic_reports(&reports);
+    assert!(
+        rendered.iter().any(|line| line.contains("private_double")),
+        "the visibility diagnostic must name the rejected private helper: {rendered:?}"
+    );
+    assert!(
+        reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .all(|(_, view)| view.descriptor().code.starts_with("MOTH-")),
+        "the rejected private import must stay in the user-diagnostic lane"
+    );
+}
+
+/// WHAT: two local aliases of the same imported const function prepare one provider body.
+/// WHY:  materialisation is keyed by provider identity, so repeated imports and repeated calls must
+///       not reparse the provider body or duplicate its declaration. Preparation is observed per
+///       registered row, so a row outside the imported closure stays visible as absent, and the
+///       exact folded output rejects an alias that folds the wrong value or shares an output slot.
+#[test]
+fn repeated_import_aliases_install_one_provider_const_closure() {
+    let entry = "@helper phase5_provider_reuse_marker\n@helper phase5_provider_reuse_marker as phase5_alias\n\nfirst #I32 = phase5_provider_reuse_marker(20)\nsecond #I32 = phase5_alias(2)\n\n[: first=[first] second=[second] ]\n";
+    let provider_module = "$export\n@internal phase5_provider_reuse_marker\n@internal phase5_unused_provider_marker\n";
+    let provider_body = "private_increment #I32 = 1\n\nphase5_provider_reuse_marker #|value I32| -> I32:\n    return value + private_increment\n;\n\nphase5_unused_provider_marker #|value I32| -> I32:\n    return value * 99\n;\n";
+
+    let compiled = compile_template_fixture(&[
+        ("src/@entry.moth", entry),
+        ("src/helper/@mod.moth", provider_module),
+        ("src/helper/internal.moth", provider_body),
+    ]);
+
+    assert_entry_folded_output(&compiled, " first=21 second=3 ");
+    assert_eq!(
+        reuse_probe::preparations("phase5_provider_reuse_marker"),
+        1,
+        "one provider origin must prepare its body exactly once"
+    );
+    assert_eq!(
+        reuse_probe::preparations("phase5_unused_provider_marker"),
+        0,
+        "an unrelated internal provider body must stay outside the imported closure"
+    );
+    assert_eq!(
+        reuse_probe::rebases("phase5_provider_reuse_marker"),
+        1,
+        "the second import alias must reuse the completed origin before context rebase"
+    );
+    assert_eq!(
+        reuse_probe::selected_rows("phase5_provider_reuse_marker"),
+        1,
+        "one cold origin materialisation must select only the reachable entry row"
     );
 }
 

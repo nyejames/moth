@@ -10,10 +10,11 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::generics
     InvalidFunctionSignatureCode, InvalidFunctionSignatureView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
-    FunctionReturnContractSyntax, FunctionSignatureSyntax, parse_function_signature_syntax,
-    parse_trait_requirement_signature_syntax,
+    FunctionReturnContractSyntax, FunctionSignatureSyntax,
+    parse_function_signature_syntax_with_evaluation, parse_trait_requirement_signature_syntax,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
@@ -85,12 +86,13 @@ fn parse_function_contract(source: &str) -> FunctionSignatureSyntax {
         .expect("test path fits");
     let mut warnings = DiagnosticBag::new();
     let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream));
-    parse_function_signature_syntax(
+    parse_function_signature_syntax_with_evaluation(
         &mut declaration_cursor,
         &mut warnings,
         &mut string_table,
         function_path,
         &mut path_fork,
+        CallableEvaluation::Runtime,
     )
     .expect("the signature should parse")
 }
@@ -213,12 +215,13 @@ fn function_never_with_following_type_is_rejected() {
         .expect("test path fits");
     let mut warnings = DiagnosticBag::new();
     let mut declaration_cursor = DeclarationCursor::new(cursor_at_open_bracket(&token_stream));
-    let failure = parse_function_signature_syntax(
+    let failure = parse_function_signature_syntax_with_evaluation(
         &mut declaration_cursor,
         &mut warnings,
         &mut string_table,
         function_path,
         &mut path_fork,
+        CallableEvaluation::Runtime,
     )
     .expect_err("a type after `-> !` must be rejected");
     assert_never_cannot_combine(failure);

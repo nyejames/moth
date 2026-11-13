@@ -1,0 +1,9 @@
+$export
+identity type T |value T| -> T:
+    return value
+;
+
+$export
+plus_one #|value I32| -> I32:
+    return value + 1
+;

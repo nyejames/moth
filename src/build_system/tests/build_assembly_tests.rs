@@ -38,6 +38,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, DiagnosticCategory, DiagnosticSeverity, PreparedFailure,
     ProjectContextEscapeReason,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::folded_value::{
@@ -546,6 +547,7 @@ fn source_package_facade_rejects_project_context_reachable_private_helper() {
         origin: OriginDeclarationId::Function(exported_origin.clone()),
         synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+            evaluation: CallableEvaluation::Runtime,
             category: PublicFunctionCategory::ConcreteLocal,
             parameters: Vec::new(),
             return_contract: PublicCallableReturnContract::Returns {
@@ -895,6 +897,7 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
         origin: OriginDeclarationId::Function(exported_origin.clone()),
         synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+            evaluation: CallableEvaluation::Runtime,
             category: PublicFunctionCategory::ConcreteLocal,
             parameters: Vec::new(),
             return_contract: PublicCallableReturnContract::Returns {
@@ -1128,6 +1131,7 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
         origin: OriginDeclarationId::Function(make_origin.clone()),
         synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+            evaluation: CallableEvaluation::Runtime,
             category: PublicFunctionCategory::ConcreteLocal,
             parameters: Vec::new(),
             return_contract: PublicCallableReturnContract::Returns {

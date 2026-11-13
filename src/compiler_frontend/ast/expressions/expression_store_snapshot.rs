@@ -31,6 +31,7 @@ impl<'a> ExpressionView<'a> {
             let c = &owner.calls[id.index()];
             CandidateCall {
                 target: c.target,
+                evaluation: c.evaluation,
                 arguments: arguments(c.arguments),
                 handling: c.handling.map(|id| owner.handling[id.index()].clone()),
                 requires_external_float_validation: c.requires_external_float_validation,

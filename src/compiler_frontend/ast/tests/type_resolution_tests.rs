@@ -2028,3 +2028,25 @@ fn capacity_i32_boundary_is_rejected_above_range() {
         .expect("capacity overflow should retain typed collection facts");
     assert_eq!(facts.reason, InvalidCollectionTypeCode::CapacityOverflow);
 }
+
+/// A 2,000-declaration const graph compiles on the test stack.
+///
+/// WHAT: 2,000 independent const functions, each followed by a constant that calls it, so every
+///       declaration grows the early signature table and constructs a constant initializer scope.
+/// WHY:  this is the shape whose whole-map scope copies used to be quadratic per declaration. It is
+///       a smoke test that the module still compiles at that width: it asserts nothing about copy
+///       count, elapsed time or budget use, so a regression that stays inside the default budgets
+///       and the test stack still passes.
+#[test]
+fn const_heavy_declaration_graph_compiles_on_the_test_stack() {
+    let count = 2000_usize;
+    let mut source = String::new();
+    for index in 0..count {
+        source.push_str(&format!(
+            "calc{index} #|value I32| -> I32:\n    return value + 1\n;\n"
+        ));
+        source.push_str(&format!("folded{index} #I32 = calc{index}({index})\n"));
+    }
+
+    let _ = parse_single_file_ast(&source);
+}

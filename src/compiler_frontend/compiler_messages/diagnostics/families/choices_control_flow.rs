@@ -19,7 +19,8 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_invalid_control_flow_statement, render_invalid_fallible_handling,
     render_invalid_loop_header, render_invalid_match_arm, render_invalid_match_guard,
     render_invalid_match_pattern, render_invalid_standalone_statement,
-    render_invalid_statement_position, render_non_exhaustive_match, render_unreachable_match_arm,
+    render_invalid_statement_position, render_non_exhaustive_match, render_release_folding_budget,
+    render_unreachable_match_arm,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticSeverity, InvalidChoiceVariantReason,
@@ -27,6 +28,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidMatchArmReason, InvalidMatchGuardReason, InvalidMatchPatternReason,
     InvalidStandaloneStatementReason, InvalidStatementPositionReason, NonExhaustiveMatchReason,
 };
+use crate::compiler_frontend::datatypes::const_budget::ConstBudgetUnit;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::SourceSpan;
@@ -77,6 +79,7 @@ unit_code! {
         UnexpectedOf = 9,
         UnexpectedScopeCloseInExpression = 10,
         UnexpectedScopeCloseInTemplate = 11,
+        UnexpectedScopeCloseAtTopLevel = 12,
     }
 }
 unit_code! {
@@ -569,6 +572,39 @@ unit_code! {
         EvaluationOutputBoundExceeded = 16,
         StructuralStringRequiresFinalText = 17,
         DecExponentIntegerOverflow = 18,
+        ConstCallRequiresConstantArguments = 19,
+        ConstFunctionRuntimeOperation = 20,
+        ConstFunctionExecutionUnsupported = 21,
+        // 22 stays unused so the const-execution rows keep the codes they were introduced with.
+        ConstAssertionFailed = 23,
+        ConstWorkLimitExceeded = 25,
+        ConstMemoryLimitExceeded = 26,
+        ConstHardSafetyLimitExceeded = 27,
+    }
+}
+
+unit_code! {
+    impl ConstBudgetUnit {
+        Steps = 1,
+        Mib = 2,
+        RetainedValues = 3,
+        Pieces = 4,
+        CallFrames = 5,
+        ExpressionLevels = 6,
+        HandlerLevels = 7,
+        ProjectionLevels = 8,
+    }
+}
+
+unit_code! {
+    /// Which allowance a release fold stopped at.
+    ///
+    /// WHAT: separates one call's attempt allowance from the module's shared aggregate allowance.
+    /// WHY: release advice names the scope the reader can act on; the two scopes have different
+    ///      remedies (`const_work_limit` for this call, the module's total allowance for all calls).
+    pub(crate) enum ReleaseBudgetScope {
+        Call = 1,
+        ModuleAggregate = 2,
     }
 }
 
@@ -901,6 +937,7 @@ diagnostic_family! {
             reason: UnitFact<CompileTimeEvaluationErrorReason>,
             operation: OptStringFact,
             numeric_type: OptUnitFact<NumericScalar>,
+            limit: OptCountFact,
         ],
         labels: [
             LabelMessageCode::CONFIG_INPUT_ORIGIN,
@@ -914,6 +951,51 @@ diagnostic_family! {
     }
 }
 
+diagnostic_family! {
+    RELEASE_FOLDING_BUDGET_STOPPED {
+        internal: 3090,
+        stable: "MOTH-RULE-0090",
+        category: DiagnosticCategory::Rule,
+        severity: DiagnosticSeverity::Note,
+        title: "Release folding budget exhausted",
+        facts: [
+            unit: UnitFact<ConstBudgetUnit>,
+            limit: OptCountFact,
+            setting: OptStringFact,
+            scope: UnitFact<ReleaseBudgetScope>,
+        ],
+        labels: [],
+        extra: None,
+        ctor: manual,
+        view: ReleaseFoldingBudgetView,
+        render: render_release_folding_budget,
+    }
+}
+
+/// Advisory Note that one release folding attempt stopped at a budget bound.
+///
+/// WHAT: keeps the exhausted allowance as typed facts: its unit, the effective limit, the setting
+///       that raises a configured limit, and the allowance's scope.
+/// WHY: the runtime call stays in place, so this is advice rather than a source error. The
+///      compact compile-time evaluation family has no fact word left for the unit, and its
+///      `operation` fact names operations, so the advice sentence must be rendered here from
+///      facts rather than pre-rendered by the producer.
+pub(crate) fn release_folding_budget_stopped(
+    unit: ConstBudgetUnit,
+    limit: usize,
+    setting: Option<StringId>,
+    scope: ReleaseBudgetScope,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    DiagnosticDraft::with_facts(&RELEASE_FOLDING_BUDGET_STOPPED, span, |cursor| {
+        cursor.push::<UnitFact<ConstBudgetUnit>>(&unit)?;
+        cursor.push::<OptCountFact>(&Some(limit))?;
+        cursor.push::<OptStringFact>(&setting)?;
+        cursor.push::<UnitFact<ReleaseBudgetScope>>(&scope)?;
+        Ok(())
+    })
+}
+
 /// Compile-time evaluation draft without a numeric domain.
 ///
 /// Most failures are not numeric, so they leave the optional `numeric_type` fact empty.
@@ -923,6 +1005,47 @@ pub(crate) fn compile_time_evaluation_error(
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
     compile_time_evaluation_error_with_numeric_type(reason, operation, None, span)
+}
+
+/// Rejection of an operation inside a const function body that can only run at runtime.
+///
+/// WHAT: names the rejected operation and always attaches the owning const declaration as a
+///       secondary label, when the author's declaration site is known.
+/// WHY: the same user mistake must produce one diagnostic contract whether the runtime name is
+///      reached through a bare identifier, a namespace leaf, a receiver call or a mutation target.
+pub(crate) fn const_body_runtime_operation(
+    operation: Option<StringId>,
+    span: Option<SourceSpan>,
+    const_declaration_span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    compile_time_evaluation_error(
+        CompileTimeEvaluationErrorReason::ConstFunctionRuntimeOperation,
+        operation,
+        span,
+    )
+    .with_label(const_declaration_span, None)
+}
+
+/// Compile-time evaluation draft that carries the effective budget limit.
+///
+/// WHAT: records the exhausted numeric allowance as a structured fact alongside the reason.
+/// WHY: the renderer owns the unit spelling (`steps` or `MiB`), so producers keep the raw count
+///      instead of pre-rendering an ambiguous byte number. Fixed safety limits also provide their
+///      effective count; the family cannot also store the unit because all four fact words are
+///      already assigned.
+pub(crate) fn compile_time_evaluation_error_with_limit(
+    reason: CompileTimeEvaluationErrorReason,
+    operation: Option<StringId>,
+    limit: Option<usize>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    DiagnosticDraft::with_facts(&COMPILE_TIME_EVALUATION_ERROR, span, |cursor| {
+        cursor.push::<UnitFact<CompileTimeEvaluationErrorReason>>(&reason)?;
+        cursor.push::<OptStringFact>(&operation)?;
+        cursor.push::<OptUnitFact<NumericScalar>>(&None)?;
+        cursor.push::<OptCountFact>(&limit)?;
+        Ok(())
+    })
 }
 
 /// Compile-time evaluation draft that names the numeric domain an operation evaluated in.
@@ -941,6 +1064,7 @@ pub(crate) fn compile_time_evaluation_error_with_numeric_type(
         cursor.push::<UnitFact<CompileTimeEvaluationErrorReason>>(&reason)?;
         cursor.push::<OptStringFact>(&operation)?;
         cursor.push::<OptUnitFact<NumericScalar>>(&numeric_type)?;
+        cursor.push::<OptCountFact>(&None)?;
         Ok(())
     })
 }
@@ -958,4 +1082,5 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES:
     INVALID_FALLIBLE_HANDLING,
     INVALID_MATCH_GUARD,
     COMPILE_TIME_EVALUATION_ERROR,
+    RELEASE_FOLDING_BUDGET_STOPPED,
 ];

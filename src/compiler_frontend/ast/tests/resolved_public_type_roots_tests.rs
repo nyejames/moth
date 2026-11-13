@@ -22,6 +22,7 @@ use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAlias,
 };
 use crate::compiler_frontend::compiler_errors::{InfrastructureFailure, InfrastructureFailureKind};
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, StructTypeDefinition,
@@ -140,6 +141,7 @@ fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
                 None,
             )),
         },
+        evaluation: CallableEvaluation::Runtime,
     }
 }
 
@@ -547,6 +549,7 @@ fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_indepe
         ResolvedFunctionSignature {
             receiver: Some(public_receiver.clone()),
             signature: receiver_signature(int_type_id),
+            evaluation: CallableEvaluation::Runtime,
         },
     );
     signatures.insert(
@@ -554,6 +557,7 @@ fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_indepe
         ResolvedFunctionSignature {
             receiver: Some(private_receiver.clone()),
             signature: receiver_signature(int_type_id),
+            evaluation: CallableEvaluation::Runtime,
         },
     );
 
@@ -813,6 +817,7 @@ fn missing_receiver_catalog_entry_is_internal_error() {
         ResolvedFunctionSignature {
             receiver: Some(receiver),
             signature: receiver_signature(int_type_id),
+            evaluation: CallableEvaluation::Runtime,
         },
     );
 

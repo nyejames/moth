@@ -1,0 +1,5 @@
+pair #|value I32| -> I32, I32:
+return value, value + 1
+;
+result = 1
+~[: result=[result]]

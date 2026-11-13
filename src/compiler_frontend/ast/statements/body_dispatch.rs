@@ -738,6 +738,15 @@ pub(crate) fn parse_function_body_statements(
                     )));
                 }
 
+                // Top-level code owns no block, so a `;` here can only be a stray closer.
+                // Accepting it would end the start body and silently drop what follows.
+                ContextKind::Module => {
+                    return Err(statement_dispatch_error(unexpected_scope_close(
+                        UnexpectedScopeCloseContext::TopLevel,
+                        token_stream,
+                    )));
+                }
+
                 ContextKind::MatchArm => break,
 
                 _ => {

@@ -473,6 +473,9 @@ fn expect_template_diagnostic(error: TemplateError) -> CompactDiagnosticBagForTe
         | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
             compact_template_diagnostic(diagnostic)
         }
+        TemplateError::Budget(exhaustion) => {
+            compact_template_diagnostic(exhaustion.into_diagnostic())
+        }
         TemplateError::Infrastructure(error) => {
             panic!("expected a template source diagnostic, got infrastructure failure: {error:?}")
         }

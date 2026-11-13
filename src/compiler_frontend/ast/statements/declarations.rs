@@ -12,13 +12,13 @@ use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::ast::const_values::binding::{
     bound_constant_initializer, resolve_const_expression_content,
 };
-use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::{ExpressionParseError, NumericDeferral};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExpressionOperationView, ExpressionView,
 };
+use crate::compiler_frontend::ast::expressions::function_calls::const_argument_kind;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
@@ -128,17 +128,9 @@ fn initializer_is_compile_time_constant(
     expression_builder: &AstExpressionBuilder,
     const_values: &ConstValueStore,
 ) -> Result<bool, TemplateError> {
-    initializer
-        .const_value_kind_with_template_classifier(const_values, &mut |template| {
-            classify_template_from_effective_tir(
-                template,
-                &context.template_ir_store,
-                expression_builder,
-                const_values,
-                Some(context.external_package_registry.as_ref()),
-            )
-        })
+    const_argument_kind(initializer, context, expression_builder, const_values)
         .map(|kind| kind.is_compile_time_value())
+        .map_err(TemplateError::from)
 }
 
 /// Body-local declaration plus syntax-origin facts that are not stored on `Declaration`.

@@ -1,0 +1,33 @@
+Removed = |
+    length I32,
+    removed I32,
+|
+
+remove_case #|| -> Removed:
+    values ~= {1, 2}
+    writer ~= values
+    removed = ~writer.remove(0) catch:
+        then 0
+    ;
+    return Removed(
+        length = values.length(),
+        removed = removed,
+    )
+;
+
+runtime_remove || -> Removed:
+    values ~= {1, 2}
+    writer ~= values
+    removed = ~writer.remove(0) catch:
+        then 0
+    ;
+    return Removed(
+        length = values.length(),
+        removed = removed,
+    )
+;
+
+a = remove_case()
+b = runtime_remove()
+~[: const_length=[a.length] const_removed=[a.removed] runtime_length=[b.length] runtime_removed=[b.removed]]
+entry = "."

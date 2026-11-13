@@ -1,0 +1,14 @@
+double #|value I32| -> I32:
+    return value * 2
+;
+
+Point = |
+    x I32 = 0,
+|
+
+x |this Point| -> I32:
+    return this.x
+;
+
+result #= double(21)
+~[: [result]]

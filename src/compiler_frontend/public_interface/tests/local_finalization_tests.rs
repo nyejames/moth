@@ -22,6 +22,7 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowAnalysis;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::public_call_summary::{
@@ -87,6 +88,7 @@ fn function_draft_record(
         origin: OriginDeclarationId::Function(origin),
         synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+            evaluation: CallableEvaluation::Runtime,
             category: PublicFunctionCategory::ConcreteLocal,
             parameters,
             return_contract: PublicCallableReturnContract::Returns {
@@ -139,6 +141,7 @@ fn generic_function_draft_record(origin: OriginFunctionId) -> PublicDeclarationR
         origin: OriginDeclarationId::Function(origin),
         synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+            evaluation: CallableEvaluation::Runtime,
             category: PublicFunctionCategory::GenericTemplate(PublicGenericTemplateDescriptor {
                 generic_parameters: vec![],
             }),

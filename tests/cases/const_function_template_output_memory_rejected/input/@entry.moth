@@ -1,0 +1,10 @@
+grow #|| -> String:
+    text ~= "x"
+    loop 0 to 21 |i|:
+        ~text = [:[text][text]]
+    ;
+    return text
+;
+
+result = grow()
+~[: result=[result]]

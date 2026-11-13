@@ -44,6 +44,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraft
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, InvalidFallibleHandlingReason, TypeMismatchContext,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
@@ -190,13 +191,17 @@ impl HandledFallibleCall {
     pub(crate) fn into_plain_expression(
         self,
         expression_builder: &mut AstExpressionBuilder,
+        evaluation: CallableEvaluation,
     ) -> Result<OwnedExpr, ExpressionParseError> {
-        Ok(expression_builder.function_call_with_typed_arguments(
-            self.name,
-            self.args,
-            self.result_type_ids,
-            self.call_span,
-        )?)
+        Ok(
+            expression_builder.function_call_with_evaluation_and_typed_arguments(
+                self.name,
+                evaluation,
+                self.args,
+                self.result_type_ids,
+                self.call_span,
+            )?,
+        )
     }
 
     pub(crate) fn into_expression(

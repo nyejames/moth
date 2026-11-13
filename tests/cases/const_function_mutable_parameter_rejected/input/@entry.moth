@@ -1,0 +1,5 @@
+bad_mutable #|value ~I32| -> I32:
+    return value
+;
+start ||:
+;

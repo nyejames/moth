@@ -1,0 +1,14 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0030"]
+message_contains = ["at the top level"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0030"
+reason = "invalid_statement_position.unexpected_scope_close_at_top_level"
+path = "input/@entry.moth"
+line = 8
+count = 1

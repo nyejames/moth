@@ -18,7 +18,8 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::module_compilation::{
-    DEFAULT_MAX_ERRORS_PER_MODULE, DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS, FrontendOptions,
+    ConstExecutionLimits, DEFAULT_MAX_ERRORS_PER_MODULE, DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+    FrontendOptions,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -185,6 +186,8 @@ pub struct Config {
     /// `None` disables the threshold. Fixed-only project config supplies the value, and an omitted
     /// setting uses [`DEFAULT_MAX_ERRORS_PER_PROJECT`]. The threshold is not a maximum result count.
     pub max_errors_per_project: Option<NonZeroU32>,
+    /// Work and retained-memory allowances for const execution.
+    pub(crate) const_execution_limits: ConstExecutionLimits,
     pub version: Option<String>,
     pub author: Option<String>,
     pub license: Option<String>,
@@ -218,6 +221,7 @@ impl Config {
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             max_errors_per_module: Some(DEFAULT_MAX_ERRORS_PER_MODULE),
             max_errors_per_project: Some(DEFAULT_MAX_ERRORS_PER_PROJECT),
+            const_execution_limits: ConstExecutionLimits::default(),
             version: None,
             author: None,
             license: None,
@@ -233,12 +237,13 @@ impl Config {
     /// Project the settings the compiler frontend consumes.
     ///
     /// WHY: the frontend must not read this configuration container. The project tool owns the
-    ///      translation, so only the template loop ceiling and module error allowance cross the
-    ///      boundary.
+    ///      translation, so only the template loop ceiling, module error allowance and typed
+    ///      const-execution limits cross the boundary.
     pub(crate) fn frontend_options(&self) -> FrontendOptions {
         FrontendOptions {
             template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
             max_errors_per_module: self.max_errors_per_module,
+            const_execution_limits: self.const_execution_limits,
         }
     }
 
@@ -341,6 +346,7 @@ impl Default for Config {
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             max_errors_per_module: Some(DEFAULT_MAX_ERRORS_PER_MODULE),
             max_errors_per_project: Some(DEFAULT_MAX_ERRORS_PER_PROJECT),
+            const_execution_limits: ConstExecutionLimits::default(),
             project_name: String::from("html_project"),
             version: None,
             author: None,

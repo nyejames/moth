@@ -344,6 +344,33 @@ impl ScopeContext {
     //  Module lookups
     // --------------------------
 
+    /// Whether this module's expressions may contain required source const calls.
+    ///
+    /// WHY: the environment knows this before the executables map is published, so expression
+    ///      completion can skip the const-call rewrite in modules that declared none.
+    pub(crate) fn with_has_const_functions(mut self, has_const_functions: bool) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).has_const_functions = has_const_functions;
+        self
+    }
+
+    /// Attach the prepared const executables for required calls in this scope.
+    pub(crate) fn with_const_function_executables(
+        mut self,
+        executables: ConstFunctionExecutables,
+    ) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).const_function_executables = Some(executables);
+        self
+    }
+
+    /// Attach the const callable rows prepared before the whole-module signature pass.
+    pub(crate) fn with_early_const_function_signatures(
+        mut self,
+        signatures: EarlyConstFunctionSignatures,
+    ) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).early_const_function_signatures = Some(signatures);
+        self
+    }
+
     /// Install the completed immutable module lookup package before body emission.
     pub(crate) fn with_lookups(mut self, lookups: Rc<AstModuleLookups>) -> ScopeContext {
         let shared = Rc::make_mut(&mut self.shared);

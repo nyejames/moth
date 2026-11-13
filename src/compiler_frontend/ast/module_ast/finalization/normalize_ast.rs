@@ -37,8 +37,8 @@ use crate::compiler_frontend::ast::templates::runtime_handoff::{
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::tir::{
     ExpressionSiteId, RuntimeTemplateReason, TemplateIrStore, TemplatePreparation,
-    TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase, TemplateTirReference,
-    TirView, collect_effective_tir_expression_overlay_payloads, finalized_tir_view_for_template,
+    TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirReference, TirView,
+    collect_effective_tir_expression_overlay_payloads, finalized_tir_view_for_template,
     owned_runtime_slot_handoff_for_prepared_view, owned_runtime_template_handoff_for_prepared_view,
     replace_expression_overlay_entries,
 };
@@ -48,6 +48,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::template
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticDraft, InvalidTemplateSlotReason, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
@@ -140,6 +141,7 @@ impl AstFinalizer<'_, '_> {
                 ResolvedPublicTypeRootKind::Function {
                     signature,
                     generic_parameter_list_id,
+                    evaluation,
                 } => {
                     if let Some(root_generic_parameter_list_id) = generic_parameter_list_id.as_ref()
                     {
@@ -165,6 +167,17 @@ impl AstFinalizer<'_, '_> {
                                 root.path,
                                 root_generic_parameter_list_id.0,
                                 template.generic_parameter_list_id.0
+                            ))
+                            .into());
+                        }
+                    } else if *evaluation == CallableEvaluation::Const {
+                        // Const functions have no runtime declaration node. Their signature was
+                        // resolved and published before body preparation, so there is nothing to
+                        // synchronize from runtime emission.
+                        if normalized_function_signatures_by_path.contains_key(&root.path) {
+                            return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
+                                "public default synchronization: a const free-function root at {:?} has a runtime declaration node; const functions must not emit runtime bodies",
+                                root.path
                             ))
                             .into());
                         }
@@ -1076,6 +1089,9 @@ impl From<TemplateError> for TemplateNormalizationError {
             | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
                 TemplateNormalizationError::Diagnostic(diagnostic)
             }
+            TemplateError::Budget(exhaustion) => {
+                TemplateNormalizationError::Diagnostic(exhaustion.into_diagnostic())
+            }
             TemplateError::Infrastructure(error) => {
                 TemplateNormalizationError::Infrastructure(error)
             }
@@ -1421,14 +1437,12 @@ fn normalize_template_for_hir(
     // loop headers, and every reachable control-flow body from one root pass.
     let reference = template.tir_reference;
     // All TIR references are local to this module store, so overlay payloads are
-    // collected from the same store. Phase promotion to Finalized is gated separately
-    // below; parsed references may receive normalized overlays without becoming finalized views.
-    let should_mark_finalized = reference.phase.is_at_least(TemplateTirPhase::Composed);
+    // collected from the same store. Phase promotion to Finalized follows the shared
+    // composed-phase rule on the handle; parsed references may receive normalized overlays
+    // without becoming finalized views.
     let expression_payloads = collect_expression_overlay_payloads(&reference, context)?;
     if expression_payloads.is_empty() && reference.context.expression_overlay.is_none() {
-        if should_mark_finalized {
-            template.tir_reference.phase = TemplateTirPhase::Finalized;
-        }
+        template.mark_reference_finalized();
         return Ok(());
     }
 
@@ -1445,9 +1459,7 @@ fn normalize_template_for_hir(
     let mut store = context.template_ir_store.borrow_mut();
     template.tir_reference.context =
         replace_expression_overlay_entries(&mut store, reference.context, normalized_overrides)?;
-    if should_mark_finalized {
-        template.tir_reference.phase = TemplateTirPhase::Finalized;
-    }
+    template.mark_reference_finalized();
 
     Ok(())
 }

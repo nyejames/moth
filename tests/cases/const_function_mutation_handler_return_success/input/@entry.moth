@@ -1,0 +1,44 @@
+-- A catch handler `return` during a mutation argument leaves the const function. The mutation
+-- must not consume the handler's return value as an argument or write its target.
+
+Row = |
+    cells {I32},
+|
+
+render #|cells {I32}| -> String:
+    return [: [loop cells |cell|:[cell];] ]
+;
+
+set_message #|| -> String:
+    values ~= {1, 2, 3}
+    others = {4, 5, 6}
+    ~values.set(others.get(9), 1) catch:
+        return "set recovered"
+    ;
+    return "set normal"
+;
+
+set_flag #|| -> Bool:
+    values ~= {1, 2, 3}
+    others = {4, 5, 6}
+    ~values.set(others.get(9), 1) catch:
+        return true
+    ;
+    return false
+;
+
+set_row #|| -> Row:
+    values ~= {1, 2, 3}
+    others = {4, 5, 6}
+    ~values.set(others.get(9), 1) catch:
+        return Row(cells = {7})
+    ;
+    return Row(cells = {8})
+;
+
+message #String = set_message()
+flag #Bool = set_flag()
+row_value #Row = set_row()
+row_text #String = render(row_value.cells)
+
+~[: message=[message] flag=[flag] row=[row_text] ]

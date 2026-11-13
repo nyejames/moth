@@ -7,6 +7,7 @@
 
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 
 pub(crate) type TypeResolutionResult<T> = Result<T, DiagnosticDraft>;
@@ -16,6 +17,8 @@ pub(crate) type TypeResolutionResult<T> = Result<T, DiagnosticDraft>;
 pub(crate) struct ResolvedFunctionSignature {
     pub(crate) receiver: Option<ReceiverKey>,
     pub(crate) signature: FunctionSignature,
+    /// Whether the callable is required compile-time evaluation only.
+    pub(crate) evaluation: CallableEvaluation,
 }
 
 mod aliases;

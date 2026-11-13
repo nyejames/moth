@@ -108,27 +108,19 @@ where
         .map_err(TestRunnerError::triage_report)?;
 
     let timer = std::time::Instant::now();
-    let mut indexed_results = if let Some(thread_count) = configured_thread_count {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(thread_count)
-            .build()
-            .map_err(|error| {
-                TestRunnerError::thread_pool(format!(
-                    "Failed to create test runner thread pool: {error}"
-                ))
-            })?;
-
-        pool.install(|| {
-            cases
-                .into_par_iter()
-                .enumerate()
-                .map(|(index, case)| {
-                    let result = execute_case(&case);
-                    (index, case, result)
-                })
-                .collect::<Vec<_>>()
-        })
-    } else {
+    // Compilation is recursive and release builds run one extra bounded AST pass. Match the
+    // normal main-thread stack so a parallel worker parses the same project shape the CLI accepts.
+    // Rayon still owns the default worker count (including `RAYON_NUM_THREADS`) when the Moth
+    // thread-count setting is absent.
+    const RUNNER_STACK_BYTES: usize = 8 * 1024 * 1024;
+    let mut pool_builder = rayon::ThreadPoolBuilder::new().stack_size(RUNNER_STACK_BYTES);
+    if let Some(thread_count) = configured_thread_count {
+        pool_builder = pool_builder.num_threads(thread_count);
+    }
+    let pool = pool_builder.build().map_err(|error| {
+        TestRunnerError::thread_pool(format!("Failed to create test runner thread pool: {error}"))
+    })?;
+    let mut indexed_results = pool.install(|| {
         cases
             .into_par_iter()
             .enumerate()
@@ -137,7 +129,7 @@ where
                 (index, case, result)
             })
             .collect::<Vec<_>>()
-    };
+    });
 
     indexed_results.sort_by_key(|(index, _, _)| *index);
 

@@ -13,6 +13,7 @@ use crate::compiler_frontend::builtins::error_type::{
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{CapacityResource, CompilerStage};
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     ParsedNamedTypeReference, collect_capacity_references_in_parsed_ref,
@@ -22,7 +23,7 @@ use crate::compiler_frontend::headers::binding_environment::{
     HeaderBindingEnvironment, ResolvedQualifiedTarget,
 };
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
-use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
+use crate::compiler_frontend::headers::parse_file_headers::{HeaderKind, RetainedDependencyClause};
 use crate::compiler_frontend::headers::qualified_references::push_const_required_expression_ranges;
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::headers::types::{
@@ -37,7 +38,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenCursor, TokenRange};
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashSet;
 
 /// Collect local declaration-ordering hints from a constant's declared type annotation.
@@ -225,6 +226,20 @@ pub(super) fn collect_qualified_reference_ordering_hints(
         return Ok(());
     }
 
+    // Const function calls are compile-time value dependencies, so their qualified targets join
+    // the constant ordering edges.
+    let const_function_paths = headers
+        .iter()
+        .filter_map(|header| match &header.kind {
+            HeaderKind::Function { signature, .. }
+                if signature.evaluation == CallableEvaluation::Const =>
+            {
+                Some(header.declaration_path)
+            }
+            _ => None,
+        })
+        .collect::<FxHashSet<_>>();
+
     // Occurrence lists are file-owned and map order is not observable here: insertion targets a
     // per-header hint set and this pass produces no diagnostic that could select a witness.
     for occurrences in module_symbols.qualified_references_by_source.values() {
@@ -254,7 +269,8 @@ pub(super) fn collect_qualified_reference_ordering_hints(
             };
             let target_path = match &resolved.target {
                 ResolvedQualifiedTarget::Source { declaration_path }
-                    if module_symbols.constant_paths.contains(declaration_path) =>
+                    if module_symbols.constant_paths.contains(declaration_path)
+                        || const_function_paths.contains(declaration_path) =>
                 {
                     Some(*declaration_path)
                 }

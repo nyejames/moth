@@ -28,6 +28,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -36,6 +37,7 @@ use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
+use crate::compiler_frontend::module_compilation::ConstExecutionLimits;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
@@ -103,6 +105,10 @@ impl ModuleMaterialisationCapture {
 }
 
 impl ModuleMaterialisationPreparation {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one prepared materialisation request keeps requester context, live interner tables, limits and timing separate"
+    )]
     pub(crate) fn materialise_ast(
         &self,
         identity: &GeneratedFunctionIdentity,
@@ -110,6 +116,7 @@ impl ModuleMaterialisationPreparation {
         requester_call_span: Option<SourceSpan>,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
+        const_execution_limits: ConstExecutionLimits,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<MaterialisedGenericAst, PreparedFailure> {
         let (declaring_context, template_index) = self
@@ -132,6 +139,7 @@ impl ModuleMaterialisationPreparation {
                 style_directives: &self.style_directives,
                 build_profile: self.build_profile,
                 template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
+                const_execution_limits,
                 #[cfg(feature = "timers")]
                 timing_context,
             },
@@ -923,6 +931,7 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
         crate::compiler_frontend::ast::type_resolution::ResolvedFunctionSignature {
             receiver,
             signature: signature.clone(),
+            evaluation: CallableEvaluation::Runtime,
         },
     );
     lookups.generic_function_templates_by_path.insert(

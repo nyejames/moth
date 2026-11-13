@@ -1,0 +1,11 @@
+Point = |
+    x I32,
+|
+
+read_x #|point Point| -> I32:
+    return point.x
+;
+
+x #I32 = read_x(Point(x = 7))
+
+io.line([: x=[x] ])

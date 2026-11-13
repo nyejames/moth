@@ -1,0 +1,9 @@
+@alpha value
+@beta read
+
+-- The argument names the imported top-level constant, while the imported function's parameter
+-- also carries the name `value`. A parameter is its own binding, not a top-level reference.
+
+result #I32 = read(value)
+
+~[: result=[result] ]

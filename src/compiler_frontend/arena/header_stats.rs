@@ -70,6 +70,7 @@ impl HeaderStats {
             HeaderKind::Function {
                 generic_parameters,
                 signature,
+                ..
             } => {
                 self.functions += 1;
                 self.generic_parameters += generic_parameters.parameters.len();

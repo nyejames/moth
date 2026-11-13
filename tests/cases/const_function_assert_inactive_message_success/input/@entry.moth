@@ -1,0 +1,13 @@
+bad_message #|| -> String:
+    assert(false, "message must stay inactive")
+    return "message"
+;
+
+verified #|ok Bool| -> I32:
+    assert(ok, bad_message())
+    return 1
+;
+
+result #I32 = verified(true)
+
+io.line([: result=[result] ])

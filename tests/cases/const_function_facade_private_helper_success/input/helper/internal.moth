@@ -1,0 +1,9 @@
+private_increment #I32 = 1
+
+private_double #|value I32| -> I32:
+    return value * 2
+;
+
+public_double #|value I32| -> I32:
+    return private_double(value) + private_increment
+;

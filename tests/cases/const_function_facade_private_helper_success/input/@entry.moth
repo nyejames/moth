@@ -1,0 +1,11 @@
+@helper public_double
+
+@helper public_double as public_double_alias
+
+@direct direct_public_double
+
+result #I32 = public_double(20)
+alias_result #I32 = public_double_alias(2)
+direct_result #I32 = direct_public_double(21)
+
+[: result=[result] alias_result=[alias_result] direct_result=[direct_result] ]

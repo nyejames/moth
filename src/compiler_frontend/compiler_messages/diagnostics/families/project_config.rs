@@ -196,7 +196,7 @@ diagnostic_family! {
         severity: DiagnosticSeverity::Error,
         title: "Circular dependency",
         facts: [path: PathFact,],
-        labels: [],
+        labels: [LabelMessageCode::DEPENDENCY_CYCLE_PARTICIPANT],
         extra: None,
         ctor: manual,
         view: CircularDependencyView,

@@ -1,0 +1,38 @@
+-- A projected alias composed through an earlier projected alias keeps the canonical collection
+-- identity, while an explicit copy of the same composed projection stays independent.
+Inner = |
+    values {I32},
+|
+
+Outer = |
+    inner Inner,
+|
+
+const_composed #|| -> I32:
+    root ~= Outer(Inner(values = {1}))
+    inner_alias ~= root.inner
+    nested ~= inner_alias.values
+    ~nested.push(5)
+    return nested.length()
+;
+
+runtime_composed || -> I32:
+    root ~= Outer(Inner(values = {1}))
+    inner_alias ~= root.inner
+    nested ~= inner_alias.values
+    ~nested.push(5)
+    return nested.length()
+;
+
+const_copied #|| -> I32:
+    root ~= Outer(Inner(values = {1}))
+    inner_alias ~= root.inner
+    nested ~= copy inner_alias.values
+    ~nested.push(5)
+    return root.inner.values.length() * 10 + nested.length()
+;
+
+a = const_composed()
+b = runtime_composed()
+c = const_copied()
+~[: a=[a] b=[b] c=[c]]

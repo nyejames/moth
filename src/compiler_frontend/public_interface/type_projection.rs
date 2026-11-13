@@ -62,6 +62,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::generics
 use crate::compiler_frontend::compiler_messages::{
     InvalidGenericParameterReason, InvalidReceiverDeclarationReason,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -862,6 +863,7 @@ pub(super) fn project_free_function_semantics(
     function_origin: OriginFunctionId,
     generic_parameter_list_id: Option<GenericParameterListId>,
     signature: &FunctionSignature,
+    evaluation: CallableEvaluation,
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
     trait_source_facts: &FxHashMap<TraitId, ResolvedTraitSourceFact>,
@@ -924,6 +926,7 @@ pub(super) fn project_free_function_semantics(
 
     Ok(PublicFunctionSemantics {
         category,
+        evaluation,
         parameters,
         return_contract,
     })

@@ -8,6 +8,7 @@ use super::nominal_blueprints::{
     MaterialisationTypeBlueprint, NominalMaterialisationBlueprint, intern_generated_canonical_type,
 };
 use super::preparation_freeze::{ModuleMaterialisationCapture, ModuleMaterialisationPreparation};
+use super::semantic_closure::{StableLocalAlias, StableLocalConstant};
 use super::visibility::StableFileVisibility;
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstStringValue, ConstValueField, ConstValueId, ConstValueMetadata,
@@ -62,6 +63,12 @@ pub(crate) struct GenericTemplateArtefact {
     pub(super) receiver: Option<StableReceiverKey>,
     pub(super) function_path: PathId,
     pub(super) source_file: PathId,
+    /// Authored provider declaration span, retained for consuming instantiation diagnostics.
+    ///
+    /// WHY: the materialised requester environment installs a `GenericFunctionTemplate` per
+    ///      selected row, including the root row, carrying this span. The emitter then labels
+    ///      `GenericInstantiationDeclarationSite` from it, so a failing instance points at the
+    ///      provider declaration.
     pub(super) declaration_span: Option<SourceSpan>,
     pub(super) body: StableBodySyntax,
     pub(super) signature: StableFunctionSignature,
@@ -73,6 +80,59 @@ pub(crate) struct GenericTemplateArtefact {
     pub(super) nominals: Box<[StableNominalBinding]>,
     pub(super) nominal_blueprints:
         FxHashMap<CanonicalTypeIdentity, NominalMaterialisationBlueprint>,
+}
+
+/// One retained const function body published for cross-module execution.
+///
+/// WHAT: a provider-local const function's retained source syntax plus the stable signature,
+///       visibility and declaration closure its body needs when a consumer materialises it.
+/// WHY: const calls fold before HIR exists, so a consumer must parse the provider body through its
+///      own expression store. Carrying only source syntax and stable semantic facts keeps provider
+///      `ExprId`, `ConstValueId` and local HIR out of publication.
+#[derive(Clone)]
+pub(crate) struct ConstFunctionArtefact {
+    /// Public origin for an exported entry; `None` for a private transitive helper.
+    pub(crate) origin: Option<OriginFunctionId>,
+    /// Provider-local declaration path, rebased to the consumer domain on materialisation.
+    pub(crate) function_path: PathId,
+    pub(super) body: StableBodySyntax,
+    pub(super) signature: StableFunctionSignature,
+    pub(super) visibility: StableFileVisibility,
+    pub(super) declarations: Box<[StableDeclarationBinding]>,
+    pub(super) constants: Box<[StableLocalConstant]>,
+    pub(super) aliases: Box<[StableLocalAlias]>,
+    /// Provider-local const function bodies this body can call.
+    pub(super) closure: Box<[PathId]>,
+    pub(super) callables: Box<[StableCallableBinding]>,
+    pub(super) nominals: Box<[StableNominalBinding]>,
+    pub(super) nominal_blueprints:
+        FxHashMap<CanonicalTypeIdentity, NominalMaterialisationBlueprint>,
+}
+
+impl ConstFunctionArtefact {
+    pub(super) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        self.function_path = remap.get(self.function_path);
+        self.body.remap_path_ids(remap);
+        self.visibility.remap_path_ids(remap);
+        for declaration in &mut self.declarations {
+            declaration.remap_path_ids(remap);
+        }
+        for constant in &mut self.constants {
+            constant.local_path = remap.get(constant.local_path);
+        }
+        for alias in &mut self.aliases {
+            alias.local_path = remap.get(alias.local_path);
+        }
+        for path in &mut self.closure {
+            *path = remap.get(*path);
+        }
+        for callable in &mut self.callables {
+            callable.remap_path_ids(remap);
+        }
+        for nominal in &mut self.nominals {
+            nominal.remap_path_ids(remap);
+        }
+    }
 }
 
 /// Canonical callable input for generic inference, including imported templates without bodies.
@@ -330,6 +390,23 @@ impl MaterialisationNominalSource for ModuleMaterialisationCapture {
 
 impl MaterialisationNominalSource for GenericTemplateArtefact {
     const SOURCE_LABEL: &'static str = "artefact";
+
+    fn nominal_blueprint(
+        &self,
+        identity: &CanonicalTypeIdentity,
+    ) -> Option<&NominalMaterialisationBlueprint> {
+        self.nominal_blueprints.get(identity)
+    }
+
+    fn nominal_blueprints(
+        &self,
+    ) -> impl Iterator<Item = (&CanonicalTypeIdentity, &NominalMaterialisationBlueprint)> + '_ {
+        self.nominal_blueprints.iter()
+    }
+}
+
+impl MaterialisationNominalSource for ConstFunctionArtefact {
+    const SOURCE_LABEL: &'static str = "const artefact";
 
     fn nominal_blueprint(
         &self,

@@ -925,6 +925,21 @@ A resolved parameter carries its contract (value, wire, or route with an optiona
 
 Templates remain ordinary strings with no hidden wire, route, subscription or rerender recipe. Structural resource pieces follow their independent contract. Persistent observation, event delivery, UI scheduling and route application require separately defined consumer/lifetime contracts. This foundation supplies none implicitly.
 
+#### Const-function execution and speculative source folding
+
+A source const function is prepared during Stage 4 from its canonical typed body and is executed by
+one bounded frame machine over typed expressions and `ConstValueStore` values. Required calls fold
+before HIR exists. The executor owns no parser, type system, value domain or template engine; it
+delegates numeric, cast, Text, collection and template operations to their existing owners.
+
+Release ordinary-function folding is an AST-owned candidate rewrite at the finalization barrier,
+before expression freezing and HIR lowering. Stage 4 emission prepares eligible ordinary bodies once
+while their canonical scope facts are live. One whole-body classifier decides declaration
+eligibility and speculative candidacy with different refusal policy. A successful candidate replaces
+the call expression transactionally; a refused, failing or budget-limited candidate leaves the
+authored call and every runtime check intact. Debug does not run speculation. HIR receives only the
+final folded AST and never adapts itself back into typed expressions.
+
 ### Stage 5: HIR and validation
 
 High-level intermediate representation (HIR) is the first backend-facing semantic IR. It lowers completed typed AST and concrete generated functions into explicit control flow, places, locals, calls and effects. Each module or generated body retains its paired type environment. Cross-module calls use stable targets without copying callee bodies into callers.

@@ -1,0 +1,9 @@
+Bad = |
+    x I32,
+|
+
+bad_receiver #|this Bad| -> I32:
+    return 0
+;
+start ||:
+;

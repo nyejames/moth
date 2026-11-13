@@ -1,0 +1,7 @@
+identity type A |value A| -> A:
+    return value
+;
+
+bad #|value I32| -> I32:
+    return identity(value)
+;

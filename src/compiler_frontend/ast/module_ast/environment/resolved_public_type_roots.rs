@@ -21,6 +21,7 @@ use crate::compiler_frontend::ast::type_resolution::{
 use crate::compiler_frontend::canonical_type_identity::CanonicalTraitIdentity;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -52,6 +53,8 @@ pub(crate) enum ResolvedPublicTypeRootKind {
     Function {
         signature: FunctionSignature,
         generic_parameter_list_id: Option<GenericParameterListId>,
+        /// Whether every call is required compile-time evaluation.
+        evaluation: CallableEvaluation,
     },
 
     /// Public nominal struct with its canonical `TypeId` and resolved field declarations.
@@ -268,6 +271,7 @@ pub(crate) fn build_resolved_public_type_roots(
                     kind: ResolvedPublicTypeRootKind::Function {
                         signature: resolved.signature.clone(),
                         generic_parameter_list_id,
+                        evaluation: resolved.evaluation,
                     },
                 });
             }
@@ -397,6 +401,7 @@ pub(crate) fn build_resolved_public_type_roots(
                     kind: ResolvedPublicTypeRootKind::Function {
                         signature: resolved.signature.clone(),
                         generic_parameter_list_id,
+                        evaluation: resolved.evaluation,
                     },
                 });
             }

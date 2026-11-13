@@ -2,8 +2,10 @@
 //!
 //! WHAT: iterates sorted headers with full context (resolved signatures, receiver catalog,
 //! per-file visibility) and lowers each header into typed AST nodes.
-//! WHY: emission is the only AST phase that parses executable bodies (function bodies, template
-//! bodies, entry body). Earlier phases consume header shells without body parsing.
+//! WHY: emission is the only AST phase that parses ordinary executable bodies (function bodies,
+//! template bodies, entry body). Earlier phases consume header shells without body parsing,
+//! except const function bodies, which environment construction prepares early so const calls
+//! can execute while later declarations resolve.
 //! Top-level declaration shell reparsing does NOT happen here — shells were fully parsed
 //! by the header stage and resolved by environment construction.
 //!
@@ -12,9 +14,14 @@
 
 use crate::compiler_frontend::ast::AstDocFragment;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::const_execution::{
+    ConstBodyPreparationError, ConstBodyReferenceScope, const_body_rejection_diagnostic,
+    executable_for_const_declaration,
+};
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionBodyValidationInput, GenericFunctionInstance, GenericFunctionInstanceKey,
@@ -65,11 +72,13 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
 use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
-use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
+use crate::compiler_frontend::datatypes::{
+    CallableEvaluation, CallableReturnShape, FunctionReturnContract,
+};
 use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::{
     SourceDirectiveKind, SourceOperandFoldResources, fold_source_directive_operand,
 };
@@ -82,11 +91,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 #[cfg(feature = "detailed_timers")]
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::timed_stage_attributed_opt;
 
-fn enclosing_callable_contract(
+pub(in crate::compiler_frontend::ast) fn enclosing_callable_contract(
     signature: &FunctionSignature,
     owner: EnclosingCallableOwner,
 ) -> Rc<EnclosingCallableContract> {
@@ -132,6 +142,9 @@ pub(in crate::compiler_frontend::ast) struct AstEmission {
     /// Fully validated generic template bodies retained only through static specialisation and
     /// terminality. They never enter executable HIR.
     pub(in crate::compiler_frontend::ast) validated_generic_template_bodies: Vec<AstNode>,
+    /// Fully parsed required-const bodies retained only through static specialisation and
+    /// terminality. They never enter executable HIR or runtime call lowering.
+    pub(in crate::compiler_frontend::ast) const_function_bodies: Vec<AstNode>,
     /// Declaration-attached documentation records folded during emission.
     pub(in crate::compiler_frontend::ast) doc_fragments: Vec<AstDocFragment>,
 }
@@ -334,6 +347,9 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
     generic_function_instances_by_key:
         FxHashMap<GenericFunctionInstanceKey, GenericFunctionInstance>,
     validated_generic_template_bodies: Vec<AstNode>,
+    const_function_bodies: Vec<AstNode>,
+    /// Const declarations already prepared in Stage 3 dependency order.
+    prepared_const_function_paths: FxHashSet<PathId>,
     generic_call_site_identity_handle: Option<FrozenIdentityHandle>,
     doc_fragments: Rc<RefCell<Vec<AstDocFragment>>>,
     publish_source_docs: bool,
@@ -349,6 +365,15 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let lookups = std::rc::Rc::get_mut(&mut environment.lookups)
             .expect("AST environment lookups are uniquely owned before emission");
         let warnings = DiagnosticBag::from_diagnostics(std::mem::take(&mut lookups.warnings));
+        let prepared_const_function_bodies =
+            std::mem::take(&mut lookups.prepared_const_function_bodies);
+        let prepared_const_function_paths = prepared_const_function_bodies
+            .iter()
+            .filter_map(|node| match &node.kind {
+                NodeKind::Function(path, _, _) => Some(*path),
+                _ => None,
+            })
+            .collect();
         Self {
             context,
             path_fork,
@@ -362,6 +387,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             known_infallible_functions: Rc::new(RefCell::new(FxHashSet::default())),
             generic_function_instances_by_key: FxHashMap::default(),
             validated_generic_template_bodies: Vec::new(),
+            const_function_bodies: prepared_const_function_bodies,
+            prepared_const_function_paths,
             generic_call_site_identity_handle: None,
             doc_fragments: Rc::new(RefCell::new(Vec::new())),
             publish_source_docs: true,
@@ -408,6 +435,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             generic_instance_count: self.generic_function_instances_by_key.len(),
             deferred_generic_requests,
             validated_generic_template_bodies: self.validated_generic_template_bodies,
+            const_function_bodies: self.const_function_bodies,
             doc_fragments: std::mem::take(&mut self.doc_fragments.borrow_mut()),
         })
     }
@@ -448,6 +476,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         ))
         .with_known_infallible_functions(Rc::clone(&self.known_infallible_functions))
         .with_receiver_methods(Rc::clone(&self.environment.lookups.receiver_methods))
+        .with_const_function_executables(Rc::clone(
+            &self.environment.lookups.const_function_executables,
+        ))
+        .with_has_const_functions(self.environment.lookups.has_const_functions)
         .with_lookups(Rc::clone(&self.environment.lookups))
         .with_source_file_scope(input.source_file_scope)
         .with_declaring_file_id(input.declaring_file_id);
@@ -871,6 +903,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             generic_instance_count: self.generic_function_instances_by_key.len(),
             deferred_generic_requests,
             validated_generic_template_bodies: self.validated_generic_template_bodies,
+            const_function_bodies: self.const_function_bodies,
             doc_fragments: std::mem::take(&mut self.doc_fragments.borrow_mut()),
         })
     }
@@ -1368,6 +1401,15 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             )));
         };
 
+        let is_const = resolved_signature.evaluation == CallableEvaluation::Const;
+        if is_const
+            && self
+                .prepared_const_function_paths
+                .contains(&header.declaration_path)
+        {
+            return Ok(());
+        }
+
         // --------------------------
         //  Build body parsing context
         // --------------------------
@@ -1399,6 +1441,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 string_table,
             )
             .map_err(FunctionBodyFailure::Diagnosed)?;
+        if is_const {
+            context = context.with_const_body(header.name_span);
+        }
 
         // --------------------------
         //  Parse body and emit node
@@ -1421,6 +1466,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut self.compatibility_cache,
         );
         let mut body_warnings = DiagnosticBag::new();
+        // Validation needs the declaration scope after the body parse consumes it. The clone shares
+        // the module tables and allocates one sibling frame, so body locals never leak into the
+        // reference check. Ordinary bodies do not pay for it.
+        let reference_scope = is_const.then(|| context.clone());
         let body_result = function_body_to_ast(
             &mut body_cursor,
             context,
@@ -1437,15 +1486,69 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .and_then(|parsed| parsed.expect_complete_nodes("a source function body"))
             .map_err(Self::split_expression_failure)?;
 
+        if let Some(reference_scope) = reference_scope.as_ref() {
+            Self::validate_const_declaration_body(
+                &resolved_signature.signature,
+                &body,
+                &self.context.expression_builder,
+                ConstBodyReferenceScope {
+                    scope: reference_scope,
+                    path_fork: &*self.path_fork,
+                    constants: &self.context.const_values,
+                },
+                header.name_span,
+                string_table,
+            )?;
+        }
+
         // AST symbol IDs are stored as complete PathId values and are unique
         // module-wide, not only within a local scope.
-        self.ast.push(AstNode {
+        //
+        // A const function has no runtime body. Its parsed executable is retained by the
+        // compiler-only const preparation owner, never as a runtime function node.
+        let node = AstNode {
             kind: NodeKind::Function(header.declaration_path, resolved_signature.signature, body),
             span: header.name_span,
             scope: function_scope,
-        });
+        };
+        if is_const {
+            // A body whose early preparation needed contracts that resolve after the constant
+            // walk is parsed here with the complete environment and still never enters runtime
+            // output.
+            self.const_function_bodies.push(node);
+            increment_ast_counter(AstCounter::ConstFunctionBodiesPrepared);
+        } else {
+            self.ast.push(node);
+        }
 
         Ok(())
+    }
+
+    /// Prove that one parsed const declaration body compiles into a const executable.
+    ///
+    /// WHAT: prepares the body's executable only to validate it, mapping an unsupported operation to
+    ///       the const-body diagnostic and an infrastructure fault to a fatal failure.
+    /// WHY: the body is retained by the const preparation owner and never emitted as a runtime node,
+    ///      so emission's only remaining job is to reject a body the executor cannot compile.
+    fn validate_const_declaration_body(
+        signature: &FunctionSignature,
+        body: &[AstNode],
+        expression_builder: &AstExpressionBuilder,
+        references: ConstBodyReferenceScope<'_>,
+        declaration_span: Option<SourceSpan>,
+        string_table: &mut StringTable,
+    ) -> Result<(), FunctionBodyFailure> {
+        match executable_for_const_declaration(signature, body, expression_builder, references) {
+            Ok(_) => Ok(()),
+            Err(ConstBodyPreparationError::Unsupported(rejection)) => {
+                Err(FunctionBodyFailure::Diagnosed(
+                    const_body_rejection_diagnostic(&rejection, declaration_span, string_table),
+                ))
+            }
+            Err(ConstBodyPreparationError::Infrastructure(error)) => Err(
+                FunctionBodyFailure::Fatal(PreparedFailure::Infrastructure(error)),
+            ),
+        }
     }
 
     // --------------------------
@@ -1843,6 +1946,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             TemplateError::Diagnostic(diagnostic)
             | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
                 self.diagnostic_messages(diagnostic, string_table)
+            }
+            TemplateError::Budget(exhaustion) => {
+                self.diagnostic_messages(exhaustion.into_diagnostic(), string_table)
             }
             TemplateError::Infrastructure(error) => self.error_messages(error, string_table),
         }

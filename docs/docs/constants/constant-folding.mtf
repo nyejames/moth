@@ -102,3 +102,30 @@ compilation.
 Stage 4 performs this selection after final constant values and full branch validation,
 then derives terminality and executable facts from the selected AST.
 
+### Release optimisation of ordinary functions
+
+In a release build, the compiler may replace a call to an ordinary function
+with its folded result when the function's entire transitive body is
+const-safe and every argument is a compile-time constant. Parameters must be
+immutable ordinary values, the function must produce one infallible success
+slot, and calls with handling or error channels are ineligible. Assignments
+and collection mutations must target body-local bindings.
+
+Release optimisation never changes observable work it cannot prove.
+Parameter-dependent calls, host effects, mutable-reference calls, recursive
+candidate graphs and unrepresentable result shapes stay in the runtime
+program. A refused candidate is left unchanged.
+
+Const execution is bounded by typed project settings:
+
+- `const_work_limit` limits evaluation steps for one call. The aggregate module
+  allowance is eight times this value.
+- `const_memory_limit_mb` limits retained folded value and text allocation in
+  MiB for one call, with the same aggregate multiplier.
+
+A configured value above the compiler maximum for either setting is rejected
+as a project configuration error. A release call that exhausts a budget
+remains at runtime and produces a deduplicated `Note` naming the effective
+limit and, for a configurable limit, the setting to raise. Required const
+evaluation reports an error instead.
+

@@ -5,7 +5,7 @@
 //! WHY: late resolution lets signatures use named struct types and receiver syntax
 //! without adding a second nominal-type system just for headers.
 
-use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
+use super::builder::{AstModuleEnvironmentBuilder, CachedReceiverCatalog, DeclarationPassLanes};
 use crate::compiler_frontend::ast::ast_nodes::{DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -20,20 +20,23 @@ use crate::compiler_frontend::ast::receiver_methods::{
     BuildReceiverMethodCatalogInput, ReceiverMethodCatalogError, ReceiverMethodEntry,
     build_receiver_method_catalog,
 };
-use crate::compiler_frontend::ast::statements::functions::function_signature_from_syntax_with_unresolved_types;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionSignature, SignatureTypeFallbackPolicy,
+    FunctionSignature, ParameterContract, SignatureTypeFallbackPolicy,
+    function_signature_from_syntax_with_unresolved_types,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
-    intern_resolved_function_signature, resolve_function_signature,
+    ResolvedFunctionSignature, intern_resolved_function_signature, resolve_function_signature,
     validate_generic_parameters_used,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
-use crate::compiler_frontend::compiler_messages::{
-    InvalidReceiverDeclarationReason, PublicGenericOwnerKind,
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    generics_traits_api, names_declarations,
 };
+use crate::compiler_frontend::compiler_messages::{
+    InvalidDeclarationReason, InvalidReceiverDeclarationReason, PublicGenericOwnerKind,
+};
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -43,15 +46,16 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
 use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
+use crate::compiler_frontend::declaration_syntax::signature_members::FunctionSignatureSyntax;
+use crate::compiler_frontend::headers::module_symbols::DeclarationId;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
-use crate::compiler_frontend::symbols::path_interner::PathId;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::rc::Rc;
 
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
@@ -68,264 +72,331 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ) -> Result<(), ExpressionParseError> {
         for &declaration_id in &declaration_lanes.functions {
             let header = declaration_lanes.header(declaration_id, sorted_headers)?;
-            let HeaderKind::Function {
-                generic_parameters,
-                signature,
-            } = &header.kind
-            else {
-                continue;
-            };
-
-            let visibility = self.header_visibility(header)?;
-
-            let resolved_bounds_by_local = self.resolve_generic_parameter_bounds(
-                generic_parameters,
-                &visibility,
+            self.resolve_one_function_signature(
+                declaration_id,
+                header,
                 trait_environment,
                 string_table,
             )?;
-            // The module root's surface decides which functions are public, so a function
-            // re-exported from another file is checked too. Receiver methods are never exported;
-            // the receiver gate below checks their bounds once the receiver type is known.
-            if !generic_parameters.is_empty() {
-                for public_root_file in self.public_export_roots_for_header(header) {
+        }
+
+        Ok(())
+    }
+
+    /// Resolve one function header's signature and publish its declaration shell.
+    ///
+    /// WHY: an environment pass that must prepare a const function before its dependent
+    ///      constants needs the same canonical signature path as the later whole-module pass.
+    ///      Resolved rows are skipped, so the full pass stays idempotent.
+    pub(in crate::compiler_frontend::ast) fn resolve_one_function_signature(
+        &mut self,
+        declaration_id: DeclarationId,
+        header: &Header,
+        trait_environment: &TraitEnvironment,
+        string_table: &mut StringTable,
+    ) -> Result<(), ExpressionParseError> {
+        if self
+            .resolved_function_signatures_by_path
+            .contains_key(&header.declaration_path)
+        {
+            return Ok(());
+        }
+        let HeaderKind::Function {
+            generic_parameters,
+            signature,
+        } = &header.kind
+        else {
+            return Ok(());
+        };
+
+        let visibility = self.header_visibility(header)?;
+
+        let resolved_bounds_by_local = self.resolve_generic_parameter_bounds(
+            generic_parameters,
+            &visibility,
+            trait_environment,
+            string_table,
+        )?;
+        // The module root's surface decides which functions are public, so a function
+        // re-exported from another file is checked too. Receiver methods are never exported;
+        // the receiver gate below checks their bounds once the receiver type is known.
+        if !generic_parameters.is_empty() {
+            for public_root_file in self.public_export_roots_for_header(header) {
+                self.validate_public_generic_bounds(
+                    header,
+                    &public_root_file,
+                    PublicGenericOwnerKind::Function,
+                    generic_parameters,
+                    &resolved_bounds_by_local,
+                    trait_environment,
+                )?;
+            }
+        }
+
+        let registered_generic_parameters = if generic_parameters.is_empty() {
+            None
+        } else {
+            Some(
+                self.type_environment.register_generic_parameter_list(
+                    generic_parameters
+                        .parameters
+                        .iter()
+                        .map(|parameter| (parameter.id, parameter.name)),
+                    &resolved_bounds_by_local,
+                ),
+            )
+        };
+
+        let generic_parameter_scope = self.generic_parameter_scope(
+            generic_parameters,
+            registered_generic_parameters
+                .as_ref()
+                .map(|registered| &registered.canonical_by_local),
+            Some(header.tokens.source()),
+            &visibility,
+            string_table,
+        )?;
+
+        // ---------------------------------
+        //  Parse unresolved signature
+        // ---------------------------------
+
+        let signature_context = self
+            .environment_header_scope(header, string_table)
+            .with_file_visibility(Arc::clone(&visibility))
+            .with_early_const_function_signatures(Rc::clone(&self.early_const_function_signatures))
+            .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants));
+        let unresolved_signature = {
+            let owner_tokens = self.token_owner(header.tokens.source()).ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "function header has no prepared source token owner",
+                )
+            })?;
+            // Live parser state stays on the canonical source owner. The transient
+            // cursor spans the full canonical source so nested default ranges stay
+            // inside its bounds for this signature parse only. `from_source_tokens`
+            // retains the canonical owner for later bounded expression handoffs.
+            let full = owner_tokens.full_range().map_err(|error| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!("function header source range could not be constructed: {error:?}"),
+                )
+            })?;
+            let source_owner =
+                AstCursor::from_source_tokens(&owner_tokens, full).map_err(|error| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        format!(
+                            "function header source range is outside its source owner: {error:?}"
+                        ),
+                    )
+                })?;
+            let mut compatibility_cache = TypeCompatibilityCache::new();
+            let mut type_interner =
+                AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
+            let signature = function_signature_from_syntax_with_unresolved_types(
+                signature,
+                &source_owner,
+                &signature_context,
+                &mut type_interner,
+                &mut self.context.expression_builder,
+                &mut self.context.const_values,
+                string_table,
+                SignatureTypeFallbackPolicy::StrictCapacity,
+                self.path_fork,
+            )?;
+            for warning in signature_context.take_emitted_warnings() {
+                self.warnings.push(warning);
+            }
+            signature
+        };
+        // -------------------------------
+        //  Resolve and validate signature
+        // -------------------------------
+
+        let (mut type_resolution_context, path_fork) = self.type_resolution_context_with_path_fork(
+            &visibility,
+            generic_parameter_scope.as_ref(),
+            Some(trait_environment),
+        );
+        let resolved_signature = resolve_function_signature(
+            &header.declaration_path,
+            &unresolved_signature,
+            registered_generic_parameters
+                .as_ref()
+                .map(|parameters| parameters.list_id),
+            &mut type_resolution_context,
+            path_fork,
+            string_table,
+            Some(&signature_context),
+        )?;
+        // Release the scope's declaration-table `Rc` before the builder mutates it below.
+        drop(signature_context);
+
+        // A const function is a compile-time callable, not a runtime function with a flag.
+        // Reject declaration forms whose execution the const executor cannot represent
+        // before any body or call can depend on them.
+        if resolved_signature.evaluation == CallableEvaluation::Const {
+            validate_const_function_declaration(
+                header,
+                generic_parameters,
+                signature,
+                &resolved_signature,
+                self.path_fork,
+            )?;
+        }
+        // Receiver methods are never exported, so the export gate above never reaches them.
+        // Their bounds still project onto a public nominal, so a public receiver checks them
+        // here, before any projection can publish them.
+        if let Some(ReceiverKey::Struct(receiver_path) | ReceiverKey::Choice(receiver_path)) =
+            &resolved_signature.receiver
+        {
+            let header_source = self.header_source_path(header);
+            let receiver_roots = self.public_export_roots_for_path(receiver_path, header_source);
+            if receiver_roots.is_empty() {
+                // An imported receiver can be public through its provider interface without a
+                // local exporting root; preserve the provider-root check for that path.
+                if self.source_path_is_public_from_root_file(receiver_path, &header_source) {
+                    self.validate_public_generic_bounds(
+                        header,
+                        &header_source,
+                        PublicGenericOwnerKind::ReceiverMethod,
+                        generic_parameters,
+                        &resolved_bounds_by_local,
+                        trait_environment,
+                    )?;
+                }
+            } else {
+                for public_root_file in receiver_roots {
                     self.validate_public_generic_bounds(
                         header,
                         &public_root_file,
-                        PublicGenericOwnerKind::Function,
+                        PublicGenericOwnerKind::ReceiverMethod,
                         generic_parameters,
                         &resolved_bounds_by_local,
                         trait_environment,
                     )?;
                 }
             }
-
-            let registered_generic_parameters = if generic_parameters.is_empty() {
-                None
-            } else {
-                Some(
-                    self.type_environment.register_generic_parameter_list(
-                        generic_parameters
-                            .parameters
-                            .iter()
-                            .map(|parameter| (parameter.id, parameter.name)),
-                        &resolved_bounds_by_local,
-                    ),
-                )
-            };
-
-            let generic_parameter_scope = self.generic_parameter_scope(
-                generic_parameters,
-                registered_generic_parameters
-                    .as_ref()
-                    .map(|registered| &registered.canonical_by_local),
-                Some(header.tokens.source()),
-                &visibility,
-                string_table,
-            )?;
-
-            // ---------------------------------
-            //  Parse unresolved signature
-            // ---------------------------------
-
-            let signature_context = self
-                .environment_header_scope(header, string_table)
-                .with_file_visibility(Arc::clone(&visibility))
-                .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants));
-            let unresolved_signature = {
-                let owner_tokens = self.token_owner(header.tokens.source()).ok_or_else(|| {
-                    InfrastructureFailure::internal(
-                        CompilerStage::AstConstruction,
-                        "function header has no prepared source token owner",
-                    )
-                })?;
-                // Live parser state stays on the canonical source owner. The transient
-                // cursor spans the full canonical source so nested default ranges stay
-                // inside its bounds for this signature parse only. `from_source_tokens`
-                // retains the canonical owner for later bounded expression handoffs.
-                let full = owner_tokens.full_range().map_err(|error| {
-                    InfrastructureFailure::internal(
-                        CompilerStage::AstConstruction,
-                        format!("function header source range could not be constructed: {error:?}"),
-                    )
-                })?;
-                let source_owner =
-                    AstCursor::from_source_tokens(&owner_tokens, full).map_err(|error| {
-                        InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
-                            "function header source range is outside its source owner: {error:?}"
-                        ))
-                    })?;
-                let mut compatibility_cache = TypeCompatibilityCache::new();
-                let mut type_interner =
-                    AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
-                let signature = function_signature_from_syntax_with_unresolved_types(
-                    signature,
-                    &source_owner,
-                    &signature_context,
-                    &mut type_interner,
-                    &mut self.context.expression_builder,
-                    &mut self.context.const_values,
-                    string_table,
-                    SignatureTypeFallbackPolicy::StrictCapacity,
-                    self.path_fork,
-                )?;
-                for warning in signature_context.take_emitted_warnings() {
-                    self.warnings.push(warning);
-                }
-                signature
-            };
-            // -------------------------------
-            //  Resolve and validate signature
-            // -------------------------------
-
-            // Keep the immutable path reader independent from the mutable type-environment borrow.
-            let path_fork = self.path_fork as *const PathInternerFork;
-            let mut type_resolution_context = self.type_resolution_context_for_with_traits(
-                &visibility,
-                generic_parameter_scope.as_ref(),
-                Some(trait_environment),
-            );
-            let resolved_signature = resolve_function_signature(
-                &header.declaration_path,
-                &unresolved_signature,
-                registered_generic_parameters
-                    .as_ref()
-                    .map(|parameters| parameters.list_id),
-                &mut type_resolution_context,
-                // `type_resolution_context_for_with_traits` mutably borrows the builder only
-                // for its type environment; the path fork is not mutated by signature resolution.
-                unsafe { &*path_fork },
-                string_table,
-                Some(&signature_context),
-            )?;
-            // Release the scope's declaration-table `Rc` before the builder mutates it below.
-            drop(signature_context);
-            // Receiver methods are never exported, so the export gate above never reaches them.
-            // Their bounds still project onto a public nominal, so a public receiver checks them
-            // here, before any projection can publish them.
-            if let Some(ReceiverKey::Struct(receiver_path) | ReceiverKey::Choice(receiver_path)) =
-                &resolved_signature.receiver
-            {
-                let header_source = self.header_source_path(header);
-                let receiver_roots =
-                    self.public_export_roots_for_path(receiver_path, header_source);
-                if receiver_roots.is_empty() {
-                    // An imported receiver can be public through its provider interface without a
-                    // local exporting root; preserve the provider-root check for that path.
-                    if self.source_path_is_public_from_root_file(receiver_path, &header_source) {
-                        self.validate_public_generic_bounds(
-                            header,
-                            &header_source,
-                            PublicGenericOwnerKind::ReceiverMethod,
-                            generic_parameters,
-                            &resolved_bounds_by_local,
-                            trait_environment,
-                        )?;
-                    }
-                } else {
-                    for public_root_file in receiver_roots {
-                        self.validate_public_generic_bounds(
-                            header,
-                            &public_root_file,
-                            PublicGenericOwnerKind::ReceiverMethod,
-                            generic_parameters,
-                            &resolved_bounds_by_local,
-                            trait_environment,
-                        )?;
-                    }
-                }
-            }
-
-            let mut used_generic_parameters = rustc_hash::FxHashSet::default();
-            if let Some(registered_generic_parameters) = registered_generic_parameters.as_ref() {
-                collect_type_parameter_ids_from_signature_type_ids(
-                    &resolved_signature.signature,
-                    &self.type_environment,
-                    &registered_generic_parameters.canonical_by_local,
-                    &mut used_generic_parameters,
-                );
-            }
-            validate_generic_parameters_used(
-                generic_parameters,
-                &used_generic_parameters,
-                &header.declaration_path,
-                header.name_span,
-            )?;
-
-            // ---------------------------------
-            //  Update declaration table
-            // ---------------------------------
-
-            let function_type_id = intern_resolved_function_signature(
-                &resolved_signature.signature,
-                &mut self.type_environment,
-            );
-            let update_result = match Self::unique_declaration_table_mut(
-                &mut self.declaration_table,
-            ) {
-                Ok(declaration_table) => {
-                    if let Some(function_declaration) =
-                        declaration_table.get_mut_by_id(declaration_id)
-                    {
-                        // Free-call lookup reads the shell's receiver fact before a body exists.
-                        function_declaration.value =
-                            DeclarationValue::Shell(DeclarationShell::Function {
-                                receiver: resolved_signature.receiver.clone(),
-                            });
-                        function_declaration.type_id = function_type_id;
-                        Ok(())
-                    } else {
-                        Err(InfrastructureFailure::internal(
-                            CompilerStage::AstConstruction,
-                            "Function declaration was not registered before AST signature resolution.",
-                        ))
-                    }
-                }
-                Err(error) => Err(error),
-            };
-
-            update_result?;
-
-            if !generic_parameters.is_empty() {
-                let Some(registered_generic_parameters) = registered_generic_parameters.as_ref()
-                else {
-                    return Err(
-                        InfrastructureFailure::internal(CompilerStage::AstConstruction,
-                            "Generic function parameters were not registered before template construction.",
-                        )
-                        .into(),
-                    );
-                };
-                let canonical_owner =
-                    self.token_owner(header.tokens.source()).ok_or_else(|| {
-                        InfrastructureFailure::internal(
-                            CompilerStage::AstConstruction,
-                            "generic function header has no prepared source token owner",
-                        )
-                    })?;
-                let body = GenericFunctionBody::source(
-                    canonical_owner,
-                    header.tokens,
-                    header.token_sequence,
-                    header.declaration_path,
-                )?;
-                let template = build_generic_function_template(
-                    header,
-                    generic_parameters,
-                    &resolved_signature.signature,
-                    registered_generic_parameters.list_id,
-                    self.header_source_path(header),
-                    body,
-                );
-                self.generic_function_templates_by_path
-                    .insert(header.declaration_path.to_owned(), template);
-            }
-
-            self.resolved_function_signatures_by_path
-                .insert(header.declaration_path.to_owned(), resolved_signature);
         }
 
+        let mut used_generic_parameters = FxHashSet::default();
+        if let Some(registered_generic_parameters) = registered_generic_parameters.as_ref() {
+            collect_type_parameter_ids_from_signature_type_ids(
+                &resolved_signature.signature,
+                &self.type_environment,
+                &registered_generic_parameters.canonical_by_local,
+                &mut used_generic_parameters,
+            );
+        }
+        validate_generic_parameters_used(
+            generic_parameters,
+            &used_generic_parameters,
+            &header.declaration_path,
+            header.name_span,
+        )?;
+
+        // ---------------------------------
+        //  Update declaration table
+        // ---------------------------------
+
+        let function_type_id = intern_resolved_function_signature(
+            &resolved_signature.signature,
+            &mut self.type_environment,
+        );
+        let update_result = match Self::unique_declaration_table_mut(&mut self.declaration_table) {
+            Ok(declaration_table) => {
+                if let Some(function_declaration) = declaration_table.get_mut_by_id(declaration_id)
+                {
+                    // Free-call lookup reads the shell's receiver fact before a body exists.
+                    function_declaration.value =
+                        DeclarationValue::Shell(DeclarationShell::Function {
+                            receiver: resolved_signature.receiver.clone(),
+                        });
+                    function_declaration.type_id = function_type_id;
+                    Ok(())
+                } else {
+                    Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "Function declaration was not registered before AST signature resolution.",
+                    ))
+                }
+            }
+            Err(error) => Err(error),
+        };
+
+        update_result?;
+
+        if !generic_parameters.is_empty() {
+            let Some(registered_generic_parameters) = registered_generic_parameters.as_ref() else {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "Generic function parameters were not registered before template construction.",
+                )
+                .into());
+            };
+            let canonical_owner = self.token_owner(header.tokens.source()).ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "generic function header has no prepared source token owner",
+                )
+            })?;
+            let body = GenericFunctionBody::source(
+                canonical_owner,
+                header.tokens,
+                header.token_sequence,
+                header.declaration_path,
+            )?;
+            let template = build_generic_function_template(
+                header,
+                generic_parameters,
+                &resolved_signature.signature,
+                registered_generic_parameters.list_id,
+                self.header_source_path(header),
+                body,
+            );
+            self.generic_function_templates_by_path
+                .insert(header.declaration_path.to_owned(), template);
+        }
+
+        if resolved_signature.receiver.is_some() {
+            self.resolved_receiver_signature_count += 1;
+        }
+        self.resolved_function_signatures_by_path
+            .insert(header.declaration_path.to_owned(), resolved_signature);
+
         Ok(())
+    }
+
+    /// Receiver catalogue for const-body preparation, rebuilt only after a new receiver
+    /// signature resolved.
+    ///
+    /// The first call resolves every deferred receiver-method signature (a one-time scan of the
+    /// function lane); later calls retry only rows a not-yet-published constant deferred.
+    ///
+    /// WHY: every const body needs the method rows to name the const-body member restriction.
+    ///      Rebuilding the whole catalogue per const body repeats a scan of all headers and a
+    ///      signature clone per method, which dominates const-heavy modules with many methods.
+    ///      A receiver signature is the only input that can add a row after the catalogue is
+    ///      built, so its resolution count is the complete invalidation key.
+    pub(super) fn const_body_receiver_catalog(
+        &mut self,
+        sorted_headers: &[Header],
+        string_table: &mut StringTable,
+    ) -> Result<Rc<ReceiverMethodCatalog>, ExpressionParseError> {
+        if let Some(cached) = &self.const_body_receiver_catalog
+            && cached.receiver_signature_count == self.resolved_receiver_signature_count
+        {
+            return Ok(Rc::clone(&cached.catalog));
+        }
+
+        let catalog = self.build_receiver_catalog(sorted_headers, string_table)?;
+        self.const_body_receiver_catalog = Some(CachedReceiverCatalog {
+            receiver_signature_count: self.resolved_receiver_signature_count,
+            catalog: Rc::clone(&catalog),
+        });
+        Ok(catalog)
     }
 
     /// Builds the receiver method catalog from resolved function signatures.
@@ -516,7 +587,7 @@ fn collect_type_parameter_ids_from_signature_type_ids(
     signature: &FunctionSignature,
     type_environment: &TypeEnvironment,
     canonical_by_local: &FxHashMap<TypeParameterId, GenericParameterId>,
-    used_parameters: &mut rustc_hash::FxHashSet<TypeParameterId>,
+    used_parameters: &mut FxHashSet<TypeParameterId>,
 ) {
     for parameter in &signature.parameters {
         for type_id in parameter.semantic_type_ids() {
@@ -554,7 +625,7 @@ fn collect_type_parameter_ids_from_type_id(
     type_id: TypeId,
     type_environment: &TypeEnvironment,
     canonical_by_local: &FxHashMap<TypeParameterId, GenericParameterId>,
-    used_parameters: &mut rustc_hash::FxHashSet<TypeParameterId>,
+    used_parameters: &mut FxHashSet<TypeParameterId>,
 ) {
     match type_environment.get(type_id) {
         Some(TypeDefinition::GenericParameter(parameter)) => {
@@ -638,4 +709,90 @@ fn local_id_for_canonical_parameter(
         .find_map(|(local_id, mapped_canonical_id)| {
             (*mapped_canonical_id == canonical_id).then_some(*local_id)
         })
+}
+
+/// Reject const declaration forms the compiler-only executor cannot represent.
+///
+/// WHY: a const function executes during compilation, so unsupported generics, receivers,
+///      parameters and return contracts must fail before any body or caller depends on them.
+fn validate_const_function_declaration(
+    header: &Header,
+    generic_parameters: &GenericParameterList,
+    signature: &FunctionSignatureSyntax,
+    resolved_signature: &ResolvedFunctionSignature,
+    path_fork: &PathInternerFork,
+) -> Result<(), ExpressionParseError> {
+    let function_name = path_fork.component(header.declaration_path);
+
+    if !generic_parameters.is_empty() {
+        return Err(names_declarations::invalid_declaration(
+            InvalidDeclarationReason::ConstFunctionCannotBeGeneric,
+            function_name,
+            header.name_span,
+        )
+        .into());
+    }
+
+    if resolved_signature.receiver.is_some() {
+        return Err(names_declarations::invalid_declaration(
+            InvalidDeclarationReason::ConstFunctionCannotBeReceiverMethod,
+            function_name,
+            header.name_span,
+        )
+        .into());
+    }
+
+    for (index, parameter) in resolved_signature.signature.parameters.iter().enumerate() {
+        let unsupported_contract = parameter.contract != ParameterContract::Value;
+        if !parameter.value_mode.is_mutable() && !unsupported_contract {
+            continue;
+        }
+        let Some(parameter_name) = signature
+            .parameters
+            .get(index)
+            .and_then(|parameter| path_fork.component(parameter.id))
+        else {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "const function parameter has no resolvable source name",
+            )
+            .into());
+        };
+        return Err(names_declarations::invalid_declaration(
+            InvalidDeclarationReason::ConstFunctionUnsupportedParameter { parameter_name },
+            function_name,
+            signature.parameters[index].span.or(header.name_span),
+        )
+        .into());
+    }
+
+    if resolved_signature
+        .signature
+        .return_contract
+        .error_slot()
+        .is_some()
+    {
+        return Err(names_declarations::invalid_declaration(
+            InvalidDeclarationReason::ConstFunctionCannotReturnError,
+            function_name,
+            header.name_span,
+        )
+        .into());
+    }
+
+    if resolved_signature
+        .signature
+        .return_contract
+        .ordinary()
+        .is_none()
+    {
+        return Err(names_declarations::invalid_declaration(
+            InvalidDeclarationReason::ConstFunctionCannotReturnNever,
+            function_name,
+            header.name_span,
+        )
+        .into());
+    }
+
+    Ok(())
 }

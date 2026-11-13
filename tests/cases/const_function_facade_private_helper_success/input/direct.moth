@@ -1,0 +1,7 @@
+direct_private_double #|value I32| -> I32:
+    return value * 2
+;
+
+direct_public_double #|value I32| -> I32:
+    return direct_private_double(value) + 1
+;

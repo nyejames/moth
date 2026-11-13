@@ -8,17 +8,30 @@ use super::builder::{
     AstModuleEnvironmentBuilder, DeclarationPassLanes, field_definitions_from_declarations,
 };
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
+use crate::compiler_frontend::ast::ast_nodes::{
+    AstNode, Declaration, DeclarationShell, DeclarationValue, NodeKind,
+};
+use crate::compiler_frontend::ast::const_values::const_execution::{
+    ConstBodyPreparationError, ConstBodyReferenceScope, const_body_rejection_diagnostic,
+    executable_for_const_declaration,
+};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::generic_bounds::{
     GenericBoundEvidenceContext, validate_nominal_generic_bound_evidence,
 };
+use crate::compiler_frontend::ast::generic_functions::GenericFunctionBody;
+use crate::compiler_frontend::ast::module_ast::emission::emitter::enclosing_callable_contract;
 use crate::compiler_frontend::ast::module_ast::environment::constant_resolution::{
     ConstantHeaderInput, ConstantResolutionSession, ConstantResolutionSessionInput,
 };
+use crate::compiler_frontend::ast::module_ast::scope_context::{
+    ContextKind, EnclosingCallableOwner,
+};
 use crate::compiler_frontend::ast::statements::functions::{
-    SignatureDefaultMode, SignatureTypeFallbackPolicy, signature_member_to_declaration,
+    FunctionParameter, SignatureDefaultMode, SignatureTypeFallbackPolicy,
+    signature_member_to_declaration,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
@@ -34,6 +47,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::names_de
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, PublicGenericOwnerKind, TypeMismatchContext,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition,
     StructTypeDefinition,
@@ -46,8 +60,9 @@ use crate::compiler_frontend::declaration_syntax::signature_members::SignatureMe
 use std::sync::Arc;
 
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
+use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
@@ -96,10 +111,20 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ) -> Result<(), InfrastructureFailure> {
         for &declaration_id in &declaration_lanes.nominals {
             let header = declaration_lanes.header(declaration_id, sorted_headers)?;
+            // The early const-body receiver catalog needs every source nominal's owning file.
+            // The later strict member pass rewrites these rows; registering them with the
+            // identity pass keeps catalog validation honest during constant preparation instead
+            // of deferring a valid const body or masking an invalid receiver declaration.
+            let source_file = self
+                .module_symbols
+                .source_path_for_header(header)
+                .expect("header body range has no prepared source-path identity");
             match &header.kind {
                 HeaderKind::Struct {
                     generic_parameters, ..
                 } => {
+                    self.struct_source_by_path
+                        .insert(header.declaration_path, source_file);
                     let generic_param_list_id = if generic_parameters.is_empty() {
                         None
                     } else {
@@ -144,6 +169,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 HeaderKind::Choice {
                     generic_parameters, ..
                 } => {
+                    self.choice_source_by_path
+                        .insert(header.declaration_path, source_file);
                     let generic_param_list_id = if generic_parameters.is_empty() {
                         None
                     } else {
@@ -338,19 +365,19 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         SignatureDefaultMode::FoldNow,
                         true,
                     )?;
-                let path_fork = self.path_fork as *const PathInternerFork;
-                let mut type_resolution_context = self.type_resolution_context_for_with_traits(
-                    &visibility,
-                    generic_parameter_scope.as_ref(),
-                    Some(trait_environment),
-                );
+                let (mut type_resolution_context, path_fork) = self
+                    .type_resolution_context_with_path_fork(
+                        &visibility,
+                        generic_parameter_scope.as_ref(),
+                        Some(trait_environment),
+                    );
 
                 resolve_struct_field_types(
                     &header.declaration_path,
                     &unresolved_fields,
                     &mut type_resolution_context,
                     string_table,
-                    unsafe { &*path_fork },
+                    path_fork,
                     Some(&field_context),
                 )
                 .map_err(|error| match error {
@@ -850,9 +877,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             .with_choice_variant_shells_by_path(Rc::clone(
                                 &self.choice_variant_shells_by_path,
                             ));
-                        let path_fork = self.path_fork as *const PathInternerFork;
-                        let mut type_resolution_context = self
-                            .type_resolution_context_for_with_traits(
+                        let (mut type_resolution_context, path_fork) = self
+                            .type_resolution_context_with_path_fork(
                                 &visibility,
                                 generic_parameter_scope.as_ref(),
                                 Some(trait_environment),
@@ -862,7 +888,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             &unresolved_fields,
                             &mut type_resolution_context,
                             string_table,
-                            unsafe { &*path_fork },
+                            path_fork,
                             Some(&scope_context),
                         )
                     }
@@ -1042,7 +1068,23 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         aliases_waiting_for_constants: &FxHashSet<PathId>,
         string_table: &mut StringTable,
     ) -> Result<(), ExpressionParseError> {
-        if declaration_lanes.constants.is_empty() && aliases_waiting_for_constants.is_empty() {
+        let mut module_has_const_functions = false;
+        for &declaration_id in &declaration_lanes.ordered {
+            let header = declaration_lanes.header(declaration_id, sorted_headers)?;
+            if matches!(
+                &header.kind,
+                HeaderKind::Function { signature, .. }
+                    if signature.evaluation == CallableEvaluation::Const
+            ) {
+                module_has_const_functions = true;
+                break;
+            }
+        }
+        self.has_const_functions |= module_has_const_functions;
+        if declaration_lanes.constants.is_empty()
+            && aliases_waiting_for_constants.is_empty()
+            && !module_has_const_functions
+        {
             return Ok(());
         }
 
@@ -1062,13 +1104,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             template_ir_store: Rc::clone(&self.context.template_ir_store),
             build_profile: self.context.build_profile,
             source_token_owners: self.source_token_owners.clone(),
+            early_const_function_signatures: Rc::clone(&self.early_const_function_signatures),
+            const_function_executables: Rc::clone(&self.const_function_executables),
+            has_const_functions: self.has_const_functions,
         });
 
         let mut aliases_left = aliases_waiting_for_constants.len();
 
         for &declaration_id in &declaration_lanes.ordered {
             let header = declaration_lanes.header(declaration_id, sorted_headers)?;
-
             match &header.kind {
                 HeaderKind::TypeAlias { .. }
                     if aliases_waiting_for_constants.contains(&header.declaration_path) =>
@@ -1098,6 +1142,30 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         trait_environment,
                         string_table,
                     )?;
+                }
+                HeaderKind::Function { signature, .. }
+                    if signature.evaluation == CallableEvaluation::Const =>
+                {
+                    // Only const callables resolve here: their bodies and any constant that
+                    // calls them must prepare before the ordinary signature pass. Ordinary
+                    // signatures keep their established post-constant timing because their
+                    // defaults may read module constants.
+                    self.resolve_one_function_signature(
+                        declaration_id,
+                        header,
+                        trait_environment,
+                        string_table,
+                    )?;
+                    // Receiver methods are forbidden inside const bodies, but their rows make
+                    // the body diagnostic name that rule instead of an unknown member. Resolve
+                    // only those rows early so ordinary defaults keep post-constant timing.
+                    self.resolve_receiver_method_signatures(
+                        declaration_lanes,
+                        sorted_headers,
+                        trait_environment,
+                        string_table,
+                    )?;
+                    self.prepare_const_function_body(header, sorted_headers, string_table)?;
                 }
                 HeaderKind::Constant { .. }
                     if !self.resolved_module_constants.contains(declaration_id) =>
@@ -1143,6 +1211,250 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             }
         }
 
+        Ok(())
+    }
+
+    /// Resolve receiver-method signatures needed to classify const-body receiver calls.
+    ///
+    /// WHY: the whole-module receiver catalog is built after ordinary signatures, but const bodies
+    ///      prepare earlier. Receiver methods are always forbidden in a const body, so their exact
+    ///      types only need to make the call resolvable; a diagnostic from a default that depends
+    ///      on a not-yet-published constant defers that row to the ordinary signature pass.
+    ///
+    /// The function lane is scanned once per module. Later const bodies retry only the deferred
+    /// rows, because every other receiver signature is already resolvable.
+    fn resolve_receiver_method_signatures(
+        &mut self,
+        declaration_lanes: &DeclarationPassLanes,
+        sorted_headers: &[Header],
+        trait_environment: &TraitEnvironment,
+        string_table: &mut StringTable,
+    ) -> Result<(), ExpressionParseError> {
+        if !self.receiver_methods_scanned {
+            self.scan_receiver_method_lane(declaration_lanes, sorted_headers, string_table)?;
+        }
+
+        // A method whose default read a constant that has since published may now resolve. Only
+        // these deferred rows are retried, so each later const body does not rescan every
+        // declaration in the module.
+        let mut still_deferred = Vec::new();
+        for declaration_id in std::mem::take(&mut self.deferred_receiver_methods) {
+            let header = declaration_lanes.header(declaration_id, sorted_headers)?;
+            match self.resolve_one_function_signature(
+                declaration_id,
+                header,
+                trait_environment,
+                string_table,
+            ) {
+                Ok(()) => {}
+                Err(ExpressionParseError::Diagnostic(_)) => still_deferred.push(declaration_id),
+                Err(error) => {
+                    self.deferred_receiver_methods = still_deferred;
+                    return Err(error);
+                }
+            }
+        }
+        self.deferred_receiver_methods = still_deferred;
+        Ok(())
+    }
+
+    /// Perform the module's one-time scan of the function lane for receiver-method declarations.
+    ///
+    /// WHAT: records every function whose first parameter is named `this` as a deferred receiver
+    ///       row and marks the lane scanned.
+    /// WHY: const-body preparation retries only these rows afterwards, so the lane is scanned once
+    ///      per module instead of once per const body.
+    fn scan_receiver_method_lane(
+        &mut self,
+        declaration_lanes: &DeclarationPassLanes,
+        sorted_headers: &[Header],
+        string_table: &mut StringTable,
+    ) -> Result<(), ExpressionParseError> {
+        let receiver_name = string_table.intern("this");
+        self.receiver_methods_scanned = true;
+        for &declaration_id in &declaration_lanes.functions {
+            let header = declaration_lanes.header(declaration_id, sorted_headers)?;
+            let HeaderKind::Function { signature, .. } = &header.kind else {
+                continue;
+            };
+            if signature.parameters.first().is_some_and(|parameter| {
+                self.path_fork.component(parameter.id) == Some(receiver_name)
+            }) {
+                self.deferred_receiver_methods.push(declaration_id);
+            }
+        }
+        Ok(())
+    }
+
+    /// Parse one const function body once, in Stage 3 dependency order.
+    ///
+    /// WHAT: resolves the canonical signature, publishes its callable row to environment-time
+    ///       scopes, parses the body through the ordinary function-body entry, and retains the
+    ///       typed node in the compiler-only preparation owner.
+    /// WHY: a constant initializer may call this function as soon as the graph orders it here.
+    ///      Reparsing during runtime emission would duplicate declaration work and could not make
+    ///      an executable available to the constant that already folded.
+    fn prepare_const_function_body(
+        &mut self,
+        header: &Header,
+        sorted_headers: &[Header],
+        string_table: &mut StringTable,
+    ) -> Result<(), ExpressionParseError> {
+        self.has_const_functions = true;
+        if self
+            .prepared_const_function_paths
+            .contains(&header.declaration_path)
+        {
+            return Ok(());
+        }
+
+        let Some(resolved_signature) = self
+            .resolved_function_signatures_by_path
+            .get(&header.declaration_path)
+            .cloned()
+        else {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "const function body prepared before its signature resolved.",
+            )
+            .into());
+        };
+        self.early_const_function_signatures.borrow_mut().insert(
+            header.declaration_path.to_owned(),
+            resolved_signature.clone(),
+        );
+
+        let visibility = self.header_visibility(header)?;
+        let source_file_scope = self
+            .module_symbols
+            .source_path_for_header(header)
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "const function header has no prepared source-path identity",
+                )
+            })?;
+        // The whole-module receiver catalog is built after every signature resolves. A const
+        // body prepared here still needs the methods whose signatures are already known so a
+        // forbidden receiver call reports the const-body rule rather than an unknown method.
+        // Source nominal files and the receiver signatures needed for classification are
+        // registered before this walk, so a catalog diagnostic here is an authored declaration
+        // error. Reporting it now preserves the true source diagnostic instead of turning a
+        // dependent constant into a missing-executable failure. The catalogue is reused across
+        // const bodies and refreshed only when a new receiver signature resolves.
+        let receiver_methods = self.const_body_receiver_catalog(sorted_headers, string_table)?;
+        let mut context = self
+            .environment_header_scope(header, string_table)
+            .with_file_visibility(visibility)
+            .with_early_const_function_signatures(Rc::clone(&self.early_const_function_signatures))
+            .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants))
+            .with_const_function_executables(Rc::clone(&self.const_function_executables))
+            .with_receiver_methods(receiver_methods)
+            .with_source_file_scope(source_file_scope)
+            .with_const_body(header.name_span);
+        context.kind = ContextKind::Function;
+        context.enclosing_callable = Some(enclosing_callable_contract(
+            &resolved_signature.signature,
+            EnclosingCallableOwner::Function,
+        ));
+        context
+            .set_local_declarations(
+                resolved_signature
+                    .signature
+                    .parameters
+                    .iter()
+                    .map(FunctionParameter::to_local_declaration)
+                    .collect(),
+                &*self.path_fork,
+                string_table,
+            )
+            .map_err(ExpressionParseError::Diagnostic)?;
+
+        let body_cursor = {
+            let Some(owner) = self.source_token_owners.get(&header.tokens.source()) else {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "const function body has no canonical source token owner",
+                )
+                .into());
+            };
+            let body_tokens = GenericFunctionBody::source(
+                Arc::clone(owner.tokens()),
+                header.tokens,
+                header.token_sequence,
+                header.declaration_path,
+            )?;
+            self.const_function_body_tokens
+                .insert(header.declaration_path, body_tokens);
+            match header.token_sequence {
+                Some(sequence) => AstCursor::from_source_sequence(owner.tokens(), sequence),
+                None => AstCursor::from_source_tokens(owner.tokens(), header.tokens),
+            }
+            .map_err(|error| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    format!(
+                        "const function body range is outside its canonical source owner: {error:?}"
+                    ),
+                )
+            })?
+        };
+
+        let mut compatibility_cache = TypeCompatibilityCache::new();
+        let mut type_interner =
+            AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
+        let mut body_cursor = body_cursor;
+        // Canonical typed-body entry, not a second parser. HIR does not exist while Stage 3
+        // folds constants; the compiler-only executable row is the handoff the bounded typed-AST
+        // executor consumes.
+        //
+        // Validation needs the same declaration scope after the body parse consumes it. The clone
+        // shares the module tables and allocates one sibling frame, so the body's own locals never
+        // leak into the reference check.
+        let reference_scope = context.clone();
+        let node = function_body_to_ast(
+            &mut body_cursor,
+            context,
+            &mut type_interner,
+            &mut self.context.expression_builder,
+            &mut self.context.const_values,
+            &mut self.warnings,
+            string_table,
+            &mut *self.path_fork,
+        )?
+        .expect_complete_nodes("a source function body")?;
+        let executable = match executable_for_const_declaration(
+            &resolved_signature.signature,
+            &node,
+            &self.context.expression_builder,
+            ConstBodyReferenceScope {
+                scope: &reference_scope,
+                path_fork: &*self.path_fork,
+                constants: &self.context.const_values,
+            },
+        ) {
+            Ok(executable) => executable,
+            Err(ConstBodyPreparationError::Unsupported(rejection)) => {
+                return Err(ExpressionParseError::Diagnostic(
+                    const_body_rejection_diagnostic(&rejection, header.name_span, string_table),
+                ));
+            }
+            Err(ConstBodyPreparationError::Infrastructure(error)) => {
+                return Err(ExpressionParseError::Infrastructure(error));
+            }
+        };
+        self.const_function_executables
+            .borrow_mut()
+            .insert(header.declaration_path, executable);
+        let node = AstNode {
+            kind: NodeKind::Function(header.declaration_path, resolved_signature.signature, node),
+            span: header.name_span,
+            scope: header.declaration_path,
+        };
+        self.prepared_const_function_paths
+            .insert(header.declaration_path);
+        self.prepared_const_function_bodies.push(node);
+        increment_ast_counter(AstCounter::ConstFunctionBodiesPrepared);
         Ok(())
     }
 

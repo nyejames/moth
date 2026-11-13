@@ -272,6 +272,7 @@ fn register_header_symbol(
         HeaderKind::Function {
             generic_parameters,
             signature,
+            ..
         } => {
             register_declared_symbol(
                 module_symbols,

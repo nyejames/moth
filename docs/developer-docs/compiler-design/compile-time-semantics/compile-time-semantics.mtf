@@ -175,6 +175,37 @@ genuinely unsupported decimal, conversion or recovery paths. The
 @../../../docs/progress (Progress matrix) owns implementation and backend
 coverage rather than this ownership contract.
 
+## Const functions and release folding
+
+A required const declaration (`name #|args| -> Return:`) prepares one bounded
+typed-AST executable for its body. Every call executes that prepared body with
+constant arguments; no runtime body is emitted. Preparation validates the
+signature, compiles the statement body, classifies every reachable expression
+and prepares catch handlers once. A refused declaration reports a source
+diagnostic instead of leaving a runtime path.
+
+Release builds reuse the same executor for ordinary functions. Finalisation
+selects a conservative candidate graph: immutable shared parameters and one
+infallible result restricted to fixed scalars, Bool or Char; const-safe
+operations; body-local writes only; and a transitive closure with no missing
+dependency or cycle. Template operations are refused, and the provenance of
+every body expression must be carried by returned values, so an erased call
+cannot hide a project/config dependency. Only calls whose arguments fold to
+constants are rewritten. A refusal, failed proof, numeric failure,
+unrepresentable result shape or exhausted work/memory budget leaves the
+runtime call and its rewritten constant children in place.
+Replacement unites the call site's and evaluated value's synthetic-interface
+provenance so later link facts retain erased dependencies.
+
+Work and retained-memory allocation use typed `ConstExecutionLimits`.
+Project configuration supplies bounded values; the compiler keeps hard safety
+maxima and an aggregate module allowance. Accounting is deterministic and
+never depends on elapsed wall-clock time. A budget refusal stays typed through
+template folding instead of becoming an ordinary diagnostic. Release budget
+advice is a deduplicated `Note` at the innermost refused call site and does
+not alter exit status. Required calls still report an error at the operation
+that spent the allowance.
+
 ## What can fail here
 
 - non-foldable constant where a constant was required

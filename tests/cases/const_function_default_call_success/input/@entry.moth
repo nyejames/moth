@@ -1,0 +1,11 @@
+one #|| -> I32:
+    return 1
+;
+
+use |value I32 = one()| -> I32:
+    return value
+;
+
+result = use()
+
+io.line([: result=[result] ])

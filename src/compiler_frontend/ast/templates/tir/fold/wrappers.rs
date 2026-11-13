@@ -1,6 +1,6 @@
 //! Wrapper-context application and virtual wrapper insertion for TIR folds.
 
-use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
+use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult, TirFoldContext,
@@ -21,8 +21,8 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 
 use super::estimate::{
-    FoldEstimateMode, estimate_tir_node_output_bytes, record_tir_fold_output_estimate_miss,
-    record_tir_fold_output_intern, reserve_tir_fold_output_buffer,
+    FoldEstimateMode, bounded_output_estimate, estimate_tir_node_output_bytes,
+    record_tir_fold_output_estimate_miss, record_tir_fold_output_intern,
 };
 use super::reducer::{
     FoldInsertion, FoldOutputState, FoldTraversalInput, FoldedConstTemplatePiece,
@@ -327,14 +327,16 @@ fn fold_tir_wrapper_with_input(
     }
 
     let child_output_len = const_string_value_text_len(child_output, fold_context.string_table);
-    let estimated_bytes = wrapper_template.summary.estimated_output_bytes + child_output_len;
-    let mut output_state = FoldOutputState::with_provenance(
-        reserve_tir_fold_output_buffer(estimated_bytes),
-        child_provenance,
+    let estimated_bytes = bounded_output_estimate(
+        wrapper_template.summary.estimated_output_bytes + child_output_len,
+        fold_context.template_output_limits.as_ref(),
     );
-    if wrapper_fold_input.projection_enabled {
-        output_state.enable_projection();
-    }
+    let mut output_state = FoldOutputState::bounded_with_provenance(
+        estimated_bytes,
+        child_provenance,
+        fold_context,
+        wrapper_fold_input,
+    );
 
     let routing = prepared_wrapper_slot_routing(fold_context, wrapper_store, wrapper_reference)?;
 
@@ -428,18 +430,18 @@ pub(super) fn fold_tir_aggregate_wrapper(
     let store = fold_input.view.store();
     let aggregate_output_len =
         const_string_value_text_len(aggregate_output, fold_context.string_table);
-    let estimated_bytes = estimate_tir_node_output_bytes(
-        store,
-        wrapper_node_id,
-        fold_context.string_table,
-        FoldEstimateMode::Aggregate {
-            output_len: aggregate_output_len,
-        },
-    )?;
-    let mut wrapper_state = FoldOutputState::with_capacity(estimated_bytes);
-    if fold_input.projection_enabled {
-        wrapper_state.enable_projection();
-    }
+    let estimated_bytes = bounded_output_estimate(
+        estimate_tir_node_output_bytes(
+            store,
+            wrapper_node_id,
+            fold_context.string_table,
+            FoldEstimateMode::Aggregate {
+                output_len: aggregate_output_len,
+            },
+        )?,
+        fold_context.template_output_limits.as_ref(),
+    );
+    let mut wrapper_state = FoldOutputState::bounded(estimated_bytes, fold_context, fold_input);
 
     fold_tir_node_into_buffer(
         wrapper_node_id,
@@ -488,11 +490,8 @@ fn const_string_value_text_len(value: &ConstStringValue, string_table: &StringTa
         ConstStringValue::Pieces(pieces) => pieces
             .iter()
             .map(|piece| match piece {
-                crate::compiler_frontend::ast::const_values::store::ConstStringPiece::Text(text) => {
-                    string_table.resolve(*text).len()
-                }
-                crate::compiler_frontend::ast::const_values::store::ConstStringPiece::Resource(_)
-                | crate::compiler_frontend::ast::const_values::store::ConstStringPiece::SiteRoot => 0,
+                ConstStringPiece::Text(text) => string_table.resolve(*text).len(),
+                ConstStringPiece::Resource(_) | ConstStringPiece::SiteRoot => 0,
             })
             .sum(),
     }

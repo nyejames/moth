@@ -1,0 +1,10 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain_in_order = ["len=3 first=4 fallback=0 negative=5 nested=7 handler=11 error=101 message=Collection index out of bounds survives=0 outer=12 index=7 double=7 removed=8 fixed= 1;2;3;  nested= 1;2;"]

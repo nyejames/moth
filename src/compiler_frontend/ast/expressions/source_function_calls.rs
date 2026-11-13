@@ -23,7 +23,9 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::InvalidGenericInstantiationReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -39,6 +41,8 @@ pub(super) struct SourceCallableMemberInput<'a, 'env, 'tokens> {
     pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) function_path: &'a PathId,
     pub(super) signature: &'a FunctionSignature,
+    /// Callee execution classification resolved at call typing.
+    pub(super) evaluation: CallableEvaluation,
     pub(super) generic_template: Option<&'a GenericFunctionTemplate>,
     pub(super) visible_name: StringId,
     pub(super) call_span: Option<SourceSpan>,
@@ -70,6 +74,7 @@ pub(super) fn parse_source_callable_member(
         token_stream,
         function_path,
         signature,
+        evaluation,
         generic_template,
         visible_name,
         call_span,
@@ -84,6 +89,17 @@ pub(super) fn parse_source_callable_member(
         string_table,
         path_fork,
     } = input;
+
+    // A const function body may call only const functions. Generic source functions are
+    // runtime callables in V1, so the generic path cannot be const-eligible.
+    if context.is_const_body() && generic_template.is_some() {
+        return Err(choices_control_flow::const_body_runtime_operation(
+            Some(visible_name),
+            call_span,
+            context.const_declaration_span(),
+        )
+        .into());
+    }
 
     // ------------------------
     //  Generic source call
@@ -192,6 +208,7 @@ pub(super) fn parse_source_callable_member(
         call_span,
         context,
         signature,
+        evaluation,
         value_required: true,
         allow_boundary_catch,
         warnings: None,

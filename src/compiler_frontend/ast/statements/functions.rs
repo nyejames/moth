@@ -38,6 +38,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidTemplateStructureReason, TypeMismatchContext,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -171,6 +172,7 @@ pub(crate) enum UnresolvedFunctionReturnContract {
 pub(crate) struct UnresolvedFunctionSignature {
     pub(crate) parameters: Vec<UnresolvedFunctionParameter>,
     pub(crate) return_contract: UnresolvedFunctionReturnContract,
+    pub(crate) evaluation: CallableEvaluation,
 }
 
 /// Resolved callable contract containing canonical types but no authored type syntax.
@@ -303,6 +305,7 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
     Ok(UnresolvedFunctionSignature {
         parameters,
         return_contract,
+        evaluation: syntax.evaluation,
     })
 }
 
@@ -532,6 +535,9 @@ fn fold_signature_default(
         ConstantFoldError::Diagnostic(diagnostic)
         | ConstantFoldError::NumericFailure(diagnostic) => {
             ExpressionParseError::Diagnostic(diagnostic)
+        }
+        ConstantFoldError::Budget(exhaustion) => {
+            ExpressionParseError::Diagnostic(exhaustion.into_diagnostic())
         }
         ConstantFoldError::Infrastructure(error) => ExpressionParseError::Infrastructure(error),
     })?;

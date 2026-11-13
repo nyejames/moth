@@ -613,6 +613,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         binding_environment: &binding_environment,
         string_table,
         path_fork,
+        source_token_owners: &source_token_owners,
     })?;
 
     Ok(BoundModuleHeaders {

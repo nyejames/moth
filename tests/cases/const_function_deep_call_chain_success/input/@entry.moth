@@ -1,0 +1,163 @@
+step_0 #|| -> I32:
+    return step_1()
+;
+
+step_1 #|| -> I32:
+    return step_2()
+;
+
+step_2 #|| -> I32:
+    return step_3()
+;
+
+step_3 #|| -> I32:
+    return step_4()
+;
+
+step_4 #|| -> I32:
+    return step_5()
+;
+
+step_5 #|| -> I32:
+    return step_6()
+;
+
+step_6 #|| -> I32:
+    return step_7()
+;
+
+step_7 #|| -> I32:
+    return step_8()
+;
+
+step_8 #|| -> I32:
+    return step_9()
+;
+
+step_9 #|| -> I32:
+    return step_10()
+;
+
+step_10 #|| -> I32:
+    return step_11()
+;
+
+step_11 #|| -> I32:
+    return step_12()
+;
+
+step_12 #|| -> I32:
+    return step_13()
+;
+
+step_13 #|| -> I32:
+    return step_14()
+;
+
+step_14 #|| -> I32:
+    return step_15()
+;
+
+step_15 #|| -> I32:
+    return step_16()
+;
+
+step_16 #|| -> I32:
+    return step_17()
+;
+
+step_17 #|| -> I32:
+    return step_18()
+;
+
+step_18 #|| -> I32:
+    return step_19()
+;
+
+step_19 #|| -> I32:
+    return step_20()
+;
+
+step_20 #|| -> I32:
+    return step_21()
+;
+
+step_21 #|| -> I32:
+    return step_22()
+;
+
+step_22 #|| -> I32:
+    return step_23()
+;
+
+step_23 #|| -> I32:
+    return step_24()
+;
+
+step_24 #|| -> I32:
+    return step_25()
+;
+
+step_25 #|| -> I32:
+    return step_26()
+;
+
+step_26 #|| -> I32:
+    return step_27()
+;
+
+step_27 #|| -> I32:
+    return step_28()
+;
+
+step_28 #|| -> I32:
+    return step_29()
+;
+
+step_29 #|| -> I32:
+    return step_30()
+;
+
+step_30 #|| -> I32:
+    return step_31()
+;
+
+step_31 #|| -> I32:
+    return step_32()
+;
+
+step_32 #|| -> I32:
+    return step_33()
+;
+
+step_33 #|| -> I32:
+    return step_34()
+;
+
+step_34 #|| -> I32:
+    return step_35()
+;
+
+step_35 #|| -> I32:
+    return step_36()
+;
+
+step_36 #|| -> I32:
+    return step_37()
+;
+
+step_37 #|| -> I32:
+    return step_38()
+;
+
+step_38 #|| -> I32:
+    return step_39()
+;
+
+step_39 #|| -> I32:
+    return 1
+;
+
+result #I32 = step_0()
+
+io.line([: result=[result] ])

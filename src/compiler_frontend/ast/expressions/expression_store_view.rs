@@ -137,6 +137,7 @@ impl<'a> CallView<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct PlaceView<'a> {
     owner: &'a ExpressionStore,
+    id: PlaceId,
     record: &'a PlaceRecord,
 }
 pub(crate) enum PlaceProjectionView<'a> {
@@ -150,6 +151,9 @@ pub(crate) enum PlaceProjectionView<'a> {
     },
 }
 impl<'a> PlaceView<'a> {
+    pub(crate) fn id(self) -> PlaceId {
+        self.id
+    }
     pub(crate) fn metadata(self) -> &'a PlaceRecord {
         self.record
     }
@@ -326,6 +330,7 @@ impl ExpressionStore {
             .ok_or_else(|| invariant("place ID outside owner"))?;
         Ok(PlaceView {
             owner: self,
+            id,
             record,
         })
     }
@@ -338,6 +343,7 @@ impl ExpressionStore {
             ExpressionOp::Reference(id) => V::Reference(id),
             ExpressionOp::Copy(id) => V::Copy(PlaceView {
                 owner: o,
+                id,
                 record: &o.places[id.index()],
             }),
             ExpressionOp::FieldAccess { base, field } => V::FieldAccess {

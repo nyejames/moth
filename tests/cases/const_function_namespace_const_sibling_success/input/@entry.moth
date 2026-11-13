@@ -1,0 +1,4 @@
+@provider outer
+
+result #I32 = outer(3)
+[: result=[result] ]

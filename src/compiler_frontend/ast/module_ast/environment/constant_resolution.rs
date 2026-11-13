@@ -37,7 +37,8 @@ use crate::compiler_frontend::ast::module_ast::environment::{
     ResolvedConstantSet, TopLevelDeclarationTable,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::{
-    ContextKind, FileValueResolutionServices, ScopeContext,
+    ConstFunctionExecutables, ContextKind, EarlyConstFunctionSignatures,
+    FileValueResolutionServices, ScopeContext,
 };
 use crate::compiler_frontend::ast::statements::declarations::{
     DeclarationLowering, DeclarationLoweringTables, resolve_declaration_syntax,
@@ -64,10 +65,10 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
+use crate::compiler_frontend::headers::{SourceTokenOwners, SyntheticContentPayload};
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -101,10 +102,17 @@ pub(crate) struct ConstantResolutionSessionInput {
     /// Stage 0 file-reference outcomes and module-local structural resource identity.
     pub file_value_resolution: Option<Rc<FileValueResolutionServices>>,
     /// One canonical token owner per source, used for bounded adapters.
-    pub source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
+    pub source_token_owners: SourceTokenOwners,
     pub build_profile: FrontendBuildProfile,
     pub template_const_loop_iteration_limit: usize,
+    /// Whether any const function was declared in this module.
+    pub has_const_functions: bool,
+    /// Prepared const executables available to this constant's initializer parse.
+    pub const_function_executables: ConstFunctionExecutables,
+    /// Const callable rows prepared before this constant's initializer parses.
+    pub early_const_function_signatures: EarlyConstFunctionSignatures,
 }
+
 /// State that changes between constants, supplied by the environment builder per call.
 ///
 /// WHY: the Stage 3 walk publishes aliases and constructor scaffolds between constants, so the
@@ -562,6 +570,11 @@ impl ConstantResolutionSession {
         // through the header-built visibility package so namespace bindings and aliases behave
         // exactly like they do in function/entry body contexts.
         .with_file_visibility(Arc::clone(file_visibility))
+        .with_early_const_function_signatures(Rc::clone(
+            &module_view.early_const_function_signatures,
+        ))
+        .with_const_function_executables(Rc::clone(&module_view.const_function_executables))
+        .with_has_const_functions(module_view.has_const_functions)
         .with_source_file_scope(source_file_scope)
         .with_declaring_file_id(header.tokens.source())
         .with_resolved_type_aliases(resolved_type_aliases)
@@ -612,6 +625,9 @@ fn non_constant_initializer_fold_refusal(
         ) if diagnostic.code() == "MOTH-SYNTAX-0037" => {
             Err(ExpressionParseError::Diagnostic(diagnostic))
         }
+        Err(ConstantFoldError::Budget(exhaustion)) => Err(ExpressionParseError::Diagnostic(
+            exhaustion.into_diagnostic(),
+        )),
         Ok(_)
         | Err(ConstantFoldError::Diagnostic(_))
         | Err(ConstantFoldError::NumericFailure(_)) => Ok(()),

@@ -268,6 +268,9 @@ pub(crate) fn compact_label_message_text(
 
     let text = match message {
         DurableLabelMessage::None => return None,
+        DurableLabelMessage::DependencyCycleParticipant => {
+            "next declaration in the dependency cycle".to_owned()
+        }
         DurableLabelMessage::PreviousDeclaration => "previous declaration here".to_owned(),
         DurableLabelMessage::ConflictingAccess => "earlier conflicting access here".to_owned(),
         #[cfg(test)]
@@ -290,6 +293,7 @@ pub(crate) fn compact_label_message_text(
         DurableLabelMessage::EarlierSectionMarker => {
             "first marker for this Markdown block here".to_owned()
         }
+        DurableLabelMessage::ConstCallSite => "const call entered here".to_owned(),
         DurableLabelMessage::EarlierTemplateHeadItem => {
             "earlier conflicting head item here".to_owned()
         }
