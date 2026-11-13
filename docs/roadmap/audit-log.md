@@ -49,6 +49,9 @@ Coverage is not quality. An audited area may still have open findings.
 | `frontend.optional_defaults` | Optional parameters and fields with a present default; this audit inspected only the reproduced explicit-value override behavior | Correctness 2026-10 AUD-0012 `partial` `stale` |
 | `crates.moth_mon.schema` | Field validation and preparation in `crates/moth-mon/src/schema.rs`, including the `prepare_fields` to `prepare_field` handoff | Redundancy 2026-10 AUD-0015 `partial` |
 | `docs.empty_container_contract` | Accepted empty-map and empty-collection semantics across public references, status and related examples | Documentation 2026-10 AUD-0016 `partial` |
+| `frontend.statement_boundary_diagnostics` | User diagnostics for statement terminators, scope closers and expression ends, and the diagnostic construction path those reports use. This run inspected the statement dispatcher, header body capture, start-body EOF, initializer open-construct scan, and expression-end delimiter reporting. | Diagnostics 2026-11 AUD-0017 `partial` |
+| `frontend.function_body_parsing` | Statement parsing inside function bodies after header capture of the body range, including nested block closers and whether later statements are absorbed by an unclosed inner block. This run did not exhaust match-arm, multi-bind or generic-body parsers. | Correctness 2026-11 AUD-0019 `partial` |
+| `backends.feature_validation` | Target-contract validation in `src/backends/backend_feature_validation.rs` (Wasm arms only; the `Js` arm is an intentional no-op). This run did not inspect `external_package_validation.rs`, nested generic-instance occurrences, or every `MOTH-RULE-0064` fixture. | Correctness 2026-11 AUD-0020 `partial` |
 
 ## Never audited
 
