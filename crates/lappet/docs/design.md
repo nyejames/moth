@@ -234,6 +234,10 @@ another real builder needs it, not as speculative V1 structure.
 ## Instances, resources and scheduling
 
 An execution instance owns its store, Moth memory and lifetime-scoped host state.
+An embedder chooses a sendable instance, which may move between threads and
+holds only `Send` host values, or a thread-bound instance, which stays on one
+thread and holds any host value. The
+[host resource and context API](host-resources.md) owns both kinds.
 Compiled code may be shared without sharing mutable instance state. Resources
 have a registered type, runtime owner and lifecycle. Reject stale, wrong-type,
 foreign-instance and conflicting-access handles before constructing Rust

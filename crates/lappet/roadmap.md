@@ -13,11 +13,12 @@ planned backend support as available.
   with no native runtime or host adapter.
 - Current milestone: 2, establish Wasmtime execution. Its plan is ready and not
   started.
-- Blockers: none for milestone 2. Milestones 4 and 5 wait for work on `main`
-  listed under [Waiting on main](#waiting-on-main).
+- Blockers: none for milestones 2, 3 and 4. Milestone 5 waits for milestone 4.
+  Later milestones wait for work on `main` listed under
+  [Waiting on main](#waiting-on-main).
 - Next action: activate the
   [Wasmtime runtime foundation plan](../../docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md)
-  at Phase 0.
+  at Phase 0. The host contract crate plan can start in parallel.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
 and [Wasm optimisation](../../docs/developer-docs/wasm-optimisation/overview.mtf)
@@ -37,16 +38,17 @@ compiler crate, so they proceed while compiler work continues on `main`.
 | 1 | Separate the CLI from the compiler library | Delivered | Delivered | None |
 | 2 | Establish Wasmtime execution | `crates/lappet` only | Now | [Runtime foundation](../../docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md) |
 | 3 | Build host boundary tables and fault mechanics | `crates/lappet` only | Milestone 2 delivers instances, limits and fault quarantine | [Host boundary tables](../../docs/roadmap/plans/lappet-host-boundary-tables-plan.md) |
-| 4 | Extract the shared host contract crate | New crate, `src/host`, `src/builder`, `xtask` | Const functions are on `main` | [Host contract crate](../../docs/roadmap/plans/lappet-host-contract-crate-plan.md) |
-| 5 | Finish the native binding and artefact handoff | `src/builder`, `src/build_system`, `src/builder_surface` | Const functions are on `main` and milestone 4 is delivered | [Native binding handoff](../../docs/roadmap/plans/lappet-native-binding-handoff-plan.md) |
+| 4 | Extract the shared host contract crate | New crate, `src/host`, `src/builder`, `xtask` | Now | [Host contract crate](../../docs/roadmap/plans/lappet-host-contract-crate-plan.md) |
+| 5 | Finish the native binding and artefact handoff | `src/builder`, `src/build_system`, `src/builder_surface` | Milestone 4 is delivered | [Native binding handoff](../../docs/roadmap/plans/lappet-native-binding-handoff-plan.md) |
 | 6 | Establish official Core conformance | Lappet, Core references | Milestones 3 and 5 and its own checkpoint | Write when the checkpoint is approved |
 | 7 | Connect real Moth applications | Lappet, public compiler services | The compiler's native host ABI prerequisites | Write when the gate opens |
 | 8 | Package declaration and local catalog foundations | Build system, Stage 0, Lappet | Its checkpoint and the package prerequisites | Write when the checkpoint is approved |
 | 9 | Package eligibility and dependency evidence | Lappet, compiler facts | Milestone 8 | Write when the checkpoint is approved |
 | 10 | Remote admission | Lappet | Milestone 9 and its checkpoint | Write when the checkpoint is approved |
 
-Milestone 4 is small and independent of milestones 2 and 3. Run it as soon as
-its wait is satisfied, even when milestone 2 or 3 is still in progress. The
+Milestone 4 is small and independent of milestones 2 and 3. Run it alongside
+them. Milestones 4 and 5 edit the compiler crate, so sync with `main` before
+each of their phases. The
 package lane, milestones 8 to 10, is independent of Wasmtime and may move ahead
 of milestones 6 and 7 once its prerequisites and checkpoint are met.
 
@@ -58,7 +60,6 @@ the current tree instead of trusting this table.
 
 | Lands on `main` | Unblocks | Why Lappet waits |
 |---|---|---|
-| Const functions, including the `const_work_limit` and `const_memory_limit_mb` project settings | Milestones 4 and 5 | That work edits `src/build_system/project_config.rs`, `src/build_system/project_config/validation.rs`, `src/builder_surface/definition.rs` and `src/projects/settings.rs`. The remaining SDK work edits the same config owners |
 | A `ValidatedMemoryPlan` producer for boundary string, frame and scope allocations | Milestone 7 | The native host ABI forbids a temporary planner or guessed layout |
 | Host-import lowering to `moth-host-v1` names, fallible-call lowering through `out_frame` and `status` and builtin `Error` value lowering | Milestone 7 and the compiler-level adapter tests | Lappet adapters convert only what compiled Moth really emits |
 | `i64` resource-token carriage, the `staged_text_take` import and the call-scope helper exports | Milestone 7 | Milestone 3 exercises these protocols with fixtures only |
@@ -70,6 +71,9 @@ owns the full compiler prerequisite list. The first registry prerequisite, the
 restricted host profile and the package-path `#` rule, is already delivered by
 `BuilderDefinition::finish`.
 
+V1 const functions landed on `main` and this branch merged them on 13 November
+2026. Nothing on `main` now blocks milestones 2 to 5.
+
 After each sync, rerun the focused Lappet tests and the dependency boundary
 check, then re-read any authority the merge changed.
 
@@ -78,11 +82,6 @@ check, then re-read any authority the merge changed.
 Each needs Nye's answer before the named work starts. Recommendations are
 recorded in the owning plan.
 
-- **Host resource and context API.** The
-  [draft design](docs/host-resources.md) awaits review. It ends with four
-  questions and five amendments to the adapter responsibilities. Blocks the
-  resource phases of milestone 3. The staging table and token generator don't
-  wait.
 - **Runtime policy defaults.** Provisional limits are recorded in the runtime
   foundation plan. Milestone 2 gathers the evidence and Nye confirms the final
   values before they move into the runtime design.
@@ -206,14 +205,16 @@ until Moth's backend can produce the equivalent program.
 
 Plan: [Host boundary tables](../../docs/roadmap/plans/lappet-host-boundary-tables-plan.md).
 
-**Checkpoint.** Approve the [draft host resource and context API](docs/host-resources.md)
-before the resource phases. The staging table, the token generator and their
-fault handling follow the accepted [adapter responsibilities](docs/host-abi.md)
-and need no further decision.
+**Checkpoint.** Accepted on 13 November 2026. The
+[host resource and context API](docs/host-resources.md) owns resource
+ownership, access, per-call context and the sendable and thread-bound instance
+kinds. V1 is strict: every boundary violation quarantines the instance. The
+staging table, the token generator and their fault handling follow the
+[adapter responsibilities](docs/host-abi.md).
 
 **Delivery.** Implement the per-instance staging table, the process-wide token
-generator, the per-instance resource table with call-scoped access guards and
-the per-call host context slot. Wire each into fault quarantine and teardown.
+generator, the per-instance resource table with call-scoped access guards,
+the per-call host context slot and both instance kinds. Wire each into fault quarantine and teardown.
 Build no value conversion, descriptor matching or manifest preflight here.
 
 **Evidence.** Cover the fixture-level deferred tests in the adapter

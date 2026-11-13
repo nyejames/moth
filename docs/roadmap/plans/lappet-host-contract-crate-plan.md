@@ -11,7 +11,7 @@ Delete this plan in the commit that completes it and update
 - Status: accepted, not started. Nye confirmed arrangement B and the
   `moth-host` name, and the runtime design records the graph.
 - Current slice: none.
-- Blockers: const functions landing on `main`.
+- Blockers: none.
 - Next action: Phase 0.
 
 ## Goal
@@ -69,10 +69,9 @@ can quietly reinterpret.
 
 ## Prerequisites
 
-- Const functions are on `main` and `lappet-work` is synced, so the compiler
-  crate changes here don't collide with that work.
-
-Nothing else. This plan doesn't need the Lappet runtime to exist.
+None outstanding. The branch already contains the project config and builder
+surface changes from const functions, so this plan's compiler crate edits
+don't collide with them. This plan doesn't need the Lappet runtime to exist.
 
 ## Read first
 
@@ -122,7 +121,7 @@ split or compiler/build integration". These own the contracts:
 - [ ] Sync with `main` and confirm the prerequisites in the current tree.
 - [ ] Re-read the routed documents and report any drift before writing code.
 
-Exit: the branch contains const functions and no drift is unreported.
+Exit: the branch is current with `main` and no drift is unreported.
 
 ## Phase 1: create the crate and move the vocabulary
 
