@@ -51,10 +51,23 @@ The repository-root `moth` Cargo package owns the compiler library.
 `crates/moth-cli` owns the CLI package and its `moth` executable:
 
 ```text
-moth-cli -> moth compiler library
-         -> lappet
-lappet   -> public compiler/builder contracts where needed
+moth-lexical  <- moth-mon
+moth-host     (no workspace dependencies)
+moth          -> moth-lexical, moth-mon, moth-host
+lappet        -> moth-host and wasmtime   with the `runtime` feature
+              -> moth                     with the future `packages` feature
+moth-cli      -> moth, lappet
 ```
+
+`moth-host` is the accepted home for the data the compiler and Lappet must
+agree on: the host descriptor vocabulary first, then the host value types, the
+host manifest's value types and the ABI's reserved names and frame-layout rule
+as each gains a real consumer. It holds no Wasmtime type and no
+compiler-internal type. The compiler keeps everything semantic, including the
+registry conversion and manifest production, and re-exports the crate as
+`moth::host`. Lappet's runtime never depends on the compiler. Only its future
+package feature does, and that feature never pulls in Wasmtime. The crate isn't
+extracted yet. [The roadmap](../roadmap.md) owns that delivery.
 
 The workspace defaults to `moth-cli` for root Cargo commands. Its features
 forward to the compiler's matching features. Explicit compiler and workspace
@@ -92,7 +105,7 @@ authority owns work done before Wasm emission and work delegated to native
 code generation. Native optimisation settings cannot change source types,
 safety validation, error contracts or memory-model legality.
 
-Retain Cranelift's default backtracking register allocator. Wasmtime 49.0.3
+Retain Cranelift's default backtracking register allocator. Wasmtime 50.0.1
 marks its faster single-pass allocator not production-ready and outside normal
 security-advisory support. Keep inlining disabled by default. Benchmark
 `SpeedAndSize` and parallel module compilation before enabling either.
@@ -235,9 +248,12 @@ state sharing. A lifecycle root does not automatically require one new Wasm
 instance, but reuse must preserve isolation and cleanup.
 
 Arbitrary guest callbacks and re-entry into the same active instance are outside
-V1. The instance checkpoint defines fault disposition, cleanup and whether an
-instance can be used again after a trap. Neither retries nor transactional
-rollback of earlier host IO are implied by a Moth error.
+V1. A trap, boundary fault or host fault quarantines its instance, which is
+then dropped and never called again. The V1 helper set has no reset helper, so
+reuse after a fault needs a later ABI version.
+[Host ABI adapter responsibilities](host-abi.md#faults) owns the fault table.
+Neither retries nor transactional rollback of earlier host IO are implied by a
+Moth error.
 
 Moth channels and asynchronous execution will need coordinated compiler,
 builder and runtime work later. V1 adds no event loop, task scheduler, async

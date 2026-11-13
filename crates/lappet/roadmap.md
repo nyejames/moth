@@ -1,25 +1,23 @@
 # Lappet roadmap
 
-Lappet owns its runtime, embedding and package-manager work here. Develop it in
-an isolated worktree, separately from Moth's serial compiler roadmap. Refresh
-the current compiler contracts before each integration slice. This roadmap
-never resumes a paused compiler plan or treats planned backend support as
-available.
+Lappet owns its runtime, embedding and package-manager work here. Develop it on
+the `lappet-work` branch in an isolated worktree, separately from Moth's serial
+compiler roadmap. Refresh the current compiler contracts before each
+integration slice. This roadmap never resumes a paused compiler plan or treats
+planned backend support as available.
 
 ## Current state
 
 - Status: CLI separation and the public `moth::builder` SDK prototype are
   delivered. The `lappet` crate remains dependency-free and documentation-only,
   with no native runtime or host adapter.
-- Current checkpoint: native binding and artefact handoff remains unfinished.
-- Blockers: none for Phase 2 SDK work. `.config(...)` and
-  `CompiledProject::settings` remain incomplete, as do `BuildArtifacts`
-  publication and `BuildContext::compile_wasm`. Native execution awaits the
-  compiler ABI prerequisites and Lappet's separate runtime milestone.
-- Next action: implement `.config(...)` and `CompiledProject::settings` through
-  the active [native binding handoff plan](../../docs/roadmap/plans/lappet-native-binding-handoff-plan.md),
-  then complete output publication and the native Wasm handoff. Package
-  management remains deferred.
+- Current milestone: 2, establish Wasmtime execution. Its plan is ready and not
+  started.
+- Blockers: none for milestone 2. Milestones 4 and 5 wait for work on `main`
+  listed under [Waiting on main](#waiting-on-main).
+- Next action: activate the
+  [Wasmtime runtime foundation plan](../../docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md)
+  at Phase 0.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
 and [Wasm optimisation](../../docs/developer-docs/wasm-optimisation/overview.mtf)
@@ -27,6 +25,70 @@ own the accepted direction. This living roadmap owns delivery, findings and
 open decisions. Record a checkpoint's decision in its permanent owner before
 implementing the affected slice. Keep unresolved questions explicit rather
 than turning example API names into obligations.
+
+## Sequence
+
+Work top to bottom. A milestone starts only when its row's wait is satisfied.
+Milestones 2 and 3 live entirely in `crates/lappet` and never touch the
+compiler crate, so they proceed while compiler work continues on `main`.
+
+| # | Milestone | Touches | Starts when | Plan |
+|---|---|---|---|---|
+| 1 | Separate the CLI from the compiler library | Delivered | Delivered | None |
+| 2 | Establish Wasmtime execution | `crates/lappet` only | Now | [Runtime foundation](../../docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md) |
+| 3 | Build host boundary tables and fault mechanics | `crates/lappet` only | Milestone 2 delivers instances, limits and fault quarantine | [Host boundary tables](../../docs/roadmap/plans/lappet-host-boundary-tables-plan.md) |
+| 4 | Extract the shared host contract crate | New crate, `src/host`, `src/builder`, `xtask` | Const functions are on `main` | [Host contract crate](../../docs/roadmap/plans/lappet-host-contract-crate-plan.md) |
+| 5 | Finish the native binding and artefact handoff | `src/builder`, `src/build_system`, `src/builder_surface` | Const functions are on `main` and milestone 4 is delivered | [Native binding handoff](../../docs/roadmap/plans/lappet-native-binding-handoff-plan.md) |
+| 6 | Establish official Core conformance | Lappet, Core references | Milestones 3 and 5 and its own checkpoint | Write when the checkpoint is approved |
+| 7 | Connect real Moth applications | Lappet, public compiler services | The compiler's native host ABI prerequisites | Write when the gate opens |
+| 8 | Package declaration and local catalog foundations | Build system, Stage 0, Lappet | Its checkpoint and the package prerequisites | Write when the checkpoint is approved |
+| 9 | Package eligibility and dependency evidence | Lappet, compiler facts | Milestone 8 | Write when the checkpoint is approved |
+| 10 | Remote admission | Lappet | Milestone 9 and its checkpoint | Write when the checkpoint is approved |
+
+Milestone 4 is small and independent of milestones 2 and 3. Run it as soon as
+its wait is satisfied, even when milestone 2 or 3 is still in progress. The
+package lane, milestones 8 to 10, is independent of Wasmtime and may move ahead
+of milestones 6 and 7 once its prerequisites and checkpoint are met.
+
+## Waiting on main
+
+This branch tracks `main`. Sync it whenever one of these lands and before every
+integration slice. Name the capability a milestone needs, then confirm it in
+the current tree instead of trusting this table.
+
+| Lands on `main` | Unblocks | Why Lappet waits |
+|---|---|---|
+| Const functions, including the `const_work_limit` and `const_memory_limit_mb` project settings | Milestones 4 and 5 | That work edits `src/build_system/project_config.rs`, `src/build_system/project_config/validation.rs`, `src/builder_surface/definition.rs` and `src/projects/settings.rs`. The remaining SDK work edits the same config owners |
+| A `ValidatedMemoryPlan` producer for boundary string, frame and scope allocations | Milestone 7 | The native host ABI forbids a temporary planner or guessed layout |
+| Host-import lowering to `moth-host-v1` names, fallible-call lowering through `out_frame` and `status` and builtin `Error` value lowering | Milestone 7 and the compiler-level adapter tests | Lappet adapters convert only what compiled Moth really emits |
+| `i64` resource-token carriage, the `staged_text_take` import and the call-scope helper exports | Milestone 7 | Milestone 3 exercises these protocols with fixtures only |
+| Builder-selected export wrappers, the host manifest and `host.assertion_failed` moved into `moth-abi-v1` | Milestone 7 and manifest-driven preflight | Lappet matches implementations against the manifest, never against guessed names |
+| Dependency clauses, canonical project and package graphs, configuration and input isolation, immutable public interfaces and stable capability and ABI fingerprints | Milestone 8 | The manager consumes compiler-owned compatibility facts |
+
+The [native host ABI](../../docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf)
+owns the full compiler prerequisite list. The first registry prerequisite, the
+restricted host profile and the package-path `#` rule, is already delivered by
+`BuilderDefinition::finish`.
+
+After each sync, rerun the focused Lappet tests and the dependency boundary
+check, then re-read any authority the merge changed.
+
+## Open decisions
+
+Each needs Nye's answer before the named work starts. Recommendations are
+recorded in the owning plan.
+
+- **Host resource and context API.** The
+  [draft design](docs/host-resources.md) awaits review. It ends with four
+  questions and five amendments to the adapter responsibilities. Blocks the
+  resource phases of milestone 3. The staging table and token generator don't
+  wait.
+- **Runtime policy defaults.** Provisional limits are recorded in the runtime
+  foundation plan. Milestone 2 gathers the evidence and Nye confirms the final
+  values before they move into the runtime design.
+- **Facade-only projects.** Whether a project with a package facade and no
+  normal entry module may build. Blocks nothing yet. The artefact fixtures use a
+  project with both.
 
 ## Working rules
 
@@ -45,6 +107,13 @@ coverage, the smallest implementation and the repository Slice review. Retain
 useful evidence and actionable findings here without copying raw logs. Final
 integration follows the repository's full validation gate. Compare both the
 game-engine and server use cases at every public runtime/API decision.
+
+Lappet plans live in `docs/roadmap/plans/` with a `lappet-` prefix and follow
+the main roadmap's rules for adding and maintaining plans. Only this roadmap
+links them. A plan names the capabilities it needs and never cites another
+plan. Delete a plan in the commit that completes it and update this roadmap in
+the same commit. Commits are authored by Nye only, with no attribution lines.
+Push to `lappet-work` and don't open a pull request unless asked.
 
 ## 1. Separate the CLI from the compiler library
 
@@ -95,46 +164,20 @@ focused run and the repeated routine gate. No production correction remained.
 These local checks do not claim hosted platform coverage, profiling execution or
 `just validate-full` merge readiness.
 
-## 2. Freeze the native binding and artefact handoff
+## 2. Establish Wasmtime execution
 
-**Checkpoint.** Define the first concrete Rust-to-Moth ABI using the existing
-manual host descriptor path. Specify supported scalars, strings, optionals,
-errors, explicit context and opaque resources. Byte buffers, records,
-choices, collections, multi-slot host imports and resource results are deferred
-beyond V1 and each needs an approved shape before expanding the restricted
-profile. Resolve allocation, result ownership, cleanup on every failure path,
-call-scoped views and runtime-internal helper calls without permitting general
-re-entry. Specify explicit host-callable Moth exports and their identity.
+Plan: [Wasmtime runtime foundation](../../docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md).
 
-**Delivery.** Share one descriptor contract between compiler registration and
-runtime adapters. Retain semantic types separately from physical carriers and
-implementation selection. Implement only approved adapters, with no guessed
-Rust layout, second type registry or general serialisation framework. Attribute
-errors to both the Moth call and the registered host binding where available.
-
-**Documentation.** The accepted V1 physical boundary lives in the compiler-owned
-[native host ABI](../../docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf).
-[Host ABI adapter responsibilities](docs/host-abi.md) owns Lappet's adapter,
-staging, resource-table and fault duties. Link each executable adapter example
-to tests.
-
-**Evidence.** Cover exact integer ranges, finite floats, Byte versus U8, invalid
-Unicode/lengths, optional absence versus failure, ordered results and exactly-once
-calls. Reject mismatched imports, undeclared exports, missing contexts, stale or
-foreign handles and overlapping exclusive resource access. Test independence
-of returned storage and every allocation/cleanup failure path actually added.
-
-## 3. Establish Wasmtime execution independently
-
-**Checkpoint.** Select a Wasmtime version and minimal Cranelift-only Cargo
-features. Validate supported Wasm proposals, hosts, debugging requirements,
-resource accounting and fault disposition. Compare `OptLevel::None` and
-`OptLevel::Speed` using representative game and server workloads before
-confirming the defaults. Retain the default backtracking register allocator
-and disabled inlining unless a separate investigation justifies changing them.
-Determine when a trap or adapter fault invalidates an instance. Set
-memory/stack/execution limits and a policy for blocking native calls. Keep
-the public runtime configuration small.
+**Checkpoint.** Wasmtime 50.0.1 with the `std`, `runtime` and `cranelift`
+Cargo features is selected behind Lappet's `runtime` feature. A trap or fault
+quarantines its instance, which is then dropped. The plan records provisional
+memory, stack, execution and table limits. Still to confirm with evidence:
+supported Wasm proposals, hosts, debugging requirements and those limits.
+Compare `OptLevel::None` and `OptLevel::Speed` using representative game and
+server workloads before confirming the defaults. Retain the default
+backtracking register allocator and disabled inlining unless a separate
+investigation justifies changing them. Set a policy for blocking native calls.
+Keep the public runtime configuration small.
 
 **Delivery.** Cranelift is V1's sole native compiler. Development defaults
 to `OptLevel::None` and release to `OptLevel::Speed`, independent of the
@@ -144,21 +187,97 @@ contexts and resources instance-owned. Execution remains synchronous and
 builder-scheduled. No persistent AOT cache or other Wasm engine is included.
 
 **Evidence.** Run identical core Wasm fixtures under both Cranelift
-optimisation levels on candidate Linux x86-64/AArch64, macOS x86-64/AArch64
-and Windows x86-64 hosts. Publish only verified combinations. Measure clean
+optimisation levels. The plan records evidence from the implementing host
+first. Candidate Linux x86-64/AArch64, macOS x86-64/AArch64 and Windows
+x86-64 hosts are published only once each is verified. Measure clean
 Rust build cost, binary size, cold engine/module compilation, instantiation,
 execution, host-call cost and resident memory separately. Test limits,
 traps, teardown and prohibited re-entry. These fixtures do not prove a
 Moth compiler ABI.
 
-**Documentation.** Add `docs/wasmtime-integration.md` using the pinned
-Wasmtime release and upstream source references. Document a minimal runnable
-Rust embedding example, backed by a tested `examples/` program or integration
-test. It should show engine setup, a host import, core Wasm instantiation, a
-typed exported call and failure/cleanup handling. A hand-authored Wasm fixture
-is acceptable until Moth's backend can produce the equivalent program.
+**Documentation.** Keep [the Wasmtime reference](docs/wasmtime-integration.md)
+current with the pinned release and record findings that change an
+implementation choice. Back its embedding sketch with a tested program. It
+shows engine setup, a host import, core Wasm instantiation, a typed exported
+call and failure/cleanup handling. A hand-authored Wasm fixture is acceptable
+until Moth's backend can produce the equivalent program.
 
-## 4. Establish official Core conformance
+## 3. Build host boundary tables and fault mechanics
+
+Plan: [Host boundary tables](../../docs/roadmap/plans/lappet-host-boundary-tables-plan.md).
+
+**Checkpoint.** Approve the [draft host resource and context API](docs/host-resources.md)
+before the resource phases. The staging table, the token generator and their
+fault handling follow the accepted [adapter responsibilities](docs/host-abi.md)
+and need no further decision.
+
+**Delivery.** Implement the per-instance staging table, the process-wide token
+generator, the per-instance resource table with call-scoped access guards and
+the per-call host context slot. Wire each into fault quarantine and teardown.
+Build no value conversion, descriptor matching or manifest preflight here.
+
+**Evidence.** Cover the fixture-level deferred tests in the adapter
+responsibilities: ticket lifetime and take checks, stale, closed,
+other-instance, wrong-type and conflicting tokens, physical import mismatches
+and a trapping scope helper. Run each under both optimisation levels. Fixtures
+follow the V1 protocol by hand and prove Lappet's mechanics only.
+
+## 4. Extract the shared host contract crate
+
+Plan: [Host contract crate](../../docs/roadmap/plans/lappet-host-contract-crate-plan.md).
+
+**Checkpoint.** Accepted on 13 November 2026 and recorded in the
+[runtime design](docs/design.md#users-and-workspace-dependencies). Lappet's
+runtime depends on a small `moth-host` contract crate and Wasmtime, never on
+the compiler. The compiler depends on the same crate and keeps the
+`moth::host` path. Only Lappet's future package feature depends on the
+compiler.
+
+**Delivery.** Move the host descriptor vocabulary into the contract crate,
+keep the registry conversion in the compiler, extend the first-party
+dependency boundary check and record the accepted graph in the runtime design.
+
+**Evidence.** The public `moth::host` path and the standalone crate expose the
+same types. The contract crate depends on no workspace package. `lappet` with
+the `runtime` feature builds without the compiler in its dependency tree.
+
+## 5. Finish the native binding and artefact handoff
+
+Plan: [Native binding handoff](../../docs/roadmap/plans/lappet-native-binding-handoff-plan.md).
+
+**Checkpoint.** The first concrete Rust-to-Moth ABI is accepted. It uses the
+existing manual host descriptor path and covers scalars, strings, optionals,
+errors, explicit context and opaque resources. Byte buffers, records, choices,
+collections, multi-slot host imports and resource results are deferred beyond
+V1 and each needs an approved shape before expanding the restricted profile.
+
+**Delivery.** Complete the public builder SDK: the configuration helper and
+typed settings, artefact publication, the honest native Wasm availability
+error and the external fixture crate. Then publish import and export
+requirements and a pure-Rust preflight. Share one descriptor contract between
+compiler registration and runtime adapters. Retain semantic types separately
+from physical carriers and implementation selection. Implement only approved
+adapters, with no guessed Rust layout, second type registry or general
+serialisation framework. Attribute errors to both the Moth call and the
+registered host binding where available.
+
+**Documentation.** The accepted V1 physical boundary lives in the compiler-owned
+[native host ABI](../../docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf).
+[Host ABI adapter responsibilities](docs/host-abi.md) owns Lappet's adapter,
+staging, resource-table and fault duties. Link each executable adapter example
+to tests.
+
+**Evidence.** A separate Rust crate defines a builder, compiles a real Moth
+project, publishes one output and sees the honest native Wasm error. Reject
+mismatched imports, undeclared exports, missing implementations and wrong
+types, arity or return channels in the pure-Rust preflight. Value-level
+evidence needs emitted Wasm and belongs to milestone 7: exact integer ranges,
+finite floats, Byte versus U8 at runtime, invalid Unicode and lengths,
+optional absence versus failure, ordered results, exactly-once calls,
+independence of returned storage and every allocation and cleanup failure
+path.
+
+## 6. Establish official Core conformance
 
 **Checkpoint.** Inventory the complete public Core catalogue and distinguish
 compiler-internal helpers from optional host facilities. Record the exact
@@ -180,7 +299,7 @@ differences. Distinguish unsupported facilities from broken advertised ones.
 Check that `io` stays reserved without forcing custom hosts to implement it.
 No implementation status is claimed from registering descriptors alone.
 
-## 5. Connect real Moth applications
+## 7. Connect real Moth applications
 
 **Gate.** Wait for delivered structured Wasm lowering, concrete result/error
 ABIs, required scalar/aggregate representations, compiler-selected runtime
@@ -194,6 +313,8 @@ lifecycle and one server lifecycle without adding a scheduler or web framework.
 Keep rendering/output/resource planning with the builder and build system.
 
 **Evidence.** Run actual Moth programs, not hand-authored ABI substitutes.
+Repeat every fixture-level boundary test from milestone 3 and deliver the
+value-level evidence deferred from milestone 5.
 Cover source-to-host-to-source values, errors, lifecycle cleanup, isolated host
 state and capability rejection. Benchmark all four combinations of Moth
 output profile and native strategy under the shared optimisation authority.
@@ -203,7 +324,7 @@ Never mutate published compiler results to make runtime binding succeed.
 when the compiler and runtime handoffs support it. Keep the example checked
 against the public embedding API rather than documenting hypothetical calls.
 
-## 6. Deliver package declaration and local catalog foundations
+## 8. Deliver package declaration and local catalog foundations
 
 This lane is independent of Wasmtime. It replaces the retired main-roadmap
 package-manager foundations plan without claiming that its implementation is
@@ -239,7 +360,7 @@ not trigger filesystem probing, a config import preamble or legacy folder
 fallback. Incompatible artefacts are rejected or rebuilt through the existing
 policy, never repaired with guessed layouts or numeric conversions.
 
-## 7. Derive package eligibility and dependency evidence
+## 9. Derive package eligibility and dependency evidence
 
 **Checkpoint.** Specify how compiler/provider facts establish public Core use,
 no-core closure and excluded Builder/foreign dependencies. Distinguish public
@@ -261,7 +382,7 @@ packages, version duplication and copied/vendored source. Lead status alone
 never decides rejection. Compare candidate closure, project closure and added
 cost without counting shared packages repeatedly.
 
-## 8. Design remote admission before enabling managed addition
+## 10. Design remote admission before enabling managed addition
 
 **Checkpoint.** Approve version/lockfile/override policy, metadata provenance,
 source staging and archive limits, source integrity, isolated analysis and the
