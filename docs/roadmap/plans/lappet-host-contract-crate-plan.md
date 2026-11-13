@@ -8,10 +8,10 @@ Delete this plan in the commit that completes it and update
 
 ## Status
 
-- Status: proposed. Nye hasn't confirmed the split yet.
+- Status: accepted, not started. Nye confirmed arrangement B and the
+  `moth-host` name, and the runtime design records the graph.
 - Current slice: none.
-- Blockers: Nye's confirmation of the dependency split, and const functions
-  landing on `main`.
+- Blockers: const functions landing on `main`.
 - Next action: Phase 0.
 
 ## Goal
@@ -33,7 +33,7 @@ Wasm module, and every compiler edit rebuilds the runtime and its tests. It
 also rules out a later compiler-free deployment. The runtime needs about 150
 lines of the compiler, the descriptors, so the cost is out of proportion.
 
-**B. A small contract crate, with Lappet split by feature.** Recommended.
+**B. A small contract crate, with Lappet split by feature.** Accepted.
 
 ```text
 moth-lexical  <- moth-mon
@@ -69,7 +69,6 @@ can quietly reinterpret.
 
 ## Prerequisites
 
-- Nye has confirmed arrangement B, or chosen another.
 - Const functions are on `main` and `lappet-work` is synced, so the compiler
   crate changes here don't collide with that work.
 
@@ -115,18 +114,15 @@ split or compiler/build integration". These own the contracts:
 4. Fix every blocker, rerun the checks and commit. Push to `lappet-work`.
 5. Stop for Nye on any public API choice.
 
-## Phase 0: confirm and record the decision
+## Phase 0: activation
 
-- [ ] Present the evaluated split to Nye and get an explicit answer,
-  including the crate name. `moth-host` is the recommendation.
-- [ ] If declined, record the chosen arrangement in the roadmap's open
-  decisions, delete this plan and update the roadmap's sequence.
-- [ ] If accepted, replace the dependency sketch in
-  `crates/lappet/docs/design.md` under `Users and workspace dependencies` with
-  the accepted graph and its ownership rule.
+- [x] Nye accepted arrangement B and the `moth-host` name.
+- [x] `crates/lappet/docs/design.md` records the accepted graph and its
+  ownership rule under `Users and workspace dependencies`.
 - [ ] Sync with `main` and confirm the prerequisites in the current tree.
+- [ ] Re-read the routed documents and report any drift before writing code.
 
-Exit: the permanent owner records the decision.
+Exit: the branch contains const functions and no drift is unreported.
 
 ## Phase 1: create the crate and move the vocabulary
 
@@ -173,7 +169,7 @@ Exit: boundary checks and lanes pass.
 - [ ] Update `index.md` for the new crate and the moved owner.
 - [ ] Update the first-party dependency paragraph in
   `docs/developer-docs/style-guide/validation.mtf` to name the new extracted
-  package. Accepting this plan in Phase 0 approves this one documentation edit.
+  package. Nye accepted this plan, which approves this one documentation edit.
 - [ ] Report, without editing, any other document that names `src/host` as the
   descriptor owner.
 - [ ] Update `crates/lappet/roadmap.md` with delivered status, evidence and the

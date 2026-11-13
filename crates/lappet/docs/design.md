@@ -51,10 +51,23 @@ The repository-root `moth` Cargo package owns the compiler library.
 `crates/moth-cli` owns the CLI package and its `moth` executable:
 
 ```text
-moth-cli -> moth compiler library
-         -> lappet
-lappet   -> public compiler/builder contracts where needed
+moth-lexical  <- moth-mon
+moth-host     (no workspace dependencies)
+moth          -> moth-lexical, moth-mon, moth-host
+lappet        -> moth-host and wasmtime   with the `runtime` feature
+              -> moth                     with the future `packages` feature
+moth-cli      -> moth, lappet
 ```
+
+`moth-host` is the accepted home for the data the compiler and Lappet must
+agree on: the host descriptor vocabulary first, then the host value types, the
+host manifest's value types and the ABI's reserved names and frame-layout rule
+as each gains a real consumer. It holds no Wasmtime type and no
+compiler-internal type. The compiler keeps everything semantic, including the
+registry conversion and manifest production, and re-exports the crate as
+`moth::host`. Lappet's runtime never depends on the compiler. Only its future
+package feature does, and that feature never pulls in Wasmtime. The crate isn't
+extracted yet. [The roadmap](../roadmap.md) owns that delivery.
 
 The workspace defaults to `moth-cli` for root Cargo commands. Its features
 forward to the compiler's matching features. Explicit compiler and workspace

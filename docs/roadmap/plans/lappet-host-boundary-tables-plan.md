@@ -52,6 +52,8 @@ bindings, ABI and exported calls". These own the contracts:
   `Host context`, `Faults` and `Deferred tests`. It owns Lappet's duties.
 - `docs/developer-docs/project-builders/host-packages.mtf`: `Register opaque
   resources` and `Supply host context explicitly`.
+- `crates/lappet/docs/host-resources.md`: the resource and context API. It is
+  a draft until Phase 0 completes.
 - `crates/lappet/docs/design.md`: `Instances, resources and scheduling`.
 
 When this plan and one of those documents disagree, the document wins. Report
@@ -100,7 +102,7 @@ evidence. A value changes only with recorded evidence and Nye's confirmation.
 | Staged text per entry | 16 MiB | Far above ordinary text, far below the ABI's 2 GiB length limit | Largest realistic host string in the game and server cases |
 | Staged text live per instance | 64 MiB | Bounds host memory held for one guest | Peak live staged bytes in the fixtures |
 | Live resource entries per instance | 1,048,576 | A long-lived game world may hold many resources | Table memory per entry and lookup cost at this size |
-| Closed entries | Closing marks the entry closed and releases the Rust value at once. A later use is a boundary fault | The adapter responsibilities require the closed state, and a long-lived instance mustn't keep closed values alive | Memory held per closed marker, and whether markers need reclaiming before teardown |
+| Closed entries | Follow the Phase 0 answer. The draft API removes the entry at close and returns its value | A long-lived instance mustn't pay for every resource it ever closed | Table memory per live entry |
 | Token generator | One process-wide `u64` counter starting at 1. Exhaustion is a host fault | Accepted V1 decision | None |
 | Ticket generator | Per-instance `u64` counter starting at 1. Never reused while the instance lives | The ABI requires uniqueness within the instance only | None |
 
@@ -110,23 +112,17 @@ The adapter responsibilities leave the Rust host resource API and the
 Rust-facing call API as later runtime design. Decide the first before Phase 3.
 
 - [ ] Confirm the prerequisites in the current tree and sync with `main`.
-- [ ] Present Nye with this recommended shape and record the answer in
-  `crates/lappet/docs/host-abi.md` under `Resource table` and `Host context`:
-  - the embedder creates a resource on an instance and receives a token, and
-    closes it by token
-  - a resource is any `'static` Rust value. Its registered type is checked on
-    every use
-  - host code borrows a resource only through a call-scoped guard that grants
-    shared or exclusive access and releases on drop
-  - the embedder passes one context value per guest entry call. It is borrowed
-    for that call and never stored in the instance
-  - all of it stays `pub(crate)` until the manifest-driven public API exists
-- [ ] Open questions to settle in the same conversation: whether two tokens
-  may name one underlying object in V1 and whether a resource may be closed
-  while a guest call is active.
+- [ ] Get Nye's answers to the four questions at the end of the draft in
+  `crates/lappet/docs/host-resources.md` and any changes to the draft itself.
+- [ ] Remove the draft banner from that page, apply its accepted amendments to
+  `crates/lappet/docs/host-abi.md` under `Resource table` and `Host context`
+  and remove the roadmap's open decision.
+- [ ] Everything stays `pub(crate)` until the manifest-driven public API
+  exists. Phases 3 to 5 implement the accepted page, not this plan's summary
+  of it.
 
-Exit: the decision is recorded in the permanent owner. Phases 1 and 2 don't
-wait for it.
+Exit: the page is accepted and the adapter responsibilities agree with it.
+Phases 1 and 2 don't wait for it.
 
 ## Phase 1: staging table
 
@@ -189,8 +185,7 @@ Exit: unit tests pass.
 - [ ] Implement the call-scoped guard. Shared access may coexist with shared
   access. Exclusive access conflicts with any other access to the same
   underlying object. Dropping the guard releases the access.
-- [ ] Apply the Phase 0 answer on two tokens naming one object. If V1 allows
-  it, conflict tracking keys on the object, not the token.
+- [ ] Key conflict tracking on the table entry, as the accepted API states.
 - [ ] A conflict is a boundary fault and the host function isn't called.
 - [ ] Write a fixture whose export receives tokens as `i64` arguments and
   passes them to test host imports.

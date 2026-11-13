@@ -37,8 +37,8 @@ compiler crate, so they proceed while compiler work continues on `main`.
 | 1 | Separate the CLI from the compiler library | Delivered | Delivered | None |
 | 2 | Establish Wasmtime execution | `crates/lappet` only | Now | [Runtime foundation](../../docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md) |
 | 3 | Build host boundary tables and fault mechanics | `crates/lappet` only | Milestone 2 delivers instances, limits and fault quarantine | [Host boundary tables](../../docs/roadmap/plans/lappet-host-boundary-tables-plan.md) |
-| 4 | Extract the shared host contract crate | New crate, `src/host`, `src/builder`, `xtask` | Nye confirms the split and const functions are on `main` | [Host contract crate](../../docs/roadmap/plans/lappet-host-contract-crate-plan.md) |
-| 5 | Finish the native binding and artefact handoff | `src/builder`, `src/build_system`, `src/builder_surface` | Const functions are on `main` and milestone 4 is delivered or declined | [Native binding handoff](../../docs/roadmap/plans/lappet-native-binding-handoff-plan.md) |
+| 4 | Extract the shared host contract crate | New crate, `src/host`, `src/builder`, `xtask` | Const functions are on `main` | [Host contract crate](../../docs/roadmap/plans/lappet-host-contract-crate-plan.md) |
+| 5 | Finish the native binding and artefact handoff | `src/builder`, `src/build_system`, `src/builder_surface` | Const functions are on `main` and milestone 4 is delivered | [Native binding handoff](../../docs/roadmap/plans/lappet-native-binding-handoff-plan.md) |
 | 6 | Establish official Core conformance | Lappet, Core references | Milestones 3 and 5 and its own checkpoint | Write when the checkpoint is approved |
 | 7 | Connect real Moth applications | Lappet, public compiler services | The compiler's native host ABI prerequisites | Write when the gate opens |
 | 8 | Package declaration and local catalog foundations | Build system, Stage 0, Lappet | Its checkpoint and the package prerequisites | Write when the checkpoint is approved |
@@ -78,12 +78,11 @@ check, then re-read any authority the merge changed.
 Each needs Nye's answer before the named work starts. Recommendations are
 recorded in the owning plan.
 
-- **Host contract crate.** Whether to extract `moth::host` into a small
-  dependency-free `moth-host` crate so Lappet's runtime never depends on the
-  compiler. Recommended. Blocks milestone 4 only.
-- **Host resource and context API.** The Rust shape for creating, closing and
-  borrowing resources and for supplying per-call context. Blocks the resource
-  phases of milestone 3. The staging table and token generator don't wait.
+- **Host resource and context API.** The
+  [draft design](docs/host-resources.md) awaits review. It ends with four
+  questions and five amendments to the adapter responsibilities. Blocks the
+  resource phases of milestone 3. The staging table and token generator don't
+  wait.
 - **Runtime policy defaults.** Provisional limits are recorded in the runtime
   foundation plan. Milestone 2 gathers the evidence and Nye confirms the final
   values before they move into the runtime design.
@@ -207,10 +206,10 @@ until Moth's backend can produce the equivalent program.
 
 Plan: [Host boundary tables](../../docs/roadmap/plans/lappet-host-boundary-tables-plan.md).
 
-**Checkpoint.** Approve the Rust host resource and context API before the
-resource phases. The staging table, the token generator and their fault
-handling follow the accepted [adapter responsibilities](docs/host-abi.md) and
-need no further decision.
+**Checkpoint.** Approve the [draft host resource and context API](docs/host-resources.md)
+before the resource phases. The staging table, the token generator and their
+fault handling follow the accepted [adapter responsibilities](docs/host-abi.md)
+and need no further decision.
 
 **Delivery.** Implement the per-instance staging table, the process-wide token
 generator, the per-instance resource table with call-scoped access guards and
@@ -227,10 +226,11 @@ follow the V1 protocol by hand and prove Lappet's mechanics only.
 
 Plan: [Host contract crate](../../docs/roadmap/plans/lappet-host-contract-crate-plan.md).
 
-**Checkpoint.** Confirm the dependency split recorded in the plan. Lappet's
-runtime would depend on a small `moth-host` contract crate and Wasmtime, never
-on the compiler. The compiler would depend on the same crate and keep the
-`moth::host` path. Only Lappet's future package feature would depend on the
+**Checkpoint.** Accepted on 13 November 2026 and recorded in the
+[runtime design](docs/design.md#users-and-workspace-dependencies). Lappet's
+runtime depends on a small `moth-host` contract crate and Wasmtime, never on
+the compiler. The compiler depends on the same crate and keeps the
+`moth::host` path. Only Lappet's future package feature depends on the
 compiler.
 
 **Delivery.** Move the host descriptor vocabulary into the contract crate,

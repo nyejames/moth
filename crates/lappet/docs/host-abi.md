@@ -83,7 +83,9 @@ protocol itself is defined by the native host ABI.
 ## Resource table
 
 Each instance owns a table of its opaque host resources. Rust code creates and
-closes resources through the host resource API, which is later runtime design.
+closes resources through the host resource API. Its
+[draft design](host-resources.md) awaits review and proposes amendments to this
+section and to host context.
 
 - Tokens come from one process-wide generator, so they are nonzero, unique
   across every runtime and instance in the process and never reused. A token
