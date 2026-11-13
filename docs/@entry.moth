@@ -1,4 +1,5 @@
 @styles navbar, section, theme_head, highlight, sidebar, init_docs_sidebar
+@html img, div
 
 [$in title:["What is Moth?"]]
 [$in description:["Introduction to the Moth language and toolchain."]]
@@ -7,9 +8,19 @@
 [navbar]
 [sidebar]
 init_docs_sidebar()!
+
+
 [section, $md:
 
-    # What is Moth?
+    [div:
+        [$md:
+            # What is Moth?
+        ]
+
+        [img, @assets/moth-brown.png:
+            [$in style, $css "inline": max-width: 100px;]
+        ]
+    ]
 
     Moth is a new programming language and toolchain.
 

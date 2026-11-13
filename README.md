@@ -1,5 +1,5 @@
 <div align="center">
-<img src="./docs/assets/moth-logo.webp" width="10%"/>
+<img src="./docs/assets/moth-brown.png" width="12%"/>
 <br>
 
 # Moth
