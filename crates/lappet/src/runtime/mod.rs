@@ -43,6 +43,7 @@ mod imports;
 mod instance;
 mod limits;
 mod module;
+mod resource;
 mod staging;
 
 #[cfg(test)]

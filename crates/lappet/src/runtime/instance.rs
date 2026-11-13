@@ -5,11 +5,15 @@
 //!
 //! [`Instance::call`] is the only way into guest code after instantiation. It owns quarantine:
 //! the first fault marks the instance, and every later call is refused there without entering
-//! the guest. V1 has no reset, so a faulted instance can only be dropped.
+//! the guest. V1 has no reset. A faulted instance can still close and drain its resources.
 
 use super::error::{BoundaryFault, LinkError, RuntimeError};
 use super::fault::{GuestEntry, classify_guest_failure};
 use super::limits::InstanceLimits;
+use super::resource::{
+    DrainedResources, InstanceKind, ResourceError, ResourceTable, ResourceToken, Sendable,
+    ThreadBound,
+};
 use super::staging::StagingTable;
 use wasmtime::{InstancePre, Store, StoreLimits, WasmParams, WasmResults};
 
@@ -37,23 +41,30 @@ impl Deadline {
 }
 
 /// Everything a store owns besides the guest itself.
-pub(super) struct StoreData<HostState> {
+pub(super) struct StoreData<HostState, Kind: InstanceKind = Sendable> {
     pub(super) host_state: HostState,
     pub(super) limits: InstanceLimits,
     store_limits: StoreLimits,
     pub(super) staging: StagingTable,
+    pub(super) resources: ResourceTable<Kind::Object>,
 }
 
 /// A compiled module whose imports are already checked against one set of host imports.
-pub(crate) struct PreparedModule<HostState: 'static> {
-    instance_pre: InstancePre<StoreData<HostState>>,
+pub(crate) struct PreparedModule<HostState: 'static, Kind: InstanceKind = Sendable> {
+    instance_pre: InstancePre<StoreData<HostState, Kind>>,
 }
 
-impl<HostState: 'static> PreparedModule<HostState> {
-    pub(super) fn new(instance_pre: InstancePre<StoreData<HostState>>) -> Self {
+impl<HostState: 'static, Kind: InstanceKind> PreparedModule<HostState, Kind> {
+    pub(super) fn new(instance_pre: InstancePre<StoreData<HostState, Kind>>) -> Self {
         Self { instance_pre }
     }
+}
 
+impl<HostState, Kind> PreparedModule<HostState, Kind>
+where
+    HostState: super::resource::HostStateBound<Kind>,
+    Kind: InstanceKind,
+{
     /// Creates an isolated instance and runs its Wasm start function, if it has one.
     ///
     /// The limits and the deadline are in force before any guest code runs. On failure the
@@ -63,7 +74,7 @@ impl<HostState: 'static> PreparedModule<HostState> {
         host_state: HostState,
         limits: InstanceLimits,
         start_deadline: Deadline,
-    ) -> Result<Instance<HostState>, RuntimeError> {
+    ) -> Result<Instance<HostState, Kind>, RuntimeError> {
         let module = self.instance_pre.module();
         limits
             .check_module(module)
@@ -74,6 +85,7 @@ impl<HostState: 'static> PreparedModule<HostState> {
             limits,
             store_limits: limits.store_limits(),
             staging: StagingTable::new(),
+            resources: ResourceTable::new(),
         };
         let mut store = Store::new(module.engine(), store_data);
         store.limiter(|store_data| &mut store_data.store_limits);
@@ -101,14 +113,17 @@ impl<HostState: 'static> PreparedModule<HostState> {
 }
 
 /// One running guest with its store and host state.
-pub(crate) struct Instance<HostState: 'static> {
-    store: Store<StoreData<HostState>>,
+///
+/// `Kind` is [`Sendable`] by default. A [`ThreadBound`] instance uses the same table and the
+/// same calls, and the compiler stops it leaving its thread.
+pub(crate) struct Instance<HostState: 'static, Kind: InstanceKind = Sendable> {
+    store: Store<StoreData<HostState, Kind>>,
     instance: wasmtime::Instance,
     /// Set by the first fault and never cleared. Only [`Instance::call`] reads or writes it.
     is_quarantined: bool,
 }
 
-impl<HostState: 'static> Instance<HostState> {
+impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
     /// Calls an exported function by its physical Wasm signature.
     ///
     /// Taking `&mut self` means no call can start while another is active. A missing export or
@@ -185,18 +200,69 @@ impl<HostState: 'static> Instance<HostState> {
         self.store.data().staging.has_live_ticket()
     }
 
-    /// A fault ends the call. The staging table is cleared here, and the instance can only be
-    /// dropped afterwards.
+    /// A fault ends guest calls. The staging table is cleared. Resources stay, so the embedder
+    /// can still close and drain them.
     fn quarantine(&mut self) {
         self.is_quarantined = true;
         self.store.data_mut().staging.clear();
     }
+
+    /// Resolves a token to its value. The type is checked before the reference is returned.
+    pub(crate) fn resource<T: 'static>(
+        &self,
+        token: ResourceToken<T>,
+    ) -> Result<&T, ResourceError> {
+        self.store.data().resources.get(token)
+    }
+
+    pub(crate) fn resource_mut<T: 'static>(
+        &mut self,
+        token: ResourceToken<T>,
+    ) -> Result<&mut T, ResourceError> {
+        self.store.data_mut().resources.get_mut(token)
+    }
+
+    /// Removes the entry and returns the value. A faulted instance can still close.
+    pub(crate) fn close_resource<T: 'static>(
+        &mut self,
+        token: ResourceToken<T>,
+    ) -> Result<T, ResourceError> {
+        self.store.data_mut().resources.close(token)
+    }
+
+    /// Returns every remaining value in creation order and leaves the table empty.
+    pub(crate) fn drain_resources(&mut self) -> DrainedResources {
+        self.store.data_mut().resources.drain()
+    }
 }
 
-impl<HostState: 'static> Drop for Instance<HostState> {
+impl<HostState: 'static> Instance<HostState, Sendable> {
+    /// Inserts a `Send` value and returns its token. The table owns the value.
+    pub(crate) fn insert_resource<T: Send + 'static>(
+        &mut self,
+        value: T,
+    ) -> Result<ResourceToken<T>, ResourceError> {
+        let limits = self.store.data().limits;
+        self.store.data_mut().resources.insert(value, &limits)
+    }
+}
+
+impl<HostState: 'static> Instance<HostState, ThreadBound> {
+    /// Inserts any `'static` value. The instance cannot move to another thread.
+    pub(crate) fn insert_resource<T: 'static>(
+        &mut self,
+        value: T,
+    ) -> Result<ResourceToken<T>, ResourceError> {
+        let limits = self.store.data().limits;
+        self.store.data_mut().resources.insert(value, &limits)
+    }
+}
+
+impl<HostState: 'static, Kind: InstanceKind> Drop for Instance<HostState, Kind> {
     fn drop(&mut self) {
         // Teardown uses the same clear as a fault, so a live ticket can't outlive the instance
-        // even if a later drop observer still sees the store.
+        // even if a later drop observer still sees the store. Resources drop with the store, in
+        // creation order, from the table's own drop.
         self.store.data_mut().staging.clear();
     }
 }

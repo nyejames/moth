@@ -14,6 +14,7 @@ mod fault_tests;
 mod instance_tests;
 mod limit_tests;
 mod policy_measurements;
+mod resource_tests;
 mod staged_text_tests;
 mod staging_tests;
 

@@ -11,6 +11,7 @@ resolver = "2"
 # Direct Cargo and just use the same warning policy, without recipe-only -D flags.
 [workspace.lints.rust]
 warnings = "deny"
+unexpected_cfgs = { level = "deny", check-cfg = ["cfg(lappet_reject_non_send_insert)"] }
 
 [lints]
 workspace = true

@@ -14,6 +14,7 @@ use super::fault::run_host_import;
 use super::instance::{PreparedModule, StoreData};
 use super::limits::InstanceLimits;
 use super::module::CompiledModule;
+use super::resource::InstanceKind;
 use super::staging::{StagingError, StagingTable};
 use wasmtime::{Caller, Engine, Extern, FuncType, Linker, UnknownImportError, Val, ValType};
 
@@ -21,11 +22,11 @@ use wasmtime::{Caller, Engine, Extern, FuncType, Linker, UnknownImportError, Val
 ///
 /// Registration is store-independent, so one set of imports serves every instance prepared
 /// from it. Mutable state lives in each instance's `HostState`, never in the import closures.
-pub(crate) struct HostImports<HostState: 'static> {
-    linker: Linker<StoreData<HostState>>,
+pub(crate) struct HostImports<HostState: 'static, Kind: InstanceKind = super::resource::Sendable> {
+    linker: Linker<StoreData<HostState, Kind>>,
 }
 
-impl<HostState: 'static> HostImports<HostState> {
+impl<HostState: 'static, Kind: InstanceKind> HostImports<HostState, Kind> {
     pub(crate) fn new(engine: &RuntimeEngine) -> Self {
         // A new linker rejects a second definition of one name and defines nothing by itself.
         // An import the host didn't register is therefore always a link error, never a stub.
@@ -98,7 +99,7 @@ impl<HostState: 'static> HostImports<HostState> {
     pub(crate) fn prepare(
         &self,
         module: &CompiledModule,
-    ) -> Result<PreparedModule<HostState>, RuntimeError> {
+    ) -> Result<PreparedModule<HostState, Kind>, RuntimeError> {
         // Wasmtime reports a cross-engine module as untyped text, so check the identity here.
         if !Engine::same(self.linker.engine(), module.wasmtime().engine()) {
             return Err(RuntimeError::EngineMismatch);
@@ -134,7 +135,9 @@ const STAGED_TEXT_TAKE: &str = "staged_text_take";
 /// name for it yet, so the take import uses the fixture convention.
 const GUEST_MEMORY_EXPORT: &str = "memory";
 
-fn install_staged_text_take<HostState: 'static>(linker: &mut Linker<StoreData<HostState>>) {
+fn install_staged_text_take<HostState: 'static, Kind: InstanceKind>(
+    linker: &mut Linker<StoreData<HostState, Kind>>,
+) {
     let signature = FuncType::new(
         linker.engine(),
         [ValType::I64, ValType::I32, ValType::I32],
@@ -162,8 +165,8 @@ fn install_staged_text_take<HostState: 'static>(linker: &mut Linker<StoreData<Ho
         .expect("a fresh linker accepts the reserved take import");
 }
 
-fn copy_staged_text<HostState>(
-    caller: &mut Caller<'_, StoreData<HostState>>,
+fn copy_staged_text<HostState, Kind: InstanceKind>(
+    caller: &mut Caller<'_, StoreData<HostState, Kind>>,
     ticket: u64,
     destination: i32,
     length: i32,

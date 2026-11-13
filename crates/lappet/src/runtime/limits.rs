@@ -33,17 +33,20 @@ pub struct InstanceLimits {
     pub max_staged_entry_bytes: usize,
     /// Largest total of staged text live in the instance, in bytes.
     pub max_staged_live_bytes: usize,
+    /// Largest number of resource entries live in the instance.
+    pub max_live_resources: usize,
 }
 
 impl Default for InstanceLimits {
     /// The provisional V1 defaults: 256 MiB of linear memory, 65,536 table elements, 16 MiB
-    /// per staged entry and 64 MiB of staged text live.
+    /// per staged entry, 64 MiB of staged text live and 1,048,576 resource entries.
     fn default() -> Self {
         Self {
             max_memory_bytes: 256 * 1024 * 1024,
             max_table_elements: 65_536,
             max_staged_entry_bytes: 16 * 1024 * 1024,
             max_staged_live_bytes: 64 * 1024 * 1024,
+            max_live_resources: 1_048_576,
         }
     }
 }
