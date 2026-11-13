@@ -329,6 +329,20 @@ impl<Object: ?Sized + Erased> ResourceTable<Object> {
         self.entries.get(&raw).ok_or(BoundaryFault::TokenNotLive)
     }
 
+    /// Checks an export argument before guest entry. A failure leaves the table unchanged.
+    pub(crate) fn check_argument(
+        &self,
+        raw: i64,
+        type_id: std::any::TypeId,
+    ) -> Result<(), BoundaryFault> {
+        let entry = self.live(raw)?;
+        if entry.type_id == type_id {
+            Ok(())
+        } else {
+            Err(BoundaryFault::TokenTypeMismatch)
+        }
+    }
+
     fn reject_wrong_type<T: 'static>(
         &self,
         entry: &LiveEntry<Object>,

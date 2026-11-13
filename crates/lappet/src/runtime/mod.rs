@@ -2,8 +2,8 @@
 //!
 //! This module owns the engine, compiled modules, isolated instances, their limits and the
 //! classified errors every runtime failure is reported through. It establishes runtime
-//! mechanics only: nothing here knows the Moth host ABI, a host descriptor or a compiled Moth
-//! artefact.
+//! mechanics: it drives the reserved call-scope helper names and does not know a host
+//! descriptor or a compiled Moth artefact.
 //!
 //! Data flows one way:
 //!
@@ -14,7 +14,9 @@
 //! 3. `HostImports` (`imports.rs`) registers host functions by physical Wasm signature and
 //!    checks a module's imports once, producing a `PreparedModule`.
 //! 4. `Instance` (`instance.rs`) owns one store, one guest and one host state under
-//!    [`InstanceLimits`] (`limits.rs`). Its `call` is the only guest entry and owns quarantine.
+//!    [`InstanceLimits`] (`limits.rs`). Its `call` is the guest entry and owns quarantine.
+//!    Context moves into that store for the call and back out before it returns. A scoped
+//!    export call drives the native host ABI's scope helpers and skips close after a fault.
 //! 5. `fault.rs` classifies a failed host import or guest entry into a [`RuntimeError`]
 //!    (`error.rs`).
 //!
@@ -36,6 +38,7 @@
     )
 )]
 
+mod context;
 mod engine;
 mod error;
 mod fault;
@@ -50,6 +53,6 @@ mod staging;
 mod tests;
 
 pub use engine::{NativeOptimisation, RuntimeEngine};
-pub use error::{BoundaryFault, HostFault, LimitFault, LinkError, RuntimeError};
+pub use error::{BoundaryFault, ContextFault, HostFault, LimitFault, LinkError, RuntimeError};
 pub use limits::InstanceLimits;
 pub use module::CompiledModule;

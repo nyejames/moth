@@ -51,6 +51,9 @@ pub enum RuntimeError {
 
     /// A ticket, token, span or frame broke the host ABI. The instance is quarantined.
     BoundaryFault(BoundaryFault),
+    /// An export argument failed a check before guest entry. The guest was not entered and
+    /// the instance stays usable.
+    ExportArgument(BoundaryFault),
     // After a fault.
     /// The instance faulted earlier and is quarantined. Guest code was not entered.
     InstanceFaulted,
@@ -100,6 +103,8 @@ pub enum BoundaryFault {
     TokenTypeMismatch,
     /// The token is already borrowed in a way this use conflicts with.
     TokenConflict,
+    /// An export status or result field is not one of the canonical values.
+    NoncanonicalStatus,
 }
 
 impl std::error::Error for BoundaryFault {}
@@ -117,6 +122,7 @@ impl fmt::Display for BoundaryFault {
             Self::TokenNotLive => "the resource token is not live in this instance",
             Self::TokenTypeMismatch => "the resource token has another type",
             Self::TokenConflict => "the resource token is already borrowed",
+            Self::NoncanonicalStatus => "the export status or result frame is not canonical",
         })
     }
 }
@@ -152,6 +158,20 @@ pub enum HostFault {
     /// The native side broke an invariant that is neither a guest trap nor a reported host
     /// failure, such as a host import producing a result of the wrong Wasm type.
     Internal { source: ErrorSource },
+
+    /// The embedder's context was missing or had another type, so the host function was not
+    /// called.
+    Context(ContextFault),
+}
+
+/// Why a host function did not receive its context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ContextFault {
+    /// The holder was empty.
+    Missing,
+    /// The holder carried a value of another type.
+    WrongType,
 }
 
 impl RuntimeError {
@@ -195,6 +215,9 @@ impl fmt::Display for RuntimeError {
             Self::LimitExceeded { limit, .. } => limit.fmt(formatter),
             Self::HostFault(host_fault) => host_fault.fmt(formatter),
             Self::BoundaryFault(boundary_fault) => boundary_fault.fmt(formatter),
+            Self::ExportArgument(_) => {
+                formatter.write_str("an export argument was rejected before the guest was entered")
+            }
 
             Self::InstanceFaulted => {
                 formatter.write_str("the instance faulted earlier and can't be called again")
@@ -217,6 +240,7 @@ impl Error for RuntimeError {
 
             Self::Link(link_error) => link_error.source(),
             Self::HostFault(host_fault) => host_fault.source(),
+            Self::ExportArgument(fault) => Some(fault),
 
             Self::BoundaryFault(_) | Self::EngineMismatch | Self::InstanceFaulted => None,
         }
@@ -285,6 +309,12 @@ impl fmt::Display for HostFault {
             Self::Failed { .. } => formatter.write_str("a host import failed"),
             Self::Panicked { message } => write!(formatter, "a host import panicked: {message}"),
             Self::Internal { .. } => formatter.write_str("the native host side failed"),
+            Self::Context(ContextFault::Missing) => {
+                formatter.write_str("the host function's context is missing")
+            }
+            Self::Context(ContextFault::WrongType) => {
+                formatter.write_str("the host function's context has another type")
+            }
         }
     }
 }
@@ -293,7 +323,7 @@ impl Error for HostFault {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Failed { source } | Self::Internal { source } => Some(source.as_ref()),
-            Self::Panicked { .. } => None,
+            Self::Panicked { .. } | Self::Context(_) => None,
         }
     }
 }

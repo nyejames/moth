@@ -38,7 +38,7 @@ fn define(imports: &mut HostImports<AccessHost>) -> Result<(), RuntimeError> {
         "shared",
         [ValType::I64],
         [],
-        |host, _, _, resources, arguments, _| {
+        |host, _, _, resources, _context, arguments, _| {
             resources.with_access(&[request(token(arguments), false)], |_| {
                 host.ran = true;
             })?;
@@ -50,7 +50,7 @@ fn define(imports: &mut HostImports<AccessHost>) -> Result<(), RuntimeError> {
         "exclusive",
         [ValType::I64],
         [],
-        |host, _, _, resources, arguments, _| {
+        |host, _, _, resources, _context, arguments, _| {
             resources.with_access(&[request(token(arguments), true)], |access| {
                 let _ = access.exclusive::<u32>(0);
                 host.ran = true;
@@ -63,7 +63,7 @@ fn define(imports: &mut HostImports<AccessHost>) -> Result<(), RuntimeError> {
         "shared_both",
         [ValType::I64, ValType::I64],
         [],
-        |host, _, _, resources, arguments, _| {
+        |host, _, _, resources, _context, arguments, _| {
             let second = arguments[1].i64().expect("the import takes two i64 tokens");
             resources.with_access(
                 &[request(token(arguments), false), request(second, false)],
@@ -81,7 +81,7 @@ fn define(imports: &mut HostImports<AccessHost>) -> Result<(), RuntimeError> {
         "exclusive_then_shared",
         [ValType::I64],
         [],
-        |host, _, _, resources, arguments, _| {
+        |host, _, _, resources, _context, arguments, _| {
             let raw = token(arguments);
             resources.with_access(&[request(raw, true), request(raw, false)], |_| {
                 host.ran = true;
@@ -94,7 +94,7 @@ fn define(imports: &mut HostImports<AccessHost>) -> Result<(), RuntimeError> {
         "panic_holding",
         [ValType::I64],
         [],
-        |_host, _, _, resources, arguments, _| {
+        |_host, _, _, resources, _context, arguments, _| {
             resources.with_access(&[request(token(arguments), true)], |_| {
                 panic!("host import bug while holding a resource");
             })?;

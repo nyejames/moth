@@ -9,6 +9,7 @@
 //! other files share the `guest.wat` fixture and the [`TestHost`] state defined here.
 
 mod access_tests;
+mod context_tests;
 mod embedding_program;
 mod engine_tests;
 mod fault_tests;
@@ -16,6 +17,7 @@ mod instance_tests;
 mod limit_tests;
 mod policy_measurements;
 mod resource_tests;
+mod scope_tests;
 mod staged_text_tests;
 mod staging_tests;
 
@@ -163,7 +165,7 @@ fn define_test_host_imports(imports: &mut HostImports<TestHost>) -> Result<(), R
         "read_value",
         [],
         [ValType::I32],
-        |host, _staging, _limits, _resources, _arguments, results| {
+        |host, _staging, _limits, _resources, _context, _arguments, results| {
             results[0] = Val::I32(host.value);
             Ok(())
         },
@@ -173,7 +175,7 @@ fn define_test_host_imports(imports: &mut HostImports<TestHost>) -> Result<(), R
         "record",
         [ValType::I32],
         [],
-        |host, _staging, _limits, _resources, arguments, _results| {
+        |host, _staging, _limits, _resources, _context, arguments, _results| {
             let value = arguments[0].i32().expect("the import takes one i32");
             host.recorded.push(value);
             Ok(())
@@ -184,7 +186,7 @@ fn define_test_host_imports(imports: &mut HostImports<TestHost>) -> Result<(), R
         "advance_epoch",
         [],
         [],
-        |host, _staging, _limits, _resources, _arguments, _results| {
+        |host, _staging, _limits, _resources, _context, _arguments, _results| {
             host.engine.advance_epoch();
             Ok(())
         },
@@ -196,28 +198,34 @@ fn define_test_host_imports(imports: &mut HostImports<TestHost>) -> Result<(), R
         "fail",
         [],
         [],
-        |_host, _staging, _limits, _resources, _arguments, _results| Err("the disk is full".into()),
+        |_host, _staging, _limits, _resources, _context, _arguments, _results| {
+            Err("the disk is full".into())
+        },
     )?;
     imports.define(
         "host",
         "panic",
         [],
         [],
-        |_host, _staging, _limits, _resources, _arguments, _results| panic!("host import bug"),
+        |_host, _staging, _limits, _resources, _context, _arguments, _results| {
+            panic!("host import bug")
+        },
     )?;
     imports.define(
         "host",
         "panic_with_payload_that_panics_when_dropped",
         [],
         [],
-        |_host, _staging, _limits, _resources, _arguments, _results| panic_any(PanicsWhenDropped),
+        |_host, _staging, _limits, _resources, _context, _arguments, _results| {
+            panic_any(PanicsWhenDropped)
+        },
     )?;
     imports.define(
         "host",
         "wrong_result_type",
         [],
         [ValType::I32],
-        |_host, _staging, _limits, _resources, _arguments, results| {
+        |_host, _staging, _limits, _resources, _context, _arguments, results| {
             results[0] = Val::I64(7);
             Ok(())
         },

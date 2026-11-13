@@ -4,10 +4,12 @@
 //! typed by its physical Wasm signature here. Canonical identities, descriptors and value
 //! conversion belong to the adapters.
 //!
-//! A host import receives its instance's host state, the staging table and the call's Wasm
-//! values. It gets no handle that could call an export, so it can't re-enter the guest. The
-//! reserved take import is the one exception that writes guest memory, and it writes only.
+//! A host import receives its instance's host state, the staging table, the per-call context
+//! and the call's Wasm values. It gets no handle that could call an export, so it can't
+//! re-enter the guest. The reserved take import is the one exception that writes guest memory,
+//! and it writes only.
 
+use super::context::CallContext;
 use super::engine::RuntimeEngine;
 use super::error::{BoundaryFault, ErrorSource, LinkError, RuntimeError};
 use super::fault::run_host_import;
@@ -53,6 +55,7 @@ impl<HostState: 'static, Kind: InstanceKind> HostImports<HostState, Kind> {
             &mut StagingTable,
             &InstanceLimits,
             &ResourceTable<Kind::Object>,
+            &mut CallContext<'_>,
             &[Val],
             &mut [Val],
         ) -> Result<(), ErrorSource>
@@ -71,12 +74,14 @@ impl<HostState: 'static, Kind: InstanceKind> HostImports<HostState, Kind> {
                     return Err(wasmtime::Error::new(BoundaryFault::TicketLiveAtImport));
                 }
                 let data = caller.data_mut();
+                let mut context = CallContext::new(&mut data.context);
                 run_host_import(|| {
                     host_function(
                         &mut data.host_state,
                         &mut data.staging,
                         &data.limits,
                         &data.resources,
+                        &mut context,
                         arguments,
                         results,
                     )

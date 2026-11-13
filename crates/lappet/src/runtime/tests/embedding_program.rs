@@ -32,7 +32,7 @@ fn run_embedding_program(optimisation: NativeOptimisation) -> Result<(), Runtime
         "read_value",
         [],
         [ValType::I32],
-        |host_state, _staging, _limits, _resources, _arguments, results| {
+        |host_state, _staging, _limits, _resources, _context, _arguments, results| {
             results[0] = Val::I32(host_state.value);
             Ok(())
         },

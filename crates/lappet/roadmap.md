@@ -418,7 +418,13 @@ ceiling is 1,048,576. Phase 4: a host call checks every token before any Rust
 reference exists. Shared borrows coexist and an exclusive borrow conflicts
 with any other borrow of that entry. The borrows are released when the call
 returns or panics. Stale, closed, other-instance, wrong-type and conflicting
-tokens are boundary faults and the host body does not run.
+tokens are boundary faults and the host body does not run. Phase 5: context
+moves into the instance for one call and back to the holder on every outcome,
+including a caught host panic. A missing or wrong-type context is a host fault
+and the host function does not run. A scoped export opens, reserves, calls
+once, copies the returned span and closes. A trap, a noncanonical status or a
+noncanonical span skips close and makes no further guest call. A bad token
+argument is rejected before guest entry and the instance stays usable.
 
 ## 4. Extract the shared host contract crate
 

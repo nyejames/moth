@@ -34,7 +34,10 @@ pub(super) fn run_host_import(
         Ok(Ok(())) => return Ok(()),
         Ok(Err(source)) => match source.downcast::<super::error::BoundaryFault>() {
             Ok(fault) => return Err(wasmtime::Error::new(*fault)),
-            Err(source) => HostFault::Failed { source },
+            Err(source) => match source.downcast::<HostFault>() {
+                Ok(fault) => return Err(wasmtime::Error::new(*fault)),
+                Err(source) => HostFault::Failed { source },
+            },
         },
         Err(panic_payload) => {
             let message = panic_message(panic_payload.as_ref());

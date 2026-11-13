@@ -73,6 +73,25 @@ fn import_the_host_does_not_provide_is_a_missing_import() {
 }
 
 #[test]
+fn an_extra_physical_import_fails_before_guest_start() {
+    under_both_optimisations(|optimisation| {
+        let harness = GuestHarness::new(optimisation);
+        // The start function would trap if preparation succeeded and instantiation ran.
+        let result = harness.prepare(
+            r#"(module
+                (import "host" "read_value" (func (result i32)))
+                (import "host" "not_defined" (func))
+                (func $start unreachable)
+                (start $start))"#,
+        );
+        let Err(RuntimeError::Link(LinkError::MissingImport { module, name })) = result else {
+            panic!("expected the extra import to be rejected before guest start");
+        };
+        assert_eq!((module.as_str(), name.as_str()), ("host", "not_defined"));
+    });
+}
+
+#[test]
 fn import_with_another_physical_signature_is_a_mismatch() {
     under_both_optimisations(|optimisation| {
         let harness = GuestHarness::new(optimisation);
@@ -98,7 +117,7 @@ fn defining_one_import_name_twice_is_rejected() {
             "read_value",
             [],
             [ValType::I32],
-            |_host, _staging, _limits, _resources, _arguments, _results| Ok(()),
+            |_host, _staging, _limits, _resources, _context, _arguments, _results| Ok(()),
         );
 
         let Err(RuntimeError::Link(LinkError::ImportDefinition { module, name, .. })) = result

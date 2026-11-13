@@ -32,6 +32,7 @@ fn prepared_from(
              staging: &mut StagingTable,
              limits,
              _resources,
+             _context,
              _arguments,
              results| {
                 let ticket = staging
@@ -48,7 +49,7 @@ fn prepared_from(
             "record",
             [ValType::I32],
             [],
-            |host, _staging, _limits, _resources, arguments, _results| {
+            |host, _staging, _limits, _resources, _context, arguments, _results| {
                 host.recorded
                     .push(arguments[0].i32().expect("the import takes one i32"));
                 Ok(())
