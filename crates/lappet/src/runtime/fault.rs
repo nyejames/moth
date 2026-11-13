@@ -54,6 +54,10 @@ pub(super) fn classify_guest_failure(error: wasmtime::Error, entry: GuestEntry) 
         Ok(host_fault) => return RuntimeError::HostFault(host_fault),
         Err(error) => error,
     };
+    let error = match error.downcast::<super::error::BoundaryFault>() {
+        Ok(boundary_fault) => return RuntimeError::BoundaryFault(boundary_fault),
+        Err(error) => error,
+    };
 
     let trap = error.downcast_ref::<Trap>().copied();
     let source = error.into_boxed_dyn_error();

@@ -14,6 +14,7 @@ mod fault_tests;
 mod instance_tests;
 mod limit_tests;
 mod policy_measurements;
+mod staged_text_tests;
 mod staging_tests;
 
 use crate::runtime::imports::HostImports;
@@ -160,7 +161,7 @@ fn define_test_host_imports(imports: &mut HostImports<TestHost>) -> Result<(), R
         "read_value",
         [],
         [ValType::I32],
-        |host, _arguments, results| {
+        |host, _staging, _limits, _arguments, results| {
             results[0] = Val::I32(host.value);
             Ok(())
         },
@@ -170,7 +171,7 @@ fn define_test_host_imports(imports: &mut HostImports<TestHost>) -> Result<(), R
         "record",
         [ValType::I32],
         [],
-        |host, arguments, _results| {
+        |host, _staging, _limits, arguments, _results| {
             let value = arguments[0].i32().expect("the import takes one i32");
             host.recorded.push(value);
             Ok(())
@@ -181,32 +182,40 @@ fn define_test_host_imports(imports: &mut HostImports<TestHost>) -> Result<(), R
         "advance_epoch",
         [],
         [],
-        |host, _arguments, _results| {
+        |host, _staging, _limits, _arguments, _results| {
             host.engine.advance_epoch();
             Ok(())
         },
     )?;
 
     // The ways a host import can fault.
-    imports.define("host", "fail", [], [], |_host, _arguments, _results| {
-        Err("the disk is full".into())
-    })?;
-    imports.define("host", "panic", [], [], |_host, _arguments, _results| {
-        panic!("host import bug")
-    })?;
+    imports.define(
+        "host",
+        "fail",
+        [],
+        [],
+        |_host, _staging, _limits, _arguments, _results| Err("the disk is full".into()),
+    )?;
+    imports.define(
+        "host",
+        "panic",
+        [],
+        [],
+        |_host, _staging, _limits, _arguments, _results| panic!("host import bug"),
+    )?;
     imports.define(
         "host",
         "panic_with_payload_that_panics_when_dropped",
         [],
         [],
-        |_host, _arguments, _results| panic_any(PanicsWhenDropped),
+        |_host, _staging, _limits, _arguments, _results| panic_any(PanicsWhenDropped),
     )?;
     imports.define(
         "host",
         "wrong_result_type",
         [],
         [ValType::I32],
-        |_host, _arguments, results| {
+        |_host, _staging, _limits, _arguments, results| {
             results[0] = Val::I64(7);
             Ok(())
         },

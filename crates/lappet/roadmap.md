@@ -405,6 +405,10 @@ fault, but the resource API returns that as an insertion error because no
 guest call is running. The API wins. Phase 1: the staging table issues
 nonzero tickets that are never reused, keeps a failed take, and reads both
 byte ceilings from `InstanceLimits`. A fault clears the instance's table.
+Phase 2: `moth-abi-v1.staged_text_take` copies staged text into guest memory
+and consumes the ticket. A bad take, a live ticket at another import and a
+live ticket at entry return are boundary faults that quarantine the instance
+and clear the table. Fixture tests pass under both optimisation levels.
 
 ## 4. Extract the shared host contract crate
 

@@ -94,6 +94,14 @@ impl StagingTable {
         Ok(bytes)
     }
 
+    /// A copy of a live entry, without consuming it.
+    pub(crate) fn staged_bytes(&self, ticket: u64) -> Result<Vec<u8>, StagingError> {
+        self.entries
+            .get(&ticket)
+            .cloned()
+            .ok_or(StagingError::UnknownTicket)
+    }
+
     pub(crate) fn has_live_ticket(&self) -> bool {
         !self.entries.is_empty()
     }

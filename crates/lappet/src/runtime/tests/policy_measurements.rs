@@ -97,7 +97,7 @@ fn workload_imports(engine: &RuntimeEngine) -> Result<HostImports<WorkloadHost>,
         "read_input",
         [ValType::I32],
         [ValType::I32],
-        |host: &mut WorkloadHost, arguments, results| {
+        |host: &mut WorkloadHost, _staging, _limits, arguments, results| {
             let index = arguments[0].i32().expect("the import takes one i32");
             results[0] = Val::I32(host.inputs[index.unsigned_abs() as usize % host.inputs.len()]);
             Ok(())
@@ -108,7 +108,7 @@ fn workload_imports(engine: &RuntimeEngine) -> Result<HostImports<WorkloadHost>,
         "record_depth",
         [ValType::I32],
         [],
-        |host: &mut WorkloadHost, arguments, _results| {
+        |host: &mut WorkloadHost, _staging, _limits, arguments, _results| {
             host.deepest_recursion = arguments[0].i32().expect("the import takes one i32");
             Ok(())
         },

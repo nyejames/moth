@@ -49,6 +49,6 @@ mod staging;
 mod tests;
 
 pub use engine::{NativeOptimisation, RuntimeEngine};
-pub use error::{HostFault, LimitFault, LinkError, RuntimeError};
+pub use error::{BoundaryFault, HostFault, LimitFault, LinkError, RuntimeError};
 pub use limits::InstanceLimits;
 pub use module::CompiledModule;

@@ -7,7 +7,7 @@
 //! the first fault marks the instance, and every later call is refused there without entering
 //! the guest. V1 has no reset, so a faulted instance can only be dropped.
 
-use super::error::{LinkError, RuntimeError};
+use super::error::{BoundaryFault, LinkError, RuntimeError};
 use super::fault::{GuestEntry, classify_guest_failure};
 use super::limits::InstanceLimits;
 use super::staging::StagingTable;
@@ -39,8 +39,9 @@ impl Deadline {
 /// Everything a store owns besides the guest itself.
 pub(super) struct StoreData<HostState> {
     pub(super) host_state: HostState,
+    pub(super) limits: InstanceLimits,
     store_limits: StoreLimits,
-    staging: StagingTable,
+    pub(super) staging: StagingTable,
 }
 
 /// A compiled module whose imports are already checked against one set of host imports.
@@ -70,6 +71,7 @@ impl<HostState: 'static> PreparedModule<HostState> {
 
         let store_data = StoreData {
             host_state,
+            limits,
             store_limits: limits.store_limits(),
             staging: StagingTable::new(),
         };
@@ -83,11 +85,16 @@ impl<HostState: 'static> PreparedModule<HostState> {
             .instance_pre
             .instantiate(&mut store)
             .map_err(|error| classify_guest_failure(error, GuestEntry::StartFunction))?;
-
+        // A start function is an outermost entry. A ticket it leaves live is the same fault as
+        // an export that returns with one live, and no instance is handed out.
+        if store.data().staging.has_live_ticket() {
+            return Err(RuntimeError::BoundaryFault(
+                BoundaryFault::TicketLiveAtReturn,
+            ));
+        }
         Ok(Instance {
             store,
             instance,
-            limits,
             is_quarantined: false,
         })
     }
@@ -97,7 +104,6 @@ impl<HostState: 'static> PreparedModule<HostState> {
 pub(crate) struct Instance<HostState: 'static> {
     store: Store<StoreData<HostState>>,
     instance: wasmtime::Instance,
-    limits: InstanceLimits,
     /// Set by the first fault and never cleared. Only [`Instance::call`] reads or writes it.
     is_quarantined: bool,
 }
@@ -143,7 +149,15 @@ impl<HostState: 'static> Instance<HostState> {
             .set_epoch_deadline(deadline.ticks_beyond_current());
 
         match typed_function.call(&mut self.store, parameters) {
-            Ok(results) => Ok(results),
+            Ok(results) => {
+                if self.has_live_staged_text() {
+                    self.quarantine();
+                    return Err(RuntimeError::BoundaryFault(
+                        BoundaryFault::TicketLiveAtReturn,
+                    ));
+                }
+                Ok(results)
+            }
             Err(error) => {
                 self.quarantine();
                 Err(classify_guest_failure(error, GuestEntry::ExportedCall))
@@ -163,7 +177,8 @@ impl<HostState: 'static> Instance<HostState> {
 
     /// Stages text for the guest. The empty slice returns ticket zero and stores nothing.
     pub(crate) fn stage_text(&mut self, bytes: &[u8]) -> Result<u64, super::staging::StagingError> {
-        self.store.data_mut().staging.stage(bytes, &self.limits)
+        let limits = self.store.data().limits;
+        self.store.data_mut().staging.stage(bytes, &limits)
     }
 
     pub(crate) fn has_live_staged_text(&self) -> bool {

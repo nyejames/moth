@@ -49,6 +49,8 @@ pub enum RuntimeError {
     /// Native host code failed during a guest call.
     HostFault(HostFault),
 
+    /// A ticket, token, span or frame broke the host ABI. The instance is quarantined.
+    BoundaryFault(BoundaryFault),
     // After a fault.
     /// The instance faulted earlier and is quarantined. Guest code was not entered.
     InstanceFaulted,
@@ -76,6 +78,38 @@ pub enum LinkError {
 
     /// The exported function has another physical Wasm signature than the call used.
     ExportSignatureMismatch { name: String, source: ErrorSource },
+}
+
+/// Which host-ABI check failed. This is not a Moth error and not a guest trap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BoundaryFault {
+    /// The ticket is zero, unknown or already taken.
+    UnknownTicket,
+    /// The ticket is live, but the length is not the staged length.
+    WrongLength,
+    /// The destination range is outside the guest memory.
+    DestinationOutOfBounds,
+    /// A host import other than the take import was entered while a ticket was live.
+    TicketLiveAtImport,
+    /// The outermost guest entry returned while a ticket was live.
+    TicketLiveAtReturn,
+}
+
+impl std::error::Error for BoundaryFault {}
+
+impl fmt::Display for BoundaryFault {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::UnknownTicket => "the staged-text ticket is not live",
+            Self::WrongLength => "the staged-text length does not match",
+            Self::DestinationOutOfBounds => "the staged-text destination is outside guest memory",
+            Self::TicketLiveAtImport => {
+                "a host import was entered while staged text was still live"
+            }
+            Self::TicketLiveAtReturn => "the guest entry returned while staged text was still live",
+        })
+    }
 }
 
 /// Which limit was exhausted.
@@ -151,6 +185,7 @@ impl fmt::Display for RuntimeError {
             Self::GuestTrap { .. } => formatter.write_str("guest code trapped"),
             Self::LimitExceeded { limit, .. } => limit.fmt(formatter),
             Self::HostFault(host_fault) => host_fault.fmt(formatter),
+            Self::BoundaryFault(boundary_fault) => boundary_fault.fmt(formatter),
 
             Self::InstanceFaulted => {
                 formatter.write_str("the instance faulted earlier and can't be called again")
@@ -174,7 +209,7 @@ impl Error for RuntimeError {
             Self::Link(link_error) => link_error.source(),
             Self::HostFault(host_fault) => host_fault.source(),
 
-            Self::EngineMismatch | Self::InstanceFaulted => None,
+            Self::BoundaryFault(_) | Self::EngineMismatch | Self::InstanceFaulted => None,
         }
     }
 }
