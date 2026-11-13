@@ -303,11 +303,15 @@ fn registered_support_only_package_compiles_its_external_surface() {
         &[("@package.moth", "$export\nsupport_label #= \"support\"\n")],
         "@supportpkg support_label\n~[:[support_label]]\n",
     ));
-    assert_eq!(frontend.source_packages.len(), 1);
+    assert_eq!(
+        frontend.source_packages.len(),
+        3,
+        "directory compilation publishes the imported package plus official @html and @styles"
+    );
     let package = frontend
         .source_packages
         .iter()
-        .next()
+        .find(|package| package.package_identity.name() == "supportpkg")
         .expect("the imported package boundary should be retained");
     let artifact = package
         .boundary
@@ -349,11 +353,11 @@ fn registered_triple_root_package_keeps_its_entry_dormant() {
         ],
         "@triplepkg support_label\n~[:[support_label]]\n",
     ));
-    assert_eq!(frontend.source_packages.len(), 1);
+    assert_eq!(frontend.source_packages.len(), 3);
     let package = frontend
         .source_packages
         .iter()
-        .next()
+        .find(|package| package.package_identity.name() == "triplepkg")
         .expect("the imported package boundary should be retained");
     let artifact = package
         .boundary

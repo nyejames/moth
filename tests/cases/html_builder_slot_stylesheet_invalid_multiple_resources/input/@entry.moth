@@ -1,4 +1,4 @@
 -- One contribution must resolve to exactly one tracked resource.
-[$in stylesheets: [@styles/a.css][@styles/b.css]]
+[$in stylesheets: [@site_styles/a.css][@site_styles/b.css]]
 
 [:<main>invalid multiple stylesheets</main>]

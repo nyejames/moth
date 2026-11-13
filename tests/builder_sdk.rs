@@ -51,20 +51,24 @@ fn external_crate_defines_source_and_host_packages() {
 }
 
 #[test]
-fn external_crate_cannot_register_the_html_prelude_package() {
-    let html_dir = tempfile::tempdir().expect("should create HTML package directory");
+fn external_crate_cannot_replace_official_core_source_packages() {
+    let package_dir = tempfile::tempdir().expect("should create package directory");
 
-    for (case, path) in [("root", "@html"), ("nested", "@html/docs")] {
+    for (case, path) in [
+        ("html", "@html"),
+        ("html nested", "@html/docs"),
+        ("styles", "@styles"),
+        ("styles nested", "@styles/docs"),
+    ] {
         let error = BuilderDefinition::new("game")
-            .source_package(SourcePackage::new(path).from_dir(html_dir.path()))
+            .source_package(SourcePackage::new(path).from_dir(package_dir.path()))
             .finish()
-            .expect_err("SDK builders cannot register the official HTML prelude package");
+            .expect_err("SDK builders cannot replace an official Core source package");
         assert_eq!(error.kind(), ErrorKind::InvalidDefinition, "{case}");
-        assert!(error.to_string().contains("reserved"), "{case}: {error}");
         assert!(
             error
                 .to_string()
-                .contains("standard HTML builder package set"),
+                .contains("overlaps registered source package"),
             "{case}: {error}"
         );
     }
@@ -249,6 +253,25 @@ impl ProjectBuilder for NoPackageBuilder {
     ) -> Result<BuildArtifacts, Error> {
         Ok(BuildArtifacts::new())
     }
+}
+
+/// Imports official Core source packages without any builder-selected web package.
+const CORE_SOURCE_IMPORT_PAGE: &str = "@html p\n@styles center\nvalue = [p, center: Hello]\n";
+
+#[test]
+fn minimal_sdk_builder_imports_official_html_and_styles_without_web_packages() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(project_dir.path(), CORE_SOURCE_IMPORT_PAGE, false);
+    let builder = RecordingBuildBuilder {
+        build_ran: Cell::new(false),
+    };
+
+    build_project(&builder, BuildRequest::new(project_dir.path()))
+        .expect("official @html and @styles must import without @web/canvas");
+    assert!(
+        builder.build_ran.get(),
+        "compilation of the official Core imports must reach the builder"
+    );
 }
 
 /// Exposes one host function that takes a `Byte`.

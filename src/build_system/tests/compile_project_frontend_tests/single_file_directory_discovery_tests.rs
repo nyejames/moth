@@ -266,7 +266,10 @@ fn directory_project_discovers_multiple_entry_modules() {
     );
 
     let modules = successful_compilation_value(result);
-    let views = modules.successful_module_views().collect::<Vec<_>>();
+    let views = modules
+        .project
+        .successful_module_views()
+        .collect::<Vec<_>>();
     assert_eq!(
         views.len(),
         2,
@@ -533,7 +536,10 @@ fn check_project_with_root_entry_only_publishes_no_interface() {
     );
 
     let modules = successful_compilation_value(result);
-    let views = modules.successful_module_views().collect::<Vec<_>>();
+    let views = modules
+        .project
+        .successful_module_views()
+        .collect::<Vec<_>>();
     assert_eq!(
         views.len(),
         1,

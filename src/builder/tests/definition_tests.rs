@@ -332,7 +332,7 @@ fn finish_rejects_source_packages_without_an_installed_directory() {
 }
 
 #[test]
-fn reserved_core_source_package_paths_are_rejected() {
+fn core_source_package_paths_reject_builder_source_and_host_packages() {
     let custom_html_dir = package_dir();
 
     for (case, path) in [
@@ -347,8 +347,54 @@ fn reserved_core_source_package_paths_are_rejected() {
                 .source_package(SourcePackage::new(path).from_dir(custom_html_dir.path()))
                 .finish(),
         );
-        assert!(message.contains("overlaps registered source package"), "{case}: {message}");
+        assert!(
+            message.contains("overlaps registered source package"),
+            "{case}: {message}"
+        );
+        let message = invalid_definition_message(
+            &format!("host {case}"),
+            BuilderDefinition::new("game")
+                .host_package(HostPackage::new(path))
+                .finish(),
+        );
+        assert!(
+            message.contains("overlaps host package"),
+            "host {case}: {message}"
+        );
     }
+}
+
+#[test]
+fn minimal_sdk_builder_preserves_official_core_source_roots() {
+    use crate::builder_surface::BuilderSurface;
+    use crate::builder_surface::PackageMetadata;
+    use crate::builder_surface::definition::CORE_SOURCE_PACKAGE_PREFIXES;
+    use crate::builder_surface::source_package_registry::ProvidedSourceRoot;
+
+    let definition = BuilderDefinition::new("game")
+        .finish()
+        .expect("a minimal SDK builder should finish");
+    let surface = definition.surface();
+    for prefix in CORE_SOURCE_PACKAGE_PREFIXES {
+        let root = surface
+            .source_packages
+            .get_root(prefix)
+            .unwrap_or_else(|| panic!("minimal SDK builder should keep official @{prefix}"));
+        assert_eq!(root.metadata, PackageMetadata::source(PackageOrigin::Core));
+        assert!(matches!(
+            &root.root,
+            ProvidedSourceRoot::Filesystem(path)
+                if path == &BuilderSurface::builtin_source_package_root(prefix)
+        ));
+    }
+    assert!(
+        surface
+            .binding_packages
+            .get_package("@web/canvas")
+            .is_none(),
+        "official source roots must not load the HTML canvas binding"
+    );
+    assert!(surface.source_packages.get_root("web/site").is_none());
 }
 
 #[test]

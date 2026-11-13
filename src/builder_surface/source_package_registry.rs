@@ -1,6 +1,6 @@
 //! Source-backed package registry.
 //!
-//! WHAT: tracks builder-provided and project-local source-backed package roots.
+//! WHAT: tracks the official Core, builder-provided and project-local source-backed package roots.
 //! WHY: source-backed package dependencies resolve to actual `.moth` files, not binding-backed
 //!      packages, so the path resolver needs to know where each package prefix lives.
 

@@ -1,1 +1,1 @@
-docs_alias #= @styles/docs.css
+docs_alias #= @site_styles/docs.css

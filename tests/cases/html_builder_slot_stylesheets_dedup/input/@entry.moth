@@ -4,12 +4,12 @@
 -- resolve to one stable resource origin and emit one link. A and B have identical bytes but
 -- distinct origins, so they remain separate links.
 
-[$in stylesheets: [@styles/docs.css]]
+[$in stylesheets: [@site_styles/docs.css]]
 [$in stylesheets: [docs_alias]]
 [$in stylesheets:
-    [@styles/docs.css]
+    [@site_styles/docs.css]
 ]
-[$in stylesheets: [@styles/a.css]]
-[$in stylesheets: [@styles/b.css]]
+[$in stylesheets: [@site_styles/a.css]]
+[$in stylesheets: [@site_styles/b.css]]
 
 [:<main>stylesheets body</main>]

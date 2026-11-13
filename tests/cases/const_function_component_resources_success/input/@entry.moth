@@ -9,7 +9,7 @@ Card = |
 make #|title String| -> Card:
     return Card(
         body = [: <div class="card">[title]</div> ],
-        styles = {[@styles/card.css]},
+        styles = {[@site_styles/card.css]},
     )
 ;
 

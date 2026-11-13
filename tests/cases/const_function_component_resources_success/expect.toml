@@ -8,11 +8,11 @@ warnings = "forbid"
 path = "index.html"
 kind = "html"
 must_contain_in_order = [
-    "<main> <div class=\"card\">hello</div>  styles= ./styles/card.css; </main>",
+    "<main> <div class=\"card\">hello</div>  styles= ./site_styles/card.css; </main>",
 ]
 
 [[backends.html.artifact_assertions]]
-path = "styles/card.css"
+path = "site_styles/card.css"
 kind = "binary"
 
 [backends.html_wasm]
@@ -23,9 +23,9 @@ warnings = "forbid"
 path = "index.html"
 kind = "html"
 must_contain_in_order = [
-    "<main> <div class=\"card\">hello</div>  styles= ./styles/card.css; </main>",
+    "<main> <div class=\"card\">hello</div>  styles= ./site_styles/card.css; </main>",
 ]
 
 [[backends.html_wasm.artifact_assertions]]
-path = "styles/card.css"
+path = "site_styles/card.css"
 kind = "binary"

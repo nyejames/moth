@@ -263,6 +263,14 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
                 crate::builder_surface::PackageOrigin::Core,
             )
         );
+        assert!(
+            matches!(
+                &core_source.root,
+                crate::builder_surface::source_package_registry::ProvidedSourceRoot::Filesystem(path)
+                    if path == &crate::builder_surface::BuilderSurface::builtin_source_package_root(prefix)
+            ),
+            "@{prefix} must stay on its official source root"
+        );
     }
 
     let site_package = frontend_surface

@@ -321,8 +321,6 @@ impl StableBodySyntax {
         &self,
         source_file: PathId,
         path_fork: &mut PathInternerFork,
-        _string_table: &mut StringTable,
-        identity_tables: Option<(&Arc<PathTable>, &Arc<FrozenStringTable>)>,
     ) -> Result<MaterialisedBody, InfrastructureFailure> {
         // Validate the retained canonical owner before handing its range and sequence to a parser
         // consumer.
@@ -356,25 +354,13 @@ impl StableBodySyntax {
             self.donor_file_id,
             resolved_file_references,
         )?);
-        // A retained path/string pair or string-only donor is carried as independent identity
-        // metadata. The parser borrows the canonical donor range and installs these tables as
-        // TokenPayloadOrigin, translating only payloads it consumes into requester tables.
-        // Without a retained path table, the caller's installed identity pair supplies path
-        // provenance for same-domain materialisation.
-        let (source_path_table, source_string_table) = match &self.source_path_table {
-            Some(path_table) => (
-                Some(Arc::clone(path_table)),
-                self.source_string_table.clone(),
-            ),
-            None => identity_tables
-                .map(|(path_table, source_strings)| {
-                    (
-                        Some(Arc::clone(path_table)),
-                        Some(Arc::clone(source_strings)),
-                    )
-                })
-                .unwrap_or_else(|| (None, self.source_string_table.clone())),
-        };
+        // The parser borrows the canonical donor range and installs the retained strings as
+        // TokenPayloadOrigin, translating only payloads it consumes into requester tables. Those
+        // strings are always the domain that issued the token payloads: a source body retains its
+        // declaring module's snapshot, which can differ from the boundary-wide table installed on
+        // the published context once earlier packages have merged into the shared boundary table.
+        let source_path_table = self.source_path_table.clone();
+        let source_string_table = self.source_string_table.clone();
         let source_owner = self.source_owner.clone();
         Ok(MaterialisedBody {
             source_owner,

@@ -1,6 +1,6 @@
 @aliases preload_alias
 
-[$in stylesheets: [@styles/docs.css]]
+[$in stylesheets: [@site_styles/docs.css]]
 
 -- The first contribution is literal text. Its structural duplicates must be compared only after
 -- each complete contribution is rendered in this page's artefact URL context.

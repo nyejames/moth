@@ -12,19 +12,19 @@ warnings = "forbid"
 path = "index.html"
 kind = "html"
 must_contain = [
-    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
-    "<link rel=\"stylesheet\" href=\"./styles/a.css\">",
-    "<link rel=\"stylesheet\" href=\"./styles/b.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/docs.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/a.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/b.css\">",
 ]
 must_contain_in_order = [
-    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
-    "<link rel=\"stylesheet\" href=\"./styles/a.css\">",
-    "<link rel=\"stylesheet\" href=\"./styles/b.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/docs.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/a.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/b.css\">",
 ]
 must_contain_exactly_once = [
-    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
-    "<link rel=\"stylesheet\" href=\"./styles/a.css\">",
-    "<link rel=\"stylesheet\" href=\"./styles/b.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/docs.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/a.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/b.css\">",
 ]
 
 [[backends.html.artifact_assertions]]
@@ -34,15 +34,15 @@ must_contain = ["<link rel=\"stylesheet\" href=\"./styles/docs.css\">"]
 must_contain_exactly_once = ["rel=\"stylesheet\""]
 
 [[backends.html.artifact_assertions]]
-path = "styles/docs.css"
+path = "site_styles/docs.css"
 kind = "binary"
 
 [[backends.html.artifact_assertions]]
-path = "styles/a.css"
+path = "site_styles/a.css"
 kind = "binary"
 
 [[backends.html.artifact_assertions]]
-path = "styles/b.css"
+path = "site_styles/b.css"
 kind = "binary"
 
 [[backends.html.artifact_assertions]]
@@ -57,19 +57,19 @@ warnings = "forbid"
 path = "index.html"
 kind = "html"
 must_contain = [
-    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
-    "<link rel=\"stylesheet\" href=\"./styles/a.css\">",
-    "<link rel=\"stylesheet\" href=\"./styles/b.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/docs.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/a.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/b.css\">",
 ]
 must_contain_in_order = [
-    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
-    "<link rel=\"stylesheet\" href=\"./styles/a.css\">",
-    "<link rel=\"stylesheet\" href=\"./styles/b.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/docs.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/a.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/b.css\">",
 ]
 must_contain_exactly_once = [
-    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
-    "<link rel=\"stylesheet\" href=\"./styles/a.css\">",
-    "<link rel=\"stylesheet\" href=\"./styles/b.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/docs.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/a.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/b.css\">",
 ]
 
 [[backends.html_wasm.artifact_assertions]]
@@ -79,15 +79,15 @@ must_contain = ["<link rel=\"stylesheet\" href=\"./styles/docs.css\">"]
 must_contain_exactly_once = ["rel=\"stylesheet\""]
 
 [[backends.html_wasm.artifact_assertions]]
-path = "styles/docs.css"
+path = "site_styles/docs.css"
 kind = "binary"
 
 [[backends.html_wasm.artifact_assertions]]
-path = "styles/a.css"
+path = "site_styles/a.css"
 kind = "binary"
 
 [[backends.html_wasm.artifact_assertions]]
-path = "styles/b.css"
+path = "site_styles/b.css"
 kind = "binary"
 
 [[backends.html_wasm.artifact_assertions]]

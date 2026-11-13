@@ -211,7 +211,10 @@ fn mandatory_core_registers_official_source_package_roots() {
 
     let surface = BuilderSurface::with_mandatory_core();
     for prefix in CORE_SOURCE_PACKAGE_PREFIXES {
-        let root = surface.source_packages.get_root(prefix).expect("mandatory Core root");
+        let root = surface
+            .source_packages
+            .get_root(prefix)
+            .expect("mandatory Core root");
         assert_eq!(root.metadata, PackageMetadata::source(PackageOrigin::Core));
         assert!(matches!(
             &root.root,
@@ -227,13 +230,25 @@ fn mandatory_core_roots_reject_replacement_and_nested_overlaps() {
     use crate::builder_surface::BuilderSurface;
 
     let mut surface = BuilderSurface::with_mandatory_core();
-    for prefix in ["html", "HTML", "html/docs", "styles", "Styles", "styles/docs"] {
+    for prefix in [
+        "html",
+        "HTML",
+        "html/docs",
+        "styles",
+        "Styles",
+        "styles/docs",
+    ] {
         let error = surface.source_packages.register_filesystem_root(
             prefix,
             std::path::PathBuf::from("/tmp/custom-package"),
             PackageOrigin::Builder,
         );
-        assert!(error.is_err(), "@{prefix} cannot replace a Core source package");
+        assert!(
+            error.is_err(),
+            "@{prefix} cannot replace a Core source package"
+        );
     }
-    surface.validate().expect("rejected writes preserve official roots");
+    surface
+        .validate()
+        .expect("rejected writes preserve official roots");
 }

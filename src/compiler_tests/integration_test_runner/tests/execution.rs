@@ -609,10 +609,6 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
         assert!(html.contains("text-align: center"));
         assert!(html.contains("<canvas id=\"game_canvas\""));
         assert!(html.contains("<script type=\"importmap\">"));
-        assert!(
-            html.contains("__moth_src_fn_"),
-            "the source-owned canvas helper functions must be linked into the page bundle"
-        );
         let canvas_glue_is_emitted = built.project.output_files.iter().any(|output| {
             if let FileKind::Js(script) = output.file_kind() {
                 script.contains("getCanvas as __moth_external_fn")

@@ -523,7 +523,11 @@ fn project_compilation_selects_only_modules_with_entry_roots_as_entries() {
         .unwrap_or_else(|never| match never {}),
     );
 
-    assert_eq!(module_count.load(std::sync::atomic::Ordering::SeqCst), 2);
+    // Both project modules reach the backend beside the always-published Core source facades.
+    assert_eq!(
+        module_count.load(std::sync::atomic::Ordering::SeqCst),
+        2 + crate::builder_surface::definition::CORE_SOURCE_PACKAGE_PREFIXES.len()
+    );
     assert_eq!(entry_count.load(std::sync::atomic::Ordering::SeqCst), 1);
 
     let _ = temp;

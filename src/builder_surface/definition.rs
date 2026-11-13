@@ -8,7 +8,6 @@
 use crate::build_system::output::{
     DEV_OUTPUT_FIELD, RELEASE_OUTPUT_FIELD, ensure_single_output_root_owner,
 };
-use crate::builder_surface::{PackageOrigin, SourcePackageRegistry};
 use crate::builder_surface::config_schema::{
     ConfigFieldShape, ConfigSchema, ConfigSchemaField, ConfigSchemas, UnknownFieldPolicy,
 };
@@ -19,6 +18,7 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::builder_surface::package_metadata::package_paths_overlap;
 use crate::builder_surface::source_file_kind_registry::SourceFileKindRegistry;
 use crate::builder_surface::source_package_registry::ProvidedSourceRoot;
+use crate::builder_surface::{PackageOrigin, SourcePackageRegistry};
 use crate::compiler_frontend::build_config::{
     BuildInputName, BuilderConfigGlobalError, BuilderConfigGlobalSet, PrimitiveBuildValue,
 };

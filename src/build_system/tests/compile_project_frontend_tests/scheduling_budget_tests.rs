@@ -230,8 +230,8 @@ fn finish_stopped_package_request(
     let package = frontend
         .source_packages
         .iter()
-        .next()
-        .expect("a stopped package request retains its boundary");
+        .find(|package| package.boundary.scheduling_cutoff.is_some())
+        .expect("a stopped package request retains its cutoff boundary");
     assert_eq!(
         package
             .boundary
@@ -287,14 +287,23 @@ fn finish_stopped_package_request(
         "unexpected success-only rejection: {rejection:?}"
     );
     for package in frontend.source_packages.iter() {
-        let rejection = package
+        if package.boundary.scheduling_cutoff.is_some() {
+            let rejection = package
+                .boundary
+                .require_all_successful()
+                .expect_err("a stopped package boundary is never linkable");
+            assert!(
+                rejection.message.contains("project scheduling cutoff"),
+                "unexpected package success-only rejection: {rejection:?}"
+            );
+            continue;
+        }
+        package
             .boundary
             .require_all_successful()
-            .expect_err("a stopped package boundary is never linkable");
-        assert!(
-            rejection.message.contains("project scheduling cutoff"),
-            "unexpected package success-only rejection: {rejection:?}"
-        );
+            .unwrap_or_else(|rejection| {
+                panic!("a package that finished before the cutoff stays linkable: {rejection:?}")
+            });
     }
 
     let reports = finish_diagnosed(frontend, warning_owner, project_source_files);
@@ -1171,12 +1180,20 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
 
     let (frontend, mut warning_owner, project_source_files) =
         run_shared_package_lane(root, FrontendCompilationMode::Canonical);
-    assert_eq!(frontend.source_packages.len(), 1);
     let package = frontend
         .source_packages
         .iter()
-        .next()
-        .expect("the registered package should publish");
+        .find(|package| package.package_identity.name() == "shared")
+        .unwrap_or_else(|| {
+            panic!(
+                "the registered shared package should publish, got {:?}",
+                frontend
+                    .source_packages
+                    .iter()
+                    .map(|package| package.package_identity.name())
+                    .collect::<Vec<_>>()
+            )
+        });
     let helper_module = package_module_id(package, "helper");
     let broken_module = package_module_id(package, "z_broken");
     assert!(
@@ -1305,8 +1322,8 @@ fn diagnostic_recovery_package_cutoff_can_diagnose_its_own_root() {
     let package = frontend
         .source_packages
         .iter()
-        .next()
-        .expect("the registered package should publish");
+        .find(|package| package.package_identity.name() == "shared")
+        .expect("the registered shared package should publish");
     let later_module = package_module_id(package, "later");
     assert_eq!(
         package
@@ -1415,8 +1432,8 @@ fn diagnostic_recovery_deferred_package_check_only_refuses_an_unvisited_provider
     let package = frontend
         .source_packages
         .iter()
-        .next()
-        .expect("the registered package should publish");
+        .find(|package| package.package_identity.name() == "shared")
+        .expect("the registered shared package should publish");
     let late_module = package_module_id(package, "z_late");
     assert!(
         matches!(
@@ -1484,8 +1501,8 @@ fn diagnostic_recovery_deferred_package_check_only_stops_after_an_admitted_unit(
     let package = frontend
         .source_packages
         .iter()
-        .next()
-        .expect("the registered package should publish");
+        .find(|package| package.package_identity.name() == "shared")
+        .expect("the registered shared package should publish");
     assert!(matches!(
         package
             .boundary
@@ -1551,6 +1568,15 @@ fn diagnostic_recovery_deferred_package_check_only_stops_after_an_admitted_unit(
         "unexpected success-only rejection: {rejection:?}"
     );
     for package in frontend.source_packages.iter() {
+        if package.boundary.diagnosed.is_empty() {
+            package
+                .boundary
+                .require_all_successful()
+                .unwrap_or_else(|rejection| {
+                    panic!("a clean official package stays linkable: {rejection:?}")
+                });
+            continue;
+        }
         let rejection = package
             .boundary
             .require_all_successful()
