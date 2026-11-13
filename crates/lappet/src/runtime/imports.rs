@@ -186,7 +186,7 @@ fn copy_staged_text<HostState>(
         return Err(wasmtime::Error::new(BoundaryFault::DestinationOutOfBounds));
     };
     memory
-        .write(&mut *caller, destination as usize, &bytes)
+        .write(&mut *caller, destination, &bytes)
         .map_err(|_| wasmtime::Error::new(BoundaryFault::DestinationOutOfBounds))?;
 
     caller
