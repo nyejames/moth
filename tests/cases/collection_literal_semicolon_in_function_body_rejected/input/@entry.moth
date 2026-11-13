@@ -1,0 +1,4 @@
+show ||:
+    values = {1; 2}
+    io.line("still inside the function")
+;

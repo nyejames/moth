@@ -1,0 +1,14 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0002"]
+message_contains = ["Unexpected token `;`"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0002"
+path = "input/@entry.moth"
+line = 2
+column = 16
+count = 1

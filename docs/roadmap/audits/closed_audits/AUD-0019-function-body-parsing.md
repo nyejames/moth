@@ -39,7 +39,7 @@ AUD-0017-F01 already owns silent acceptance of an unclosed block in the entry st
 
 ### AUD-0019-F01: A semicolon inside a call ends the function body range
 
-- State: `accepted`
+- State: `closed`
 - Kind: `Diagnostics`
 
 #### Evidence
@@ -100,11 +100,69 @@ That closer decision only. Preserve balanced `if`, `loop`, `catch` and match ran
 
 #### Linked findings
 
-None. Filed in the Diagnostics lane from this Correctness run because the source is rejected.
+None at filing. Filed in the Diagnostics lane from this Correctness run because the source is rejected. Implementation added AUD-0019-F02 as a linked Tests finding.
+
+### AUD-0019-F02: Unclosed-group tests pin the truncated-body diagnostic
+
+- State: `closed`
+- Kind: `Tests`
+
+#### Evidence
+
+Two tests pin the diagnostic produced when a function body is cut at a `;` inside an open group:
+
+- `tests/cases/grouped_unclosed_numeric_chain_rejected` (`value = (((1 + 1 + 1 + 1`, then `return value`, then `;`) expected `MOTH-SYNTAX-0002` `` Unexpected token `return` ``.
+- `src/projects/tests/check_tests.rs` `unclosed_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack` expected `MOTH-SYNTAX-0002` for 2048 unclosed groups.
+
+With F01's top-level-only closer, the function's own `;` is inside the open group and does not end the body. Header capture then reaches EOF and reports `MOTH-SYNTAX-0017` `expected ')'`.
+
+#### Counter-explanation tested
+
+**"The old diagnostic was better because it pointed near the error."** Its identity is worse: it names `return` without saying a `)` is missing. Keeping it would need a second closer rule for the case where a group is open, which F01 removes. The span moves to EOF. AUD-0017-F02 owns the opener label that restores locality.
+
+#### Violated contract or cost
+
+These pins would reject the accepted F01 correction.
+
+#### Root owner
+
+The two tests named above.
+
+#### Suggested correction
+
+Expect `MOTH-SYNTAX-0017` and `expected ')'`. Keep the single-diagnostic and stack-budget assertions.
+
+#### Fix scope and preserved invariants
+
+Only those expectations. The deep-nesting test still requires one error and no native stack overflow on the default Windows main-thread stack.
+
+#### Required validation
+
+Full `cargo test -p moth --lib` and the integration suite.
+
+#### Linked findings
+
+AUD-0019-F01.
 
 ## Triage (2026-11-13)
 
 **F01 accepted** after source review at `fd695d18b`. `capture_function_body_range_from_cursor` counts every `TokenTag::END` as a block closer before consulting its tracked `NestingDepth`. An illegal semicolon inside a call can therefore cut off the retained function-body token range before AST sees the actual offending token. The nested-delimiter guard belongs at this existing header capture decision. Keep the semicolon illegal inside a call and retain the complete function body for an accurate AST diagnostic. The original empirical check was not rerun because this checkout lacks a compiler binary and Rust toolchain.
+
+**Implementation scope decisions (2026-11-13, coordinator).** Implementation surfaced three consequences of the nesting-aware closer. They were decided as follows:
+
+- **Block headers inside a group.** A nesting-aware `;` alone made a header keyword inside a group, such as `io.line(load() catch: then "x")`, open a scope that no top-level `;` closes. That reported EOF instead of `MOTH-RULE-0051`. Authorised: block-header keywords and colons open scopes only at top-level nesting, matching the closer.
+- **`;` inside a collection literal.** A body that is no longer cut at the inner `;` would have newly accepted `values = {1; 2}` in a function, because the literal entry window silently discarded tokens after an early stop. That acceptance already existed at the entry top level. `collection-literals.mtf` separates entries with commas only. Authorised: the literal owner rejects `;` at its own span. A leading `;` entry previously reached the expression parser's empty-fragment invariant (`MOTH-INFRA-0001`) and is now `MOTH-SYNTAX-0002`.
+- **Unclosed group before the function closer.** Accepted trade-off. The body now runs to EOF, so the report is `MOTH-SYNTAX-0017` naming the missing `)` or `}` at EOF, and diagnostics in later declarations of that file are not reported. Its identity is better than the old `0002`/`0012` at the following token or byte 0. AUD-0017-F02 owns the opener label. The two test pins are AUD-0019-F02, accepted.
+
+## Resolution (2026-11-13)
+
+**F01 fixed.** In `capture_function_body_range_from_cursor`, a `;` closes the active block only at top-level `NestingDepth`, and `if` / `catch` / `loop` headers and their colons open a scope only at top-level nesting. An illegal `;` inside a call stays in the retained body range, and AST reports it at its own span. `io.line("x"; "y")` now gives `MOTH-SYNTAX-0002` `` Unexpected token `;` `` at 2:16 instead of end of file at 1:1. Receiver methods share the capture. Collection and map literal entries go through `create_complete_expression_until`, which reports a token that an early-stopping entry would otherwise discard. `;`, `:`, `=>` and `else` inside `{...}` are now named at their spans.
+
+**F02 fixed.** Both pins expect `MOTH-SYNTAX-0017` `expected ')'`. The stack-budget test keeps its purpose.
+
+Regression coverage: header test `semicolon_inside_call_stays_in_captured_function_body`, collection test `rejects_statement_terminator_in_curly_literal_entries`, and cases `function_body_semicolon_inside_call_rejected`, `function_body_balanced_blocks_template_semicolon_success`, `catch_inside_call_argument_rejected`, `collection_literal_semicolon_in_function_body_rejected` and `collection_literal_semicolon_at_top_level_rejected`.
+
+**F01 and F02 verified and closed.** Independent verifiers, not the implementer, ran two rounds. Round 1 found a unit test the implementer had not run, which now belongs to F02, and a widening case that also passed on the parent binary. That case now uses the form that fails on the parent and passes with the fix. Round 2 returned clean after re-running the repros, the full `cargo test -p moth --lib`, the full integration suite, clippy and the format check. The coordinator's `just validate` result is recorded in the closeout commit message. Function-body capture changed materially, so the audit-log row is marked stale. This also changes the reproduction path of AUD-0017-F04 and F05; see that report.
 
 ## Checked and clean
 

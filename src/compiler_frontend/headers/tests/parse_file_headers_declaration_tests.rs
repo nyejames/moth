@@ -1046,6 +1046,63 @@ fn import_is_an_ordinary_identifier() {
     );
 }
 
+/// A `;` inside a call does not close the function block, so capture keeps it and every later
+/// body token; the AST then reports the authored semicolon at its own span.
+#[test]
+fn semicolon_inside_call_stays_in_captured_function_body() {
+    let (headers, string_table) = parse_single_file_headers_with_table(
+        "show ||:\n    io.line(\"x\"; \"y\")\n    io.line(seen)\n;\n",
+    );
+
+    let function = headers
+        .headers
+        .iter()
+        .find(|header| matches!(header.kind, HeaderKind::Function { .. }))
+        .expect("expected function header");
+
+    let mut cursor = header_body_tokens(&headers, function);
+    let mut captured_semicolons = 0usize;
+    let mut last_non_newline_tag = None;
+    let mut symbols_after_semicolon = Vec::new();
+    let mut saw_semicolon = false;
+    while let Some(token) = cursor.advance() {
+        let tag = token.tag();
+        if tag == TokenTag::END {
+            captured_semicolons += 1;
+            saw_semicolon = true;
+        }
+        if tag != TokenTag::NEWLINE {
+            last_non_newline_tag = Some(tag);
+        }
+        if saw_semicolon
+            && tag == TokenTag::SYMBOL
+            && let Some(symbol) = token.string_id()
+        {
+            symbols_after_semicolon.push(string_table.resolve(symbol).to_owned());
+        }
+        if token.is_eof() {
+            break;
+        }
+    }
+
+    assert_eq!(
+        captured_semicolons, 1,
+        "the captured body must keep the illegal `;` instead of ending its range there"
+    );
+    assert_eq!(
+        last_non_newline_tag,
+        Some(TokenTag::CLOSE_PARENTHESIS),
+        "the captured body must extend through the statement after the illegal `;`, up to the \
+         function's own closer"
+    );
+    assert!(
+        symbols_after_semicolon
+            .iter()
+            .any(|symbol| symbol == "seen"),
+        "a statement after the illegal `;` must stay inside the captured body"
+    );
+}
+
 #[test]
 fn import_is_a_valid_struct_identifier() {
     let (headers, string_table) =

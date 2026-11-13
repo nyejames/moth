@@ -22,8 +22,6 @@ Triaged and authorised for bounded investigation or correction. Implementation h
   - `Correctness` | `frontend.source_directive_parsing`
 - [AUD-0017-F01: Unclosed blocks in the entry start body are accepted and swallow later statements](./audits/open_audits/AUD-0017-statement-boundary-diagnostics.md#aud-0017-f01-unclosed-blocks-in-the-entry-start-body-are-accepted-and-swallow-later-statements)
   - `Correctness` | `frontend.statement_boundary_diagnostics`
-- [AUD-0019-F01: A semicolon inside a call ends the function body range](./audits/open_audits/AUD-0019-function-body-parsing.md#aud-0019-f01-a-semicolon-inside-a-call-ends-the-function-body-range)
-  - `Diagnostics` | `frontend.function_body_parsing`
 - [AUD-0018-F02: A known directive inside a declaration shell is reported as an unexpected token](./audits/open_audits/AUD-0018-source-directive-parsing.md#aud-0018-f02-a-known-directive-inside-a-declaration-shell-is-reported-as-an-unexpected-token)
   - `Diagnostics` | `frontend.source_directive_parsing`
 - [AUD-0017-F02: A missing block closer is reported as unexpected end of file and does not name the open block](./audits/open_audits/AUD-0017-statement-boundary-diagnostics.md#aud-0017-f02-a-missing-block-closer-is-reported-as-unexpected-end-of-file-and-does-not-name-the-open-block)

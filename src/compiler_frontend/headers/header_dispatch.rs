@@ -925,6 +925,12 @@ pub(super) fn capture_function_body_range_from_cursor(
         })?;
 
         match current.tag() {
+            // A `;` closes the active block only at top-level nesting. Inside `(...)`, `{...}` or
+            // a template head it is not a block closer, so it stays in the captured body range for
+            // the AST to report at its own span and the cursor keeps reading the rest of the body.
+            TokenTag::END if !nesting.is_top_level() => {
+                block_header_pending = false;
+            }
             TokenTag::END => {
                 block_header_pending = false;
                 scopes_closed = scopes_closed.checked_add(1).ok_or_else(|| {
@@ -942,7 +948,13 @@ pub(super) fn capture_function_body_range_from_cursor(
                     body_end = Some(current.index());
                 }
             }
-            TokenTag::IF | TokenTag::CATCH | TokenTag::LOOP => block_header_pending = true,
+            // A block header only opens a source scope when the header itself sits at top-level
+            // nesting. A header-shaped keyword inside `(...)`, `{...}` or a template head is
+            // misplaced syntax that the AST names, and leaving a pending colon armed there would
+            // let it open a phantom scope on a later top-level colon.
+            TokenTag::IF | TokenTag::CATCH | TokenTag::LOOP => {
+                block_header_pending = nesting.is_top_level();
+            }
             // Inline headers resolve through `then`, and a match guard resolves through `=>`.
             // Neither shape opens a source scope.
             TokenTag::THEN | TokenTag::FAT_ARROW => block_header_pending = false,
@@ -950,16 +962,20 @@ pub(super) fn capture_function_body_range_from_cursor(
             // only a block-header colon still contributes one balanced source scope.
             TokenTag::COLON if block_header_pending => {
                 block_header_pending = false;
-                scopes_opened = scopes_opened.checked_add(1).ok_or_else(|| {
-                    HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-                        "Function body opening-delimiter depth overflowed.",
-                        Some(current.source_span()),
-                    ))
-                })?;
-                if previous_meaningful_tag == Some(TokenTag::IS) {
-                    let depth = scopes_opened.saturating_sub(scopes_closed);
-                    match_body_floor =
-                        Some(match_body_floor.map_or(depth, |floor| floor.min(depth)));
+                // Only a top-level colon opens a block. A colon inside a group belongs to
+                // malformed header syntax and must not unbalance the captured function body.
+                if nesting.is_top_level() {
+                    scopes_opened = scopes_opened.checked_add(1).ok_or_else(|| {
+                        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+                            "Function body opening-delimiter depth overflowed.",
+                            Some(current.source_span()),
+                        ))
+                    })?;
+                    if previous_meaningful_tag == Some(TokenTag::IS) {
+                        let depth = scopes_opened.saturating_sub(scopes_closed);
+                        match_body_floor =
+                            Some(match_body_floor.map_or(depth, |floor| floor.min(depth)));
+                    }
                 }
             }
             // A line-initial `name:` declares a region, which balances its `;` like a block.

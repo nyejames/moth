@@ -20183,3 +20183,38 @@ path = "const_function_repeated_handler_success"
 tags = ["integration", "functions", "const", "runtime"]
 contract = "language.functions.const_repeated_handler_execution_matches_runtime"
 role = "primary"
+
+[[case]]
+id = "function_body_semicolon_inside_call_rejected"
+path = "function_body_semicolon_inside_call_rejected"
+tags = ["integration", "functions", "diagnostics"]
+contract = "language.functions.semicolon_inside_call_is_not_a_block_closer"
+role = "primary"
+
+[[case]]
+id = "function_body_balanced_blocks_template_semicolon_success"
+path = "function_body_balanced_blocks_template_semicolon_success"
+tags = ["integration", "functions", "templates"]
+contract = "language.functions.nested_block_closers_preserve_the_function_body"
+role = "smoke"
+
+[[case]]
+id = "catch_inside_call_argument_rejected"
+path = "catch_inside_call_argument_rejected"
+tags = ["integration", "functions", "diagnostics", "results"]
+contract = "language.results.catch_requires_receiving_site"
+role = "primary"
+
+[[case]]
+id = "collection_literal_semicolon_in_function_body_rejected"
+path = "collection_literal_semicolon_in_function_body_rejected"
+tags = ["integration", "collections", "functions", "diagnostics"]
+contract = "language.collections.statement_terminator_is_not_an_entry_separator"
+role = "primary"
+
+[[case]]
+id = "collection_literal_semicolon_at_top_level_rejected"
+path = "collection_literal_semicolon_at_top_level_rejected"
+tags = ["integration", "collections", "diagnostics"]
+contract = "language.collections.statement_terminator_in_top_level_entry_rejected"
+role = "primary"

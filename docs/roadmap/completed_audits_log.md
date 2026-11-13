@@ -24,9 +24,20 @@ Historical audit resolutions and the index of reports with no outstanding findin
 - [AUD-0014: Tokenizer line-break predicate redundancy](./audits/closed_audits/AUD-0014-tokenizer-line-break-redundancy.md)
 - [AUD-0015: MON schema preparation redundancy](./audits/closed_audits/AUD-0015-mon-schema-preparation-redundancy.md)
 - [AUD-0016: Empty-container documentation correctness](./audits/closed_audits/AUD-0016-empty-container-documentation.md)
+- [AUD-0019: Function body parsing](./audits/closed_audits/AUD-0019-function-body-parsing.md)
 - [AUD-0020: Backend feature validation](./audits/closed_audits/AUD-0020-backend-feature-validation.md)
 
 ## Resolution records
+
+- AUD-0019-F01 and linked AUD-0019-F02 were accepted and resolved by making function-body
+  capture nesting-aware. A `;` closes, and a block header opens, only at top-level nesting, so an
+  illegal `;` inside a call stays in the body and is reported at its own span. Collection and
+  map literal entries now reject `;` instead of silently discarding the rest of the entry, which
+  also replaces a `MOTH-INFRA-0001` for `{; 1}`. An unclosed group before the function closer
+  now reports the missing `)` or `}` at EOF. That was an accepted trade-off, and two tests were
+  re-pinned under F02. Two independent verification rounds ended clean with the full library
+  and integration suites. The `just validate` result is recorded in the closeout commit
+  message. See the [AUD-0019 resolution](./audits/closed_audits/AUD-0019-function-body-parsing.md#resolution-2026-11-13).
 
 - AUD-0020-F01 was accepted and resolved by gating reachable payload-free variant constructions
   (unit choice variants and `Option` `none`) in the HTML-Wasm shapes gate with the new
