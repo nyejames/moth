@@ -332,21 +332,22 @@ fn finish_rejects_source_packages_without_an_installed_directory() {
 }
 
 #[test]
-fn reserved_html_source_package_paths_are_rejected() {
+fn reserved_core_source_package_paths_are_rejected() {
     let custom_html_dir = package_dir();
 
-    for (case, path) in [("root", "@html"), ("nested", "@html/docs")] {
+    for (case, path) in [
+        ("html", "@html"),
+        ("html nested", "@html/docs"),
+        ("styles", "@styles"),
+        ("styles nested", "@styles/docs"),
+    ] {
         let message = invalid_definition_message(
             case,
             BuilderDefinition::new("game")
                 .source_package(SourcePackage::new(path).from_dir(custom_html_dir.path()))
                 .finish(),
         );
-        assert!(message.contains("reserved"), "{case}: {message}");
-        assert!(
-            message.contains("standard HTML builder package set"),
-            "{case}: {message}"
-        );
+        assert!(message.contains("overlaps registered source package"), "{case}: {message}");
     }
 }
 
