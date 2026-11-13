@@ -13,6 +13,7 @@ mod engine_tests;
 mod fault_tests;
 mod instance_tests;
 mod limit_tests;
+mod policy_measurements;
 
 use crate::runtime::imports::HostImports;
 use crate::runtime::instance::{Deadline, Instance, PreparedModule};

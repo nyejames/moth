@@ -15,10 +15,8 @@ planned backend support as available.
 - Blockers: none for milestones 2, 3 and 4. Milestone 5 waits for milestone 4.
   Later milestones wait for work on `main` listed under
   [Waiting on main](#waiting-on-main).
-- Next action: continue the
-  [Wasmtime runtime foundation plan](../../docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md)
-  at Phase 6, policy evidence. The host contract crate plan can start in
-  parallel.
+- Next action: Nye confirms or revises the Phase 6 policy lines below before
+  Phase 7 records them. The host contract crate plan is in closeout.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
 and [Wasm optimisation](../../docs/developer-docs/wasm-optimisation/overview.mtf)
@@ -277,12 +275,102 @@ Findings from the pinned release that shaped the implementation:
   Cranelift profile until compiled Moth output shows which of them it needs.
 - Raw host imports use Wasmtime's dynamically typed `func_new`, so one
   wrapper catches panics and withholds any handle that could re-enter the
-  guest. Statically typed registration is faster per call and needs one
-  wrapper per arity. Phase 6 measures the dynamic cost before that is weighed.
+  guest. The measured difference is about 20 ns per scalar host call. That
+  does not justify one typed wrapper per arity.
 - A host fault keeps what the host reported. It drops the Wasm backtrace that
   Wasmtime attached while unwinding.
 - Host imports can't reach guest memory yet. That access arrives with the
   staging table, its first consumer.
+
+**Phase 6 evidence.** Recorded on 13 November 2026 on one host, macOS AArch64
+with Rust 1.99.0, from authored core Wasm fixtures. The numbers are not
+compiled Moth and say nothing about the Moth host ABI. Timings are release
+builds. A cold compilation uses a fresh engine each time. Preflight,
+instantiation and teardown are timed only after one untimed call. Peak
+resident memory is the process maximum from `/usr/bin/time -l` and includes
+the test harness. Raw output stays local.
+
+Published engine, release optimisation, epoch interruption on:
+
+| Measurement | Median |
+|---|---|
+| Engine setup | 2.8 us |
+| Cold module compilation | 938 us |
+| Import preflight | 0.2 us |
+| Instantiation | 3.6 us |
+| Teardown | 3.5 us |
+| Game frame, 1000 entity steps | 222 us |
+| One entity step, including its export lookup | 0.2 us |
+| Server request, 1 MiB written, teardown excluded | 223 us |
+| Compute, Collatz to 100000 | 16.3 ms |
+| Scalar host call, difference | 20 ns |
+| Recursion depth before the stack fault | 10918 frames |
+| Process peak RSS, game | 8.5 MB |
+| Process peak RSS, server | 9.5 MB |
+
+The smallest embedder links to 0.36 MB stripped without the runtime feature
+and 8.05 MB stripped with it. Unstripped, those figures are 0.45 MB and
+11.0 MB. A clean `lappet` build with the feature took 78 s in dev and 53 s
+in release, against under 1 s with no feature.
+
+Epoch interruption and the two optimisation levels, median:
+
+| Measurement | Development, on | Development, off | Release, on | Release, off |
+|---|---|---|---|---|
+| Cold compilation | 738 us | 515 us | 938 us | 626 us |
+| Game frame | 224 us | 224 us | 222 us | 224 us |
+| Server request | 255 us | 213 us | 223 us | 229 us |
+| Collatz to 100000 | 16.1 ms | 15.9 ms | 16.3 ms | 16.3 ms |
+| Recursion depth | 10918 | 16377 | 10918 | 16377 |
+
+The scalar host-call figure is the difference between two counted loops that
+both store on every iteration. On the published engine the host-call loop is
+20.7 ns per iteration and the loop without a host call is 0.7 ns, so the call
+costs 20 ns. The recursion probe makes one host call per frame. The game and
+server workloads do not recurse. A repeat of the release server samples was
+223 us with the check and 224 us without it.
+
+Pinned Cranelift profile is Wasm 3.0 plus wide arithmetic. Threads and GC are
+absent because those Cargo features are off, and the engine then removes
+exceptions with GC. Explicit toggles are multi-value on, Memory64 off, custom
+page sizes off and relaxed SIMD off. The other profile toggles are not set
+explicitly.
+
+Policy lines, unchanged until Nye confirms them:
+
+- Wasmtime `=50.0.1` with `std`, `runtime` and `cranelift`: confirmed. The
+  feature costs about 7.7 MB of stripped code and a clean release build of
+  about 53 s. No feature is proposed.
+- Cranelift, set explicitly: confirmed. No measurement was required.
+- Development optimisation `OptLevel::None` and release `OptLevel::Speed`:
+  confirmed. This integer loop and the game step show no execution gap, and
+  `Speed` adds about 0.2 ms to compiling this small module. `SpeedAndSize` is
+  not proposed.
+- Backtracking, no inlining, parallel compilation not compiled in: confirmed.
+  Compile time does not block either workload.
+- Proposal toggles: confirmed as pinned above. Compiled Moth output still has
+  to show which of the unpinned toggles it needs.
+- Linear memory ceiling 256 MiB: confirmed for these fixtures. The server
+  workload peaked at 9.5 MB of process RSS after writing 1 MiB. They do not
+  show that a server needs a lower default.
+- One instance, one memory and one table: confirmed. No fixture needs more.
+- Table elements 65,536: confirmed. The workloads use no table, and the limit
+  tests use at most two elements.
+- Wasm stack 512 KiB: confirmed. The probe still reaches about 11000 frames
+  with a host call on every frame.
+- `memory.grow` returns `-1` without a trap: unchanged. The policy row defers
+  confirmation to the real-application memory contract, and these fixtures do
+  not replace that.
+- Epoch interruption on, embedder-advanced ticks, no timer thread: confirmed.
+  The game frame is the same with the check on or off. The server sample is
+  slower with the check in the development build and not in the release build.
+  Opt-in is not proposed.
+- Fuel disabled: confirmed. No V1 consumer appeared.
+- Wasm backtrace capture on, `backtrace` Cargo feature off: confirmed. Trap
+  errors carry function names with the selected features.
+- No Lappet timeout around a native host call: confirmed. The builder still
+  owns host IO policy.
+- A fault quarantines the instance: confirmed by the Phase 5 tests.
 
 ## 3. Build host boundary tables and fault mechanics
 

@@ -49,8 +49,22 @@ pub struct RuntimeEngine {
 
 impl RuntimeEngine {
     /// Builds the engine, reporting a configuration this host can't support.
+    ///
+    /// Epoch interruption is always on. A game needs a frame budget and a server a request
+    /// budget, and neither wants a timer thread that Lappet would have to start.
     pub fn new(optimisation: NativeOptimisation) -> Result<Self, RuntimeError> {
-        let config = engine_config(optimisation);
+        Self::with_epoch_interruption(optimisation, EpochInterruption::Enabled)
+    }
+
+    /// Builds an engine with epoch interruption chosen by the caller.
+    ///
+    /// Only the policy measurements use this, to record the cost of the epoch check. A
+    /// published engine always enables interruption.
+    pub(crate) fn with_epoch_interruption(
+        optimisation: NativeOptimisation,
+        epoch_interruption: EpochInterruption,
+    ) -> Result<Self, RuntimeError> {
+        let config = engine_config(optimisation, epoch_interruption);
         let engine = Engine::new(&config).map_err(RuntimeError::engine_configuration)?;
         Ok(Self { engine })
     }
@@ -80,8 +94,27 @@ impl RuntimeEngine {
     }
 }
 
+/// Whether compiled guest code checks the engine epoch.
+///
+/// The published engine always enables the check. Measurements need the disabled case, and that
+/// constructor stays crate-private.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EpochInterruption {
+    Enabled,
+    Disabled,
+}
+
+impl EpochInterruption {
+    fn is_enabled(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+}
+
 /// The one place the engine policy is written down.
-fn engine_config(optimisation: NativeOptimisation) -> Config {
+fn engine_config(
+    optimisation: NativeOptimisation,
+    epoch_interruption: EpochInterruption,
+) -> Config {
     let mut config = Config::new();
 
     // Native code generation. `Strategy::Auto` selects Cranelift today, but an implicit choice
@@ -100,9 +133,10 @@ fn engine_config(optimisation: NativeOptimisation) -> Config {
     config.wasm_custom_page_sizes(false);
     config.wasm_relaxed_simd(false);
 
-    // Execution bounds. Every guest entry sets an epoch deadline, so guest code is always
-    // interruptible by the embedder. Deterministic fuel metering has no V1 consumer.
-    config.epoch_interruption(true);
+    // Execution bounds. Every guest entry sets an epoch deadline. The check itself is compiled
+    // in only when interruption is enabled, which the published engine always does. Deterministic
+    // fuel metering has no V1 consumer.
+    config.epoch_interruption(epoch_interruption.is_enabled());
     config.consume_fuel(false);
     config.max_wasm_stack(MAX_WASM_STACK_BYTES);
 
