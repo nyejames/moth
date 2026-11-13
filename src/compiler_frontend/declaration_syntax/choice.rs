@@ -436,21 +436,9 @@ pub(crate) fn parse_choice_shell(
                 .into());
             }
             _ => {
-                let span = current_source_span(token_stream);
-                let Some(found) = token_stream
-                    .current_diagnostic_token(string_table)
-                    .map_err(|error| {
-                        HeaderParseFailure::Infrastructure(
-                            InfrastructureFailure::malformed_token_projection(
-                                "choice unexpected-token diagnostic",
-                                error,
-                            ),
-                        )
-                    })?
-                else {
-                    return Err(token_lexical::unexpected_end_of_file(None, span).into());
-                };
-                return Err(token_lexical::unexpected_token_from_tag(found, span).into());
+                return Err(
+                    super::declaration_shell_token_error(token_stream, string_table)?.into(),
+                );
             }
         }
     }

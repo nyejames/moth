@@ -38,7 +38,9 @@ use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenRange, TokenTag,
 };
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
-use crate::compiler_frontend::utilities::token_scan::NestingDepth;
+use crate::compiler_frontend::utilities::token_scan::{
+    NestingDepth, unclosed_delimiter_eof_diagnostic,
+};
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -61,7 +63,9 @@ pub(crate) struct SourceDirectiveAnnotation {
 /// Captures one source directive's operand from the token after its name.
 ///
 /// WHAT: at outer source depth, the next `STYLE_DIRECTIVE`, newline or EOF ends the operand; a
-///       newline inside balanced syntax stays part of it.
+///       newline inside balanced syntax stays part of it. A real EOF reached with a group still
+///       open reports the missing closer through the shared EOF diagnostic, while a bounded
+///       statement view that ends mid-group leaves the report to its caller's boundary diagnostic.
 /// WHY: `$doc [$md: ...]` must not treat the nested `$md` as the next outer directive, and a
 ///       multi-line balanced operand must keep all of its tokens. The caller owns target-line
 ///       validation after the complete run is captured.
@@ -70,6 +74,7 @@ pub(crate) fn capture_source_directive_operand(
     operand_contract: SourceModifierOperand,
     name_id: StringId,
     directive_span: SourceSpan,
+    string_table: &mut StringTable,
 ) -> Result<Option<TokenRange>, DiagnosticDraft> {
     match operand_contract {
         SourceModifierOperand::None => {
@@ -115,16 +120,36 @@ pub(crate) fn capture_source_directive_operand(
             let mut depth = NestingDepth::default();
             while let Some(token) = cursor.current() {
                 let tag = token.tag();
+                // EOF is a stable token: `advance` never moves past it. An operand that is still
+                // inside an open group when EOF arrives is unterminated, so stop here instead of
+                // spinning on the same token.
+                if tag == TokenTag::EOF {
+                    break;
+                }
                 if depth.is_top_level()
-                    && matches!(
-                        tag,
-                        TokenTag::NEWLINE | TokenTag::STYLE_DIRECTIVE | TokenTag::EOF
-                    )
+                    && matches!(tag, TokenTag::NEWLINE | TokenTag::STYLE_DIRECTIVE)
                 {
                     break;
                 }
                 depth.step_tag(tag);
                 cursor.advance();
+            }
+
+            // Only a real `EOF` token owns the end-of-file diagnostic. A bounded statement view
+            // that exhausts first falls through, leaving its authored dangling-target report to
+            // the statement run rather than claiming a spanless end of file.
+            if !depth.is_top_level()
+                && let Some(eof) = cursor.current()
+                && eof.tag() == TokenTag::EOF
+            {
+                return Err(unclosed_delimiter_eof_diagnostic(
+                    cursor.source_tokens(),
+                    start,
+                    cursor.position(),
+                    Some(eof.source_span()),
+                    None,
+                    string_table,
+                ));
             }
 
             let end = cursor.position();
@@ -379,6 +404,7 @@ pub(crate) fn parse_statement_source_directive_run(
                 operand_contract,
                 name_id,
                 directive_span,
+                &mut *string_table,
             )?
         };
         // `capture_source_directive_operand` leaves a bare directive on its own token and

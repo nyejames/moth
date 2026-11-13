@@ -20218,3 +20218,73 @@ path = "collection_literal_semicolon_at_top_level_rejected"
 tags = ["integration", "collections", "diagnostics"]
 contract = "language.collections.statement_terminator_in_top_level_entry_rejected"
 role = "primary"
+
+[[case]]
+id = "source_directive_unclosed_template_operand_rejected"
+path = "source_directive_unclosed_template_operand_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.unclosed_source_directive_operand_rejected"
+role = "primary"
+
+[[case]]
+id = "source_directive_unclosed_parenthesis_operand_rejected"
+path = "source_directive_unclosed_parenthesis_operand_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.unclosed_source_directive_operand_rejected"
+role = "boundary"
+
+[[case]]
+id = "source_directive_unclosed_brace_operand_rejected"
+path = "source_directive_unclosed_brace_operand_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.unclosed_source_directive_operand_rejected"
+role = "boundary"
+
+[[case]]
+id = "source_directive_unclosed_statement_operand_rejected"
+path = "source_directive_unclosed_statement_operand_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.unclosed_statement_source_directive_operand_rejected"
+role = "primary"
+
+[[case]]
+id = "source_directive_multiline_operand_success"
+path = "source_directive_multiline_operand_success"
+tags = ["integration", "directives"]
+contract = "language.directives.balanced_multiline_source_directive_operand_acceptance"
+role = "primary"
+
+[[case]]
+id = "source_directive_in_choice_variant_rejected"
+path = "source_directive_in_choice_variant_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.source_directive_in_declaration_shell_rejected"
+role = "primary"
+
+[[case]]
+id = "source_directive_in_struct_field_rejected"
+path = "source_directive_in_struct_field_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.source_directive_in_declaration_shell_rejected"
+role = "boundary"
+
+[[case]]
+id = "source_directive_in_parameter_rejected"
+path = "source_directive_in_parameter_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.source_directive_in_declaration_shell_rejected"
+role = "boundary"
+
+[[case]]
+id = "template_directive_in_declaration_shell_rejected"
+path = "template_directive_in_declaration_shell_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.template_directive_in_source_position_rejected"
+role = "primary"
+
+[[case]]
+id = "declaration_shell_unknown_token_rejected"
+path = "declaration_shell_unknown_token_rejected"
+tags = ["integration", "declaration", "diagnostics"]
+contract = "language.declarations.declaration_shell_unknown_token_rejected"
+role = "primary"

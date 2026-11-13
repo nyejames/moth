@@ -671,6 +671,7 @@ fn parse_headers_in_file_inner(
                     operand_contract,
                     name_id,
                     current_span,
+                    context.string_table,
                 )?;
                 let annotation = SourceDirectiveAnnotation {
                     kind,

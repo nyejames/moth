@@ -24,10 +24,22 @@ Historical audit resolutions and the index of reports with no outstanding findin
 - [AUD-0014: Tokenizer line-break predicate redundancy](./audits/closed_audits/AUD-0014-tokenizer-line-break-redundancy.md)
 - [AUD-0015: MON schema preparation redundancy](./audits/closed_audits/AUD-0015-mon-schema-preparation-redundancy.md)
 - [AUD-0016: Empty-container documentation correctness](./audits/closed_audits/AUD-0016-empty-container-documentation.md)
+- [AUD-0018: Source directive parsing](./audits/closed_audits/AUD-0018-source-directive-parsing.md)
 - [AUD-0019: Function body parsing](./audits/closed_audits/AUD-0019-function-body-parsing.md)
 - [AUD-0020: Backend feature validation](./audits/closed_audits/AUD-0020-backend-feature-validation.md)
 
 ## Resolution records
+
+- AUD-0018-F01 and AUD-0018-F02 were accepted and resolved. Source-directive operand capture now
+  stops at EOF at any nesting depth, so an unclosed `[`, `(` or `{` operand no longer hangs the
+  compiler. On a real EOF token it reports the shared unclosed-delimiter diagnostic
+  (`MOTH-SYNTAX-0022` for templates, `MOTH-SYNTAX-0017` otherwise). A known directive in a
+  choice-variant, member-list or post-type declaration-shell position now reports a
+  `MOTH-SYNTAX-0021` placement diagnostic through one shared rejection path, instead of the
+  generic unexpected-token error. Three independent verification rounds ended clean. The
+  coordinator retargeted the statement-position regression case after round 2 so that it
+  reaches the statement capture. The `just validate` result is recorded in the closeout commit
+  message. See the [AUD-0018 resolution](./audits/closed_audits/AUD-0018-source-directive-parsing.md#resolution-2026-11-13).
 
 - AUD-0019-F01 and linked AUD-0019-F02 were accepted and resolved by making function-body
   capture nesting-aware. A `;` closes, and a block header opens, only at top-level nesting, so an

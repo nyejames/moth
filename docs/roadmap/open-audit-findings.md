@@ -18,12 +18,8 @@ None.
 
 Triaged and authorised for bounded investigation or correction. Implementation has not begun.
 
-- [AUD-0018-F01: An unclosed source-directive operand hangs the compiler](./audits/open_audits/AUD-0018-source-directive-parsing.md#aud-0018-f01-an-unclosed-source-directive-operand-hangs-the-compiler)
-  - `Correctness` | `frontend.source_directive_parsing`
 - [AUD-0017-F01: Unclosed blocks in the entry start body are accepted and swallow later statements](./audits/open_audits/AUD-0017-statement-boundary-diagnostics.md#aud-0017-f01-unclosed-blocks-in-the-entry-start-body-are-accepted-and-swallow-later-statements)
   - `Correctness` | `frontend.statement_boundary_diagnostics`
-- [AUD-0018-F02: A known directive inside a declaration shell is reported as an unexpected token](./audits/open_audits/AUD-0018-source-directive-parsing.md#aud-0018-f02-a-known-directive-inside-a-declaration-shell-is-reported-as-an-unexpected-token)
-  - `Diagnostics` | `frontend.source_directive_parsing`
 - [AUD-0017-F02: A missing block closer is reported as unexpected end of file and does not name the open block](./audits/open_audits/AUD-0017-statement-boundary-diagnostics.md#aud-0017-f02-a-missing-block-closer-is-reported-as-unexpected-end-of-file-and-does-not-name-the-open-block)
   - `Diagnostics` | `frontend.statement_boundary_diagnostics`
 - [AUD-0017-F04: An unclosed parenthesis at the end of an expression is reported at the start of the file](./audits/open_audits/AUD-0017-statement-boundary-diagnostics.md#aud-0017-f04-an-unclosed-parenthesis-at-the-end-of-an-expression-is-reported-at-the-start-of-the-file)

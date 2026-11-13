@@ -1,0 +1,5 @@
+$doc [:hello
+]
+greeting #= "Hello"
+
+~[: [greeting]]

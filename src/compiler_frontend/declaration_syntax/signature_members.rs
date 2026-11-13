@@ -595,11 +595,11 @@ pub fn parse_signature_members_syntax(
                     return Err(diagnostic.into());
                 }
 
-                let span = current_source_span(token_stream);
-                let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
-                    return Err(token_lexical::unexpected_end_of_file(None, span).into());
-                };
-                return Err(token_lexical::unexpected_token_from_tag(found, span).into());
+                // A recognised directive where a member belongs is a placement error; every
+                // other token keeps the generic unexpected-token report.
+                return Err(
+                    super::declaration_shell_token_error(token_stream, string_table)?.into(),
+                );
             }
         }
     }
@@ -786,11 +786,8 @@ fn parse_signature_member_syntax(
         }
 
         _ => {
-            let span = current_source_span(token_stream);
-            let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
-                return Err(token_lexical::unexpected_end_of_file(None, span).into());
-            };
-            return Err(token_lexical::unexpected_token_from_tag(found, span).into());
+            // A directive after the member's type is still inside the field/parameter shell.
+            return Err(super::declaration_shell_token_error(token_stream, string_table)?.into());
         }
     };
 

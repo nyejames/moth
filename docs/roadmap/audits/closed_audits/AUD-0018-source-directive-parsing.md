@@ -42,7 +42,7 @@ Open findings had no directive-parsing candidate. No roadmap plan owns this pars
 
 ### AUD-0018-F01: An unclosed source-directive operand hangs the compiler
 
-- State: `accepted`
+- State: `closed`
 - Kind: `Correctness`
 
 #### Evidence
@@ -106,7 +106,7 @@ None.
 
 ### AUD-0018-F02: A known directive inside a declaration shell is reported as an unexpected token
 
-- State: `accepted`
+- State: `closed`
 - Kind: `Diagnostics`
 
 #### Evidence
@@ -174,6 +174,16 @@ Both findings are accepted for bounded investigation after source review at `fd6
 
 - **F01 accepted.** `capture_source_directive_operand` only stops at EOF when `NestingDepth` is top-level, while `TokenCursor::advance` leaves EOF stationary. A missing inner closer therefore gives the loop no progress condition. End capture at EOF regardless of nesting and let the existing expression/template diagnostic owner identify the missing closer. Preserve balanced multiline operands.
 - **F02 accepted.** `directives.mtf` explicitly requires known directives in invalid contexts to receive placement diagnostics. The declaration-shell fallback emits a generic unexpected-token diagnostic for `STYLE_DIRECTIVE`, even though directive recognition is already complete. Prefer the existing typed placement family at the shell rejection boundary and keep field, variant and parameter attachment unsupported. Check for a reusable rejection path before adding separate special cases.
+
+## Resolution (2026-11-13)
+
+**F01 fixed.** The operand loop in `capture_source_directive_operand` now stops at EOF regardless of `NestingDepth`, so it never calls `advance` on the stationary EOF token. If the operand reaches a real EOF token with a group still open, capture returns the shared `unclosed_delimiter_eof_diagnostic`, the same owner that header function-body capture and signature-member default scanning use. The operand range never reaches a fold, so this is the earliest owner that knows the missing closer. `$doc [:hello` now reports `MOTH-SYNTAX-0022` with the `Template starts here` label, the same identity as an ordinary unclosed template initializer. `$doc (` and `$doc {` report `MOTH-SYNTAX-0017` `expected ')'` or `'}'`. Balanced multi-line operands, nested `$md` and newline or next-directive termination are unchanged.
+
+**F02 fixed.** A new `declaration_syntax::declaration_shell_token_error` is the single rejection path for the choice-variant, signature-member-list and post-type member fallbacks. A known source modifier there reports `MOTH-SYNTAX-0021` `WrongTarget`, the same identity as the attachment walk. A known template directive reports `MOTH-SYNTAX-0021` `WrongContext`, matching its source-position diagnostic. Any other token keeps `MOTH-SYNTAX-0002`, and `$not_a_directive` keeps `MOTH-SYNTAX-0010`. Nothing is accepted or attached. Generic-parameter and type-syntax positions already report typed diagnostics that name the directive and are outside this boundary.
+
+Regression coverage: unclosed template, parenthesis, brace and statement-position operands; a balanced multi-line operand; `$doc` in a choice variant, struct field and parameter; `$slot` in a declaration shell; and an unknown token in a shell. The progress-matrix Source directives row records the new rejection coverage.
+
+**F01 and F02 verified and closed.** Independent verifiers, not the implementer, ran three rounds. Round 1 found a statement-position unclosed `(` operand that produced a diagnostic with no source location. At that tree, function-body capture still cut the body at the inner `;`. Rebased onto AUD-0019's nesting-aware capture, the same source reaches the real EOF and reports a located `MOTH-SYNTAX-0017`. The guard now issues the EOF diagnostic only on a real EOF token, so it can never be unlocated. Round 2 found that the statement-position case had become unable to reach the statement capture: header capture rejected its function-body input first, so the case also passed on the parent commit. The coordinator retargeted it to an entry-root `if` block, which hangs on the parent commit and reports `MOTH-SYNTAX-0017` at the real EOF with the fix. Round 3 returned clean after re-running the repros with timeouts, the full `cargo test -p moth --lib`, the full integration suite, clippy and the format check. The coordinator's `just validate` result is recorded in the closeout commit message. Directive capture changed materially, so the audit-log row is marked stale.
 
 ## Checked and clean
 
