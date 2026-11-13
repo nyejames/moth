@@ -2,7 +2,8 @@
 //!
 //! The fixtures under `fixtures/` prove Wasmtime integration only. They say nothing about the
 //! Moth host ABI or compiled Moth output. Every behaviour runs under both native optimisation
-//! levels, because the levels compile the same Wasm through different Cranelift pipelines.
+//! levels through [`under_both_optimisations`], because the levels compile the same Wasm
+//! through different Cranelift pipelines.
 //!
 //! `embedding_program.rs` is the self-contained program the Wasmtime reference links to. The
 //! other files share the `guest.wat` fixture and the [`TestHost`] state defined here.
@@ -16,17 +17,36 @@ mod limit_tests;
 use crate::runtime::imports::HostImports;
 use crate::runtime::instance::{Deadline, Instance, PreparedModule};
 use crate::runtime::{InstanceLimits, NativeOptimisation, RuntimeEngine, RuntimeError};
+use std::panic::panic_any;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use wasmtime::{Val, ValType};
 
-/// Both native optimisation levels, so a failure names the level that broke.
-const BOTH_OPTIMISATIONS: [NativeOptimisation; 2] =
-    [NativeOptimisation::Development, NativeOptimisation::Release];
+/// Runs one scenario under each native optimisation level.
+///
+/// Any panic inside the scenario, including a setup `expect`, is followed by a line naming the
+/// level it ran under, so no assertion has to carry that context itself.
+fn under_both_optimisations(scenario: impl Fn(NativeOptimisation)) {
+    for optimisation in [NativeOptimisation::Development, NativeOptimisation::Release] {
+        let _level_on_panic = LevelOnPanic(optimisation);
+        scenario(optimisation);
+    }
+}
 
-/// Assembles a WAT fixture into the binary Wasm the runtime compiles.
+struct LevelOnPanic(NativeOptimisation);
+
+impl Drop for LevelOnPanic {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!("the scenario failed under native optimisation {:?}", self.0);
+        }
+    }
+}
+
+/// Assembles a WAT fixture into the binary Wasm the runtime compiles. The assembler doesn't
+/// validate, so a fixture may be deliberately invalid Wasm.
 fn assemble(wat_source: &str) -> Vec<u8> {
-    wat::parse_str(wat_source).expect("the fixture is authored, valid WAT")
+    wat::parse_str(wat_source).expect("the fixture is authored, well-formed WAT")
 }
 
 fn engine(optimisation: NativeOptimisation) -> Arc<RuntimeEngine> {
@@ -35,7 +55,7 @@ fn engine(optimisation: NativeOptimisation) -> Arc<RuntimeEngine> {
     Arc::new(engine)
 }
 
-/// Per-instance host state for the `guest.wat` imports.
+/// Per-instance host state for the test host imports.
 struct TestHost {
     /// Returned by `host.read_value`.
     value: i32,
@@ -54,27 +74,40 @@ impl Drop for TestHost {
     }
 }
 
-/// One engine with the `guest.wat` module prepared against the test host imports.
+/// One engine with the test host imports and the `guest.wat` module prepared against them.
 struct GuestHarness {
     engine: Arc<RuntimeEngine>,
-    prepared: PreparedModule<TestHost>,
+    imports: HostImports<TestHost>,
+    guest: PreparedModule<TestHost>,
     drop_count: Arc<AtomicUsize>,
 }
 
 impl GuestHarness {
     fn new(optimisation: NativeOptimisation) -> Self {
         let engine = engine(optimisation);
-        let module = engine
-            .compile_module(&assemble(include_str!("fixtures/guest.wat")))
-            .expect("the guest fixture is valid core Wasm");
-        let prepared = test_host_imports(&engine)
-            .prepare(&module)
+        let imports = test_host_imports(&engine);
+        let guest = prepare(&engine, &imports, include_str!("fixtures/guest.wat"))
             .expect("the test host provides every guest import");
 
         Self {
             engine,
-            prepared,
+            imports,
+            guest,
             drop_count: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    /// Prepares another module against the same engine and test host imports.
+    fn prepare(&self, wat_source: &str) -> Result<PreparedModule<TestHost>, RuntimeError> {
+        prepare(&self.engine, &self.imports, wat_source)
+    }
+
+    fn host_state(&self, value: i32) -> TestHost {
+        TestHost {
+            value,
+            recorded: Vec::new(),
+            engine: Arc::clone(&self.engine),
+            drop_count: Arc::clone(&self.drop_count),
         }
     }
 
@@ -83,14 +116,8 @@ impl GuestHarness {
     }
 
     fn instantiate_with_limits(&self, value: i32, limits: InstanceLimits) -> Instance<TestHost> {
-        let host_state = TestHost {
-            value,
-            recorded: Vec::new(),
-            engine: Arc::clone(&self.engine),
-            drop_count: Arc::clone(&self.drop_count),
-        };
-        self.prepared
-            .instantiate(host_state, limits, Deadline::Unbounded)
+        self.guest
+            .instantiate(self.host_state(value), limits, Deadline::Unbounded)
             .expect("the guest fixture has no start function and fits the limits")
     }
 
@@ -99,7 +126,26 @@ impl GuestHarness {
     }
 }
 
-/// The host side of every `guest.wat` import.
+/// Compiles a WAT module and checks its imports against `imports`.
+fn prepare<HostState: 'static>(
+    engine: &RuntimeEngine,
+    imports: &HostImports<HostState>,
+    wat_source: &str,
+) -> Result<PreparedModule<HostState>, RuntimeError> {
+    let module = engine.compile_module(&assemble(wat_source))?;
+    imports.prepare(&module)
+}
+
+/// A panic payload whose own destructor panics.
+struct PanicsWhenDropped;
+
+impl Drop for PanicsWhenDropped {
+    fn drop(&mut self) {
+        panic!("the panic payload's destructor panicked");
+    }
+}
+
+/// The host side of every test import.
 fn test_host_imports(engine: &RuntimeEngine) -> HostImports<TestHost> {
     let mut imports = HostImports::new(engine);
     define_test_host_imports(&mut imports).expect("each test import name is defined once");
@@ -139,13 +185,20 @@ fn define_test_host_imports(imports: &mut HostImports<TestHost>) -> Result<(), R
         },
     )?;
 
-    // The three ways a host import can fault.
+    // The ways a host import can fault.
     imports.define("host", "fail", [], [], |_host, _arguments, _results| {
         Err("the disk is full".into())
     })?;
     imports.define("host", "panic", [], [], |_host, _arguments, _results| {
         panic!("host import bug")
     })?;
+    imports.define(
+        "host",
+        "panic_with_payload_that_panics_when_dropped",
+        [],
+        [],
+        |_host, _arguments, _results| panic_any(PanicsWhenDropped),
+    )?;
     imports.define(
         "host",
         "wrong_result_type",

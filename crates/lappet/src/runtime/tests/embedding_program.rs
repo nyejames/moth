@@ -1,10 +1,11 @@
 //! The tested embedding program behind the sketch in `docs/wasmtime-integration.md`.
 //!
 //! It reads top to bottom: engine setup, a host import, instantiation, a typed export call and
-//! failure handling. It deliberately uses nothing from the shared test setup. The import and
-//! call surface it uses is crate-private mechanics over plain core Wasm, not the Moth host ABI
-//! and not a published embedding API.
+//! failure handling. The program itself uses nothing from the shared test setup. The import
+//! and call surface it uses is crate-private mechanics over plain core Wasm, not the Moth host
+//! ABI and not a published embedding API.
 
+use super::under_both_optimisations;
 use crate::runtime::imports::HostImports;
 use crate::runtime::instance::Deadline;
 use crate::runtime::{InstanceLimits, NativeOptimisation, RuntimeEngine, RuntimeError};
@@ -79,8 +80,8 @@ fn run_embedding_program(optimisation: NativeOptimisation) -> Result<(), Runtime
 
 #[test]
 fn embedding_program_runs_under_both_optimisation_levels() {
-    for optimisation in [NativeOptimisation::Development, NativeOptimisation::Release] {
+    under_both_optimisations(|optimisation| {
         let outcome = run_embedding_program(optimisation);
-        assert!(outcome.is_ok(), "{optimisation:?}: {:?}", outcome.err());
-    }
+        assert!(outcome.is_ok(), "{:?}", outcome.err());
+    });
 }

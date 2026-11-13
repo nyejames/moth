@@ -1,7 +1,9 @@
 //! The native engine: one compilation policy shared by every module built from it.
 //!
-//! Every engine option Lappet relies on is set explicitly in [`engine_config`], so a Wasmtime
-//! upgrade can't change the profile by changing a default.
+//! Every engine option Lappet's own checks and documented exclusions rely on is set explicitly
+//! in [`engine_config`], so a Wasmtime upgrade can't change those by changing a default. The
+//! remaining Wasm proposals follow the pinned release's Cranelift profile until compiled Moth
+//! output shows which of them it needs.
 
 use super::error::RuntimeError;
 use super::module::CompiledModule;
@@ -89,12 +91,14 @@ fn engine_config(optimisation: NativeOptimisation) -> Config {
     config.cranelift_regalloc_algorithm(RegallocAlgorithm::Backtracking);
     config.compiler_inlining(Inlining::No);
 
-    // Wasm proposals Lappet relies on. Exports return ordered multiple results, guest addresses
-    // are 32-bit and the limit checks assume the standard page size. Threads and GC aren't
-    // compiled into the dependency at all.
+    // Wasm proposals. Exports return ordered multiple results, guest addresses are 32-bit and
+    // the limit checks assume the standard page size. Relaxed SIMD is outside the V1 profile
+    // because its results may differ between targets. Threads and GC aren't compiled into the
+    // dependency at all.
     config.wasm_multi_value(true);
     config.wasm_memory64(false);
     config.wasm_custom_page_sizes(false);
+    config.wasm_relaxed_simd(false);
 
     // Execution bounds. Every guest entry sets an epoch deadline, so guest code is always
     // interruptible by the embedder. Deterministic fuel metering has no V1 consumer.

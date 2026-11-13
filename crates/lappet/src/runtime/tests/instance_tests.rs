@@ -1,6 +1,6 @@
 //! Instantiation, host imports, export calls and teardown.
 
-use super::{BOTH_OPTIMISATIONS, GuestHarness, TestHost, assemble, engine, test_host_imports};
+use super::{GuestHarness, TestHost, engine, prepare, under_both_optimisations};
 use crate::runtime::imports::HostImports;
 use crate::runtime::instance::Deadline;
 use crate::runtime::{InstanceLimits, LinkError, RuntimeError};
@@ -8,7 +8,7 @@ use wasmtime::ValType;
 
 #[test]
 fn scalar_values_round_trip_through_an_import_and_an_export() {
-    for optimisation in BOTH_OPTIMISATIONS {
+    under_both_optimisations(|optimisation| {
         let harness = GuestHarness::new(optimisation);
         let mut instance = harness.instantiate(40);
 
@@ -16,13 +16,13 @@ fn scalar_values_round_trip_through_an_import_and_an_export() {
             .call("add_to_host_value", 2, Deadline::Unbounded)
             .expect("the call has no fault path");
 
-        assert_eq!(sum, 42, "{optimisation:?}");
-    }
+        assert_eq!(sum, 42);
+    });
 }
 
 #[test]
 fn instances_of_one_prepared_module_share_no_host_state_or_memory() {
-    for optimisation in BOTH_OPTIMISATIONS {
+    under_both_optimisations(|optimisation| {
         let harness = GuestHarness::new(optimisation);
         let mut first = harness.instantiate(1);
         let mut second = harness.instantiate(2);
@@ -45,110 +45,94 @@ fn instances_of_one_prepared_module_share_no_host_state_or_memory() {
                 .call("add_to_host_value", 0, Deadline::Unbounded)
                 .expect("the call has no fault path");
 
-            assert_eq!(loaded, written, "{optimisation:?}");
-            assert_eq!(from_host, host_value, "{optimisation:?}");
-            assert_eq!(
-                instance.host_state().recorded,
-                [written],
-                "{optimisation:?}"
-            );
+            assert_eq!(loaded, written);
+            assert_eq!(from_host, host_value);
+            assert_eq!(instance.host_state().recorded, [written]);
         }
-    }
+    });
 }
 
 #[test]
 fn import_the_host_does_not_provide_is_a_missing_import() {
-    let wasm_bytes = assemble(include_str!("fixtures/guest.wat"));
-
-    for optimisation in BOTH_OPTIMISATIONS {
+    under_both_optimisations(|optimisation| {
         let engine = engine(optimisation);
-        let module = engine
-            .compile_module(&wasm_bytes)
-            .expect("the guest fixture is valid core Wasm");
         let no_imports: HostImports<TestHost> = HostImports::new(&engine);
 
-        let result = no_imports.prepare(&module);
+        // The fixture has exactly one import.
+        let result = prepare(
+            &engine,
+            &no_imports,
+            include_str!("fixtures/round_trip.wat"),
+        );
 
-        // Wasmtime reports the first unresolved import in the module's import order.
         let Err(RuntimeError::Link(LinkError::MissingImport { module, name })) = result else {
-            panic!("{optimisation:?}: expected a missing import");
+            panic!("expected a missing import");
         };
         assert_eq!((module.as_str(), name.as_str()), ("host", "read_value"));
-    }
+    });
 }
 
 #[test]
 fn import_with_another_physical_signature_is_a_mismatch() {
-    let wasm_bytes = assemble(r#"(module (import "host" "read_value" (func (result i64))))"#);
-
-    for optimisation in BOTH_OPTIMISATIONS {
-        let engine = engine(optimisation);
-        let module = engine
-            .compile_module(&wasm_bytes)
-            .expect("the module is valid core Wasm");
+    under_both_optimisations(|optimisation| {
+        let harness = GuestHarness::new(optimisation);
 
         // The test host defines `host.read_value` as `() -> i32`.
-        let result = test_host_imports(&engine).prepare(&module);
+        let result =
+            harness.prepare(r#"(module (import "host" "read_value" (func (result i64))))"#);
 
-        assert!(
-            matches!(
-                result,
-                Err(RuntimeError::Link(LinkError::ImportMismatch { .. }))
-            ),
-            "{optimisation:?}"
-        );
-    }
+        assert!(matches!(
+            result,
+            Err(RuntimeError::Link(LinkError::ImportMismatch { .. }))
+        ));
+    });
 }
 
 #[test]
 fn defining_one_import_name_twice_is_rejected() {
-    for optimisation in BOTH_OPTIMISATIONS {
-        let engine = engine(optimisation);
-        let mut imports = test_host_imports(&engine);
+    under_both_optimisations(|optimisation| {
+        let mut harness = GuestHarness::new(optimisation);
 
-        let result = imports.define(
+        let result = harness.imports.define(
             "host",
             "read_value",
             [],
             [ValType::I32],
-            |_host: &mut TestHost, _arguments, _results| Ok(()),
+            |_host, _arguments, _results| Ok(()),
         );
 
         let Err(RuntimeError::Link(LinkError::ImportDefinition { module, name, .. })) = result
         else {
-            panic!("{optimisation:?}: expected a rejected definition");
+            panic!("expected a rejected definition");
         };
         assert_eq!((module.as_str(), name.as_str()), ("host", "read_value"));
-    }
+    });
 }
 
 #[test]
 fn bad_export_call_is_a_link_error_and_leaves_the_instance_usable() {
-    for optimisation in BOTH_OPTIMISATIONS {
+    under_both_optimisations(|optimisation| {
         let harness = GuestHarness::new(optimisation);
         let mut instance = harness.instantiate(5);
 
         let missing = instance.call::<(), ()>("no_such_export", (), Deadline::Unbounded);
         let Err(RuntimeError::Link(LinkError::MissingExport { name })) = missing else {
-            panic!("{optimisation:?}: expected a missing export");
+            panic!("expected a missing export");
         };
         assert_eq!(name, "no_such_export");
 
         // A memory export isn't a callable function.
         let not_a_function = instance.call::<(), ()>("memory", (), Deadline::Unbounded);
-        assert!(
-            matches!(
-                not_a_function,
-                Err(RuntimeError::Link(LinkError::MissingExport { .. }))
-            ),
-            "{optimisation:?}"
-        );
+        assert!(matches!(
+            not_a_function,
+            Err(RuntimeError::Link(LinkError::MissingExport { .. }))
+        ));
 
         // `add_to_host_value` is `(i32) -> i32`.
         let mismatched = instance.call::<i64, i32>("add_to_host_value", 1, Deadline::Unbounded);
         let Err(RuntimeError::Link(LinkError::ExportSignatureMismatch { name, .. })) = mismatched
         else {
-            panic!("{optimisation:?}: expected a signature mismatch");
+            panic!("expected a signature mismatch");
         };
         assert_eq!(name, "add_to_host_value");
 
@@ -156,56 +140,71 @@ fn bad_export_call_is_a_link_error_and_leaves_the_instance_usable() {
         let sum: i32 = instance
             .call("add_to_host_value", 1, Deadline::Unbounded)
             .expect("link errors don't quarantine");
-        assert_eq!(sum, 6, "{optimisation:?}");
-    }
+        assert_eq!(sum, 6);
+    });
+}
+
+#[test]
+fn start_function_runs_at_instantiation_and_can_call_the_host() {
+    let recording_start = r#"
+        (module
+          (import "host" "record" (func $record (param i32)))
+          (func $start (call $record (i32.const 7)))
+          (start $start))
+    "#;
+
+    under_both_optimisations(|optimisation| {
+        let harness = GuestHarness::new(optimisation);
+        let prepared = harness
+            .prepare(recording_start)
+            .expect("the test host provides the import");
+
+        let instance = prepared
+            .instantiate(
+                harness.host_state(0),
+                InstanceLimits::default(),
+                Deadline::Unbounded,
+            )
+            .expect("the start function returns");
+
+        assert_eq!(instance.host_state().recorded, [7]);
+    });
 }
 
 #[test]
 fn trapping_start_function_fails_instantiation_and_drops_host_state_once() {
-    let wasm_bytes = assemble("(module (func $start unreachable) (start $start))");
-
-    for optimisation in BOTH_OPTIMISATIONS {
+    under_both_optimisations(|optimisation| {
         let harness = GuestHarness::new(optimisation);
-        let module = harness
-            .engine
-            .compile_module(&wasm_bytes)
-            .expect("the module is valid core Wasm");
-        let prepared = test_host_imports(&harness.engine)
-            .prepare(&module)
+        let prepared = harness
+            .prepare("(module (func $start unreachable) (start $start))")
             .expect("the module has no imports");
-        let host_state = TestHost {
-            value: 0,
-            recorded: Vec::new(),
-            engine: harness.engine.clone(),
-            drop_count: harness.drop_count.clone(),
-        };
 
-        let result =
-            prepared.instantiate(host_state, InstanceLimits::default(), Deadline::Unbounded);
-
-        assert!(
-            matches!(result, Err(RuntimeError::StartTrap { .. })),
-            "{optimisation:?}"
+        let result = prepared.instantiate(
+            harness.host_state(0),
+            InstanceLimits::default(),
+            Deadline::Unbounded,
         );
-        assert_eq!(harness.host_states_dropped(), 1, "{optimisation:?}");
-    }
+
+        assert!(matches!(result, Err(RuntimeError::StartTrap { .. })));
+        assert_eq!(harness.host_states_dropped(), 1);
+    });
 }
 
 #[test]
 fn dropping_an_instance_drops_its_host_state_exactly_once() {
-    for optimisation in BOTH_OPTIMISATIONS {
+    under_both_optimisations(|optimisation| {
         let harness = GuestHarness::new(optimisation);
         let mut first = harness.instantiate(1);
         let second = harness.instantiate(2);
         first
             .call::<i32, ()>("record", 9, Deadline::Unbounded)
             .expect("the host import has no fault path");
-        assert_eq!(harness.host_states_dropped(), 0, "{optimisation:?}");
+        assert_eq!(harness.host_states_dropped(), 0);
 
         drop(first);
-        assert_eq!(harness.host_states_dropped(), 1, "{optimisation:?}");
+        assert_eq!(harness.host_states_dropped(), 1);
 
         drop(second);
-        assert_eq!(harness.host_states_dropped(), 2, "{optimisation:?}");
-    }
+        assert_eq!(harness.host_states_dropped(), 2);
+    });
 }

@@ -33,9 +33,16 @@ pub(super) fn run_host_import(
     let host_fault = match outcome {
         Ok(Ok(())) => return Ok(()),
         Ok(Err(source)) => HostFault::Failed { source },
-        Err(panic_payload) => HostFault::Panicked {
-            message: panic_message(panic_payload.as_ref()),
-        },
+        Err(panic_payload) => {
+            let message = panic_message(panic_payload.as_ref());
+            // A payload's own destructor can panic. Drop it under a second guard and leak
+            // whatever that panic carried, so no unwind leaves this function.
+            if let Err(destructor_payload) = catch_unwind(AssertUnwindSafe(|| drop(panic_payload)))
+            {
+                std::mem::forget(destructor_payload);
+            }
+            HostFault::Panicked { message }
+        }
     };
     Err(wasmtime::Error::new(host_fault))
 }

@@ -102,7 +102,9 @@ impl<HostState: 'static> Instance<HostState> {
     ///
     /// Taking `&mut self` means no call can start while another is active. A missing export or
     /// a signature mismatch is a link error and leaves the instance usable, because no guest
-    /// code ran. Any failure once the guest is entered quarantines the instance.
+    /// code ran. Any failure of the call itself quarantines the instance. That includes a
+    /// native-side mistake Wasmtime rejects before entering the guest, such as a reference
+    /// owned by another instance, which is reported as an internal host fault.
     pub(crate) fn call<Parameters, Results>(
         &mut self,
         export_name: &str,

@@ -220,9 +220,38 @@ until Moth's backend can produce the equivalent program.
   The public names are `RuntimeEngine`, `NativeOptimisation`,
   `CompiledModule`, `InstanceLimits`, `RuntimeError`, `LinkError`,
   `LimitFault` and `HostFault`. The crate-private mechanism is `HostImports`,
-  `PreparedModule`, `Instance` and `Deadline`. 24 fixture tests pass under
+  `PreparedModule`, `Instance` and `Deadline`. 26 fixture tests pass under
   both optimisation levels, including the embedding program the Wasmtime
-  reference links to.
+  reference links to. The tests were written with the implementation, so the
+  plan's red-then-green sequence was not observed. A later mutation check on
+  a scratch copy caught every probed regression: quarantine set and check,
+  limit precheck, both deadline installations, the store limiter, swapped
+  start and guest traps, an uncaught host panic, an unguarded panic-payload
+  drop, relaxed SIMD left on and a stack trap reported as a guest trap.
+
+The independent review required four corrections, all applied in the
+follow-up:
+
+- Relaxed SIMD is switched off explicitly. The pinned Cranelift profile
+  enables it, and its results can differ between targets.
+- A panic payload is dropped under a second unwind guard. A payload whose
+  destructor panics no longer escapes the host boundary or skips quarantine.
+- The start deadline is proven by a start function that returns in time after
+  an epoch has already passed. An epoch-enabled store begins with a deadline
+  that has already elapsed, so a spinning-start test alone could pass without
+  the deadline being installed.
+- A module-level dead-code expectation stays on the runtime module. Narrowing
+  it to each crate-private item would repeat one reason across the private
+  surface, and the test build still compiles that surface without the
+  expectation, so unused production code is still reported there.
+
+Two review points were recorded rather than changed. A typed export can
+accept a function reference owned by another instance, and Wasmtime rejects
+that before guest entry. The call still quarantines, reported as an internal
+host fault, because passing that reference is a host-adapter bug. `define`
+accepts numeric Wasm carriers only by contract. A reference type built for
+another engine panics inside Wasmtime, and no adapter in this milestone
+builds one.
 
 Findings from the pinned release that shaped the implementation:
 
@@ -243,7 +272,9 @@ Findings from the pinned release that shaped the implementation:
   `wasm_backtrace_max_frames` to the release default of 20. Trap errors carry
   function names without the `backtrace` Cargo feature.
 - The limit checks assume the standard 64 KiB page, so the custom page sizes
-  proposal is switched off explicitly beside multi-value on and Memory64 off.
+  proposal is switched off explicitly, as are Memory64 and relaxed SIMD.
+  Multi-value stays on. The other proposal toggles follow the pinned
+  Cranelift profile until compiled Moth output shows which of them it needs.
 - Raw host imports use Wasmtime's dynamically typed `func_new`, so one
   wrapper catches panics and withholds any handle that could re-enter the
   guest. Statically typed registration is faster per call and needs one

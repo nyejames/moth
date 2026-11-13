@@ -33,8 +33,11 @@ impl<HostState: 'static> HostImports<HostState> {
 
     /// Registers one host function under its physical Wasm signature.
     ///
-    /// The function fills `results` in order. A failure it returns, or a panic, becomes a host
-    /// fault that ends the guest call.
+    /// The function fills `results` in order. A failure it returns becomes a host fault that
+    /// ends the guest call, and so does a panic.
+    ///
+    /// The signature uses the numeric Wasm carriers. A reference type built for another engine
+    /// is a caller bug and panics inside Wasmtime.
     pub(crate) fn define(
         &mut self,
         module: &str,

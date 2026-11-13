@@ -1,6 +1,6 @@
 //! Fault classification and quarantine.
 
-use super::{BOTH_OPTIMISATIONS, GuestHarness, TestHost};
+use super::{GuestHarness, TestHost, under_both_optimisations};
 use crate::runtime::instance::{Deadline, Instance};
 use crate::runtime::{HostFault, LimitFault, RuntimeError};
 use std::error::Error;
@@ -16,7 +16,7 @@ enum ExpectedFault {
 }
 
 /// Every faulting export of `guest.wat`, with the deadline its fault needs.
-const FAULTING_EXPORTS: [(&str, Deadline, ExpectedFault); 6] = [
+const FAULTING_EXPORTS: [(&str, Deadline, ExpectedFault); 7] = [
     ("trap", Deadline::Unbounded, ExpectedFault::GuestTrap),
     (
         "recurse_forever",
@@ -35,6 +35,11 @@ const FAULTING_EXPORTS: [(&str, Deadline, ExpectedFault); 6] = [
     ),
     (
         "call_panicking_import",
+        Deadline::Unbounded,
+        ExpectedFault::HostPanicked,
+    ),
+    (
+        "call_import_whose_panic_payload_panics_when_dropped",
         Deadline::Unbounded,
         ExpectedFault::HostPanicked,
     ),
@@ -61,8 +66,8 @@ fn call_faulting_export(
     result.expect_err("the export always faults")
 }
 
-fn assert_fault_category(error: &RuntimeError, expected: ExpectedFault, context: &str) {
-    let matches_expectation = match (expected, error) {
+fn is_expected_fault(error: &RuntimeError, expected: ExpectedFault) -> bool {
+    match (expected, error) {
         (ExpectedFault::GuestTrap, RuntimeError::GuestTrap { .. }) => true,
         (ExpectedFault::Limit(expected), RuntimeError::LimitExceeded { limit, .. }) => {
             *limit == expected
@@ -71,47 +76,45 @@ fn assert_fault_category(error: &RuntimeError, expected: ExpectedFault, context:
         (ExpectedFault::HostPanicked, RuntimeError::HostFault(HostFault::Panicked { .. })) => true,
         (ExpectedFault::HostInternal, RuntimeError::HostFault(HostFault::Internal { .. })) => true,
         _ => false,
-    };
-    assert!(
-        matches_expectation,
-        "{context}: expected {expected:?}, got {error:?}"
-    );
+    }
 }
 
 #[test]
 fn every_fault_category_is_classified_and_quarantines_its_instance() {
-    for optimisation in BOTH_OPTIMISATIONS {
+    under_both_optimisations(|optimisation| {
         let harness = GuestHarness::new(optimisation);
 
         for (export_name, deadline, expected) in FAULTING_EXPORTS {
-            let context = format!("{optimisation:?}, {export_name}");
             let mut instance = harness.instantiate(0);
             let mut sibling = harness.instantiate(0);
 
             let fault = call_faulting_export(&mut instance, export_name, deadline);
-            assert_fault_category(&fault, expected, &context);
+            assert!(
+                is_expected_fault(&fault, expected),
+                "{export_name}: expected {expected:?}, got {fault:?}"
+            );
 
             // The quarantined instance refuses the call without entering the guest: `record`
             // would otherwise leave its argument in host state.
             let refused = instance.call::<i32, ()>("record", 1, Deadline::Unbounded);
             assert!(
                 matches!(refused, Err(RuntimeError::InstanceFaulted)),
-                "{context}"
+                "{export_name}"
             );
-            assert!(instance.host_state().recorded.is_empty(), "{context}");
+            assert!(instance.host_state().recorded.is_empty(), "{export_name}");
 
             // A sibling instance of the same prepared module is unaffected.
             sibling
                 .call::<i32, ()>("record", 1, Deadline::Unbounded)
                 .expect("the sibling never faulted");
-            assert_eq!(sibling.host_state().recorded, [1], "{context}");
+            assert_eq!(sibling.host_state().recorded, [1], "{export_name}");
         }
-    }
+    });
 }
 
 #[test]
 fn quarantined_instance_keeps_its_host_state_until_it_is_dropped_once() {
-    for optimisation in BOTH_OPTIMISATIONS {
+    under_both_optimisations(|optimisation| {
         let harness = GuestHarness::new(optimisation);
         let mut instance = harness.instantiate(0);
         instance
@@ -121,36 +124,32 @@ fn quarantined_instance_keeps_its_host_state_until_it_is_dropped_once() {
         call_faulting_export(&mut instance, "trap", Deadline::Unbounded);
 
         // The embedder can still read and drain what the faulted instance owns.
-        assert_eq!(instance.host_state().recorded, [3], "{optimisation:?}");
+        assert_eq!(instance.host_state().recorded, [3]);
         instance.host_state_mut().recorded.clear();
-        assert_eq!(harness.host_states_dropped(), 0, "{optimisation:?}");
+        assert_eq!(harness.host_states_dropped(), 0);
 
         drop(instance);
-        assert_eq!(harness.host_states_dropped(), 1, "{optimisation:?}");
-    }
+        assert_eq!(harness.host_states_dropped(), 1);
+    });
 }
 
 #[test]
 fn host_faults_carry_what_the_host_reported() {
-    for optimisation in BOTH_OPTIMISATIONS {
+    under_both_optimisations(|optimisation| {
         let harness = GuestHarness::new(optimisation);
 
         let mut instance = harness.instantiate(0);
         let failed =
             call_faulting_export(&mut instance, "call_failing_import", Deadline::Unbounded);
         let reported = failed.source().map(ToString::to_string);
-        assert_eq!(
-            reported.as_deref(),
-            Some("the disk is full"),
-            "{optimisation:?}"
-        );
+        assert_eq!(reported.as_deref(), Some("the disk is full"));
 
         let mut instance = harness.instantiate(0);
         let panicked =
             call_faulting_export(&mut instance, "call_panicking_import", Deadline::Unbounded);
         let RuntimeError::HostFault(HostFault::Panicked { message }) = panicked else {
-            panic!("{optimisation:?}: expected a caught host panic");
+            panic!("expected a caught host panic");
         };
-        assert_eq!(message, "host import bug", "{optimisation:?}");
-    }
+        assert_eq!(message, "host import bug");
+    });
 }

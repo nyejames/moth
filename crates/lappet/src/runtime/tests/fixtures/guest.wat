@@ -5,6 +5,8 @@
   (import "host" "advance_epoch" (func $advance_epoch))
   (import "host" "fail" (func $fail))
   (import "host" "panic" (func $panic))
+  (import "host" "panic_with_payload_that_panics_when_dropped"
+    (func $panic_with_payload_that_panics_when_dropped))
   (import "host" "wrong_result_type" (func $wrong_result_type (result i32)))
 
   (memory (export "memory") 1)
@@ -37,5 +39,7 @@
     (call $fail))
   (func (export "call_panicking_import")
     (call $panic))
+  (func (export "call_import_whose_panic_payload_panics_when_dropped")
+    (call $panic_with_payload_that_panics_when_dropped))
   (func (export "call_import_with_wrong_result_type") (result i32)
     (call $wrong_result_type)))
