@@ -18812,6 +18812,20 @@ contract = "backend.html_wasm.unsupported_backend_feature_rejected"
 role = "adversarial"
 
 [[case]]
+id = "wasm_payload_free_choice_variant_rejected"
+path = "wasm_payload_free_choice_variant_rejected"
+tags = ["integration", "backend", "wasm", "diagnostics"]
+contract = "backend.html_wasm.unsupported_backend_feature_rejected"
+role = "adversarial"
+
+[[case]]
+id = "wasm_payload_free_option_none_rejected"
+path = "wasm_payload_free_option_none_rejected"
+tags = ["integration", "backend", "wasm", "diagnostics"]
+contract = "backend.html_wasm.unsupported_backend_feature_rejected"
+role = "adversarial"
+
+[[case]]
 id = "wasm_generic_function_call_rejected"
 path = "wasm_generic_function_call_rejected"
 tags = ["integration", "backend", "wasm", "diagnostics"]

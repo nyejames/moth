@@ -24,8 +24,18 @@ Historical audit resolutions and the index of reports with no outstanding findin
 - [AUD-0014: Tokenizer line-break predicate redundancy](./audits/closed_audits/AUD-0014-tokenizer-line-break-redundancy.md)
 - [AUD-0015: MON schema preparation redundancy](./audits/closed_audits/AUD-0015-mon-schema-preparation-redundancy.md)
 - [AUD-0016: Empty-container documentation correctness](./audits/closed_audits/AUD-0016-empty-container-documentation.md)
+- [AUD-0020: Backend feature validation](./audits/closed_audits/AUD-0020-backend-feature-validation.md)
 
 ## Resolution records
+
+- AUD-0020-F01 was accepted and resolved by gating reachable payload-free variant constructions
+  (unit choice variants and `Option` `none`) in the HTML-Wasm shapes gate with the new
+  `PayloadFreeVariantValues` reason, so they report `MOTH-RULE-0064` at the authored site
+  instead of crashing Wasm lowering. The default assertion-message carrier is skipped
+  explicitly. Default and folded messages still build on Wasm and unreachable helpers still
+  impose no requirement. An independent verifier re-ran the original probes and the HTML-Wasm
+  lane (508/508). The `just validate` result is recorded in the closeout commit message. See the
+  [AUD-0020-F01 resolution](./audits/closed_audits/AUD-0020-backend-feature-validation.md#resolution-2026-11-13).
 
 - AUD-0003 completed without outstanding findings. It reviewed runtime assertion-message handling and call-argument consolidation after the feature corrections, including the frontend/HIR handoff, JavaScript and Wasm support boundary and affected tests. The report records the coordinator's passing focused validation and the final auditor's no-findings result at `1d0a68207`. See [AUD-0003](./audits/closed_audits/AUD-0003-runtime-assertion-messages-call-arguments.md).
 
