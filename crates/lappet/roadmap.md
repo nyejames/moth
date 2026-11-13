@@ -17,7 +17,8 @@ planned backend support as available.
   [Waiting on main](#waiting-on-main).
 - Next action: continue the
   [Wasmtime runtime foundation plan](../../docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md)
-  at Phase 2. The host contract crate plan can start in parallel.
+  at Phase 6, policy evidence. The host contract crate plan can start in
+  parallel.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
 and [Wasm optimisation](../../docs/developer-docs/wasm-optimisation/overview.mtf)
@@ -214,6 +215,43 @@ until Moth's backend can produce the equivalent program.
   `moth-cli` have no path to Wasmtime, and `just first-party-deps` and
   `just feature-lane-check` pass with the new `lappet` and `lappet-runtime`
   lanes. The independent review was clean.
+- Phases 2 to 5, engine, instances, limits and faults: delivered as one slice
+  because the instance, its limits and its quarantine share one small owner.
+  The public names are `RuntimeEngine`, `NativeOptimisation`,
+  `CompiledModule`, `InstanceLimits`, `RuntimeError`, `LinkError`,
+  `LimitFault` and `HostFault`. The crate-private mechanism is `HostImports`,
+  `PreparedModule`, `Instance` and `Deadline`. 24 fixture tests pass under
+  both optimisation levels, including the embedding program the Wasmtime
+  reference links to.
+
+Findings from the pinned release that shaped the implementation:
+
+- Wasmtime reports a module needing a disabled proposal through the same
+  untyped validation failure as malformed bytes. Both are
+  `RuntimeError::InvalidModule`. A separate unsupported-proposal category
+  needs a second validation pass with a direct `wasmparser` dependency or
+  Wasmtime's `reexport-wasmparser` feature. That changes the selected feature
+  set, so it waits for Nye.
+- Wasmtime reports a limiter denial at instantiation and a cross-engine
+  module as untyped text. Lappet checks the module's declared memories and
+  tables and the engine identity itself, before instantiation, and classifies
+  from those typed facts. The store limiter still enforces every limit.
+- The Wasm 3.0 profile Cranelift enables accepts modules with several
+  memories and tables. The per-instance count limit rejects them, not
+  validation.
+- `Config::wasm_backtrace` is deprecated in 50.0.1. The engine pins
+  `wasm_backtrace_max_frames` to the release default of 20. Trap errors carry
+  function names without the `backtrace` Cargo feature.
+- The limit checks assume the standard 64 KiB page, so the custom page sizes
+  proposal is switched off explicitly beside multi-value on and Memory64 off.
+- Raw host imports use Wasmtime's dynamically typed `func_new`, so one
+  wrapper catches panics and withholds any handle that could re-enter the
+  guest. Statically typed registration is faster per call and needs one
+  wrapper per arity. Phase 6 measures the dynamic cost before that is weighed.
+- A host fault keeps what the host reported. It drops the Wasm backtrace that
+  Wasmtime attached while unwinding.
+- Host imports can't reach guest memory yet. That access arrives with the
+  staging table, its first consumer.
 
 ## 3. Build host boundary tables and fault mechanics
 
