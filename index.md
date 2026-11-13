@@ -21,14 +21,14 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 - [Lappet crate](crates/lappet/README.md) and [library entry](crates/lappet/src/lib.rs): feature-split workspace library, dependency-free with no feature enabled.
     - [runtime](crates/lappet/src/runtime/mod.rs): the `runtime` feature's Wasmtime mechanics, with no host ABI. Public: the Cranelift [engine](crates/lappet/src/runtime/engine.rs) policy, compiled modules, [instance limits](crates/lappet/src/runtime/limits.rs) and classified [runtime errors](crates/lappet/src/runtime/error.rs). Crate-private: [host import](crates/lappet/src/runtime/imports.rs) registration and preflight, [instances](crates/lappet/src/runtime/instance.rs) with export calls, deadlines and quarantine, and [fault classification](crates/lappet/src/runtime/fault.rs). [tests](crates/lappet/src/runtime/tests/) use authored core Wasm fixtures.
 - [Runtime design](crates/lappet/docs/design.md), [package-manager design](crates/lappet/docs/package-manager.md) and [independent roadmap](crates/lappet/roadmap.md): accepted contracts, milestone order, waits on `main` and isolated-worktree implementation checkpoints.
-- Lappet plans: [Wasmtime runtime foundation](docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md), [host boundary tables](docs/roadmap/plans/lappet-host-boundary-tables-plan.md), [host contract crate](docs/roadmap/plans/lappet-host-contract-crate-plan.md) and [native binding handoff](docs/roadmap/plans/lappet-native-binding-handoff-plan.md). The Lappet roadmap owns their order.
+- Lappet plans: [Wasmtime runtime foundation](docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md), [host boundary tables](docs/roadmap/plans/lappet-host-boundary-tables-plan.md) and [native binding handoff](docs/roadmap/plans/lappet-native-binding-handoff-plan.md). The Lappet roadmap owns their order. The host contract crate plan is delivered and deleted.
 - [Wasmtime integration reference](crates/lappet/docs/wasmtime-integration.md): the pinned Wasmtime release, the API surface Lappet uses and the excluded features.
 - [Host resource and context API](crates/lappet/docs/host-resources.md): accepted Rust API for resource ownership, access, per-call context and the sendable and thread-bound instance kinds.
 - [Host ABI adapter responsibilities](crates/lappet/docs/host-abi.md): Lappet's installation, conversion, staging-table and resource-table duties over the compiler-owned [native host ABI](docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf).
 - [Wasm optimisation reference](docs/developer-docs/wasm-optimisation/overview.mtf) and [detailed authority](docs/developer-docs/wasm-optimisation/wasm-optimisation.mtf): shared compiler/native-code policy. Its [page](docs/developer-docs/wasm-optimisation/@entry.moth) composes the site.
 - [Lappet introduction](docs/docs/lappet/lappet.mtf) and [page](docs/docs/lappet/@entry.moth): application and embedding overview, with implementation status explicit.
 
-## Standalone lexical and MON crates
+## Standalone lexical, MON and host crates
 
 - [moth-lexical entry](crates/moth-lexical/src/lib.rs): compiler-independent identifier, source-word and numeric leaf facts.
     - [identifier.rs](crates/moth-lexical/src/identifier.rs): Unicode identifier shape and reserved user-name checks.
@@ -41,6 +41,8 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
     - [numeric.rs](crates/moth-mon/src/numeric.rs), [map_keys.rs](crates/moth-mon/src/map_keys.rs): codec-specific scalar conversion and typed map-key validation.
     - [budget.rs](crates/moth-mon/src/budget.rs), [error.rs](crates/moth-mon/src/error.rs): resource accounting, exact input byte spans and public `MonError` projection.
     - [public API tests](crates/moth-mon/tests/public_api.rs), [numeric cases](crates/moth-mon/tests/public_api/numeric.rs) and [resource cases](crates/moth-mon/tests/public_api/resources.rs): external Rust API coverage. Focused reader, schema and writer tests live in [src/tests/](crates/moth-mon/src/tests/).
+- [moth-host entry](crates/moth-host/src/lib.rs): dependency-free host descriptor vocabulary. The compiler re-exports it as `moth::host`.
+    - [descriptor tests](crates/moth-host/src/tests/descriptor_tests.rs): the read surface the compiler conversion uses.
 
 ## Project/build shell
 
@@ -74,7 +76,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
     - [project.rs](src/builder/project.rs): the public `ProjectBuilder` trait and the `build_project` driver over the shared build orchestration.
     - [compiled_project.rs](src/builder/compiled_project.rs): the compiled project handle, the owner-bound package facade handle, the build context and the artifact set.
     - [error.rs](src/builder/error.rs): the public error kinds and the rendered compiler messages.
-- [host descriptors](src/host/mod.rs): public `moth::host` closed V1 vocabulary for manual native Rust host function descriptors, mapped onto the external-package registry specification.
+- [host conversion](src/builder/host_conversion.rs): maps a `moth-host` descriptor onto the external-package registry specification. The vocabulary itself lives in [moth-host](crates/moth-host/src/lib.rs).
 - [builder surface](src/builder_surface/): core packages, external import providers and package metadata.
     - [core_packages/](src/builder_surface/core_packages/): prelude, io, math, collections, text, random and time.
     - [external_import_providers/](src/builder_surface/external_import_providers/): provider registry and resolution table.

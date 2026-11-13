@@ -9,14 +9,17 @@ planned backend support as available.
 ## Current state
 
 - Status: CLI separation and the public `moth::builder` SDK prototype are
-  delivered. The `lappet` crate has a `runtime` feature with a pinned Wasmtime
-  dependency and its first runtime code. It has no host adapter yet.
-- Current milestone: 2, establish Wasmtime execution. Its plan is active.
-- Blockers: none for milestones 2, 3 and 4. Milestone 5 waits for milestone 4.
+  delivered. The host descriptor vocabulary lives in `moth-host`. The `lappet`
+  crate has a Wasmtime runtime and is waiting for policy confirmation before
+  that policy is written into the design docs. It has no host adapter yet.
+- Current milestone: 2, establish Wasmtime execution. Its plan is active
+  through Phase 7, which waits for confirmation. Milestone 4 is delivered.
+- Blockers: Phase 7 waits for Nye's confirmation of the Phase 6 policy lines.
+  Milestone 3 can start. Milestone 5 can start after a sync with `main`.
   Later milestones wait for work on `main` listed under
   [Waiting on main](#waiting-on-main).
-- Next action: Nye confirms or revises the Phase 6 policy lines below before
-  Phase 7 records them. The host contract crate plan is in closeout.
+- Next action: Nye confirms or revises the Phase 6 policy lines before Phase 7
+  records them.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
 and [Wasm optimisation](../../docs/developer-docs/wasm-optimisation/overview.mtf)
@@ -36,7 +39,7 @@ compiler crate, so they proceed while compiler work continues on `main`.
 | 1 | Separate the CLI from the compiler library | Delivered | Delivered | None |
 | 2 | Establish Wasmtime execution | `crates/lappet` only | Now | [Runtime foundation](../../docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md) |
 | 3 | Build host boundary tables and fault mechanics | `crates/lappet` only | Milestone 2 delivers instances, limits and fault quarantine | [Host boundary tables](../../docs/roadmap/plans/lappet-host-boundary-tables-plan.md) |
-| 4 | Extract the shared host contract crate | New crate, `src/host`, `src/builder`, `xtask` | Now | [Host contract crate](../../docs/roadmap/plans/lappet-host-contract-crate-plan.md) |
+| 4 | Extract the shared host contract crate | Delivered | Delivered | None |
 | 5 | Finish the native binding and artefact handoff | `src/builder`, `src/build_system`, `src/builder_surface` | Milestone 4 is delivered | [Native binding handoff](../../docs/roadmap/plans/lappet-native-binding-handoff-plan.md) |
 | 6 | Establish official Core conformance | Lappet, Core references | Milestones 3 and 5 and its own checkpoint | Write when the checkpoint is approved |
 | 7 | Connect real Moth applications | Lappet, public compiler services | The compiler's native host ABI prerequisites | Write when the gate opens |
@@ -44,9 +47,8 @@ compiler crate, so they proceed while compiler work continues on `main`.
 | 9 | Package eligibility and dependency evidence | Lappet, compiler facts | Milestone 8 | Write when the checkpoint is approved |
 | 10 | Remote admission | Lappet | Milestone 9 and its checkpoint | Write when the checkpoint is approved |
 
-Milestone 4 is small and independent of milestones 2 and 3. Run it alongside
-them. Milestones 4 and 5 edit the compiler crate, so sync with `main` before
-each of their phases. The
+Milestone 4 is delivered. Milestone 5 edits the compiler crate, so sync with
+`main` before its phases. The
 package lane, milestones 8 to 10, is independent of Wasmtime and may move ahead
 of milestones 6 and 7 once its prerequisites and checkpoint are met.
 
@@ -396,31 +398,25 @@ follow the V1 protocol by hand and prove Lappet's mechanics only.
 
 ## 4. Extract the shared host contract crate
 
-Plan: [Host contract crate](../../docs/roadmap/plans/lappet-host-contract-crate-plan.md).
+**Delivered.** 13 November 2026. `HostType` and `HostFunction` live in
+`crates/moth-host`, which has no dependencies. The compiler re-exports that
+crate as `moth::host` and keeps the registry conversion beside its only
+caller. `moth-host` is an extracted package with no permitted workspace
+dependency and a feature-free lane. Lappet does not depend on it yet, because
+the runtime has no consumer for the descriptors. That edge waits for the host
+adapters. `HostType` is non-exhaustive, so the compiler's match has a
+rejecting arm no current variant reaches.
 
-**Checkpoint.** Accepted on 13 November 2026 and recorded in the
-[runtime design](docs/design.md#users-and-workspace-dependencies). Lappet's
-runtime depends on a small `moth-host` contract crate and Wasmtime, never on
-the compiler. The compiler depends on the same crate and keeps the
-`moth::host` path. Only Lappet's future package feature depends on the
-compiler.
+`just validate` passed on this tree: formatting, Clippy, feature lanes,
+source audit and first-party dependencies were clean, and the workspace unit
+tests, integration cases and docs check passed. The independent review found
+no change to a builder author's public path or rejection message.
 
-**Delivery.** Move the host descriptor vocabulary into the contract crate,
-keep the registry conversion in the compiler, extend the first-party
-dependency boundary check and record the accepted graph in the runtime design.
-
-**Evidence.** The public `moth::host` path and the standalone crate expose the
-same types. The contract crate depends on no workspace package. `lappet` with
-the `runtime` feature builds without the compiler in its dependency tree.
-
-**Progress.** Phases 1 and 2 are in the tree. `HostType` and `HostFunction`
-moved unchanged into `crates/moth-host`, which has no dependencies. The
-compiler re-exports that crate as `moth::host` and keeps the registry
-conversion beside its only caller. `moth-host` is an extracted package with
-no permitted workspace dependency and a feature-free lane. Lappet does not
-depend on it yet: the runtime has no consumer for the descriptors, so that
-edge waits for the host adapters. `HostType` is non-exhaustive, so the
-compiler's match has a rejecting arm no current variant reaches.
+Documents that still name `src/host` as the descriptor owner, and were not
+edited: `docs/roadmap/plans/lappet-native-binding-handoff-plan.md` and
+`crates/lappet/docs/design.md`, which still says the crate is not extracted.
+`CONTRIBUTING.md` and other `validation.mtf` lists still omit `moth-host`.
+The approved documentation edit was the first-party dependency paragraph only.
 
 ## 5. Finish the native binding and artefact handoff
 
