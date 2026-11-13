@@ -4,8 +4,11 @@ Lappet is Moth's native runtime, Rust host-binding infrastructure and future
 package manager. It lives in the Moth workspace and keeps all user-facing
 commands under `moth`.
 
-This initial library contains documentation only. It has no runtime dependency,
-public execution API or package-installation command.
+The crate is split by Cargo feature. With no feature it has no dependency and
+no API. The `runtime` feature adds native core Wasm execution through a pinned
+Wasmtime release, in [`src/runtime/`](src/runtime/mod.rs). It establishes
+runtime mechanics over authored Wasm fixtures only. There are no host adapters,
+no Moth host ABI support and no package-installation command yet.
 
 ## Read the design
 
@@ -22,5 +25,5 @@ capabilities and never resumes a paused compiler plan implicitly.
 
 The CLI separation milestone is delivered in `crates/moth-cli`, which owns the
 `moth` executable and is the workspace default. The root `moth` package remains
-the compiler library. Runtime and package-manager implementation still waits
-for its own design gates.
+the compiler library and never depends on Lappet or Wasmtime. Package-manager
+implementation still waits for its own design gates.

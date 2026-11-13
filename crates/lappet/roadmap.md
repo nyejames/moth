@@ -9,16 +9,15 @@ planned backend support as available.
 ## Current state
 
 - Status: CLI separation and the public `moth::builder` SDK prototype are
-  delivered. The `lappet` crate remains dependency-free and documentation-only,
-  with no native runtime or host adapter.
-- Current milestone: 2, establish Wasmtime execution. Its plan is ready and not
-  started.
+  delivered. The `lappet` crate has a `runtime` feature with a pinned Wasmtime
+  dependency and its first runtime code. It has no host adapter yet.
+- Current milestone: 2, establish Wasmtime execution. Its plan is active.
 - Blockers: none for milestones 2, 3 and 4. Milestone 5 waits for milestone 4.
   Later milestones wait for work on `main` listed under
   [Waiting on main](#waiting-on-main).
-- Next action: activate the
+- Next action: continue the
   [Wasmtime runtime foundation plan](../../docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md)
-  at Phase 0. The host contract crate plan can start in parallel.
+  at Phase 2. The host contract crate plan can start in parallel.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
 and [Wasm optimisation](../../docs/developer-docs/wasm-optimisation/overview.mtf)
@@ -200,6 +199,21 @@ implementation choice. Back its embedding sketch with a tested program. It
 shows engine setup, a host import, core Wasm instantiation, a typed exported
 call and failure/cleanup handling. A hand-authored Wasm fixture is acceptable
 until Moth's backend can produce the equivalent program.
+
+**Progress.** Evidence so far comes from one host, macOS AArch64 with Rust
+1.99.0, and from authored fixtures.
+
+- Phase 0, 13 November 2026: the branch was current with `main`, 50.0.1 was
+  the newest 50.0.x release and the routed documents showed no drift.
+- Phase 1, dependency and feature gate: `runtime` enables Wasmtime `=50.0.1`
+  with `std`, `runtime` and `cranelift` only. The fixture assembler is `wat`
+  `=1.261.0`, matching the `wasmparser` 0.261.0 that Wasmtime validates with.
+  The feature adds 82 packages to a `lappet` build. The lockfile grew from 81
+  to 159 packages. A clean `lappet` build with `runtime` took 78 s in the dev
+  profile and 53 s in release, against under 1 s with no feature. `moth` and
+  `moth-cli` have no path to Wasmtime, and `just first-party-deps` and
+  `just feature-lane-check` pass with the new `lappet` and `lappet-runtime`
+  lanes. The independent review was clean.
 
 ## 3. Build host boundary tables and fault mechanics
 

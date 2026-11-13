@@ -8,3 +8,17 @@ publish = false
 
 [lints]
 workspace = true
+
+[features]
+# Native Wasm execution through Wasmtime. Off by default so package-management
+# consumers never compile a native code generator.
+runtime = ["dep:wasmtime"]
+
+[dependencies]
+# Exact pin: `docs/wasmtime-integration.md` records the release every API detail was checked against.
+wasmtime = { version = "=50.0.1", default-features = false, features = ["std", "runtime", "cranelift"], optional = true }
+
+[dev-dependencies]
+# Fixture-only WAT assembler, matched to the `wasmparser` release Wasmtime 50.0.1 validates with.
+# Production code compiles binary Wasm and never parses WAT.
+wat = "=1.261.0"
