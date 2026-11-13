@@ -66,7 +66,10 @@ pub mod builder;
 mod builder_surface;
 mod compiler_frontend;
 pub mod first_party_js;
-pub mod host;
+
+/// Deliberate, supported convenience re-export of `moth_host`; this exposes the same API and Rust
+/// types directly, not a compatibility shim or second implementation.
+pub use moth_host as host;
 
 /// Deliberate, supported convenience re-export of `moth_mon`; this exposes the same API and Rust
 /// types directly, not a compatibility shim or second implementation.

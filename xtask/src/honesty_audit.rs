@@ -68,6 +68,7 @@ const SCANNED_SOURCE_ROOTS: &[&str] = &[
     "crates/moth-lexical/src",
     "crates/moth-mon/src",
     "crates/moth-mon/tests",
+    "crates/moth-host/src",
     "crates/moth-cli/src",
     "crates/moth-cli/tests",
     "xtask/src",

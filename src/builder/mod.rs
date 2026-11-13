@@ -9,6 +9,7 @@
 mod compiled_project;
 mod definition;
 mod error;
+mod host_conversion;
 mod project;
 
 /// Deliberately re-exports the build system's single profile type.

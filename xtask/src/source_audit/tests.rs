@@ -138,6 +138,7 @@ fn reports_violations_in_extracted_crate_sources_and_tests() {
         "crates/moth-lexical/src/tests/violation.rs",
         "crates/moth-mon/src/tests/violation.rs",
         "crates/moth-mon/tests/violation.rs",
+        "crates/moth-host/src/tests/violation.rs",
         "crates/moth-cli/src/tests/violation.rs",
         "crates/moth-cli/tests/violation.rs",
     ] {
@@ -165,6 +166,10 @@ fn reports_violations_in_extracted_crate_sources_and_tests() {
             ),
             (
                 "crates/moth-mon/tests/violation.rs",
+                SourceRule::RemovedLegacyConversionName,
+            ),
+            (
+                "crates/moth-host/src/tests/violation.rs",
                 SourceRule::RemovedLegacyConversionName,
             ),
             (

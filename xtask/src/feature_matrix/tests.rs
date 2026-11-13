@@ -66,6 +66,11 @@ fn extracted_source_and_test_owners_report_exact_undeclared_cfg_features() {
             "crates/moth-mon/tests/public_api.rs",
             "public_coddec",
         ),
+        (
+            "moth-host",
+            "crates/moth-host/src/tests/descriptor.rs",
+            "host_descripter",
+        ),
         ("moth-cli", "crates/moth-cli/src/cli.rs", "cli_optionz"),
         (
             "moth-cli",
@@ -120,6 +125,7 @@ fn extracted_source_and_test_owners_report_exact_undeclared_cfg_features() {
             "crates/moth-lexical/src",
             "crates/moth-mon/src",
             "crates/moth-mon/tests",
+            "crates/moth-host/src",
             "crates/moth-cli/src",
             "crates/moth-cli/tests",
             "crates/lappet/src",

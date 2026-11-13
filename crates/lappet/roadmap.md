@@ -325,6 +325,15 @@ dependency boundary check and record the accepted graph in the runtime design.
 same types. The contract crate depends on no workspace package. `lappet` with
 the `runtime` feature builds without the compiler in its dependency tree.
 
+**Progress.** Phases 1 and 2 are in the tree. `HostType` and `HostFunction`
+moved unchanged into `crates/moth-host`, which has no dependencies. The
+compiler re-exports that crate as `moth::host` and keeps the registry
+conversion beside its only caller. `moth-host` is an extracted package with
+no permitted workspace dependency and a feature-free lane. Lappet does not
+depend on it yet: the runtime has no consumer for the descriptors, so that
+edge waits for the host adapters. `HostType` is non-exhaustive, so the
+compiler's match has a rejecting arm no current variant reaches.
+
 ## 5. Finish the native binding and artefact handoff
 
 Plan: [Native binding handoff](../../docs/roadmap/plans/lappet-native-binding-handoff-plan.md).

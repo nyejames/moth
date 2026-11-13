@@ -28,6 +28,7 @@ fn fixture_workspace() -> TempDir {
         "moth-mon",
         "[dependencies]\nmoth-lexical = { path = \"../moth-lexical\" }\n",
     );
+    write_rust_package(workspace.path(), "moth-host", "");
     write_rust_package(workspace.path(), "lappet", "");
     write_rust_package(workspace.path(), "moth-cli", "");
     write_fixture_file(
@@ -330,6 +331,7 @@ fn rust_libraries_allow_only_the_forward_workspace_direction() {
             "Cargo.toml",
             "crates/lappet/Cargo.toml",
             "crates/moth-cli/Cargo.toml",
+            "crates/moth-host/Cargo.toml",
             "crates/moth-lexical/Cargo.toml",
             "crates/moth-mon/Cargo.toml",
         ],
@@ -348,6 +350,9 @@ fn rust_libraries_reject_reverse_normal_dev_and_build_edges() {
             ("moth-mon", "moth", "../.."),
             ("moth-lexical", "moth", "../.."),
             ("moth-lexical", "moth-mon", "../moth-mon"),
+            ("moth-host", "moth", "../.."),
+            ("moth-host", "moth-lexical", "../moth-lexical"),
+            ("moth-host", "moth-mon", "../moth-mon"),
         ] {
             let workspace = fixture_workspace();
             write_rust_package(workspace.path(), "moth-mon", "");
@@ -439,7 +444,7 @@ fn inactive_target_dependency_is_still_rejected() {
 
 #[test]
 fn extracted_libraries_reject_other_first_party_workspace_packages() {
-    for package in ["moth-mon", "moth-lexical"] {
+    for package in ["moth-mon", "moth-lexical", "moth-host"] {
         let workspace = fixture_workspace();
         write_rust_package(workspace.path(), "utility", "");
         write_rust_package(
@@ -465,7 +470,7 @@ fn extracted_libraries_reject_other_first_party_workspace_packages() {
 
 #[test]
 fn missing_extracted_workspace_packages_fail_closed() {
-    for package in ["moth-mon", "moth-lexical"] {
+    for package in ["moth-mon", "moth-lexical", "moth-host"] {
         let workspace = fixture_workspace();
         write_rust_package(workspace.path(), "moth-mon", "");
         fs::remove_dir_all(workspace.path().join("crates").join(package))

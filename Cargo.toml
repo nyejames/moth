@@ -4,7 +4,7 @@ version = "0.1.12"
 edition = "2024"
 
 [workspace]
-members = [".", "crates/lappet", "crates/moth-cli", "crates/moth-lexical", "crates/moth-mon", "xtask"]
+members = [".", "crates/lappet", "crates/moth-cli", "crates/moth-host", "crates/moth-lexical", "crates/moth-mon", "xtask"]
 default-members = ["crates/moth-cli"]
 resolver = "2"
 
@@ -58,6 +58,7 @@ toml = "1.1.2"
 wasm-encoder = "0.247.0"
 wasmparser = "0.247.0"
 notify = "8.2.0"
+moth-host = { path = "crates/moth-host" }
 moth-lexical = { path = "crates/moth-lexical" }
 moth-mon = { path = "crates/moth-mon" }
 unicode-width = "0.2"

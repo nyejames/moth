@@ -661,6 +661,7 @@ dependencies = [
 name = "moth"
 version = "0.1.12"
 dependencies = [
+ "moth-host",
  "moth-lexical",
  "moth-mon",
  "notify",
@@ -691,6 +692,10 @@ dependencies = [
  "saying",
  "tempfile",
 ]
+
+[[package]]
+name = "moth-host"
+version = "0.1.0"
 
 [[package]]
 name = "moth-lexical"

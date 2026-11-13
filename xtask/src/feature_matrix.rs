@@ -270,6 +270,13 @@ pub const FEATURE_LANES: &[FeatureLane] = &[
         owns: "standalone codec invariants, public integration tests and doctests",
     },
     FeatureLane {
+        name: "moth-host",
+        package: "moth-host",
+        features: &[],
+        kind: FeatureLaneKind::Standard,
+        owns: "the descriptor vocabulary's unit tests",
+    },
+    FeatureLane {
         name: "lappet",
         package: "lappet",
         features: &[],
@@ -361,6 +368,12 @@ const PACKAGE_SOURCES: &[(&str, &str, &[&str])] = &[
         "moth-mon",
         "crates/moth-mon/Cargo.toml",
         &["crates/moth-mon/src", "crates/moth-mon/tests"],
+    ),
+    (
+        "moth-host",
+        "crates/moth-host/Cargo.toml",
+        // The descriptor tests live under `src/tests`, so this crate owns no separate test root.
+        &["crates/moth-host/src"],
     ),
     (
         "moth-cli",
