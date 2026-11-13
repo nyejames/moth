@@ -130,6 +130,19 @@ Targeted module/consumer reuse, including dev-server configuration invalidation,
 existing incremental and persistent artefact work. Current dev rebuilds do not consume an invalidation
 report.
 
+### Const implementation reuse gate
+
+A consumer that folded an imported const call depends on the provider's exported body and the
+transitive private const helpers and constants that body reached. The public callable record carries
+the callable's type and `Const` evaluation contract, not that implementation closure. Before any warm
+semantic consumer reuse is enabled, provider publication must therefore expose one compiler-owned
+implementation digest over exactly that reachable closure. The digest must use stable semantic
+identity, not source text, formatting, source positions or donor-local numeric IDs, and it must not
+publish private declaration names or values into the public interface. A body-only or private-helper
+edit then invalidates a consumer that folded the affected origin, while unrelated public interfaces
+and consumers remain reusable. Until that reuse path exists, builds recompile consumers and no
+dormant cache digest is maintained.
+
 ## What can fail here
 
 - missing fingerprint input or inconsistent identity

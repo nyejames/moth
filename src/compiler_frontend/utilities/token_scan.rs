@@ -14,13 +14,16 @@ use crate::compiler_frontend::compiler_messages::diagnostics::{
     draft::DiagnosticDraft,
     families::{templates, token_lexical},
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_binding_target_syntax;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
-use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::{INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRangeError, TokenRef, TokenTag,
 };
+use rustc_hash::FxHashSet;
 
 /// Failure lanes for declaration-initializer scanning.
 ///
@@ -166,7 +169,7 @@ pub(crate) fn collect_scanned_symbol_references(
             .checked_add(1)
             .and_then(|next_index| tokens.get(next_index))
             .map(|t| t.tag);
-        if next == Some(TokenTag::ASSIGN) {
+        if next == Some(TokenTag::ASSIGN) || next == Some(TokenTag::AS) {
             continue;
         }
 
@@ -195,6 +198,235 @@ pub(crate) fn collect_scanned_symbol_references(
     }
 
     references
+}
+
+/// Collect every local binding name declared in one const-function body token view.
+///
+/// WHAT: recognizes explicit declaration targets with the shared declaration-shell grammar, plus
+///       loop/catch bindings, multi-bind targets and match payload bindings.
+/// WHY: const-body dependency scanning sees parameter and local names as bare symbols. Moth
+///      forbids shadowing, so a body-local spelling is never a reference to a top-level
+///      declaration; filtering these names prevents false graph edges and false cycles without a
+///      second expression parser.
+pub(crate) fn collect_body_local_binding_names(
+    tokens: TokenFactView<'_>,
+    string_table: &mut StringTable,
+) -> Result<FxHashSet<StringId>, InfrastructureFailure> {
+    let mut names = FxHashSet::default();
+    let mut index = 0usize;
+    let mut parenthesis_depth = 0usize;
+    let mut curly_depth = 0usize;
+    while index < tokens.len() {
+        let Some(token) = tokens.get(index) else {
+            break;
+        };
+        match token.tag {
+            TokenTag::OPEN_PARENTHESIS => parenthesis_depth += 1,
+            TokenTag::CLOSE_PARENTHESIS => {
+                parenthesis_depth = parenthesis_depth.saturating_sub(1);
+            }
+            TokenTag::OPEN_CURLY => curly_depth += 1,
+            TokenTag::CLOSE_CURLY => {
+                curly_depth = curly_depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+        let statement_level = parenthesis_depth == 0 && curly_depth == 0;
+        if token.tag == TokenTag::TYPE_PARAMETER_BRACKET && statement_level {
+            index = collect_bar_bindings(tokens, index, &mut names);
+            continue;
+        }
+        if token.tag == TokenTag::SYMBOL
+            && let Some(name) = token.symbol
+        {
+            // Multi-bind and declaration targets are statement forms. Restrict them to the
+            // statement-level token context so map entries, named arguments and field writes
+            // cannot make their spellings look like local declarations.
+            if statement_level
+                && let Some(next) =
+                    collect_binding_target_names(tokens, index, name, string_table, &mut names)?
+            {
+                index = next;
+                continue;
+            }
+            if statement_level {
+                // The payload scan walks its own parentheses; ordinary scanning can resume
+                // at the next token.
+                collect_match_payload_names(tokens, index, &mut names);
+            }
+        }
+        index += 1;
+    }
+    Ok(names)
+}
+
+/// Collect the name or names declared by one statement-level binding target.
+///
+/// WHAT: parses the target grammar once, then extends the same parse across a comma-separated
+///       multi-bind list until its `=` separator.
+/// WHY: one parse of the shared binding-target grammar yields both the single target and the comma
+///      list, so the collected name set and the resume index cannot disagree. A malformed first
+///      target contributes no local names and ends the scan.
+fn collect_binding_target_names(
+    tokens: TokenFactView<'_>,
+    index: usize,
+    name: StringId,
+    string_table: &mut StringTable,
+    names: &mut FxHashSet<StringId>,
+) -> Result<Option<usize>, InfrastructureFailure> {
+    let mut declaration_cursor = DeclarationCursor::new(tokens.cursor_at(index + 1)?);
+    let initial_position = declaration_cursor.position();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let Ok(first_target) = parse_binding_target_syntax(
+        name,
+        &mut declaration_cursor,
+        string_table,
+        &mut span_builder,
+    ) else {
+        return Ok(None);
+    };
+    let consumed = declaration_cursor
+        .position()
+        .saturating_sub(initial_position);
+    let mut cursor = index + 1 + consumed;
+    let mut pending = vec![name];
+
+    while let Some(separator) = tokens.get(cursor) {
+        match separator.tag {
+            TokenTag::COMMA => {
+                let Some(next) = tokens.get(cursor + 1) else {
+                    break;
+                };
+                let Some(next_name) = next.symbol.filter(|_| next.tag == TokenTag::SYMBOL) else {
+                    break;
+                };
+                // Each multi-bind target may carry its own annotation or marker after its name.
+                let Some(after_name) = tokens.cursor_at(cursor + 2).ok() else {
+                    break;
+                };
+                pending.push(next_name);
+                let mut declaration_cursor = DeclarationCursor::new(after_name);
+                let initial_position = declaration_cursor.position();
+                let mut span_builder = ExtendedSpanBuilder::new();
+                let _ = parse_binding_target_syntax(
+                    next_name,
+                    &mut declaration_cursor,
+                    string_table,
+                    &mut span_builder,
+                );
+                let consumed = declaration_cursor
+                    .position()
+                    .saturating_sub(initial_position);
+                let Some(next_cursor) = (cursor + 2).checked_add(consumed) else {
+                    break;
+                };
+                cursor = next_cursor;
+            }
+            TokenTag::ASSIGN if pending.len() > 1 => {
+                names.extend(pending);
+                return Ok(Some(cursor + 1));
+            }
+            _ => break,
+        }
+    }
+
+    if !first_target.declares_explicitly() {
+        return Ok(None);
+    }
+    names.insert(name);
+    Ok(Some(index + 1 + consumed))
+}
+
+fn collect_bar_bindings(
+    tokens: TokenFactView<'_>,
+    start: usize,
+    names: &mut FxHashSet<StringId>,
+) -> usize {
+    let mut inside = false;
+    let mut index = start;
+    while index < tokens.len() {
+        let Some(token) = tokens.get(index) else {
+            break;
+        };
+        if token.tag == TokenTag::TYPE_PARAMETER_BRACKET {
+            if inside {
+                return index + 1;
+            }
+            inside = true;
+        } else if inside
+            && token.tag == TokenTag::SYMBOL
+            && let Some(name) = token.symbol
+        {
+            names.insert(name);
+        }
+        index += 1;
+    }
+    index
+}
+
+fn collect_match_payload_names(
+    tokens: TokenFactView<'_>,
+    index: usize,
+    names: &mut FxHashSet<StringId>,
+) {
+    // Match arms are line-oriented. Reusing that boundary keeps a guard call such as
+    // `Failed(x) if positive(threshold) =>` from looking like a payload pattern of its own.
+    if index > 0
+        && !tokens
+            .get(index - 1)
+            .is_some_and(|token| token.tag == TokenTag::NEWLINE)
+    {
+        return;
+    }
+    let Some(open) = tokens.get(index + 1) else {
+        return;
+    };
+    if open.tag != TokenTag::OPEN_PARENTHESIS {
+        return;
+    }
+    let mut depth = 1usize;
+    let mut cursor = index + 2;
+    let mut payload_names = Vec::new();
+    while cursor < tokens.len() {
+        let Some(token) = tokens.get(cursor) else {
+            break;
+        };
+        match token.tag {
+            TokenTag::OPEN_PARENTHESIS => depth += 1,
+            TokenTag::CLOSE_PARENTHESIS => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    let Some(arrow) = tokens.get(cursor + 1) else {
+                        return;
+                    };
+                    if arrow.tag != TokenTag::FAT_ARROW {
+                        return;
+                    }
+                    names.extend(payload_names);
+                    return;
+                }
+            }
+            TokenTag::SYMBOL => {
+                let previous = cursor
+                    .checked_sub(1)
+                    .and_then(|previous| tokens.get(previous))
+                    .map(|token| token.tag);
+                let next = tokens.get(cursor + 1).map(|token| token.tag);
+                if previous != Some(TokenTag::DOT)
+                    && previous != Some(TokenTag::DOUBLE_COLON)
+                    && next != Some(TokenTag::OPEN_PARENTHESIS)
+                    && next != Some(TokenTag::AS)
+                    && let Some(name) = token.symbol
+                {
+                    // `field as local` names the field before `as`; only the renamed local is a
+                    // body binding.
+                    payload_names.push(name);
+                }
+            }
+            _ => {}
+        }
+        cursor += 1;
+    }
 }
 
 /// Whether the symbol at `index` is the static target name immediately after `$slot` or `$in`.
@@ -241,8 +473,8 @@ fn is_static_slot_target(
 pub(crate) struct ScannedToken {
     pub(crate) tag: TokenTag,
     pub(crate) symbol: Option<StringId>,
-    pub(crate) path_syntax_id: Option<crate::compiler_frontend::paths::path_syntax::PathSyntaxId>,
-    pub(crate) span: crate::compiler_frontend::source::LocalSpan,
+    pub(crate) path_syntax_id: Option<PathSyntaxId>,
+    pub(crate) span: LocalSpan,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -301,6 +533,57 @@ impl<'a> TokenFactView<'a> {
             tokens,
             start: bounded_start,
             end: bounded_end,
+        })
+    }
+
+    /// Construct a bounded canonical cursor beginning at `offset` in this view.
+    ///
+    /// WHAT: exposes the same checked token owner the view scans so declaration-shell parsers can
+    ///       read one local binding target without materialising a separate token window.
+    /// WHY: const-body dependency filtering must reuse the binding grammar instead of inventing a
+    ///      second declaration recognizer.
+    fn cursor_at(self, offset: usize) -> Result<TokenCursor<'a>, InfrastructureFailure> {
+        let Self::Canonical { tokens, start, end } = self;
+        let absolute = start.checked_add(offset).ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "const body local-binding cursor offset overflowed",
+            )
+        })?;
+        if absolute > end {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "const body local-binding cursor escaped its token view",
+            ));
+        }
+        let start = u32::try_from(absolute).map_err(|_| {
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "const body local-binding token index exceeds its representation",
+            )
+        })?;
+        let end = u32::try_from(end).map_err(|_| {
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "const body local-binding token end exceeds its representation",
+            )
+        })?;
+        let range = TokenRange::try_new_for(
+            tokens,
+            TokenIndex::from_raw(start),
+            TokenIndex::from_raw(end),
+        )
+        .map_err(|error| {
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("const body local-binding token range failed: {error:?}"),
+            )
+        })?;
+        TokenCursor::new(tokens, range).map_err(|error| {
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("const body local-binding cursor failed: {error:?}"),
+            )
         })
     }
 

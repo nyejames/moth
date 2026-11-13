@@ -9,6 +9,7 @@ use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_
 use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_snapshot_builder::TypeDisplaySnapshotBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::compaction::CompactOutcome;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::unreachable_match_arm;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::unused_import;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
@@ -342,6 +343,49 @@ fn report_set_severity_filter_keeps_production_order_within_each_run() {
         .expect("the labelled ordinary error remains")
         .1;
     assert_eq!(duplicate.durable_labels().count(), 1);
+}
+
+#[test]
+fn const_body_runtime_rejection_always_labels_the_const_declaration() {
+    let operation = exact_span(4, 6);
+    let declaration = exact_span(20, 7);
+
+    let labelled = choices_control_flow::const_body_runtime_operation(
+        None,
+        Some(operation),
+        Some(declaration),
+    );
+    let compact = compact_bag_for_test(DiagnosticBag::from(labelled), None);
+    let view = compact
+        .first()
+        .expect("the const-body rejection is retained");
+    let labels = view
+        .durable_labels()
+        .filter_map(|label| match label.site {
+            SiteRef::Local(span) => Some((label.message, span)),
+            SiteRef::Absent | SiteRef::Foreign { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        labels.len(),
+        1,
+        "the owning const declaration is always the secondary label"
+    );
+    assert_eq!(labels[0].1, declaration);
+
+    let unlabelled =
+        choices_control_flow::const_body_runtime_operation(None, Some(operation), None);
+    let compact = compact_bag_for_test(DiagnosticBag::from(unlabelled), None);
+    let view = compact
+        .first()
+        .expect("the const-body rejection is retained");
+    assert_eq!(
+        view.durable_labels()
+            .filter(|label| !matches!(label.site, SiteRef::Absent))
+            .count(),
+        0,
+        "an unauthored declaration site contributes no located label"
+    );
 }
 
 #[test]

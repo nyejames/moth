@@ -27,6 +27,7 @@ use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::const_eval::{
     ConstantFoldOutcome, FoldRequirement, FoldServices,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -122,6 +123,7 @@ fn function_root(
         kind: ResolvedPublicTypeRootKind::Function {
             signature,
             generic_parameter_list_id: None,
+            evaluation: CallableEvaluation::Runtime,
         },
     }
 }
@@ -741,11 +743,13 @@ fn never_contract_changes_public_semantic_identity() {
     );
 
     let never_semantics = PublicFunctionSemantics {
+        evaluation: CallableEvaluation::Runtime,
         category: PublicFunctionCategory::ConcreteLocal,
         parameters: Vec::new(),
         return_contract: never,
     };
     let ordinary_semantics = PublicFunctionSemantics {
+        evaluation: CallableEvaluation::Runtime,
         category: PublicFunctionCategory::ConcreteLocal,
         parameters: Vec::new(),
         return_contract: ordinary,
@@ -971,6 +975,7 @@ fn receiver_method_semantics_from_seed_rejects_free_function_seed_without_panic(
             .expect("test path fits"),
         origin: free_function_origin("free_fn"),
         generic_template: false,
+        evaluation: CallableEvaluation::Runtime,
         kind: CallableSeedKind::FreeFunction,
     };
     let signatures = FxHashMap::default();
@@ -992,6 +997,7 @@ fn receiver_method_semantics_from_seed_rejects_missing_signature_without_panic()
             .expect("test path fits"),
         origin: OriginFunctionId::new_receiver(module_origin(), "tick".to_owned(), origin),
         generic_template: false,
+        evaluation: CallableEvaluation::Runtime,
         kind: CallableSeedKind::ReceiverMethod {
             receiver_origin: struct_origin("Counter"),
             method_index: 99,

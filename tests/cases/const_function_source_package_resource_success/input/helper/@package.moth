@@ -1,0 +1,18 @@
+$export
+Card = |
+    body String,
+    styles {String},
+|
+
+$export
+make #|title String| -> Card:
+    return Card(
+        body = [: <div class="card">[title]</div> ],
+        styles = {[@styles/card.css]},
+    )
+;
+
+$export
+list_styles #|styles {String}| -> String:
+    return [: [loop styles |style|:[style];] ]
+;

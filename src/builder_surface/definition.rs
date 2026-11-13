@@ -293,6 +293,15 @@ fn compiler_project_record_schema() -> ConfigSchema {
             ),
         )
         .expect("project schema is under construction");
+    // Const execution limits are compiler controls, so they stay fixed-only and bounded.
+    for name in ["const_work_limit", "const_memory_limit_mb"] {
+        schema
+            .register_field(
+                root,
+                ConfigSchemaField::fixed_scalar(name, FixedScalar::I32),
+            )
+            .expect("project schema is under construction");
+    }
     // Diagnostic limits are compiler controls, so they stay fixed-only like the loop limit.
     // No schema default: an omitted setting must stay distinguishable from an authored `none`.
     schema

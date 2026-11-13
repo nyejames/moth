@@ -1,0 +1,9 @@
+unsupported #|value I32| -> I32:
+    if value is:
+        1 => return 1
+        else => return 0
+    ;
+;
+
+result = 7
+~[: result=[result]]

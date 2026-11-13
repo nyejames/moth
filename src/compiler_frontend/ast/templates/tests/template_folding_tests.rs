@@ -45,10 +45,13 @@ fn context<'a>(
         expression_builder: expressions,
         const_values: constants,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        template_output_limits: None,
+        template_work: None,
         source_scope: None,
         external_package_registry: None,
         prepared_wrapper_slot_routing: FxHashMap::default(),
         bindings,
+        required_call_rewriter: None,
     }
 }
 

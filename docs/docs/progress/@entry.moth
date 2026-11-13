@@ -191,6 +191,14 @@ init_docs_sidebar()!
         ]
 
         [data:
+            [: Const functions]
+            [: Partial]
+            [: Required const declaration/call execution, deterministic work and allocation budgets, cross-module publication and release-only ordinary-function folding.]
+            [: Frontend]
+            [: `name #|args| -> Return:` declares a callable whose every call is executed at compile time. V1 admits immutable ordinary-value parameters and one ordinary success slot; runtime arguments, mutable parameters, fallible contracts and dependency cycles are rejected. Required calls execute the one prepared typed-AST body and never emit a const-only runtime symbol. Release builds optionally fold scalar-returning ordinary const-safe functions and retain runtime calls with a deduplicated Note when a configured budget refuses a candidate. Aggregate, String, template-bearing and unproven-provenance candidates stay at runtime. See @../functions/function-declarations (Function declarations) and @../constants/constant-folding (Constant folding).]
+        ]
+
+        [data:
             [: Never return contracts]
             [: Partial]
             [: Broad frontend, HIR, borrow, Boracle, JavaScript and current Wasm coverage, including standalone-call placement, body-proof diagnostics, trait and external contract matching and defensive unreachable lowering.]

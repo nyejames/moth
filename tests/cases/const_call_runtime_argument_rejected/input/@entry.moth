@@ -1,0 +1,8 @@
+square #|value I32| -> I32:
+    return value * value
+;
+
+bad |value I32| -> I32:
+    return square(value)
+;
+io.line("unreachable")

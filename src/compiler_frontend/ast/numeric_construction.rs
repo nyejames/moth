@@ -56,6 +56,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::TypeMismatchContext;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::type_mismatch;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId, builtin_type_ids};
@@ -612,6 +613,8 @@ pub(crate) enum DeferredCallHandling {
 #[derive(Debug, Clone)]
 pub(crate) struct DeferredSourceCall {
     pub(crate) function_path: PathId,
+    /// The callee's required-vs-optional evaluation classification settled at call typing.
+    pub(crate) evaluation: CallableEvaluation,
     pub(crate) success_result_type_ids: Vec<TypeId>,
     pub(crate) error_return_type_id: Option<TypeId>,
     /// Whether the callee's settled return contract completes as a value or terminates.

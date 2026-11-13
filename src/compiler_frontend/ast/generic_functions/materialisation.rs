@@ -12,6 +12,7 @@
 //! nominal-blueprint, semantic-closure and alias projection details.
 mod alias_projection;
 mod artefact_emit;
+mod const_materialisation;
 mod frozen_file_references;
 mod frozen_syntax;
 mod nominal_blueprints;
@@ -26,6 +27,7 @@ use crate::compiler_frontend::ast::AstBuildResult;
 #[cfg(test)]
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_public_folded_value;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::module_compilation::ConstExecutionLimits;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -33,6 +35,11 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 pub(crate) use artefact_emit::ModuleMaterialisationContext;
+#[cfg(test)]
+pub(crate) use const_materialisation::reuse_probe;
+pub(crate) use const_materialisation::{
+    ConstFunctionMaterialisationTarget, materialise_imported_const_function,
+};
 pub(crate) use preparation_freeze::{
     ModuleMaterialisationCapture, ModuleMaterialisationEnvironmentInput,
     ModuleMaterialisationPreparation, ModuleMaterialisationPreparationBuilder,
@@ -68,6 +75,7 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
+    pub(crate) const_execution_limits: ConstExecutionLimits,
     /// The requesting module owns generated work in current-schema attribution.
     #[cfg(feature = "timers")]
     pub(crate) timing_context: Option<crate::timing::TimingContext>,

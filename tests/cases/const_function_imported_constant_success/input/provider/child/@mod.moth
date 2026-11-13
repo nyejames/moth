@@ -1,0 +1,2 @@
+$export
+limit #I32 = 4

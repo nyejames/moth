@@ -1,0 +1,15 @@
+-- Parameter-dependent template content folds through the AST-owned TIR fold authority,
+-- including a nested template whose loop source is a const-function parameter.
+
+render #|title String| -> String:
+    return [: <section><b>[title]</b></section> ]
+;
+
+list #|values {String}| -> String:
+    return [: [loop values |value|:[value];] ]
+;
+
+heading #String = render("hello")
+items #String = list({"a", "b", "c"})
+
+[:<main>[heading] items=[items]</main>]

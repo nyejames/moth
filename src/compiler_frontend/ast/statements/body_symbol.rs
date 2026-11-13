@@ -10,7 +10,7 @@
 //! unsupported RHS shapes report their authored rule diagnostic.
 
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -1248,6 +1248,12 @@ pub(crate) fn parse_symbol_statement(
                         )
                     })?
                     .to_owned();
+                reject_runtime_mutation_target_in_const_body(
+                    context,
+                    &declaration,
+                    symbol_id,
+                    Some(token_stream.current_span()),
+                )?;
                 let mutation = handle_mutation(
                     token_stream,
                     &declaration,
@@ -1410,6 +1416,12 @@ pub(crate) fn parse_symbol_statement(
                             missing_write_prefix(token_stream, symbol_id, string_table)?.into()
                         );
                     }
+                    reject_runtime_mutation_target_in_const_body(
+                        context,
+                        &declaration,
+                        symbol_id,
+                        Some(token_stream.current_span()),
+                    )?;
 
                     let mutation = handle_mutation_target(
                         token_stream,
@@ -1623,3 +1635,26 @@ pub(crate) fn parse_symbol_statement(
 #[cfg(test)]
 #[path = "tests/struct_parsing_tests.rs"]
 mod struct_parsing_tests;
+
+/// Reject a const body that writes a binding owned by runtime state.
+///
+/// WHAT: permits body-local parameters/locals and explicit constants, and rejects every other
+///       mutation target with the const declaration as a secondary label.
+/// WHY: assignment dispatch resolves a place directly instead of lowering the identifier as an
+///      expression, so the expression-reference eligibility check never sees the write.
+fn reject_runtime_mutation_target_in_const_body(
+    context: &ScopeContext,
+    declaration: &Declaration,
+    target_name: StringId,
+    span: Option<SourceSpan>,
+) -> Result<(), ExpressionParseError> {
+    if context.const_body_rejects_runtime_declaration(declaration) {
+        return Err(choices_control_flow::const_body_runtime_operation(
+            Some(target_name),
+            span,
+            context.const_declaration_span(),
+        )
+        .into());
+    }
+    Ok(())
+}

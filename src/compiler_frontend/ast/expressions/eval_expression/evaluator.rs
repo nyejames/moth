@@ -10,6 +10,9 @@ use crate::compiler_frontend::ast::const_eval::{
     ConstantFoldOutcome, ExplicitConstantPayload, FoldRequirement, FoldServices, constant_fold,
     constant_fold_with_dec_power_exponent_depth, explicit_constant_operand,
 };
+use crate::compiler_frontend::ast::const_values::const_execution::{
+    ConstExecutionServices, rewrite_required_const_calls,
+};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
@@ -57,6 +60,89 @@ use super::typing_error::ExpressionTypingError;
     reason = "expression evaluation keeps scope, RPN nodes, type interner, expression builder, const store, expected type, value mode, string table, and path fork as separate borrows at the shared operator-folding entry point"
 )]
 pub fn evaluate_expression(
+    context: &ScopeContext,
+    nodes: Vec<ExpressionRpnItem>,
+    type_interner: &mut AstTypeInterner<'_>,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    expected_type: &mut ExpectedType,
+    mismatch_context: TypeMismatchContext,
+    value_mode: &ValueMode,
+    string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
+) -> Result<OwnedExpr, ExpressionTypingError> {
+    let root = evaluate_expression_inner(
+        context,
+        nodes,
+        type_interner,
+        expressions,
+        const_values,
+        expected_type,
+        mismatch_context,
+        value_mode,
+        string_table,
+        path_fork,
+    )?;
+
+    // Required source const calls fold at the one expression completion boundary. A module with
+    // no const callable returns before touching the executables map, so ordinary expression
+    // parsing pays neither the borrow nor a graph walk.
+    // A const body is not executed while it is parsed. Its required calls fold with the
+    // call-site parameter bindings when the prepared executable runs.
+    if context.is_const_body() || !context.has_const_functions() {
+        return Ok(root);
+    }
+    // The map is attached once the environment knows the module's const callables; it can still
+    // be empty while bodies are being prepared, which leaves this expression unchanged.
+    let Some(executables) = context.const_function_executables() else {
+        return Ok(root);
+    };
+    let registry = executables.borrow();
+    let original = root.id();
+    let rewritten = rewrite_required_const_calls(
+        ConstExecutionServices {
+            builder: expressions,
+            constants: const_values,
+            executables: &registry,
+            scope: context,
+            string_table,
+            types: type_interner.environment(),
+            path_fork,
+        },
+        original,
+    )
+    .map_err(ExpressionTypingError::from)?;
+    drop(registry);
+    if rewritten == original {
+        return Ok(root);
+    }
+    // Folding a call can expose an ordinary operator expression whose operands are now
+    // constants. Re-enter the shared folder once so the completed expression has the same
+    // constant shape it would have had if the call had authored a literal.
+    let outcome = constant_fold(
+        rewritten,
+        expressions,
+        const_values,
+        FoldServices::new(
+            string_table,
+            Some(context),
+            Some(context.external_package_registry.as_ref()),
+        ),
+        FoldRequirement::Opportunistic,
+    )
+    .map_err(ExpressionTypingError::from)?;
+    let folded = match outcome {
+        ConstantFoldOutcome::Folded(root) | ConstantFoldOutcome::NotConstant(root) => root,
+        ConstantFoldOutcome::Refused { root, .. } => root,
+    };
+    Ok(expressions.own(folded))
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the inner entry keeps the public wrapper's exact inputs because the const executor calls it directly with its own borrowed resources; an input struct would change that caller, not remove the list"
+)]
+fn evaluate_expression_inner(
     context: &ScopeContext,
     nodes: Vec<ExpressionRpnItem>,
     type_interner: &mut AstTypeInterner<'_>,

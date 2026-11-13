@@ -11,12 +11,18 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 
+use crate::compiler_frontend::ast::generic_functions::{
+    ConstFunctionMaterialisationTarget, materialise_imported_const_function,
+};
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::nominal::imported_nominal_path;
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionParameter, FunctionSignature, MaterialisedFunctionSignature, ParameterContract,
 };
-use crate::compiler_frontend::ast::type_resolution::intern_resolved_function_signature;
+use crate::compiler_frontend::ast::type_resolution::{
+    ResolvedFunctionSignature, intern_resolved_function_signature,
+};
 use crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::public_interface::{
@@ -74,7 +80,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 type_syntax: None,
                 value_mode: ValueMode::ImmutableReference,
                 value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
-                binding_span: None,
+                binding_span: self
+                    .binding_environment
+                    .imported_declaration_spans_by_local_path
+                    .get(&local_path)
+                    .copied(),
                 config_contract: None,
             };
             Self::unique_declaration_table_mut(&mut self.declaration_table)?
@@ -90,6 +100,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 ResolvedFunctionSignature {
                     receiver: None,
                     signature: signature.clone(),
+                    evaluation: function.evaluation,
                 },
             );
 
@@ -125,6 +136,65 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         declaration_span: None,
                     },
                 );
+                continue;
+            }
+
+            // Const imports carry a signature and evaluation fact, but no runtime call contract.
+            // Their executable closure is published separately and every call is folded.
+            if function.evaluation == CallableEvaluation::Const {
+                // Constant initializers in this module can parse before the whole-module lookup
+                // table exists, so imported const callables also need the early signature row.
+                self.early_const_function_signatures.borrow_mut().insert(
+                    local_path,
+                    ResolvedFunctionSignature {
+                        receiver: None,
+                        signature: signature.clone(),
+                        evaluation: function.evaluation,
+                    },
+                );
+                let OriginDeclarationId::Function(const_origin) = &origin else {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "Imported const callable has no stable function origin",
+                    )
+                    .into());
+                };
+                // The registry is present for canonical module compilation. Generated and
+                // config-only AST builds import no source const callables, so absence here stays
+                // the pre-existing signature-only path.
+                if let Some(registry) = self.context.provider_materialisations {
+                    self.has_const_functions = true;
+                    let mut target = ConstFunctionMaterialisationTarget {
+                        declaration_table: &mut self.declaration_table,
+                        resolved_constants: &mut self.resolved_module_constants,
+                        early_const_function_signatures: &self.early_const_function_signatures,
+                        const_function_executables: &self.const_function_executables,
+                        type_environment: &mut self.type_environment,
+                        expression_builder: &mut self.context.expression_builder,
+                        const_values: &mut self.context.const_values,
+                        warnings: &mut self.warnings,
+                        string_table,
+                        path_fork: self.path_fork,
+                        external_package_registry: &self.context.external_package_registry,
+                        style_directives: self.context.style_directives,
+                        file_value_resolution: self.context.file_value_resolution.as_ref(),
+                        build_profile: self.context.build_profile,
+                        template_ir_store: &self.context.template_ir_store,
+                        provider_materialisations: self.context.provider_materialisations,
+                        materialised_const_provider_origins: &mut self
+                            .materialised_const_provider_origins,
+                        materialised_const_function_paths: &mut self
+                            .materialised_const_function_paths,
+                        materialised_const_constant_paths: &mut self
+                            .materialised_const_constant_paths,
+                    };
+                    materialise_imported_const_function(
+                        const_origin,
+                        local_path,
+                        registry,
+                        &mut target,
+                    )?;
+                }
                 continue;
             }
 
@@ -278,6 +348,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     ResolvedFunctionSignature {
                         receiver: Some(receiver.clone()),
                         signature: signature.clone(),
+                        evaluation: CallableEvaluation::Runtime,
                     },
                 );
 

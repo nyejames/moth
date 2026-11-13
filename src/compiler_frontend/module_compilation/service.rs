@@ -1030,7 +1030,7 @@ fn run_semantic_stages(
             .map(|(_, interface)| interface)
             .collect::<Vec<_>>();
         materialisation_context_builder
-            .freeze(&public_interface_refs)?
+            .freeze(&public_interface_refs, &public_origins_by_path)?
             .map(Arc::new)
     };
     // Each present facade root contributes exactly one closed surface. An entry-only module
@@ -1217,6 +1217,7 @@ fn build_ast_with_registered_types(
             public_source_trait_origins,
             build_config_values: Arc::clone(&context.build_config_values),
             builder_root_slots: context.builder_root_slots,
+            provider_materialisations: Some(context.provider_materialisations),
         },
         #[cfg(feature = "timers")]
         timing_context,

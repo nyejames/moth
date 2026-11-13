@@ -1,0 +1,25 @@
+square #|value I32| -> I32:
+    return value * value
+;
+
+is_positive #|value I32| -> Bool:
+    return value > 0
+;
+
+runtime_binding = square(8)
+
+read || -> I32:
+    return square(6)
+;
+
+result ~= 0
+if is_positive(square(3)):
+    ~result = runtime_binding + read()
+;
+
+total ~I32 = 0
+loop to square(2) |index|:
+    ~total = total + index
+;
+
+~[: binding=[runtime_binding] call=[read()] branch=[result] loop=[total] ]

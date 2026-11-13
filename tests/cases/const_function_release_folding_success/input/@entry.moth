@@ -1,0 +1,9 @@
+double |value I32| -> I32:
+    return value * 2
+;
+
+dynamic |value I32| -> I32:
+    return double(value)
+;
+
+~[: [double(2)] [dynamic(3)] ]

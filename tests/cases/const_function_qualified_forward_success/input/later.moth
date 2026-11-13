@@ -1,0 +1,3 @@
+later #|| -> I32:
+    return 3
+;

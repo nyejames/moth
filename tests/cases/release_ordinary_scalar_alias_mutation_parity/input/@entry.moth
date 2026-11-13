@@ -1,0 +1,14 @@
+Pair = |
+    a {I32},
+    b {I32},
+|
+
+make_len || -> I32:
+    xs ~= {1}
+    p ~= Pair(a = xs, b = xs)
+    ~p.a.push(2)
+    return p.b.length()
+;
+
+result = make_len()
+~[: [result] ]

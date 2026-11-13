@@ -25,6 +25,7 @@ use crate::compiler_frontend::ast::expressions::source_function_calls::{
 };
 use crate::compiler_frontend::ast::field_access::reference_expression_from_declaration;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::NamespaceValueMember;
@@ -119,14 +120,15 @@ fn resolve_source_value_member(
     // Namespace fields are not first-class function values. A function member must
     // continue through the normal call parser so missing `(...)` reports at the call
     // boundary instead of lowering a function declaration shell as a value.
-    if let Some(signature) = context.source_callable_signature(declaration) {
+    if let Some((signature, evaluation)) = context.source_callable_contract(declaration) {
         let generic_template = context.lookup_generic_function_template(symbol_path);
         let expression_is_boundary_leading = stream_is_boundary_leading(expression);
 
         parse_source_callable_member(SourceCallableMemberInput {
             token_stream,
             function_path: symbol_path,
-            signature,
+            signature: signature.as_ref(),
+            evaluation,
             generic_template,
             visible_name: member_name,
             call_span: member_span,
@@ -142,6 +144,14 @@ fn resolve_source_value_member(
             string_table,
         })
     } else {
+        if context.const_body_rejects_runtime_declaration(declaration) {
+            return Err(choices_control_flow::const_body_runtime_operation(
+                Some(member_name),
+                member_span,
+                context.const_declaration_span(),
+            )
+            .into());
+        }
         let reference_expression = reference_expression_from_declaration(
             declaration,
             context,

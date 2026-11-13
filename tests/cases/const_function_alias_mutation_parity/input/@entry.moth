@@ -1,0 +1,17 @@
+const_alias #|| -> I32:
+    values ~= {1}
+    writer ~= values
+    ~writer.push(2)
+    return values.length()
+;
+
+runtime_alias || -> I32:
+    values ~= {1}
+    writer ~= values
+    ~writer.push(2)
+    return values.length()
+;
+
+a = const_alias()
+b = runtime_alias()
+~[: a=[a] b=[b]]

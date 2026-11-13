@@ -16,6 +16,7 @@ use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrId, TemplateTirPhase, TemplateTirReference, TemplateViewContext,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::{
@@ -527,6 +528,7 @@ fn call_arguments_constructor_fields_and_handling_side_ids_move_once() {
         .expect("call handling");
     let make_call = |arguments| ResolvedCall {
         target: ResolvedCallableTarget::Function(PathId::ROOT),
+        evaluation: CallableEvaluation::Runtime,
         arguments,
         handling: Some(handling),
         requires_external_float_validation: true,

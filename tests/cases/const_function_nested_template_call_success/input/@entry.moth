@@ -1,0 +1,28 @@
+-- Required const calls in template expression sites execute only when TIR folding selects that
+-- site, with the loop or branch bindings active there.
+
+format #|value String| -> String:
+    return [: n=[value] ]
+;
+
+list #|values {String}| -> String:
+    return [: [loop values |value|:[format(value)];] ]
+;
+
+fail #|| -> String:
+    assert(false, "inactive branch must not execute")
+    return [: bad ]
+;
+
+choose #|flag Bool| -> String:
+    if flag:
+        return [: ok ]
+    else
+        return [: [fail()] ]
+    ;
+;
+
+items #String = list({"a", "b"})
+choice #String = choose(true)
+
+[: [items] [choice] ]

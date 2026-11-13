@@ -55,8 +55,26 @@ pub(crate) struct ConstRangeCursor {
     finished: bool,
     limit: usize,
     span: Option<SourceSpan>,
+    /// How a stalled float step is reported to the loop owner.
+    stall_policy: StalledStepPolicy,
+    /// A stalled candidate discovered while yielding the current counter: `None` means nothing is
+    /// pending, `Some(span)` means the next advance reports it unless the body discarded the
+    /// cursor with `break` or `return`.
+    pending_no_progress: Option<Option<SourceSpan>>,
     /// The authored step position, or `None` when the step is the implicit `+1`.
     step_span: Option<SourceSpan>,
+}
+
+/// How a stalled float step is reported to the loop owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StalledStepPolicy {
+    /// Report the stall on the advance that discovers it.
+    Immediate,
+    /// Yield the current counter once more and report the stall on the next advance.
+    ///
+    /// WHY: runtime lowering checks a stalled float step after the body, so the const executor
+    ///      preserves that order and lets the authored iteration run.
+    Deferred,
 }
 
 enum ConstRangeCursorKind {
@@ -143,7 +161,22 @@ impl ConstRangeCursor {
             limit,
             span,
             step_span,
+            stall_policy: StalledStepPolicy::Immediate,
+            pending_no_progress: None,
         })
+    }
+
+    pub(crate) fn new_lenient(
+        range: &RangeLoopSpec,
+        expressions: &AstExpressionBuilder,
+        constants: &ConstValueStore,
+        limit: usize,
+        span: Option<SourceSpan>,
+        step_span: Option<SourceSpan>,
+    ) -> Result<Self, TemplateError> {
+        let mut cursor = Self::new(range, expressions, constants, limit, span, step_span)?;
+        cursor.stall_policy = StalledStepPolicy::Deferred;
+        Ok(cursor)
     }
 
     pub(crate) fn iteration_count(&self) -> usize {
@@ -151,6 +184,9 @@ impl ConstRangeCursor {
     }
 
     pub(crate) fn next_counter(&mut self) -> Result<Option<FixedScalarValue>, TemplateError> {
+        if let Some(span) = self.pending_no_progress.take() {
+            return Err(invalid_range_step_no_progress(span));
+        }
         if self.finished {
             return Ok(None);
         }
@@ -253,6 +289,11 @@ impl ConstRangeCursor {
                 // An in-range candidate that rounds back to the current counter would make the
                 // range stall without ever reaching its endpoint.
                 if next == previous {
+                    if self.stall_policy == StalledStepPolicy::Deferred {
+                        self.finished = true;
+                        self.pending_no_progress = Some(self.step_span);
+                        return Ok(Some(counter));
+                    }
                     return Err(invalid_range_step_no_progress(self.step_span));
                 }
                 *current = next;

@@ -35,6 +35,61 @@ pub(crate) const DEFAULT_MAX_ERRORS_PER_MODULE: NonZeroU32 =
 ///      measurements.
 pub(crate) const AST_RECOVERY_WORK_TOKENS: u32 = 4_096;
 
+/// Default work steps one const call may consume.
+pub(crate) const DEFAULT_CONST_EXECUTION_WORK_LIMIT: usize = 1_000_000;
+/// Hard ceiling a project setting cannot raise for one const call.
+pub(crate) const MAX_CONST_EXECUTION_WORK_LIMIT: usize = 16_000_000;
+/// Default retained folded-text bytes one const call may produce.
+pub(crate) const DEFAULT_CONST_EXECUTION_MEMORY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
+/// Hard ceiling a project setting cannot raise for retained folded memory.
+pub(crate) const MAX_CONST_EXECUTION_MEMORY_LIMIT_BYTES: usize = 256 * 1024 * 1024;
+/// Aggregate work and memory allow this many attempts' worth of the per-call allowance.
+pub(crate) const CONST_EXECUTION_AGGREGATE_MULTIPLIER: usize = 8;
+
+/// Typed work and memory allowances for const execution.
+///
+/// WHAT: carries one per-attempt allowance and the larger module-wide safeguards selected from
+///       project configuration.
+/// WHY:  every const call and bounded template fold charges the same budget owner. Keeping the
+///       limits typed prevents a template loop setting or a raw numeric field from becoming a
+///       general function-work budget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ConstExecutionLimits {
+    pub(crate) max_attempt_steps: usize,
+    pub(crate) max_total_steps: usize,
+    pub(crate) max_attempt_memory_bytes: usize,
+    pub(crate) max_total_memory_bytes: usize,
+}
+
+impl Default for ConstExecutionLimits {
+    fn default() -> Self {
+        Self {
+            max_attempt_steps: DEFAULT_CONST_EXECUTION_WORK_LIMIT,
+            max_total_steps: DEFAULT_CONST_EXECUTION_WORK_LIMIT
+                * CONST_EXECUTION_AGGREGATE_MULTIPLIER,
+            max_attempt_memory_bytes: DEFAULT_CONST_EXECUTION_MEMORY_LIMIT_BYTES,
+            max_total_memory_bytes: DEFAULT_CONST_EXECUTION_MEMORY_LIMIT_BYTES
+                * CONST_EXECUTION_AGGREGATE_MULTIPLIER,
+        }
+    }
+}
+
+impl ConstExecutionLimits {
+    pub(crate) fn from_configured(work_limit: usize, memory_limit_bytes: usize) -> Self {
+        Self {
+            max_attempt_steps: work_limit.min(MAX_CONST_EXECUTION_WORK_LIMIT),
+            max_total_steps: work_limit
+                .min(MAX_CONST_EXECUTION_WORK_LIMIT)
+                .saturating_mul(CONST_EXECUTION_AGGREGATE_MULTIPLIER),
+            max_attempt_memory_bytes: memory_limit_bytes
+                .min(MAX_CONST_EXECUTION_MEMORY_LIMIT_BYTES),
+            max_total_memory_bytes: memory_limit_bytes
+                .min(MAX_CONST_EXECUTION_MEMORY_LIMIT_BYTES)
+                .saturating_mul(CONST_EXECUTION_AGGREGATE_MULTIPLIER),
+        }
+    }
+}
+
 /// Settings one frontend instance consumes.
 #[derive(Clone, Debug)]
 pub(crate) struct FrontendOptions {
@@ -44,6 +99,8 @@ pub(crate) struct FrontendOptions {
     ///
     /// `None` disables only this count limit; the recovery-work guard still applies.
     pub(crate) max_errors_per_module: Option<NonZeroU32>,
+    /// Work and retained-memory allowances for const execution.
+    pub(crate) const_execution_limits: ConstExecutionLimits,
 }
 
 /// The recovery policy one AST build consumes.
@@ -91,6 +148,7 @@ impl Default for FrontendOptions {
         Self {
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             max_errors_per_module: Some(DEFAULT_MAX_ERRORS_PER_MODULE),
+            const_execution_limits: ConstExecutionLimits::default(),
         }
     }
 }

@@ -453,15 +453,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 string_table,
             )?;
 
-        let path_fork = self.path_fork as *const PathInternerFork;
-        let mut type_resolution_context =
-            self.type_resolution_context_for(&visibility, generic_parameter_scope);
+        let (mut type_resolution_context, path_fork) =
+            self.type_resolution_context_with_path_fork(&visibility, generic_parameter_scope, None);
         let resolved_signature = resolve_function_signature(
             &header.declaration_path,
             &unresolved_signature,
             None,
             &mut type_resolution_context,
-            unsafe { &*path_fork },
+            path_fork,
             string_table,
             Some(&signature_context),
         )?;
@@ -872,6 +871,7 @@ fn signature_with_trait_this_as_parameter(
             }
             FunctionReturnContractSyntax::Never => FunctionReturnContractSyntax::Never,
         },
+        evaluation: signature.evaluation,
     }
 }
 

@@ -1,0 +1,6 @@
+@helper make, list_styles, Card
+
+card #Card = make("remote")
+card_styles #String = list_styles(card.styles)
+
+[:<main>[card.body] styles=[card_styles]</main>]

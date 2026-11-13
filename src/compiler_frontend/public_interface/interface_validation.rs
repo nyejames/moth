@@ -771,6 +771,10 @@ fn collect_expected_callable_summaries(
                     origin
                 )));
             }
+            // Const callables carry their evaluation facts in the const executable contract.
+            if !function.evaluation.has_runtime_body() {
+                return Ok(());
+            }
             if matches!(function.category, PublicFunctionCategory::ConcreteLocal) {
                 insert_expected_summary(origin, &function.parameters, expected)?;
             }

@@ -20,6 +20,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidFunctionSignatureReason, InvalidParameterContractReason, InvalidSignatureMemberReason,
     ParameterContractKind,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     ParsedParameterContractSyntax, TypeAnnotationContext,
@@ -130,6 +131,8 @@ impl Default for FunctionReturnContractSyntax {
 pub struct FunctionSignatureSyntax {
     pub parameters: Vec<SignatureMemberSyntax>,
     pub return_contract: FunctionReturnContractSyntax,
+    /// Whether this callable runs only during compilation.
+    pub evaluation: CallableEvaluation,
 }
 
 impl SignatureMemberSyntax {
@@ -219,12 +222,16 @@ impl FunctionSignatureSyntax {
 ///
 /// ENTRY INVARIANT: the stream is positioned on the opening `|`.
 /// EXIT INVARIANT: the stream is positioned immediately after the terminating `:`.
-pub fn parse_function_signature_syntax(
+///
+/// WHY: the `#|` const declaration shares the ordinary parameter and return grammar, so only the
+///      resulting callable fact differs.
+pub fn parse_function_signature_syntax_with_evaluation(
     token_stream: &mut DeclarationCursor<'_>,
     warnings: &mut DiagnosticBag,
     string_table: &mut StringTable,
     function_path: PathId,
     path_fork: &mut PathInternerFork,
+    evaluation: CallableEvaluation,
 ) -> SignatureMemberParseResult<FunctionSignatureSyntax> {
     token_stream.advance();
 
@@ -246,6 +253,7 @@ pub fn parse_function_signature_syntax(
             return Ok(FunctionSignatureSyntax {
                 parameters,
                 return_contract: FunctionReturnContractSyntax::Returns(Vec::new()),
+                evaluation,
             });
         }
 
@@ -301,6 +309,7 @@ pub fn parse_function_signature_syntax(
     Ok(FunctionSignatureSyntax {
         parameters,
         return_contract,
+        evaluation,
     })
 }
 
@@ -971,6 +980,7 @@ pub fn parse_trait_requirement_signature_syntax(
     Ok(FunctionSignatureSyntax {
         parameters,
         return_contract,
+        evaluation: CallableEvaluation::Runtime,
     })
 }
 

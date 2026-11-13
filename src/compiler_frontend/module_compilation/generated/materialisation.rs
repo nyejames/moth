@@ -151,6 +151,7 @@ fn materialise_generated_request<'build>(
             request.identity.declaration().defining_name()
         )))
     })?;
+    let const_execution_limits = context.options.const_execution_limits;
     let (declaring_source_identity_handle, materialised) = match &declaring_context {
         DeclaringMaterialisation::Prepared(context) => {
             let (declaring_context, _) = context
@@ -168,6 +169,7 @@ fn materialise_generated_request<'build>(
                 request.call_span,
                 &mut compiler.string_table,
                 &mut compiler.path_fork,
+                const_execution_limits,
                 #[cfg(feature = "timers")]
                 request.timing_context,
             )?;
@@ -227,6 +229,7 @@ fn materialise_generated_request<'build>(
                         template_const_loop_iteration_limit: context
                             .options
                             .template_const_loop_iteration_limit,
+                        const_execution_limits: context.options.const_execution_limits,
                         #[cfg(feature = "timers")]
                         timing_context: request.timing_context,
                     },
@@ -246,6 +249,7 @@ fn materialise_generated_request<'build>(
                         template_const_loop_iteration_limit: context
                             .options
                             .template_const_loop_iteration_limit,
+                        const_execution_limits: context.options.const_execution_limits,
                         #[cfg(feature = "timers")]
                         timing_context: request.timing_context,
                     },

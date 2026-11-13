@@ -1,0 +1,6 @@
+bad #|value I32| -> I32:
+    local = value
+;
+
+start ||:
+;

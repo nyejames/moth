@@ -10,6 +10,7 @@
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{CommonSyntaxMistakeReason, CompilerStage};
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax;
 use crate::compiler_frontend::declaration_syntax::signature_members::SignatureMemberSyntax;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
@@ -420,8 +421,8 @@ pub(crate) fn push_header_expression_ranges(
 /// Append the token ranges whose values fold before their declaring shell is prepared.
 ///
 /// WHAT: exactly the compile-time value positions: a non-config constant initializer, a synthetic
-///       Moth-template body, a const-template body, and function parameter, struct field and
-///       choice variant record field defaults.
+///       Moth-template body, a const-template body, a const function body, and function
+///       parameter, struct field and choice variant record field defaults.
 /// WHY: content-source ordering and qualified-reference ordering must recognise one eligibility
 ///      policy. A const-required expression is semantically bound before ordinary body emission,
 ///      so it can require a declaration-ordering edge; a runtime body never can. Trait requirement
@@ -463,6 +464,12 @@ pub(crate) fn push_const_required_expression_ranges(
         }
         HeaderKind::Function { signature, .. } => {
             push_signature_default_ranges(&signature.parameters, &mut push);
+            // A const function body executes in the compiler. Its qualified provider selections
+            // and direct content-source paths are declaration-ordering dependencies exactly like
+            // a constant initializer, while an ordinary runtime body stays ordering-neutral.
+            if signature.evaluation == CallableEvaluation::Const && !header.tokens.is_empty() {
+                push(header.tokens);
+            }
         }
         HeaderKind::Struct { fields, .. } => {
             push_signature_default_ranges(fields, &mut push);

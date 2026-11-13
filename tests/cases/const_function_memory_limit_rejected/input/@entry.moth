@@ -1,0 +1,10 @@
+build #|limit I32| -> {I32}:
+    items ~{I32} = {}
+    loop to limit |index|:
+        ~items.push(index)
+    ;
+    return items
+;
+
+result #= build(1000)
+~[: done]

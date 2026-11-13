@@ -1,0 +1,7 @@
+value #I32 = square(7)
+
+square #|input I32| -> I32:
+    return input * input
+;
+
+io.line([: value=[value] ])

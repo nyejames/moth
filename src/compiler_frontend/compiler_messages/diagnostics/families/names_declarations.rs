@@ -184,6 +184,11 @@ unit_code! {
         TraitIncompatibilityMissingTrait = 18,
         TraitIncompatibilitySemicolon = 19,
         MissingInitializerExpression = 20,
+        ConstFunctionCannotBeGeneric = 21,
+        ConstFunctionCannotBeReceiverMethod = 22,
+        ConstFunctionUnsupportedParameter = 23,
+        ConstFunctionCannotReturnError = 24,
+        ConstFunctionCannotReturnNever = 25,
     }
 }
 
@@ -248,6 +253,22 @@ impl InvalidDeclarationCode {
             InvalidDeclarationReason::MissingInitializerExpression => {
                 (Self::MissingInitializerExpression, None)
             }
+            InvalidDeclarationReason::ConstFunctionCannotBeGeneric => {
+                (Self::ConstFunctionCannotBeGeneric, None)
+            }
+            InvalidDeclarationReason::ConstFunctionCannotBeReceiverMethod => {
+                (Self::ConstFunctionCannotBeReceiverMethod, None)
+            }
+            InvalidDeclarationReason::ConstFunctionUnsupportedParameter { parameter_name } => (
+                Self::ConstFunctionUnsupportedParameter,
+                Some(*parameter_name),
+            ),
+            InvalidDeclarationReason::ConstFunctionCannotReturnError => {
+                (Self::ConstFunctionCannotReturnError, None)
+            }
+            InvalidDeclarationReason::ConstFunctionCannotReturnNever => {
+                (Self::ConstFunctionCannotReturnNever, None)
+            }
         }
     }
 
@@ -309,6 +330,23 @@ impl InvalidDeclarationCode {
             }
             Self::MissingInitializerExpression => {
                 InvalidDeclarationReason::MissingInitializerExpression
+            }
+            Self::ConstFunctionCannotBeGeneric => {
+                InvalidDeclarationReason::ConstFunctionCannotBeGeneric
+            }
+            Self::ConstFunctionCannotBeReceiverMethod => {
+                InvalidDeclarationReason::ConstFunctionCannotBeReceiverMethod
+            }
+            Self::ConstFunctionUnsupportedParameter => {
+                InvalidDeclarationReason::ConstFunctionUnsupportedParameter {
+                    parameter_name: detail?,
+                }
+            }
+            Self::ConstFunctionCannotReturnError => {
+                InvalidDeclarationReason::ConstFunctionCannotReturnError
+            }
+            Self::ConstFunctionCannotReturnNever => {
+                InvalidDeclarationReason::ConstFunctionCannotReturnNever
             }
         })
     }

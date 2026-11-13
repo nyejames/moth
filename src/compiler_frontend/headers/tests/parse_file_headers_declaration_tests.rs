@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenTag};
 
@@ -701,6 +702,25 @@ fn compile_time_declarations_parse_as_headers_without_elevating_body_symbols() {
             .any(|name| name == "items" || name == "item" || name == "index"),
         "only legitimate postfix constant declarations should become headers"
     );
+}
+
+#[test]
+fn const_function_marker_classifies_the_callable() {
+    let headers =
+        parse_single_file_headers("square #|value I32| -> I32:\n    return value * value\n;\n");
+    let signature = first_function_signature(&headers);
+
+    assert_eq!(signature.evaluation, CallableEvaluation::Const);
+    assert_eq!(signature.parameters.len(), 1);
+}
+
+#[test]
+fn ordinary_function_stays_runtime_evaluated() {
+    let headers =
+        parse_single_file_headers("square |value I32| -> I32:\n    return value * value\n;\n");
+    let signature = first_function_signature(&headers);
+
+    assert_eq!(signature.evaluation, CallableEvaluation::Runtime);
 }
 
 #[test]

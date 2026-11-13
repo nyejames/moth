@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0053"]
+message_contains = ["Every argument to const function 'square' must be a compile-time constant"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+path = "input/@entry.moth"
+line = 6
+column = 12

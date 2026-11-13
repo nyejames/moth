@@ -358,6 +358,32 @@ pub(crate) fn invalid_declaration_message(
         InvalidDeclarationReason::MissingInitializerExpression => {
             format!("Declaration {name_text} is missing an initializer expression after '='.")
         }
+        InvalidDeclarationReason::ConstFunctionCannotBeGeneric => {
+            format!(
+                "Const function {name_text} cannot declare generic parameters. Use a concrete signature or make it an ordinary function."
+            )
+        }
+        InvalidDeclarationReason::ConstFunctionCannotBeReceiverMethod => {
+            format!(
+                "Const function {name_text} cannot be a receiver method. Declare it as a free function."
+            )
+        }
+        InvalidDeclarationReason::ConstFunctionUnsupportedParameter { parameter_name } => {
+            format!(
+                "Const function {name_text} cannot use parameter '{}'. Const parameters must be ordinary immutable values, so remove any mutable marker or Wiring/Route contract.",
+                string_table.resolve(parameter_name)
+            )
+        }
+        InvalidDeclarationReason::ConstFunctionCannotReturnError => {
+            format!(
+                "Const function {name_text} cannot return a fallible error channel. Return success values only, or make it an ordinary function."
+            )
+        }
+        InvalidDeclarationReason::ConstFunctionCannotReturnNever => {
+            format!(
+                "Const function {name_text} cannot declare a Never return. Const calls must produce a compile-time value."
+            )
+        }
     }
 }
 

@@ -76,10 +76,13 @@ impl ModuleMaterialisationContext {
             concrete_call_summaries: Box::new([]),
             semantic_closure: StableSemanticClosure::default(),
             artefacts,
+            const_functions: Box::new([]),
             module_origin: None,
             frozen_identity_handle,
             path_table: None,
             source_string_table: None,
+            const_path_table: None,
+            const_source_string_table: None,
         }
     }
 

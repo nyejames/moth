@@ -1,0 +1,11 @@
+sum_to #|limit I32| -> I32:
+    sum ~= 0
+    loop to limit |item|:
+        ~sum = sum + item
+    ;
+    return sum
+;
+
+result #I32 = sum_to(5)
+
+io.line([: result=[result] ])

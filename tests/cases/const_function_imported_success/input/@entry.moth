@@ -1,0 +1,14 @@
+@square square
+
+inner #|value I32| -> I32:
+    return value + 1
+;
+
+outer #|value I32| -> I32:
+    return inner(value)
+;
+
+nested #I32 = outer(41)
+imported #I32 = square(6)
+
+~[: nested=[nested] imported=[imported] ]

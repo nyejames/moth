@@ -1,0 +1,117 @@
+-- WHAT: preparing a const body full of logical expressions must not spend the const-execution
+--       work allowance.
+-- WHY:  `churn` is never executed, and the tight `const_work_limit` in config.moth is already
+--       needed by the `fixed()` call below. Charging the allowance while discovering this body
+--       would refuse that unrelated required call.
+
+fixed #|| -> I32:
+    return 7
+;
+
+churn #|a Bool, b Bool| -> Bool:
+    local_1 = a and b
+    local_2 = a and b
+    local_3 = a and b
+    local_4 = a and b
+    local_5 = a and b
+    local_6 = a and b
+    local_7 = a and b
+    local_8 = a and b
+    local_9 = a and b
+    local_10 = a and b
+    local_11 = a and b
+    local_12 = a and b
+    local_13 = a and b
+    local_14 = a and b
+    local_15 = a and b
+    local_16 = a and b
+    local_17 = a and b
+    local_18 = a and b
+    local_19 = a and b
+    local_20 = a and b
+    local_21 = a and b
+    local_22 = a and b
+    local_23 = a and b
+    local_24 = a and b
+    local_25 = a and b
+    local_26 = a and b
+    local_27 = a and b
+    local_28 = a and b
+    local_29 = a and b
+    local_30 = a and b
+    local_31 = a and b
+    local_32 = a and b
+    local_33 = a and b
+    local_34 = a and b
+    local_35 = a and b
+    local_36 = a and b
+    local_37 = a and b
+    local_38 = a and b
+    local_39 = a and b
+    local_40 = a and b
+    local_41 = a and b
+    local_42 = a and b
+    local_43 = a and b
+    local_44 = a and b
+    local_45 = a and b
+    local_46 = a and b
+    local_47 = a and b
+    local_48 = a and b
+    local_49 = a and b
+    local_50 = a and b
+    local_51 = a and b
+    local_52 = a and b
+    local_53 = a and b
+    local_54 = a and b
+    local_55 = a and b
+    local_56 = a and b
+    local_57 = a and b
+    local_58 = a and b
+    local_59 = a and b
+    local_60 = a and b
+    local_61 = a and b
+    local_62 = a and b
+    local_63 = a and b
+    local_64 = a and b
+    local_65 = a and b
+    local_66 = a and b
+    local_67 = a and b
+    local_68 = a and b
+    local_69 = a and b
+    local_70 = a and b
+    local_71 = a and b
+    local_72 = a and b
+    local_73 = a and b
+    local_74 = a and b
+    local_75 = a and b
+    local_76 = a and b
+    local_77 = a and b
+    local_78 = a and b
+    local_79 = a and b
+    local_80 = a and b
+    local_81 = a and b
+    local_82 = a and b
+    local_83 = a and b
+    local_84 = a and b
+    local_85 = a and b
+    local_86 = a and b
+    local_87 = a and b
+    local_88 = a and b
+    local_89 = a and b
+    local_90 = a and b
+    local_91 = a and b
+    local_92 = a and b
+    local_93 = a and b
+    local_94 = a and b
+    local_95 = a and b
+    local_96 = a and b
+    local_97 = a and b
+    local_98 = a and b
+    local_99 = a and b
+    local_100 = a and b
+    return a and b
+;
+
+value #I32 = fixed()
+
+io.line([: folded=[value] ])

@@ -1,0 +1,23 @@
+-- A required const call returns a nominal component record whose body template depends on its
+-- parameter, and whose stylesheet collection carries a structural resource into the consumer.
+
+Card = |
+    body String,
+    styles {String},
+|
+
+make #|title String| -> Card:
+    return Card(
+        body = [: <div class="card">[title]</div> ],
+        styles = {[@styles/card.css]},
+    )
+;
+
+list_styles #|styles {String}| -> String:
+    return [: [loop styles |style|:[style];] ]
+;
+
+card #Card = make("hello")
+card_styles #String = list_styles(card.styles)
+
+[:<main>[card.body] styles=[card_styles]</main>]

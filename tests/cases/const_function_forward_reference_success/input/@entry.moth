@@ -1,0 +1,11 @@
+outer #|value I32| -> I32:
+    return inner(value)
+;
+
+inner #|value I32| -> I32:
+    return value + 1
+;
+
+result #I32 = outer(41)
+
+~[: result=[result] ]

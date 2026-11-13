@@ -45,6 +45,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidAssignmentTargetReason, InvalidCallShapeReason,
     InvalidTemplateSlotReason, NameNamespace, TypeUsedAsValueReason,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::external_packages::{ExternalConstantDef, ExternalFunctionDef};
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -691,7 +692,14 @@ pub(super) fn lower_resolved_declaration_expression(
     // placeholders that have not been folded yet are not rejected prematurely.
     // Template constness comes from preparation's exact effective view so composed
     // templates retain their module-local reference and overlays.
+    // A const callable is not itself a value, but a call to it is a compile-time value in a
+    // constant context. Defer to the call parser instead of rejecting the callable reference.
+    let callable = context.source_callable_contract(declaration);
+    let is_required_const_callable = callable
+        .as_ref()
+        .is_some_and(|(_, evaluation)| *evaluation == CallableEvaluation::Const);
     if context.kind.is_constant_context()
+        && !is_required_const_callable
         && !context.is_unresolved_constant_placeholder(declaration)
     {
         let is_compile_time_constant = match declaration.value.initializer() {
@@ -722,8 +730,8 @@ pub(super) fn lower_resolved_declaration_expression(
         }
     }
 
-    match context.source_callable_signature(declaration) {
-        Some(signature) => {
+    match callable {
+        Some((signature, evaluation)) => {
             let generic_template = context.lookup_generic_function_template(&declaration.id);
             let call_span = Some(token_stream.current_span());
             let expression_is_boundary_leading = stream_is_boundary_leading(expression);
@@ -731,7 +739,8 @@ pub(super) fn lower_resolved_declaration_expression(
             parse_source_callable_member(SourceCallableMemberInput {
                 token_stream,
                 function_path: &declaration.id,
-                signature,
+                signature: signature.as_ref(),
+                evaluation,
                 generic_template,
                 visible_name: identifier,
                 call_span,
@@ -751,6 +760,14 @@ pub(super) fn lower_resolved_declaration_expression(
         }
 
         None => {
+            if context.const_body_rejects_runtime_declaration(declaration) {
+                return Err(choices_control_flow::const_body_runtime_operation(
+                    Some(identifier),
+                    Some(token_stream.current_span()),
+                    context.const_declaration_span(),
+                )
+                .into());
+            }
             let reference_span = Some(token_stream.current_span());
             let reference_expression = reference_expression_from_declaration(
                 declaration,

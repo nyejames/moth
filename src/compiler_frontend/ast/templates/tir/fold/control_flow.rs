@@ -34,12 +34,14 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 
 use super::estimate::{
-    FoldEstimateMode, estimate_loop_aggregate_bytes, estimate_tir_node_output_bytes,
-    estimated_collection_iteration_count, estimated_range_iteration_count,
-    record_tir_fold_output_estimate_miss, record_tir_fold_output_intern,
+    FoldEstimateMode, bounded_output_estimate, estimate_loop_aggregate_bytes,
+    estimate_tir_node_output_bytes, estimated_collection_iteration_count,
+    estimated_range_iteration_count, record_tir_fold_output_estimate_miss,
+    record_tir_fold_output_intern,
 };
 use super::reducer::{
-    FoldInsertion, FoldOutputState, FoldTraversalInput, fold_tir_node, fold_tir_node_into_buffer,
+    FoldInsertion, FoldOutputState, FoldTraversalInput, charge_template_iteration, fold_tir_node,
+    fold_tir_node_into_buffer,
 };
 use super::wrappers::fold_tir_aggregate_wrapper;
 
@@ -471,7 +473,7 @@ pub(super) fn fold_tir_loop(
     output_state: &mut FoldOutputState,
     fold_context: &mut TirFoldContext<'_>,
     fold_input: &FoldTraversalInput<'_, '_>,
-    loop_span: Option<crate::compiler_frontend::source::SourceSpan>,
+    loop_span: Option<SourceSpan>,
     insertion: FoldInsertion<'_>,
 ) -> Result<(), TemplateError> {
     let store = fold_input.view.store();
@@ -562,12 +564,12 @@ pub(super) fn fold_tir_loop(
 
             let estimated_iterations =
                 estimated_range_iteration_count(fold_context.template_const_loop_iteration_limit);
-            let estimated_aggregate =
-                estimate_loop_aggregate_bytes(body_estimate, estimated_iterations);
-            let mut aggregate_state = FoldOutputState::with_capacity(estimated_aggregate);
-            if fold_input.projection_enabled {
-                aggregate_state.enable_projection();
-            }
+            let estimated_aggregate = bounded_output_estimate(
+                estimate_loop_aggregate_bytes(body_estimate, estimated_iterations),
+                fold_context.template_output_limits.as_ref(),
+            );
+            let mut aggregate_state =
+                FoldOutputState::bounded(estimated_aggregate, fold_context, fold_input);
 
             let effective_range;
             let range_ref: &RangeLoopSpec = if has_override {
@@ -745,12 +747,12 @@ pub(super) fn fold_tir_loop(
                 step,
                 fold_context.template_const_loop_iteration_limit,
             );
-            let estimated_aggregate =
-                estimate_loop_aggregate_bytes(body_estimate, estimated_iterations);
-            let mut aggregate_state = FoldOutputState::with_capacity(estimated_aggregate);
-            if fold_input.projection_enabled {
-                aggregate_state.enable_projection();
-            }
+            let estimated_aggregate = bounded_output_estimate(
+                estimate_loop_aggregate_bytes(body_estimate, estimated_iterations),
+                fold_context.template_output_limits.as_ref(),
+            );
+            let mut aggregate_state =
+                FoldOutputState::bounded(estimated_aggregate, fold_context, fold_input);
 
             while let Some(index) = cursor.next_index()? {
                 let item = *items.get(index).ok_or_else(|| {
@@ -850,6 +852,7 @@ fn fold_tir_loop_iteration(
     fold_input: &FoldTraversalInput<'_, '_>,
     insertion: FoldInsertion<'_>,
 ) -> Result<(), TemplateError> {
+    charge_template_iteration(fold_context)?;
     let previous_bindings_len = fold_context.push_bindings(iteration_bindings);
     let folded_result = fold_tir_node(body_id, fold_context, fold_input, insertion);
     fold_context.restore_bindings(previous_bindings_len);

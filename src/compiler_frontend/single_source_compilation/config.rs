@@ -55,7 +55,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::{
-    AstRecoveryPolicy, DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+    AstRecoveryPolicy, ConstExecutionLimits, DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
 };
 use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, resolve_module_dependencies,
@@ -318,7 +318,9 @@ fn compile_prepared_config_source(
             config_resolution: Some(std::rc::Rc::clone(&config_resolution)),
             build_config_values: std::sync::Arc::new(Default::default()),
             builder_root_slots: None,
+            provider_materialisations: None,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+            const_execution_limits: ConstExecutionLimits::default(),
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]
             timing_context: None,

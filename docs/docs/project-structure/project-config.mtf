@@ -65,6 +65,20 @@ The optional `project #= (...)` constant accepts these named fields:
     ]
 
     [td:
+        [: `const_work_limit`]
+        [: `I32`]
+        [: `1000000`]
+        [: No]
+    ]
+
+    [td:
+        [: `const_memory_limit_mb`]
+        [: `I32`]
+        [: `16`]
+        [: No]
+    ]
+
+    [td:
         [: `max_errors_per_module`]
         [: `I32?`]
         [: `5`]
@@ -79,9 +93,11 @@ The optional `project #= (...)` constant accepts these named fields:
     ]
 ]
 
-The record's recognised settings schema is closed. Arbitrary fields, misspelled standard fields and `metadata = ...` are rejected. `@project` publishes the predefined fields except the two diagnostic limits. The diagnostic limits are compiler controls and are never published.
+The record's recognised settings schema is closed. Arbitrary fields, misspelled standard fields and `metadata = ...` are rejected. `@project` publishes `name`, `version`, `author`, `license` and an explicitly configured `template_const_loop_iteration_limit`. It does not publish the const-execution controls or the diagnostic limits; those are compiler controls.
 
-`name`, `template_const_loop_iteration_limit`, `max_errors_per_module` and `max_errors_per_project` remain fixed-only, including through helper constants. An omitted `name` defaults to the selected directory name and is validated as a Moth project identifier; it is never silently rewritten. Omitted `version` means unversioned.
+`name`, `template_const_loop_iteration_limit`, `const_work_limit`, `const_memory_limit_mb`,
+`max_errors_per_module` and `max_errors_per_project` remain fixed-only, including through helper
+constants. An omitted `name` defaults to the selected directory name and is validated as a Moth project identifier; it is never silently rewritten. Omitted `version` means unversioned.
 
 ### Diagnostic limits @#diagnostic-limits
 

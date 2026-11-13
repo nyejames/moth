@@ -1,0 +1,3 @@
+first #|| -> I32:
+    return @second second()
+;

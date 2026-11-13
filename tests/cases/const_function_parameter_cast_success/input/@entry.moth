@@ -1,0 +1,36 @@
+-- Parameter substitution must preserve the canonical cast semantics inside a required call and
+-- match the same casts performed by ordinary runtime calls. `scalar` covers a `Char` argument.
+
+stringify #|value I32| -> String:
+    return cast value
+;
+
+parse #|value String| -> I32:
+    return cast value
+;
+
+scalar #|letter Char| -> I32:
+    return cast letter
+;
+
+stringify_runtime |value I32| -> String:
+    return cast value
+;
+
+parse_runtime |value String| -> I32:
+    return cast value
+;
+
+scalar_runtime |letter Char| -> I32:
+    return cast letter
+;
+
+rendered #String = stringify(42)
+parsed #I32 = parse("37")
+scalar_value #I32 = scalar('A')
+
+runtime_rendered = stringify_runtime(42)
+runtime_parsed = parse_runtime("37")
+runtime_scalar = scalar_runtime('A')
+
+~[: rendered=[rendered] parsed=[parsed] scalar=[scalar_value] runtime=[runtime_rendered]/[runtime_parsed]/[runtime_scalar] ]

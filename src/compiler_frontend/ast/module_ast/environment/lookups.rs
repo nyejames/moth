@@ -7,11 +7,15 @@
 
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration};
-use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
+use crate::compiler_frontend::ast::generic_functions::{
+    GenericFunctionBody, GenericFunctionTemplate,
+};
 use crate::compiler_frontend::ast::module_ast::environment::{
     DeclarationSemanticTable, ResolvedConstantSet, TopLevelDeclarationTable,
 };
-use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
+use crate::compiler_frontend::ast::module_ast::scope_context::{
+    ConstFunctionExecutables, ReceiverMethodCatalog,
+};
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAlias,
 };
@@ -73,6 +77,20 @@ pub(crate) struct AstModuleLookups {
     pub(crate) resolved_struct_fields_by_path: Rc<FxHashMap<PathId, Vec<Declaration>>>,
     pub(crate) resolved_function_signatures_by_path:
         Rc<FxHashMap<PathId, ResolvedFunctionSignature>>,
+    /// Const function bodies prepared in Stage 3 dependency order before runtime emission.
+    ///
+    /// WHY: a const call must be executable when its dependent constant folds. Emission later
+    ///      moves these nodes into the compiler-only const owner instead of reparsing them.
+    pub(crate) prepared_const_function_bodies: Vec<AstNode>,
+    /// Canonical source views of every prepared const function body.
+    ///
+    /// WHY: cross-module const publication retains body syntax instead of provider expression
+    ///      IDs, so a consumer can reparse the body into its own expression store.
+    pub(crate) const_function_body_tokens: FxHashMap<PathId, GenericFunctionBody>,
+    /// Whether any required source const callable was declared in this module.
+    pub(crate) has_const_functions: bool,
+    /// Prepared required-call executables for every later expression parse.
+    pub(crate) const_function_executables: ConstFunctionExecutables,
     // Owned directly: this map is only borrowed (never cloned as an `Rc`) during emission, so
     // AST finalization can move it straight into the `AstBuildResult` generic-template side
     // result without an `Rc::try_unwrap` dance.

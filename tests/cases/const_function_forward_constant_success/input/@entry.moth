@@ -1,0 +1,26 @@
+Point = |
+    x I32,
+    y I32,
+|
+
+read_later #|value I32| -> I32:
+    return later_constant
+;
+
+copy_later #|| -> I32:
+    return copy later_constant
+;
+
+read_projected #|| -> I32:
+    return later_point.x
+;
+
+later_constant #I32 = 7
+
+later_point #= Point(x = 5, y = 6)
+
+first #I32 = read_later(0)
+second #I32 = copy_later()
+third #I32 = read_projected()
+
+~[: first=[first] second=[second] third=[third] ]

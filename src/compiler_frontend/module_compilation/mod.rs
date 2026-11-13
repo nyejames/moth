@@ -49,7 +49,11 @@ pub(crate) use generated::{
 };
 #[cfg(test)]
 pub(crate) use options::AST_RECOVERY_WORK_TOKENS;
-pub(crate) use options::{AstRecoveryPolicy, FrontendOptions};
+pub(crate) use options::{
+    AstRecoveryPolicy, ConstExecutionLimits, DEFAULT_CONST_EXECUTION_MEMORY_LIMIT_BYTES,
+    DEFAULT_CONST_EXECUTION_WORK_LIMIT, FrontendOptions, MAX_CONST_EXECUTION_MEMORY_LIMIT_BYTES,
+    MAX_CONST_EXECUTION_WORK_LIMIT,
+};
 pub(crate) use options::{DEFAULT_MAX_ERRORS_PER_MODULE, DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS};
 pub(crate) use outcome::{ModuleCompilationOutcome, ModuleSemanticResult};
 pub(crate) use prepared::PreparedModuleInput;

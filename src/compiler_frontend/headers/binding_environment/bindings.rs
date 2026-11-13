@@ -367,6 +367,12 @@ pub(crate) struct HeaderBindingEnvironment {
     ///       [`HeaderBindingEnvironment::imported_declarations_by_origin`] rather than duplicating a
     ///       complete declaration payload per local path.
     pub(crate) imported_declarations_by_local_path: FxHashMap<PathId, OriginDeclarationId>,
+    /// Consumer-authored import-site spans keyed by the projected local declaration path.
+    ///
+    /// WHAT: the selected-name span from the direct-selection or qualified-reference clause.
+    /// WHY: imported declarations cross the interface boundary without provider source spans, but
+    ///      a consumer diagnostic can still point at the binding that introduced the callee.
+    pub(crate) imported_declaration_spans_by_local_path: FxHashMap<PathId, SourceSpan>,
     /// Resolved targets for authored expression-qualified references.
     ///
     /// WHAT: one shared map with one entry per `(owning source, authored path row)` occurrence.

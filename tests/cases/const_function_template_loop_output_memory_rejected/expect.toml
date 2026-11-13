@@ -1,0 +1,13 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0053"]
+message_contains = ["Const function execution exhausted `const_memory_limit_mb` at 1 MiB."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+reason = "compile_time_evaluation_error.const_memory_limit_exceeded"
+path = "input/@entry.moth"
+line = 13
+column = 12
+count = 1

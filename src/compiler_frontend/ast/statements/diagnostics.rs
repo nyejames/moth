@@ -128,13 +128,16 @@ pub(crate) enum UnexpectedScopeCloseContext {
 
     /// The scope close appeared inside a template literal, where `;` is not valid.
     Template,
+
+    /// The scope close appeared in top-level code, where no block is open.
+    TopLevel,
 }
 
-/// Produce a diagnostic for an unexpected scope-close (`;`) in expression or
-/// template context.
+/// Produce a diagnostic for an unexpected scope-close (`;`) in expression, template or
+/// top-level context.
 ///
-/// WHAT: expressions and templates are not terminated with `;`, so encountering
-///       `End` inside them needs a targeted explanation.
+/// WHAT: expressions and templates are not terminated with `;`, and top-level code has no
+///       open block, so encountering `End` there needs a targeted explanation.
 pub(crate) fn unexpected_scope_close(
     context: UnexpectedScopeCloseContext,
     token_stream: &AstCursor,
@@ -145,6 +148,9 @@ pub(crate) fn unexpected_scope_close(
         }
         UnexpectedScopeCloseContext::Template => {
             InvalidStatementPositionReason::UnexpectedScopeCloseInTemplate
+        }
+        UnexpectedScopeCloseContext::TopLevel => {
+            InvalidStatementPositionReason::UnexpectedScopeCloseAtTopLevel
         }
     };
 

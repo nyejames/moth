@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{AstCapacityResource, ValueReceiverContext};
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -245,6 +246,12 @@ pub(crate) struct MapEntry<E = ExprId> {
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedCall {
     pub target: ResolvedCallableTarget,
+    /// Whether this call must be executed by the compiler.
+    ///
+    /// WHAT: copies the callee's classification at call typing time.
+    /// WHY: const evaluation must recognise a required call without re-resolving the callee
+    ///      through a scope that may no longer be available.
+    pub evaluation: CallableEvaluation,
     pub arguments: ArgumentRange,
     pub handling: Option<HandlingId>,
     pub requires_external_float_validation: bool,
@@ -651,6 +658,22 @@ storage!(
     failures: ExpressionFailureFacts,
     occurrences: OccurrenceFacts,
 );
+impl AstExpressionBuilder {
+    /// Marks every retained template handle as finalized for the const-body boundary.
+    ///
+    /// WHAT: applies the durable handle's composed-to-finalized promotion to every retained
+    ///       template, without replacing its expressions.
+    /// WHY: const function bodies are validated by the final AST type/TIR boundary but never
+    ///      reach HIR, so they miss the runtime-template materialization pass. Callers run this
+    ///      only when the module emitted const bodies; the ordinary path promotes its own
+    ///      templates during HIR normalization.
+    pub(crate) fn finalize_retained_template_references(&mut self) {
+        for template in &mut self.storage.templates {
+            template.mark_reference_finalized();
+        }
+    }
+}
+
 /// Append-only builder for the expression store of one AST phase.
 ///
 /// WHAT: owns the `ExpressionStore` while expressions are built. Each append is checked against
@@ -1234,6 +1257,18 @@ impl ExpressionStore {
         });
         result
     }
+    /// Visit index expressions embedded in one place's projections.
+    ///
+    /// WHY: whole-body executability checks must see expressions the executor can evaluate even
+    ///      when they appear only on an assignment place.
+    pub(crate) fn visit_place_index_expressions(
+        &self,
+        id: PlaceId,
+        visit: &mut dyn FnMut(ExprId),
+    ) -> Result<(), InfrastructureFailure> {
+        self.visit_place_edges(id, visit)
+    }
+
     fn visit_place_edges(
         &self,
         id: PlaceId,

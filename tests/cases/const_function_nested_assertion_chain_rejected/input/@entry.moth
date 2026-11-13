@@ -1,0 +1,10 @@
+inner #|value I32| -> I32:
+    assert(value > 0, "inner failed")
+    return value
+;
+
+outer #|value I32| -> I32:
+    return inner(value)
+;
+
+result #I32 = outer(0)

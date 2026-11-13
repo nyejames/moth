@@ -1,0 +1,5 @@
+@caller caller
+
+result #I32 = caller()
+
+~[: result=[result] ]

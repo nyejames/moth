@@ -1,0 +1,12 @@
+square #|value I32| -> I32:
+    return value * value
+;
+
+subtract #|left I32, right I32| -> I32:
+    return left - right
+;
+
+first #I32 = subtract(10, 3)
+difference #I32 = square(3) - 1
+
+~[: first=[first] difference=[difference] ]

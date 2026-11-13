@@ -1,0 +1,10 @@
+read_lengths #|limit I32| -> I32:
+    values = {3, 4, 5}
+    total ~I32 = 0
+    loop to limit |_index|:
+        ~total = total + values.length()
+    ;
+    return total
+;
+
+result #I32 = read_lengths(100000)

@@ -885,6 +885,9 @@ pub(crate) fn invalid_statement_position_message(reason: InvalidStatementPositio
         InvalidStatementPositionReason::UnexpectedScopeCloseInTemplate => {
             "Unexpected use of ';' inside a template. Templates are not closed with ';'.".to_string()
         }
+        InvalidStatementPositionReason::UnexpectedScopeCloseAtTopLevel => {
+            "Unexpected ';' at the top level. It does not close any open block.".to_string()
+        }
     }
 }
 

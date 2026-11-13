@@ -29,6 +29,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use rustc_hash::FxHashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -115,7 +116,7 @@ fn unprojectable_retained_alias_target_fails_at_the_alias_declaration() {
         )
         .expect("a completed alias target must detach");
     detached
-        .freeze(&[&control.public_interface])
+        .freeze(&[&control.public_interface], &FxHashMap::default())
         .expect("the detached alias target must freeze")
         .expect("the retained generic should produce a materialisation context");
 

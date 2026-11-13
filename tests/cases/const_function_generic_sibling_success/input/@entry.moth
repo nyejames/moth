@@ -1,0 +1,6 @@
+@helper identity, plus_one
+
+folded #I32 = plus_one(5)
+
+[: folded=[folded] ]
+~[: runtime=[identity(5)] ]

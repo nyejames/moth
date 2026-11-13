@@ -1,0 +1,11 @@
+private_increment #I32 = 1
+
+$export
+add_one #|value I32| -> I32:
+    return value + private_increment
+;
+
+$export
+double_add_one #|value I32| -> I32:
+    return value * 2 + private_increment
+;

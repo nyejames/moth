@@ -752,6 +752,7 @@ impl HeaderKind {
             HeaderKind::Function {
                 generic_parameters,
                 signature,
+                ..
             } => {
                 generic_parameters.remap_string_ids(remap);
                 signature.remap_string_ids(remap);
@@ -879,6 +880,7 @@ impl HeaderKind {
             HeaderKind::Function {
                 generic_parameters,
                 signature,
+                ..
             } => {
                 generic_parameters.rebind_source_identity(file_id);
                 rebind_function_signature_source_identity(
@@ -2496,6 +2498,7 @@ fn validate_header_kind(
         HeaderKind::Function {
             generic_parameters,
             signature,
+            ..
         } => {
             validate_generic_parameters(generic_parameters, file_id)?;
             validate_function_signature(signature, file_id, source_file, path_fork, source_tokens)?;

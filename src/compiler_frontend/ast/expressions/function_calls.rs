@@ -13,8 +13,9 @@
 //! expression, so the enclosing fragment owner retains it with the pending operand in place.
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_eval::{
-    ExplicitConstantPayload, explicit_constant_operand,
+    ExplicitConstantPayload, explicit_constant_operand, registered_external_const_eval_op,
 };
+use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
@@ -29,10 +30,10 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::HandledFallibleHostFunctionCallInput;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    AstExpressionBuilder, OwnedExpr,
+    AstExpressionBuilder, ExpressionOperationView, ExpressionView, OwnedExpr,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::{
-    FallibleExpressionHandling, FallibleHandling,
+    ConstValueKind, FallibleExpressionHandling, FallibleHandling,
 };
 use crate::compiler_frontend::ast::generic_functions::numeric_origins::GenericErrorReturn;
 use crate::compiler_frontend::ast::numeric_construction::{
@@ -51,10 +52,14 @@ use crate::compiler_frontend::ast::statements::never_call::{NeverCall, NeverCall
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::InvalidCallShapeReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -74,6 +79,8 @@ pub struct FunctionCallParseInput<'a, 'b, 'tokens> {
     pub call_span: Option<SourceSpan>,
     pub context: &'a ScopeContext,
     pub signature: &'a FunctionSignature,
+    /// Callee execution classification resolved at call typing.
+    pub evaluation: CallableEvaluation,
     pub value_required: bool,
     pub allow_boundary_catch: bool,
     pub warnings: Option<&'a mut DiagnosticBag>,
@@ -159,6 +166,8 @@ pub(crate) struct DeferredExternalCall {
 pub(crate) struct CallFinishContext<'a, 'b, 'tokens> {
     pub(crate) token_stream: &'a mut AstCursor<'tokens>,
     pub(crate) context: &'a ScopeContext,
+    /// Callee execution classification resolved at call typing.
+    pub(crate) evaluation: CallableEvaluation,
     pub(crate) value_required: bool,
     pub(crate) allow_boundary_catch: bool,
     pub(crate) warnings: Option<&'a mut DiagnosticBag>,
@@ -185,6 +194,7 @@ pub(crate) fn parse_function_call_expression(
         call_span,
         context,
         signature,
+        evaluation,
         value_required,
         allow_boundary_catch,
         warnings,
@@ -194,6 +204,17 @@ pub(crate) fn parse_function_call_expression(
         string_table,
         path_fork,
     } = input;
+
+    // Required const bodies cannot call runtime source functions. The callee classification
+    // was resolved at call typing, so the rejection stays at the authored call.
+    if context.is_const_body() && evaluation != CallableEvaluation::Const {
+        return Err(choices_control_flow::const_body_runtime_operation(
+            path_fork.component(*id),
+            call_span,
+            context.const_declaration_span(),
+        )
+        .into());
+    }
 
     // ------------------------
     //  Route to external call
@@ -256,6 +277,7 @@ pub(crate) fn parse_function_call_expression(
                 path_fork,
                 function_path: id,
                 signature,
+                evaluation,
                 expectations: parameter_expectations,
                 arguments,
                 call_span,
@@ -276,6 +298,21 @@ pub(crate) fn parse_function_call_expression(
         const_values,
         path_fork,
     )?;
+
+    // Required const calls may not depend on runtime state. The call-site check is skipped while
+    // validating a const body: its parameters and locals are compile-time placeholders, and a
+    // nested const call receives them when the outer call executes.
+    if evaluation == CallableEvaluation::Const {
+        validate_const_call_arguments(
+            &args,
+            id,
+            call_span,
+            context,
+            expression_builder,
+            const_values,
+            path_fork,
+        )?;
+    }
 
     // A Never callee has no value. The statement owner lifts this outcome into `NeverCall`;
     // every value owner rejects it at the shared evaluation choke point.
@@ -314,6 +351,7 @@ pub(crate) fn parse_function_call_expression(
         CallFinishContext {
             token_stream,
             context,
+            evaluation,
             value_required,
             allow_boundary_catch,
             warnings,
@@ -342,6 +380,7 @@ struct RetainedSourceCallInput<'a, 'b, 'tokens> {
     path_fork: &'a mut PathInternerFork,
     function_path: &'a PathId,
     signature: &'a FunctionSignature,
+    evaluation: CallableEvaluation,
     expectations: Vec<ParameterExpectation>,
     arguments: Vec<DeferredCallArgument>,
     call_span: Option<SourceSpan>,
@@ -374,6 +413,7 @@ fn retain_numeric_source_call(
         path_fork,
         function_path,
         signature,
+        evaluation,
         expectations,
         arguments,
         call_span,
@@ -396,6 +436,7 @@ fn retain_numeric_source_call(
             function_path: function_path.to_owned(),
             success_result_type_ids: Vec::new(),
             error_return_type_id: None,
+            evaluation,
             completion: CallCompletion::Never,
             expectations,
             arguments,
@@ -438,6 +479,7 @@ fn retain_numeric_source_call(
             function_path: function_path.to_owned(),
             success_result_type_ids: success_result_type_ids.to_vec(),
             error_return_type_id,
+            evaluation,
             completion: CallCompletion::Value,
             expectations,
             arguments,
@@ -575,6 +617,7 @@ pub(crate) fn finish_function_call_expression(
     let CallFinishContext {
         token_stream,
         context,
+        evaluation,
         value_required,
         allow_boundary_catch,
         warnings,
@@ -597,7 +640,7 @@ pub(crate) fn finish_function_call_expression(
         }
 
         let call_path = call.name;
-        let expression = call.into_plain_expression(expression_builder)?;
+        let expression = call.into_plain_expression(expression_builder, evaluation)?;
         return Ok(if context.source_call_has_private_failure_lane(call_path) {
             expression_builder.with_private_call_failure_candidate(expression, call_path)?
         } else {
@@ -675,6 +718,207 @@ pub(crate) fn resolve_user_function_call_arguments(
     .map_err(ExpressionParseError::from)
 }
 
+/// Enforce compile-time arguments for a required const call made outside a const body.
+///
+/// WHAT: requires every completed argument to be a compile-time value shape, allowing nested
+///       const calls whose own arguments are constant.
+/// WHY: a const declaration's own parameters and locals are placeholders that become concrete
+///      only when the declaration executes; applying the call-site rule while validating the
+///      declaration would reject valid const-to-const calls such as `inner(x)`.
+pub(crate) fn validate_const_call_arguments(
+    arguments: &[CallArgument<OwnedExpr>],
+    callee_path: &PathId,
+    call_span: Option<SourceSpan>,
+    context: &ScopeContext,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+    path_fork: &PathInternerFork,
+) -> Result<(), ExpressionParseError> {
+    if context.is_const_body() {
+        return Ok(());
+    }
+    for argument in arguments {
+        let kind = const_argument_kind(
+            expression_builder.view_owned(argument.value)?,
+            context,
+            expression_builder,
+            const_values,
+        )?;
+        if matches!(kind, ConstValueKind::NonConst) {
+            let mut diagnostic = choices_control_flow::compile_time_evaluation_error(
+                CompileTimeEvaluationErrorReason::ConstCallRequiresConstantArguments,
+                path_fork.component(*callee_path),
+                call_span,
+            );
+            if let Some(span) = context
+                .top_level_declarations
+                .get_by_path(callee_path)
+                .and_then(|declaration| declaration.binding_span)
+            {
+                diagnostic =
+                    diagnostic.with_label(Some(span), Some(LabelDraftMessage::PreviousDeclaration));
+            }
+            return Err(diagnostic.into());
+        }
+    }
+    Ok(())
+}
+
+/// Classify one argument to a required const call.
+///
+/// WHAT: treats a call to another const function as a compile-time value when all of its own
+///       arguments are compile-time values.
+/// WHY: nested const calls are the normal composition mechanism, but the generic value-shape
+///      classifier sees every call as non-constant until the executor folds it.
+pub(crate) fn const_argument_kind(
+    view: ExpressionView<'_>,
+    context: &ScopeContext,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+) -> Result<ConstValueKind, ExpressionParseError> {
+    // A registered infallible host call is compile-time executable even though the call's own
+    // evaluation classification stays Runtime. Its arguments must still be compile-time values.
+    // The call is matched first so the lookup only refines an operation this classifier already
+    // knows is a call.
+    if let ExpressionOperationView::Call(call) = view.operation()
+        && registered_external_const_eval_op(view, Some(context.external_package_registry.as_ref()))
+            .is_some()
+    {
+        for argument in call.arguments().iter() {
+            if matches!(
+                const_argument_kind(argument.value(), context, expression_builder, const_values)?,
+                ConstValueKind::NonConst
+            ) {
+                return Ok(ConstValueKind::NonConst);
+            }
+        }
+        return Ok(ConstValueKind::Composite);
+    }
+
+    let kind = view
+        .const_value_kind_with_template_classifier(const_values, &mut |template| {
+            classify_template_from_effective_tir(
+                template,
+                &context.template_ir_store,
+                expression_builder,
+                const_values,
+                Some(context.external_package_registry.as_ref()),
+            )
+        })
+        .map_err(ExpressionParseError::from)?;
+    if !matches!(kind, ConstValueKind::NonConst) {
+        return Ok(kind);
+    }
+    const_composite_argument_kind(view, context, expression_builder, const_values)
+}
+
+/// Classify data construction whose leaves include required const calls.
+///
+/// WHAT: recursively accepts const calls nested inside a collection, map, nominal construction,
+///       coercion or field access when every contained value is compile-time.
+/// WHY: the generic value-shape classifier reports a composite containing a const call as
+///      non-constant because the call itself is not yet folded. Treating the composite as runtime
+///      would reject a valid argument such as `{inner()}` passed to another const function.
+fn const_composite_argument_kind(
+    view: ExpressionView<'_>,
+    context: &ScopeContext,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+) -> Result<ConstValueKind, ExpressionParseError> {
+    let all_constant = |values: &mut dyn Iterator<Item = ExpressionView<'_>>| {
+        for value in values {
+            if matches!(
+                const_argument_kind(value, context, expression_builder, const_values)?,
+                ConstValueKind::NonConst
+            ) {
+                return Ok(false);
+            }
+        }
+        Ok::<bool, ExpressionParseError>(true)
+    };
+
+    match view.operation() {
+        ExpressionOperationView::Call(call)
+            if call.metadata().evaluation == CallableEvaluation::Const =>
+        {
+            let mut arguments = call.arguments().iter().map(|argument| argument.value());
+            if all_constant(&mut arguments)? {
+                Ok(ConstValueKind::Composite)
+            } else {
+                Ok(ConstValueKind::NonConst)
+            }
+        }
+        ExpressionOperationView::Collection(values) => {
+            if all_constant(&mut values.iter())? {
+                Ok(ConstValueKind::Composite)
+            } else {
+                Ok(ConstValueKind::NonConst)
+            }
+        }
+        ExpressionOperationView::Map(entries) => {
+            let mut values = entries
+                .iter()
+                .flat_map(|entry| [entry.key(), entry.value()]);
+            if all_constant(&mut values)? {
+                Ok(ConstValueKind::Composite)
+            } else {
+                Ok(ConstValueKind::NonConst)
+            }
+        }
+        ExpressionOperationView::Struct { fields }
+        | ExpressionOperationView::Choice { fields, .. }
+        | ExpressionOperationView::RouteConstruct { fields, .. } => {
+            if all_constant(&mut fields.iter().map(|field| field.value()))? {
+                Ok(ConstValueKind::Composite)
+            } else {
+                Ok(ConstValueKind::NonConst)
+            }
+        }
+        ExpressionOperationView::Coerce { value, .. }
+        | ExpressionOperationView::FieldAccess { base: value, .. }
+        | ExpressionOperationView::Cast { source: value, .. }
+        | ExpressionOperationView::LogicalNot { operand: value }
+        | ExpressionOperationView::NumericUnary { operand: value, .. }
+        | ExpressionOperationView::PropagateOption { value } => {
+            const_argument_kind(value, context, expression_builder, const_values)
+        }
+        ExpressionOperationView::NumericBinary { left, right, .. }
+        | ExpressionOperationView::LogicalBinary { left, right, .. }
+        | ExpressionOperationView::Compare { left, right, .. }
+        | ExpressionOperationView::Range {
+            start: left,
+            end: right,
+            ..
+        } => {
+            let mut values = [left, right].into_iter();
+            if all_constant(&mut values)? {
+                Ok(ConstValueKind::Composite)
+            } else {
+                Ok(ConstValueKind::NonConst)
+            }
+        }
+        ExpressionOperationView::CollectionBuiltin {
+            receiver,
+            arguments,
+            ..
+        }
+        | ExpressionOperationView::MapBuiltin {
+            receiver,
+            arguments,
+            ..
+        } => {
+            let mut values =
+                std::iter::once(receiver).chain(arguments.iter().map(|argument| argument.value()));
+            if all_constant(&mut values)? {
+                Ok(ConstValueKind::Composite)
+            } else {
+                Ok(ConstValueKind::NonConst)
+            }
+        }
+        _ => Ok(ConstValueKind::NonConst),
+    }
+}
+
 /// Parses an external-function call for expression position.
 ///
 /// WHAT: returns the completed expression call contract after shared external-call argument and
@@ -716,6 +960,14 @@ pub(crate) fn parse_external_function_call_expression(
         expectations_from_host_function(external_function, type_environment)
     };
     let callee_name = string_table.intern(&external_function.name);
+    if context.is_const_body() && external_function.const_eval.is_none() {
+        return Err(choices_control_flow::const_body_runtime_operation(
+            Some(callee_name),
+            call_span,
+            context.const_declaration_span(),
+        )
+        .into());
+    }
     let raw_args = parse_call_arguments_typed_with_numeric_retention(
         token_stream,
         context,
@@ -876,6 +1128,7 @@ pub(crate) fn parse_external_function_call_expression(
         CallFinishContext {
             token_stream,
             context,
+            evaluation: CallableEvaluation::Runtime,
             value_required,
             allow_boundary_catch,
             warnings,
@@ -978,6 +1231,7 @@ fn finish_external_function_call_expression(
     let CallFinishContext {
         token_stream,
         context,
+        evaluation: _,
         value_required,
         allow_boundary_catch,
         warnings,

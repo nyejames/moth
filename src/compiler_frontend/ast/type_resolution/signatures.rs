@@ -253,6 +253,7 @@ pub(crate) fn resolve_function_signature(
             parameters: resolved_parameters,
             return_contract,
         },
+        evaluation: signature.evaluation,
     })
 }
 

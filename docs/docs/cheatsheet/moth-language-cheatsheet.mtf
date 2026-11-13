@@ -83,7 +83,7 @@ Strings have no ordering, indexing or in-place character mutation. `Char` suppor
 A const record is a compile-time group of named, folded values. Fields have unique labels with explicit values and don't see preceding field labels
 as bindings. Runtime code may read its ordinary fields but can't pass, return or store the whole record or call methods on it.
 
-Only Core functions with an explicit constant-evaluation contract can fold calls. MON shares record syntax but is a separate data format.
+Core functions with an explicit constant-evaluation contract and declared const functions can fold calls. Release builds may also fold proven const-safe ordinary calls. MON shares record syntax but is a separate data format.
 
 ## References, copies and lifetimes
 
@@ -269,6 +269,20 @@ Custom error types need explicit recovery or mapping. Postfix `!` is for declare
 Parameters use `|...|`, or `||` when empty. Call with parentheses. Positional arguments precede named ones.
 A named argument may skip a default, which must be compile-time evaluable and can't refer to other parameters.
 Builtin and host calls use positional arguments. Omit `->` for no success or error results. A function with only a failure slot writes `-> Error!`.
+A const function writes `#` between its name and parameter list. Every call must receive compile-time constants and is executed by the compiler:
+
+[codeblock, $code "moth":
+    double #|value I32| -> I32:
+        return value * 2
+    ;
+
+    label #= [: result [double(21)]]
+]
+
+Const declarations handle immutable ordinary-value parameters and one ordinary success slot in V1.
+A required const call that cannot execute is a source error, not a runtime fallback.
+Release builds may also fold an ordinary function whose whole body proves const-safe; a refused optimisation stays a runtime call.
+
 
 Mutable parameters require `~place` for existing mutable storage, including named arguments. Fresh values and explicit copies stay unmarked:
 

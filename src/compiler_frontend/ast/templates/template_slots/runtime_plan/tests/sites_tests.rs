@@ -57,6 +57,9 @@ fn assert_authority_error(
     let error =
         result.expect_err(format!("{context} must surface as a broken-authority error").as_str());
     match error {
+        TemplateError::Budget(exhaustion) => {
+            panic!("expected broken authority, got budget refusal: {exhaustion:?}")
+        }
         TemplateError::Infrastructure(error) => {
             let error = &error.primary;
             assert!(
@@ -404,6 +407,9 @@ fn missing_structural_authority_propagates_through_runtime_slot_site_planner() {
     match error {
         TemplateError::Infrastructure(error) => {
             assert_eq!(error.primary.kind, InfrastructureFailureKind::Internal);
+        }
+        TemplateError::Budget(_) => {
+            panic!("missing structural authority must not exhaust a compile-time budget");
         }
         TemplateError::Diagnostic(_) | TemplateError::NonConstantReferenceInConstant(_) => {
             panic!("missing structural authority must not become a user diagnostic");

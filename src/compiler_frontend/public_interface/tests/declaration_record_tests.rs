@@ -37,6 +37,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, ExportedGenericParameterIdentity, GenericDeclarationOrigin,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -208,6 +209,7 @@ fn function_root(
         kind: ResolvedPublicTypeRootKind::Function {
             signature,
             generic_parameter_list_id,
+            evaluation: CallableEvaluation::Runtime,
         },
     }
 }
@@ -510,6 +512,7 @@ fn free_fn_binding_and_root(
         kind: ResolvedPublicTypeRootKind::Function {
             signature: FunctionSignature::default(),
             generic_parameter_list_id: None,
+            evaluation: CallableEvaluation::Runtime,
         },
     };
     let binding = export_binding(

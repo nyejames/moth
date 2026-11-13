@@ -17,6 +17,35 @@ use super::ids::TypeId;
 #[cfg(test)]
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 
+/// Where a callable's body executes.
+///
+/// WHAT: one callable classification shared by header syntax, resolved signatures, call targets
+///       and published callable surfaces.
+/// WHY: a const function is not a runtime function with an optimisation flag. Every consumer that
+///      decides whether a call must fold or may reach a backend reads this one enum instead of a
+///      boolean attached to one stage only.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum CallableEvaluation {
+    /// The body is emitted for runtime execution.
+    #[default]
+    Runtime,
+    /// Every call is required compile-time evaluation; no runtime body is emitted.
+    Const,
+}
+
+impl CallableEvaluation {
+    /// Whether a callable with this classification has a runtime body.
+    ///
+    /// WHAT: true only for `Runtime`.
+    /// WHY: public-interface validation, local finalization, origin seeding and concrete callable
+    ///      collection all skip a const callable because its const executable contract, not a HIR
+    ///      body, carries its evaluation facts. One predicate states that rule instead of four
+    ///      paraphrased comments.
+    pub(crate) fn has_runtime_body(self) -> bool {
+        matches!(self, Self::Runtime)
+    }
+}
+
 /// Ordered success slots of one resolved callable contract.
 ///
 /// `Zero` and `One` stay allocation-free; `Multiple` always holds at least two entries.

@@ -26,6 +26,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTraitIdentity, CanonicalTypeIdentity, ExternalOpaqueTypeIdentity,
     ModulePrivateNominalIdentity, StableTraitRequirementIdentity,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::external_packages::{
     CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalPackageRegistry,
     ExternalSymbolCategory, ExternalSymbolPath, ExternalTypeDef, ExternalTypeId,
@@ -166,6 +167,7 @@ fn function_record(
         origin: OriginDeclarationId::Function(origin),
         synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+            evaluation: CallableEvaluation::Runtime,
             category,
             parameters: Vec::new(),
             return_contract: PublicCallableReturnContract::Returns {
@@ -412,6 +414,7 @@ fn accepts_external_type_with_same_stable_identity_and_different_local_ids() {
             )),
             synthetic_interface_provenance: Default::default(),
             semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+                evaluation: CallableEvaluation::Runtime,
                 category: PublicFunctionCategory::GenericTemplate(
                     PublicGenericTemplateDescriptor {
                         generic_parameters: Vec::new(),
@@ -472,6 +475,7 @@ fn rejects_direct_private_nominal_before_interface_closure() {
         origin: OriginDeclarationId::Function(origin),
         synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+            evaluation: CallableEvaluation::Runtime,
             category: PublicFunctionCategory::GenericTemplate(PublicGenericTemplateDescriptor {
                 generic_parameters: Vec::new(),
             }),
@@ -524,6 +528,7 @@ fn rejects_nested_private_generic_instance_before_publication() {
             origin: OriginDeclarationId::Function(origin),
             synthetic_interface_provenance: Default::default(),
             semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+                evaluation: CallableEvaluation::Runtime,
                 category: PublicFunctionCategory::GenericTemplate(
                     PublicGenericTemplateDescriptor {
                         generic_parameters: Vec::new(),
@@ -669,6 +674,7 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
         origin: OriginDeclarationId::Function(make_origin.clone()),
         synthetic_interface_provenance: Default::default(),
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+            evaluation: CallableEvaluation::Runtime,
             category: PublicFunctionCategory::ConcreteLocal,
             parameters: Vec::new(),
             return_contract: PublicCallableReturnContract::Returns {

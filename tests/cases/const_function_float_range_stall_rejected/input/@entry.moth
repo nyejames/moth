@@ -1,0 +1,11 @@
+stalled #|| -> I32:
+    count ~= 0
+    start F32 = 16777216.0
+    end F32 = 16777218.0
+    loop start to end by 1.0 |item|:
+        ~count = count + 1
+    ;
+    return count
+;
+
+result #I32 = stalled()

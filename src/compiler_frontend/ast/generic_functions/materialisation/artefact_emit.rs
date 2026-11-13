@@ -9,7 +9,7 @@ use super::nominal_blueprints::{
 use super::semantic_closure::{StableSemanticClosure, install_private_semantic_closure};
 use super::sidecar_build::{GeneratedSidecarRequest, emit_materialised_sidecar};
 use super::stable_types::{
-    GeneratedFoldedValueMaterialiser, GeneratedValueMaterialisationServices,
+    ConstFunctionArtefact, GeneratedFoldedValueMaterialiser, GeneratedValueMaterialisationServices,
     GenericTemplateArtefact, MaterialisationNominalSource, StableFunctionReturnContract,
     StableFunctionSignature, StableFunctionTarget, StableParameterContract,
     const_store_error_into_prepared_failure, generated_file_value_resolution_services,
@@ -42,6 +42,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -62,7 +63,8 @@ use crate::compiler_frontend::public_interface::{
 #[cfg(test)]
 use crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity;
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, StableModuleOriginIdentity,
+    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, OriginFunctionId,
+    StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::{
@@ -94,6 +96,12 @@ pub(crate) struct ModuleMaterialisationContext {
     pub(super) concrete_call_summaries: Box<[ConcreteCallSummaryRecord]>,
     pub(super) semantic_closure: StableSemanticClosure,
     pub(super) artefacts: Box<[GenericTemplateArtefact]>,
+    /// Retained const function bodies published for cross-module compile-time execution.
+    ///
+    /// Sorted by `function_path`; exported rows carry their public origin and private helpers
+    /// carry `None`. A consumer materialises only the rows reachable from the entries it
+    /// requests, and reuses them once per provider identity.
+    pub(super) const_functions: Box<[ConstFunctionArtefact]>,
     pub(super) module_origin: Option<StableModuleOriginIdentity>,
     pub(super) frozen_identity_handle: FrozenIdentityHandle,
     /// The complete path table that issued this context's retained `PathId`s.
@@ -108,14 +116,45 @@ pub(crate) struct ModuleMaterialisationContext {
     /// the path table prevents a requester boundary from interpreting the same numeric IDs as its
     /// own strings while rebasing a published context.
     pub(super) source_string_table: Option<Arc<FrozenStringTable>>,
+    /// Issuing path/string pair for retained const rows, independent of the generic pair.
+    pub(super) const_path_table: Option<Arc<PathTable>>,
+    pub(super) const_source_string_table: Option<Arc<FrozenStringTable>>,
 }
 
-type RetainedIdentityArcs<'a> = Option<(&'a Arc<PathTable>, &'a Arc<FrozenStringTable>)>;
+pub(super) type RetainedIdentityArcs<'a> = Option<(&'a Arc<PathTable>, &'a Arc<FrozenStringTable>)>;
+
+/// Pair one context's retained issuing tables, rejecting a half-installed pair.
+///
+/// WHY: publication installs both halves together, so one half alone means the context was
+///      mutated after publication and every retained path would resolve in the wrong string
+///      domain. An incomplete pair is an internal invariant break, never a user input error.
+fn complete_identity_arcs<'a>(
+    path_table: &'a Option<Arc<PathTable>>,
+    source_string_table: &'a Option<Arc<FrozenStringTable>>,
+    incomplete_pair_message: &'static str,
+) -> Result<RetainedIdentityArcs<'a>, InfrastructureFailure> {
+    match (path_table, source_string_table) {
+        (Some(path_table), Some(source_strings)) => Ok(Some((path_table, source_strings))),
+        (None, None) => Ok(None),
+        _ => Err(InfrastructureFailure::internal(
+            CompilerStage::GenericMaterialisation,
+            incomplete_pair_message,
+        )),
+    }
+}
+
 impl ModuleMaterialisationContext {
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.semantic_closure.remap_path_ids(remap);
         for artefact in &mut self.artefacts {
             artefact.remap_path_ids(remap);
+        }
+        // Const rows retain paths in their own issuing domain. Publication remaps surrounding
+        // module facts, but these rows rebase only when a consumer materialises them.
+        if self.const_path_table.is_none() || self.const_source_string_table.is_none() {
+            for function in &mut self.const_functions {
+                function.remap_path_ids(remap);
+            }
         }
     }
 
@@ -136,6 +175,21 @@ impl ModuleMaterialisationContext {
             .iter()
             .enumerate()
             .map(|(index, artefact)| (&artefact.declaration_identity, index))
+    }
+
+    /// Iterate every published const function row with its exact dense row index.
+    pub(crate) fn const_function_rows(
+        &self,
+    ) -> impl Iterator<Item = (&OriginFunctionId, usize)> + '_ {
+        self.const_functions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, function)| function.origin.as_ref().map(|origin| (origin, index)))
+    }
+
+    /// Borrow the complete published const function closure.
+    pub(crate) fn published_const_functions(&self) -> &[ConstFunctionArtefact] {
+        &self.const_functions
     }
 
     /// Observe the frozen private contract without rebuilding the declaring environment.
@@ -186,29 +240,78 @@ impl ModuleMaterialisationContext {
     pub(crate) fn retained_identity_tables(
         &self,
     ) -> Result<Option<(&PathTable, &FrozenStringTable)>, InfrastructureFailure> {
-        match (
-            self.path_table.as_deref(),
-            self.source_string_table.as_deref(),
-        ) {
-            (Some(path_table), Some(source_strings)) => Ok(Some((path_table, source_strings))),
-            (None, None) => Ok(None),
-            _ => Err(InfrastructureFailure::internal(
-                CompilerStage::GenericMaterialisation,
-                "published materialisation context has an incomplete identity table pair",
-            )),
-        }
+        self.retained_identity_arcs().map(|pair| {
+            pair.map(|(path_table, source_strings)| (path_table.as_ref(), source_strings.as_ref()))
+        })
     }
+
     pub(crate) fn retained_identity_arcs(
         &self,
     ) -> Result<RetainedIdentityArcs<'_>, InfrastructureFailure> {
-        match (&self.path_table, &self.source_string_table) {
-            (Some(path_table), Some(source_strings)) => Ok(Some((path_table, source_strings))),
-            (None, None) => Ok(None),
-            _ => Err(InfrastructureFailure::internal(
-                CompilerStage::GenericMaterialisation,
-                "published materialisation context has an incomplete identity table pair",
-            )),
+        complete_identity_arcs(
+            &self.path_table,
+            &self.source_string_table,
+            "published materialisation context has an incomplete identity table pair",
+        )
+    }
+
+    /// Retained identity pair that issued the published const rows.
+    pub(super) fn const_identity_arcs(
+        &self,
+    ) -> Result<RetainedIdentityArcs<'_>, InfrastructureFailure> {
+        complete_identity_arcs(
+            &self.const_path_table,
+            &self.const_source_string_table,
+            "published const identity table pair is incomplete",
+        )
+    }
+
+    /// Rebase only the selected retained const rows into a requester's path/string domain.
+    ///
+    /// WHAT: re-interns the const issuing table, then clones and remaps exactly the rows named by
+    ///       `row_indices` in their published order.
+    /// WHY:  reachability is decided from the published row index before any row copy. A provider
+    ///       can retain thousands of unrelated const bodies, and copying the whole module context
+    ///       for one import would make a cold consumer import proportional to the provider.
+    pub(crate) fn rebased_const_closure_for_requester(
+        &self,
+        row_indices: &[usize],
+        path_fork: &mut PathInternerFork,
+        destination_strings: &mut StringTable,
+    ) -> Result<Option<Box<[ConstFunctionArtefact]>>, InfrastructureFailure> {
+        let Some((path_table, source_strings)) = self.const_identity_arcs()? else {
+            return Ok(None);
+        };
+        let path_remap = path_fork
+            .remap_table_from_strings(path_table, source_strings.as_ref(), destination_strings)
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::GenericMaterialisation,
+                    "published const identity tables could not be re-interned",
+                )
+            })?;
+        let mut rows = row_indices
+            .iter()
+            .map(|index| {
+                self.const_functions
+                    .get(*index)
+                    .cloned()
+                    .ok_or_else(|| {
+                        InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
+                            format!(
+                                "Published const closure selected row {index} outside its retained const rows"
+                            ),
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        #[cfg(test)]
+        super::const_materialisation::reuse_probe::record_selected_rows(&rows);
+        for row in &mut rows {
+            row.remap_path_ids(&path_remap);
         }
+        Ok(Some(rows.into_boxed_slice()))
     }
 
     /// Record the probe-only ownership that this retained context will carry to the render tail.
@@ -338,6 +441,7 @@ impl GenericTemplateArtefact {
             style_directives,
             build_profile,
             template_const_loop_iteration_limit,
+            const_execution_limits,
             #[cfg(feature = "timers")]
             timing_context,
         } = input;
@@ -373,7 +477,9 @@ impl GenericTemplateArtefact {
             config_resolution: None,
             build_config_values: Arc::new(Default::default()),
             builder_root_slots: None,
+            provider_materialisations: None,
             template_const_loop_iteration_limit,
+            const_execution_limits,
             capacity_estimate: FrontendArenaCapacityEstimate::default(),
             #[cfg(feature = "timers")]
             timing_context,
@@ -835,6 +941,7 @@ impl GenericTemplateArtefact {
                 ResolvedFunctionSignature {
                     receiver: Some(receiver.clone()),
                     signature: signature.clone(),
+                    evaluation: CallableEvaluation::Runtime,
                 },
             );
             // WHY: the import projection can already hold this imported concrete method by path,
@@ -1154,6 +1261,7 @@ impl GenericTemplateArtefact {
                 ResolvedFunctionSignature {
                     receiver: receiver.clone(),
                     signature: signature.clone(),
+                    evaluation: CallableEvaluation::Runtime,
                 },
             );
             if let Some(receiver) = receiver.clone() {
@@ -1658,6 +1766,7 @@ impl super::stable_types::StableCallableBinding {
             ResolvedFunctionSignature {
                 receiver: None,
                 signature,
+                evaluation: CallableEvaluation::Runtime,
             },
         );
         Rc::make_mut(&mut lookups.declaration_semantics).register_materialised_function(local_path);

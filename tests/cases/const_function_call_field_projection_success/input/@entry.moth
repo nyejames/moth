@@ -1,0 +1,19 @@
+-- A field projection completes after the required call beneath it folds to a constant record.
+
+Point = |
+    x I32,
+    y I32,
+|
+
+make #|value I32| -> Point:
+    return Point(x = value, y = value + 1)
+;
+
+read_x #|point Point| -> I32:
+    return point.x
+;
+
+result #I32 = make(3).x
+bound #I32 = read_x(Point(x = 7, y = 8))
+
+[: result=[result] bound=[bound] ]

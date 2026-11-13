@@ -35,6 +35,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraft
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidCastReason,
 };
+pub(crate) use crate::compiler_frontend::datatypes::const_budget::{
+    ConstBudgetCategory, ConstBudgetUnit,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::{NumberArithmeticError, NumberValue};
@@ -61,8 +64,62 @@ use std::borrow::Cow;
 pub(crate) enum ConstantFoldError {
     Diagnostic(DiagnosticDraft),
     NumericFailure(DiagnosticDraft),
+    /// A bound refused evaluation. Release speculation converts this to an advisory Note and
+    /// retains the runtime call; required evaluation converts it to an Error.
+    Budget(ConstBudgetExhaustion),
     Infrastructure(Box<InfrastructureErrors>),
 }
+
+/// One typed budget refusal with the effective limit and the setting that raises it.
+#[derive(Clone, Debug)]
+pub(crate) struct ConstBudgetExhaustion {
+    pub category: ConstBudgetCategory,
+    pub unit: ConstBudgetUnit,
+    pub limit: u64,
+    pub setting: Option<&'static str>,
+    pub aggregate: bool,
+    /// Innermost source location that spent the allowance.
+    pub span: Option<SourceSpan>,
+    /// Innermost refused call site, which owns Note deduplication and display.
+    pub call_span: Option<SourceSpan>,
+    /// Active const-call sites, outermost first, retained for required diagnostics.
+    pub call_chain: Vec<SourceSpan>,
+}
+
+impl ConstBudgetExhaustion {
+    pub(crate) fn into_diagnostic(self) -> DiagnosticDraft {
+        debug_assert_eq!(
+            self.category,
+            self.unit.category(),
+            "a budget refusal must charge its unit to the category that owns it"
+        );
+        let reason = match (self.unit.category(), self.setting) {
+            (ConstBudgetCategory::Memory, Some(_)) => {
+                CompileTimeEvaluationErrorReason::ConstMemoryLimitExceeded
+            }
+            (ConstBudgetCategory::Work, Some(_)) => {
+                CompileTimeEvaluationErrorReason::ConstWorkLimitExceeded
+            }
+            _ => CompileTimeEvaluationErrorReason::ConstHardSafetyLimitExceeded,
+        };
+        // The effective limit is known for fixed safety bounds too, so it always becomes the
+        // typed `limit` fact. The compact family has no fact word left for `unit`: its four-word
+        // fact area already holds reason, operation, numeric type and limit. The renderer can
+        // therefore keep the hard-limit sentence generic rather than printing a bare count.
+        let effective_limit = usize::try_from(self.limit).ok();
+        let mut diagnostic = choices_control_flow::compile_time_evaluation_error_with_limit(
+            reason,
+            None,
+            effective_limit,
+            self.span,
+        );
+        for span in self.call_chain.iter().rev() {
+            diagnostic = diagnostic.with_label(Some(*span), Some(LabelDraftMessage::ConstCallSite));
+        }
+        diagnostic
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum ConstantFoldOutcome {
     Folded(ExprId),
@@ -178,6 +235,7 @@ impl From<TemplateError> for ConstantFoldError {
             | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
                 Self::Diagnostic(diagnostic)
             }
+            TemplateError::Budget(exhaustion) => Self::Budget(exhaustion),
             TemplateError::Infrastructure(error) => Self::Infrastructure(error),
         }
     }

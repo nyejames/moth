@@ -1,0 +1,5 @@
+identity type A #|value A| -> A:
+    return value
+;
+start ||:
+;

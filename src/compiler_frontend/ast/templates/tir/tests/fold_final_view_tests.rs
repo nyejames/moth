@@ -88,10 +88,13 @@ fn build_test_fold_context<'a>(
         const_values,
         template_const_loop_iteration_limit:
             crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        template_output_limits: None,
+        template_work: None,
         bindings: vec![],
         source_scope: None,
         external_package_registry: None,
         prepared_wrapper_slot_routing: FxHashMap::default(),
+        required_call_rewriter: None,
     }
 }
 

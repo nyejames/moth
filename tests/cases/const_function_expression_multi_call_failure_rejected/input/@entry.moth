@@ -1,0 +1,10 @@
+ok #|| -> I32:
+    return 1
+;
+
+fail #|| -> I32:
+    assert(false, "stop")
+    return 2
+;
+
+value #I32 = ok() + fail()

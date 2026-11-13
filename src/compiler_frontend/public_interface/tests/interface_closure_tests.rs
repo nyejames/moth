@@ -23,6 +23,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     ExportedGenericParameterIdentity, GenericDeclarationOrigin, StableTraitRequirementIdentity,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{PublicFoldedField, PublicFoldedValue};
 use crate::compiler_frontend::public_call_summary::{
@@ -86,6 +87,7 @@ fn function_record(
     parameter_count: usize,
 ) -> PublicDeclarationRecord {
     PublicDeclarationRecord { origin: OriginDeclarationId::Function(function_origin(module, name)), synthetic_interface_provenance: Default::default(), semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
+        evaluation: CallableEvaluation::Runtime,
         category: PublicFunctionCategory::ConcreteLocal,
         parameters: (0..parameter_count)
             .map(|index| PublicParameterTypeSlot {

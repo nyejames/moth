@@ -1,0 +1,5 @@
+project #= (
+    name = "test_project",
+    const_work_limit = 100,
+)
+html #= ()
