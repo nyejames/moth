@@ -21,6 +21,8 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Ongoing in parallel 
 
+- [Core HTML, Styles and universal MTF migration](./plans/core-html-styles-and-universal-mtf-migration.md). Foundation is on a draft PR branch. Finish the compiler-wide `.mtf` source-kind and combined constant-prelude migration, update remaining fixtures and validate before merging. **ACTIVE**
+
 - [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md). Partially complete and underway. **PAUSED**
 
 - [Boracle research](./plans/boracle-next-research-plans) and [production borrow checker development](./plans/production-borrow-checker.md): Research precision and migration wait for the merged typed-expression/native-result capabilities and explicit activation. Current status, accepted implementation decisions and borrow/Boracle issues live in the production companion. **ONGOING, RESEARCH RESTART PAUSED**

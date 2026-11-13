@@ -53,9 +53,9 @@ Bootstrap starts with a command selecting the artefact builder, build profile, t
 
 The selected builder does not supply or propagate a semantic numeric profile. It supplies its capability surface and exact typed primitive globals; compiler language policy owns the `I32`/`F64` literal defaults, while each source/input contract names an exact type. The build profile controls optimisation/planning effort, instrumentation and physical representation policy, not numeric semantics or mandatory access/lifetime legality. `docs/compiler-design-overview.md` > `Exact numeric identities and physical representation` owns numeric values and compatibility.
 
-The capability surface contains source-backed Core/Builder packages, binding-backed packages, import providers, runtime requirements, supported source kinds, primitive build globals and target-affinity/capability metadata. Directives are not part of it: the compiler defines every directive and every builder sees the same set.
+The capability surface contains mandatory Core source roots, builder source-backed packages, binding-backed packages, import providers, runtime requirements, optional source kinds, primitive build globals and target-affinity/capability metadata. Directives are not part of it: the compiler defines every directive and every builder sees the same set.
 
-Template constant scope is not a configurable capability. The compiler authority's Stage 2 source-kind section owns the fixed `@html` prelude and the rule that a builder enabling `.mtf` must register the official `packages/html` source package. A builder cannot opt arbitrary source packages into `.mtf` scope.
+Template constant scope is not a configurable capability. `.mtf` is compiler-supported under every builder alongside `.moth`. The compiler authority's Stage 2 source-kind section owns the fixed public-constant prelude from the official `@html` and `@styles` Core/MothSource packages. The common builder surface registers both roots through `SourcePackageRegistry`. Builders cannot substitute their own source packages or add arbitrary symbols to `.mtf` scope. Plain `.md` remains builder-selectable.
 
 Official executable environments provide the canonical Core catalogue through
 official native or browser implementations, with documented host-capability gates
@@ -378,7 +378,7 @@ Package origin and backing are independent:
 | Origin | Core, Builder, ProjectLocal or Dependency. |
 | Backing | MothSource or ExternalBinding. |
 
-For example, `@html` is Builder/MothSource, a virtual Core IO package is Core/ExternalBinding, a support facade is ProjectLocal/MothSource and an annotated project JavaScript file is ProjectLocal/ExternalBinding.
+For example, `@html` and `@styles` are Core/MothSource, `@web/site` is Builder/MothSource, a virtual Core IO package is Core/ExternalBinding, a support facade is ProjectLocal/MothSource and an annotated project JavaScript file is ProjectLocal/ExternalBinding.
 
 Classification records provenance/implementation. It changes no namespace precedence, visibility, facade privacy, dependency syntax or receiver semantics. Source and binding registries remain separate because their discovery and runtime contracts differ.
 

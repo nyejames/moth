@@ -8,8 +8,7 @@
 use crate::build_system::output::{
     DEV_OUTPUT_FIELD, RELEASE_OUTPUT_FIELD, ensure_single_output_root_owner,
 };
-use crate::builder_surface::SourcePackageRegistry;
-use crate::builder_surface::PackageOrigin;
+use crate::builder_surface::{PackageOrigin, SourcePackageRegistry};
 use crate::builder_surface::config_schema::{
     ConfigFieldShape, ConfigSchema, ConfigSchemaField, ConfigSchemas, UnknownFieldPolicy,
 };
