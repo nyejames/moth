@@ -72,4 +72,8 @@
     (i32.store8 (i32.const 32) (i32.const 255))
     (i32.store (local.get $frame) (i32.const 32))
     (i32.store offset=4 (local.get $frame) (i32.const 1))
-    (i32.const 0)))
+    (i32.const 0))
+
+  (func (export "work_declared_error") (param $argument i32) (param $length i32) (param $frame i32) (result i32)
+    (call $step (i32.const 4))
+    (i32.const 1)))

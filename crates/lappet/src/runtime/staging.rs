@@ -71,6 +71,17 @@ impl StagingTable {
         Ok(ticket)
     }
 
+    /// The length of a live entry, without copying or consuming it.
+    pub(crate) fn len(&self, ticket: u64) -> Result<usize, StagingError> {
+        if ticket == 0 {
+            return Err(StagingError::UnknownTicket);
+        }
+        self.entries
+            .get(&ticket)
+            .map(Vec::len)
+            .ok_or(StagingError::UnknownTicket)
+    }
+
     /// Removes a live entry whose length is `expected_length` and returns its bytes.
     ///
     /// A miss or a length mismatch consumes nothing.
@@ -94,12 +105,11 @@ impl StagingTable {
         Ok(bytes)
     }
 
-    /// A copy of a live entry, without consuming it.
-    pub(crate) fn staged_bytes(&self, ticket: u64) -> Result<Vec<u8>, StagingError> {
-        self.entries
-            .get(&ticket)
-            .cloned()
-            .ok_or(StagingError::UnknownTicket)
+    /// Puts a taken entry back. A failed copy must leave the table unchanged.
+    pub(crate) fn restore(&mut self, ticket: u64, bytes: Vec<u8>) {
+        self.live_bytes += bytes.len();
+        let replaced = self.entries.insert(ticket, bytes);
+        debug_assert!(replaced.is_none(), "a taken ticket is not live");
     }
 
     pub(crate) fn has_live_ticket(&self) -> bool {
@@ -110,11 +120,5 @@ impl StagingTable {
     pub(crate) fn clear(&mut self) {
         self.entries.clear();
         self.live_bytes = 0;
-    }
-}
-
-impl Default for StagingTable {
-    fn default() -> Self {
-        Self::new()
     }
 }

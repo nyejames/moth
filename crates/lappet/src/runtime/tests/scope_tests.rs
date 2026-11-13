@@ -1,7 +1,8 @@
 //! The host side of the call-scope protocol, under both optimisation levels.
 //!
 //! The driver opens, reserves, calls the export once, copies the returned span and closes.
-//! A trap or a noncanonical status skips close and makes no further guest call.
+//! Status `1` is a declared error: the scope still closes and the instance stays usable. A trap
+//! or a noncanonical status skips close and makes no further guest call.
 
 use super::{assemble, engine, under_both_optimisations};
 use crate::runtime::context::HostContext;
@@ -126,6 +127,49 @@ fn a_noncanonical_result_skips_close() {
             assert_eq!(instance.host_state().steps, [1, 2, 4], "{export_name}");
         }
     });
+}
+
+#[test]
+fn a_declared_error_closes_the_scope_and_leaves_the_instance_usable() {
+    under_both_optimisations(|optimisation| {
+        let mut instance = instance(optimisation);
+        let declared = instance.call_scoped(
+            "work_declared_error",
+            b"",
+            Deadline::Unbounded,
+            &mut HostContext::empty(),
+        );
+        assert!(matches!(declared, Err(RuntimeError::DeclaredError)));
+        assert_eq!(instance.host_state().steps, [1, 2, 4, 3]);
+        assert_eq!(instance.deadline_installs(), 1);
+        instance
+            .call::<i32, ()>("arm", 0, Deadline::Unbounded)
+            .expect("a declared error does not quarantine the instance");
+    });
+}
+
+#[test]
+fn a_scoped_call_installs_its_deadline_once() {
+    under_both_optimisations(|optimisation| {
+        let mut instance = instance(optimisation);
+        instance
+            .call_scoped(
+                "work",
+                b"hi",
+                Deadline::AfterTicks(1),
+                &mut HostContext::empty(),
+            )
+            .expect("the helpers and the export share one deadline");
+        assert_eq!(instance.deadline_installs(), 1);
+    });
+}
+
+#[test]
+fn a_negative_i32_is_a_wasm32_address() {
+    use crate::runtime::instance::guest_offset;
+    assert_eq!(guest_offset(0), 0);
+    assert_eq!(guest_offset(-1), 0xFFFF_FFFF);
+    assert_eq!(guest_offset(i32::MIN), 0x8000_0000);
 }
 
 #[test]

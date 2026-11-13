@@ -44,6 +44,20 @@ fn tickets_are_nonzero_unique_and_never_reused() {
 }
 
 #[test]
+fn a_taken_entry_can_be_restored_without_a_second_copy_living_beside_it() {
+    let mut table = StagingTable::new();
+    let limits = InstanceLimits::default();
+    let ticket = table.stage(b"kept", &limits).expect("the entry fits");
+    let bytes = table.take(ticket, 4).expect("the length matches");
+    table.restore(ticket, bytes);
+    assert_eq!(table.len(ticket), Ok(4));
+    assert_eq!(
+        table.take(ticket, 4).expect("the restored entry is live"),
+        b"kept"
+    );
+}
+
+#[test]
 fn a_failed_take_consumes_nothing() {
     let mut table = StagingTable::new();
     let limits = InstanceLimits::default();

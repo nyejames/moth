@@ -116,14 +116,26 @@ mod sealed {
 pub(crate) trait InstanceKind: sealed::Sealed + 'static {
     /// The object bound stored in the one resource table.
     type Object: ?Sized + Erased;
+    /// The context bound stored in the per-call slot. A sendable instance accepts only `Send`
+    /// context. A thread-bound instance accepts any `'static` value.
+    type Context: ?Sized + Any;
+    fn downcast_context<T: 'static>(value: &mut Box<Self::Context>) -> Option<&mut T>;
 }
 
 impl InstanceKind for Sendable {
     type Object = dyn Erased + Send;
+    type Context = dyn Any + Send;
+    fn downcast_context<T: 'static>(value: &mut Box<Self::Context>) -> Option<&mut T> {
+        value.downcast_mut()
+    }
 }
 
 impl InstanceKind for ThreadBound {
     type Object = dyn Erased;
+    type Context = dyn Any;
+    fn downcast_context<T: 'static>(value: &mut Box<Self::Context>) -> Option<&mut T> {
+        value.downcast_mut()
+    }
 }
 
 /// A stored value the table can check and return without knowing `T` at the map.
@@ -523,18 +535,12 @@ fn issue_from(counter: &AtomicU64) -> Result<NonZeroU64, ResourceError> {
     }
 }
 
+/// The last carrier token, exposed so the exhaustion test can start one before it.
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) const LAST_ISSUED_TOKEN: u64 = LAST_TOKEN;
 
-    #[test]
-    fn issued_tokens_are_nonzero_unique_and_then_exhausted() {
-        let counter = AtomicU64::new(LAST_TOKEN - 1);
-        let first = issue_from(&counter).expect("one token remains before the last");
-        let last = issue_from(&counter).expect("the last carrier token can be issued");
-        assert_ne!(first, last);
-        assert!(first.get() > 0);
-        assert_eq!(issue_from(&counter), Err(ResourceError::Exhausted));
-        assert_eq!(issue_from(&counter), Err(ResourceError::Exhausted));
-    }
+/// Issues from a private counter. The process-wide generator is not used.
+#[cfg(test)]
+pub(crate) fn issue_from_counter(counter: &AtomicU64) -> Result<NonZeroU64, ResourceError> {
+    issue_from(counter)
 }

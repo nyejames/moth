@@ -1,7 +1,7 @@
 # Lappet host resource and context API
 
-> Accepted design with implementation deferred. Lappet has no runtime,
-> resource table or context code yet. [The roadmap](../roadmap.md) owns status.
+> The runtime foundation is in the tree. The adapter is not. This page is still
+> the accepted design, and [the roadmap](../roadmap.md) owns delivery status.
 
 This page owns how a Rust embedder gives a Lappet instance opaque host
 resources and per-call host context, and how host functions reach them.

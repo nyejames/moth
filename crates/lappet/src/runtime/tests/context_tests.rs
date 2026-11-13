@@ -274,3 +274,65 @@ fn a_bad_token_argument_leaves_the_instance_usable() {
             .expect("the wrong-type rejection did not quarantine the instance");
     });
 }
+
+#[test]
+fn a_thread_bound_instance_accepts_context_that_is_not_send() {
+    use crate::runtime::resource::ThreadBound;
+    use std::rc::Rc;
+
+    under_both_optimisations(|optimisation| {
+        let engine = engine(optimisation);
+        let mut imports = HostImports::<(), ThreadBound>::new(&engine);
+        imports
+            .define(
+                "host",
+                "touch",
+                [],
+                [],
+                |_: &mut (), _, _, _, context, _, _| {
+                    let value = context.require::<Rc<u8>>().map_err(|fault| {
+                        let source: crate::runtime::error::ErrorSource = Box::new(fault);
+                        source
+                    })?;
+                    assert_eq!(**value, 7);
+                    Ok(())
+                },
+            )
+            .expect("the touch import is defined once");
+        let module = engine
+            .compile_module(&assemble(
+                r#"(module (import "host" "touch" (func $touch)) (func (export "entry") (call $touch)))"#,
+            ))
+            .expect("the fixture is valid core Wasm");
+        let mut instance = imports
+            .prepare(&module)
+            .expect("the fixture imports are provided")
+            .instantiate((), InstanceLimits::default(), Deadline::Unbounded)
+            .expect("the fixture has no start function");
+        let mut context = HostContext::<ThreadBound>::new(Rc::new(7u8));
+        instance
+            .call_with_context::<(), ()>("entry", (), Deadline::Unbounded, &mut context)
+            .expect("a thread-bound instance accepts context that is not Send");
+        assert_eq!(
+            **context.get_mut::<Rc<u8>>().expect("the value came back"),
+            7
+        );
+    });
+}
+
+#[test]
+fn a_sendable_context_rejects_a_value_that_is_not_send() {
+    use crate::runtime::context::ContextValue;
+    use crate::runtime::resource::Sendable;
+    use std::rc::Rc;
+
+    // Compiles only while `Rc<u8>` cannot be sendable context. Removing the `Send` bound makes
+    // this assertion ambiguous.
+    trait AmbiguousIfImpl<Marker> {
+        fn some_item() {}
+    }
+    impl<T: ?Sized> AmbiguousIfImpl<()> for T {}
+    struct WouldBeSendableContext;
+    impl<T: ?Sized + ContextValue<Sendable>> AmbiguousIfImpl<WouldBeSendableContext> for T {}
+    let _ = <Rc<u8> as AmbiguousIfImpl<_>>::some_item;
+}

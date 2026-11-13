@@ -423,10 +423,17 @@ returns or panics. Stale, closed, other-instance, wrong-type and conflicting
 tokens are boundary faults and the host body does not run. Phase 5: context
 moves into the instance for one call and back to the holder on every outcome,
 including a caught host panic. A missing or wrong-type context is a host fault
-and the host function does not run. A scoped export opens, reserves, calls
-once, copies the returned span and closes. A trap, a noncanonical status or a
-noncanonical span skips close and makes no further guest call. A bad token
-argument is rejected before guest entry and the instance stays usable.
+and the host function does not run. A thread-bound instance accepts context
+that is not `Send`. A scoped export opens, reserves, calls once, copies the
+returned span and closes. Status `1` is a declared error: the scope closes and
+the instance stays usable. A trap, a noncanonical status or a noncanonical span
+skips close and makes no further guest call. A bad token argument is rejected
+before guest entry and the instance stays usable.
+
+**Decision.** `HostState` stays the instance-owned slot the crate-private
+import closures use. It is not a third ABI role. Resources and context are the
+two roles a host function receives. Adapters will see those through one call
+view and will not grow a parallel state generic.
 
 **Phase 6 evidence.** Recorded on 13 November 2026 on the same host, from
 authored fixtures and one release run. The numbers are not compiled Moth.
@@ -436,8 +443,8 @@ borrows it, so it includes the argument and the lookup.
 
 | Measurement | Median |
 |---|---|
-| Stage 16 bytes | 41 ns |
-| Stage 16 MiB | 427 us |
+| Stage 16 bytes | 42 ns |
+| Stage 16 MiB | 387 us |
 | Guarded host call above a bare call, release | 84 ns |
 | Guarded host call above a bare call, development | 125 ns |
 | Lookup of a live token in a full table | 78 ns |
@@ -451,8 +458,10 @@ ceiling. The game and server fixtures stage no host string.
 Policy lines, unchanged until Nye confirms them:
 
 - Staged text per entry, 16 MiB: unchanged. The workloads stage no host
-  string. A 16 MiB stage succeeds in 427 us. They do not show a realistic
-  string that needs another cap.
+  string. A 16 MiB stage succeeds in 387 us. The timer covers `stage` only.
+  The guest copy no longer clones the entry before writing it, and that copy
+  was not in this figure. They do not show a realistic string that needs
+  another cap.
 - Staged text live per instance, 64 MiB: confirmed for these fixtures. The
   largest staged entry measured is 16 MiB. They do not show a peak that needs
   a lower default.

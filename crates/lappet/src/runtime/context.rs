@@ -8,62 +8,83 @@
 //! A host function names the type it needs. A missing value or another type is a host fault and
 //! the function is not called. The slot holds one value, so a mutable borrow cannot conflict
 //! with another borrow of the same context.
+//!
+//! A sendable instance accepts only `Send` context, because its store may move between threads.
+//! A thread-bound instance accepts any `'static` value, which is where a game keeps a window or
+//! a graphics context.
 
 use super::error::{ContextFault, HostFault};
+use super::resource::{InstanceKind, Sendable, ThreadBound};
 use std::any::Any;
 
-/// The embedder-owned holder. It allocates when the value is stored, not on each call.
-///
-/// The value is `Send` so the same slot can live in a sendable store. A thread-bound instance
-/// uses that slot too. Non-`Send` context is not part of this holder.
-pub(crate) struct HostContext {
-    value: Option<Box<dyn Any + Send>>,
+/// A value that may be stored as context for one instance kind.
+pub(crate) trait ContextValue<Kind: InstanceKind>: 'static {
+    fn into_context(self) -> Box<Kind::Context>;
 }
 
-impl HostContext {
-    pub(crate) fn new<T: Any + Send>(value: T) -> Self {
+impl<T: Any + Send> ContextValue<Sendable> for T {
+    fn into_context(self) -> Box<dyn Any + Send> {
+        Box::new(self)
+    }
+}
+
+impl<T: Any> ContextValue<ThreadBound> for T {
+    fn into_context(self) -> Box<dyn Any> {
+        Box::new(self)
+    }
+}
+
+/// The embedder-owned holder. It allocates when the value is stored, not on each call.
+pub(crate) struct HostContext<Kind: InstanceKind = Sendable> {
+    value: Option<Box<Kind::Context>>,
+}
+
+impl<Kind: InstanceKind> HostContext<Kind> {
+    pub(crate) fn new(value: impl ContextValue<Kind>) -> Self {
         Self {
-            value: Some(Box::new(value)),
+            value: Some(ContextValue::<Kind>::into_context(value)),
         }
     }
 
     pub(crate) fn empty() -> Self {
         Self { value: None }
     }
+}
 
-    pub(crate) fn get_mut<T: Any + Send>(&mut self) -> Result<&mut T, ContextFault> {
+impl<Kind: InstanceKind> HostContext<Kind> {
+    pub(crate) fn get_mut<T: Any>(&mut self) -> Result<&mut T, ContextFault> {
         match self.value.as_mut() {
             None => Err(ContextFault::Missing),
-            Some(value) => value.downcast_mut().ok_or(ContextFault::WrongType),
+            Some(value) => Kind::downcast_context(value).ok_or(ContextFault::WrongType),
         }
     }
 
-    pub(super) fn take(&mut self) -> Option<Box<dyn Any + Send>> {
+    pub(super) fn take(&mut self) -> Option<Box<Kind::Context>> {
         self.value.take()
     }
 
-    pub(super) fn restore(&mut self, value: Option<Box<dyn Any + Send>>) {
+    pub(super) fn restore(&mut self, value: Option<Box<Kind::Context>>) {
         self.value = value;
     }
 }
 
 /// The per-call slot, borrowed for one host import.
-pub(crate) struct CallContext<'a> {
-    slot: &'a mut Option<Box<dyn Any + Send>>,
+pub(crate) struct CallContext<'a, Kind: InstanceKind = Sendable> {
+    slot: &'a mut Option<Box<Kind::Context>>,
 }
 
-impl CallContext<'_> {
-    pub(super) fn new(slot: &mut Option<Box<dyn Any + Send>>) -> CallContext<'_> {
+impl<'a, Kind: InstanceKind> CallContext<'a, Kind> {
+    pub(super) fn new(slot: &'a mut Option<Box<Kind::Context>>) -> Self {
         CallContext { slot }
     }
 
     /// Borrows the context as `T`. Failure means the host function must not run.
-    pub(crate) fn require<T: Any + Send>(&mut self) -> Result<&mut T, HostFault> {
+    pub(crate) fn require<T: Any>(&mut self) -> Result<&mut T, HostFault> {
         match self.slot.as_mut() {
             None => Err(HostFault::Context(ContextFault::Missing)),
-            Some(value) => value
-                .downcast_mut()
-                .ok_or(HostFault::Context(ContextFault::WrongType)),
+            Some(value) => {
+                Kind::downcast_context(value).ok_or(HostFault::Context(ContextFault::WrongType))
+            }
         }
     }
 }

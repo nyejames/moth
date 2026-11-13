@@ -5,8 +5,9 @@
 //! the source for display and logging, behind a standard error object so no Wasmtime type is
 //! public.
 //!
-//! None of these is a Moth error. A declared Moth error travels through the host ABI's own
-//! channel, which arrives with the adapters.
+//! None of these is a Moth error. A declared Moth error is [`RuntimeError::DeclaredError`].
+//! The fixture export driver distinguishes that edge and closes the scope. Decoding the error
+//! record is the adapter's job.
 
 use std::error::Error;
 use std::fmt;
@@ -54,6 +55,9 @@ pub enum RuntimeError {
     /// An export argument failed a check before guest entry. The guest was not entered and
     /// the instance stays usable.
     ExportArgument(BoundaryFault),
+    /// The export returned status `1`, the declared-error edge. The instance is not
+    /// quarantined. This driver does not decode the error record.
+    DeclaredError,
     // After a fault.
     /// The instance faulted earlier and is quarantined. Guest code was not entered.
     InstanceFaulted,
@@ -114,7 +118,7 @@ impl fmt::Display for BoundaryFault {
         formatter.write_str(match self {
             Self::UnknownTicket => "the staged-text ticket is not live",
             Self::WrongLength => "the staged-text length does not match",
-            Self::DestinationOutOfBounds => "the staged-text destination is outside guest memory",
+            Self::DestinationOutOfBounds => "the guest address is outside the instance's memory",
             Self::TicketLiveAtImport => {
                 "a host import was entered while staged text was still live"
             }
@@ -218,7 +222,7 @@ impl fmt::Display for RuntimeError {
             Self::ExportArgument(_) => {
                 formatter.write_str("an export argument was rejected before the guest was entered")
             }
-
+            Self::DeclaredError => formatter.write_str("the export returned a declared error"),
             Self::InstanceFaulted => {
                 formatter.write_str("the instance faulted earlier and can't be called again")
             }
@@ -242,7 +246,10 @@ impl Error for RuntimeError {
             Self::HostFault(host_fault) => host_fault.source(),
             Self::ExportArgument(fault) => Some(fault),
 
-            Self::BoundaryFault(_) | Self::EngineMismatch | Self::InstanceFaulted => None,
+            Self::BoundaryFault(_)
+            | Self::EngineMismatch
+            | Self::InstanceFaulted
+            | Self::DeclaredError => None,
         }
     }
 }

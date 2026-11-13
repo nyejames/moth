@@ -239,6 +239,20 @@ fn a_sendable_instance_rejects_a_resource_that_is_not_send() {
     );
 }
 
+#[test]
+fn issued_tokens_are_nonzero_unique_and_then_exhausted() {
+    use crate::runtime::resource::{LAST_ISSUED_TOKEN, issue_from_counter};
+    use std::sync::atomic::AtomicU64;
+
+    let counter = AtomicU64::new(LAST_ISSUED_TOKEN - 1);
+    let first = issue_from_counter(&counter).expect("one token remains before the last");
+    let last = issue_from_counter(&counter).expect("the last carrier token can be issued");
+    assert_ne!(first, last);
+    assert!(first.get() > 0);
+    assert_eq!(issue_from_counter(&counter), Err(ResourceError::Exhausted));
+    assert_eq!(issue_from_counter(&counter), Err(ResourceError::Exhausted));
+}
+
 struct DropProbe {
     id: u32,
     log: Arc<Mutex<Vec<u32>>>,

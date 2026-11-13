@@ -55,7 +55,7 @@ impl<HostState: 'static, Kind: InstanceKind> HostImports<HostState, Kind> {
             &mut StagingTable,
             &InstanceLimits,
             &ResourceTable<Kind::Object>,
-            &mut CallContext<'_>,
+            &mut CallContext<'_, Kind>,
             &[Val],
             &mut [Val],
         ) -> Result<(), ErrorSource>
@@ -137,10 +137,6 @@ fn classify_import_failure(error: wasmtime::Error) -> LinkError {
 const STAGED_TEXT_MODULE: &str = "moth-abi-v1";
 const STAGED_TEXT_TAKE: &str = "staged_text_take";
 
-/// Guest fixtures export their one linear memory under this name. Compiled Moth has no export
-/// name for it yet, so the take import uses the fixture convention.
-const GUEST_MEMORY_EXPORT: &str = "memory";
-
 fn install_staged_text_take<HostState: 'static, Kind: InstanceKind>(
     linker: &mut Linker<StoreData<HostState, Kind>>,
 ) {
@@ -177,32 +173,43 @@ fn copy_staged_text<HostState, Kind: InstanceKind>(
     destination: i32,
     length: i32,
 ) -> wasmtime::Result<()> {
-    let bytes = caller
-        .data()
-        .staging
-        .staged_bytes(ticket)
-        .map_err(boundary_from_staging)?;
     let Ok(length) = usize::try_from(length) else {
         return Err(wasmtime::Error::new(BoundaryFault::WrongLength));
     };
-    if bytes.len() != length {
+    let staged_len = caller
+        .data()
+        .staging
+        .len(ticket)
+        .map_err(boundary_from_staging)?;
+    if staged_len != length {
         return Err(wasmtime::Error::new(BoundaryFault::WrongLength));
     }
     // The i32 carrier's bits are a Wasm32 address, including addresses at or above 2 GiB.
     let destination = destination as u32 as usize;
-
-    let Some(Extern::Memory(memory)) = caller.get_export(GUEST_MEMORY_EXPORT) else {
+    let Some(Extern::Memory(memory)) = caller.get_export(super::instance::GUEST_MEMORY_EXPORT)
+    else {
         return Err(wasmtime::Error::new(BoundaryFault::DestinationOutOfBounds));
     };
-    memory
-        .write(&mut *caller, destination, &bytes)
-        .map_err(|_| wasmtime::Error::new(BoundaryFault::DestinationOutOfBounds))?;
+    let memory_size = memory.data_size(&*caller);
+    let Some(end) = destination.checked_add(length) else {
+        return Err(wasmtime::Error::new(BoundaryFault::DestinationOutOfBounds));
+    };
+    if end > memory_size {
+        return Err(wasmtime::Error::new(BoundaryFault::DestinationOutOfBounds));
+    }
 
-    caller
+    // Take only after the write can succeed, so a rejected destination leaves the entry.
+    // The bytes have to leave the store before `write` borrows it, and a failed write puts
+    // them back. That is one copy into guest memory, not a second copy of the entry.
+    let bytes = caller
         .data_mut()
         .staging
         .take(ticket, length)
         .map_err(boundary_from_staging)?;
+    if memory.write(&mut *caller, destination, &bytes).is_err() {
+        caller.data_mut().staging.restore(ticket, bytes);
+        return Err(wasmtime::Error::new(BoundaryFault::DestinationOutOfBounds));
+    }
     Ok(())
 }
 

@@ -6,6 +6,10 @@
 //! [`Instance::call`] is the guest entry after instantiation, and it owns quarantine. Context
 //! moves into the store for one entry and back to the holder before the call returns.
 //! [`Instance::call_scoped`] drives the native host ABI's call-scope helpers around one export.
+//!
+//! `HostState` is the instance-owned slot the crate-private import closures use. It is not a
+//! third ABI role. Resources and context are the two roles a host function receives. Adapters
+//! will see those through one call view and will not grow a parallel state generic.
 
 use super::context::HostContext;
 use super::error::{BoundaryFault, HostFault, LinkError, RuntimeError};
@@ -43,6 +47,9 @@ impl Deadline {
 }
 
 /// Everything a store owns besides the guest itself.
+///
+/// `host_state` is the pre-adapter slot described above. Context follows the instance kind:
+/// sendable context is `Send`, and thread-bound context is any `'static` value.
 pub(super) struct StoreData<HostState, Kind: InstanceKind = Sendable> {
     pub(super) host_state: HostState,
     pub(super) limits: InstanceLimits,
@@ -50,7 +57,7 @@ pub(super) struct StoreData<HostState, Kind: InstanceKind = Sendable> {
     pub(super) staging: StagingTable,
     pub(super) resources: ResourceTable<Kind::Object>,
     /// Empty between calls. [`Instance::with_context`] is the only writer.
-    pub(super) context: Option<Box<dyn std::any::Any + Send>>,
+    pub(super) context: Option<Box<Kind::Context>>,
 }
 
 /// A compiled module whose imports are already checked against one set of host imports.
@@ -113,6 +120,8 @@ where
             store,
             instance,
             is_quarantined: false,
+            #[cfg(test)]
+            deadline_installs: 0,
         })
     }
 }
@@ -124,8 +133,10 @@ where
 pub(crate) struct Instance<HostState: 'static, Kind: InstanceKind = Sendable> {
     store: Store<StoreData<HostState, Kind>>,
     instance: wasmtime::Instance,
-    /// Set by the first fault and never cleared. Only [`Instance::call`] reads or writes it.
+    /// Set by the first fault and never cleared. [`Instance::call`] and the scope driver write it.
     is_quarantined: bool,
+    #[cfg(test)]
+    deadline_installs: u32,
 }
 
 impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
@@ -141,6 +152,21 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
         export_name: &str,
         parameters: Parameters,
         deadline: Deadline,
+    ) -> Result<Results, RuntimeError>
+    where
+        Parameters: WasmParams,
+        Results: WasmResults,
+    {
+        self.install_deadline(deadline);
+        self.invoke(export_name, parameters)
+    }
+
+    /// Enters an export without installing a new deadline. The scope driver installs one
+    /// deadline for the whole export, including its helpers.
+    fn invoke<Parameters, Results>(
+        &mut self,
+        export_name: &str,
+        parameters: Parameters,
     ) -> Result<Results, RuntimeError>
     where
         Parameters: WasmParams,
@@ -165,9 +191,6 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
                     })
                 })?;
 
-        self.store
-            .set_epoch_deadline(deadline.ticks_beyond_current());
-
         match typed_function.call(&mut self.store, parameters) {
             Ok(results) => {
                 if self.has_live_staged_text() {
@@ -185,13 +208,22 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
         }
     }
 
+    fn install_deadline(&mut self, deadline: Deadline) {
+        self.store
+            .set_epoch_deadline(deadline.ticks_beyond_current());
+        #[cfg(test)]
+        {
+            self.deadline_installs += 1;
+        }
+    }
+
     /// Calls an export with the holder's context moved into the instance for this call only.
     pub(crate) fn call_with_context<Parameters, Results>(
         &mut self,
         export_name: &str,
         parameters: Parameters,
         deadline: Deadline,
-        context: &mut HostContext,
+        context: &mut HostContext<Kind>,
     ) -> Result<Results, RuntimeError>
     where
         Parameters: WasmParams,
@@ -210,7 +242,7 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
         raw: i64,
         type_id: TypeId,
         deadline: Deadline,
-        context: &mut HostContext,
+        context: &mut HostContext<Kind>,
     ) -> Result<Results, RuntimeError>
     where
         Results: WasmResults,
@@ -228,7 +260,7 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
         export_name: &str,
         argument: &[u8],
         deadline: Deadline,
-        context: &mut HostContext,
+        context: &mut HostContext<Kind>,
     ) -> Result<ScopedResult, RuntimeError> {
         self.with_context(context, |instance| {
             instance.drive_scope(export_name, argument, deadline)
@@ -242,7 +274,7 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
 
     fn with_context<Results>(
         &mut self,
-        context: &mut HostContext,
+        context: &mut HostContext<Kind>,
         body: impl FnOnce(&mut Self) -> Result<Results, RuntimeError>,
     ) -> Result<Results, RuntimeError> {
         if self.has_context() {
@@ -268,44 +300,53 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
                 source: "an export argument string does not fit an i32 length".into(),
             }));
         };
-        self.call::<(), ()>(SCOPE_OPEN, (), deadline)?;
-        match self.drive_open_scope(export_name, argument, argument_size, deadline) {
-            Ok(copied) => match self.call::<(), ()>(SCOPE_CLOSE, (), deadline) {
+        // One budget covers open, reserve, the export and close. Resetting it on each
+        // entry would multiply the deadline by the number of guest entries.
+        self.install_deadline(deadline);
+        self.invoke::<(), ()>(SCOPE_OPEN, ())?;
+        match self.drive_open_scope(export_name, argument, argument_size) {
+            Ok(ScopeBody::Copied(copied)) => match self.invoke::<(), ()>(SCOPE_CLOSE, ()) {
                 Ok(()) => Ok(ScopedResult { copied }),
+                Err(error) => Err(self.fault_open_scope(error)),
+            },
+            Ok(ScopeBody::DeclaredError) => match self.invoke::<(), ()>(SCOPE_CLOSE, ()) {
+                Ok(()) => Err(RuntimeError::DeclaredError),
                 Err(error) => Err(self.fault_open_scope(error)),
             },
             Err(error) => Err(self.fault_open_scope(error)),
         }
     }
 
-    /// A scope is open. Any error here must not call scope close.
+    /// A scope is open. Any error here must not call scope close. Status `1` is a declared
+    /// error, not a fault, so the caller still closes.
     fn drive_open_scope(
         &mut self,
         export_name: &str,
         argument: &[u8],
         argument_size: i32,
-        deadline: Deadline,
-    ) -> Result<String, RuntimeError> {
+    ) -> Result<ScopeBody, RuntimeError> {
         let argument_address = if argument.is_empty() {
             0
         } else {
-            let address = self.reserve(argument_size, FRAME_ALIGN, deadline)?;
+            let address = self.reserve(argument_size, FRAME_ALIGN)?;
             self.write_memory(address, argument)?;
             address
         };
-        let frame = self.reserve(FRAME_SIZE, FRAME_ALIGN, deadline)?;
+        let frame = self.reserve(FRAME_SIZE, FRAME_ALIGN)?;
         self.write_memory(frame, &[0; FRAME_SIZE as usize])?;
-        let status = self.call::<(i32, i32, i32), i32>(
+        let status = self.invoke::<(i32, i32, i32), i32>(
             export_name,
             (argument_address, argument_size, frame),
-            deadline,
         )?;
-        if status != 0 {
-            return Err(RuntimeError::BoundaryFault(
+        match status {
+            0 => self.read_span(frame).map(ScopeBody::Copied),
+            // The fixture frame is the success span. Decoding `AbiGuestError` arrives with
+            // the adapters. Status `1` is still the declared-error edge, not a bad status.
+            1 => Ok(ScopeBody::DeclaredError),
+            _ => Err(RuntimeError::BoundaryFault(
                 BoundaryFault::NoncanonicalStatus,
-            ));
+            )),
         }
-        self.read_span(frame)
     }
 
     fn fault_open_scope(&mut self, error: RuntimeError) -> RuntimeError {
@@ -315,22 +356,16 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
         error
     }
 
-    fn reserve(&mut self, size: i32, align: i32, deadline: Deadline) -> Result<i32, RuntimeError> {
-        let address = self.call::<(i32, i32), i32>(SCOPE_RESERVE, (size, align), deadline)?;
-        if address < 0 {
-            return Err(RuntimeError::BoundaryFault(
-                BoundaryFault::DestinationOutOfBounds,
-            ));
-        }
-        Ok(address)
+    fn reserve(&mut self, size: i32, align: i32) -> Result<i32, RuntimeError> {
+        // Failure traps inside the helper. A returned value is an address, including one at
+        // or above 2 GiB, whose `i32` carrier is negative.
+        self.invoke::<(i32, i32), i32>(SCOPE_RESERVE, (size, align))
     }
 
     fn write_memory(&mut self, address: i32, bytes: &[u8]) -> Result<(), RuntimeError> {
         let memory = self.scope_memory()?;
-        let offset = usize::try_from(address)
-            .map_err(|_| RuntimeError::BoundaryFault(BoundaryFault::DestinationOutOfBounds))?;
         memory
-            .write(&mut self.store, offset, bytes)
+            .write(&mut self.store, guest_offset(address), bytes)
             .map_err(|_| RuntimeError::BoundaryFault(BoundaryFault::DestinationOutOfBounds))
     }
 
@@ -343,7 +378,7 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
 
     fn scope_memory(&mut self) -> Result<wasmtime::Memory, RuntimeError> {
         self.instance
-            .get_memory(&mut self.store, SCOPE_MEMORY)
+            .get_memory(&mut self.store, GUEST_MEMORY_EXPORT)
             .ok_or_else(|| {
                 RuntimeError::HostFault(HostFault::Internal {
                     source: "the module exports no memory named `memory`".into(),
@@ -353,9 +388,7 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
 
     fn read_span(&mut self, frame: i32) -> Result<String, RuntimeError> {
         let mut header = [0u8; FRAME_SIZE as usize];
-        let frame_offset = usize::try_from(frame)
-            .map_err(|_| RuntimeError::BoundaryFault(BoundaryFault::DestinationOutOfBounds))?;
-        self.read_memory(frame_offset, &mut header)?;
+        self.read_memory(guest_offset(frame), &mut header)?;
         let address = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
         let length = u32::from_le_bytes([header[4], header[5], header[6], header[7]]);
         if length == 0 {
@@ -448,6 +481,11 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
     pub(crate) fn drain_resources(&mut self) -> DrainedResources {
         self.store.data_mut().resources.drain()
     }
+
+    #[cfg(test)]
+    pub(crate) fn deadline_installs(&self) -> u32 {
+        self.deadline_installs
+    }
 }
 
 /// The string copied out of the scope before it was closed.
@@ -455,13 +493,25 @@ pub(crate) struct ScopedResult {
     pub(crate) copied: String,
 }
 
+enum ScopeBody {
+    Copied(String),
+    DeclaredError,
+}
+
 const SCOPE_OPEN: &str = "moth_abi_v1_scope_open";
 const SCOPE_RESERVE: &str = "moth_abi_v1_scope_reserve";
 const SCOPE_CLOSE: &str = "moth_abi_v1_scope_close";
-const SCOPE_MEMORY: &str = "memory";
+/// Guest fixtures export their one linear memory under this name. Compiled Moth has no export
+/// name for it yet, so the take import and the scope driver share the fixture convention.
+pub(super) const GUEST_MEMORY_EXPORT: &str = "memory";
 /// An `AbiSpan`: address then UTF-8 byte length.
 const FRAME_SIZE: i32 = 8;
 const FRAME_ALIGN: i32 = 4;
+
+/// The `i32` carrier's bits are a Wasm32 address, including addresses at or above 2 GiB.
+pub(crate) fn guest_offset(address: i32) -> usize {
+    address as u32 as usize
+}
 
 impl<HostState: 'static> Instance<HostState, Sendable> {
     /// Inserts a `Send` value and returns its token. The table owns the value.
@@ -482,14 +532,5 @@ impl<HostState: 'static> Instance<HostState, ThreadBound> {
     ) -> Result<ResourceToken<T>, ResourceError> {
         let limits = self.store.data().limits;
         self.store.data_mut().resources.insert(value, &limits)
-    }
-}
-
-impl<HostState: 'static, Kind: InstanceKind> Drop for Instance<HostState, Kind> {
-    fn drop(&mut self) {
-        // Teardown uses the same clear as a fault, so a live ticket can't outlive the instance
-        // even if a later drop observer still sees the store. Resources drop with the store, in
-        // creation order, from the table's own drop.
-        self.store.data_mut().staging.clear();
     }
 }
