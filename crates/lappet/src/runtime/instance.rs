@@ -10,6 +10,7 @@
 use super::error::{LinkError, RuntimeError};
 use super::fault::{GuestEntry, classify_guest_failure};
 use super::limits::InstanceLimits;
+use super::staging::StagingTable;
 use wasmtime::{InstancePre, Store, StoreLimits, WasmParams, WasmResults};
 
 /// How long one guest entry may run, in epoch ticks the embedder advances.
@@ -39,6 +40,7 @@ impl Deadline {
 pub(super) struct StoreData<HostState> {
     pub(super) host_state: HostState,
     store_limits: StoreLimits,
+    staging: StagingTable,
 }
 
 /// A compiled module whose imports are already checked against one set of host imports.
@@ -69,6 +71,7 @@ impl<HostState: 'static> PreparedModule<HostState> {
         let store_data = StoreData {
             host_state,
             store_limits: limits.store_limits(),
+            staging: StagingTable::new(),
         };
         let mut store = Store::new(module.engine(), store_data);
         store.limiter(|store_data| &mut store_data.store_limits);
@@ -84,6 +87,7 @@ impl<HostState: 'static> PreparedModule<HostState> {
         Ok(Instance {
             store,
             instance,
+            limits,
             is_quarantined: false,
         })
     }
@@ -93,6 +97,7 @@ impl<HostState: 'static> PreparedModule<HostState> {
 pub(crate) struct Instance<HostState: 'static> {
     store: Store<StoreData<HostState>>,
     instance: wasmtime::Instance,
+    limits: InstanceLimits,
     /// Set by the first fault and never cleared. Only [`Instance::call`] reads or writes it.
     is_quarantined: bool,
 }
@@ -140,7 +145,7 @@ impl<HostState: 'static> Instance<HostState> {
         match typed_function.call(&mut self.store, parameters) {
             Ok(results) => Ok(results),
             Err(error) => {
-                self.is_quarantined = true;
+                self.quarantine();
                 Err(classify_guest_failure(error, GuestEntry::ExportedCall))
             }
         }
@@ -154,5 +159,29 @@ impl<HostState: 'static> Instance<HostState> {
 
     pub(crate) fn host_state_mut(&mut self) -> &mut HostState {
         &mut self.store.data_mut().host_state
+    }
+
+    /// Stages text for the guest. The empty slice returns ticket zero and stores nothing.
+    pub(crate) fn stage_text(&mut self, bytes: &[u8]) -> Result<u64, super::staging::StagingError> {
+        self.store.data_mut().staging.stage(bytes, &self.limits)
+    }
+
+    pub(crate) fn has_live_staged_text(&self) -> bool {
+        self.store.data().staging.has_live_ticket()
+    }
+
+    /// A fault ends the call. The staging table is cleared here, and the instance can only be
+    /// dropped afterwards.
+    fn quarantine(&mut self) {
+        self.is_quarantined = true;
+        self.store.data_mut().staging.clear();
+    }
+}
+
+impl<HostState: 'static> Drop for Instance<HostState> {
+    fn drop(&mut self) {
+        // Teardown uses the same clear as a fault, so a live ticket can't outlive the instance
+        // even if a later drop observer still sees the store.
+        self.store.data_mut().staging.clear();
     }
 }

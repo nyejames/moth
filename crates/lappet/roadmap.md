@@ -396,6 +396,16 @@ other-instance, wrong-type and conflicting tokens, physical import mismatches
 and a trapping scope helper. Run each under both optimisation levels. Fixtures
 follow the V1 protocol by hand and prove Lappet's mechanics only.
 
+**Progress.** Phase 0, 13 November 2026: the runtime foundation is in this
+tree and the branch is not behind `main`. Wasmtime 50.0.1 does not require
+store data to be `Send` for construction, limits, epoch deadlines,
+instantiation or a typed call, so a thread-bound instance can use the calls
+Lappet makes. One drift: the plan calls token-generator exhaustion a host
+fault, but the resource API returns that as an insertion error because no
+guest call is running. The API wins. Phase 1: the staging table issues
+nonzero tickets that are never reused, keeps a failed take, and reads both
+byte ceilings from `InstanceLimits`. A fault clears the instance's table.
+
 ## 4. Extract the shared host contract crate
 
 **Delivered.** 13 November 2026. `HostType` and `HostFunction` live in

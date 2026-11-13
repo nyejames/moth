@@ -4,8 +4,9 @@
 //! module's declared requirements are also checked up front, because Wasmtime reports a limiter
 //! denial at instantiation as untyped text and the runtime classifies by typed facts only.
 //!
-//! These limits bound guest allocations. They don't bound Rust host allocations, native
-//! libraries or a blocking host call.
+//! These ceilings bound one instance. Guest memory and table growth are denied without a fault.
+//! Staged text is host memory held for the guest. Exceeding it is reported to the caller, which
+//! classifies it as a host fault when a guest call is running.
 
 use super::error::LimitFault;
 use wasmtime::{Module, StoreLimits, StoreLimitsBuilder};
@@ -28,14 +29,21 @@ pub struct InstanceLimits {
     pub max_memory_bytes: usize,
     /// Largest element count the instance's table may reach.
     pub max_table_elements: usize,
+    /// Largest single staged text entry, in bytes.
+    pub max_staged_entry_bytes: usize,
+    /// Largest total of staged text live in the instance, in bytes.
+    pub max_staged_live_bytes: usize,
 }
 
 impl Default for InstanceLimits {
-    /// The provisional V1 defaults: 256 MiB of linear memory and 65,536 table elements.
+    /// The provisional V1 defaults: 256 MiB of linear memory, 65,536 table elements, 16 MiB
+    /// per staged entry and 64 MiB of staged text live.
     fn default() -> Self {
         Self {
             max_memory_bytes: 256 * 1024 * 1024,
             max_table_elements: 65_536,
+            max_staged_entry_bytes: 16 * 1024 * 1024,
+            max_staged_live_bytes: 64 * 1024 * 1024,
         }
     }
 }

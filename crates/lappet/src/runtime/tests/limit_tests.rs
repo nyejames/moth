@@ -24,6 +24,7 @@ fn module_that_cannot_fit_the_limits_is_rejected() {
     let two_pages_one_element = InstanceLimits {
         max_memory_bytes: 2 * WASM_PAGE_BYTES,
         max_table_elements: 1,
+        ..InstanceLimits::default()
     };
     let rejected_modules = [
         (
