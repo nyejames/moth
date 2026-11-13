@@ -13,13 +13,15 @@ planned backend support as available.
   crate has a Wasmtime runtime and is waiting for policy confirmation before
   that policy is written into the design docs. It has no host adapter yet.
 - Current milestone: 2, establish Wasmtime execution. Its plan is active
-  through Phase 7, which waits for confirmation. Milestone 4 is delivered.
-- Blockers: Phase 7 waits for Nye's confirmation of the Phase 6 policy lines.
-  Milestone 3 can start. Milestone 5 can start after a sync with `main`.
-  Later milestones wait for work on `main` listed under
+  through Phase 7, which waits for confirmation. Milestone 3 is in the tree
+  through its policy evidence and waits for the same confirmation. Milestone 4
+  is delivered.
+- Blockers: Phase 7 of milestones 2 and 3 wait for Nye's confirmation of the
+  policy lines below. Milestone 5 can start after a sync with `main`. Later
+  milestones wait for work on `main` listed under
   [Waiting on main](#waiting-on-main).
-- Next action: Nye confirms or revises the Phase 6 policy lines before Phase 7
-  records them.
+- Next action: Nye confirms or revises the milestone 2 and milestone 3 policy
+  lines before either Phase 7 records them.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
 and [Wasm optimisation](../../docs/developer-docs/wasm-optimisation/overview.mtf)
@@ -425,6 +427,45 @@ and the host function does not run. A scoped export opens, reserves, calls
 once, copies the returned span and closes. A trap, a noncanonical status or a
 noncanonical span skips close and makes no further guest call. A bad token
 argument is rejected before guest entry and the instance stays usable.
+
+**Phase 6 evidence.** Recorded on 13 November 2026 on the same host, from
+authored fixtures and one release run. The numbers are not compiled Moth.
+Staging and the resource table do not use Cranelift. The guard figure is the
+difference between a bare host call and a host call that passes one token and
+borrows it, so it includes the argument and the lookup.
+
+| Measurement | Median |
+|---|---|
+| Stage 16 bytes | 41 ns |
+| Stage 16 MiB | 427 us |
+| Guarded host call above a bare call, release | 84 ns |
+| Guarded host call above a bare call, development | 125 ns |
+| Lookup of a live token in a full table | 78 ns |
+| Resident growth at 1,048,576 live entries | 126 bytes per entry |
+
+A full table of `u32` values grew the process from 7.7 MB to 137 MB resident.
+That growth includes the allocator, not only the table nodes. Closing one
+entry freed its slot. One 16 MiB staged entry is under the 64 MiB live
+ceiling. The game and server fixtures stage no host string.
+
+Policy lines, unchanged until Nye confirms them:
+
+- Staged text per entry, 16 MiB: unchanged. The workloads stage no host
+  string. A 16 MiB stage succeeds in 427 us. They do not show a realistic
+  string that needs another cap.
+- Staged text live per instance, 64 MiB: confirmed for these fixtures. The
+  largest staged entry measured is 16 MiB. They do not show a peak that needs
+  a lower default.
+- Live resource entries, 1,048,576: confirmed as a ceiling. Filling it costs
+  about 129 MB of resident growth, 126 bytes per live entry, and a lookup is
+  78 ns. No lower default is proposed.
+- Closed entries removed at close: confirmed. A full table accepted another
+  entry after one close. A long-lived instance pays for live entries only.
+- Token generator, one process-wide counter from 1: confirmed. Accepted. No
+  measurement was required.
+- Ticket generator, one per-instance counter from 1, never reused: confirmed.
+  The ABI requires uniqueness within the instance only. No measurement was
+  required.
 
 ## 4. Extract the shared host contract crate
 

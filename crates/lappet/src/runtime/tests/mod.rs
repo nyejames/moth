@@ -9,6 +9,7 @@
 //! other files share the `guest.wat` fixture and the [`TestHost`] state defined here.
 
 mod access_tests;
+mod boundary_measurements;
 mod context_tests;
 mod embedding_program;
 mod engine_tests;
