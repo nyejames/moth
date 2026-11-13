@@ -1,6 +1,6 @@
 @canvas-drawing content as canvas_advanced
 @canvas-drawing-basic content as canvas_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

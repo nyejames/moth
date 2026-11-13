@@ -1,4 +1,4 @@
-@styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
 @lappet content as lappet_content
 
 [$in title:["Lappet"]]

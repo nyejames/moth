@@ -1,6 +1,6 @@
 @website-structure-basic content as website_basic
 @website-structure content as website_advanced
-@styles navbar, section, language_theme_head, doc_level, doc_pager, sidebar, init_docs_sidebar
+@docs_styles navbar, section, language_theme_head, doc_level, doc_pager, sidebar, init_docs_sidebar
 
 [$in title:Website structure]
 [$in description:An idiomatic multi-page Moth website from entries and shared packages.]

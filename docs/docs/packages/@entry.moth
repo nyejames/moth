@@ -12,7 +12,7 @@
 @package-origins-and-backing-basic content as package_origins_and_backing_basic
 @external-binding-contracts content as external_binding_contracts
 @external-binding-contracts-basic content as external_binding_contracts_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

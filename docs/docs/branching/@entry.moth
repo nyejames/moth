@@ -6,7 +6,7 @@
 @pattern-matching-basic content as pattern_matching_basic
 @patterns-and-exhaustiveness content as patterns_and_exhaustiveness
 @patterns-and-exhaustiveness-basic content as patterns_and_exhaustiveness_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

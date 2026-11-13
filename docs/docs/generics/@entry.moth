@@ -8,7 +8,7 @@
 @generic-instances-basic content as generic_instances_basic
 @generic-limits content as generic_limits
 @generic-limits-basic content as generic_limits_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

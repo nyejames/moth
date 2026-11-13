@@ -1,4 +1,4 @@
-@styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Documentation"]]
 [$in description:["Moth language, project and compiler documentation."]]

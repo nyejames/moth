@@ -1,5 +1,5 @@
 @native-host-abi content as reference_content
-@styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Native host ABI"]]
 [$in description:["The physical Wasm32 boundary between compiled Moth and native Rust host code."]]

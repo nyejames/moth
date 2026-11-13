@@ -1,5 +1,5 @@
 @declared-regions content as reference_content
-@styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Declared regions"]]
 [$in description:["Accepted deferred declared-region syntax, placement and hard destination lifetimes."]]

@@ -1,6 +1,6 @@
 @math content as math_advanced
 @math-basic content as math_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

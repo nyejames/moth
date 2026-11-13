@@ -1,5 +1,5 @@
 @declarations-dependencies-and-ordering content as reference_content
-@styles navbar, section, theme_css, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_css, sidebar, init_docs_sidebar
 @diagrams css as diagrams_css
 
 [$in title:["06. Declarations, dependencies and ordering"]]

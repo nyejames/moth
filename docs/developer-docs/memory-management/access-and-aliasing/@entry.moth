@@ -1,5 +1,5 @@
 @access-and-aliasing content as reference_content
-@styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Access and aliasing"]]
 [$in description:["How Moth shares, copies and requests exclusive access to values."]]

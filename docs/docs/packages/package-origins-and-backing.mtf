@@ -4,8 +4,8 @@ Every package has two independent classifications: where it comes from and how t
 
 Origin describes ownership and distribution:
 
-- **Core**: compiler-owned packages such as `@core/io` and `@core/math`.
-- **Builder**: packages selected by a project builder, including `@html` and `@web/canvas`.
+- **Core**: compiler-owned packages such as `@html`, `@styles`, `@core/io` and `@core/math`.
+- **Builder**: packages selected by a project builder, including `@web/site` and `@web/canvas`.
 - **ProjectLocal**: scoped `@package.moth` support packages, the project-root package facade and annotated project-local JavaScript files.
 - **Dependency**: reserved for future package-system support.
 
@@ -25,7 +25,8 @@ Backing is semantic, not a file-format choice. Precompiling or emitting a `MothS
         [: **Backing**]
     ]
 
-    [td: [:`@html`, `@web/site`] [: Builder] [: MothSource]]
+    [td: [:`@html`, `@styles`] [: Core] [: MothSource]]
+    [td: [:`@web/site`] [: Builder] [: MothSource]]
     [td: [:`@core/collections`, `@core/io`, `@core/math`, `@core/text`, `@core/random`, `@core/time`] [: Core] [: ExternalBinding]]
     [td: [:`@web/canvas`, `@web/graphics`, `@web/page`] [: Builder] [: ExternalBinding]]
     [td: [: Scoped `@package.moth` support package] [: ProjectLocal] [: MothSource]]
@@ -37,7 +38,7 @@ Origin and backing don't change dependency clause syntax or module visibility. S
 
 ### Prelude is visibility policy
 
-The prelude is implicit dependency policy, not an origin or backing. It exposes the bare `io` namespace as an alias to `@core/io`. Package metadata belongs to `@core/io`, while bare-name visibility belongs to the prelude.
+The prelude is implicit dependency policy, not an origin or backing. The ordinary Moth prelude exposes `io` as an alias to `@core/io`. The separate `.mtf` prelude makes public compile-time constants from `@html` and `@styles` visible by bare name. Package metadata remains independent of these visibility policies.
 
 ### Builder-selected availability
 

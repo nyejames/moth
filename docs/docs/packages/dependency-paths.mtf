@@ -35,7 +35,8 @@ A qualified reference creates an early provider-dependency fact, not a dependenc
 - **Support package**: scoped `@package.moth` packages are depended on by package name. Consumers never encode ancestor paths. A support-only child remains importable only by eligible consumers through its support surface.
 - **Entry-only child module**: an entry-only directory has no importable normal interface. A dependency that requests one receives a missing-surface diagnostic. The entry is never activated.
 - **Core binding-backed package**: `@core/math`, `@core/text` and current peers are registered by the builder.
-- **Builder source-backed package**: `@html` is a builder-provided source-backed package and the fixed template prelude provider.
+- **Core source-backed package**: `@html` and `@styles` are compiler-provided Moth source packages and the fixed template prelude providers.
+- **Builder source-backed package**: `@web/site` belongs to the HTML builder.
 - **Builder binding-backed package**: `@web/canvas` is a builder-owned runtime package.
 - **JavaScript file**: project-local annotated JavaScript files require `.js` and a builder external import provider. The `.js` extension is kept.
 

@@ -1,6 +1,6 @@
 @site content as site_advanced
 @site-basic content as site_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

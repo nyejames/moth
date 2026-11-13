@@ -1,7 +1,7 @@
 @moth-language-cheatsheet content as cheatsheet_content
 @reserved-names-list content as reserved_names_list
 
-@styles navbar, section, language_theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, language_theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Language cheatsheet"]]
 [$in description:["A single page, compact reference for the full Moth language surface."]]

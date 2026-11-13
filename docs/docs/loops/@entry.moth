@@ -6,7 +6,7 @@
 @range-loops-basic content as range_loops_basic
 @loop-control content as loop_control
 @loop-control-basic content as loop_control_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

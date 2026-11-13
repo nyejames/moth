@@ -1,5 +1,5 @@
 @ownership-and-drops content as reference_content
-@styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Affine ownership and drops"]]
 [$in description:["Affine cleanup responsibility, the two-bit ownership ABI and conditional destruction."]]

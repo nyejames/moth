@@ -1,5 +1,5 @@
 @retained-edge-counting content as reference_content
-@styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Retained Edge Counting"]]
 [$in description:["The narrow counted strategy for runtime-many persistent retained edges."]]
