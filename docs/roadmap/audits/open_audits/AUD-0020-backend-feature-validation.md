@@ -39,7 +39,7 @@ Open findings AUD-0017-F01..F07, AUD-0018-F01..F02 and AUD-0019-F01 all own fron
 
 ### AUD-0020-F01: Reachable payload-free variant values are accepted and then crash Wasm lowering
 
-- State: `candidate`
+- State: `accepted`
 - Kind: `Correctness`
 
 #### Evidence
@@ -124,6 +124,10 @@ Each probe above must report `MOTH-RULE-0064` at an authored span instead of a b
 
 None.
 
+## Triage (2026-11-13)
+
+**F01 accepted** after source review at `fd695d18b`. The reachable-shape check only records `VariantPayloadValues` when a `VariantConstruct` has fields. The Wasm lowerer emits an `I64` for an empty constructor, while `lower_type_to_abi` assigns `Handle` to that option/choice type. This proves incompatible carriers at the handoff, consistent with the report's three build failures. Reject unsupported reachable constructions before lowering. Preserve the folded and default assertion-message exceptions because their lowerer paths never consume the variant carrier. Do not implement variant storage as part of the audit follow-up. Fresh execution was unavailable without a compiler binary or Rust toolchain.
+
 ## Checked and clean
 
 - Gate ordering and priority: routes, fixed scalars, `Dec`, assertions, cross-module calls, maps, casts, numerics, range candidates, floats, loop-step failures, generics, errors, fallible flow, mutable parameters, mutable aliases, shapes. Narrower type/operation reasons keep priority over later gates (pinned by `wasm_mutable_parameter_gate_preserves_existing_type_reason_precedence` and the builder running linked targets last).
@@ -137,7 +141,6 @@ None.
 - Unsupported-shape walker: exhaustive over selected statements, terminators and expression trees through the shared child walker; `PushRuntimeFragment`, match scrutinee/pattern/guard and `Invoke` operands are all visited. `Bool`/`Char` template chunks are rejected (`wasm_bool_template_chunk_rejected` fixture plus probes); `Byte` chunks never arrive (frontend `MOTH-SYNTAX-0022`, probed); narrow-integer chunks are accepted and lower (probed `U8`/`I8`/`U16`/`I16`); nested `StringAppend` chains are fully descended.
 - `BackendTypeFacts`: cycle-safe. Open-cycle visits are never memoised, so recursive nominal types recompute rather than cache provisional facts; scalar/error/number facts still propagate to the outermost querier.
 - `Dec`: literals, comparisons and conversions are all rejected before lowering's `compiler_bug!` arms via the `NumberValues` shape scan and the cast gate.
-- Fixture census: 165 `MOTH-RULE-0064` fixtures pin 24 of 27 reasons. The three with no `tests/cases` pin are `CrossModuleCalls`, `RuntimeAssertionMessages` and `FloatBoundaryValidation`... no — recount: every reason except `CrossModuleCalls`, `FloatFormatting` and `FloatBoundaryValidation` has at least one pin; those three are covered by Rust unit tests instead. (Corrected during closeout: the census command output lists `runtime_assertion_messages` once; the unpinned three are cross-module calls and the two float-statement reasons.)
 
 ## Limitations
 

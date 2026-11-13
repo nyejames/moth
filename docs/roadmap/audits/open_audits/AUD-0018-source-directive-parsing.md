@@ -42,7 +42,7 @@ Open findings had no directive-parsing candidate. No roadmap plan owns this pars
 
 ### AUD-0018-F01: An unclosed source-directive operand hangs the compiler
 
-- State: `candidate`
+- State: `accepted`
 - Kind: `Correctness`
 
 #### Evidence
@@ -106,7 +106,7 @@ None.
 
 ### AUD-0018-F02: A known directive inside a declaration shell is reported as an unexpected token
 
-- State: `candidate`
+- State: `accepted`
 - Kind: `Diagnostics`
 
 #### Evidence
@@ -167,6 +167,13 @@ The three sources above must report a directive placement identity, not `MOTH-SY
 #### Linked findings
 
 None. Filed in the Diagnostics lane from this Correctness run because legality is already rejection.
+
+## Triage (2026-11-13)
+
+Both findings are accepted for bounded investigation after source review at `fd695d18b`. The audited implementation is unchanged from `c62bbe560`. Fresh runtime reproduction was unavailable because this checkout has no compiler binary or Rust toolchain.
+
+- **F01 accepted.** `capture_source_directive_operand` only stops at EOF when `NestingDepth` is top-level, while `TokenCursor::advance` leaves EOF stationary. A missing inner closer therefore gives the loop no progress condition. End capture at EOF regardless of nesting and let the existing expression/template diagnostic owner identify the missing closer. Preserve balanced multiline operands.
+- **F02 accepted.** `directives.mtf` explicitly requires known directives in invalid contexts to receive placement diagnostics. The declaration-shell fallback emits a generic unexpected-token diagnostic for `STYLE_DIRECTIVE`, even though directive recognition is already complete. Prefer the existing typed placement family at the shell rejection boundary and keep field, variant and parameter attachment unsupported. Check for a reusable rejection path before adding separate special cases.
 
 ## Checked and clean
 

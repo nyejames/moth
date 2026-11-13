@@ -152,7 +152,7 @@ sound. The defect is not in who owns the registry; it is in what the registry co
 
 ### AUD-0004-F01: The scope registry covers 4.6% of maintained implementation, so a directed audit of the frontend folded-value pipeline cannot record coverage
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Documentation`
 - Scope: `docs/roadmap/audit-log.md`
 - Priority: `unassigned`
@@ -538,11 +538,11 @@ file appears in two Leaf rows; the freshness table has exactly one row per regis
 
 #### Triage record
 
-Not yet triaged.
+Accepted and resolved by replacing the old registry with an open coverage ledger. See `Outcome` below.
 
 ### AUD-0004-F02: The audit workflow has no route by which a directed audit of unregistered code can register its scope, so such a run deadlocks
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Documentation`
 - Scope: `docs/roadmap/audit-guide.md`, `docs/roadmap/audit-log.md`
 - Priority: `unassigned`
@@ -719,11 +719,11 @@ Documentation release-build gate: `moth build docs --release`, or
 
 #### Triage record
 
-Not yet triaged.
+Accepted and resolved by allowing every audit run to add its own coverage row. See `Outcome` below.
 
 ### AUD-0004-F03: The `tests.harness` row cites a test file at a path it no longer occupies
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Documentation`
 - Scope: `docs/roadmap/audit-log.md`
 - Priority: `unassigned`
@@ -832,7 +832,7 @@ Independent of F01 and F02; may be fixed in the same change.
 
 #### Triage record
 
-Not yet triaged.
+Accepted and resolved by correcting the `tests.harness` path. See `Outcome` below.
 
 ## No-finding checks
 

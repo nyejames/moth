@@ -39,7 +39,7 @@ AUD-0017-F01 already owns silent acceptance of an unclosed block in the entry st
 
 ### AUD-0019-F01: A semicolon inside a call ends the function body range
 
-- State: `candidate`
+- State: `accepted`
 - Kind: `Diagnostics`
 
 #### Evidence
@@ -101,6 +101,10 @@ That closer decision only. Preserve balanced `if`, `loop`, `catch` and match ran
 #### Linked findings
 
 None. Filed in the Diagnostics lane from this Correctness run because the source is rejected.
+
+## Triage (2026-11-13)
+
+**F01 accepted** after source review at `fd695d18b`. `capture_function_body_range_from_cursor` counts every `TokenTag::END` as a block closer before consulting its tracked `NestingDepth`. An illegal semicolon inside a call can therefore cut off the retained function-body token range before AST sees the actual offending token. The nested-delimiter guard belongs at this existing header capture decision. Keep the semicolon illegal inside a call and retain the complete function body for an accurate AST diagnostic. The original empirical check was not rerun because this checkout lacks a compiler binary and Rust toolchain.
 
 ## Checked and clean
 

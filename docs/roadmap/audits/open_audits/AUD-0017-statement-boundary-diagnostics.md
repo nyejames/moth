@@ -47,7 +47,7 @@ Open findings had no unresolved candidates. AUD-0005 and AUD-0014 touch tokenize
 
 ### AUD-0017-F01: Unclosed blocks in the entry start body are accepted and swallow later statements
 
-- State: `candidate`
+- State: `accepted`
 - Kind: `Correctness`
 
 #### Evidence
@@ -131,7 +131,7 @@ None. Filed in the Correctness lane from this Diagnostics run because legality i
 
 ### AUD-0017-F02: A missing block closer is reported as unexpected end of file and does not name the open block
 
-- State: `candidate`
+- State: `accepted`
 - Kind: `Diagnostics`
 
 #### Evidence
@@ -223,7 +223,7 @@ AUD-0017-F01 is the start-body case this report does not cover, because that cas
 
 ### AUD-0017-F03: A semicolon used as a statement terminator is not identified, so the follow-on error blames the wrong token
 
-- State: `candidate`
+- State: `rejected`
 - Kind: `Diagnostics`
 
 #### Evidence
@@ -298,7 +298,7 @@ None.
 
 ### AUD-0017-F04: An unclosed parenthesis at the end of an expression is reported at the start of the file
 
-- State: `candidate`
+- State: `accepted`
 - Kind: `Diagnostics`
 
 #### Evidence
@@ -357,7 +357,7 @@ AUD-0017-F02. `unclosed_delimiter_eof_diagnostic` computes a `(` opener span and
 
 ### AUD-0017-F05: Expression-end expected tokens are rendered as TokenTag debug names
 
-- State: `candidate`
+- State: `accepted`
 - Kind: `Diagnostics`
 
 #### Evidence
@@ -408,7 +408,7 @@ None.
 
 ### AUD-0017-F06: Ending a binary expression reports the missing operand on the wrong side
 
-- State: `candidate`
+- State: `accepted`
 - Kind: `Diagnostics`
 
 #### Evidence
@@ -463,7 +463,7 @@ AUD-0017-F07.
 
 ### AUD-0017-F07: Dangling-operator tests pin the wrong operand side
 
-- State: `candidate`
+- State: `accepted`
 - Kind: `Tests`
 
 #### Evidence
@@ -503,6 +503,18 @@ The updated unit test and HTML case, then `just validate`. Lands with AUD-0017-F
 #### Linked findings
 
 AUD-0017-F06.
+
+## Triage (2026-11-13)
+
+Source review against `fd695d18b`, which retains the audited `c62bbe560` implementation. No compiler binary or Rust toolchain was available for fresh reproduction. The original disposable probes remain the executable evidence. These decisions authorise bounded investigation, not a patch design.
+
+- **F01 accepted.** `body_dispatch.rs` accepts EOF for any statement context, while entry start capture tracks `executable_block_depth` only to distinguish nested runtime items. No remaining closer check exists. Preserve implicit start's own EOF termination while requiring explicit nested blocks to close.
+- **F02 accepted.** Function header capture knows scope depth but retains no colon spans. The common delimiter scanner retains an opener only for templates. Improve diagnostics at the owning scans, without inventing a source-wide rescan. The proposed special wording for a closer consumed by an inner block is contingent on being able to identify that closer precisely.
+- **F03 rejected.** Both reported tokens are genuinely invalid in their parsed contexts: the first `;` legally ends the function and a later top-level `;` closes no active block, while `return` outside a function is invalid. Moth uses explicit delimiters and permits top-level executable statements after a function. Nothing in the source proves that the earlier semicolon was intended as a statement terminator rather than the function closer. Attaching blame to it would guess intent and can mislead for independently authored top-level errors. The existing `MOTH-SYNTAX-0030` and `MOTH-RULE-0042` reports correctly identify the first illegal token. This does not block future diagnostic improvements supported by unambiguous evidence.
+- **F04 accepted.** Exhausted `AstCursor::current_span` falls back to byte zero while `GroupFrame` retains the opening `(` span. Repair the group-exhaustion diagnostic rather than changing the global cursor fallback for unrelated callers.
+- **F05 accepted.** Both expression-boundary paths interpolate `TokenTag` through `Debug`, and the rendered error has no translation layer. Use one source-spelling formatter owned by expression parsing if a current helper can be reused.
+- **F06 accepted.** The binary RPN consumer pops the sole authored left operand into its right slot, then reports a missing left operand. Keep operand-side classification near the expression owner that can distinguish the authored side, without changing evaluation order.
+- **F07 accepted, linked to F06.** The two assertions expressly freeze the wrong side and would block its correction. Retain their operator-span and diagnostic-code checks.
 
 ## Checked and clean
 
