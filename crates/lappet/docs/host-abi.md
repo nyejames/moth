@@ -83,37 +83,54 @@ protocol itself is defined by the native host ABI.
 ## Resource table
 
 Each instance owns a table of its opaque host resources. Rust code creates and
-closes resources through the host resource API. Its
-[draft design](host-resources.md) awaits review and proposes amendments to this
-section and to host context.
+closes resources through the
+[host resource and context API](host-resources.md), which owns the Rust shape,
+ownership and failure reporting.
 
 - Tokens come from one process-wide generator, so they are nonzero, unique
   across every runtime and instance in the process and never reused. A token
   from another runtime is therefore never live in this table. Exhausting the
-  generator is a host fault.
-- Every use checks the instance's table, the registered canonical resource type
-  and the entry's lifecycle before a Rust reference exists. Stale, closed,
-  wrong-type and other-instance tokens are boundary faults.
+  generator is an error returned from insertion, because no guest call is
+  running.
+- V1 mints one token per entry. Every use from the guest checks the instance's
+  table, the registered canonical resource type and that the entry is live
+  before a Rust reference exists. Stale, closed, wrong-type and other-instance
+  tokens are boundary faults.
 - A call-scoped guard grants shared or exclusive access. It tracks the
   underlying object and rejects any conflict, exclusive with exclusive or
-  shared with exclusive, including two tokens for one object.
-- Closing a resource marks its entry closed. Teardown drops every entry. Rust
-  drop timing never decides observable Moth behaviour.
+  shared with exclusive, including two tokens for one object. Host calls never
+  nest in V1, so a conflict can arise only within one host call's own
+  parameters.
+- Closing a resource removes its entry and returns its value to the embedder.
+  The table keeps no closed marker, because a token is never reused.
+- The table changes only between guest calls. A host function can't create or
+  close a resource.
+- Quarantine blocks guest calls only. The embedder can still close, inspect
+  and drain the resources of a faulted instance. Teardown drops remaining
+  entries in creation order. Rust drop timing never decides observable Moth
+  behaviour.
+- A token the embedder passes as an export argument is checked before guest
+  entry. A token that isn't live or has the wrong type is an error returned to
+  the embedder, the guest isn't entered and the instance stays usable.
 
 The guest can't close a resource or tell Lappet it dropped a token. A
 long-lived instance, such as a game world, must close resources it no longer
 needs through the host resource API, or its table grows until teardown. A
-server can create an instance per request, so request resources can't leak into
-another request through a shared table.
+guest that uses a token after its entry closed takes a boundary fault, so the
+embedder coordinates each close with the Moth program. A server can create an
+instance per request, so request resources can't leak into another request
+through a shared table.
 
 ## Host context
 
 A host function may mark at most one parameter as host context. Context isn't a
 Moth parameter and has no Wasm carrier or descriptor slot. The embedder supplies
 context for each guest entry call, so one instance can serve successive requests
-with different context. Lappet checks its Rust type before the host call. A
-missing or mismatched context is a host fault and the function isn't called. A mutable
-context receives exclusive access for the call.
+with different context. The value is moved into the instance for the call and
+returned to the embedder afterwards on every outcome, including a fault. The
+instance retains none between calls. Lappet checks its Rust type before the
+host call. A missing or mismatched context is a host fault and the function
+isn't called. A mutable context receives exclusive access for the call.
 
 ## Faults
 
@@ -127,6 +144,11 @@ context receives exclusive access for the call.
 No fault becomes a Moth error. The adapter catches an unwinding Rust panic at
 the call boundary and reports a host fault. A host built with `panic = "abort"`
 aborts the process instead, and Lappet gives no Moth-level guarantee.
+
+V1 is deliberately strict. Every violation above quarantines the whole
+instance, with no partial recovery, so that mistakes surface early while Moth
+and Lappet stabilise. A more forgiving model for long-running applications is
+later design and needs its own approved contract.
 
 A fault ends the guest call and the faulting instance is quarantined. Lappet
 then calls no guest helper, clears the staging table and discards values

@@ -9,14 +9,12 @@ and update `crates/lappet/roadmap.md` in the same commit.
 
 - Status: paused. Phases 0, 1, 2A, 2B.0, 2B.1, 2B.2a, 2B.2b and 2B.2d are delivered.
 - Current slice: Phase 2B.2c, the builder configuration helper and typed settings.
-- Blockers: const functions landing on `main`. That work edits the project
-  config validation, project settings and builder surface definition that the
-  configuration helper also edits. Phase 3 also waits for the extracted
-  `moth-host` contract crate, because the import and export requirement types
-  belong beside the descriptors. Executable native Wasm lowering is
+- Blockers: the extracted `moth-host` contract crate. It moves the host
+  descriptors this plan builds on, and Phase 3's import and export requirement
+  types belong beside them. Executable native Wasm lowering is
   blocked on the compiler prerequisites listed in the native host ABI. Phase 2
   does not need it.
-- Next action: after syncing with `main`, implement the
+- Next action: once the contract crate exists, sync with `main` and implement the
   `.config(name, |config| ...)` helper and `CompiledProject::settings`. The
   generic output roots are already delivered.
 
