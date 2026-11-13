@@ -32,7 +32,10 @@ pub(super) fn run_host_import(
 
     let host_fault = match outcome {
         Ok(Ok(())) => return Ok(()),
-        Ok(Err(source)) => HostFault::Failed { source },
+        Ok(Err(source)) => match source.downcast::<super::error::BoundaryFault>() {
+            Ok(fault) => return Err(wasmtime::Error::new(*fault)),
+            Err(source) => HostFault::Failed { source },
+        },
         Err(panic_payload) => {
             let message = panic_message(panic_payload.as_ref());
             // A payload's own destructor can panic. Drop it under a second guard and leak

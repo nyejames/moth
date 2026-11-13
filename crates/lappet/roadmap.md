@@ -414,7 +414,11 @@ instance kinds. A sendable instance rejects a value that is not `Send`. A
 thread-bound instance is not `Send` and can store one. Close returns the
 value, drain hands ownership back and teardown drops what remains in
 creation order. A faulted instance can still close and drain. The live-entry
-ceiling is 1,048,576.
+ceiling is 1,048,576. Phase 4: a host call checks every token before any Rust
+reference exists. Shared borrows coexist and an exclusive borrow conflicts
+with any other borrow of that entry. The borrows are released when the call
+returns or panics. Stale, closed, other-instance, wrong-type and conflicting
+tokens are boundary faults and the host body does not run.
 
 ## 4. Extract the shared host contract crate
 

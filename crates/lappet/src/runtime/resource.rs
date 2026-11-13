@@ -5,17 +5,15 @@
 //! and returns the value, so the embedder chooses when observable teardown runs. Whatever
 //! remains is dropped in ascending token order, which is creation order, because the generator
 //! never goes backwards.
-//!
-//! Both instance kinds use this one table. A [`Sendable`] instance stores only `Send` values, so
-//! the instance itself is `Send`. A [`ThreadBound`] instance stores any `'static` value and is
-//! not `Send`. Neither kind is `Sync`.
-
+use super::error::BoundaryFault;
 use super::limits::InstanceLimits;
 use std::any::Any;
+use std::cell::{Ref, RefCell, RefMut};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
+use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The last token that fits the ABI's `i64` carrier. The counter is a `u64`, but a token the
@@ -158,10 +156,15 @@ pub(crate) trait HostStateBound<Kind: InstanceKind>: 'static {}
 impl<T: Send + 'static> HostStateBound<Sendable> for T {}
 
 impl<T: 'static> HostStateBound<ThreadBound> for T {}
+/// One live value and its call-scoped borrow, the same rule as `RefCell`.
+struct LiveEntry<Object: ?Sized + Erased> {
+    value: RefCell<Box<Object>>,
+    type_id: std::any::TypeId,
+}
 
 /// Live resources for one instance, keyed by token so iteration is creation order.
 pub(crate) struct ResourceTable<Object: ?Sized + Erased = dyn Erased + Send> {
-    entries: BTreeMap<NonZeroU64, Box<Object>>,
+    entries: BTreeMap<NonZeroU64, LiveEntry<Object>>,
 }
 
 impl<Object: ?Sized + Erased> ResourceTable<Object> {
@@ -171,21 +174,100 @@ impl<Object: ?Sized + Erased> ResourceTable<Object> {
         }
     }
 
-    pub(crate) fn get<T: 'static>(&self, token: ResourceToken<T>) -> Result<&T, ResourceError> {
-        self.entry(token.raw)?
-            .as_any()
-            .downcast_ref()
-            .ok_or(ResourceError::WrongType)
+    pub(crate) fn get<T: 'static>(
+        &self,
+        token: ResourceToken<T>,
+    ) -> Result<Shared<'_, T>, ResourceError> {
+        self.borrow_shared(token.raw.get() as i64)
+            .map_err(resource_error)
     }
 
     pub(crate) fn get_mut<T: 'static>(
         &mut self,
         token: ResourceToken<T>,
-    ) -> Result<&mut T, ResourceError> {
-        self.entry_mut(token.raw)?
-            .as_any_mut()
-            .downcast_mut()
-            .ok_or(ResourceError::WrongType)
+    ) -> Result<Exclusive<'_, T>, ResourceError> {
+        // The embedder holds `&mut self`, so no host guard can be live. The exclusive borrow
+        // is still the same entry state a host call uses.
+        self.borrow_exclusive(token.raw.get() as i64)
+            .map_err(resource_error)
+    }
+
+    /// Resolves a guest token and borrows it shared. The reference exists only after the checks.
+    pub(crate) fn borrow_shared<T: 'static>(
+        &self,
+        raw: i64,
+    ) -> Result<Shared<'_, T>, BoundaryFault> {
+        let entry = self.live(raw)?;
+        self.reject_wrong_type::<T>(entry)?;
+        let borrowed = entry
+            .value
+            .try_borrow()
+            .map_err(|_| BoundaryFault::TokenConflict)?;
+        let view = Ref::map(borrowed, |value| {
+            value
+                .as_ref()
+                .as_any()
+                .downcast_ref::<T>()
+                .expect("the type was checked before the borrow")
+        });
+        Ok(Shared { view })
+    }
+
+    /// Resolves a guest token and borrows it exclusively.
+    pub(crate) fn borrow_exclusive<T: 'static>(
+        &self,
+        raw: i64,
+    ) -> Result<Exclusive<'_, T>, BoundaryFault> {
+        let entry = self.live(raw)?;
+        self.reject_wrong_type::<T>(entry)?;
+        let borrowed = entry
+            .value
+            .try_borrow_mut()
+            .map_err(|_| BoundaryFault::TokenConflict)?;
+        let view = RefMut::map(borrowed, |value| {
+            value
+                .as_mut()
+                .as_any_mut()
+                .downcast_mut::<T>()
+                .expect("the type was checked before the borrow")
+        });
+        Ok(Exclusive { view })
+    }
+
+    /// Checks every request, then runs `body` with the borrows. A rejected request drops the
+    /// borrows already taken and does not call `body`, so no Rust reference exists. The borrows
+    /// live in this function, not in the host, so the host cannot keep one by forgetting a guard.
+    pub(crate) fn with_access<R>(
+        &self,
+        requests: &[AccessRequest],
+        body: impl FnOnce(&mut PreparedAccess<'_, Object>) -> R,
+    ) -> Result<R, BoundaryFault> {
+        let mut holds = Vec::with_capacity(requests.len());
+        for request in requests {
+            holds.push(self.hold(request)?);
+        }
+        let mut prepared = PreparedAccess { holds };
+        Ok(body(&mut prepared))
+    }
+
+    fn hold(&self, request: &AccessRequest) -> Result<Held<'_, Object>, BoundaryFault> {
+        let entry = self.live(request.raw)?;
+        if entry.type_id != request.type_id {
+            return Err(BoundaryFault::TokenTypeMismatch);
+        }
+        if request.exclusive {
+            let borrowed = entry
+                .value
+                .try_borrow_mut()
+                .map_err(|_| BoundaryFault::TokenConflict)?;
+            Ok(Held::Exclusive(borrowed))
+        } else {
+            let borrowed = entry
+                .value
+                .try_borrow()
+                .map_err(|_| BoundaryFault::TokenConflict)?;
+            Ok(Held::Shared(borrowed))
+        }
     }
 
     /// Removes the entry and returns the value. A wrong type leaves the entry in place.
@@ -193,14 +275,17 @@ impl<Object: ?Sized + Erased> ResourceTable<Object> {
         &mut self,
         token: ResourceToken<T>,
     ) -> Result<T, ResourceError> {
-        if !self.entry(token.raw)?.as_any().is::<T>() {
+        if self.entry(token.raw)?.type_id != std::any::TypeId::of::<T>() {
             return Err(ResourceError::WrongType);
         }
+
         let entry = self
             .entries
             .remove(&token.raw)
             .expect("the entry was found before it was removed");
         Ok(*entry
+            .value
+            .into_inner()
             .into_any()
             .downcast()
             .expect("the type was checked before removal"))
@@ -210,7 +295,7 @@ impl<Object: ?Sized + Erased> ResourceTable<Object> {
     pub(crate) fn drain(&mut self) -> DrainedResources {
         let values = std::mem::take(&mut self.entries)
             .into_values()
-            .map(|entry| entry.into_any())
+            .map(|entry| entry.value.into_inner().into_any())
             .collect();
         DrainedResources { values }
     }
@@ -224,25 +309,132 @@ impl<Object: ?Sized + Erased> ResourceTable<Object> {
             return Err(ResourceError::Full);
         }
         let raw = issue_token()?;
-        self.entries.insert(raw, value);
+        self.entries.insert(
+            raw,
+            LiveEntry {
+                value: RefCell::new(value),
+                type_id: std::any::TypeId::of::<T>(),
+            },
+        );
         Ok(ResourceToken {
             raw,
             _type: PhantomData,
         })
     }
 
-    fn entry(&self, raw: NonZeroU64) -> Result<&Object, ResourceError> {
-        self.entries
-            .get(&raw)
-            .map(Box::as_ref)
-            .ok_or(ResourceError::NotLive)
+    fn live(&self, raw: i64) -> Result<&LiveEntry<Object>, BoundaryFault> {
+        let Some(raw) = u64::try_from(raw).ok().and_then(NonZeroU64::new) else {
+            return Err(BoundaryFault::TokenNotLive);
+        };
+        self.entries.get(&raw).ok_or(BoundaryFault::TokenNotLive)
     }
 
-    fn entry_mut(&mut self, raw: NonZeroU64) -> Result<&mut Object, ResourceError> {
-        self.entries
-            .get_mut(&raw)
-            .map(Box::as_mut)
-            .ok_or(ResourceError::NotLive)
+    fn reject_wrong_type<T: 'static>(
+        &self,
+        entry: &LiveEntry<Object>,
+    ) -> Result<(), BoundaryFault> {
+        if entry.type_id == std::any::TypeId::of::<T>() {
+            Ok(())
+        } else {
+            Err(BoundaryFault::TokenTypeMismatch)
+        }
+    }
+
+    fn entry(&self, raw: NonZeroU64) -> Result<&LiveEntry<Object>, ResourceError> {
+        self.entries.get(&raw).ok_or(ResourceError::NotLive)
+    }
+}
+
+/// A shared borrow of one resource. Dropping it releases the entry.
+pub(crate) struct Shared<'a, T> {
+    view: Ref<'a, T>,
+}
+
+impl<T> Deref for Shared<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.view
+    }
+}
+
+impl<T: PartialEq> PartialEq for Shared<'_, T> {
+    fn eq(&self, other: &Self) -> bool {
+        *self.view == *other.view
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for Shared<'_, T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.view.fmt(formatter)
+    }
+}
+
+/// An exclusive borrow of one resource. Dropping it releases the entry.
+pub(crate) struct Exclusive<'a, T> {
+    view: RefMut<'a, T>,
+}
+
+impl<T> Deref for Exclusive<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.view
+    }
+}
+
+impl<T> DerefMut for Exclusive<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.view
+    }
+}
+
+/// One token a host call wants to borrow. The type is the parameter's registered type.
+pub(crate) struct AccessRequest {
+    pub(crate) raw: i64,
+    pub(crate) exclusive: bool,
+    pub(crate) type_id: std::any::TypeId,
+}
+
+enum Held<'a, Object: ?Sized + Erased> {
+    Shared(Ref<'a, Box<Object>>),
+    Exclusive(RefMut<'a, Box<Object>>),
+}
+
+/// Borrows already taken for one host call. A typed reference is created only from here.
+pub(crate) struct PreparedAccess<'a, Object: ?Sized + Erased> {
+    holds: Vec<Held<'a, Object>>,
+}
+
+impl<Object: ?Sized + Erased> PreparedAccess<'_, Object> {
+    pub(crate) fn shared<T: 'static>(&self, index: usize) -> &T {
+        let Held::Shared(hold) = &self.holds[index] else {
+            panic!("access {index} was reserved exclusive");
+        };
+        hold.as_ref()
+            .as_any()
+            .downcast_ref()
+            .expect("the type was checked before the borrow")
+    }
+
+    pub(crate) fn exclusive<T: 'static>(&mut self, index: usize) -> &mut T {
+        let Held::Exclusive(hold) = &mut self.holds[index] else {
+            panic!("access {index} was reserved shared");
+        };
+        hold.as_mut()
+            .as_any_mut()
+            .downcast_mut()
+            .expect("the type was checked before the borrow")
+    }
+}
+
+fn resource_error(fault: BoundaryFault) -> ResourceError {
+    match fault {
+        BoundaryFault::TokenNotLive => ResourceError::NotLive,
+        BoundaryFault::TokenTypeMismatch => ResourceError::WrongType,
+        // An embedder lookup holds the instance, so a host guard cannot be live.
+        BoundaryFault::TokenConflict => ResourceError::NotLive,
+        _ => ResourceError::NotLive,
     }
 }
 

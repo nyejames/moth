@@ -211,14 +211,14 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
     pub(crate) fn resource<T: 'static>(
         &self,
         token: ResourceToken<T>,
-    ) -> Result<&T, ResourceError> {
+    ) -> Result<super::resource::Shared<'_, T>, ResourceError> {
         self.store.data().resources.get(token)
     }
 
     pub(crate) fn resource_mut<T: 'static>(
         &mut self,
         token: ResourceToken<T>,
-    ) -> Result<&mut T, ResourceError> {
+    ) -> Result<super::resource::Exclusive<'_, T>, ResourceError> {
         self.store.data_mut().resources.get_mut(token)
     }
 

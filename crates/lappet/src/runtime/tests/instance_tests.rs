@@ -98,7 +98,7 @@ fn defining_one_import_name_twice_is_rejected() {
             "read_value",
             [],
             [ValType::I32],
-            |_host, _staging, _limits, _arguments, _results| Ok(()),
+            |_host, _staging, _limits, _resources, _arguments, _results| Ok(()),
         );
 
         let Err(RuntimeError::Link(LinkError::ImportDefinition { module, name, .. })) = result

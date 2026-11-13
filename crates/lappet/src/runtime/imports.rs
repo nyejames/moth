@@ -14,7 +14,7 @@ use super::fault::run_host_import;
 use super::instance::{PreparedModule, StoreData};
 use super::limits::InstanceLimits;
 use super::module::CompiledModule;
-use super::resource::InstanceKind;
+use super::resource::{InstanceKind, ResourceTable};
 use super::staging::{StagingError, StagingTable};
 use wasmtime::{Caller, Engine, Extern, FuncType, Linker, UnknownImportError, Val, ValType};
 
@@ -52,6 +52,7 @@ impl<HostState: 'static, Kind: InstanceKind> HostImports<HostState, Kind> {
             &mut HostState,
             &mut StagingTable,
             &InstanceLimits,
+            &ResourceTable<Kind::Object>,
             &[Val],
             &mut [Val],
         ) -> Result<(), ErrorSource>
@@ -69,13 +70,13 @@ impl<HostState: 'static, Kind: InstanceKind> HostImports<HostState, Kind> {
                 if caller.data().staging.has_live_ticket() {
                     return Err(wasmtime::Error::new(BoundaryFault::TicketLiveAtImport));
                 }
-                let limits = caller.data().limits;
                 let data = caller.data_mut();
                 run_host_import(|| {
                     host_function(
                         &mut data.host_state,
                         &mut data.staging,
-                        &limits,
+                        &data.limits,
+                        &data.resources,
                         arguments,
                         results,
                     )

@@ -94,6 +94,12 @@ pub enum BoundaryFault {
     TicketLiveAtImport,
     /// The outermost guest entry returned while a ticket was live.
     TicketLiveAtReturn,
+    /// The token is zero, closed, unknown or from another instance.
+    TokenNotLive,
+    /// The token is live, but the value has another type.
+    TokenTypeMismatch,
+    /// The token is already borrowed in a way this use conflicts with.
+    TokenConflict,
 }
 
 impl std::error::Error for BoundaryFault {}
@@ -108,6 +114,9 @@ impl fmt::Display for BoundaryFault {
                 "a host import was entered while staged text was still live"
             }
             Self::TicketLiveAtReturn => "the guest entry returned while staged text was still live",
+            Self::TokenNotLive => "the resource token is not live in this instance",
+            Self::TokenTypeMismatch => "the resource token has another type",
+            Self::TokenConflict => "the resource token is already borrowed",
         })
     }
 }

@@ -28,7 +28,12 @@ fn prepared_from(
             "stage",
             [],
             [ValType::I64],
-            |_host: &mut StageHost, staging: &mut StagingTable, limits, _arguments, results| {
+            |_host: &mut StageHost,
+             staging: &mut StagingTable,
+             limits,
+             _resources,
+             _arguments,
+             results| {
                 let ticket = staging
                     .stage(STAGED, limits)
                     .map_err(|_| "the staged text did not fit the limits")?;
@@ -43,7 +48,7 @@ fn prepared_from(
             "record",
             [ValType::I32],
             [],
-            |host, _staging, _limits, arguments, _results| {
+            |host, _staging, _limits, _resources, arguments, _results| {
                 host.recorded
                     .push(arguments[0].i32().expect("the import takes one i32"));
                 Ok(())

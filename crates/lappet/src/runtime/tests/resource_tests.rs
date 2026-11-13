@@ -84,7 +84,10 @@ fn a_wrong_type_is_rejected_and_the_entry_stays() {
             .resource_mut(token)
             .expect("the type was checked before the reference")
             .push('s');
-        assert_eq!(instance.resource(token).map(String::as_str), Ok("sprites"));
+        assert_eq!(
+            instance.resource(token).expect("the entry stays").as_str(),
+            "sprites"
+        );
     });
 }
 
@@ -111,7 +114,7 @@ fn a_full_table_rejects_the_next_insert_and_keeps_the_live_entry() {
 
         let token = instance.insert_resource(1u8).expect("the first entry fits");
         assert_eq!(instance.insert_resource(2u8), Err(ResourceError::Full));
-        assert_eq!(instance.resource(token), Ok(&1));
+        assert_eq!(*instance.resource(token).expect("the first entry stays"), 1);
     });
 }
 
