@@ -1563,6 +1563,67 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
 }
 
 #[test]
+fn build_html_project_pure_core_source_package_imports_emit_no_javascript_artifacts() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        root.join("@entry.moth"),
+        "@html p\n@styles center\n\n[p, center: official constants only]\n",
+    )
+    .expect("should write page");
+
+    let builder = HtmlProjectBuilder::new();
+    let result = successful_compilation_value(
+        build_project(
+            &builder,
+            root.to_str().expect("temp dir should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+            &mut discovery_stops,
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
+
+    let outputs = BuiltOutputs::index(&result.project);
+    let html = html_text(outputs.at("index.html"));
+    assert!(
+        html.contains("<p style=\"text-align: center;\">"),
+        "the official @styles constant should render: {html}"
+    );
+
+    let javascript_outputs = result
+        .project
+        .output_files
+        .iter()
+        .filter(|output| matches!(output.file_kind(), FileKind::Js(_)))
+        .map(|output| portable_path_text(output.relative_output_path()))
+        .collect::<Vec<_>>();
+    assert!(
+        javascript_outputs.is_empty(),
+        "importing pure @html and @styles must emit no JavaScript artifact, found {javascript_outputs:?}"
+    );
+
+    let deferred_javascript = result
+        .project
+        .deferred_resources
+        .iter()
+        .map(|resource| portable_path_text(&resource.relative_output_path))
+        .filter(|path| path.ends_with(".js"))
+        .collect::<Vec<_>>();
+    assert!(
+        deferred_javascript.is_empty(),
+        "importing pure @html and @styles must defer no JavaScript resource, found {deferred_javascript:?}"
+    );
+}
+
+#[test]
 fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");

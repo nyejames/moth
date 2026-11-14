@@ -11,3 +11,10 @@ must_contain = [
     "<p",
     "Hello from builder html!",
 ]
+# Both imports are pure compile-time constants, so importing them must not reference an emitted
+# JS module, the runtime module or an import map. The baseline page bootstrap script is not a
+# package asset and stays outside this assertion.
+must_not_contain = [
+    "_moth/js/",
+    "<script type=\"importmap\">",
+]

@@ -13113,6 +13113,20 @@ contract = "language.dependencies.moth_template_unrelated_source_package_implici
 role = "primary"
 
 [[case]]
+id = "moth_template_project_package_exports_not_in_prelude"
+path = "moth_template_project_package_exports_not_in_prelude"
+tags = ["integration", "moth_template", "html", "diagnostics", "dependencies", "source-packages"]
+contract = "language.dependencies.moth_template_project_package_exports_not_in_prelude"
+role = "primary"
+
+[[case]]
+id = "moth_template_project_package_center_keeps_official_prelude"
+path = "moth_template_project_package_center_keeps_official_prelude"
+tags = ["integration", "moth_template", "html", "dependencies", "source-packages"]
+contract = "language.dependencies.moth_template_project_package_center_keeps_official_prelude"
+role = "primary"
+
+[[case]]
 id = "moth_template_direct_selection_alias_dependency"
 path = "moth_template_direct_selection_alias_dependency"
 tags = ["integration", "moth_template", "html", "dependencies"]
