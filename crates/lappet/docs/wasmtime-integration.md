@@ -146,8 +146,14 @@ fn invoke(wasm_bytes: &[u8]) -> wasmtime::Result<i32> {
 
 Do not install imports by guessed source names or treat `i32` as a
 complete Moth numeric signature. Real Lappet adapters consume checked
-compiler descriptors. A complete, executable embedding example remains
-a separate roadmap deliverable.
+compiler descriptors.
+
+The tested counterpart of this sketch is
+[`embedding_program.rs`](../src/runtime/tests/embedding_program.rs). It runs
+the same sequence through Lappet's own wrappers under both optimisation
+levels: engine setup, a host import, instantiation, a typed export call and
+failure handling. The import and call surface it uses is crate-private. It
+is the mechanism the host adapters build on, not a published embedding API.
 
 ## Host calls and linear memory
 

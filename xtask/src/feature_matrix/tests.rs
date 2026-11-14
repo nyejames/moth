@@ -17,6 +17,7 @@ use tempfile::{TempDir, tempdir};
 
 // These manifests and recipes are parser inputs, not source-text assertions.
 const MOTH_MANIFEST: &str = include_str!("../../../Cargo.toml");
+const LAPPET_MANIFEST: &str = include_str!("../../../crates/lappet/Cargo.toml");
 const ROOT_JUSTFILE: &str = include_str!("../../../justfile");
 
 fn fixture_workspace() -> TempDir {
@@ -28,10 +29,11 @@ fn fixture_workspace() -> TempDir {
             fs::create_dir_all(workspace.path().join(root)).expect("required fixture source root");
         }
 
-        let contents = if matches!(*package, "moth" | "moth-cli") {
-            MOTH_MANIFEST.to_string()
-        } else {
-            format!("[package]\nname = \"{package}\"\nversion = \"0.1.0\"\n")
+        // Packages whose lanes enable features need their real feature tables.
+        let contents = match *package {
+            "moth" | "moth-cli" => MOTH_MANIFEST.to_string(),
+            "lappet" => LAPPET_MANIFEST.to_string(),
+            _ => format!("[package]\nname = \"{package}\"\nversion = \"0.1.0\"\n"),
         };
         fs::write(workspace.path().join(manifest), contents).expect("fixture package manifest");
     }
@@ -64,11 +66,21 @@ fn extracted_source_and_test_owners_report_exact_undeclared_cfg_features() {
             "crates/moth-mon/tests/public_api.rs",
             "public_coddec",
         ),
+        (
+            "moth-host",
+            "crates/moth-host/src/tests/descriptor.rs",
+            "host_descripter",
+        ),
         ("moth-cli", "crates/moth-cli/src/cli.rs", "cli_optionz"),
         (
             "moth-cli",
             "crates/moth-cli/tests/cli_exit_status.rs",
             "cli_exit_statuus",
+        ),
+        (
+            "lappet",
+            "crates/lappet/src/runtime/tests/engine.rs",
+            "runtme",
         ),
     ];
 
@@ -113,8 +125,10 @@ fn extracted_source_and_test_owners_report_exact_undeclared_cfg_features() {
             "crates/moth-lexical/src",
             "crates/moth-mon/src",
             "crates/moth-mon/tests",
+            "crates/moth-host/src",
             "crates/moth-cli/src",
             "crates/moth-cli/tests",
+            "crates/lappet/src",
             "xtask/src",
         ]
     );

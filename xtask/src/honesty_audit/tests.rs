@@ -72,6 +72,7 @@ fn reports_hard_findings_in_extracted_crate_tests() {
         "crates/moth-lexical/src/tests/violation.rs",
         "crates/moth-mon/src/tests/violation.rs",
         "crates/moth-mon/tests/violation.rs",
+        "crates/moth-host/src/tests/violation.rs",
         "crates/moth-cli/src/tests/violation.rs",
         "crates/moth-cli/tests/violation.rs",
     ] {
@@ -94,6 +95,7 @@ fn reports_hard_findings_in_extracted_crate_tests() {
             ("crates/moth-lexical/src/tests/violation.rs", 2),
             ("crates/moth-mon/src/tests/violation.rs", 2),
             ("crates/moth-mon/tests/violation.rs", 2),
+            ("crates/moth-host/src/tests/violation.rs", 2),
             ("crates/moth-cli/src/tests/violation.rs", 2),
             ("crates/moth-cli/tests/violation.rs", 2),
         ]

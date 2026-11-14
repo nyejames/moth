@@ -9,15 +9,19 @@ planned backend support as available.
 ## Current state
 
 - Status: CLI separation and the public `moth::builder` SDK prototype are
-  delivered. The `lappet` crate remains dependency-free and documentation-only,
-  with no native runtime or host adapter.
-- Current milestone: 2, establish Wasmtime execution. Its plan is ready and not
-  started.
-- Blockers: none for milestone 2. Milestones 4 and 5 wait for work on `main`
-  listed under [Waiting on main](#waiting-on-main).
-- Next action: activate the
-  [Wasmtime runtime foundation plan](../../docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md)
-  at Phase 0.
+  delivered. The host descriptor vocabulary lives in `moth-host`. The `lappet`
+  crate has a Wasmtime runtime and is waiting for policy confirmation before
+  that policy is written into the design docs. It has no host adapter yet.
+- Current milestone: 2, establish Wasmtime execution. Its plan is active
+  through Phase 7, which waits for confirmation. Milestone 3 is in the tree
+  through its policy evidence and waits for the same confirmation. Milestone 4
+  is delivered.
+- Blockers: Phase 7 of milestones 2 and 3 wait for Nye's confirmation of the
+  policy lines below. Milestone 5 can start after a sync with `main`. Later
+  milestones wait for work on `main` listed under
+  [Waiting on main](#waiting-on-main).
+- Next action: Nye confirms or revises the milestone 2 and milestone 3 policy
+  lines before either Phase 7 records them.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
 and [Wasm optimisation](../../docs/developer-docs/wasm-optimisation/overview.mtf)
@@ -37,16 +41,16 @@ compiler crate, so they proceed while compiler work continues on `main`.
 | 1 | Separate the CLI from the compiler library | Delivered | Delivered | None |
 | 2 | Establish Wasmtime execution | `crates/lappet` only | Now | [Runtime foundation](../../docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md) |
 | 3 | Build host boundary tables and fault mechanics | `crates/lappet` only | Milestone 2 delivers instances, limits and fault quarantine | [Host boundary tables](../../docs/roadmap/plans/lappet-host-boundary-tables-plan.md) |
-| 4 | Extract the shared host contract crate | New crate, `src/host`, `src/builder`, `xtask` | Const functions are on `main` | [Host contract crate](../../docs/roadmap/plans/lappet-host-contract-crate-plan.md) |
-| 5 | Finish the native binding and artefact handoff | `src/builder`, `src/build_system`, `src/builder_surface` | Const functions are on `main` and milestone 4 is delivered | [Native binding handoff](../../docs/roadmap/plans/lappet-native-binding-handoff-plan.md) |
+| 4 | Extract the shared host contract crate | Delivered | Delivered | None |
+| 5 | Finish the native binding and artefact handoff | `src/builder`, `src/build_system`, `src/builder_surface` | Milestone 4 is delivered | [Native binding handoff](../../docs/roadmap/plans/lappet-native-binding-handoff-plan.md) |
 | 6 | Establish official Core conformance | Lappet, Core references | Milestones 3 and 5 and its own checkpoint | Write when the checkpoint is approved |
 | 7 | Connect real Moth applications | Lappet, public compiler services | The compiler's native host ABI prerequisites | Write when the gate opens |
 | 8 | Package declaration and local catalog foundations | Build system, Stage 0, Lappet | Its checkpoint and the package prerequisites | Write when the checkpoint is approved |
 | 9 | Package eligibility and dependency evidence | Lappet, compiler facts | Milestone 8 | Write when the checkpoint is approved |
 | 10 | Remote admission | Lappet | Milestone 9 and its checkpoint | Write when the checkpoint is approved |
 
-Milestone 4 is small and independent of milestones 2 and 3. Run it as soon as
-its wait is satisfied, even when milestone 2 or 3 is still in progress. The
+Milestone 4 is delivered. Milestone 5 edits the compiler crate, so sync with
+`main` before its phases. The
 package lane, milestones 8 to 10, is independent of Wasmtime and may move ahead
 of milestones 6 and 7 once its prerequisites and checkpoint are met.
 
@@ -58,7 +62,6 @@ the current tree instead of trusting this table.
 
 | Lands on `main` | Unblocks | Why Lappet waits |
 |---|---|---|
-| Const functions, including the `const_work_limit` and `const_memory_limit_mb` project settings | Milestones 4 and 5 | That work edits `src/build_system/project_config.rs`, `src/build_system/project_config/validation.rs`, `src/builder_surface/definition.rs` and `src/projects/settings.rs`. The remaining SDK work edits the same config owners |
 | A `ValidatedMemoryPlan` producer for boundary string, frame and scope allocations | Milestone 7 | The native host ABI forbids a temporary planner or guessed layout |
 | Host-import lowering to `moth-host-v1` names, fallible-call lowering through `out_frame` and `status` and builtin `Error` value lowering | Milestone 7 and the compiler-level adapter tests | Lappet adapters convert only what compiled Moth really emits |
 | `i64` resource-token carriage, the `staged_text_take` import and the call-scope helper exports | Milestone 7 | Milestone 3 exercises these protocols with fixtures only |
@@ -70,6 +73,9 @@ owns the full compiler prerequisite list. The first registry prerequisite, the
 restricted host profile and the package-path `#` rule, is already delivered by
 `BuilderDefinition::finish`.
 
+V1 const functions landed on `main` and this branch merged them on 13 November
+2026. Nothing on `main` now blocks milestones 2 to 5.
+
 After each sync, rerun the focused Lappet tests and the dependency boundary
 check, then re-read any authority the merge changed.
 
@@ -78,11 +84,6 @@ check, then re-read any authority the merge changed.
 Each needs Nye's answer before the named work starts. Recommendations are
 recorded in the owning plan.
 
-- **Host resource and context API.** The
-  [draft design](docs/host-resources.md) awaits review. It ends with four
-  questions and five amendments to the adapter responsibilities. Blocks the
-  resource phases of milestone 3. The staging table and token generator don't
-  wait.
 - **Runtime policy defaults.** Provisional limits are recorded in the runtime
   foundation plan. Milestone 2 gathers the evidence and Nye confirms the final
   values before they move into the runtime design.
@@ -202,18 +203,193 @@ shows engine setup, a host import, core Wasm instantiation, a typed exported
 call and failure/cleanup handling. A hand-authored Wasm fixture is acceptable
 until Moth's backend can produce the equivalent program.
 
+**Progress.** Evidence so far comes from one host, macOS AArch64 with Rust
+1.99.0, and from authored fixtures.
+
+- Phase 0, 13 November 2026: the branch was current with `main`, 50.0.1 was
+  the newest 50.0.x release and the routed documents showed no drift.
+- Phase 1, dependency and feature gate: `runtime` enables Wasmtime `=50.0.1`
+  with `std`, `runtime` and `cranelift` only. The fixture assembler is `wat`
+  `=1.261.0`, matching the `wasmparser` 0.261.0 that Wasmtime validates with.
+  The feature adds 82 packages to a `lappet` build. The lockfile grew from 81
+  to 159 packages. A clean `lappet` build with `runtime` took 78 s in the dev
+  profile and 53 s in release, against under 1 s with no feature. `moth` and
+  `moth-cli` have no path to Wasmtime, and `just first-party-deps` and
+  `just feature-lane-check` pass with the new `lappet` and `lappet-runtime`
+  lanes. The independent review was clean.
+- Phases 2 to 5, engine, instances, limits and faults: delivered as one slice
+  because the instance, its limits and its quarantine share one small owner.
+  The public names are `RuntimeEngine`, `NativeOptimisation`,
+  `CompiledModule`, `InstanceLimits`, `RuntimeError`, `LinkError`,
+  `LimitFault` and `HostFault`. The crate-private mechanism is `HostImports`,
+  `PreparedModule`, `Instance` and `Deadline`. 26 fixture tests pass under
+  both optimisation levels, including the embedding program the Wasmtime
+  reference links to. The tests were written with the implementation, so the
+  plan's red-then-green sequence was not observed. A later mutation check on
+  a scratch copy caught every probed regression: quarantine set and check,
+  limit precheck, both deadline installations, the store limiter, swapped
+  start and guest traps, an uncaught host panic, an unguarded panic-payload
+  drop, relaxed SIMD left on and a stack trap reported as a guest trap.
+
+The independent review required four corrections, all applied in the
+follow-up:
+
+- Relaxed SIMD is switched off explicitly. The pinned Cranelift profile
+  enables it, and its results can differ between targets.
+- A panic payload is dropped under a second unwind guard. A payload whose
+  destructor panics no longer escapes the host boundary or skips quarantine.
+- The start deadline is proven by a start function that returns in time after
+  an epoch has already passed. An epoch-enabled store begins with a deadline
+  that has already elapsed, so a spinning-start test alone could pass without
+  the deadline being installed.
+- A module-level dead-code expectation stays on the runtime module. Narrowing
+  it to each crate-private item would repeat one reason across the private
+  surface, and the test build still compiles that surface without the
+  expectation, so unused production code is still reported there.
+
+Two review points were recorded rather than changed. A typed export can
+accept a function reference owned by another instance, and Wasmtime rejects
+that before guest entry. The call still quarantines, reported as an internal
+host fault, because passing that reference is a host-adapter bug. `define`
+accepts numeric Wasm carriers only by contract. A reference type built for
+another engine panics inside Wasmtime, and no adapter in this milestone
+builds one.
+
+Findings from the pinned release that shaped the implementation:
+
+- Wasmtime reports a module needing a disabled proposal through the same
+  untyped validation failure as malformed bytes. Both are
+  `RuntimeError::InvalidModule`. A separate unsupported-proposal category
+  needs a second validation pass with a direct `wasmparser` dependency or
+  Wasmtime's `reexport-wasmparser` feature. That changes the selected feature
+  set, so it waits for Nye.
+- Wasmtime reports a limiter denial at instantiation and a cross-engine
+  module as untyped text. Lappet checks the module's declared memories and
+  tables and the engine identity itself, before instantiation, and classifies
+  from those typed facts. The store limiter still enforces every limit.
+- The Wasm 3.0 profile Cranelift enables accepts modules with several
+  memories and tables. The per-instance count limit rejects them, not
+  validation.
+- `Config::wasm_backtrace` is deprecated in 50.0.1. The engine pins
+  `wasm_backtrace_max_frames` to the release default of 20. Trap errors carry
+  function names without the `backtrace` Cargo feature.
+- The limit checks assume the standard 64 KiB page, so the custom page sizes
+  proposal is switched off explicitly, as are Memory64 and relaxed SIMD.
+  Multi-value stays on. The other proposal toggles follow the pinned
+  Cranelift profile until compiled Moth output shows which of them it needs.
+- Raw host imports use Wasmtime's dynamically typed `func_new`, so one
+  wrapper catches panics and withholds any handle that could re-enter the
+  guest. The measured difference is about 20 ns per scalar host call. That
+  does not justify one typed wrapper per arity.
+- A host fault keeps what the host reported. It drops the Wasm backtrace that
+  Wasmtime attached while unwinding.
+- Host imports can't reach guest memory yet. That access arrives with the
+  staging table, its first consumer.
+
+**Phase 6 evidence.** Recorded on 13 November 2026 on one host, macOS AArch64
+with Rust 1.99.0, from authored core Wasm fixtures. The numbers are not
+compiled Moth and say nothing about the Moth host ABI. Timings are release
+builds. A cold compilation uses a fresh engine each time. Preflight,
+instantiation and teardown are timed only after one untimed call. Peak
+resident memory is the process maximum from `/usr/bin/time -l` and includes
+the test harness. Raw output stays local.
+
+Published engine, release optimisation, epoch interruption on:
+
+| Measurement | Median |
+|---|---|
+| Engine setup | 2.8 us |
+| Cold module compilation | 938 us |
+| Import preflight | 0.2 us |
+| Instantiation | 3.6 us |
+| Teardown | 3.5 us |
+| Game frame, 1000 entity steps | 222 us |
+| One entity step, including its export lookup | 0.2 us |
+| Server request, 1 MiB written, teardown excluded | 223 us |
+| Compute, Collatz to 100000 | 16.3 ms |
+| Scalar host call, difference | 20 ns |
+| Recursion depth before the stack fault | 10918 frames |
+| Process peak RSS, game | 8.5 MB |
+| Process peak RSS, server | 9.5 MB |
+
+The smallest embedder links to 0.36 MB stripped without the runtime feature
+and 8.05 MB stripped with it. Unstripped, those figures are 0.45 MB and
+11.0 MB. A clean `lappet` build with the feature took 78 s in dev and 53 s
+in release, against under 1 s with no feature.
+
+Epoch interruption and the two optimisation levels, median:
+
+| Measurement | Development, on | Development, off | Release, on | Release, off |
+|---|---|---|---|---|
+| Cold compilation | 738 us | 515 us | 938 us | 626 us |
+| Game frame | 224 us | 224 us | 222 us | 224 us |
+| Server request | 255 us | 213 us | 223 us | 229 us |
+| Collatz to 100000 | 16.1 ms | 15.9 ms | 16.3 ms | 16.3 ms |
+| Recursion depth | 10918 | 16377 | 10918 | 16377 |
+
+The scalar host-call figure is the difference between two counted loops that
+both store on every iteration. On the published engine the host-call loop is
+20.7 ns per iteration and the loop without a host call is 0.7 ns, so the call
+costs 20 ns. The recursion probe makes one host call per frame. The game and
+server workloads do not recurse. A repeat of the release server samples was
+223 us with the check and 224 us without it.
+
+Pinned Cranelift profile is Wasm 3.0 plus wide arithmetic. Threads and GC are
+absent because those Cargo features are off, and the engine then removes
+exceptions with GC. Explicit toggles are multi-value on, Memory64 off, custom
+page sizes off and relaxed SIMD off. The other profile toggles are not set
+explicitly.
+
+Policy lines, unchanged until Nye confirms them:
+
+- Wasmtime `=50.0.1` with `std`, `runtime` and `cranelift`: confirmed. The
+  feature costs about 7.7 MB of stripped code and a clean release build of
+  about 53 s. No feature is proposed.
+- Cranelift, set explicitly: confirmed. No measurement was required.
+- Development optimisation `OptLevel::None` and release `OptLevel::Speed`:
+  confirmed. This integer loop and the game step show no execution gap, and
+  `Speed` adds about 0.2 ms to compiling this small module. `SpeedAndSize` is
+  not proposed.
+- Backtracking, no inlining, parallel compilation not compiled in: confirmed.
+  Compile time does not block either workload.
+- Proposal toggles: confirmed as pinned above. Compiled Moth output still has
+  to show which of the unpinned toggles it needs.
+- Linear memory ceiling 256 MiB: confirmed for these fixtures. The server
+  workload peaked at 9.5 MB of process RSS after writing 1 MiB. They do not
+  show that a server needs a lower default.
+- One instance, one memory and one table: confirmed. No fixture needs more.
+- Table elements 65,536: confirmed. The workloads use no table, and the limit
+  tests use at most two elements.
+- Wasm stack 512 KiB: confirmed. The probe still reaches about 11000 frames
+  with a host call on every frame.
+- `memory.grow` returns `-1` without a trap: unchanged. The policy row defers
+  confirmation to the real-application memory contract, and these fixtures do
+  not replace that.
+- Epoch interruption on, embedder-advanced ticks, no timer thread: confirmed.
+  The game frame is the same with the check on or off. The server sample is
+  slower with the check in the development build and not in the release build.
+  Opt-in is not proposed.
+- Fuel disabled: confirmed. No V1 consumer appeared.
+- Wasm backtrace capture on, `backtrace` Cargo feature off: confirmed. Trap
+  errors carry function names with the selected features.
+- No Lappet timeout around a native host call: confirmed. The builder still
+  owns host IO policy.
+- A fault quarantines the instance: confirmed by the Phase 5 tests.
+
 ## 3. Build host boundary tables and fault mechanics
 
 Plan: [Host boundary tables](../../docs/roadmap/plans/lappet-host-boundary-tables-plan.md).
 
-**Checkpoint.** Approve the [draft host resource and context API](docs/host-resources.md)
-before the resource phases. The staging table, the token generator and their
-fault handling follow the accepted [adapter responsibilities](docs/host-abi.md)
-and need no further decision.
+**Checkpoint.** Accepted on 13 November 2026. The
+[host resource and context API](docs/host-resources.md) owns resource
+ownership, access, per-call context and the sendable and thread-bound instance
+kinds. V1 is strict: every boundary violation quarantines the instance. The
+staging table, the token generator and their fault handling follow the
+[adapter responsibilities](docs/host-abi.md).
 
 **Delivery.** Implement the per-instance staging table, the process-wide token
-generator, the per-instance resource table with call-scoped access guards and
-the per-call host context slot. Wire each into fault quarantine and teardown.
+generator, the per-instance resource table with call-scoped access guards,
+the per-call host context slot and both instance kinds. Wire each into fault quarantine and teardown.
 Build no value conversion, descriptor matching or manifest preflight here.
 
 **Evidence.** Cover the fixture-level deferred tests in the adapter
@@ -222,24 +398,105 @@ other-instance, wrong-type and conflicting tokens, physical import mismatches
 and a trapping scope helper. Run each under both optimisation levels. Fixtures
 follow the V1 protocol by hand and prove Lappet's mechanics only.
 
+**Progress.** Phase 0, 13 November 2026: the runtime foundation is in this
+tree and the branch is not behind `main`. Wasmtime 50.0.1 does not require
+store data to be `Send` for construction, limits, epoch deadlines,
+instantiation or a typed call, so a thread-bound instance can use the calls
+Lappet makes. One drift: the plan calls token-generator exhaustion a host
+fault, but the resource API returns that as an insertion error because no
+guest call is running. The API wins. Phase 1: the staging table issues
+nonzero tickets that are never reused, keeps a failed take, and reads both
+byte ceilings from `InstanceLimits`. A fault clears the instance's table.
+Phase 2: `moth-abi-v1.staged_text_take` copies staged text into guest memory
+and consumes the ticket. A bad take, a live ticket at another import and a
+live ticket at entry return are boundary faults that quarantine the instance
+and clear the table. Fixture tests pass under both optimisation levels.
+Phase 3: one process-wide token generator and one resource table for both
+instance kinds. A sendable instance rejects a value that is not `Send`. A
+thread-bound instance is not `Send` and can store one. Close returns the
+value, drain hands ownership back and teardown drops what remains in
+creation order. A faulted instance can still close and drain. The live-entry
+ceiling is 1,048,576. Phase 4: a host call checks every token before any Rust
+reference exists. Shared borrows coexist and an exclusive borrow conflicts
+with any other borrow of that entry. The borrows are released when the call
+returns or panics. Stale, closed, other-instance, wrong-type and conflicting
+tokens are boundary faults and the host body does not run. Phase 5: context
+moves into the instance for one call and back to the holder on every outcome,
+including a caught host panic. A missing or wrong-type context is a host fault
+and the host function does not run. A thread-bound instance accepts context
+that is not `Send`. A scoped export opens, reserves, calls once, copies the
+returned span and closes. Status `1` is a declared error: the scope closes and
+the instance stays usable. A trap, a noncanonical status or a noncanonical span
+skips close and makes no further guest call. A bad token argument is rejected
+before guest entry and the instance stays usable.
+
+**Decision.** `HostState` stays the instance-owned slot the crate-private
+import closures use. It is not a third ABI role. Resources and context are the
+two roles a host function receives. Adapters will see those through one call
+view and will not grow a parallel state generic.
+
+**Phase 6 evidence.** Recorded on 13 November 2026 on the same host, from
+authored fixtures and one release run. The numbers are not compiled Moth.
+Staging and the resource table do not use Cranelift. The guard figure is the
+difference between a bare host call and a host call that passes one token and
+borrows it, so it includes the argument and the lookup.
+
+| Measurement | Median |
+|---|---|
+| Stage 16 bytes | 42 ns |
+| Stage 16 MiB | 387 us |
+| Guarded host call above a bare call, release | 84 ns |
+| Guarded host call above a bare call, development | 125 ns |
+| Lookup of a live token in a full table | 78 ns |
+| Resident growth at 1,048,576 live entries | 126 bytes per entry |
+
+A full table of `u32` values grew the process from 7.7 MB to 137 MB resident.
+That growth includes the allocator, not only the table nodes. Closing one
+entry freed its slot. One 16 MiB staged entry is under the 64 MiB live
+ceiling. The game and server fixtures stage no host string.
+
+Policy lines, unchanged until Nye confirms them:
+
+- Staged text per entry, 16 MiB: unchanged. The workloads stage no host
+  string. A 16 MiB stage succeeds in 387 us. The timer covers `stage` only.
+  The guest copy no longer clones the entry before writing it, and that copy
+  was not in this figure. They do not show a realistic string that needs
+  another cap.
+- Staged text live per instance, 64 MiB: confirmed for these fixtures. The
+  largest staged entry measured is 16 MiB. They do not show a peak that needs
+  a lower default.
+- Live resource entries, 1,048,576: confirmed as a ceiling. Filling it costs
+  about 129 MB of resident growth, 126 bytes per live entry, and a lookup is
+  78 ns. No lower default is proposed.
+- Closed entries removed at close: confirmed. A full table accepted another
+  entry after one close. A long-lived instance pays for live entries only.
+- Token generator, one process-wide counter from 1: confirmed. Accepted. No
+  measurement was required.
+- Ticket generator, one per-instance counter from 1, never reused: confirmed.
+  The ABI requires uniqueness within the instance only. No measurement was
+  required.
+
 ## 4. Extract the shared host contract crate
 
-Plan: [Host contract crate](../../docs/roadmap/plans/lappet-host-contract-crate-plan.md).
+**Delivered.** 13 November 2026. `HostType` and `HostFunction` live in
+`crates/moth-host`, which has no dependencies. The compiler re-exports that
+crate as `moth::host` and keeps the registry conversion beside its only
+caller. `moth-host` is an extracted package with no permitted workspace
+dependency and a feature-free lane. Lappet does not depend on it yet, because
+the runtime has no consumer for the descriptors. That edge waits for the host
+adapters. `HostType` is non-exhaustive, so the compiler's match has a
+rejecting arm no current variant reaches.
 
-**Checkpoint.** Accepted on 13 November 2026 and recorded in the
-[runtime design](docs/design.md#users-and-workspace-dependencies). Lappet's
-runtime depends on a small `moth-host` contract crate and Wasmtime, never on
-the compiler. The compiler depends on the same crate and keeps the
-`moth::host` path. Only Lappet's future package feature depends on the
-compiler.
+`just validate` passed on this tree: formatting, Clippy, feature lanes,
+source audit and first-party dependencies were clean, and the workspace unit
+tests, integration cases and docs check passed. The independent review found
+no change to a builder author's public path or rejection message.
 
-**Delivery.** Move the host descriptor vocabulary into the contract crate,
-keep the registry conversion in the compiler, extend the first-party
-dependency boundary check and record the accepted graph in the runtime design.
-
-**Evidence.** The public `moth::host` path and the standalone crate expose the
-same types. The contract crate depends on no workspace package. `lappet` with
-the `runtime` feature builds without the compiler in its dependency tree.
+Documents that still name `src/host` as the descriptor owner, and were not
+edited: `docs/roadmap/plans/lappet-native-binding-handoff-plan.md` and
+`crates/lappet/docs/design.md`, which still says the crate is not extracted.
+`CONTRIBUTING.md` and other `validation.mtf` lists still omit `moth-host`.
+The approved documentation edit was the first-party dependency paragraph only.
 
 ## 5. Finish the native binding and artefact handoff
 

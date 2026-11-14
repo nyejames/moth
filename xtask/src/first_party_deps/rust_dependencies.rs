@@ -14,8 +14,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const EXTRACTED_PACKAGES: &[(&str, &[&str])] =
-    &[("moth-lexical", &[]), ("moth-mon", &["moth-lexical"])];
+const EXTRACTED_PACKAGES: &[(&str, &[&str])] = &[
+    ("moth-lexical", &[]),
+    ("moth-mon", &["moth-lexical"]),
+    // The host contract is shared by the compiler and native runtimes, so it may not depend on a
+    // workspace package.
+    ("moth-host", &[]),
+];
 
 /// Packages no extracted library may reach, whether or not they are workspace members.
 const ALWAYS_FORBIDDEN_PACKAGES: &[&str] = &["moth", "xtask"];

@@ -1,15 +1,10 @@
 # Lappet host resource and context API
 
-> **Draft for review.** Nothing here is accepted or implemented. Once Nye
-> confirms it, this page becomes the owner of the Rust-facing resource and
-> context API and the amendments listed at the end move into
-> [host ABI adapter responsibilities](host-abi.md). [The roadmap](../roadmap.md)
-> owns status.
+> The runtime foundation is in the tree. The adapter is not. This page is still
+> the accepted design, and [the roadmap](../roadmap.md) owns delivery status.
 
-This page designs how a Rust embedder gives a Lappet instance opaque host
-resources and per-call host context, and how host functions reach them. It
-fills the two gaps the adapter responsibilities leave as "later runtime
-design".
+This page owns how a Rust embedder gives a Lappet instance opaque host
+resources and per-call host context, and how host functions reach them.
 
 | Owner | Contract |
 |---|---|
@@ -18,7 +13,16 @@ design".
 | [Host ABI adapter responsibilities](host-abi.md) | Token uniqueness, the checks before a Rust reference exists and the fault table |
 | This page | The Rust API over those rules: ownership, lifecycle, access and failure reporting |
 
-Rust names below are illustrative. The contracts are what is proposed.
+Rust names below are illustrative. The contracts are what is accepted.
+
+## Strict first
+
+V1 puts safety and correctness ahead of recovery. Every boundary violation
+quarantines the whole instance, a stale token is never tolerated and no state
+is repaired on the guest's behalf. This catches mistakes early while Moth and
+Lappet stabilise. Long-running applications will later need more ways to
+recover from unexpected state. That is future design with its own approved
+contract, not something an implementation relaxes on its own.
 
 ## Constraints the design starts from
 
@@ -37,9 +41,8 @@ Rust names below are illustrative. The contracts are what is proposed.
 - Both priority environments must work: a long-lived game world that creates
   and retires resources for hours, and a server that isolates requests.
 
-The fourth constraint changes the earlier recommendation. Context can't be
-"borrowed for the call" in the Rust lifetime sense. It is moved in for the call
-and moved back out.
+Because of the fourth constraint, context can't be "borrowed for the call" in
+the Rust lifetime sense. It is moved in for the call and moved back out.
 
 ## Two roles: identity and storage
 
@@ -86,9 +89,10 @@ impl Instance {
 }
 ```
 
-- **Ownership.** The table owns each value. A resource type is any
-  `'static + Send` Rust type registered with the runtime. Registration is what
-  later ties the Rust type to its canonical Moth type.
+- **Ownership.** The table owns each value. A resource type is any `'static`
+  Rust type registered with the runtime that meets the instance kind's thread
+  rule under [Instance kinds and threads](#instance-kinds-and-threads).
+  Registration is what later ties the Rust type to its canonical Moth type.
 - **Typed tokens.** `ResourceToken<T>` is a `Copy` wrapper over the nonzero
   token that remembers `T` at compile time. Embedder code can't pass a
   `Window` token where a `Texture` is expected. The raw `i64` exists only at
@@ -160,10 +164,10 @@ the guest isn't entered, so the instance stays usable. The same mistake made by
 the guest later is a boundary fault.
 
 A guest may keep a token after the embedder closes its entry. Using it then is
-a boundary fault and quarantines the instance. An embedder that retires a
-resource while Moth code may still hold its token should first tell the Moth
-program through an ordinary export, or keep the entry and mark its own value
-retired.
+a boundary fault and quarantines the instance. V1 keeps this strict. An
+embedder that retires a resource while Moth code may still hold its token
+first tells the Moth program through an ordinary export, or keeps the entry and
+marks its own value retired.
 
 ## Host context
 
@@ -212,18 +216,44 @@ impl HostCall<'_> {
 The view offers no insert, no close and no way to call the guest. A returned
 `Fault` ends the call before the function body runs.
 
-## Threads
+## Instance kinds and threads
 
-An instance is `Send` and not `Sync`. A server can move an instance to a worker
-thread, and one thread uses it at a time. Resource values and context values
-are therefore `Send`. State that must stay on one thread, such as a window
-handle, stays in engine storage and is named by a `Send` identity.
+An embedder chooses one of two instance kinds when it creates an instance.
+Neither kind is ever `Sync`: one thread uses an instance at a time.
+
+| Kind | Moves between threads | Resource and context values |
+|---|---|---|
+| Sendable instance, the default | Yes. The instance is `Send` | Must be `Send` |
+| Thread-bound instance | No. The instance is neither `Send` nor `Sync` | Any `'static` value |
+
+- A **sendable instance** suits a server that hands instances to worker
+  threads. Its table and context accept only `Send` values.
+- A **thread-bound instance** suits a game whose state must stay on one
+  thread, such as a window handle or a graphics context. It accepts values
+  that aren't `Send`, and the Rust compiler stops it leaving its thread.
+- The kind is a compile-time property of the instance type, not a runtime
+  flag. A value that isn't `Send` can't be inserted into a sendable instance
+  or passed to it as context. Nothing is checked at run time and no thread
+  identity is recorded.
+- Both kinds share one implementation of the table, the access rules and the
+  fault handling. They differ only in the thread bound on stored values. Don't
+  build two tables.
+- One compiled module serves both kinds. Compiled code and host function
+  implementations are shared and thread-safe either way. Only instance state
+  differs.
+- Tokens come from the same process-wide generator for both kinds, so a token
+  from a thread-bound instance is never live in another instance.
+- A context holder follows the same rule. A sendable instance takes a holder
+  of a `Send` value. A thread-bound instance takes either.
+
+Confirm against the pinned Wasmtime release that a store whose data isn't
+`Send` supports every call Lappet makes on it.
 
 ## Failure summary
 
 | Situation | Outcome | Instance afterwards |
 |---|---|---|
-| Embedder inserts an unregistered type, or the table is full | `ResourceError` | Usable |
+| Embedder inserts an unregistered type, the table is full or the generator is exhausted | `ResourceError` | Usable |
 | Embedder closes or inspects a token that isn't live or has another type | `ResourceError` | Usable |
 | Embedder passes a bad token as an export argument | Error before guest entry | Usable |
 | Guest passes a token that isn't live, has the wrong type or conflicts | Boundary fault | Quarantined, resources recoverable |
@@ -249,34 +279,7 @@ block it.
 - **Several tokens for one entry.** If a later profile lets the host hand out
   an alias, conflict tracking already keys on the entry, not the token.
 - **Nested host calls.** Per-entry borrow state already handles them.
-
-## Proposed amendments to the adapter responsibilities
-
-Accepting this draft changes these statements in
-[host ABI adapter responsibilities](host-abi.md):
-
-1. "Closing a resource marks its entry closed" becomes: closing removes the
-   entry and returns its value.
-2. "Exhausting the generator is a host fault" becomes: it is an error returned
-   from insertion, because no guest call is running.
-3. "The embedder supplies context for each guest entry call" gains: the value
-   is moved into the instance for the call and returned afterwards, on every
-   outcome.
-4. The resource table section gains: quarantine doesn't block closing or
-   draining, and teardown drops in creation order.
-5. The guard rule keeps its wording. It gains a note that V1 mints one token
-   per entry and that a conflict can only arise within one host call.
-
-## Questions for Nye
-
-1. **`Send` everywhere.** Requiring `Send` resources and context lets a server
-   move instances across threads. The cost is that a game can't put a
-   thread-bound value directly in a resource or context. Is that acceptable, or
-   should a thread-bound instance kind exist?
-2. **Stale token severity.** A guest using a closed token quarantines the whole
-   instance, as the ABI already says. For a long-lived game world this makes
-   every close a coordination point with Moth code. Keep it strict for V1?
-3. **Removing closed entries.** This amends an accepted sentence. Confirm the
-   amendment, or keep markers and accept the growth.
-4. **Token arguments checked before entry.** Treating an embedder's bad token
-   as a recoverable error, not a fault, is new. Confirm.
+- **A more forgiving fault model.** Recovering an instance after a stale token
+  or another contained violation needs an approved contract and, for export
+  calls, a reset helper in a later ABI version. V1's strictness is a starting
+  point, not a permanent rule.

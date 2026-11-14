@@ -9,8 +9,7 @@ this plan in the commit that completes it and update
 
 ## Status
 
-- Status: ready, not started. Phases 3 to 5 wait for the Phase 0 design
-  checkpoint.
+- Status: ready, not started. The resource and context API is accepted.
 - Current slice: none.
 - Blockers: the runtime foundation isn't delivered yet.
 - Next action: Phase 0 once the prerequisites exist.
@@ -52,8 +51,8 @@ bindings, ABI and exported calls". These own the contracts:
   `Host context`, `Faults` and `Deferred tests`. It owns Lappet's duties.
 - `docs/developer-docs/project-builders/host-packages.mtf`: `Register opaque
   resources` and `Supply host context explicitly`.
-- `crates/lappet/docs/host-resources.md`: the resource and context API. It is
-  a draft until Phase 0 completes.
+- `crates/lappet/docs/host-resources.md`: the accepted resource and context
+  API, including the strict-first rule and the two instance kinds.
 - `crates/lappet/docs/design.md`: `Instances, resources and scheduling`.
 
 When this plan and one of those documents disagree, the document wins. Report
@@ -102,27 +101,23 @@ evidence. A value changes only with recorded evidence and Nye's confirmation.
 | Staged text per entry | 16 MiB | Far above ordinary text, far below the ABI's 2 GiB length limit | Largest realistic host string in the game and server cases |
 | Staged text live per instance | 64 MiB | Bounds host memory held for one guest | Peak live staged bytes in the fixtures |
 | Live resource entries per instance | 1,048,576 | A long-lived game world may hold many resources | Table memory per entry and lookup cost at this size |
-| Closed entries | Follow the Phase 0 answer. The draft API removes the entry at close and returns its value | A long-lived instance mustn't pay for every resource it ever closed | Table memory per live entry |
+| Closed entries | Removed at close, with the value returned to the embedder | Accepted. A long-lived instance mustn't pay for every resource it ever closed | Table memory per live entry |
 | Token generator | One process-wide `u64` counter starting at 1. Exhaustion is a host fault | Accepted V1 decision | None |
 | Ticket generator | Per-instance `u64` counter starting at 1. Never reused while the instance lives | The ABI requires uniqueness within the instance only | None |
 
-## Phase 0: design checkpoint for the resource and context API
+## Phase 0: activation
 
-The adapter responsibilities leave the Rust host resource API and the
-Rust-facing call API as later runtime design. Decide the first before Phase 3.
-
+- [x] Nye accepted the host resource and context API, and the adapter
+  responsibilities carry its amendments.
 - [ ] Confirm the prerequisites in the current tree and sync with `main`.
-- [ ] Get Nye's answers to the four questions at the end of the draft in
-  `crates/lappet/docs/host-resources.md` and any changes to the draft itself.
-- [ ] Remove the draft banner from that page, apply its accepted amendments to
-  `crates/lappet/docs/host-abi.md` under `Resource table` and `Host context`
-  and remove the roadmap's open decision.
-- [ ] Everything stays `pub(crate)` until the manifest-driven public API
-  exists. Phases 3 to 5 implement the accepted page, not this plan's summary
-  of it.
+- [ ] Re-read the routed documents and report any drift before writing code.
+- [ ] Confirm against the pinned Wasmtime release that a store whose data
+  isn't `Send` supports every call Lappet makes. Stop for Nye if it doesn't.
 
-Exit: the page is accepted and the adapter responsibilities agree with it.
-Phases 1 and 2 don't wait for it.
+Everything stays `pub(crate)` until the manifest-driven public API exists.
+Phases 3 to 5 implement the accepted page, not this plan's summary of it.
+
+Exit: prerequisites confirmed and no drift is unreported.
 
 ## Phase 1: staging table
 
@@ -163,8 +158,6 @@ Exit: fixture-level deferred test 4 passes under both levels.
 
 ## Phase 3: token generator and resource table
 
-Needs the Phase 0 decision.
-
 - [ ] Implement the process-wide token generator. Tokens are nonzero and never
   reused. Exhaustion is a host fault.
 - [ ] Implement the per-instance resource table: insert a value and receive a
@@ -172,7 +165,12 @@ Needs the Phase 0 decision.
   check. Enforce the live-entry limit. Teardown drops every entry.
 - [ ] Unit tests: tokens from two instances never collide, a token from another
   instance isn't live here, zero is invalid, a closed token is stale, a
-  wrong-type use is rejected and teardown drops each value exactly once.
+  wrong-type use is rejected, close returns the value and removes the entry,
+  a faulted instance still closes and drains and teardown drops each value
+  exactly once in creation order.
+- [ ] Implement both instance kinds over the one table. Add compile-fail
+  coverage that a sendable instance rejects a value that isn't `Send` and that
+  a thread-bound instance can't move to another thread.
 
 Review focus: every rejection happens before a Rust reference exists, Rust
 drop timing decides no observable behaviour and the table isn't a general
@@ -201,15 +199,19 @@ Exit: fixture-level deferred test 5 passes under both levels.
 
 ## Phase 5: host context and export call scope
 
-- [ ] Implement the per-call context slot. The embedder supplies context for
-  each guest entry call. A missing or wrong-type context is a host fault and
+- [ ] Implement the context holder and the per-call slot. The value moves in
+  for the call and returns to the holder on every outcome, including a fault
+  and a caught host panic. A missing or wrong-type context is a host fault and
   the host function isn't called. Mutable context is exclusive for the call.
 - [ ] Implement the host side of the call-scope protocol against a fixture
   that exports hand-written `moth_abi_v1_scope_open`, `scope_reserve` and
   `scope_close`: open, reserve, call once, close. When any step traps, the
   whole call fails, no further guest call runs and scope close is skipped.
+- [ ] Check each token passed as an export argument before guest entry. A bad
+  token is an error, the guest isn't entered and the instance stays usable.
 - [ ] Tests: one instance serves two successive entry calls with different
-  context, a missing context, a wrong-type context, a trapping scope helper
+  context, the context comes back after a fault, a bad token argument leaves
+  the instance usable, a missing context, a wrong-type context, a trapping scope helper
   and a trapping export inside an open scope.
 - [ ] Extend the physical import tests: a missing, extra or mismatched
   physical import fails before guest start under both levels.

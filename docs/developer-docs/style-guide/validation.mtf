@@ -559,11 +559,11 @@ closed rather than being treated as clean.
 
 The same command reads `cargo metadata --no-deps --format-version 1` for the
 Rust workspace. Across normal, development and build dependencies,
-`moth-lexical` may depend on no first-party workspace package and `moth-mon`
-may depend only on `moth-lexical`. Neither may depend on `moth` or `xtask`, even
-when that package is outside workspace membership. Renaming a
-dependency does not change its package identity or exempt its edge. Missing
-configured packages and failed metadata queries fail closed. The console and
+`moth-lexical` and `moth-host` may depend on no first-party workspace package
+and `moth-mon` may depend only on `moth-lexical`. None of them may depend on
+`moth` or `xtask`, even when that package is outside workspace membership.
+Renaming a dependency does not change its package identity or exempt its edge.
+Missing configured packages and failed metadata queries fail closed. The console and
 report list the inspected Rust manifests alongside the JavaScript roots.
 
 The same dependency-kind and canonical-name checks keep `moth` independent of

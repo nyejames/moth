@@ -270,6 +270,27 @@ pub const FEATURE_LANES: &[FeatureLane] = &[
         owns: "standalone codec invariants, public integration tests and doctests",
     },
     FeatureLane {
+        name: "moth-host",
+        package: "moth-host",
+        features: &[],
+        kind: FeatureLaneKind::Standard,
+        owns: "the descriptor vocabulary's unit tests",
+    },
+    FeatureLane {
+        name: "lappet",
+        package: "lappet",
+        features: &[],
+        kind: FeatureLaneKind::Standard,
+        owns: "the dependency-free Lappet build, proving the crate compiles without Wasmtime",
+    },
+    FeatureLane {
+        name: "lappet-runtime",
+        package: "lappet",
+        features: &["runtime"],
+        kind: FeatureLaneKind::Standard,
+        owns: "native Wasm execution mechanics over core Wasm fixtures",
+    },
+    FeatureLane {
         name: "xtask",
         package: "xtask",
         features: &[],
@@ -349,10 +370,17 @@ const PACKAGE_SOURCES: &[(&str, &str, &[&str])] = &[
         &["crates/moth-mon/src", "crates/moth-mon/tests"],
     ),
     (
+        "moth-host",
+        "crates/moth-host/Cargo.toml",
+        // The descriptor tests live under `src/tests`, so this crate owns no separate test root.
+        &["crates/moth-host/src"],
+    ),
+    (
         "moth-cli",
         "crates/moth-cli/Cargo.toml",
         &["crates/moth-cli/src", "crates/moth-cli/tests"],
     ),
+    ("lappet", "crates/lappet/Cargo.toml", &["crates/lappet/src"]),
     ("xtask", "xtask/Cargo.toml", &["xtask/src"]),
 ];
 

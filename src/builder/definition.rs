@@ -6,13 +6,14 @@
 //! `finish` leaves no partially registered definition behind.
 
 use super::Error;
+use super::host_conversion;
 use crate::build_system::output::BuilderIdentity;
 use crate::builder_surface::definition::{
     BuilderSurfaceValidationError, TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
 };
 use crate::builder_surface::{BuilderSurface, PackageOrigin, SourceFileKind};
 use crate::compiler_frontend::external_packages::ExternalRegistrationError;
-use crate::host::HostFunction;
+use moth_host::HostFunction;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -168,7 +169,7 @@ impl BuilderDefinitionDraft {
                 .register_package(&package.path, PackageOrigin::Builder)
                 .map_err(registration_error_to_builder_error)?;
             for function in &package.functions {
-                let spec = function.to_spec().map_err(|reason| {
+                let spec = host_conversion::external_function_spec(function).map_err(|reason| {
                     Error::invalid_definition(format!(
                         "Host function '{}' in host package '{}' {reason}.",
                         function.name(),
