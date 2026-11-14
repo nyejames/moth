@@ -277,9 +277,9 @@ init_docs_sidebar()!
         [data:
             [: HTML Builder package [$html:<code>@html</code>]]
             [: Partial]
-            [: Targeted source-backed Builder package registration plus docs-site use across templates, style helpers, tables, code blocks and canvas wrappers.]
+            [: Targeted source-backed Builder package registration plus docs-site use across templates, style helpers, tables, code blocks and the canvas markup helper.]
             [: HTML builder]
-            [: [$html:<code>@html</code>] provides compile-time HTML helpers and source-owned wrappers over lower-level builder bindings such as [$html:<code>@web/canvas</code>]. It should grow only where helpers are broadly useful to HTML projects rather than becoming a general web framework.]
+            [: [$html:<code>@html</code>] provides compile-time HTML markup helpers, including the [$html:<code>canvas</code>] element helper. Runtime canvas types and drawing calls belong to [$html:<code>@web/canvas</code>], which a browser-capable HTML builder provides. It should grow only where helpers are broadly useful to HTML projects rather than becoming a general web framework.]
         ]
 
         [data:

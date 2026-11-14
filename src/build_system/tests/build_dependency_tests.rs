@@ -1495,7 +1495,7 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
 }
 
 #[test]
-fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_runtime_artifacts() {
+fn build_html_project_unused_html_canvas_markup_does_not_emit_runtime_artifacts() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
@@ -1553,7 +1553,7 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
                 |resource| portable_path_text(&resource.relative_output_path)
                     .starts_with("_moth/js/canvas.js")
             ),
-        "an unreachable canvas helper should not defer a canvas asset output"
+        "unused canvas markup should not defer a canvas asset output"
     );
 
     let html = html_text(outputs.at("index.html"));
@@ -1703,7 +1703,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
 }
 
 #[test]
-fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
+fn build_html_project_web_canvas_free_function_import_emits_builtin_js_asset_and_glue() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();

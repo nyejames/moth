@@ -744,7 +744,7 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
 }
 
 #[test]
-fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
+fn entry_runtime_metadata_ignores_unused_web_canvas_binding() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
@@ -756,7 +756,7 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
     .expect("should write config");
     fs::write(
         dir.join("@entry.moth"),
-        "@html canvas\npage_canvas_id #= canvas\nvalue = 1\n",
+        "@html canvas\ncanvas_markup #= canvas\nvalue = 1\n",
     )
     .expect("should write page");
 
@@ -812,7 +812,7 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
             .external_imports
             .iter()
             .all(|import| import.package_id != canvas_package_id),
-        "entry runtime metadata should exclude unreachable @web/canvas wrappers"
+        "entry runtime metadata should exclude the unused @web/canvas binding for pure @html markup"
     );
 }
 

@@ -3,7 +3,7 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["unused_html_canvas_constant", "unused_canvas_id"]
+rendered_output_contains = ["runtime_template_constant", "runtime_template_value"]
 
 [backends.html_wasm]
 mode = "success"

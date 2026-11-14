@@ -16,14 +16,12 @@ This README is the package's living development document. It holds design direct
 
 - `canvas.js` is the whole package: seven opaque handle types and free functions covering element management, context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access.
 - `../mod.rs` registers it as a Builder-origin binding package. Reachable calls emit `canvas.js`, generated glue and the `@moth/runtime` import map entry.
-- `packages/html/@mod.moth` wraps it in the source-owned `Canvas` struct with receiver methods. Binding-backed packages can't expose receivers, so method-style ergonomics live there.
+- `packages/html/@mod.moth` owns only the compile-time `<canvas>` markup helper. Runtime canvas use goes through this package's free functions.
 - The package is HTML-JS only. The Wasm backend rejects reachable calls before lowering.
 
 ## Role and direction
 
 Canvas is deliberately allowed broader growth than most first-party packages. Visual and animation-heavy programs are useful compiler, runtime and language stress tests. Prefer coherent drawing, state, path, transform, text, image and pixel workflows over a mechanical copy of the Canvas API.
-
-Grow `@html` wrappers only where a source-owned method or helper composition clearly improves Moth usage.
 
 ### Relationship to `@web/graphics`
 
