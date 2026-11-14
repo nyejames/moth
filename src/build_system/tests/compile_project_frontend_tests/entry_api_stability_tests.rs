@@ -2,11 +2,15 @@ use super::*;
 use crate::build_system::create_project_modules::compiled_boundary::ProjectFrontendCompilation;
 use crate::compiler_frontend::ast::generic_functions::reuse_probe;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
+use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::hir::reachability::collect_reachability_from_function_link_facts;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::utils::{collect_reachable_blocks, terminator_targets};
 use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
-use crate::compiler_frontend::public_interface::PublicSemanticInterface;
+use crate::compiler_frontend::public_interface::{
+    PublicDeclarationSemantics, PublicSemanticInterface,
+};
+use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceClass;
 
 const BASE_HELPER: &str = "compute |value I32| -> I32:\n    return value\n;\n";
@@ -53,6 +57,36 @@ fn normal_interface_for<'a>(
                 .ends_with(suffix)
         })
         .unwrap_or_else(|| panic!("expected a normal facade ending with {suffix:?}"))
+}
+
+/// Returns the fully folded text of an exported string constant in a normal interface.
+///
+/// WHY: a `.mtf` file value and a qualified `content` reference must publish the same concrete
+///      constant text, not merely compile.
+fn exported_constant_text(interface: &PublicSemanticInterface, name: &str) -> String {
+    let declaration = interface
+        .declarations
+        .iter()
+        .find(|declaration| {
+            matches!(
+                &declaration.origin,
+                OriginDeclarationId::Constant(origin) if origin.defining_name() == name
+            )
+        })
+        .unwrap_or_else(|| panic!("the interface must export constant `{name}`"));
+    let PublicDeclarationSemantics::Constant(constant) = &declaration.semantics else {
+        panic!("`{name}` must retain constant semantics");
+    };
+    let PublicFoldedValue::String(value) = &constant.folded_value else {
+        panic!(
+            "`{name}` must fold to a string, got {:?}",
+            constant.folded_value
+        );
+    };
+    value
+        .clone()
+        .into_text()
+        .unwrap_or_else(|| panic!("`{name}` must be fully textual for this fixture"))
 }
 
 /// Asserts the entry's complete folded output without accepting extra adjacent values.
@@ -347,6 +381,43 @@ fn qualified_private_helper_edit_changes_only_the_dependent_folded_content() {
                 .expect("the fixture publishes its root facade")
         ),
         "the root facade exports no selected fact and must keep its fingerprint"
+    );
+}
+
+/// WHAT: under a builder that selects no optional source kinds, a `.mtf` file value and the
+///       qualified `content` reference publish the same exact folded text, including a nested
+///       `.mtf` body and markup from a bare `@html` prelude name.
+/// WHY:  `.mtf` support is compiler-owned, and both reference forms must select the one synthetic
+///       constant. A compile-only assertion would accept a value that folded to empty or wrong
+///       text.
+#[test]
+fn compiler_supported_mtf_file_value_and_qualified_content_fold_identically() {
+    let compiled = compile_fixture(&[
+        (
+            "src/@entry.moth",
+            "@content file_value, qualified\n[: [file_value] [qualified] ]\n",
+        ),
+        (
+            "src/content/@mod.moth",
+            "$export\nfile_value #= @intro.mtf\n$export\nqualified #= @intro content\n",
+        ),
+        (
+            "src/content/intro.mtf",
+            "intro body [: [p: nested [@nested.mtf] ] ]\n",
+        ),
+        ("src/content/nested.mtf", "nested body\n"),
+    ]);
+
+    let interface = normal_interface_for(&compiled, "content");
+    let file_value = exported_constant_text(interface, "file_value");
+    let qualified = exported_constant_text(interface, "qualified");
+    assert_eq!(
+        file_value, qualified,
+        "an explicit `.mtf` file value and `@intro content` must select the same synthetic constant"
+    );
+    assert_eq!(
+        file_value, "<p>intro body <p style=\"\"><p> nested <p>nested body</p> </p></p> </p>",
+        "the folded content must retain the outer body, the nested template body and `@html` markup"
     );
 }
 

@@ -1,4 +1,4 @@
-@styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
+@docs_styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
 
 [$in title:Moth Patterns]
 [$in description:How Moth's language features and packages fit together in larger projects.]

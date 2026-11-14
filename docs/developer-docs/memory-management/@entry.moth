@@ -1,4 +1,4 @@
-@styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
 
 [$in title:["Memory management"]]
 [$in description:["Reference semantics, borrow validation, lifetime topology, declared regions and collector-free backend lowering."]]

@@ -1,5 +1,5 @@
 -- Resources referenced only by named builder contributions stay in the build output.
-[$in stylesheets: [@styles/docs.css]]
+[$in stylesheets: [@site_styles/docs.css]]
 [$in favicon:[@static/dot.svg]]
 [$in head:<link rel="preload" href="[@static/preload.bin]">]
 

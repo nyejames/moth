@@ -47,7 +47,7 @@ pub(crate) struct ProjectPathResolver {
     source_package_roots: PreparedSourcePackageRoots,
     /// Module roots prepared by Stage 0. Resolver construction never discovers them.
     module_roots: ModuleRootTable,
-    /// Builder-supported source file kinds available for this project.
+    /// Fixed compiler source kinds and optional builder registrations for this project.
     source_file_kinds: SourceFileKindRegistry,
 }
 
@@ -190,7 +190,7 @@ impl ProjectPathResolver {
         self.module_roots.root_directories()
     }
 
-    /// WHAT: returns the builder-supported source file kinds for this project.
+    /// WHAT: returns the source file kinds supported for this project.
     /// WHY: Stage 0 and dependency resolution need to know which non-`.moth` extensions are valid.
     pub(crate) fn source_file_kinds(&self) -> &SourceFileKindRegistry {
         &self.source_file_kinds

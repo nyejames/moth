@@ -22,7 +22,7 @@ use crate::build_system::create_project_modules::source_discovery_error::file_pr
 use crate::build_system::create_project_modules::source_loading::{
     SourceReadError, registered_source_read_error, retained_source_error,
 };
-use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
+use crate::builder_surface::{OptionalSourceKind, SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
@@ -121,7 +121,7 @@ pub(super) fn prepare_file_value_bundle(
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let source_file_kinds = recognised_source_file_kinds();
+    let source_file_kinds = content_source_file_kinds();
     let path_resolver = ProjectPathResolver::new_with_module_roots(
         module_root.clone(),
         module_root.clone(),
@@ -937,7 +937,7 @@ fn collect_content_candidate(
                 let Some(kind) = source_file_kinds.kind_for_extension(extension) else {
                     return Err(InfrastructureFailure::internal(
                         CompilerStage::ProjectBuildAssembly,
-                        "resolved supported content target has no registered source kind",
+                        "resolved supported content target has no supported source kind",
                     ));
                 };
                 candidates.insert(canonical.clone(), kind);
@@ -1079,11 +1079,11 @@ fn prepare_one_source(
     ))
 }
 
-fn recognised_source_file_kinds() -> SourceFileKindRegistry {
+/// The direct template bundle resolves sibling content by extension. `.moth` and `.mtf` are
+/// always supported, so only the optional plain Markdown kind needs selection here.
+fn content_source_file_kinds() -> SourceFileKindRegistry {
     let mut registry = SourceFileKindRegistry::new();
-    for supported in SourceFileKind::recognized_kinds() {
-        registry.register(supported.extension, supported.kind);
-    }
+    registry.register(OptionalSourceKind::PlainMarkdown);
     registry
 }
 

@@ -1,5 +1,4 @@
-@html center
-@styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
+@docs_styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
 
 [$in title:["Core packages"]]
 [$in description:["Overview of Moth Core packages and their current HTML/JS support."]]
@@ -11,12 +10,20 @@ init_docs_sidebar()!
 [section, $md:
     # Core packages
 
-    Core packages provide typed capabilities owned by the compiler and selected
-    by the active builder. They use the same dependency syntax as source packages,
-    but binding-backed implementations don't become files in your project.
+    Core packages provide typed capabilities owned by the compiler. Binding-backed
+    Core packages are selected by the active builder. They use the same dependency
+    syntax as source packages, but binding-backed implementations don't become
+    files in your project.
 
-    Most Core packages require explicit dependency clauses. Unlike large standard-library
-    preludes, Moth reserves only a small implicit namespace surface such as `io`.
+    `@html` and `@styles` are different. They are mandatory Core/MothSource
+    packages that the common builder surface registers under every builder,
+    including custom SDK builders. Builder configuration never selects them, and
+    `.mtf` templates always see their compile-time constants in the fixed
+    prelude.
+
+    Most other Core packages require explicit dependency clauses. Unlike large
+    standard-library preludes, Moth reserves only a small implicit namespace
+    surface such as `io`.
 
     Official environments target the complete Core catalogue with documented
     host-capability gates. Custom builders may supply only the implementations
@@ -29,6 +36,8 @@ init_docs_sidebar()!
 
     ## Package pages
 
+    - @./html/ (@html)
+    - @./styles/ (@styles)
     - @./prelude (Prelude policy)
     - @./io (Core IO)
     - @./collections (Core collections)

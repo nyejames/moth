@@ -8,10 +8,8 @@
 use super::Error;
 use super::host_conversion;
 use crate::build_system::output::BuilderIdentity;
-use crate::builder_surface::definition::{
-    BuilderSurfaceValidationError, TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
-};
-use crate::builder_surface::{BuilderSurface, PackageOrigin, SourceFileKind};
+use crate::builder_surface::definition::BuilderSurfaceValidationError;
+use crate::builder_surface::{BuilderSurface, OptionalSourceKind, PackageOrigin};
 use crate::compiler_frontend::external_packages::ExternalRegistrationError;
 use moth_host::HostFunction;
 use std::fmt;
@@ -87,7 +85,7 @@ pub struct BuilderDefinitionDraft {
     identity: String,
     source_packages: Vec<SourcePackage>,
     host_packages: Vec<HostPackage>,
-    source_kinds: Vec<SourceFileKind>,
+    source_kinds: Vec<OptionalSourceKind>,
 }
 
 impl BuilderDefinitionDraft {
@@ -105,7 +103,7 @@ impl BuilderDefinitionDraft {
 
     /// Accepts plain `.md` Markdown content files.
     pub fn markdown(mut self) -> Self {
-        self.source_kinds.push(SourceFileKind::PlainMarkdown);
+        self.source_kinds.push(OptionalSourceKind::PlainMarkdown);
         self
     }
 
@@ -118,14 +116,6 @@ impl BuilderDefinitionDraft {
 
         for package in &self.source_packages {
             let prefix = package_path_without_introducer(&package.path)?;
-            let root = prefix.split('/').next().unwrap_or_default();
-            if root.eq_ignore_ascii_case(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX) {
-                return Err(Error::invalid_definition(format!(
-                    "Source package '@{}' is reserved for the standard HTML builder package set; \
-                     an SDK builder cannot register the official template prelude package.",
-                    TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX
-                )));
-            }
             let root = package.root.as_ref().ok_or_else(|| {
                 Error::invalid_definition(format!(
                     "Source package '{}' needs an installed directory from `from_dir`.",
@@ -184,7 +174,7 @@ impl BuilderDefinitionDraft {
         }
 
         for kind in self.source_kinds {
-            surface.source_file_kinds.register(kind.extension(), kind);
+            surface.source_file_kinds.register(kind);
         }
 
         match surface.validate() {

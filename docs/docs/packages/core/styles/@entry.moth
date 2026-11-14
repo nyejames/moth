@@ -1,0 +1,43 @@
+@styles-helpers content as styles_advanced
+@styles-helpers-basic content as styles_basic
+@docs_styles navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+    sidebar,
+    init_docs_sidebar
+
+[$in title:["@styles"]]
+[$in description:["Inline style fragments from the universal Core source package."]]
+[$in head:[language_theme_head]]
+
+[navbar]
+[sidebar]
+init_docs_sidebar()!
+[section, $md:
+    # @styles
+
+    `@styles` provides inline style fragments for the `style` slots exposed by
+    `@html`. It is a mandatory Core/MothSource package, so every builder gets the
+    same six constants and the same `.mtf` prelude contribution.
+]
+
+[section:
+    [doc_level:
+        [$in key:styles-helpers]
+        [$in title:Style helpers]
+        [$in advanced:[styles_advanced]]
+
+        [styles_basic]
+    ]
+]
+
+[section:
+    [doc_pager:
+        [$in previous_path:../html/]
+        [$in previous_title:@html]
+        [$in next_path:../prelude/]
+        [$in next_title:Prelude policy]
+    ]
+]

@@ -1787,8 +1787,8 @@ fn generated_sidecar_warnings_flow_through_success_results() {
         .expect("generated sidecar boundaries should assemble");
     assert_eq!(
         compilation.module_count(),
-        4,
-        "success-only compilation should retain both base modules and generated sidecars"
+        4 + crate::builder_surface::definition::CORE_SOURCE_PACKAGE_PREFIXES.len(),
+        "success-only compilation should retain both base modules, generated sidecars and the Core source facades"
     );
     drop(compilation);
     let compilation_result: CompilationResult<()> =

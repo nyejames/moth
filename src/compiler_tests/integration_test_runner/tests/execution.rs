@@ -484,7 +484,8 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
         ("selected page.moth", false, true),
     ] {
         let mut fixture = EntryFixture::new(
-            "@html p, center, canvas\n\
+            "@html p, canvas\n\
+             @styles center\n\
              @wrappers draw\n\
              [p, center: source-package-wrapper]\n\
              [canvas:\n\
@@ -499,19 +500,20 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
         }
         fs::write(
             fixture.directory.path().join("src/wrappers.moth"),
-            "@html Canvas, get_canvas\n\
+            "@web/canvas get_canvas, context_2d, Canvas2d, set_fill_style, fill_rect\n\
              @labels marker\n\
-             paint |drawing ~Canvas|:\n\
-                 ~drawing.set_fill_style(\"#202020\")\n\
-                 ~drawing.fill_rect(0.0, 0.0, 10.0, 10.0)\n\
+             paint |drawing ~Canvas2d|:\n\
+                 set_fill_style(~drawing, \"#202020\")\n\
+                 fill_rect(~drawing, 0.0, 0.0, 10.0, 10.0)\n\
              ;\n\
              draw |id String| -> String, Error!:\n\
-                 drawing ~= get_canvas(id)!\n\
+                 element = get_canvas(id)!\n\
+                 drawing ~= context_2d(element)!\n\
                  paint(~drawing)\n\
                  return marker\n\
              ;\n",
         )
-        .expect("should write Canvas wrapper module");
+        .expect("should write canvas helper module");
         fs::write(
             fixture.directory.path().join("src/labels.moth"),
             "marker #String = \"remapped-label\"\n",
@@ -607,10 +609,6 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
         assert!(html.contains("text-align: center"));
         assert!(html.contains("<canvas id=\"game_canvas\""));
         assert!(html.contains("<script type=\"importmap\">"));
-        assert!(
-            html.contains("__moth_src_fn_"),
-            "the source-owned Canvas wrapper functions must be linked into the page bundle"
-        );
         let canvas_glue_is_emitted = built.project.output_files.iter().any(|output| {
             if let FileKind::Js(script) = output.file_kind() {
                 script.contains("getCanvas as __moth_external_fn")
@@ -623,7 +621,7 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
         });
         assert!(
             canvas_glue_is_emitted,
-            "the reachable source-owned Canvas methods must select their browser runtime wrappers"
+            "the reachable canvas helper functions must select their browser runtime bindings"
         );
     }
 }

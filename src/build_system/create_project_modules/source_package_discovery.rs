@@ -7,6 +7,7 @@
 //! roots, public surfaces or sibling collisions. Canonical project-local packages are structural
 //! support roots owned by `SourceTreeIndex`; this module does not interpret legacy config folders.
 
+use crate::builder_surface::definition::damaged_package_set_report;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{ProvidedSourceRoot, SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -100,13 +101,17 @@ pub(crate) fn build_source_package_boundary_indexes(
     for package in source_packages.iter() {
         let ProvidedSourceRoot::Filesystem(path) = &package.root;
         // Canonicalize each registered filesystem root before traversal so the package index
-        // never proceeds against a path whose canonicalization failed. This preserves the
-        // existing file-error diagnostic for unresolvable package roots.
+        // never proceeds against a path whose canonicalization failed.
         let canonical_root = fs::canonicalize(path).map_err(|error| {
+            let mut reason = format!("Failed to canonicalize source-backed package root: {error}");
+            if let Some(report) = damaged_package_set_report(path) {
+                reason.push_str(". ");
+                reason.push_str(&report);
+            }
             InfrastructureFailure::filesystem(
                 crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 path,
-                format!("Failed to canonicalize source-backed package root: {error}"),
+                reason,
             )
         })?;
 

@@ -1,6 +1,6 @@
 @boracle-reference-solver content as reference_content
 @boracle-operational-oracle content as operational_content
-@styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Boracle"]]
 [$in description:["Moth's permanent slow reference borrow solver, its borrow-analysis laboratory and the operational contract for its bounded oracle."]]

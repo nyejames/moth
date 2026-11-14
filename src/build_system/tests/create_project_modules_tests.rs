@@ -1,5 +1,5 @@
 use super::compiled_boundary::{
-    CompiledGraphBoundary, CompiledSourcePackage, CompletedSourcePackageRegistry,
+    CompiledGraphBoundary, CompiledSourcePackage, CompletedSourcePackageRegistry, DiagnosedModule,
 };
 use super::file_reference_resolution::SingleFileReferenceOutcome;
 use super::generated_store::BoundaryGeneratedFunctionStore;
@@ -1753,6 +1753,60 @@ pub(super) fn compiled_package(prefix: &str) -> CompiledSourcePackage {
             modules,
             generated: BoundaryGeneratedFunctionStore::default(),
             diagnosed: Vec::new(),
+            blocked: Vec::new(),
+            scheduling_cutoff: None,
+        },
+    }
+}
+
+/// A completed package whose facade module retained one user diagnostic.
+///
+/// WHAT: publishes the diagnosed store slot and the matching retained diagnostic record so the
+///       package boundary satisfies its outcome bijection.
+/// WHY: readiness tests need a failed provider package without compiling real package sources.
+pub(super) fn diagnosed_package(prefix: &str) -> CompiledSourcePackage {
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+    use crate::compiler_frontend::semantic_identity::{
+        ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+    };
+
+    let package_identity =
+        StablePackageIdentity::source_package(PackageOrigin::ProjectLocal, prefix);
+    let origin = StableModuleOriginIdentity::from_portable_path(
+        package_identity.clone(),
+        format!("{prefix}/@mod.moth"),
+        ModuleRootRole::Normal,
+    );
+    let root_path = PathBuf::from(format!("{prefix}/@mod.moth"));
+    let graph = ProjectModuleGraph::from_standalone_roots(vec![(origin, root_path)]);
+    let root_module_id = ModuleId::from_index(0);
+
+    let mut modules = ModuleArtifactStore::new(1);
+    modules
+        .mark_diagnosed(root_module_id)
+        .expect("test package root should hold the diagnosed slot");
+    let mut string_table = StringTable::new();
+    let name = string_table.intern("missing_name");
+    let diagnostics = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(names_declarations::unknown_value_name(name, None)),
+        string_table,
+        None,
+        None,
+    )
+    .classify_premerge()
+    .expect("the fixture diagnostic should classify");
+
+    CompiledSourcePackage {
+        package_identity,
+        root_module_id,
+        boundary: CompiledGraphBoundary {
+            structure: graph,
+            modules,
+            generated: BoundaryGeneratedFunctionStore::default(),
+            diagnosed: vec![DiagnosedModule {
+                module_id: root_module_id,
+                diagnostics,
+            }],
             blocked: Vec::new(),
             scheduling_cutoff: None,
         },

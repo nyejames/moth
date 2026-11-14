@@ -1,6 +1,6 @@
 @time content as time_advanced
 @time-basic content as time_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

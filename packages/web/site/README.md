@@ -2,7 +2,7 @@
 
 `@web/site` is the HTML builder's source-backed package for static site URLs. Its values are compile-time strings that keep the structural site root until the builder renders the consuming page. It knows nothing about the browser or the page that imports it.
 
-`@web/page` shares the `@web` prefix but has a different backing. It is a binding-backed package for live browser state in `src/projects/html_project/binding_packages/web/page/`.
+`@web/page` shares the `@web` prefix but has a different backing. It is a binding-backed package for live browser state whose asset lives in `packages/web/page/`.
 
 | Owner | Holds |
 |---|---|

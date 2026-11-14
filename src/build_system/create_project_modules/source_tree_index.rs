@@ -16,6 +16,7 @@
 //! through duplicated per-module records.
 use super::module_identity::{ModuleId, ModuleIdentityRecord, ModuleIdentityTable};
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
+use crate::builder_surface::definition::damaged_package_set_report;
 use crate::builder_surface::external_import_providers::provider::ExternalFileExtension;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
@@ -403,12 +404,12 @@ impl SourceRecord {
         &self.classification
     }
 
-    /// Whether this source's extension is registered in the project's `SourceFileKindRegistry`.
+    /// Whether this source's extension is supported by the active builder.
     ///
-    /// `Moth` is always supported. Other recognized kinds (`MothTemplate`, `PlainMarkdown`) are
-    /// supported only when the builder registered the extension. The namespace checks this flag
-    /// to produce `UnsupportedSourceFileKind` diagnostics for recognized but unsupported dependencies
-    /// without a filesystem probe.
+    /// `.moth` and `.mtf` are compiler-supported under every builder. A recognized optional kind
+    /// (plain Markdown) is supported only when the builder selected it. The namespace checks this
+    /// flag to produce `UnsupportedSourceFileKind` diagnostics for recognized but unsupported
+    /// dependencies without a filesystem probe.
     pub(crate) fn supported(&self) -> bool {
         self.supported
     }
@@ -793,7 +794,9 @@ impl SourceTreeIndex {
                 let is_module_root = file_name_is_module_root_file(file_name);
                 let source_kind = recognized_source_kind(file_name);
                 let source_supported = source_kind.is_some_and(|kind| {
-                    source_file_kinds.supports_recognized_extension(kind.extension())
+                    source_file_kinds
+                        .kind_for_extension(kind.extension())
+                        .is_some()
                 });
                 let provider_extension = source_kind
                     .is_none()
@@ -1572,43 +1575,28 @@ fn aliased_root_files_error(
 /// A package may carry any combination of normal, support and entry roots, but it needs at
 /// least one API facade root. A support root beside a normal root is the external package
 /// surface; the normal root remains the internal interface. Missing roots and aliased roots keep
-/// package-specific typed diagnostics.
+/// package-specific typed diagnostics, except in a compiler-shipped package, where a missing
+/// facade means the installed package set is incomplete.
 fn classify_package_root_directory(
     directory: &Path,
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
     package_prefix: &str,
     string_table: &mut StringTable,
 ) -> Result<ClassifiedDirectoryRoots, PreparedFailure> {
-    if directory_roots.is_empty() {
-        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-        let diagnostic =
-            project_structure_diagnostic(InvalidConfigReason::SourcePackageMissingRoot {
-                prefix: diagnostic_strings.intern(package_prefix),
-                root: path_id(directory, &mut diagnostic_strings),
-            });
-        let table = string_table.take_for_handoff();
-        return Err(PreparedFailure::Diagnosed(
-            PreparedDiagnosticBatch::capture_from_bag(
-                DiagnosticBag::from(diagnostic),
-                table,
-                None,
-                None,
-            ),
-        ));
-    }
-
-    let normal_count = directory_roots
-        .iter()
-        .filter(|root| root.role == ModuleRootRole::Normal)
-        .count();
-    let support_count = directory_roots
-        .iter()
-        .filter(|root| root.role == ModuleRootRole::Support)
-        .count();
-
     // A registered source package is importable, so it needs at least one API facade root.
     // An entry-only package root has no public surface and cannot satisfy the package contract.
-    if normal_count == 0 && support_count == 0 {
+    let has_facade = directory_roots
+        .iter()
+        .any(|root| matches!(root.role, ModuleRootRole::Normal | ModuleRootRole::Support));
+    if !has_facade {
+        if let Some(report) = damaged_package_set_report(directory) {
+            return Err(InfrastructureFailure::filesystem(
+                CompilerStage::ProjectBuildAssembly,
+                directory,
+                format!("Source package @{package_prefix} has no API facade root. {report}"),
+            )
+            .into());
+        }
         let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
         let diagnostic =
             project_structure_diagnostic(InvalidConfigReason::SourcePackageMissingRoot {
@@ -1686,9 +1674,9 @@ fn source_stem_from_file_name(file_name: &str) -> Option<&str> {
 ///
 /// Returns `Some(kind)` for every recognized extension (`moth`, `mtf`, `md`) regardless of
 /// whether the project's `SourceFileKindRegistry` supports it. The discovery pass computes
-/// `supported` separately from `supports_recognized_extension` so the index can surface
-/// recognized-but-unsupported files for structured dependency diagnostics without a filesystem
-/// probe during dependency resolution.
+/// `supported` by asking the registry for the extension's kind, so the index can surface
+/// recognized-but-unsupported optional files for structured dependency diagnostics without a
+/// filesystem probe during dependency resolution.
 fn recognized_source_kind(file_name: &str) -> Option<SourceFileKind> {
     let extension = Path::new(file_name)
         .extension()

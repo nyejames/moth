@@ -1,19 +1,20 @@
-//! Builder-declared source file kind registry.
+//! Compiler-owned source file kind recognition and builder-selected optional kinds.
 //!
-//! WHAT: tracks which non-standard source file kinds the active builder supports.
-//! WHY: the compiler owns the canonical language source extension as the built-in source kind;
-//!      builders opt into additional file kinds such as template content and plain Markdown
-//!      through `BuilderSurface` so support is builder-controlled.
+//! WHAT: classifies source extensions by kind and tracks which optional kinds the active builder
+//! supports.
+//! WHY: extension recognition belongs to the compiler so `.moth` and `.mtf` behave identically
+//!      under every builder. Only kinds whose availability is a builder decision are registrable.
 
 use crate::projects::settings::{
     CONTENT_EXTENSION, CONTENT_SUFFIX, LANGUAGE_SOURCE_EXTENSION, LANGUAGE_SOURCE_SUFFIX,
     MARKDOWN_EXTENSION, MARKDOWN_SUFFIX,
 };
-use std::collections::HashMap;
+use std::collections::BTreeSet;
 
 /// Identifies a category of source file that the compiler can ingest.
 ///
-/// WHAT: distinguishes built-in language source from builder-supported extensions.
+/// WHAT: distinguishes compiler-supported language and template source from builder-selected
+///       content kinds.
 /// WHY: Stage 0 discovery and later frontend stages branch on source kind to apply the
 ///      correct tokenization, header preparation, and AST lowering rules.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -28,7 +29,18 @@ pub enum SourceFileKind {
     PlainMarkdown,
 }
 
-/// A single registered source file kind mapping.
+/// A source kind whose support is the active builder's decision.
+///
+/// WHY: `.moth` and `.mtf` are compiler-supported under every builder, so a builder cannot
+///      disable, reassign or substitute them. Limiting registration to this type keeps that
+///      policy in the type system instead of a rejected runtime registration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum OptionalSourceKind {
+    /// Plain Markdown content files, bound as a generated `content #String` constant.
+    PlainMarkdown,
+}
+
+/// A single compiler-recognized source file kind mapping.
 ///
 /// WHAT: pairs a file extension with its source kind for lookup.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,68 +49,36 @@ pub struct SupportedSourceFileKind {
     pub kind: SourceFileKind,
 }
 
-/// Registry of builder-supported source file kinds.
+/// Registry of builder-selected optional source kinds.
 ///
-/// WHAT: collects extensions the active builder wants the compiler to recognize.
-/// WHY: keeps source-kind support declarative and builder-local instead of hard-coding
-///      extensions in Stage 0 or dependency resolution.
-///
-/// `.moth` is always implicitly supported and does not need registration.
+/// WHAT: collects the optional kinds the active builder supports.
+/// WHY: source-kind support is declarative and builder-local, but only for kinds the compiler
+///      does not already support everywhere.
 #[derive(Clone, Debug, Default)]
 pub struct SourceFileKindRegistry {
-    kinds: HashMap<&'static str, SourceFileKind>,
+    optional_kinds: BTreeSet<OptionalSourceKind>,
 }
 
 impl SourceFileKindRegistry {
-    /// Creates an empty registry.
+    /// Creates an empty registry. Compiler-supported kinds still resolve and need no entry.
     pub fn new() -> Self {
-        Self {
-            kinds: HashMap::new(),
-        }
+        Self::default()
     }
 
-    /// Registers a source file kind for the given extension.
-    ///
-    /// WHY: builders declare support so the compiler can discover and handle non-standard
-    ///      source files during module building.
-    pub fn register(&mut self, extension: &'static str, kind: SourceFileKind) {
-        self.kinds.insert(extension, kind);
+    /// Supports one optional source kind under this builder.
+    pub fn register(&mut self, kind: OptionalSourceKind) {
+        self.optional_kinds.insert(kind);
     }
 
-    /// Looks up the source kind for a file extension.
+    /// Looks up the supported source kind for a file extension.
     ///
-    /// Returns `None` for unrecognized extensions. Callers should treat the canonical
-    /// language source extension as `SourceFileKind::Moth` even when this returns `None`.
+    /// Returns `None` for unrecognized extensions and for optional kinds the active builder did
+    /// not select. Compiler-supported kinds are always returned.
     pub fn kind_for_extension(&self, extension: &str) -> Option<SourceFileKind> {
-        self.kinds.get(extension).copied()
-    }
-
-    /// Returns whether the given extension is registered as a supported source kind.
-    pub fn is_supported(&self, extension: &str) -> bool {
-        self.kinds.contains_key(extension)
-    }
-
-    /// Returns all registered supported source kinds.
-    pub fn supported_kinds(&self) -> Vec<SupportedSourceFileKind> {
-        let mut supported_kinds: Vec<_> = self
-            .kinds
-            .iter()
-            .map(|(&extension, &kind)| SupportedSourceFileKind { extension, kind })
-            .collect();
-
-        supported_kinds.sort_by_key(|kind| kind.extension);
-        supported_kinds
-    }
-
-    /// Returns whether this registry supports a recognized source-file extension.
-    ///
-    /// The language source extension is compiler-owned and always supported.
-    /// Builder-owned source kinds must be explicitly registered by the active builder.
-    pub fn supports_recognized_extension(&self, extension: &str) -> bool {
-        match SourceFileKind::from_extension(extension) {
-            Some(SourceFileKind::Moth) => true,
-            Some(kind) => self.kind_for_extension(extension) == Some(kind),
-            None => false,
+        let kind = SourceFileKind::from_extension(extension)?;
+        match kind.optional() {
+            Some(optional) if !self.optional_kinds.contains(&optional) => None,
+            _ => Some(kind),
         }
     }
 }
@@ -106,15 +86,27 @@ impl SourceFileKindRegistry {
 impl SourceFileKind {
     /// Looks up compiler-recognized source-file kinds by extension.
     ///
-    /// WHAT: separates recognition from active-builder support.
-    /// WHY: Stage 0 must diagnose a known but unsupported source kind, such as template content
-    ///      under a non-HTML builder, instead of falling through to a missing-dependency error.
+    /// WHAT: separates recognition, which is compiler-owned, from active-builder support.
+    /// WHY: Stage 0 must diagnose a known but unsupported optional kind, such as plain Markdown
+    ///      under a builder that did not select it, instead of falling through to a
+    ///      missing-dependency error.
     pub fn from_extension(extension: &str) -> Option<Self> {
         match extension {
             LANGUAGE_SOURCE_EXTENSION => Some(Self::Moth),
             CONTENT_EXTENSION => Some(Self::MothTemplate),
             MARKDOWN_EXTENSION => Some(Self::PlainMarkdown),
             _ => None,
+        }
+    }
+
+    /// Returns the builder-selectable kind, or `None` when every builder supports this kind.
+    ///
+    /// `.moth` and `.mtf` are fixed compiler-supported kinds. This mapping is the only place that
+    /// decides which kinds a builder may select.
+    pub const fn optional(self) -> Option<OptionalSourceKind> {
+        match self {
+            Self::Moth | Self::MothTemplate => None,
+            Self::PlainMarkdown => Some(OptionalSourceKind::PlainMarkdown),
         }
     }
 

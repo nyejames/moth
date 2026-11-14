@@ -1,6 +1,6 @@
 @graphics content as graphics_advanced
 @graphics-basic content as graphics_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

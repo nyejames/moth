@@ -1,4 +1,4 @@
-A `.mtf` file sees the fixed `@html` helpers and values from helper files in the same module. It does not see module root declarations.
+A `.mtf` file sees the fixed `@html` and `@styles` helpers and values from helper files in the same module. It does not see module root declarations.
 
 ### Selecting a helper value
 
@@ -14,21 +14,22 @@ A `.mtf` file sees the fixed `@html` helpers and values from helper files in the
 
 The path names the helper file and the symbol names one compile-time value. Keep them on one line. No `@mod.moth` file is needed.
 
-The selected name does not become a local name. It cannot clash with an `@html` helper.
+The selected name does not become a local name. It cannot clash with a prelude helper.
 
 ### Root files stay private
 
 A value written in `@mod.moth`, `@package.moth` or `@entry.moth` is not visible to a `.mtf` file, even when the root exports it. Move shared values into an ordinary helper file and select them with a qualified reference.
 
-### The HTML helpers
+### The fixed helpers
 
-`.mtf` files see constants from `@html` without a dependency clause:
+`.mtf` files see constants from `@html` and `@styles` without a dependency clause:
 
 [codeblock, $code "text":
     [p: A paragraph.]
+    [h1, center: A centred heading.]
 ]
 
-That prelude always comes from the official HTML package set. It supplies HTML constants only.
+That prelude comes from the official Core `@html` and `@styles` packages. It is available under every builder, not only HTML projects.
 
 ### A nested override
 

@@ -7,7 +7,7 @@ Moth's documentation sidebar marks the active link and builds its breadcrumb
 through an explicit runtime call after the static fragments:
 
 [codeblock, $code "moth":
-    @styles sidebar, init_docs_sidebar
+    @docs_styles sidebar, init_docs_sidebar
 
     [sidebar]
 

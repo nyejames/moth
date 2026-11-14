@@ -12119,6 +12119,13 @@ contract = "backend.html_wasm.external_js_function_unsupported"
 role = "backend"
 
 [[case]]
+id = "web_canvas_unused"
+path = "web_canvas_unused"
+tags = ["integration", "external-imports", "web-canvas", "html", "html-wasm", "reachability"]
+contract = "backend.html.unreachable_external_helper_no_assets"
+role = "backend"
+
+[[case]]
 id = "web_graphics_empty_package_resolves"
 path = "web_graphics_empty_package_resolves"
 tags = ["integration", "external-imports", "web-graphics", "positive", "js-backend"]
@@ -12133,10 +12140,10 @@ contract = "language.dependencies.web_graphics_missing_symbol_rejected"
 role = "primary"
 
 [[case]]
-id = "html_wasm_unused_html_canvas_constant"
-path = "html_wasm_unused_html_canvas_constant"
-tags = ["integration", "external-imports", "web-canvas", "html-wasm", "reachability"]
-contract = "backend.html_wasm.unreachable_canvas_constant_ignored"
+id = "html_wasm_runtime_template_top_level_constant"
+path = "html_wasm_runtime_template_top_level_constant"
+tags = ["integration", "html-wasm", "constants", "templates", "runtime"]
+contract = "backend.html_wasm.runtime_template_top_level_constant_render"
 role = "backend"
 
 [[case]]
@@ -12154,32 +12161,25 @@ contract = "backend.html_wasm.generic_runtime_value_unsupported"
 role = "backend"
 
 [[case]]
-id = "html_canvas_helper_unused_no_runtime_assets"
-path = "html_canvas_helper_unused_no_runtime_assets"
-tags = ["integration", "source-packages", "external-imports", "web-canvas", "html", "html-wasm", "reachability"]
-contract = "backend.html.unreachable_external_helper_no_assets"
+id = "html_canvas_markup_unused_no_runtime_assets"
+path = "html_canvas_markup_unused_no_runtime_assets"
+tags = ["integration", "source-packages", "web-canvas", "html", "html-wasm", "reachability"]
+contract = "backend.html.unreachable_html_markup_helper_no_runtime_assets"
 role = "backend"
 
 [[case]]
-id = "html_canvas_helper_reachable_runtime_assets"
-path = "html_canvas_helper_reachable_runtime_assets"
+id = "html_web_canvas_reachable_runtime_assets"
+path = "html_web_canvas_reachable_runtime_assets"
 tags = ["integration", "source-packages", "external-imports", "web-canvas", "html", "reachability"]
 contract = "backend.html.reachable_external_helper_emits_assets"
 role = "backend"
 
 [[case]]
-id = "html_canvas_helper_reachable_wasm_unsupported"
-path = "html_canvas_helper_reachable_wasm_unsupported"
+id = "html_web_canvas_reachable_wasm_unsupported"
+path = "html_web_canvas_reachable_wasm_unsupported"
 tags = ["integration", "source-packages", "external-imports", "web-canvas", "html-wasm", "diagnostics", "reachability"]
 contract = "backend.html_wasm.external_js_function_unsupported"
 role = "backend"
-
-[[case]]
-id = "html_canvas_raw_context_2d_not_reexported"
-path = "html_canvas_raw_context_2d_not_reexported"
-tags = ["integration", "source-packages", "external-imports", "web-canvas", "diagnostics", "facade"]
-contract = "language.dependencies.module_facade_non_exported_symbol_rejected"
-role = "boundary"
 
 [[case]]
 id = "receiver_method_source_visibility_rejected"
@@ -13120,6 +13120,20 @@ contract = "language.dependencies.moth_template_unrelated_source_package_implici
 role = "primary"
 
 [[case]]
+id = "moth_template_project_package_exports_not_in_prelude"
+path = "moth_template_project_package_exports_not_in_prelude"
+tags = ["integration", "moth_template", "html", "diagnostics", "dependencies", "source-packages"]
+contract = "language.dependencies.moth_template_project_package_exports_not_in_prelude"
+role = "primary"
+
+[[case]]
+id = "moth_template_project_package_center_keeps_official_prelude"
+path = "moth_template_project_package_center_keeps_official_prelude"
+tags = ["integration", "moth_template", "html", "dependencies", "source-packages"]
+contract = "language.dependencies.moth_template_project_package_center_keeps_official_prelude"
+role = "primary"
+
+[[case]]
 id = "moth_template_direct_selection_alias_dependency"
 path = "moth_template_direct_selection_alias_dependency"
 tags = ["integration", "moth_template", "html", "dependencies"]
@@ -13194,13 +13208,6 @@ id = "moth_template_facade_nonconstant_not_visible"
 path = "moth_template_facade_nonconstant_not_visible"
 tags = ["integration", "moth_template", "html", "diagnostics", "dependencies"]
 contract = "language.moth_template.facade_nonconstant_not_visible_in_content_rejected"
-role = "primary"
-
-[[case]]
-id = "moth_template_html_runtime_api_not_visible"
-path = "moth_template_html_runtime_api_not_visible"
-tags = ["integration", "moth_template", "html", "diagnostics", "dependencies"]
-contract = "language.moth_template.html_runtime_api_not_visible_in_content_rejected"
 role = "primary"
 
 [[case]]

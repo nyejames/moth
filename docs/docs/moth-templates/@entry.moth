@@ -8,7 +8,7 @@
 @template-scope-basic content as template_scope_basic
 @moth-template-limits content as moth_template_limits
 @moth-template-limits-basic content as moth_template_limits_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,
@@ -17,7 +17,7 @@
     init_docs_sidebar
 
 [$in title:["Moth template files"]]
-[$in description:["Moth-aware Markdown content files for HTML projects."]]
+[$in description:["Moth-aware Markdown content files available under every project builder."]]
 [$in head:[language_theme_head]]
 
 [navbar]

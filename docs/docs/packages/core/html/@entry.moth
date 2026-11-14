@@ -1,0 +1,45 @@
+@html-helpers content as html_advanced
+@html-helpers-basic content as html_basic
+@docs_styles navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+    sidebar,
+    init_docs_sidebar
+
+[$in title:["@html"]]
+[$in description:["Compile-time HTML markup helpers from the universal Core source package."]]
+[$in head:[language_theme_head]]
+
+[navbar]
+[sidebar]
+init_docs_sidebar()!
+[section, $md:
+    # @html
+
+    `@html` provides compile-time layout and formatting helpers through a
+    source-backed Core package. Each helper remains an ordinary exported
+    constant that folds into a `String`, rather than a hidden HTML syntax layer.
+    The common builder surface registers `@html` under every builder, including
+    custom SDK builders, so it is never selected by builder configuration.
+]
+
+[section:
+    [doc_level:
+        [$in key:html-helpers]
+        [$in title:HTML helpers]
+        [$in advanced:[html_advanced]]
+
+        [html_basic]
+    ]
+]
+
+[section:
+    [doc_pager:
+        [$in previous_path:../]
+        [$in previous_title:Core packages]
+        [$in next_path:../styles/]
+        [$in next_title:@styles]
+    ]
+]

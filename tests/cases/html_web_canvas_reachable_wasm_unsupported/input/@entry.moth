@@ -1,0 +1,24 @@
+@html canvas
+@web/canvas as drawing_api
+
+[canvas:
+  [$in id:game_canvas]
+  [$in style:
+    width: 320px;
+    height: 180px;
+  ]
+]
+
+draw || -> String, Error!:
+    element = drawing_api.get_canvas("game_canvas")!
+    drawing ~= drawing_api.context_2d(element)!
+    drawing_api.set_fill_style(~drawing, "#202020")
+    drawing_api.fill_rect(~drawing, 0.0, 0.0, 10.0, 10.0)
+    return "canvas_context_ready"
+;
+
+status = draw() catch:
+    then "canvas_context_unavailable"
+;
+
+io.line([: [status]])

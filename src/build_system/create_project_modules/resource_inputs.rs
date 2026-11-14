@@ -6,6 +6,7 @@
 //! watchable even when no reachable output ultimately emits it, while the compiler-facing table
 //! remains free of filesystem and byte-source policy.
 use crate::build_system::utils::stable_content_hash;
+use crate::builder_surface::definition::damaged_package_set_report;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
@@ -248,10 +249,16 @@ impl ResourceInputRegistry {
                 // The filesystem read completes before the record below is borrowed mutably to
                 // store the cached result: the canonical path is borrowed, never copied.
                 let bytes = fs::read(canonical_source_path).map_err(|error| {
-                    InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, canonical_source_path, format!(
+                    let mut reason = format!(
                         "Failed to read resource source '{}': {error}",
                         canonical_source_path.display()
-                    ))
+                    );
+                    // A shipped `@web/*` asset lives in the one selected package set.
+                    if let Some(report) = damaged_package_set_report(canonical_source_path) {
+                        reason.push_str(". ");
+                        reason.push_str(&report);
+                    }
+                    InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, canonical_source_path, reason)
                 })?;
                 // An invalidation fact only. Resource identity and output placement stay keyed
                 // by stable semantic origins and planned paths.

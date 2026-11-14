@@ -1,5 +1,5 @@
 @borrow-validation content as reference_content
-@styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Borrow validation"]]
 [$in description:["How Moth checks exclusivity, aliasing and optional transfer safety."]]

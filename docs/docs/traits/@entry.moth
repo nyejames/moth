@@ -12,7 +12,7 @@
 @core-cast-traits-basic content as core_cast_traits_basic
 @trait-design-scope content as trait_design_scope
 @trait-design-scope-basic content as trait_design_scope_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

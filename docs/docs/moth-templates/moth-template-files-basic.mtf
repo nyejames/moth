@@ -7,7 +7,7 @@ A `.mtf` file is Markdown that lives inside Moth's template world.
 
     This is **bold** text.
 
-    [p: This paragraph is styled by the @html builder helper.]
+    [p: This paragraph uses the @html helper.]
 ]
 
 No dependency clauses, no declarations, no frontmatter. Content only.

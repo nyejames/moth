@@ -8,7 +8,7 @@
 @receiver-methods-basic content as receiver_methods_basic
 @mutable-receivers content as mutable_receivers
 @mutable-receivers-basic content as mutable_receivers_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

@@ -10,7 +10,10 @@ use super::node_asset::run_asset_in_node;
 fn canvas_failures_keep_their_codes_and_messages() {
     run_asset_in_node(
         "canvas",
-        include_str!("../canvas/canvas.js"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/web/canvas/canvas.js"
+        )),
         r#"
 const expectedContext = {};
 const elements = new Map([

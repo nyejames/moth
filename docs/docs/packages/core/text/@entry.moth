@@ -1,6 +1,6 @@
 @text content as text_advanced
 @text-basic content as text_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

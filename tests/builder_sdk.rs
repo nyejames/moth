@@ -51,20 +51,24 @@ fn external_crate_defines_source_and_host_packages() {
 }
 
 #[test]
-fn external_crate_cannot_register_the_html_prelude_package() {
-    let html_dir = tempfile::tempdir().expect("should create HTML package directory");
+fn external_crate_cannot_replace_official_core_source_packages() {
+    let package_dir = tempfile::tempdir().expect("should create package directory");
 
-    for (case, path) in [("root", "@html"), ("nested", "@html/docs")] {
+    for (case, path) in [
+        ("html", "@html"),
+        ("html nested", "@html/docs"),
+        ("styles", "@styles"),
+        ("styles nested", "@styles/docs"),
+    ] {
         let error = BuilderDefinition::new("game")
-            .source_package(SourcePackage::new(path).from_dir(html_dir.path()))
+            .source_package(SourcePackage::new(path).from_dir(package_dir.path()))
             .finish()
-            .expect_err("SDK builders cannot register the official HTML prelude package");
+            .expect_err("SDK builders cannot replace an official Core source package");
         assert_eq!(error.kind(), ErrorKind::InvalidDefinition, "{case}");
-        assert!(error.to_string().contains("reserved"), "{case}: {error}");
         assert!(
             error
                 .to_string()
-                .contains("standard HTML builder package set"),
+                .contains("overlaps registered source package"),
             "{case}: {error}"
         );
     }
@@ -249,6 +253,69 @@ impl ProjectBuilder for NoPackageBuilder {
     ) -> Result<BuildArtifacts, Error> {
         Ok(BuildArtifacts::new())
     }
+}
+
+/// Imports official Core source packages without any builder-selected web package.
+const CORE_SOURCE_IMPORT_PAGE: &str = "@html p\n@styles center\nvalue = [p, center: Hello]\n";
+
+#[test]
+fn minimal_sdk_builder_imports_official_html_and_styles_without_web_packages() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(project_dir.path(), CORE_SOURCE_IMPORT_PAGE, false);
+    let builder = RecordingBuildBuilder {
+        build_ran: Cell::new(false),
+    };
+
+    build_project(&builder, BuildRequest::new(project_dir.path()))
+        .expect("official @html and @styles must import without @web/canvas");
+    assert!(
+        builder.build_ran.get(),
+        "compilation of the official Core imports must reach the builder"
+    );
+}
+
+/// A page holding an explicit `.mtf` file value and a qualified `content` constant reference.
+const MTF_FILE_VALUE_PAGE: &str =
+    "intro #= @intro.mtf\nbody = @intro content\n~[: [intro] [body] ]\n";
+
+/// A template body that imports a nested `.mtf` and uses a bare `@html` prelude name.
+const INTRO_TEMPLATE_SOURCE: &str = "[: intro [p: nested [@nested.mtf] ] ]\n";
+
+/// The nested template body reached from `intro.mtf`.
+const NESTED_TEMPLATE_SOURCE: &str = "nested template body\n";
+
+/// Proves the public SDK build path compiles `.mtf` content when the builder selects no optional
+/// source kinds. The exact folded text is asserted by the crate-internal
+/// `compiler_supported_mtf_file_value_and_qualified_content_fold_identically` test, which reads
+/// the published constant values.
+#[test]
+fn minimal_sdk_builder_compiles_mtf_file_values_without_kind_selection() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(project_dir.path(), MTF_FILE_VALUE_PAGE, false);
+    fs::write(project_dir.path().join("intro.mtf"), INTRO_TEMPLATE_SOURCE)
+        .expect("should write intro template");
+    fs::write(
+        project_dir.path().join("nested.mtf"),
+        NESTED_TEMPLATE_SOURCE,
+    )
+    .expect("should write nested template");
+    // The minimal SDK builder selects no optional source kinds, so this project proves `.mtf`
+    // support is compiler-owned rather than builder-registered.
+    let builder = RecordingBuildBuilder {
+        build_ran: Cell::new(false),
+    };
+
+    let built = build_project(&builder, BuildRequest::new(project_dir.path()))
+        .expect("`.mtf` file values must compile under a builder that selects no source kinds");
+    assert!(
+        builder.build_ran.get(),
+        "a successful template compilation must reach the builder"
+    );
+    assert!(
+        built.warnings().is_empty(),
+        "the nested template fixture should compile without warnings: {:?}",
+        built.warnings()
+    );
 }
 
 /// Exposes one host function that takes a `Byte`.

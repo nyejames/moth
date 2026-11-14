@@ -1,6 +1,6 @@
 @random content as random_advanced
 @random-basic content as random_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

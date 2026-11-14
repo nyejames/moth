@@ -20,8 +20,7 @@ use crate::build_system::output::{BuilderIdentity, CleanupPolicy, register_outpu
 use crate::builder_surface::config_schema::{
     ConfigSchema, ConfigSchemaField, NamedConfigSectionSchema, UnknownFieldPolicy,
 };
-use crate::builder_surface::definition::TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
-use crate::builder_surface::{BuilderSurface, SourceFileKind};
+use crate::builder_surface::{BuilderSurface, OptionalSourceKind};
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -405,15 +404,6 @@ impl BackendBuilder for HtmlProjectBuilder {
 
     fn frontend_surface(&self) -> BuilderSurface {
         let mut builder_surface = BuilderSurface::with_mandatory_core();
-        builder_surface
-            .source_packages
-            .register_filesystem_root(
-                TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
-                BuilderSurface::builtin_source_package_root(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX),
-                crate::builder_surface::PackageOrigin::Builder,
-            )
-            .expect("the built-in @html source package registers once");
-
         // `@web/site` is not part of the standard template prelude, so consumers need an explicit
         // dependency clause to use it.
         builder_surface
@@ -451,14 +441,11 @@ impl BackendBuilder for HtmlProjectBuilder {
             builder_surface.register_root_slot(root_slot);
         }
 
-        builder_surface.source_file_kinds.register(
-            SourceFileKind::MothTemplate.extension(),
-            SourceFileKind::MothTemplate,
-        );
-        builder_surface.source_file_kinds.register(
-            SourceFileKind::PlainMarkdown.extension(),
-            SourceFileKind::PlainMarkdown,
-        );
+        // `.mtf` is compiler-supported under every builder. The HTML builder only selects the
+        // optional plain Markdown kind.
+        builder_surface
+            .source_file_kinds
+            .register(OptionalSourceKind::PlainMarkdown);
 
         builder_surface
             .external_import_providers

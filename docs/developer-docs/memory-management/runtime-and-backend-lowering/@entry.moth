@@ -1,5 +1,5 @@
 @runtime-and-backend-lowering content as reference_content
-@styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Runtime and backend memory lowering"]]
 [$in description:["How physical memory strategies and the collector-free release guarantee meet backend targets."]]

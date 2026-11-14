@@ -2,7 +2,10 @@
 
 use super::node_asset::run_asset_in_node;
 
-const PAGE_SOURCE: &str = include_str!("../page/page.js");
+const PAGE_SOURCE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/packages/web/page/page.js"
+));
 
 #[test]
 fn getters_read_live_browser_values() {

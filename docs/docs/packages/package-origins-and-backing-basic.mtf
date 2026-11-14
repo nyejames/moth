@@ -11,4 +11,4 @@ Packages can differ in two ways: who provides them and what backs their implemen
 - Source-backed packages contain ordinary Moth modules.
 - Binding-backed packages expose typed functions, constants and opaque types implemented outside Moth.
 
-`@html` is a source-backed Builder package. `@core/collections` and `@core/math` are binding-backed Core packages. `@web/canvas` is a binding-backed Builder package.
+`@html` and `@styles` are source-backed Core packages available under every builder. `@core/collections` and `@core/math` are binding-backed Core packages. `@web/canvas` is a binding-backed Builder package.

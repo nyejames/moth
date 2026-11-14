@@ -1,7 +1,7 @@
 @style-guide content as style_content
 @testing content as testing_content
 @validation content as validation_content
-@styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Codebase development standards"]]
 [$in description:["Rust code style, testing strategy and validation gates for Moth compiler work."]]

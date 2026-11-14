@@ -18,7 +18,7 @@ Bare direct const inserts in `@entry.moth` set document metadata, without a `#` 
 
 [codeblock, $code "moth":
     [$in title:About]
-    [$in stylesheets:[@styles/site.css]]
+    [$in stylesheets:[@assets/site.css]]
     [: <main>About this site</main>]
 ]
 

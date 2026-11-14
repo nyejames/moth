@@ -6,7 +6,7 @@
 @operators-basic content as operators_basic
 @checked-arithmetic content as checked_arithmetic
 @checked-arithmetic-basic content as checked_arithmetic_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

@@ -127,22 +127,6 @@ jobs:
           set -euxo pipefail
           cargo build --locked --release -p moth-cli --bin moth --target "${{ matrix.target }}" --verbose
 
-      - name: Smoke test binary
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          HOST_ARCH="$(uname -m)"
-          TARGET="${{ matrix.target }}"
-
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            "target/${TARGET}/release/${BIN_NAME}.exe" --version
-          elif [[ "$TARGET" == "x86_64-apple-darwin" && "$HOST_ARCH" == "arm64" ]]; then
-            echo "Skipping x86_64 macOS smoke test on arm64 host"
-          else
-            "target/${TARGET}/release/${BIN_NAME}" --version
-          fi
-
       - name: Prepare package directory
         shell: bash
         run: |
@@ -161,6 +145,60 @@ jobs:
 
           cp README.md "package/${ARCHIVE_NAME}/"
           cp LICENSE "package/${ARCHIVE_NAME}/" 2>/dev/null || true
+          # Compiler-shipped package files (@html, @styles, @web/site and @web/* assets) live beside the binary.
+          cp -R packages "package/${ARCHIVE_NAME}/packages"
+
+      # Hide the checkout's packages so the packaged binary must read its own `packages/`.
+      - name: Smoke test packaged layout
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          HOST_ARCH="$(uname -m)"
+          TARGET="${{ matrix.target }}"
+          ARCHIVE_NAME="${BIN_NAME}-${GITHUB_REF_NAME}-${TARGET}"
+
+          if [[ "$TARGET" == "x86_64-apple-darwin" && "$HOST_ARCH" == "arm64" ]]; then
+            echo "Skipping x86_64 macOS smoke test on arm64 host"
+            exit 0
+          fi
+
+          MOTH="$PWD/package/${ARCHIVE_NAME}/${{ matrix.binary }}"
+          "$MOTH" --version
+
+          mv packages "$RUNNER_TEMP/checkout-packages"
+          SITE="$RUNNER_TEMP/smoke-site"
+          mkdir -p "$SITE"
+          printf 'project #= (\n    name = "smoke",\n)\nhtml #= ()\n' > "$SITE/config.moth"
+          cat > "$SITE/@entry.moth" <<'EOF'
+          @html p
+          @styles right
+          @web/canvas as drawing_api
+          @intro content as intro
+
+          ~[:[intro]]
+          ~[p, right: explicit imports]
+
+          draw || -> String, Error!:
+              element = drawing_api.get_canvas("game_canvas")!
+              drawing ~= drawing_api.context_2d(element)!
+              drawing_api.fill_rect(~drawing, 0.0, 0.0, 10.0, 10.0)
+              return "drawn"
+          ;
+
+          status = draw() catch:
+              then "unavailable"
+          ;
+
+          io.line([: [status]])
+          EOF
+          printf '[p, center: both providers]\n' > "$SITE/intro.mtf"
+
+          "$MOTH" build "$SITE"
+          grep -q "text-align: center;" "$SITE/_dev/index.html"
+          grep -q "text-align: right;" "$SITE/_dev/index.html"
+          test -s "$SITE/_dev/_moth/js/canvas.js"
+          mv "$RUNNER_TEMP/checkout-packages" packages
 
       - name: Create tar.gz package
         if: matrix.archive == 'tar.gz'

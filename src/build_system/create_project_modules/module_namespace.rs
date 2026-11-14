@@ -972,7 +972,7 @@ fn support_package_key(identities: &ModuleIdentityTable, support_id: ModuleId) -
 /// from the owning boundary's `SourceTreeIndex`.
 ///
 /// For a same-module source, the entry's `supported` flag is checked so a recognized-but-
-/// unsupported extension (for example `.mtf` without builder registration) produces the
+/// unsupported extension (for example `.md` without builder selection) produces the
 /// `UnsupportedSourceFileKind` diagnostic without a filesystem probe.
 fn resolve_entry(
     entry: &NamespaceEntry,

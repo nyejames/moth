@@ -258,12 +258,13 @@ Each Core package has a paired Advanced and Basic page:
 - `docs/docs/packages/core/time/time.mtf` / `time-basic.mtf`
 - `docs/docs/packages/core/collections/collections.mtf` / `collections-basic.mtf`
 - `docs/docs/packages/core/prelude/prelude.mtf` / `prelude-basic.mtf`
+- `docs/docs/packages/core/html/html-helpers.mtf` / `html-helpers-basic.mtf`
+- `docs/docs/packages/core/styles/styles-helpers.mtf` / `styles-helpers-basic.mtf`
 
 ## Builder packages
 
 Builder packages have paired Advanced and Basic pages:
 
-- `docs/docs/packages/builder/html/html-helpers.mtf` / `html-helpers-basic.mtf`
 - `docs/docs/packages/builder/canvas/canvas-drawing.mtf` / `canvas-drawing-basic.mtf`
 - `docs/docs/packages/builder/graphics/graphics.mtf` / `graphics-basic.mtf`
 - `docs/docs/packages/builder/site/site.mtf` / `site-basic.mtf`
