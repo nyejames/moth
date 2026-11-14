@@ -336,7 +336,7 @@ fn choice_headers_reject_invalid_payload_forms() {
 #[test]
 fn choice_headers_accept_record_payload_variants() {
     let (headers, string_table) =
-        parse_single_file_headers_with_table("Status :: Pending |\n    RetryCount I32,\n|;\n");
+        parse_single_file_headers_with_table("Status :: Pending |\n    RetryCount I32,\n|\n;\n");
 
     let choice_header = headers
         .headers
@@ -443,4 +443,97 @@ fn generic_type_aliases_are_rejected_during_header_parsing() {
             && diagnostic.reason_key()
                 == Some("invalid_declaration.parameterized_generic_type_alias")
     }));
+}
+
+/// Choice declarations close under the same physical-line contract as functions.
+///
+/// WHAT: an inline choice and a multiline choice with a standalone closer stay legal.
+/// WHY: the choice shell owns its own `;`, so a regression here would never reach AST.
+#[test]
+fn choice_scope_layout_accepts_inline_and_standalone_closers() {
+    let cases = [
+        ("inline choice", "Status :: Ready, Waiting;\n"),
+        (
+            "standalone closer",
+            "Status ::\n    Ready,\n    Waiting\n;\n",
+        ),
+    ];
+
+    for (case, source) in cases {
+        let outcome =
+            parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+        expect_header_success(outcome, case);
+    }
+}
+
+#[test]
+fn multiline_choice_closer_after_code_reports_the_closer_and_double_colon() {
+    let source = "Status ::\n    Ready,\n    Waiting;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "multiline choice closer after code",
+        "invalid_scope_layout.multiline_closer_after_code",
+        source_span_for(source, ";", 0),
+        &[(
+            ExpectedScopeLayoutLabel::OpenerStartsHere,
+            source_span_for(source, "::", 0),
+        )],
+    );
+}
+
+#[test]
+fn choice_closer_trailing_code_reports_the_first_trailing_token() {
+    let source = "Status :: Ready; io.line(\"x\")\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "choice closer trailing code",
+        "invalid_scope_layout.content_after_closer",
+        source_span_for(source, "io", 0),
+        &[(
+            ExpectedScopeLayoutLabel::EarlierCloser,
+            source_span_for(source, ";", 0),
+        )],
+    );
+}
+
+#[test]
+fn second_choice_on_a_closer_line_reports_the_first_trailing_token() {
+    let source = "A :: X; B :: Y;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "second choice after a closer",
+        "invalid_scope_layout.content_after_closer",
+        source_span_for(source, "B", 0),
+        &[(
+            ExpectedScopeLayoutLabel::EarlierCloser,
+            source_span_for(source, ";", 0),
+        )],
+    );
+}
+
+#[test]
+fn stacked_choice_closers_report_the_second_closer() {
+    let source = "Status :: Ready;;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "stacked choice closers",
+        "invalid_scope_layout.additional_closer_on_line",
+        source_span_for(source, ";", 1),
+        &[(
+            ExpectedScopeLayoutLabel::EarlierCloser,
+            source_span_for(source, ";", 0),
+        )],
+    );
 }

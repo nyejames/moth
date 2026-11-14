@@ -763,6 +763,23 @@ take(~value = value)
 }
 
 #[test]
+fn grouped_semicolon_keeps_its_expression_diagnostic_before_scope_layout() {
+    // Stage 2 leaves the grouped `;` to the expression parser, which can name the token inside
+    // the parentheses. The trailing `next` must not become a scope-layout error first.
+    let source = "take |value I32|:\n;\n\nrun ||:\n    take(1; 2)\n; next\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-SYNTAX-0002", None);
+    let semicolon_start = source.find("1; 2").expect("grouped semicolon") as u32 + 1;
+    let semicolon_span = LocalSpan::exact(semicolon_start, 1, &mut ExtendedSpanBuilder::new())
+        .expect("the semicolon span should fit inline");
+
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, semicolon_span))
+    );
+}
+
+#[test]
 fn named_argument_position_rejects_doubled_equals_as_comparison() {
     let source = "\
 take |value I32|:

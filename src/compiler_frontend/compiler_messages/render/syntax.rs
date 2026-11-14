@@ -21,7 +21,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidNumberLiteralView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     CommonSyntaxMistakeView, ExpectedSymbolStatementView, InvalidExpressionView,
-    InvalidStringEscapeView, MissingCollectionItemView, MissingOperatorOperandView,
+    InvalidScopeLayoutCode, InvalidScopeLayoutView, InvalidStringEscapeView,
+    MissingCollectionItemView, MissingOperatorOperandView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
@@ -650,6 +651,41 @@ pub(crate) fn render_invalid_standalone_statement(
 
 pub(crate) fn expected_symbol_statement_message() -> String {
     "Expected a symbol-led statement.".to_string()
+}
+
+/// The user-facing explanation for one invalid scope layout reason.
+///
+/// WHAT: says which layout rule the authored token broke and what to move or remove.
+/// WHY: a `;` that was meant as a statement terminator is the most common cause, so the message
+///      names that misunderstanding first instead of blaming a later token.
+pub(crate) fn invalid_scope_layout_message(reason: InvalidScopeLayoutCode) -> String {
+    match reason {
+        InvalidScopeLayoutCode::NestedScopeOpenerOnLine => {
+            "Move the nested scope opener to a new line. Each scope that a `;` closes opens on its own physical line.".to_string()
+        }
+        InvalidScopeLayoutCode::MultilineCloserAfterCode => {
+            "`;` closes a scope, not a statement. Place this closer on its own line, after the scope's body.".to_string()
+        }
+        InvalidScopeLayoutCode::ContentAfterCloser => {
+            "No code may follow a scope closer on the same line. Move the remaining code to the next line.".to_string()
+        }
+        InvalidScopeLayoutCode::AdditionalCloserOnLine => {
+            "Only one scope closer may end a line. Remove this `;` if it is extra, or move it to its own line if it closes an outer scope.".to_string()
+        }
+    }
+}
+
+/// WHAT: renders an invalid scope layout from its typed reason.
+/// WHY: the compact row stores the reason code that `invalid_scope_layout_message` consumes.
+pub(crate) fn render_invalid_scope_layout(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidScopeLayoutView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_scope_layout_message(facts.reason),
+        guidance: Vec::new(),
+    }
 }
 
 /// WHAT: renders the fixed symbol-led-statement message.

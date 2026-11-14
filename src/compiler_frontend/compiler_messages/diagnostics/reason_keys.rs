@@ -35,7 +35,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::template
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::UnexpectedTokenShape;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
-    CommonSyntaxMistakeCode, InvalidStringEscapeCode, NumberLiteralCode,
+    CommonSyntaxMistakeCode, InvalidScopeLayoutCode, InvalidStringEscapeCode, NumberLiteralCode,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::IncompatibleChoiceComparisonCode;
 use crate::compiler_frontend::style_directives::DirectiveOccurrence;
@@ -561,6 +561,16 @@ define_stable_reason_keys! {
     &InvalidChoiceVariantReason::UnitVariantWithParentheses => "invalid_choice_variant.unit_variant_with_parentheses",
     &InvalidChoiceVariantReason::UnitVariantAsConstructor => "invalid_choice_variant.unit_variant_as_constructor",
     &InvalidChoiceVariantReason::PayloadVariantMissingArguments => "invalid_choice_variant.payload_variant_missing_arguments",
+    },
+
+    InvalidScopeLayoutReason => {
+        @delegate(reason => InvalidScopeLayoutCode::of(*reason).stable_reason_key());
+    },
+    InvalidScopeLayoutCode => {
+        &InvalidScopeLayoutCode::NestedScopeOpenerOnLine => "invalid_scope_layout.nested_scope_opener_on_line",
+        &InvalidScopeLayoutCode::MultilineCloserAfterCode => "invalid_scope_layout.multiline_closer_after_code",
+        &InvalidScopeLayoutCode::ContentAfterCloser => "invalid_scope_layout.content_after_closer",
+        &InvalidScopeLayoutCode::AdditionalCloserOnLine => "invalid_scope_layout.additional_closer_on_line",
     },
 
     InvalidThisUsageReason => {

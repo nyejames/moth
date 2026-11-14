@@ -1441,16 +1441,17 @@ fn diagnostic_recovery_ast_work_guard_stop_reaches_check_report() {
     // `run_check_command` records command timing into the shared collector under `timers`.
     let _test_guard = crate::timing::lock_instrumentation_tests();
 
-    // `return 1;` is three body tokens. The first failed body is uncharged, so admitting
-    // `AST_RECOVERY_WORK_TOKENS / 3` valid bodies leaves one token. The final failing body needs
-    // three and is therefore refused by the work guard rather than reported.
-    const VALID_BODY_WORK_TOKENS: u32 = 3;
+    // One retained simple body is the newline after the signature colon, `return`, its value and
+    // the newline before the standalone closer. The first failed body is uncharged, so admitting
+    // `AST_RECOVERY_WORK_TOKENS / 4` valid bodies leaves no token. The final failing body needs
+    // four and is therefore refused by the work guard rather than reported.
+    const VALID_BODY_WORK_TOKENS: u32 = 4;
     let valid_body_count = AST_RECOVERY_WORK_TOKENS / VALID_BODY_WORK_TOKENS;
-    let mut source = String::from("first || -> I32:\n    return missing;\n");
+    let mut source = String::from("first || -> I32:\n    return missing\n;\n");
     for index in 0..valid_body_count {
-        source.push_str(&format!("\nvalid{index} || -> I32:\n    return 1;\n"));
+        source.push_str(&format!("\nvalid{index} || -> I32:\n    return 1\n;\n"));
     }
-    source.push_str("\nzz_last || -> I32:\n    return also_missing;\n");
+    source.push_str("\nzz_last || -> I32:\n    return also_missing\n;\n");
 
     let (_temp, root) = write_page_project("ast_work_guard", &source);
     let mut presented = None;

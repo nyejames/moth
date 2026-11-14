@@ -19,17 +19,18 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_common_syntax_mistake, render_compiler_capacity_exceeded,
     render_expected_symbol_statement, render_expected_token, render_invalid_character,
     render_invalid_expression, render_invalid_number_literal, render_invalid_path,
-    render_invalid_string_escape, render_missing_closing_delimiter, render_missing_collection_item,
-    render_missing_operator_operand, render_non_utf8_source, render_source_span_capacity,
-    render_title_only, render_unexpected_end_of_file, render_unexpected_token,
-    render_unexpected_trailing_comma,
+    render_invalid_scope_layout, render_invalid_string_escape, render_missing_closing_delimiter,
+    render_missing_collection_item, render_missing_operator_operand, render_non_utf8_source,
+    render_source_span_capacity, render_title_only, render_unexpected_end_of_file,
+    render_unexpected_token, render_unexpected_trailing_comma,
 };
 use crate::compiler_frontend::compiler_messages::{
     AstCapacityResource, CapacityResource, ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason,
     DiagnosticCapacityResource, DiagnosticCompoundAssignmentOperator, DiagnosticOperator,
     DiagnosticSeverity, DiagnosticToken, HirCapacityResource, InvalidExpressionReason,
-    InvalidMultiBindReason, InvalidStringEscapeReason, MissingWhitespace, OperatorOperandPosition,
-    PathKind, SourceSpanCapacityResource, SymbolicSpacingConstruct, SymbolicSpacingError,
+    InvalidMultiBindReason, InvalidScopeLayoutReason, InvalidStringEscapeReason, MissingWhitespace,
+    OperatorOperandPosition, PathKind, SourceSpanCapacityResource, SymbolicSpacingConstruct,
+    SymbolicSpacingError,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -1390,6 +1391,63 @@ pub(crate) fn unexpected_token_in_declaration(span: Option<SourceSpan>) -> Diagn
     DiagnosticDraft::with_facts(&UNEXPECTED_TOKEN_IN_DECLARATION, span, |_cursor| Ok(()))
 }
 
+unit_code! {
+    /// WHAT: the reason code of an invalid scope layout, one code per layout mistake.
+    /// WHY: the code owns the stable reason key while the authored spans live in the record and
+    ///      its labels, so no prose or token spelling is stored in the family row.
+    pub(crate) enum InvalidScopeLayoutCode {
+        NestedScopeOpenerOnLine = 1,
+        MultilineCloserAfterCode = 2,
+        ContentAfterCloser = 3,
+        AdditionalCloserOnLine = 4,
+    }
+}
+
+impl InvalidScopeLayoutCode {
+    pub(crate) const fn of(reason: InvalidScopeLayoutReason) -> Self {
+        match reason {
+            InvalidScopeLayoutReason::NestedScopeOpenerOnLine => Self::NestedScopeOpenerOnLine,
+            InvalidScopeLayoutReason::MultilineCloserAfterCode => Self::MultilineCloserAfterCode,
+            InvalidScopeLayoutReason::ContentAfterCloser => Self::ContentAfterCloser,
+            InvalidScopeLayoutReason::AdditionalCloserOnLine => Self::AdditionalCloserOnLine,
+        }
+    }
+}
+
+diagnostic_family! {
+    INVALID_SCOPE_LAYOUT {
+        internal: 1041,
+        stable: "MOTH-SYNTAX-0041",
+        category: DiagnosticCategory::Syntax,
+        severity: DiagnosticSeverity::Error,
+        title: "Invalid scope layout",
+        facts: [reason: UnitFact<InvalidScopeLayoutCode>],
+        labels: [
+            LabelMessageCode::SCOPE_OPENER_STARTS_HERE,
+            LabelMessageCode::EARLIER_SCOPE_OPENER_ON_LINE,
+            LabelMessageCode::SCOPE_CLOSER_BEFORE_THIS,
+        ],
+        extra: None,
+        ctor: manual,
+        reason_key: reason,
+        view: InvalidScopeLayoutView,
+        render: render_invalid_scope_layout,
+    }
+}
+
+/// The invalid-scope-layout draft for `reason` at `span`.
+///
+/// The emitting owner adds the role labels: the active opener, the earlier same-line opener, or
+/// the legal closer that the reported token conflicts with.
+pub(crate) fn invalid_scope_layout(
+    reason: InvalidScopeLayoutReason,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    DiagnosticDraft::with_facts(&INVALID_SCOPE_LAYOUT, span, |cursor| {
+        cursor.push::<UnitFact<InvalidScopeLayoutCode>>(&InvalidScopeLayoutCode::of(reason))
+    })
+}
+
 pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     EXPECTED_TOKEN,
     COMPILER_CAPACITY_EXCEEDED,
@@ -1412,4 +1470,5 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES:
     INVALID_STRING_ESCAPE,
     SOURCE_SPAN_CAPACITY,
     NON_UTF8_SOURCE,
+    INVALID_SCOPE_LAYOUT,
 ];

@@ -163,6 +163,95 @@ fn diagnostic_has_family<View: FamilyView>(view: &DiagnosticView<'_>) -> bool {
     view.family_view::<View>().is_some()
 }
 
+/// The related-site role a scope-layout diagnostic must attach.
+///
+/// WHAT: distinguishes the active opener from the legal closer that a later token conflicts with.
+/// WHY: header tests assert label roles and spans directly, so a swapped role or wrong token
+///      cannot hide behind an assertion that only counts labels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExpectedScopeLayoutLabel {
+    OpenerStartsHere,
+    EarlierCloser,
+}
+
+/// Assert the first header diagnostic is one exact scope-layout report.
+///
+/// WHAT: checks the stable code, typed reason, primary token and every related label role/span.
+/// WHY: the Stage 2 declaration owners close their own scopes, so these tests are the primary
+///      owner of their layout spans before AST ever receives the tokens.
+#[track_caller]
+fn assert_scope_layout_diagnostic(
+    outcome: HeaderTestOutcome,
+    case: &str,
+    reason_key: &str,
+    primary_span: SourceSpan,
+    expected_labels: &[(ExpectedScopeLayoutLabel, SourceSpan)],
+) {
+    let errors = match outcome {
+        HeaderTestOutcome::Headers(headers) => panic!(
+            "{case}: expected MOTH-SYNTAX-0041, but headers parsed ({count} headers)",
+            count = headers.headers.len()
+        ),
+        HeaderTestOutcome::Diagnostics(errors) => errors,
+    };
+    assert_eq!(
+        errors.diagnostics.len(),
+        1,
+        "{case}: a scope-layout failure should retain exactly one diagnostic"
+    );
+    let diagnostic = errors
+        .diagnostics
+        .first()
+        .expect("a rejected header should retain its diagnostic");
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-SYNTAX-0041",
+        "{case}: wrong diagnostic code"
+    );
+    assert_eq!(
+        diagnostic.reason_key(),
+        Some(reason_key),
+        "{case}: wrong reason key"
+    );
+    assert_eq!(
+        diagnostic_primary_span(diagnostic),
+        Some(primary_span),
+        "{case}: primary span is not the offending token"
+    );
+
+    let labels = diagnostic.durable_labels().collect::<Vec<_>>();
+    assert_eq!(
+        labels.len(),
+        expected_labels.len(),
+        "{case}: unexpected related-label count"
+    );
+    for (label, (expected_role, expected_span)) in labels.iter().zip(expected_labels) {
+        let role_matches = match expected_role {
+            ExpectedScopeLayoutLabel::OpenerStartsHere => {
+                matches!(label.message, DurableLabelMessage::ScopeOpenerStartsHere)
+            }
+            ExpectedScopeLayoutLabel::EarlierCloser => {
+                matches!(label.message, DurableLabelMessage::ScopeCloserBeforeThis)
+            }
+        };
+        assert!(
+            role_matches,
+            "{case}: unexpected label role {:?}",
+            label.message
+        );
+        let span = match label.site {
+            SiteRef::Local(span) => span,
+            SiteRef::Absent | SiteRef::Foreign { .. } => {
+                panic!("{case}: the related scope site should bind local authored source")
+            }
+        };
+        assert_eq!(
+            &span, expected_span,
+            "{case}: label bound to the wrong site"
+        );
+    }
+}
+
 fn find_diagnostic_family<View: FamilyView>(
     bag: &CompactDiagnosticBagForTest,
 ) -> Option<DiagnosticView<'_>> {

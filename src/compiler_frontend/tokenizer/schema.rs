@@ -361,6 +361,14 @@ const TOKEN_STYLE_DIRECTIVE_ATTACHED: u16 = 1 << 0;
 /// line. Comments produce no token, and a whitespace run is one NEWLINE token, so the run's
 /// authored shape is the only token-level blank-line fact.
 const TOKEN_NEWLINE_BLANK_LINE: u16 = 1 << 0;
+/// This token's authored span, or the authored text it owns, crosses a physical line break.
+///
+/// WHY: quoted strings, raw strings and template-body text may span physical lines inside one
+/// token. A discarded template body is skipped entirely, so its closing `]` token owns the line
+/// breaks the lexer consumed while discarding it. Scope layout asks whether two tokens share a
+/// physical line; hiding either shape would make a multiline construct look inline. The lexer is
+/// the only owner of both facts.
+const TOKEN_CONTAINS_LINE_BREAK: u16 = 1 << 0;
 const TOKEN_DOUBLE_COLON_ADJACENCY_FLAGS: u16 =
     TOKEN_DOUBLE_COLON_LEFT_ATTACHED | TOKEN_DOUBLE_COLON_RIGHT_ATTACHED;
 
@@ -395,7 +403,7 @@ token_schema! {
         9,
         "string literal",
         StringLiteral,
-        0,
+        TOKEN_CONTAINS_LINE_BREAK,
         TOKEN_CLASS_LITERAL | TOKEN_CLASS_CAN_END_EXPRESSION | TOKEN_CLASS_OPERAND_START,
         None
     ),
@@ -426,7 +434,7 @@ token_schema! {
         13,
         "raw string literal",
         RawStringLiteral,
-        0,
+        TOKEN_CONTAINS_LINE_BREAK,
         TOKEN_CLASS_LITERAL | TOKEN_CLASS_CAN_END_EXPRESSION,
         None
     ),
@@ -932,7 +940,7 @@ token_schema! {
         90,
         "`]`",
         Static,
-        0,
+        TOKEN_CONTAINS_LINE_BREAK,
         TOKEN_CLASS_DELIMITER | TOKEN_CLASS_CAN_END_EXPRESSION,
         None
     ),
@@ -1127,7 +1135,7 @@ impl TokenShape {
             TokenDescriptorPayload::StyleDirective => flags & !TOKEN_STYLE_DIRECTIVE_ATTACHED == 0,
             TokenDescriptorPayload::Symbol
             | TokenDescriptorPayload::StringLiteral
-            | TokenDescriptorPayload::RawStringLiteral => flags == 0,
+            | TokenDescriptorPayload::RawStringLiteral => flags & !TOKEN_CONTAINS_LINE_BREAK == 0,
         }
     }
 
@@ -1166,6 +1174,9 @@ impl TokenShape {
         let payload = self.tag.descriptor().payload();
         let allowed_flags = match payload {
             TokenDescriptorPayload::StyleDirective => TOKEN_STYLE_DIRECTIVE_ATTACHED,
+            TokenDescriptorPayload::StringLiteral | TokenDescriptorPayload::RawStringLiteral => {
+                TOKEN_CONTAINS_LINE_BREAK
+            }
             _ => 0,
         };
         if matches!(
@@ -1269,6 +1280,29 @@ impl TokenShape {
     /// Whether this line-break token's whitespace run contains a blank physical line.
     pub(crate) fn newline_has_blank_line(self) -> bool {
         self.tag == TokenTag::NEWLINE && self.flags & TOKEN_NEWLINE_BLANK_LINE != 0
+    }
+
+    pub(crate) const fn line_break_flags(contains_line_break: bool) -> u16 {
+        if contains_line_break {
+            TOKEN_CONTAINS_LINE_BREAK
+        } else {
+            0
+        }
+    }
+
+    /// Whether this token's authored span, or the text it owns, contains a physical line break.
+    ///
+    /// Quoted strings, raw strings and template-body text carry it on their own literal token.
+    /// A discarded template body carries it on the closing `]` that the lexer emits in its place.
+    /// Only those tags reserve the flag bit for this meaning; other tags use the same bit for
+    /// their own per-tag flags.
+    pub(crate) fn contains_line_break(self) -> bool {
+        matches!(
+            self.tag,
+            TokenTag::STRING_SLICE_LITERAL
+                | TokenTag::RAW_STRING_LITERAL
+                | TokenTag::TEMPLATE_CLOSE
+        ) && self.flags & TOKEN_CONTAINS_LINE_BREAK != 0
     }
 
     pub(crate) const fn data(self) -> u32 {

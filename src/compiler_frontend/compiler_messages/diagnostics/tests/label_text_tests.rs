@@ -76,6 +76,9 @@ static ALL_LABEL_ROLES_FAMILY: FamilyRow = FamilyRow {
         LabelMessageCode::BUILTIN_WRITE_BACK_ORIGIN,
         LabelMessageCode::MISSING_EXPORT_DECLARATION,
         LabelMessageCode::EXTERNAL_IMPORT_SITE,
+        LabelMessageCode::SCOPE_OPENER_STARTS_HERE,
+        LabelMessageCode::EARLIER_SCOPE_OPENER_ON_LINE,
+        LabelMessageCode::SCOPE_CLOSER_BEFORE_THIS,
     ],
     render: None,
     reason_key: |_| None,
@@ -206,6 +209,18 @@ fn label_cases(
         (
             LabelDraftMessage::ExternalImportSite,
             "imported here".to_owned(),
+        ),
+        (
+            LabelDraftMessage::ScopeOpenerStartsHere,
+            "the scope opened here".to_owned(),
+        ),
+        (
+            LabelDraftMessage::EarlierScopeOpenerOnLine,
+            "a scope already opened on this line".to_owned(),
+        ),
+        (
+            LabelDraftMessage::ScopeCloserBeforeThis,
+            "this `;` closed the scope".to_owned(),
         ),
     ]
 }

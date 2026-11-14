@@ -23,7 +23,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
     self, InvalidConfigView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
-    COMPILER_CAPACITY_EXCEEDED, EXPECTED_TOKEN,
+    self, COMPILER_CAPACITY_EXCEEDED, EXPECTED_TOKEN, INVALID_SCOPE_LAYOUT, InvalidScopeLayoutCode,
+    InvalidScopeLayoutView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
     self, TYPE_MISMATCH, USE_OF_UNINITIALIZED_LOCAL, UnsupportedBackendFeatureView,
@@ -44,8 +45,8 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, DiagnosticSeverity, ExternalJsAnnotationDirective, ExternalJsDeclarationKind,
     InvalidCollectionTypeReason, InvalidConfigReason, InvalidDeclarationReason,
     InvalidExternalModuleReason, InvalidMapTypeReason, InvalidMultiBindReason,
-    InvalidOutputFolderReason, InvalidTypeAnnotationReason, NonExhaustiveMatchReason,
-    TypeAnnotationContext, UnsupportedBackendFeatureReason,
+    InvalidOutputFolderReason, InvalidScopeLayoutReason, InvalidTypeAnnotationReason,
+    NonExhaustiveMatchReason, TypeAnnotationContext, UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -498,6 +499,71 @@ fn output_folder_collision_rendering_preserves_both_authored_spellings() {
     let rendered =
         terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::new(&string_table));
     assert!(rendered.contains("Development and release output folders 'Build' and 'build' resolve to the same output root and must be distinct."));
+}
+
+#[test]
+fn invalid_scope_layout_pins_codes_reason_keys_and_messages() {
+    let cases = [
+        (
+            InvalidScopeLayoutReason::NestedScopeOpenerOnLine,
+            InvalidScopeLayoutCode::NestedScopeOpenerOnLine,
+            "invalid_scope_layout.nested_scope_opener_on_line",
+            "Move the nested scope opener to a new line. Each scope that a `;` closes opens on its own physical line.",
+        ),
+        (
+            InvalidScopeLayoutReason::MultilineCloserAfterCode,
+            InvalidScopeLayoutCode::MultilineCloserAfterCode,
+            "invalid_scope_layout.multiline_closer_after_code",
+            "`;` closes a scope, not a statement. Place this closer on its own line, after the scope's body.",
+        ),
+        (
+            InvalidScopeLayoutReason::ContentAfterCloser,
+            InvalidScopeLayoutCode::ContentAfterCloser,
+            "invalid_scope_layout.content_after_closer",
+            "No code may follow a scope closer on the same line. Move the remaining code to the next line.",
+        ),
+        (
+            InvalidScopeLayoutReason::AdditionalCloserOnLine,
+            InvalidScopeLayoutCode::AdditionalCloserOnLine,
+            "invalid_scope_layout.additional_closer_on_line",
+            "Only one scope closer may end a line. Remove this `;` if it is extra, or move it to its own line if it closes an outer scope.",
+        ),
+    ];
+
+    assert_eq!(INVALID_SCOPE_LAYOUT.descriptor.code, "MOTH-SYNTAX-0041");
+    assert_eq!(INVALID_SCOPE_LAYOUT.word_count(), 1);
+    assert_eq!(INVALID_SCOPE_LAYOUT.pending_mask(), 0);
+    assert_eq!(
+        INVALID_SCOPE_LAYOUT.descriptor.default_severity,
+        DiagnosticSeverity::Error
+    );
+
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let span = exact_span_in_source(SourceId::from_index(1), 6, 1, &mut span_builder);
+    let string_table = StringTable::new();
+    let context = DiagnosticRenderContext::new(&string_table);
+
+    for (reason, expected_code, expected_key, expected_message) in cases {
+        assert_eq!(InvalidScopeLayoutCode::of(reason), expected_code);
+        assert_eq!(reason.stable_reason_key(), expected_key);
+        assert_eq!(expected_code.stable_reason_key(), expected_key);
+
+        let compact = compact_bag_for_test(
+            DiagnosticBag::from(token_lexical::invalid_scope_layout(reason, Some(span))),
+            None,
+        );
+        let view = compact.first().expect("scope-layout draft compacts");
+        assert_eq!(view.descriptor().code, "MOTH-SYNTAX-0041");
+        assert_eq!(view.severity(), DiagnosticSeverity::Error);
+        assert_eq!(view.reason_key(), Some(expected_key));
+        assert!(matches!(view.primary_site(), SiteRef::Local(primary) if primary == span));
+        let facts = view
+            .family_view::<InvalidScopeLayoutView>()
+            .expect("scope-layout reason facts remain typed");
+        assert_eq!(facts.reason, expected_code);
+        let guidance = terminal::format_guidance_view(view, context).join("\n");
+        assert_eq!(guidance, expected_message);
+    }
 }
 
 #[test]

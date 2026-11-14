@@ -57,6 +57,7 @@ fn family_rows_keep_stable_descriptor_codes_and_default_severities() {
         ("MOTH-SYNTAX-0003", DiagnosticSeverity::Error),
         ("MOTH-SYNTAX-0019", DiagnosticSeverity::Error),
         ("MOTH-SYNTAX-0037", DiagnosticSeverity::Error),
+        ("MOTH-SYNTAX-0041", DiagnosticSeverity::Error),
         ("MOTH-RULE-0001", DiagnosticSeverity::Error),
         ("MOTH-RULE-0021", DiagnosticSeverity::Warning),
         ("MOTH-TYPE-0001", DiagnosticSeverity::Error),
@@ -78,7 +79,7 @@ fn family_rows_keep_stable_descriptor_codes_and_default_severities() {
         assert_eq!(row.descriptor.default_severity, expected_severity);
         schema_rows_checked += 1;
     }
-    assert_eq!(schema_rows_checked, 12);
+    assert_eq!(schema_rows_checked, 13);
 }
 
 #[test]

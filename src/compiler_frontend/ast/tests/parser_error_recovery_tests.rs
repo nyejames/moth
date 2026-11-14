@@ -532,23 +532,27 @@ later || -> String:
     );
 }
 
-/// One retained simple body: `return`, one value token and the closing `;`.
+/// One retained simple body: the newline after the signature colon, `return`, one value token and
+/// the newline before its standalone closer.
 ///
-/// The header stage captures the body range from the first token after the signature colon
-/// through the closing delimiter, so these fixture bodies charge exactly three work tokens.
-const SIMPLE_BODY_WORK_TOKENS: u32 = 3;
+/// The header stage captures the body range from the first token after the signature colon up to
+/// the closing delimiter, so these fixture bodies charge exactly four work tokens.
+const SIMPLE_BODY_WORK_TOKENS: u32 = 4;
 
 #[test]
 fn diagnostic_recovery_work_boundary_admits_an_exact_fit() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 second || -> I32:
-    return also_missing;
+    return also_missing
+;
 third || -> I32:
-    return third_missing;
+    return third_missing
+;
 ";
-    // The first failed body is uncharged, so admitting both later bodies costs 3 plus 3.
+    // The first failed body is uncharged, so admitting both later bodies costs 4 plus 4.
     let exact_fit_allowance = SIMPLE_BODY_WORK_TOKENS * 2;
     let (exact_fit, exact_stops) = parse_single_file_ast_diagnostic_with_policy(
         source,
@@ -593,17 +597,21 @@ third || -> I32:
 fn diagnostic_recovery_work_boundary_overflow_stops_before_the_next_body() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 second || -> I32:
-    return also_missing;
+    return also_missing
+;
 third || -> I32:
-    return 1 + missing_third;
+    return 1 + missing_third
+;
 ";
-    // The third body retains five tokens: `return`, `1`, `+`, `missing_third` and the closing `;`.
-    const LONG_BODY_WORK_TOKENS: u32 = 5;
+    // The third body retains six tokens: the newline after its colon, `return`, `1`, `+`,
+    // `missing_third` and the newline before its standalone closer.
+    const LONG_BODY_WORK_TOKENS: u32 = 6;
     let allowance = SIMPLE_BODY_WORK_TOKENS + LONG_BODY_WORK_TOKENS;
 
-    // After the second body, three tokens remain, which is less than the third body needs.
+    // After the second body, fewer tokens remain than the third body needs.
     let (short, short_stops) =
         parse_single_file_ast_diagnostic_with_policy(source, recovery_policy(None, allowance - 1));
     assert_eq!(
@@ -637,11 +645,14 @@ third || -> I32:
 fn diagnostic_recovery_work_boundary_successful_body_consumes_allowance() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 second || -> I32:
-    return 2;
+    return 2
+;
 third || -> I32:
-    return third_missing;
+    return third_missing
+;
 ";
     let full_allowance = SIMPLE_BODY_WORK_TOKENS * 2;
 
@@ -678,9 +689,11 @@ third || -> I32:
 fn diagnostic_recovery_scope_boundary_generic_template() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 identity type T |value T| -> T:
-    return also_missing;
+    return also_missing
+;
 ";
     let result = parse_single_file_ast_diagnostic(source);
 
@@ -696,7 +709,8 @@ identity type T |value T| -> T:
 fn diagnostic_recovery_scope_boundary_implicit_start() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 value = also_missing
 ";
     let result = parse_single_file_ast_diagnostic(source);
@@ -712,7 +726,8 @@ value = also_missing
 fn diagnostic_recovery_scope_boundary_const_template() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 [: [also_missing]]
 ";
     let result = parse_single_file_ast_diagnostic(source);
@@ -728,11 +743,14 @@ first || -> I32:
 fn diagnostic_recovery_module_allowance_one_matches_fail_fast() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 second || -> I32:
-    return also_missing;
+    return also_missing
+;
 third || -> I32:
-    return third_missing;
+    return third_missing
+;
 ";
     let (result, stops) = parse_single_file_ast_diagnostic_with_policy(
         source,
@@ -750,11 +768,14 @@ third || -> I32:
 fn diagnostic_recovery_module_allowance_two_retains_two_and_stops() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 second || -> I32:
-    return also_missing;
+    return also_missing
+;
 third || -> I32:
-    return third_missing;
+    return third_missing
+;
 ";
     let (result, stops) = parse_single_file_ast_diagnostic_with_policy(
         source,
@@ -778,9 +799,11 @@ third || -> I32:
 fn diagnostic_recovery_module_allowance_reached_on_last_body_sets_no_stop() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 second || -> I32:
-    return also_missing;
+    return also_missing
+;
 ";
     let (result, stops) = parse_single_file_ast_diagnostic_with_policy(
         source,

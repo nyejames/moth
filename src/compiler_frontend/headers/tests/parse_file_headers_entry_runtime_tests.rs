@@ -242,3 +242,41 @@ fn same_line_second_runtime_marker_is_not_counted_as_a_header_fragment() {
         "only a statement-boundary marker owns a runtime header; ordinary parsing rejects the same-line continuation"
     );
 }
+
+/// A declaration-shaped token after a closer on the same line stays entry-body syntax.
+///
+/// WHAT: `if x: a(); Status :: A;` must not register `Status` as a top-level choice header.
+/// WHY: the closer ends a scope, not a statement boundary. Treating `END` as a declaration
+///      boundary would hide the authored trailing content from AST and accept two constructs on
+///      one physical line.
+#[test]
+fn declaration_shaped_tokens_after_a_closer_stay_in_the_entry_body() {
+    let source = "if x: a(); Status :: A;\n";
+    let (headers, string_table) = parse_single_file_headers_with_table(source);
+
+    assert!(
+        !headers
+            .headers
+            .iter()
+            .any(|header| matches!(header.kind, HeaderKind::Choice { .. })),
+        "`Status` after a scope closer must not become a module declaration header"
+    );
+
+    let start_header = start_function_header(&headers);
+    let mut body = header_body_tokens(&headers, start_header);
+    let mut body_symbols = Vec::new();
+    while let Some(token) = body.advance() {
+        if token.tag() == TokenTag::SYMBOL
+            && let Some(symbol) = token.string_id()
+        {
+            body_symbols.push(string_table.resolve(symbol).to_owned());
+        }
+        if token.is_eof() {
+            break;
+        }
+    }
+    assert!(
+        body_symbols.iter().any(|symbol| symbol == "Status"),
+        "the authored declaration-shaped token must remain in the entry body, found {body_symbols:?}"
+    );
+}

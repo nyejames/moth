@@ -1151,6 +1151,28 @@ pub enum InvalidChoiceVariantReason {
     PayloadVariantMissingArguments,
 }
 
+/// Why an authored scope opener or closer violates the physical-line layout contract.
+///
+/// WHAT: names the one structural mistake the diagnostic reports, at its authored token.
+/// WHY: `;` layout failures share one family but need different advice: a nested opener must move
+///      to its own line, a multiline closer must stand alone, trailing code must move down, and a
+///      stacked closer must be removed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum InvalidScopeLayoutReason {
+    /// A second semicolon-terminated scope opened on the same physical line as an active one.
+    #[allow(
+        dead_code,
+        reason = "the nested-opener rule is enforced by the Stage 4 opener owners"
+    )]
+    NestedScopeOpenerOnLine,
+    /// A multiline scope's closer shares its line with authored code other than its opener.
+    MultilineCloserAfterCode,
+    /// Authored code follows a scope closer on the same physical line.
+    ContentAfterCloser,
+    /// More than one scope closer occupies one physical line.
+    AdditionalCloserOnLine,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ReservedNameOwner {
     BuiltinType,

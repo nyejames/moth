@@ -177,7 +177,9 @@ fn generic_declarations_in_executable_bodies_require_module_top_level() {
     for declaration in [
         "nested type A |value A|:\n        return\n    ;",
         "Nested type A = |value A|",
-        "Nested type A :: Item |value A|;",
+        // The nested declaration's closer stands alone, so the outer function's Stage 2 layout
+        // check does not preempt the AST placement error this fixture protects.
+        "Nested type A :: Item |value A|\n    ;",
         "Nested type A as A",
     ] {
         let source = format!("outer ||:\n    {declaration}\n;\n");

@@ -2687,7 +2687,7 @@ fn diagnostic_span_allocates_exactly_when_needed() {
     }
     stream.start_byte_offset = 0;
     stream
-        .emit_string_literal(StringId::from_index(0))
+        .emit_string_literal(StringId::from_index(0), false)
         .expect("the long authored string token should encode");
     assert_eq!(
         stream.extended_span_builder.len(),

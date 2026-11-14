@@ -943,3 +943,428 @@ fn qualified_reference_occurrences_survive_string_remapping_and_source_rebinding
         original.dependency.dependency_shell_id.ordinal
     );
 }
+
+/// The Stage 2 function owner accepts every legal closer placement on the same source shapes.
+///
+/// WHAT: inline and standalone closers, comments, blank/comment-only lines before a closer,
+///       CRLF, bare CR, multibyte body text, a split signature and both empty-body forms.
+/// WHY: a layout predicate that keyed on one line-ending spelling or on the closer's own line
+///      alone would reject legal source before AST or the tokenizer could report its own facts.
+#[test]
+fn function_scope_layout_accepts_inline_and_standalone_closers() {
+    let cases = [
+        ("inline body", "ready_check || -> Bool: return true;\n"),
+        ("standalone closer", "run ||:\n    io.line(\"ready\")\n;\n"),
+        (
+            "closer followed by a comment",
+            "run ||:\n    io.line(\"ready\")\n; -- finished\n",
+        ),
+        (
+            "blank and comment-only lines before the closer",
+            "run ||:\n    io.line(\"ready\")\n\n    -- finished\n;\n",
+        ),
+        ("CRLF source", "run ||:\r\n    io.line(\"ready\")\r\n;\r\n"),
+        ("bare CR source", "run ||:\r    io.line(\"ready\")\r;\r"),
+        (
+            "multibyte body text",
+            "run ||:\n    io.line(\"héllo 🦋\")\n;\n",
+        ),
+        (
+            "split multiline signature",
+            "sum |left I32,\n     right I32| -> I32:\n    return left\n;\n",
+        ),
+        ("empty inline body", "run ||:;\n"),
+        ("empty multiline body", "run ||:\n;\n"),
+        (
+            "else branch closer shares its line",
+            "run ||:\n    if ready:\n        work()\n    else other();\n;\n",
+        ),
+    ];
+
+    for (case, source) in cases {
+        let outcome =
+            parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+        expect_header_success(outcome, case);
+    }
+}
+
+#[test]
+fn multiline_function_closer_after_code_reports_the_closer_and_signature_colon() {
+    let source = "run ||:\n    io.line(\"ready\");\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "multiline function closer after code",
+        "invalid_scope_layout.multiline_closer_after_code",
+        source_span_for(source, ";", 0),
+        &[(
+            ExpectedScopeLayoutLabel::OpenerStartsHere,
+            source_span_for(source, ":", 0),
+        )],
+    );
+}
+
+#[test]
+fn function_closer_trailing_code_reports_the_first_trailing_token() {
+    let source = "run ||:\n    io.line(\"ready\")\n; io.line(\"after\")\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "function closer trailing code",
+        "invalid_scope_layout.content_after_closer",
+        source_span_for(source, "io", 1),
+        &[(
+            ExpectedScopeLayoutLabel::EarlierCloser,
+            source_span_for(source, ";", 0),
+        )],
+    );
+}
+
+#[test]
+fn stacked_function_closers_report_the_second_closer() {
+    let source = "run ||: io.line(\"x\");;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "stacked inline function closers",
+        "invalid_scope_layout.additional_closer_on_line",
+        source_span_for(source, ";", 1),
+        &[(
+            ExpectedScopeLayoutLabel::EarlierCloser,
+            source_span_for(source, ";", 0),
+        )],
+    );
+}
+
+#[test]
+fn inner_and_function_closers_stacked_on_one_line_report_the_second_closer() {
+    let source = "run ||:\n    if a: b();;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "inner closer then function closer",
+        "invalid_scope_layout.additional_closer_on_line",
+        source_span_for(source, ";", 1),
+        &[(
+            ExpectedScopeLayoutLabel::EarlierCloser,
+            source_span_for(source, ";", 0),
+        )],
+    );
+}
+
+#[test]
+fn stacked_function_closers_on_a_multiline_inner_closer_report_the_inner_closer() {
+    // `if ready:` opens a block on an earlier physical line, so its `;` is the first provable
+    // error. The function closer stacked on it must not hide that fact.
+    let source = "run ||:\n    if ready:\n        work();;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "function closer stacked after a multiline inner closer",
+        "invalid_scope_layout.multiline_closer_after_code",
+        source_span_for(source, ";", 0),
+        &[(
+            ExpectedScopeLayoutLabel::OpenerStartsHere,
+            source_span_for(source, ":", 1),
+        )],
+    );
+}
+
+#[test]
+fn stacked_function_closers_on_a_stacked_inner_closer_report_the_earlier_inner_closer() {
+    // The middle `;` closes `if a` and is itself stacked on the `;` that closed `if b`. The
+    // first misplaced closer is the middle one, so it wins over the function closer.
+    let source = "run ||:\n    if a: if b: c();;;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "function closer stacked on an already-stacked inner closer",
+        "invalid_scope_layout.additional_closer_on_line",
+        source_span_for(source, ";", 1),
+        &[(
+            ExpectedScopeLayoutLabel::EarlierCloser,
+            source_span_for(source, ";", 0),
+        )],
+    );
+}
+
+#[test]
+fn legal_branch_continuation_keeps_the_stacked_check_on_the_function_closer() {
+    // An `else` body's final `;` may share the branch's line under the accepted contract, so
+    // that inner closer is legal and the function closer stacked on it is the reported one.
+    let source = "run ||:\n    if ready:\n        work()\n    else other();;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "else branch closer sharing its line",
+        "invalid_scope_layout.additional_closer_on_line",
+        source_span_for(source, ";", 1),
+        &[(
+            ExpectedScopeLayoutLabel::EarlierCloser,
+            source_span_for(source, ";", 0),
+        )],
+    );
+}
+
+#[test]
+fn legal_match_arm_continuation_keeps_the_stacked_check_on_the_function_closer() {
+    // A match arm ending in `=>` may close on the arm's line under the accepted contract.
+    let source = "run ||:\n    if value is:\n        Foo => work();;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "match arm closer sharing its line",
+        "invalid_scope_layout.additional_closer_on_line",
+        source_span_for(source, ";", 1),
+        &[(
+            ExpectedScopeLayoutLabel::EarlierCloser,
+            source_span_for(source, ";", 0),
+        )],
+    );
+}
+
+#[test]
+fn else_continuation_on_a_later_line_does_not_excuse_a_multiline_inner_closer() {
+    // The `else` sits on its own line, so the inner closer does not share the branch's physical
+    // line. `if true:` opened on an earlier line, making the first `;` the first error.
+    let source = "run ||:\n    if true:\n        return\n    else\n        return;;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "else continuation on a later line",
+        "invalid_scope_layout.multiline_closer_after_code",
+        source_span_for(source, ";", 0),
+        &[(
+            ExpectedScopeLayoutLabel::OpenerStartsHere,
+            source_span_for(source, ":", 1),
+        )],
+    );
+}
+
+#[test]
+fn else_continuation_on_the_same_line_keeps_the_inner_closer_legal() {
+    // `else return;;` shares one physical line, so the first `;` legally closes the branch and
+    // the stacked function closer is the reported error.
+    let source = "run ||:\n    if true:\n        return\n    else return;;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "else continuation on the closer line",
+        "invalid_scope_layout.additional_closer_on_line",
+        source_span_for(source, ";", 1),
+        &[(
+            ExpectedScopeLayoutLabel::EarlierCloser,
+            source_span_for(source, ";", 0),
+        )],
+    );
+}
+
+#[test]
+fn the_earliest_invalid_inner_closer_wins_when_the_function_closer_is_invalid() {
+    // The inner `;` follows code on a later line than `if true:` and the function closer also
+    // stands after code. Stage 2 reports the earlier inner error, not the function closer.
+    let source = "run ||:\n    if true:\n        return;\n    return;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "earliest invalid inner closer",
+        "invalid_scope_layout.multiline_closer_after_code",
+        source_span_for(source, ";", 0),
+        &[(
+            ExpectedScopeLayoutLabel::OpenerStartsHere,
+            source_span_for(source, ":", 1),
+        )],
+    );
+}
+
+#[test]
+fn the_earliest_invalid_inner_closer_of_three_stacked_closers_wins() {
+    // The first `;` closes the multiline `if b` after code and is the first error. The other two
+    // closers are also invalid, but Stage 2 must not report them ahead of it.
+    let source = "run ||:\n    if a:\n        if b:\n            x();;;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "three stacked closers",
+        "invalid_scope_layout.multiline_closer_after_code",
+        source_span_for(source, ";", 0),
+        &[(
+            ExpectedScopeLayoutLabel::OpenerStartsHere,
+            source_span_for(source, ":", 2),
+        )],
+    );
+}
+
+#[test]
+fn code_after_an_inner_closer_wins_when_the_function_closer_is_invalid() {
+    // The inline `if` closes legally, but code follows its `;` on the same line. That trailing
+    // code is the first structural error, ahead of the misplaced function closer.
+    let source = "run ||:\n    if true: return; return\n    return;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "code after inner closer",
+        "invalid_scope_layout.content_after_closer",
+        source_span_for(source, "return", 1),
+        &[(
+            ExpectedScopeLayoutLabel::EarlierCloser,
+            source_span_for(source, ";", 0),
+        )],
+    );
+}
+
+#[test]
+fn an_inline_value_if_inside_a_multiline_block_keeps_standalone_closers_valid() {
+    // The value-if's `else` is on the assignment line, but both real source scopes close
+    // standalone. The branch exception must not turn valid layout into an error.
+    let source = "run ||:\n    if ready:\n        x = if a then 1 else 2\n    ;\n;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    expect_header_success(outcome, "inline value-if inside a multiline block");
+}
+
+#[test]
+fn a_grouped_semicolon_is_left_to_the_expression_parser() {
+    // A `;` inside call parentheses already names a precise expression error. Stage 2 must not
+    // preempt it with the trailing-code rule for the function closer on the next line.
+    let source = "run ||:\n    call(;)\n; next\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    expect_header_success(outcome, "grouped semicolon before the function closer");
+}
+
+#[test]
+fn inline_function_with_a_multiline_literal_closer_stands_after_code() {
+    // The literal's own physical line break puts the closer on a later physical line than the
+    // signature colon, so the closer cannot claim the inline form.
+    let source = "run ||: io.line(\"a\nb\");\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "inline function with a multiline literal",
+        "invalid_scope_layout.multiline_closer_after_code",
+        source_span_for(source, ";", 0),
+        &[(
+            ExpectedScopeLayoutLabel::OpenerStartsHere,
+            source_span_for(source, ":", 0),
+        )],
+    );
+}
+
+#[test]
+fn a_discarded_template_body_line_break_is_not_inline_code() {
+    // The discarded `$note` body spans a physical line, but only the lexer sees that text. Its
+    // closing `]` owns the break, so the function closer stands after code, not inline.
+    let source = "run ||: value = 1 [$note: first\nsecond];\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "function closer after a discarded multiline template body",
+        "invalid_scope_layout.multiline_closer_after_code",
+        source_span_for(source, ";", 0),
+        &[(
+            ExpectedScopeLayoutLabel::OpenerStartsHere,
+            source_span_for(source, ":", 0),
+        )],
+    );
+}
+
+/// Const and receiver-method functions share the ordinary signature-to-body capture route.
+///
+/// WHAT: the inline form is legal and the multiline-closer-after-code form reports the same
+///       MOTH-SYNTAX-0041 reason and labels as an ordinary function.
+/// WHY: all function-like routes funnel through one capture, so a route-specific body handoff
+///      regression would otherwise only surface for the `#|` marker or a receiver signature.
+#[test]
+fn const_and_receiver_function_routes_use_the_same_closer_contract() {
+    let valid_cases = [
+        (
+            "const function inline body",
+            "square #|value I32| -> I32: return value;\n",
+        ),
+        (
+            "receiver method inline body",
+            "add |this ~Accumulator, amount I32|: return amount;\n",
+        ),
+    ];
+    for (case, source) in valid_cases {
+        let outcome =
+            parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+        expect_header_success(outcome, case);
+    }
+
+    let invalid_cases = [
+        (
+            "const function multiline closer after code",
+            "square #|value I32| -> I32:\n    return value;\n",
+        ),
+        (
+            "receiver method multiline closer after code",
+            "add |this ~Accumulator, amount I32|:\n    return amount;\n",
+        ),
+    ];
+    for (case, source) in invalid_cases {
+        let outcome =
+            parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+        assert_scope_layout_diagnostic(
+            outcome,
+            case,
+            "invalid_scope_layout.multiline_closer_after_code",
+            source_span_for(source, ";", 0),
+            &[(
+                ExpectedScopeLayoutLabel::OpenerStartsHere,
+                source_span_for(source, ":", 0),
+            )],
+        );
+    }
+}
+
+#[test]
+fn second_function_on_a_closer_line_reports_the_first_trailing_token() {
+    let source = "first ||: return 1; second ||: return 2;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "second function after a closer",
+        "invalid_scope_layout.content_after_closer",
+        source_span_for(source, "second", 0),
+        &[(
+            ExpectedScopeLayoutLabel::EarlierCloser,
+            source_span_for(source, ";", 0),
+        )],
+    );
+}

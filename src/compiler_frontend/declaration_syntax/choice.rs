@@ -35,7 +35,8 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::tokenizer::line_scanning::closer_layout_diagnostic;
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag};
 use rustc_hash::FxHashMap;
 
 #[derive(Clone, Debug)]
@@ -163,7 +164,17 @@ pub(crate) fn parse_choice_shell(
     let mut seen_variants: FxHashMap<StringId, SourceSpan> = FxHashMap::default();
     let mut duplicate_diagnostic: Option<DiagnosticDraft> = None;
 
-    // Caller is positioned on the `::` token.
+    // Caller is positioned on the `::` token. Its canonical index and span are the choice's one
+    // opening site, which the closer's physical-line check compares against. Read the canonical
+    // cursor index rather than the parser-coordinate position so a segmented view can never
+    // substitute a logical offset for a source index.
+    let opening_index = token_stream.canonical_cursor().position();
+    let opening_span = current_source_span(token_stream).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            "choice declaration `::` is missing its authored span",
+        ))
+    })?;
     token_stream.advance();
 
     loop {
@@ -308,7 +319,7 @@ pub(crate) fn parse_choice_shell(
                         continue;
                     }
                     TokenTag::END => {
-                        token_stream.advance();
+                        finish_choice_declaration(token_stream, opening_index, opening_span)?;
                         break;
                     }
                     TokenTag::ASSIGN => {
@@ -325,7 +336,11 @@ pub(crate) fn parse_choice_shell(
                                 continue;
                             }
                             TokenTag::END => {
-                                token_stream.advance();
+                                finish_choice_declaration(
+                                    token_stream,
+                                    opening_index,
+                                    opening_span,
+                                )?;
                                 break;
                             }
                             TokenTag::MUST | TokenTag::TRAIT_THIS => {
@@ -425,7 +440,7 @@ pub(crate) fn parse_choice_shell(
                     .into());
                 }
 
-                token_stream.advance();
+                finish_choice_declaration(token_stream, opening_index, opening_span)?;
                 break;
             }
             TokenTag::EOF => {
@@ -455,6 +470,38 @@ fn choice_variant_default_value_diagnostic(span: Option<SourceSpan>) -> Diagnost
         DeferredFeatureReason::ChoiceVariantDefaultValue,
         span,
     )
+}
+
+/// Consume the choice declaration's closing `;` and enforce the scope layout contract.
+///
+/// WHAT: checks the closer's physical line against the `::` opening site and the remainder of its
+///       line, then advances past it.
+/// WHY: the choice shell ends at this token, so AST never receives it. This owner alone can
+///      report a misplaced or duplicated closer at the authored `;`.
+fn finish_choice_declaration(
+    token_stream: &mut DeclarationCursor<'_>,
+    opening_index: TokenIndex,
+    opening_span: SourceSpan,
+) -> Result<(), HeaderParseFailure> {
+    let closer_index = token_stream.canonical_cursor().position();
+    let closer_span = current_source_span(token_stream).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            "choice declaration closer is missing its authored span",
+        ))
+    })?;
+    token_stream.advance();
+    let source = token_stream.canonical_cursor().source_tokens();
+    if let Some(diagnostic) = closer_layout_diagnostic(
+        source,
+        opening_index,
+        opening_span,
+        closer_index,
+        closer_span,
+    ) {
+        return Err(HeaderParseFailure::Diagnostic(diagnostic));
+    }
+    Ok(())
 }
 
 fn current_source_span(token_stream: &DeclarationCursor<'_>) -> Option<SourceSpan> {
