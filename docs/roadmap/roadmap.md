@@ -29,7 +29,9 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Sequenced work
 
-- [Audit findings follow up corrections](./open-audit-findings.md) **NEXT**
+- [Scope-closing semantics and diagnostics overhaul](./plans/scope-closing-semantics-and-diagnostics-plan.md) **NEXT** - Enforce one scope opener per physical line, inline versus multiline closing rules and no code after a semicolon. Rework scope and expression-end diagnostics with opener-aware labels, missing-closer suggestions and full source/test migration. Includes overlapping open audit findings.
+
+- [Audit findings follow up corrections](./open-audit-findings.md) - Continue after the scope overhaul with unrelated accepted findings. Resolve and close each audited area through the audit guide.
 
 - [Constraints and fast arithmetic](./plans/constraints-and-fast-math-plan.md) - Queued: Implement compiler-owned `$fast_math`, transitive `$safe_math` and `$infallible` constraints with portable fast integer and floating-point semantics. Ordinary arithmetic remains checked, Dec retains its ordinary behaviour and semantic traps follow the execution-instance fault policy.
 
