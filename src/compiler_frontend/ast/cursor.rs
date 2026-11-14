@@ -118,6 +118,14 @@ impl<'a> AstCursor<'a> {
         self.cursor.parser_window_start()
     }
 
+    /// Canonical token store this cursor reads.
+    ///
+    /// WHAT: the source owner behind every token fact, used by layout checks that must look past a
+    ///       bounded view's end for real authored neighbours.
+    pub(crate) fn source_tokens(&self) -> &'a SourceTokens {
+        self.cursor.source_tokens()
+    }
+
     /// Exclusive end of the active parser view.
     pub(crate) fn active_end(&self) -> usize {
         self.cursor.parser_length()

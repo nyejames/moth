@@ -48,7 +48,7 @@ use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::test_support::TestSourceContext;
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceId, SourceSpan,
+    ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceId, SourceSpan,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -543,6 +543,82 @@ pub(crate) fn ast_error_label_spans(diagnostic: DiagnosticView<'_>) -> Vec<Optio
             SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
         })
         .collect()
+}
+
+/// One authored site in a scope-layout table row, located by its literal source text.
+///
+/// WHAT: a needle plus which occurrence of it the row means.
+/// WHY: layout rows assert exact authored spans, and a needle stays readable where a hand-counted
+///      byte offset would silently rot when a fixture line changes.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LayoutSite<'a> {
+    needle: &'a str,
+    occurrence: usize,
+}
+
+impl<'a> LayoutSite<'a> {
+    /// The first occurrence of `needle`.
+    pub(crate) const fn first(needle: &'a str) -> Self {
+        Self {
+            needle,
+            occurrence: 0,
+        }
+    }
+
+    /// The `occurrence`-th zero-based occurrence of `needle`.
+    pub(crate) const fn nth(needle: &'a str, occurrence: usize) -> Self {
+        Self { needle, occurrence }
+    }
+
+    /// The authored span of this site inside `source`.
+    fn span_in(self, source: &str) -> SourceSpan {
+        let start = authored_needle_offset(source, self.needle, self.occurrence);
+        let mut extended = ExtendedSpanBuilder::new();
+        let span = LocalSpan::exact(start as u32, self.needle.len() as u32, &mut extended)
+            .expect("scope-layout fixture site fits the inline span domain");
+        SourceSpan::new(SourceId::COMPILATION_ROOT, span)
+    }
+}
+
+fn authored_needle_offset(source: &str, needle: &str, occurrence: usize) -> usize {
+    assert!(!needle.is_empty(), "a layout site needs authored text");
+    let mut search_from = 0;
+    let mut found = None;
+    for _ in 0..=occurrence {
+        let index = source[search_from..].find(needle).unwrap_or_else(|| {
+            panic!("scope-layout fixture does not contain `{needle}` occurrence {occurrence}")
+        });
+        found = Some(search_from + index);
+        search_from += index + needle.len();
+    }
+    found.expect("the occurrence loop runs at least once")
+}
+
+/// Assert the first AST error is the expected scope-layout reason at the authored sites.
+///
+/// WHAT: pins the stable code, the reason key, the primary site and the single related opener or
+///       closer label against literal source text.
+/// WHY: every MOTH-SYNTAX-0041 row must prove *where* it points, not merely that parsing failed;
+///       one helper keeps those tables to one line per row.
+pub(crate) fn assert_ast_scope_layout(
+    result: &CompilationResult<()>,
+    source: &str,
+    expected_reason_key: &str,
+    primary: LayoutSite<'_>,
+    label: LayoutSite<'_>,
+) {
+    let diagnostic = assert_ast_diagnostic(result, "MOTH-SYNTAX-0041", Some(expected_reason_key));
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(primary.span_in(source)),
+        "{expected_reason_key}: primary site"
+    );
+    let labels = ast_error_label_spans(diagnostic);
+    assert_eq!(
+        labels,
+        vec![Some(label.span_in(source))],
+        "{expected_reason_key}: related label"
+    );
 }
 
 /// Tokenizes one source file through a [`CompilerFrontend`] instance for test suites.

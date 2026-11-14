@@ -94,6 +94,7 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::tokenizer::line_scanning::ScopeOpening;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 
@@ -574,6 +575,14 @@ pub struct ScopeContext {
     /// Preserves an enclosing match arm's line boundary in child expression contexts.
     pub(crate) match_arm_boundary: bool,
 
+    /// The nearest still-open scope opener enclosing this body.
+    ///
+    /// WHAT: the opener whose physical line a nested `:`-opened block or branch body must not
+    ///       share. `None` only at the compiler-owned entry start, which has no enclosing scope.
+    /// WHY: each opener site installs its own opening site on the child contexts it parses, so the
+    ///      nested-opener rule reads one inherited fact instead of maintaining an opener stack.
+    pub(crate) enclosing_opener: Option<ScopeOpening>,
+
     /// True only on a statement-match arm body. Nested children of that arm stay false.
     ///
     /// WHY: a statement match nested in a catch or value-producing branch still inherits
@@ -688,6 +697,7 @@ impl Clone for ScopeContext {
             kind: self.kind.clone(),
             scope: self.scope,
             match_arm_boundary: self.match_arm_boundary,
+            enclosing_opener: self.enclosing_opener,
             in_statement_match_arm: false,
             defer_typed_error_validation: self.defer_typed_error_validation,
             shared: Rc::clone(&self.shared),
@@ -1066,6 +1076,7 @@ impl ScopeContext {
         ScopeContext {
             kind,
             match_arm_boundary: false,
+            enclosing_opener: None,
             in_statement_match_arm: false,
             defer_typed_error_validation: false,
             scope,
@@ -1136,6 +1147,7 @@ impl ScopeContext {
         Ok(ScopeContext {
             kind,
             match_arm_boundary,
+            enclosing_opener: self.enclosing_opener,
             in_statement_match_arm: false,
             defer_typed_error_validation: false,
             scope,
@@ -1176,6 +1188,7 @@ impl ScopeContext {
         ScopeContext {
             kind: ContextKind::Expression,
             match_arm_boundary: self.match_arm_boundary,
+            enclosing_opener: self.enclosing_opener,
             in_statement_match_arm: false,
             defer_typed_error_validation: self.defer_typed_error_validation,
             scope: self.scope,
@@ -1240,6 +1253,7 @@ impl ScopeContext {
         ScopeContext {
             kind: template_kind,
             match_arm_boundary: self.match_arm_boundary,
+            enclosing_opener: self.enclosing_opener,
             in_statement_match_arm: false,
             defer_typed_error_validation: false,
             scope: self.scope,
@@ -1282,6 +1296,7 @@ impl ScopeContext {
         ScopeContext {
             kind: ContextKind::Constant,
             match_arm_boundary: parent.match_arm_boundary,
+            enclosing_opener: parent.enclosing_opener,
             in_statement_match_arm: false,
             defer_typed_error_validation: false,
             scope,

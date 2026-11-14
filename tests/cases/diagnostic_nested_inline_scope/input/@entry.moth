@@ -1,0 +1,3 @@
+-- A nested scope opener cannot share the enclosing scope's opening line.
+run ||: if true: io.line("ready");
+;

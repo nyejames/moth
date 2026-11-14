@@ -27,6 +27,10 @@ use crate::compiler_frontend::ast::statements::body_dispatch::{
     ParsedBody, parse_function_body_statements,
 };
 use crate::compiler_frontend::ast::statements::condition_validation::ensure_match_guard_condition;
+use crate::compiler_frontend::ast::statements::diagnostics::{
+    current_scope_opening, current_token_index, nested_scope_opener_error,
+    scope_closer_layout_error,
+};
 use crate::compiler_frontend::ast::statements::if_headers::{ParsedIfHeader, parse_if_header};
 use crate::compiler_frontend::ast::statements::match_arm_boundaries::{
     current_token_starts_match_arm_header, token_index_has_top_level_fat_arrow,
@@ -61,7 +65,7 @@ use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag};
 
 /// Branches recursively parse function bodies, so retained-data failures travel to the module
 /// emission boundary instead of being recast as authored control-flow diagnostics.
@@ -363,21 +367,26 @@ pub fn create_branch(
             ),
         ));
     }
-    // One `;` closes the whole `if`/`else` structure, so both bodies report the same opener.
-    let body_opening_span = Some(token_stream.current_span());
+    // One `;` closes the whole `if`/`else` structure, so both bodies report the same opener. A
+    // nested opener may not share the enclosing scope's opening line.
+    let opening = current_scope_opening(token_stream)?;
+    if let Some(diagnostic) = nested_scope_opener_error(token_stream, &context, opening) {
+        return Err(branching_error(diagnostic));
+    }
     token_stream.advance();
 
     // Both bodies publish provisional generic requests into the shared sink. Finalisation owns
     // selection, so retain the exact parser boundaries without rescanning calls later.
     let then_request_start = context.generic_request_checkpoint();
-    let then_context =
+    let mut then_context =
         context.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
+    then_context.enclosing_opener = Some(opening);
     let then_scope = then_context.scope;
     let then_body = MatchBody::from_parsed(
         parse_function_body_statements(
             token_stream,
             then_context,
-            body_opening_span,
+            Some(opening),
             type_interner,
             expression_builder,
             const_values,
@@ -391,15 +400,19 @@ pub fn create_branch(
 
     let (else_body, else_scope) = if token_stream.current_tag() == TokenTag::ELSE {
         reject_same_line_else_if(token_stream)?;
+        // The `else` token introduces the terminal body, so the final `;` may share its line. The
+        // label still names the colon that opened the construct.
+        let else_opening = opening.at_site(current_token_index(token_stream)?);
         token_stream.advance();
-        let else_context =
+        let mut else_context =
             context.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
+        else_context.enclosing_opener = Some(opening);
         let else_scope = else_context.scope;
         let else_body = MatchBody::from_parsed(
             parse_function_body_statements(
                 token_stream,
                 else_context,
-                body_opening_span,
+                Some(else_opening),
                 type_interner,
                 expression_builder,
                 const_values,
@@ -506,16 +519,20 @@ fn create_option_present_capture_branch(
             ),
         ));
     }
-    let body_opening_span = Some(token_stream.current_span());
+    let opening = current_scope_opening(token_stream)?;
+    if let Some(diagnostic) = nested_scope_opener_error(token_stream, context, opening) {
+        return Err(branching_error(diagnostic));
+    }
     token_stream.advance();
-    let body_context =
+    let mut body_context =
         then_context.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
+    body_context.enclosing_opener = Some(opening);
     let body_scope = body_context.scope;
     let body = MatchBody::from_parsed(
         parse_function_body_statements(
             token_stream,
             body_context,
-            body_opening_span,
+            Some(opening),
             type_interner,
             expression_builder,
             const_values,
@@ -528,15 +545,18 @@ fn create_option_present_capture_branch(
 
     let else_body = if token_stream.current_tag() == TokenTag::ELSE {
         reject_same_line_else_if(token_stream)?;
+        // The `else` token introduces the terminal body, so the final `;` may share its line.
+        let else_opening = opening.at_site(current_token_index(token_stream)?);
         token_stream.advance();
-        let else_context =
+        let mut else_context =
             context.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
+        else_context.enclosing_opener = Some(opening);
         let else_scope = else_context.scope;
         Some(MatchBody::from_parsed(
             parse_function_body_statements(
                 token_stream,
                 else_context,
-                body_opening_span,
+                Some(else_opening),
                 type_interner,
                 expression_builder,
                 const_values,
@@ -721,6 +741,11 @@ pub(crate) fn parse_match_block(
         ));
     }
 
+    let opening = current_scope_opening(token_stream)?;
+    if let Some(diagnostic) = nested_scope_opener_error(token_stream, context, opening) {
+        return Err(branching_error(diagnostic));
+    }
+
     token_stream.advance();
     // The parameter, not an inherited catch/value-branch target, decides whether this
     // full match is a statement match. `create_match_node` passes `None`; a value
@@ -728,6 +753,8 @@ pub(crate) fn parse_match_block(
     let is_statement_match = active_value_target.is_none();
     let mut match_context =
         context.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
+    // Arm bodies and the terminal `else` body still open inside the match's own scope.
+    match_context.enclosing_opener = Some(opening);
     if let Some(active_value_target) = active_value_target {
         match_context.active_value_target = Some(active_value_target);
     }
@@ -757,6 +784,9 @@ pub(crate) fn parse_match_block(
     let mut else_arm_index: Option<usize> = None;
     let mut seen_else = false;
     let mut coverage_tracker = MatchArmCoverageTracker::default();
+    // The `=>` of the most recent arm. The terminal arm introduces the body whose `;` closes the
+    // match, so that closer may share the arrow's physical line.
+    let mut terminal_arm_site: Option<TokenIndex> = None;
 
     // ----------------------------
     //  Parse match arms
@@ -778,6 +808,13 @@ pub(crate) fn parse_match_block(
                         InvalidMatchArmReason::SemicolonDelimiter,
                         Some(token_stream.current_span()),
                     )));
+                }
+                // The match's `;` is AST-owned. Its effective opening site is the terminal arm's
+                // `=>` when one exists, because that arm introduced the final body.
+                let closer_opening =
+                    terminal_arm_site.map_or(opening, |site| opening.at_site(site));
+                if let Some(diagnostic) = scope_closer_layout_error(token_stream, closer_opening) {
+                    return Err(branching_error(diagnostic));
                 }
                 token_stream.advance();
                 break;
@@ -813,7 +850,7 @@ pub(crate) fn parse_match_block(
                 seen_else = true;
                 else_arm_index = Some(arms.len());
 
-                else_block = Some(parse_else_arm(
+                let (else_arm_body, else_arrow_site) = parse_else_arm(
                     token_stream,
                     &match_context,
                     type_interner,
@@ -823,7 +860,9 @@ pub(crate) fn parse_match_block(
                     is_statement_match,
                     string_table,
                     path_fork,
-                )?);
+                )?;
+                terminal_arm_site = Some(else_arrow_site);
+                else_block = Some(else_arm_body);
             }
 
             // Normal pattern arm or malformed header — delegate to dedicated parsing.
@@ -831,7 +870,7 @@ pub(crate) fn parse_match_block(
                 if let Some(candidate) = current_token_starts_match_arm_header(token_stream) {
                     debug_assert_eq!(candidate.start_index, token_stream.position());
                     debug_assert!(candidate.arrow_index > candidate.start_index);
-                    let parsed = parse_match_arm(
+                    let (parsed, arrow_site) = parse_match_arm(
                         &subject,
                         token_stream,
                         &match_context,
@@ -843,6 +882,7 @@ pub(crate) fn parse_match_block(
                         string_table,
                         path_fork,
                     )?;
+                    terminal_arm_site = Some(arrow_site);
 
                     if seen_else {
                         warnings.push(choices_control_flow::unreachable_match_arm(
@@ -1136,6 +1176,11 @@ pub(crate) fn resume_deferred_match<'env>(
     })
 }
 
+/// Parse the terminal `else => <body>` arm.
+///
+/// WHAT: returns the parsed body and the canonical index of the `=>` that introduced it.
+/// WHY: the final `;` may share the terminal arm's line, so the match closer needs that arrow as
+///      its effective opening site.
 #[allow(
     clippy::too_many_arguments,
     reason = "else arm parsing keeps the token stream, scope, mutable interner/builder/constant/warning/string/path state as separate borrows"
@@ -1150,7 +1195,7 @@ fn parse_else_arm(
     is_statement_match: bool,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> BranchingResult<MatchBody> {
+) -> BranchingResult<(MatchBody, TokenIndex)> {
     token_stream.advance();
     token_stream.skip_newlines();
 
@@ -1169,12 +1214,13 @@ fn parse_else_arm(
             ),
         ));
     }
+    let arrow_site = current_token_index(token_stream)?;
 
     token_stream.advance();
     let arm_context =
         new_match_arm_body_context(match_context, is_statement_match, string_table, path_fork)?;
     let arm_scope = arm_context.scope;
-    Ok(MatchBody::from_parsed(
+    let body = MatchBody::from_parsed(
         parse_function_body_statements(
             token_stream,
             arm_context,
@@ -1187,7 +1233,8 @@ fn parse_else_arm(
             path_fork,
         )?,
         arm_scope,
-    ))
+    );
+    Ok((body, arrow_site))
 }
 
 /// Parse a single `<pattern> => <body>` arm.
@@ -1196,6 +1243,9 @@ fn parse_else_arm(
 /// `=>` separator and parses the arm body into its retained-capable representation.
 /// WHY: `branching.rs` stays the owner of statement body parsing while template
 /// match work can reuse the same header parser without entering this path.
+///
+/// Returns the parsed arm and the canonical index of its `=>`, which the match closer uses as the
+/// effective opening site when this arm is terminal.
 ///
 /// ENTRY INVARIANT: the token stream is already positioned at the first token of the
 /// pattern; this function does not advance before parsing.
@@ -1214,7 +1264,7 @@ fn parse_match_arm(
     is_statement_match: bool,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> BranchingResult<ParsedMatchArm> {
+) -> BranchingResult<(ParsedMatchArm, TokenIndex)> {
     let ParsedMatchArmHeader {
         pattern,
         guard,
@@ -1243,6 +1293,7 @@ fn parse_match_arm(
     }
 
     let arrow_span = Some(token_stream.current_span());
+    let arrow_site = current_token_index(token_stream)?;
     token_stream.advance();
     let arm_body_context =
         new_match_arm_body_context(&arm_scope, is_statement_match, string_table, path_fork)?;
@@ -1269,13 +1320,16 @@ fn parse_match_arm(
         )));
     }
 
-    Ok(ParsedMatchArm {
-        pattern,
-        guard,
-        body,
-        matched_choice_variant,
-        pattern_span,
-    })
+    Ok((
+        ParsedMatchArm {
+            pattern,
+            guard,
+            body,
+            matched_choice_variant,
+            pattern_span,
+        },
+        arrow_site,
+    ))
 }
 
 fn new_match_arm_body_context(

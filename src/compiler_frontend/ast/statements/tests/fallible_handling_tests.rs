@@ -39,8 +39,8 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::parse_support::{
-    assert_ast_diagnostic, ast_error_primary_span, ast_first_error_type_display,
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    LayoutSite, assert_ast_diagnostic, assert_ast_scope_layout, ast_error_primary_span,
+    ast_first_error_type_display, parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::tokens::{TokenTag, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -1237,4 +1237,42 @@ fn catch_recovery_map_value_mismatch_names_the_map_slot() {
         .family_view::<TypeMismatchView>()
         .expect("the first error is a type mismatch");
     assert_eq!(mismatch.context, TypeMismatchContext::CatchRecoveryMapValue);
+}
+
+/// Scope-layout rows for `catch:` block bodies.
+///
+/// WHAT: a nested catch opener on the enclosing scope's line is rejected, and a `;` written after
+///       the handler's `then` value is the multiline closer after code rather than a statement
+///       terminator.
+/// WHY: catch bodies are a second authoring shape for the same closer contract, and the older
+///      `then 7;` fixture that used to report a stray top-level `;` now reports this cause.
+#[test]
+fn rejects_catch_scope_layout_violations() {
+    let rows = [
+        (
+            "may_fail || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32, Error!: return may_fail() catch:\n        then 0\n    ;\n;\n",
+            "invalid_scope_layout.nested_scope_opener_on_line",
+            LayoutSite::nth(":", 2),
+            LayoutSite::nth(":", 1),
+        ),
+        (
+            "compute || -> I32:\n    values = {3, 4, 5}\n    return values.get(0) + 1 catch:\n        then 7;\n    ;\n;\n",
+            "invalid_scope_layout.multiline_closer_after_code",
+            LayoutSite::first(";"),
+            LayoutSite::nth(":", 1),
+        ),
+    ];
+
+    for (source, reason, primary, label) in rows {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_scope_layout(&failure, source, reason, primary, label);
+    }
+}
+
+/// A block catch opened on its own line still closes with a standalone `;`.
+#[test]
+fn accepts_a_standalone_catch_closer() {
+    parse_single_file_ast(
+        "may_fail || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32, Error!:\n    return may_fail() catch |err|:\n        then 0\n    ;\n;\n",
+    );
 }

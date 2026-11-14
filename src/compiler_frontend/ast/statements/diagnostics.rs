@@ -4,8 +4,10 @@
 //!       function-body statement dispatch.
 //! WHY: keeps `body_dispatch.rs` focused on parsing logic rather than diagnostic construction.
 
+use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     choices_control_flow, token_lexical,
@@ -17,7 +19,10 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticToken, InvalidStatementPositionReason,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::tokenizer::line_scanning::{
+    ScopeOpening, closer_layout_diagnostic, nested_scope_opening_diagnostic,
+};
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenRef, TokenTag};
 
 /// Attach the exact authored range of the current token when this stream has a source identity.
 fn with_current_token_span(
@@ -157,6 +162,85 @@ pub(crate) fn unexpected_scope_close(
     with_current_token_span(
         token_stream,
         choices_control_flow::invalid_statement_position(reason, Some(token_stream.current_span())),
+    )
+}
+
+/// The canonical index of the token the cursor is on.
+///
+/// WHAT: translates the parser coordinate into the canonical source index that layout checks,
+///       spans and the token store share.
+/// WHY: segmented views report dense parser positions, so only the token reference itself knows
+///      where the authored token lives.
+pub(crate) fn current_token_index(
+    token_stream: &AstCursor,
+) -> Result<TokenIndex, InfrastructureFailure> {
+    token_stream.current().map(TokenRef::index).ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "a statement-layout check ran past the end of its token view",
+        )
+    })
+}
+
+/// Read the opener colon the cursor is on as one scope opening site.
+pub(crate) fn current_scope_opening(
+    token_stream: &AstCursor,
+) -> Result<ScopeOpening, InfrastructureFailure> {
+    scope_opening_at(token_stream, token_stream.position())
+}
+
+/// Read the opener colon at a parser coordinate as one scope opening site.
+///
+/// WHAT: pairs the colon's canonical index with its authored span, which is the label a misplaced
+///       closer or a nested opener attaches to the construct.
+/// WHY: every opener owner has already validated the colon tag, so this only converts the token
+///      into the layout vocabulary rather than repeating the lookup.
+pub(crate) fn scope_opening_at(
+    token_stream: &AstCursor,
+    index: usize,
+) -> Result<ScopeOpening, InfrastructureFailure> {
+    let token = token_stream.token_ref_at(index).ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "a scope opener was read outside its token view",
+        )
+    })?;
+    Ok(ScopeOpening {
+        site: token.index(),
+        label_span: token.source_span(),
+    })
+}
+
+/// Report a nested opener that shares its physical line with the enclosing scope's opener.
+///
+/// WHAT: compares `opener` with the enclosing opener carried by `context`.
+/// WHY: one call site per opener keeps the rule identical for statement, value, loop and handler
+///      bodies, while the entry start (no enclosing opener) opts out by carrying `None`.
+pub(crate) fn nested_scope_opener_error(
+    token_stream: &AstCursor,
+    context: &ScopeContext,
+    opener: ScopeOpening,
+) -> Option<DiagnosticDraft> {
+    let enclosing = context.enclosing_opener?;
+    nested_scope_opening_diagnostic(token_stream.source_tokens(), enclosing, opener)
+}
+
+/// Report a misplaced or duplicated scope closer at the `;` the cursor is on.
+///
+/// WHAT: classifies the closer against `opening` and the token that follows it.
+/// WHY: every AST body that consumes a `;` as a closer must issue the same MOTH-SYNTAX-0041
+///      reason exactly once, from the one classification the lexer's retained line breaks support.
+pub(crate) fn scope_closer_layout_error(
+    token_stream: &AstCursor,
+    opening: ScopeOpening,
+) -> Option<DiagnosticDraft> {
+    let closer = token_stream.current()?;
+    closer_layout_diagnostic(
+        token_stream.source_tokens(),
+        opening.site,
+        opening.label_span,
+        closer.index(),
+        closer.source_span(),
     )
 }
 

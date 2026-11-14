@@ -1,0 +1,5 @@
+-- No code may follow a scope closer on the same physical line.
+run ||:
+    if true: io.line("ready"); io.line("after")
+    ;
+;

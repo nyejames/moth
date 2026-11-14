@@ -1160,10 +1160,6 @@ pub enum InvalidChoiceVariantReason {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidScopeLayoutReason {
     /// A second semicolon-terminated scope opened on the same physical line as an active one.
-    #[allow(
-        dead_code,
-        reason = "the nested-opener rule is enforced by the Stage 4 opener owners"
-    )]
     NestedScopeOpenerOnLine,
     /// A multiline scope's closer shares its line with authored code other than its opener.
     MultilineCloserAfterCode,

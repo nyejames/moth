@@ -1,10 +1,5 @@
--- The `;` after the `then` value already closes the catch, so the function's own closer leaves
--- one `;` that closes nothing. It must be rejected rather than end the entry body early.
-compute || -> I32:
-    values = {3, 4, 5}
-    return values.get(0) + 1 catch:
-        then 7;
-    ;
+-- Top-level code owns no block, so this `;` closes nothing. Accepting it would end the entry
+-- body early and silently drop the output that follows.
+io.line("before")
 ;
-
-io.line("lost")
+io.line("after")

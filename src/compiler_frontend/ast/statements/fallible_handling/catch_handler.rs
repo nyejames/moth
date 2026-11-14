@@ -38,6 +38,9 @@ use crate::compiler_frontend::ast::statements::body_dispatch::ParsedBody;
 use crate::compiler_frontend::ast::statements::control_flow_exits::{
     ControlFlowExitSummary, analyze_control_flow_exits,
 };
+use crate::compiler_frontend::ast::statements::diagnostics::{
+    current_scope_opening, nested_scope_opener_error,
+};
 use crate::compiler_frontend::ast::statements::value_production::completeness::{
     visit_authored_then_values_mut, visit_reachable_then_values,
 };
@@ -1206,8 +1209,14 @@ fn parse_catch_fallible_handler_body(
         .into());
     }
 
+    let opening = current_scope_opening(token_stream)?;
+    if let Some(diagnostic) = nested_scope_opener_error(token_stream, context, opening) {
+        return Err(diagnostic.into());
+    }
+
     let mut handler_context =
         context.new_child_control_flow(ContextKind::CatchHandler, string_table, path_fork)?;
+    handler_context.enclosing_opener = Some(opening);
     // Even an error-only catch owns its zero success slots. A `then` must diagnose that
     // contract rather than target an enclosing value block or report a crossed boundary. A
     // pending contract parses against its declared arity of inferred slots, and an unresolved
@@ -1222,14 +1231,13 @@ fn parse_catch_fallible_handler_body(
 
     // A block catch closes with `;` like any other block, so its colon labels the missing closer
     // when the file ends inside the handler.
-    let body_opening_span = Some(token_stream.current_span());
     token_stream.advance();
 
     let mut body_warnings = DiagnosticBag::new();
     let parsed_body_result = function_body_to_ast(
         token_stream,
         handler_context,
-        body_opening_span,
+        Some(opening),
         type_interner,
         expression_builder,
         const_values,

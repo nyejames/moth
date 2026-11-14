@@ -20,6 +20,9 @@ use crate::compiler_frontend::ast::numeric_construction::DeferredBody;
 use crate::compiler_frontend::ast::statements::body_dispatch::{
     ParsedBody, parse_function_body_statements,
 };
+use crate::compiler_frontend::ast::statements::diagnostics::{
+    current_scope_opening, current_token_index, nested_scope_opener_error,
+};
 use crate::compiler_frontend::ast::statements::value_production::types::ActiveValueProductionTarget;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -28,9 +31,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, InvalidControlFlowStatementReason,
 };
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::line_scanning::ScopeOpening;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Input for the shared then/else block-body parser.
@@ -145,7 +148,10 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
     } = input;
 
     // One `;` closes the whole `if`/`else` value block, so both bodies report the same opener.
-    let body_opening_span = Some(token_stream.current_span());
+    let opening = current_scope_opening(token_stream)?;
+    if let Some(diagnostic) = nested_scope_opener_error(token_stream, outer_context, opening) {
+        return Err(diagnostic.into());
+    }
     token_stream.advance(); // consume `:`
 
     let then_request_start = outer_context.generic_request_checkpoint();
@@ -153,7 +159,8 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
         token_stream,
         then_parent,
         outer_context,
-        body_opening_span,
+        opening,
+        opening,
         type_interner,
         expression_builder,
         const_values,
@@ -170,13 +177,17 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
         )
         .into());
     }
+    // The `else` token introduces the terminal body, so its final `;` may share that line. The
+    // label still names the colon that opened the block.
+    let else_opening = opening.at_site(current_token_index(token_stream)?);
     token_stream.advance(); // consume `else`
 
     let else_body = parse_one_value_block_body(
         token_stream,
         else_parent,
         outer_context,
-        body_opening_span,
+        opening,
+        else_opening,
         type_interner,
         expression_builder,
         const_values,
@@ -204,7 +215,8 @@ fn parse_one_value_block_body(
     token_stream: &mut AstCursor,
     parent: &ScopeContext,
     outer_context: &ScopeContext,
-    body_opening_span: Option<SourceSpan>,
+    enclosing: ScopeOpening,
+    body_opening: ScopeOpening,
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
@@ -216,12 +228,15 @@ fn parse_one_value_block_body(
         parent.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
     let branch_scope = branch_context.scope;
     branch_context.active_value_target = Some(active_target);
+    // `else` is not an opener, so both bodies keep the block's colon as their enclosing opener and
+    // only their effective closer site differs.
+    branch_context.enclosing_opener = Some(enclosing);
 
     let mut warnings = DiagnosticBag::new();
     let parsed_body = parse_function_body_statements(
         token_stream,
         branch_context,
-        body_opening_span,
+        Some(body_opening),
         type_interner,
         expression_builder,
         const_values,

@@ -53,10 +53,6 @@ pub(crate) enum LabelDraftMessage {
     /// The active opener of the scope that a misplaced closer tried to close.
     ScopeOpenerStartsHere,
     /// The opener that already occupies the physical line a nested opener shares.
-    #[allow(
-        dead_code,
-        reason = "the nested-opener rule is enforced by the Stage 4 opener owners"
-    )]
     EarlierScopeOpenerOnLine,
     /// The legal `;` that authored content follows, or that a stacked closer duplicates.
     ScopeCloserBeforeThis,

@@ -3359,6 +3359,34 @@ contract = "language.syntax.top_level_stray_scope_close_rejected"
 role = "primary"
 
 [[case]]
+id = "diagnostic_code_after_scope_closer"
+path = "diagnostic_code_after_scope_closer"
+tags = ["integration", "diagnostics"]
+contract = "language.scopes.no_code_after_scope_closer"
+role = "primary"
+
+[[case]]
+id = "diagnostic_multiline_closer_after_code"
+path = "diagnostic_multiline_closer_after_code"
+tags = ["integration", "diagnostics"]
+contract = "language.scopes.multiline_closer_must_stand_alone"
+role = "primary"
+
+[[case]]
+id = "diagnostic_nested_inline_scope"
+path = "diagnostic_nested_inline_scope"
+tags = ["integration", "diagnostics"]
+contract = "language.scopes.nested_opener_requires_own_line"
+role = "primary"
+
+[[case]]
+id = "scope_closing_inline_valid"
+path = "scope_closing_inline_valid"
+tags = ["integration", "runtime"]
+contract = "language.scopes.inline_closer_shares_opening_line"
+role = "primary"
+
+[[case]]
 id = "diagnostic_recovery_independent_bodies"
 path = "diagnostic_recovery_independent_bodies"
 tags = ["integration", "diagnostics", "functions"]

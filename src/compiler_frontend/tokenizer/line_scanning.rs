@@ -43,6 +43,35 @@ fn find_top_level_fat_arrow_on_line_in_view(
     None
 }
 
+/// One authored scope opener as the layout contract addresses it.
+///
+/// WHAT: the canonical token whose physical line the opener occupies, plus the span that names the
+///       construct in a diagnostic label.
+/// WHY: a closer and a nested opener are judged against the last token that began the scope's
+///      line, which for an `if` branch is the `else` introducing the terminal body while the label
+///      must still point at the `:` the author wrote.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ScopeOpening {
+    /// The canonical token whose physical line the opener owns.
+    pub(crate) site: TokenIndex,
+    /// The span that labels the construct that opened.
+    pub(crate) label_span: SourceSpan,
+}
+
+impl ScopeOpening {
+    /// The same labelled opener reached through a later token on its opening line.
+    ///
+    /// WHAT: replaces the effective site with a branch continuation such as `else`.
+    /// WHY: `if`/`else` and match terminal arms close on the line of their terminal body, but the
+    ///      label must still name the colon that opened the construct.
+    pub(crate) fn at_site(self, site: TokenIndex) -> Self {
+        Self {
+            site,
+            label_span: self.label_span,
+        }
+    }
+}
+
 /// How a scope closer sits on its physical line.
 ///
 /// WHAT: classifies one authored `;` against its opening site and its previous token.
@@ -105,6 +134,37 @@ pub(crate) fn has_physical_line_break_between(
         index = previous;
     }
     false
+}
+
+/// Build the layout diagnostic for a second scope opener that shares an enclosing opener's line.
+///
+/// WHAT: reports `NestedScopeOpenerOnLine` at `opener` and labels `enclosing` when no physical line
+///       break separates them.
+/// WHY: the layout contract allows at most one semicolon-terminated scope per physical line, and
+///       every opener owner makes that comparison against the same retained newline evidence.
+pub(crate) fn nested_scope_opening_diagnostic(
+    tokens: &SourceTokens,
+    enclosing: ScopeOpening,
+    opener: ScopeOpening,
+) -> Option<DiagnosticDraft> {
+    use crate::compiler_frontend::compiler_messages::InvalidScopeLayoutReason;
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+    use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
+
+    if has_physical_line_break_between(tokens, enclosing.site, opener.site) {
+        return None;
+    }
+
+    Some(
+        token_lexical::invalid_scope_layout(
+            InvalidScopeLayoutReason::NestedScopeOpenerOnLine,
+            Some(opener.label_span),
+        )
+        .with_label(
+            Some(enclosing.label_span),
+            Some(LabelDraftMessage::EarlierScopeOpenerOnLine),
+        ),
+    )
 }
 
 /// Classify the closer at `closer` against the opening site at `opening`.

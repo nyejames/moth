@@ -1,0 +1,5 @@
+-- A multiline scope closes with `;` on its own line, after its body.
+compute ||:
+    total = 1 + 2;
+    io.line("still inside?")
+;

@@ -24,7 +24,8 @@ use crate::compiler_frontend::ast::statements::body_symbol::{
 use crate::compiler_frontend::ast::statements::branching::create_branch;
 use crate::compiler_frontend::ast::statements::declared_regions::classify_deferred_declared_region_header;
 use crate::compiler_frontend::ast::statements::diagnostics::{
-    UnexpectedScopeCloseContext, unexpected_scope_close, unexpected_statement_token,
+    UnexpectedScopeCloseContext, scope_closer_layout_error, unexpected_scope_close,
+    unexpected_statement_token,
 };
 use crate::compiler_frontend::ast::statements::loops::create_loop;
 use crate::compiler_frontend::ast::statements::match_arm_boundaries::{
@@ -60,7 +61,8 @@ use crate::compiler_frontend::symbols::identifier_policy;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_statement_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::tokenizer::line_scanning::ScopeOpening;
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag};
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -113,6 +115,45 @@ impl ParsedBody {
 
 fn statement_dispatch_error(diagnostic: DiagnosticDraft) -> ExpressionParseError {
     diagnostic.into()
+}
+
+/// The signature colon that encloses a captured function body's statements.
+///
+/// WHAT: reads the canonical token immediately before the body's first token.
+/// WHY: header capture returns the body as a half-open range that begins after the signature `:`,
+///      so that colon is the still-open opener for the body's first nested opener. Entry start is
+///      segmented and owns no enclosing scope, so only `Function` bodies resolve one. An empty body
+///      holds no opener to compare. A body that begins its own token store is re-parsed from
+///      generated or synthetic body text, so it has no authored enclosing opener either.
+fn function_signature_opening(
+    token_stream: &AstCursor,
+) -> Result<Option<ScopeOpening>, ExpressionParseError> {
+    let Some(opener_index) = token_stream
+        .current()
+        .and_then(|first| first.index().index().checked_sub(1))
+        .and_then(TokenIndex::try_from_index)
+    else {
+        return Ok(None);
+    };
+    let opener = token_stream
+        .canonical_token_ref_at(opener_index)
+        .ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "a captured function body could not read its signature colon",
+            )
+        })?;
+    if opener.tag() != TokenTag::COLON {
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "a captured function body did not begin after its signature colon",
+        )
+        .into());
+    }
+    Ok(Some(ScopeOpening {
+        site: opener.index(),
+        label_span: opener.source_span(),
+    }))
 }
 
 /// Builds the typed wrong-target diagnostic for a source directive in a nested position.
@@ -272,11 +313,12 @@ fn prefixed_nonplace_write(cursor: &AstCursor) -> bool {
 
 /// Parse the statements of one function, entry or nested block body.
 ///
-/// `body_opening_span` is the `:` that opened an authored block body. End of file inside such a
-/// body is a missing `;` and is rejected with a label on that colon. `None` marks a body whose
-/// end of file is not a missing closer: the compiler-owned entry start, function bodies whose
-/// token range is already balanced by header capture, and match arms whose range ends with the
-/// enclosing match's own report.
+/// `body_opening` is the effective opening site of an authored block body: the colon that opened
+/// it, or the `else`/`=>` token that introduces a terminal branch. End of file inside such a body
+/// is a missing `;` and is rejected with a label on that opener. `None` marks a body whose end of
+/// file is not a missing closer: the compiler-owned entry start, function bodies whose token range
+/// is already balanced by header capture, and match arms whose range ends with the enclosing
+/// match's own report.
 #[allow(
     clippy::too_many_arguments,
     reason = "function body keeps stream, scope, warnings and mutable parse resources apart"
@@ -284,7 +326,7 @@ fn prefixed_nonplace_write(cursor: &AstCursor) -> bool {
 pub(crate) fn parse_function_body_statements(
     token_stream: &mut AstCursor,
     mut context: ScopeContext,
-    body_opening_span: Option<SourceSpan>,
+    body_opening: Option<ScopeOpening>,
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
@@ -292,6 +334,13 @@ pub(crate) fn parse_function_body_statements(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> StatementDispatchResult<ParsedBody> {
+    // Header capture already balanced a function body at its own closer, so that `;` never reaches
+    // this loop. The signature colon still encloses every opener the body contains, and it is the
+    // canonical token immediately before the captured range.
+    if body_opening.is_none() && context.kind == ContextKind::Function {
+        context.enclosing_opener = function_signature_opening(token_stream)?;
+    }
+
     // Authored statement order for this body, including every position whose statement could not
     // finish until the body root had selected each numeric origin's single static type.
     let mut draft = BodyDraft::new();
@@ -758,7 +807,14 @@ pub(crate) fn parse_function_body_statements(
 
                 ContextKind::MatchArm => break,
 
+                // Every other body kind consumes its own `;`, so this is the one owner of that
+                // closer's placement and trailing content.
                 _ => {
+                    if let Some(opening) = body_opening
+                        && let Some(diagnostic) = scope_closer_layout_error(token_stream, opening)
+                    {
+                        return Err(statement_dispatch_error(diagnostic));
+                    }
                     token_stream.advance();
                     break;
                 }
@@ -789,14 +845,14 @@ pub(crate) fn parse_function_body_statements(
                 // An authored block body closes with `;`. Reaching the file end inside one means
                 // that block was never closed, so the statements before it must not publish as if
                 // the body had ended normally.
-                if let Some(body_opening_span) = body_opening_span {
+                if let Some(opening) = body_opening {
                     return Err(statement_dispatch_error(
                         token_lexical::unexpected_end_of_file(
                             Some(string_table.intern(";")),
                             Some(token_stream.current_span()),
                         )
                         .with_label(
-                            Some(body_opening_span),
+                            Some(opening.label_span),
                             Some(LabelDraftMessage::UnclosedBlockStartsHere),
                         ),
                     ));
