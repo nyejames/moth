@@ -931,15 +931,16 @@ struct OpenScope {
 
 /// The first authored structural error the capture walk can prove.
 ///
-/// WHAT: records either an invalid inner closer's layout diagnostic or an incomplete expression
-///       immediately before a closer.
+/// WHAT: records an invalid inner closer's layout diagnostic, an incomplete expression
+///       immediately before a closer, or a match arm outside any open match.
 /// WHY: when the function closer is also invalid, the first of these in source order is the one
 ///      the author must see. An invalid closer is ordering evidence only. An incomplete
-///      expression belongs to the expression parser, so the capture returns its body range and
-///      lets AST report the missing operand instead of replacing it with a layout error.
+///      expression and a stray arm belong to AST, so the capture returns its body range and lets
+///      AST report the earlier error instead of replacing it with a layout error.
 enum CloserEvidence {
     InvalidInner(DiagnosticDraft),
     IncompleteExpression,
+    StrayMatchArm,
 }
 
 /// Classify an inner closer, applying the branch-continuation exception only when it is on the
@@ -947,7 +948,7 @@ enum CloserEvidence {
 ///
 /// WHAT: uses the latest top-level `else`/`=>` as the effective opening site when no physical
 ///       line break separates it from the closer; otherwise uses the scope's own opener.
-/// WHY: `else return;;` is legal because the closer shares the `else` line, while an `else` on an
+/// WHY: `else return;` is legal because the closer shares the `else` line, while an `else` on an
 ///      earlier line does not excuse a closer after code.
 fn inner_closer_placement(
     source: &SourceTokens,
@@ -1147,6 +1148,16 @@ pub(super) fn capture_function_body_range_from_cursor(
             // arm may legally share its line with the closing `;`, so record that continuation.
             TokenTag::FAT_ARROW => {
                 block_header_pending = None;
+                // `=>` only delimits match arms. One at top-level nesting outside an open match
+                // means an earlier `;` closed that match, and AST reports the arm error first.
+                if earliest_closer_evidence.is_none()
+                    && nesting.is_top_level()
+                    && open_scopes
+                        .last()
+                        .is_some_and(|scope| scope.construct != SourceScopeConstruct::MatchBlock)
+                {
+                    earliest_closer_evidence = Some(CloserEvidence::StrayMatchArm);
+                }
                 // A `=>` directly after a closer cannot continue an arm of the scope that is
                 // still open; recording it would invent an exception for the innermost scope.
                 if previous_meaningful_tag != Some(TokenTag::END) {
@@ -1309,10 +1320,10 @@ pub(super) fn capture_function_body_range_from_cursor(
         );
         // When the function closer is itself invalid, the first provable structural error in the
         // file still outranks it. An invalid inner closer is reported from here because the
-        // header error ends this file's compilation. An incomplete expression before a closer is
-        // earlier in source and belongs to the expression parser, so the range returns and AST
-        // reports the missing operand instead. If the function closer is valid, inner closers
-        // stay AST's responsibility.
+        // header error ends this file's compilation. An incomplete expression before a closer or a
+        // stray match arm is earlier in source and belongs to AST, so the range returns and AST
+        // reports it instead. If the function closer is valid, inner closers stay AST's
+        // responsibility.
         if let Some(function_diagnostic) = function_diagnostic {
             match earliest_closer_evidence.take() {
                 Some(CloserEvidence::InvalidInner(diagnostic)) => {
@@ -1328,6 +1339,9 @@ pub(super) fn capture_function_body_range_from_cursor(
                         return Err(HeaderParseFailure::Diagnostic(trailing));
                     }
                 }
+                // The arm's match-delimiter report is earlier than every reason this closer has,
+                // and AST always rejects the stray arm, so the whole closer report defers.
+                Some(CloserEvidence::StrayMatchArm) => {}
                 None => return Err(HeaderParseFailure::Diagnostic(function_diagnostic)),
             }
         }

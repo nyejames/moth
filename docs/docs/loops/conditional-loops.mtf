@@ -16,7 +16,7 @@ its body while that condition remains `true`.
 ### Conditional loop contract
 
 - The form is `loop condition: ... ;`.
-- An inline loop closes on the line containing its `loop`. A multiline loop closes with `;` alone after its body. See @../language-overview/#blocks-and-statements (Blocks and statements).
+- An inline loop closes on the line containing its opening `:`. A multiline loop closes with `;` alone after its body. See @../language-overview/#blocks-and-statements (Blocks and statements).
 - The condition must resolve to `Bool`.
 - The condition is checked before the first iteration, so the body may run zero times.
 - It is checked again after each completed iteration.

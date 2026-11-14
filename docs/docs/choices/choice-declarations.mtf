@@ -28,7 +28,7 @@ A payload variant uses a record body:
 
 - The declaration form is `Name :: variants ;`.
 - An inline declaration closes on the line containing its `::`. A multiline declaration closes with `;` alone on its own line.
-- Nothing may follow the declaration's closer on its line.
+- Only whitespace or a `--` comment may follow the declaration's closer on its line.
 - Choice and variant names use `PascalCase`.
 - A choice must declare at least one variant.
 - Variant names must be unique.

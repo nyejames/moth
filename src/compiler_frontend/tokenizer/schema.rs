@@ -968,7 +968,7 @@ token_schema! {
         "`copy`",
         Static,
         0,
-        TOKEN_CLASS_KEYWORD | TOKEN_CLASS_OPERAND_START,
+        TOKEN_CLASS_KEYWORD | TOKEN_CLASS_OPERAND_START | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (

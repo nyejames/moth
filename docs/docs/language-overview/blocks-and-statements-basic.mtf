@@ -10,7 +10,8 @@ The colon opens the function body. The semicolon closes it.
 
 Semicolons do not end every line. Add one only when the surrounding block is
 finished. An inline block closes on its opening line. A multiline block closes
-with the semicolon alone on its own line.
+with the semicolon alone on its own line, or on the line of a terminal `else` or
+terminal match arm.
 
 [codeblock, $code "moth":
     if ready:

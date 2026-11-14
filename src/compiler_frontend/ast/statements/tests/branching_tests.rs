@@ -910,6 +910,10 @@ fn rejects_semicolon_between_match_arms() {
         // A nested inline scope is legal inside an arm, so the line-initial `;` after it is still
         // the match-arm delimiter error and not a scope-layout error.
         "value = 1\nif value is:\n    1 => if true: io.line([: [\"one\"]]);\n    ;\n    2 => io.line([: [\"two\"]])\n    else => io.line([: [\"other\"]])\n;\n",
+        // Header capture sees the later arm outside any open match. The earlier arm delimiter
+        // still wins over the invalid function closer and the code or closer after it.
+        "f ||:\n    if true is:\n        true => return;\n        else => return\n    ;;\n",
+        "f ||:\n    if true is:\n        true => return;\n        else => return\n    ; x()\n;\n",
     ];
 
     for source in sources {

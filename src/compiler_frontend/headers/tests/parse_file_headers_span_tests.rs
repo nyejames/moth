@@ -1336,6 +1336,10 @@ fn an_incomplete_expression_defers_an_invalid_function_closer() {
             "run ||:\n    value = 1 + ;\n",
         ),
         (
+            "function closer after a `copy` with no place",
+            "run ||:\n    return copy;\n",
+        ),
+        (
             "invalid function closer after an earlier incomplete expression",
             "run ||:\n    if true:\n        value = 1 +\n    ;\n    y = 2;\n",
         ),

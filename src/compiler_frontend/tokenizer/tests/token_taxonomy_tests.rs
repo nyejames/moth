@@ -342,7 +342,7 @@ fn schema_classifications_match_frontend_semantics() {
         assert!(tag.continues_expression());
     }
     assert!(!TokenTag::SYMBOL.continues_expression());
-    // Operators and member access need input after them even when they are not newline
+    // Operators, member access and `copy` need input after them even when they are not newline
     // continuations. Scope-closer layout uses this to leave a missing operand to the expression
     // parser instead of reporting the closer first.
     for tag in [
@@ -363,6 +363,7 @@ fn schema_classifications_match_frontend_semantics() {
         TokenTag::OR,
         TokenTag::NEGATIVE,
         TokenTag::DOT,
+        TokenTag::COPY,
     ] {
         assert!(tag.requires_following_operand());
     }
