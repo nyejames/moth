@@ -11,7 +11,6 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::generics
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
-use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, InvalidConfigReason, InvalidDeclarationReason, SourceScopeConstruct,
 };
@@ -1262,24 +1261,18 @@ pub(super) fn capture_function_body_range_from_cursor(
                         ),
                     ));
                 };
-                let diagnostic = token_lexical::unclosed_source_scope(
-                    innermost_open.construct,
-                    Some(current.source_span()),
-                )
-                .with_label(
-                    Some(innermost_open.opening_span),
-                    Some(LabelDraftMessage::UnclosedScopeStartsHere),
-                );
                 // Name the last closer only when it closed a direct child of the reported
                 // innermost scope and nothing has opened above it since: the stack is the same
                 // depth it had immediately after that `;`.
-                let diagnostic = if let Some((closer_depth, closer)) = last_inner_closer
-                    && closer_depth == open_scopes.len()
-                {
-                    diagnostic.with_label(Some(closer), Some(LabelDraftMessage::InnerBlockCloser))
-                } else {
-                    diagnostic
-                };
+                let inner_closer = last_inner_closer
+                    .filter(|(closer_depth, _)| *closer_depth == open_scopes.len())
+                    .map(|(_, closer)| closer);
+                let diagnostic = token_lexical::unclosed_source_scope(
+                    innermost_open.construct,
+                    Some(current.source_span()),
+                    innermost_open.opening_span,
+                    inner_closer,
+                );
                 return Err(diagnostic.into());
             }
             _ => {}

@@ -411,10 +411,8 @@ pub(crate) fn parse_choice_shell(
                         return Err(token_lexical::unclosed_source_scope(
                             SourceScopeConstruct::ChoiceDeclaration,
                             current_source_span(token_stream),
-                        )
-                        .with_label(
-                            Some(opening_span),
-                            Some(LabelDraftMessage::UnclosedScopeStartsHere),
+                            opening_span,
+                            None,
                         )
                         .into());
                     }
@@ -459,10 +457,8 @@ pub(crate) fn parse_choice_shell(
                 return Err(token_lexical::unclosed_source_scope(
                     SourceScopeConstruct::ChoiceDeclaration,
                     current_span,
-                )
-                .with_label(
-                    Some(opening_span),
-                    Some(LabelDraftMessage::UnclosedScopeStartsHere),
+                    opening_span,
+                    None,
                 )
                 .into());
             }

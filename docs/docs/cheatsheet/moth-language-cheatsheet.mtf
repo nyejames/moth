@@ -4,7 +4,7 @@ Follow the linked references for ambiguous or detailed rules.
 
 ## Syntax and names
 
-`:` opens a block and `;` closes it. Semicolons don't end statements. Indentation aids reading but doesn't define scope.
+`:` opens a block and `;` closes it. Semicolons don't end statements. An inline block closes on its opening line, and a multiline block closes with `;` alone on its own line. Indentation aids reading but doesn't define scope.
 Statements run in source order.
 
 [codeblock, $code "moth":
@@ -482,6 +482,7 @@ Handle failing message expressions first. Assertion messages can't propagate err
 ## Branching and value-producing blocks
 
 Conditions use `Bool`. A statement `else` is optional. Nest an `if` or use matching instead of `else if`.
+The terminal `else` body may close on the `else` line, and a match's terminal arm may close on its `=>` line.
 
 [codeblock, $code "moth":
     label = if ready then "ready" else "waiting"

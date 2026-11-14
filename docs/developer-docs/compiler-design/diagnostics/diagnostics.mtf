@@ -176,17 +176,18 @@ A suggestion such as "did you mean to close this `if` before this line?" based o
 - Indentation is not significant in Moth, so accepted programs break the heuristic. A flat body with one statement per line would get a suggestion between two valid statements. A tab counts as one column but displays as eight, so a line that looks deeper can measure shallower.
 - The heuristic is silent in the cases where help matters most: an empty body at end of file, a body indented deeper than its opener, and a stray `;` already reported by `MOTH-SYNTAX-0041`.
 
-A dedented line can still sit inside the body:
+A dedented line can still sit inside the body. This program leaves the function unclosed, so it reports `MOTH-SYNTAX-0042`:
 
 [codeblock, $code "moth":
-run ||:
+-- Invalid: the function never closes.
+run |ready Bool|:
     if ready:
         io.line("Priya")
 io.line("Rob")
     ;
 ]
 
-Here `io.line("Rob")` belongs to the `if`, and the `;` closes the `if`, leaving the function open. A suggestion to close the function before line 4 would move a valid body line out of its scope.
+Here `io.line("Rob")` belongs to the `if` even though it is dedented, and the `;` closes the `if`, leaving the function open. An indentation heuristic would suggest closing the function before `io.line("Rob")`, which would move a valid body line out of its scope.
 
 Revisiting this needs a token-side indentation fact and an exact trigger, not a guess from whitespace.
 

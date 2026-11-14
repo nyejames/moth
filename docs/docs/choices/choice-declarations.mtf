@@ -27,6 +27,8 @@ A payload variant uses a record body:
 ### Contract
 
 - The declaration form is `Name :: variants ;`.
+- An inline declaration closes on the line containing its `::`. A multiline declaration closes with `;` alone on its own line.
+- Nothing may follow the declaration's closer on its line.
 - Choice and variant names use `PascalCase`.
 - A choice must declare at least one variant.
 - Variant names must be unique.
@@ -40,6 +42,8 @@ A payload variant uses a record body:
 - Constructor-style declarations such as `Failed(String)` are invalid.
 - Recursive choice declarations are deferred.
 - A choice has nominal identity. Matching variants and payload shapes do not make two choices interchangeable.
+
+Declaration placement follows @../language-overview/#blocks-and-statements (Blocks and statements).
 
 Payload fields have concrete declared types. Constructors check values against
 those exact types and cannot infer a non-generic field type from later uses.

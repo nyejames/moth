@@ -629,7 +629,12 @@ fn unclosed_source_scope_pins_constructs_reason_keys_and_messages() {
         assert_eq!(construct.stable_reason_key(), expected_key);
 
         let compact = compact_bag_for_test(
-            DiagnosticBag::from(token_lexical::unclosed_source_scope(construct, Some(span))),
+            DiagnosticBag::from(token_lexical::unclosed_source_scope(
+                construct,
+                Some(span),
+                span,
+                None,
+            )),
             None,
         );
         let view = compact.first().expect("unclosed-scope draft compacts");

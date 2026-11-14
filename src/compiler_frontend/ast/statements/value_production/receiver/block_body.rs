@@ -21,7 +21,7 @@ use crate::compiler_frontend::ast::statements::body_dispatch::{
     ParsedBody, parse_function_body_statements,
 };
 use crate::compiler_frontend::ast::statements::diagnostics::{
-    current_scope_opening, current_token_index, nested_scope_opener_error,
+    current_token_index, nested_scope_opener_error, scope_opening_at,
 };
 use crate::compiler_frontend::ast::statements::value_production::types::ActiveValueProductionTarget;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -151,7 +151,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
     } = input;
 
     // One `;` closes the whole `if`/`else` value block, so both bodies report the same opener.
-    let opening = current_scope_opening(token_stream, construct)?;
+    let opening = scope_opening_at(token_stream, token_stream.position(), construct)?;
     if let Some(diagnostic) = nested_scope_opener_error(token_stream, outer_context, opening) {
         return Err(diagnostic.into());
     }

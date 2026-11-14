@@ -50,7 +50,6 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     choices_control_flow, names_declarations, templates, token_lexical,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
     DeferredFeatureReason, DiagnosticBag, InvalidAssignmentTargetReason,
     InvalidControlFlowStatementReason, InvalidFallibleHandlingReason, InvalidMatchArmReason,
@@ -849,25 +848,17 @@ pub(crate) fn parse_function_body_statements(
                 // that block was never closed, so the statements before it must not publish as if
                 // the body had ended normally.
                 if let Some(opening) = body_opening {
-                    let diagnostic = token_lexical::unclosed_source_scope(
-                        opening.construct,
-                        Some(token_stream.current_span()),
-                    )
-                    .with_label(
-                        Some(opening.label_span),
-                        Some(LabelDraftMessage::UnclosedScopeStartsHere),
-                    );
                     // The last `;` after this opener closed the innermost child scope. It is
                     // exact here because this body is the innermost open scope at end of file.
-                    let diagnostic = if let Some(closer) =
-                        last_child_closer_span(token_stream, opening.opener)
-                    {
-                        diagnostic
-                            .with_label(Some(closer), Some(LabelDraftMessage::InnerBlockCloser))
-                    } else {
-                        diagnostic
-                    };
-                    return Err(statement_dispatch_error(diagnostic));
+                    let inner_closer = last_child_closer_span(token_stream, opening.opener);
+                    return Err(statement_dispatch_error(
+                        token_lexical::unclosed_source_scope(
+                            opening.construct,
+                            Some(token_stream.current_span()),
+                            opening.label_span,
+                            inner_closer,
+                        ),
+                    ));
                 }
                 break;
             }

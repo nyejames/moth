@@ -29,6 +29,8 @@ The inline form also supports option-present capture and choice-variant predicat
 
 `then` sends one or more values from the active branch to the receiver.
 
+The block form closes with `;` alone after its body. The terminal `else` body may instead close on the line that begins with `else`, as in `else then "waiting";`. See @../language-overview/#blocks-and-statements (Blocks and statements).
+
 The block form with `then` is supported at the same closed receiving sites as the inline form: declarations, assignments, multi-bind and returns.
 
 ### Block option and choice predicates

@@ -15,12 +15,16 @@ A trait forms an explicit nominal method contract. A type satisfies a trait only
 - Trait declarations are top-level.
 - `TRAIT must:` opens a trait declaration.
 - One final semicolon closes the declaration.
+- An inline trait closes on the line containing its `must:`. A multiline trait closes with `;` alone on its own line.
+- Nothing may follow the declaration's closer on its line.
 - Requirements are method signatures only.
 - Marker traits with no requirements are valid.
 - Traits are compile-time static contracts.
 - Traits are not runtime values.
 - Static non-method requirements are deferred.
 - Generic traits and generic trait methods are outside scope.
+
+Declaration placement follows @../language-overview/#blocks-and-statements (Blocks and statements).
 
 ### Marker traits
 

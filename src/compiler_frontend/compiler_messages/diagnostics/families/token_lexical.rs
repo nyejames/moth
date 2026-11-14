@@ -11,7 +11,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
     CharFact, CountFact, FactCapacityError, FactCodec, IdRemap, OptPathFact, OptStringFact,
     OptTokenFact, PathFact, StringFact, TokenFact, UnitCode, UnitFact, unit_code,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelMessageCode;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
+    LabelDraftMessage, LabelMessageCode,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
@@ -1477,17 +1479,29 @@ diagnostic_family! {
     }
 }
 
-/// The unclosed-source-scope draft for `construct` at `span`.
+/// The unclosed-source-scope draft for `construct` at `primary`.
 ///
-/// The emitting owner labels the innermost still-open opener and, when a visible `;` closed an
-/// inner scope instead, that closer. The draft never claims which scope the author meant to close.
+/// Labels the innermost still-open opener and, when a visible `;` closed a direct child of that
+/// scope instead, that closer. The draft never claims which scope the author meant to close.
 pub(crate) fn unclosed_source_scope(
     construct: SourceScopeConstruct,
-    span: Option<SourceSpan>,
+    primary: Option<SourceSpan>,
+    opener: SourceSpan,
+    inner_closer: Option<SourceSpan>,
 ) -> DiagnosticDraft {
-    DiagnosticDraft::with_facts(&UNCLOSED_SOURCE_SCOPE, span, |cursor| {
+    let diagnostic = DiagnosticDraft::with_facts(&UNCLOSED_SOURCE_SCOPE, primary, |cursor| {
         cursor.push::<UnitFact<SourceScopeConstruct>>(&construct)
     })
+    .with_label(
+        Some(opener),
+        Some(LabelDraftMessage::UnclosedScopeStartsHere),
+    );
+    match inner_closer {
+        Some(closer) => {
+            diagnostic.with_label(Some(closer), Some(LabelDraftMessage::InnerBlockCloser))
+        }
+        None => diagnostic,
+    }
 }
 
 pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[

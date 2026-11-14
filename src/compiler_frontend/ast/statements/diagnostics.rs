@@ -184,17 +184,6 @@ pub(crate) fn current_token_index(
     })
 }
 
-/// Read the opener colon the cursor is on as one scope opening site.
-///
-/// `construct` is the construct this owner recognised before the colon, so an end-of-file report
-/// can name it without inferring the construct from the surrounding tokens.
-pub(crate) fn current_scope_opening(
-    token_stream: &AstCursor,
-    construct: SourceScopeConstruct,
-) -> Result<ScopeOpening, InfrastructureFailure> {
-    scope_opening_at(token_stream, token_stream.position(), construct)
-}
-
 /// Read the opener colon at a parser coordinate as one scope opening site.
 ///
 /// WHAT: pairs the colon's canonical index with its authored span and the construct it began.

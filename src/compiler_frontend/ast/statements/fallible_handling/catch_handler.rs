@@ -39,7 +39,7 @@ use crate::compiler_frontend::ast::statements::control_flow_exits::{
     ControlFlowExitSummary, analyze_control_flow_exits,
 };
 use crate::compiler_frontend::ast::statements::diagnostics::{
-    current_scope_opening, nested_scope_opener_error,
+    nested_scope_opener_error, scope_opening_at,
 };
 use crate::compiler_frontend::ast::statements::value_production::completeness::{
     visit_authored_then_values_mut, visit_reachable_then_values,
@@ -1210,7 +1210,11 @@ fn parse_catch_fallible_handler_body(
         .into());
     }
 
-    let opening = current_scope_opening(token_stream, SourceScopeConstruct::CatchHandler)?;
+    let opening = scope_opening_at(
+        token_stream,
+        token_stream.position(),
+        SourceScopeConstruct::CatchHandler,
+    )?;
     if let Some(diagnostic) = nested_scope_opener_error(token_stream, context, opening) {
         return Err(diagnostic.into());
     }

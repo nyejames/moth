@@ -125,6 +125,10 @@ Use `catch:` for a block handler without an error binding, or
     ;
 ]
 
+An inline handler closes on the line containing its `catch`. A multiline handler
+closes with `;` alone after its body. Handler placement follows
+@../language-overview/#blocks-and-statements (Blocks and statements).
+
 Inline recovery uses `then` on one logical line and has no statement body:
 
 [codeblock, $code "moth":

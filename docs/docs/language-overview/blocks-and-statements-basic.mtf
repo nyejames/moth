@@ -9,15 +9,19 @@ Most Moth blocks have a colon at the start and a semicolon at the end.
 The colon opens the function body. The semicolon closes it.
 
 Semicolons do not end every line. Add one only when the surrounding block is
-finished.
-
-Use indentation to make nesting easy to see:
+finished. An inline block closes on its opening line. A multiline block closes
+with the semicolon alone on its own line.
 
 [codeblock, $code "moth":
     if ready:
         io.line("Ready!")
     ;
 ]
+
+The `if` opens on its own line, so its semicolon stands alone after the body.
+
+Indentation makes nesting easy to see, but it never decides scope. See
+@./ (Blocks and statements advanced) for the full placement contract.
 
 Future compiler-owned blocks use `$async:` and `$checked:`; they are deferred and
 remain distinct from normal control-flow keywords and declared `name:` regions.

@@ -35,8 +35,10 @@ A source function forms a named top-level declaration.
 - A function with only an error slot still writes `-> Error!`.
 - `-> !` is mutually exclusive with every success, optional and error slot.
 - `Void` is not written as a return type.
-- `:` opens the body and `;` closes it.
+- `:` opens the body and `;` closes it. An inline body closes on the line containing its `:`. A multiline body closes with `;` alone on its own line.
 - Function names use `regular_snake_case`.
+
+Scope placement follows @../language-overview/#blocks-and-statements (Blocks and statements).
 
 Functions with required success values must return or otherwise terminate on
 every reachable path. Terminality is validated before HIR lowering.

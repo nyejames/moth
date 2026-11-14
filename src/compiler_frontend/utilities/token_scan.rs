@@ -1383,23 +1383,17 @@ pub(crate) fn collect_declaration_initializer_range(
             // A `;`-terminated block names the construct that never closed. Its opener is the
             // only authored site that explains why the initializer has not ended yet.
             if let Some(construct) = innermost.construct.source_scope() {
+                // Name the last closer only when it closed a direct child of the reported
+                // innermost scope and nothing has opened above it since.
+                let inner_closer = last_inner_closer
+                    .filter(|(closer_depth, _)| *closer_depth == open_constructs.len())
+                    .map(|(_, closer)| closer);
                 let diagnostic = token_lexical::unclosed_source_scope(
                     construct,
                     Some(current_ref.source_span()),
-                )
-                .with_label(
-                    Some(innermost.opening_span),
-                    Some(LabelDraftMessage::UnclosedScopeStartsHere),
+                    innermost.opening_span,
+                    inner_closer,
                 );
-                // Name the last closer only when it closed a direct child of the reported
-                // innermost scope and nothing has opened above it since.
-                let diagnostic = if let Some((closer_depth, closer)) = last_inner_closer
-                    && closer_depth == open_constructs.len()
-                {
-                    diagnostic.with_label(Some(closer), Some(LabelDraftMessage::InnerBlockCloser))
-                } else {
-                    diagnostic
-                };
                 return Err(TokenScanFailure::Diagnostic(diagnostic));
             }
             let expected_delimiter = Some(

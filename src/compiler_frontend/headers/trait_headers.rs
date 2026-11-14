@@ -11,7 +11,6 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
-use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
     CapacityResource, InvalidDeclarationReason, InvalidSignatureMemberReason, SourceScopeConstruct,
 };
@@ -176,10 +175,8 @@ pub(super) fn parse_trait_declaration(
                     token_lexical::unclosed_source_scope(
                         SourceScopeConstruct::TraitDeclaration,
                         cursor_span(cursor),
-                    )
-                    .with_label(
-                        Some(body_opening_span),
-                        Some(LabelDraftMessage::UnclosedScopeStartsHere),
+                        body_opening_span,
+                        None,
                     ),
                 ));
             }
