@@ -164,6 +164,32 @@ Workers may finish in any order. Merge order ignores that race. Canonical module
 
 Per-stage articles still own their contracts. This page owns the transport and lane model, not a catalogue of every code.
 
+## Hints never decide structure
+
+A hint may only follow a proven structural error. It must never decide scope, insert a closer or replace the source-accurate diagnostic.
+
+Scope errors show the rule. `MOTH-SYNTAX-0041` reports a `;` placed where a scope closer cannot go. `MOTH-SYNTAX-0042` reports a source scope that never closes, names its construct, labels its opener and labels any visible `;` that closed an inner scope instead. Those facts come from the parser that balanced the scope, so they are exact.
+
+A suggestion such as "did you mean to close this `if` before this line?" based on indentation was investigated and rejected:
+
+- Retained tokens record newline adjacency, blank lines and multi-line literals, but no column or indentation width. Columns belong to the line index at the render boundary, which parsers do not hold.
+- Indentation is not significant in Moth, so accepted programs break the heuristic. A flat body with one statement per line would get a suggestion between two valid statements. A tab counts as one column but displays as eight, so a line that looks deeper can measure shallower.
+- The heuristic is silent in the cases where help matters most: an empty body at end of file, a body indented deeper than its opener, and a stray `;` already reported by `MOTH-SYNTAX-0041`.
+
+A dedented line can still sit inside the body:
+
+[codeblock, $code "moth":
+run ||:
+    if ready:
+        io.line("Priya")
+io.line("Rob")
+    ;
+]
+
+Here `io.line("Rob")` belongs to the `if`, and the `;` closes the `if`, leaving the function open. A suggestion to close the function before line 4 would move a valid body line out of its scope.
+
+Revisiting this needs a token-side indentation fact and an exact trigger, not a guess from whitespace.
+
 ## What can fail here
 
 - user syntax, type, import, borrow or target failure
