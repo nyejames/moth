@@ -64,8 +64,12 @@ pub(crate) enum BuilderSurfaceValidationError {
 
 const BUILTIN_SOURCE_PACKAGES_DIR: &str = "packages";
 
-/// The existing `.mtf` prelude provider. The follow-up migration extends it to `@styles`.
-pub const TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX: &str = "html";
+/// The mandatory Core source roots, which are also the fixed `.mtf` constant prelude providers.
+///
+/// WHAT: every builder surface registers one Core/MothSource root per prefix, and the compiler
+///       merges public compile-time constants from the same roots into the flat `.mtf` prelude.
+/// WHY: one owner keeps the roots a builder cannot replace identical to the packages whose
+///      exported constants a template may name without an import.
 pub const CORE_SOURCE_PACKAGE_PREFIXES: [&str; 2] = ["html", "styles"];
 
 impl BuilderSurface {

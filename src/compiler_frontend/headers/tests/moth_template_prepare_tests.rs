@@ -14,7 +14,10 @@ use crate::compiler_frontend::ast::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_errors::{
+    CompilationOutcome, CompilationResult, InfrastructureErrors,
+};
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
@@ -50,8 +53,9 @@ use crate::compiler_frontend::pipeline::{
     FrontendFilePrepareSource,
 };
 use crate::compiler_frontend::public_interface::{
-    PublicConstantSemantics, PublicDeclarationRecord, PublicDeclarationSemantics,
-    PublicSemanticInterface, SourceProviderDependency, SourceProviderDependencySet,
+    ProviderDependencyKind, PublicConstantSemantics, PublicDeclarationRecord,
+    PublicDeclarationSemantics, PublicSemanticInterface, SourceProviderDependency,
+    SourceProviderDependencySet,
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::semantic_identity::{
@@ -72,7 +76,7 @@ use crate::compiler_frontend::tokenizer::tokens::{
     TokenCursor, TokenRef, TokenTag, TokenizerEntryMode,
 };
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -384,10 +388,89 @@ fn empty_provider_interface(prefix: &str) -> PublicSemanticInterface {
     }
 }
 
+/// One completed provider interface exporting a single public compile-time string constant.
+///
+/// WHY: the prelude merge reads constant declarations only, so provider-lane tests need the same
+///      export-binding and declaration pair production publishes without compiling a package.
+fn constant_provider_interface(
+    prefix: &str,
+    constant_name: &str,
+    folded_text: &str,
+) -> PublicSemanticInterface {
+    let module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local(prefix),
+        format!("{prefix}/@mod.moth"),
+        ModuleRootRole::Normal,
+    );
+    let constant_origin = OriginDeclarationId::Constant(OriginConstantId::new(
+        module_origin.clone(),
+        constant_name.to_owned(),
+    ));
+    PublicSemanticInterface {
+        module_origin: module_origin.clone(),
+        export_bindings: vec![ExportBinding::new(
+            module_origin,
+            constant_name.to_owned(),
+            constant_origin.clone(),
+        )],
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: vec![PublicDeclarationRecord {
+            origin: constant_origin,
+            synthetic_interface_provenance: Default::default(),
+            semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
+                type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+                folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
+                    folded_text.to_owned(),
+                )),
+            }),
+        }],
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    }
+}
+
+/// Build the fixed template-prelude input set for a fixture with no package provider headers.
+///
+/// WHY: production always supplies every official Core prelude package, so a fixture provider set
+///      that silently supplied only `@html` would stop exercising the merged prelude.
+fn standard_template_prelude_dependencies<'a>(
+    html: &'a PublicSemanticInterface,
+    styles: &'a PublicSemanticInterface,
+) -> SourceProviderDependencySet<'a> {
+    SourceProviderDependencySet::new(vec![
+        SourceProviderDependency {
+            kind: ProviderDependencyKind::TemplatePrelude {
+                package_prefix: "html",
+            },
+            interface: html,
+        },
+        SourceProviderDependency {
+            kind: ProviderDependencyKind::TemplatePrelude {
+                package_prefix: "styles",
+            },
+            interface: styles,
+        },
+    ])
+    .expect("both standard template prelude providers should register")
+}
+
+/// Header-binding outcome for one fixture preparation.
+///
+/// WHAT: keeps the ordinary frozen-diagnostic lane beside the infrastructure lane a malformed
+///       successful provider input produces. Cross-package prelude name collisions do not appear
+///       here: they violate the compiler-shipped prelude contract and use the compiler-bug lane.
+#[derive(Debug)]
+enum FixtureHeaderBindingFailure {
+    Diagnosed(DiagnosticDraft, StringTable),
+    Infrastructure(Box<InfrastructureErrors>),
+}
+
 struct MothTemplateScopeFixture {
     _temp_dir: TempDir,
     project_root: PathBuf,
     html_root_file: PathBuf,
+    styles_root_file: PathBuf,
     entry_file_path: PathBuf,
     project_path_resolver: ProjectPathResolver,
     source_files: Arc<SourceDatabase>,
@@ -401,21 +484,25 @@ impl MothTemplateScopeFixture {
         let project_root = temp_dir.path().join("project");
         let entry_root = project_root.join("src");
         let html_root = temp_dir.path().join("html_package");
+        let styles_root = temp_dir.path().join("styles_package");
 
         fs::create_dir_all(&entry_root).expect("entry root should be created");
         fs::create_dir_all(&html_root).expect("HTML source-backed package should be created");
+        fs::create_dir_all(&styles_root).expect("Styles source-backed package should be created");
         let project_root =
             fs::canonicalize(project_root).expect("project root should canonicalize");
         let entry_root = fs::canonicalize(entry_root).expect("entry root should canonicalize");
         let html_root = fs::canonicalize(html_root).expect("HTML root should canonicalize");
+        let styles_root = fs::canonicalize(styles_root).expect("Styles root should canonicalize");
         let html_root_file = html_root.join("@mod.moth");
+        let styles_root_file = styles_root.join("@mod.moth");
 
         // The miniature `@html` root deliberately includes non-constant exports so the
         // Moth template implicit scope proves it is filtering by source declaration kind.
         fs::write(
             &html_root_file,
             r#"$export
-p #String = "<p>"
+p #String = [$html:<p style="[$slot style]">[$slot]</p>]
 $export
 collision #= "html"
 $export
@@ -430,7 +517,25 @@ render_html || -> String:
         )
         .expect("HTML source-backed package root should be written");
 
-        let mut canonical_files = vec![html_root_file.clone()];
+        // The miniature `@styles` root mirrors the official package: exported slot
+        // contributions plus a private constant, a runtime value and a type export that must
+        // all stay outside the flat prelude.
+        fs::write(
+            &styles_root_file,
+            r#"$export
+center #String = [$in style:text-align: center;]
+$export
+styles_runtime || -> String:
+    return "runtime"
+;
+$export
+StylesToken = | color String |
+styles_private #= "private"
+"#,
+        )
+        .expect("Styles source-backed package root should be written");
+
+        let mut canonical_files = vec![html_root_file.clone(), styles_root_file.clone()];
         for (relative_path, source) in files {
             let path = project_root.join(relative_path);
             if let Some(parent) = path.parent() {
@@ -443,7 +548,10 @@ render_html || -> String:
         let mut source_packages = SourcePackageRegistry::new();
         source_packages
             .register_filesystem_root("html", html_root.clone(), PackageOrigin::Builder)
-            .expect("test source root should register");
+            .expect("test HTML source root should register");
+        source_packages
+            .register_filesystem_root("styles", styles_root.clone(), PackageOrigin::Builder)
+            .expect("test Styles source root should register");
 
         let source_file_kinds = SourceFileKindRegistry::new();
 
@@ -480,6 +588,7 @@ render_html || -> String:
             _temp_dir: temp_dir,
             project_root,
             html_root_file,
+            styles_root_file,
             entry_file_path,
             project_path_resolver,
             source_files: Arc::new(source_files),
@@ -538,11 +647,9 @@ render_html || -> String:
         prepared_relative_paths: &[&str],
     ) -> Result<(Ast, StringTable, PathInternerFork), PreparedFailure> {
         let html_interface = empty_provider_interface("html");
-        let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-            kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::TemplatePrelude,
-            interface: &html_interface,
-        }])
-        .expect("one standard template prelude provider should register");
+        let styles_interface = empty_provider_interface("styles");
+        let provider_dependencies =
+            standard_template_prelude_dependencies(&html_interface, &styles_interface);
         self.compile_module_ast_with_providers(prepared_relative_paths, &provider_dependencies)
     }
 
@@ -558,8 +665,13 @@ render_html || -> String:
                 source_provider_dependencies,
                 &mut path_fork,
             )
-            .map_err(|(diagnostic, string_table)| {
-                Self::capture_ast_diagnostic(diagnostic, string_table, &path_fork)
+            .map_err(|failure| match failure {
+                FixtureHeaderBindingFailure::Diagnosed(diagnostic, string_table) => {
+                    Self::capture_ast_diagnostic(diagnostic, string_table, &path_fork)
+                }
+                FixtureHeaderBindingFailure::Infrastructure(errors) => {
+                    PreparedFailure::Infrastructure(errors)
+                }
             })?;
         let sorted_headers = resolve_module_dependencies(
             headers,
@@ -650,14 +762,12 @@ render_html || -> String:
             StringTable,
             PathInternerFork,
         ),
-        DiagnosticDraft,
+        FixtureHeaderBindingFailure,
     > {
         let html_interface = empty_provider_interface("html");
-        let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-            kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::TemplatePrelude,
-            interface: &html_interface,
-        }])
-        .expect("one standard template prelude provider should register");
+        let styles_interface = empty_provider_interface("styles");
+        let provider_dependencies =
+            standard_template_prelude_dependencies(&html_interface, &styles_interface);
         let mut path_fork = self.source_files.fork_path_interner();
         self.prepare_and_bind_headers_with_providers(
             prepared_relative_paths,
@@ -665,6 +775,37 @@ render_html || -> String:
             &mut path_fork,
         )
         .map(|(headers, string_table)| (headers, string_table, path_fork))
+    }
+
+    /// Visible source names bound in one fixture Moth template file.
+    ///
+    /// WHY: prelude-scope tests assert the exact flat name set, so one accessor keeps the
+    ///      template-source lookup and visibility read identical across them.
+    fn visible_moth_template_source_names(
+        &self,
+        moth_template_relative_path: &str,
+        prepared_relative_paths: &[&str],
+    ) -> BTreeSet<String> {
+        let (headers, mut string_table, mut path_fork) = self
+            .prepare_and_bind_headers_for(prepared_relative_paths)
+            .expect("headers should parse");
+        let moth_template_canonical_path =
+            self.project_root_path().join(moth_template_relative_path);
+        let moth_template_logical_path = self
+            .project_path_resolver
+            .logical_path_for_canonical_file(&moth_template_canonical_path)
+            .expect("Moth template logical path should resolve");
+        let moth_template_source = path_fork
+            .try_intern_filesystem_path(&moth_template_logical_path, &mut string_table)
+            .expect("test path should be UTF-8");
+        headers
+            .binding_environment
+            .visibility_for(&moth_template_source)
+            .expect("Moth template visibility should exist")
+            .visible_source_names
+            .keys()
+            .map(|name| string_table.resolve(*name).to_owned())
+            .collect()
     }
 
     fn prepare_and_bind_headers_with_providers(
@@ -677,14 +818,13 @@ render_html || -> String:
             crate::compiler_frontend::headers::parse_file_headers::BoundModuleHeaders,
             StringTable,
         ),
-        DiagnosticDraft,
+        FixtureHeaderBindingFailure,
     > {
         self.prepare_and_bind_headers_with_providers_with_table(
             prepared_relative_paths,
             source_provider_dependencies,
             path_fork,
         )
-        .map_err(|(diagnostic, _string_table)| diagnostic)
     }
 
     fn prepare_and_bind_headers_with_providers_with_table(
@@ -697,7 +837,7 @@ render_html || -> String:
             crate::compiler_frontend::headers::parse_file_headers::BoundModuleHeaders,
             StringTable,
         ),
-        (DiagnosticDraft, StringTable),
+        FixtureHeaderBindingFailure,
     > {
         let style_directives = StyleDirectiveRegistry::built_ins();
         let external_package_registry = Arc::new(self.external_package_registry.clone());
@@ -751,7 +891,9 @@ render_html || -> String:
                         FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
                             diagnostic,
                             ..
-                        }) => (diagnostic, string_table.clone()),
+                        }) => {
+                            FixtureHeaderBindingFailure::Diagnosed(diagnostic, string_table.clone())
+                        }
                         FileFrontendPrepareFailure::Infrastructure(error) => {
                             panic!("fixture tokenization hit infrastructure failure: {error:?}")
                         }
@@ -788,7 +930,7 @@ render_html || -> String:
                 FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
                     diagnostic,
                     ..
-                }) => (diagnostic, string_table.clone()),
+                }) => FixtureHeaderBindingFailure::Diagnosed(diagnostic, string_table.clone()),
                 FileFrontendPrepareFailure::Infrastructure(error) => {
                     panic!("fixture preparation hit infrastructure failure: {error:?}")
                 }
@@ -813,7 +955,10 @@ render_html || -> String:
         )
         .map_err(|failure| match failure {
             HeaderPreparationFailure::Diagnosed(bag) => {
-                (first_diagnostic_from_bag(bag), string_table.clone())
+                FixtureHeaderBindingFailure::Diagnosed(
+                    first_diagnostic_from_bag(bag),
+                    string_table.clone(),
+                )
             }
             HeaderPreparationFailure::Infrastructure(error) => {
                 panic!("aggregation fixture infrastructure failure: {error:?}")
@@ -830,11 +975,12 @@ render_html || -> String:
             path_fork,
         )
         .map_err(|failure| match failure {
-            HeaderPreparationFailure::Diagnosed(bag) => {
-                (first_diagnostic_from_bag(bag), string_table.clone())
-            }
-            HeaderPreparationFailure::Infrastructure(error) => {
-                panic!("binding fixture infrastructure failure: {error:?}")
+            HeaderPreparationFailure::Diagnosed(bag) => FixtureHeaderBindingFailure::Diagnosed(
+                first_diagnostic_from_bag(bag),
+                string_table.clone(),
+            ),
+            HeaderPreparationFailure::Infrastructure(errors) => {
+                FixtureHeaderBindingFailure::Infrastructure(errors)
             }
         })?;
 
@@ -902,6 +1048,9 @@ render_html || -> String:
     fn source_path_for_fixture_path(&self, relative_path: &str) -> PathBuf {
         if relative_path == "@html/@mod.moth" {
             return self.html_root_file.clone();
+        }
+        if relative_path == "@styles/@mod.moth" {
+            return self.styles_root_file.clone();
         }
 
         self.project_root_path().join(relative_path)
@@ -1402,38 +1551,65 @@ fn moth_template_body_sees_flat_html_prelude_constants() {
     let (ast, string_table, path_fork) = fixture
         .compile_moth_template_ast_ok("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
 
-    folded_content_contains(&ast, &string_table, &path_fork, "<p>");
+    folded_content_contains(&ast, &string_table, &path_fork, "<p style=\"\"></p>");
+}
+
+#[test]
+fn moth_template_body_sees_flat_html_and_styles_prelude_constants() {
+    // Both official prelude providers contribute to one `.mtf` body: `p` from `@html` and the
+    // `center` slot contribution from `@styles`. The style value must travel through the same
+    // ordinary constant materialisation as any imported constant.
+    let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[p, center: Hello]")]);
+    let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
+        "src/intro.mtf",
+        &["@html/@mod.moth", "@styles/@mod.moth", "src/intro.mtf"],
+    );
+
+    folded_content_contains(&ast, &string_table, &path_fork, "text-align: center;");
+    folded_content_contains(&ast, &string_table, &path_fork, "Hello");
 }
 
 #[test]
 fn moth_template_header_visibility_contains_html_prelude_constants() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[p]")]);
-    let (headers, mut string_table, mut path_fork) = fixture
-        .prepare_and_bind_headers_for(&["@html/@mod.moth", "src/intro.mtf"])
-        .expect("headers should parse");
-    let moth_template_canonical_path = fixture.project_root_path().join("src/intro.mtf");
-    let moth_template_logical_path = fixture
-        .project_path_resolver
-        .logical_path_for_canonical_file(&moth_template_canonical_path)
-        .expect("Moth template logical path should resolve");
-    let moth_template_source = path_fork
-        .try_intern_filesystem_path(&moth_template_logical_path, &mut string_table)
-        .expect("test path should be UTF-8");
-    let visibility = headers
-        .binding_environment
-        .visibility_for(&moth_template_source)
-        .expect("Moth template visibility should exist");
-    let p_name = string_table.intern("p");
+    let names = fixture
+        .visible_moth_template_source_names("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
 
     assert!(
-        visibility.visible_source_names.contains_key(&p_name),
-        "Moth template visibility should include the @html prelude p; visible names: {:?}",
-        visibility
-            .visible_source_names
-            .keys()
-            .map(|name| string_table.resolve(*name).to_owned())
-            .collect::<Vec<_>>()
+        names.contains("p"),
+        "Moth template visibility should include the @html prelude p; visible names: {names:?}"
     );
+}
+
+#[test]
+fn moth_template_prelude_excludes_private_runtime_and_type_exports() {
+    // The flat prelude merges public compile-time constants only. `@styles` publishes `center`,
+    // while its private constant, runtime function and type export must stay unavailable by bare
+    // name just like `@html`'s type and runtime exports.
+    let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "Prelude exclusion probe")]);
+    let names = fixture.visible_moth_template_source_names(
+        "src/intro.mtf",
+        &["@html/@mod.moth", "@styles/@mod.moth", "src/intro.mtf"],
+    );
+
+    for present in ["p", "center"] {
+        assert!(
+            names.contains(present),
+            "prelude should include {present}; visible names: {names:?}"
+        );
+    }
+    for excluded in [
+        "styles_private",
+        "styles_runtime",
+        "StylesToken",
+        "HtmlDefaults",
+        "render_html",
+    ] {
+        assert!(
+            !names.contains(excluded),
+            "prelude must exclude {excluded}; visible names: {names:?}"
+        );
+    }
 }
 
 #[test]
@@ -1518,7 +1694,7 @@ fn html_prelude_constant_does_not_collide_with_an_explicit_qualified_selection()
         ],
     );
 
-    folded_content_contains(&ast, &string_table, &path_fork, "<p>");
+    folded_content_contains(&ast, &string_table, &path_fork, "<p style=\"\"></p>");
     folded_content_contains(&ast, &string_table, &path_fork, "local p");
 }
 
@@ -1562,52 +1738,31 @@ fn exported_html_functions_are_not_visible_to_moth_template_body() {
 }
 
 #[test]
-fn moth_template_sees_standard_html_prelude_constants_without_provider_headers() {
-    // Simulates the production path: `@html` is a separate compiled package whose completed
-    // interface is available through SourceProviderDependencySet, but whose source headers are
-    // not in the consumer module's prepared files. The fixed prelude must still collect its
-    // constant exports under their flat names.
-    let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[test_constant]")]);
+fn moth_template_sees_standard_prelude_constants_without_provider_headers() {
+    // Simulates the production path: both official packages are separately compiled, their
+    // completed interfaces are available through SourceProviderDependencySet, and their source
+    // headers are not in the consumer module's prepared files. The fixed prelude must still
+    // collect both constant exports under their flat names.
+    let fixture =
+        MothTemplateScopeFixture::new(&[("src/intro.mtf", "[test_constant][styles_constant]")]);
 
-    let html_origin = StableModuleOriginIdentity::from_portable_path(
-        StablePackageIdentity::project_local("html"),
-        "html".to_owned(),
-        ModuleRootRole::Normal,
-    );
-
-    let constant_origin = OriginDeclarationId::Constant(OriginConstantId::new(
-        html_origin.clone(),
-        "test_constant".to_owned(),
-    ));
-
-    let html_interface = PublicSemanticInterface {
-        module_origin: html_origin.clone(),
-        export_bindings: vec![ExportBinding::new(
-            html_origin.clone(),
-            "test_constant".to_owned(),
-            constant_origin.clone(),
-        )],
-        export_diagnostic_provenance: Vec::new(),
-        binding_exports: Vec::new(),
-        declarations: vec![PublicDeclarationRecord {
-            origin: constant_origin,
-            synthetic_interface_provenance: Default::default(),
-            semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
-                type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-                folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
-                    "from html".to_owned(),
-                )),
-            }),
-        }],
-        reusable_evidence: Vec::new(),
-        concrete_call_summaries: Vec::new(),
-    };
-
-    let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-        kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::TemplatePrelude,
-        interface: &html_interface,
-    }])
-    .expect("the standard template prelude provider should register");
+    let html_interface = constant_provider_interface("html", "test_constant", "from html");
+    let styles_interface = constant_provider_interface("styles", "styles_constant", "from styles");
+    let provider_dependencies = SourceProviderDependencySet::new(vec![
+        SourceProviderDependency {
+            kind: ProviderDependencyKind::TemplatePrelude {
+                package_prefix: "html",
+            },
+            interface: &html_interface,
+        },
+        SourceProviderDependency {
+            kind: ProviderDependencyKind::TemplatePrelude {
+                package_prefix: "styles",
+            },
+            interface: &styles_interface,
+        },
+    ])
+    .expect("both standard template prelude providers should register");
 
     let (ast, string_table, path_fork) = fixture
         .compile_moth_template_ast_with_providers(
@@ -1615,9 +1770,125 @@ fn moth_template_sees_standard_html_prelude_constants_without_provider_headers()
             &["src/intro.mtf"],
             &provider_dependencies,
         )
-        .expect(".mtf body should see the @html constant through the provider interface");
+        .expect(".mtf body should see both Core constants through the provider interfaces");
 
     folded_content_contains(&ast, &string_table, &path_fork, "from html");
+    folded_content_contains(&ast, &string_table, &path_fork, "from styles");
+}
+
+#[test]
+fn cross_package_constant_reexport_does_not_enter_the_flat_prelude() {
+    // A provider that re-exports another package's constant through its completed interface is
+    // an imported alias, not a constant it declares. The alias must not enter the flat prelude,
+    // and its spelling must not collide with the declaring package's real export.
+    let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[test_constant]")]);
+
+    let html_interface = constant_provider_interface("html", "test_constant", "from html");
+    let reexported_declaration = html_interface.declarations[0].clone();
+    let reexported_origin = reexported_declaration.origin.clone();
+    let styles_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("styles"),
+        "styles/@mod.moth".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let styles_interface = PublicSemanticInterface {
+        module_origin: styles_origin.clone(),
+        export_bindings: vec![ExportBinding::new(
+            styles_origin,
+            "test_constant".to_owned(),
+            reexported_origin,
+        )],
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: vec![reexported_declaration],
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    };
+    styles_interface
+        .validate_for_publication()
+        .expect("a re-exporting interface must satisfy publication validation");
+    let provider_dependencies = SourceProviderDependencySet::new(vec![
+        SourceProviderDependency {
+            kind: ProviderDependencyKind::TemplatePrelude {
+                package_prefix: "html",
+            },
+            interface: &html_interface,
+        },
+        SourceProviderDependency {
+            kind: ProviderDependencyKind::TemplatePrelude {
+                package_prefix: "styles",
+            },
+            interface: &styles_interface,
+        },
+    ])
+    .expect("both prelude providers should register separate interfaces");
+
+    let (ast, string_table, path_fork) = fixture
+        .compile_moth_template_ast_with_providers(
+            "src/intro.mtf",
+            &["src/intro.mtf"],
+            &provider_dependencies,
+        )
+        .expect("an imported alias must not collide with the declaring provider's constant");
+
+    folded_content_contains(&ast, &string_table, &path_fork, "from html");
+}
+
+#[test]
+fn duplicate_prelude_constants_across_official_packages_fail_before_body_evaluation() {
+    // Both official Core packages exporting one public constant name breaks a fixed
+    // compiler-shipped contract: no consumer source can repair it and no template needs to
+    // reference the name. Header binding therefore returns an internal infrastructure failure,
+    // naming both packages, before any consumer body reaches const folding. Reversing the
+    // provider input order must not change the rejected names or the message.
+    let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "no prelude reference")]);
+    let mut messages = Vec::new();
+
+    for (first, second) in [("html", "styles"), ("styles", "html")] {
+        let first_interface = constant_provider_interface(first, "shared_name", "from first");
+        let second_interface = constant_provider_interface(second, "shared_name", "from second");
+        let provider_dependencies = SourceProviderDependencySet::new(vec![
+            SourceProviderDependency {
+                kind: ProviderDependencyKind::TemplatePrelude {
+                    package_prefix: first,
+                },
+                interface: &first_interface,
+            },
+            SourceProviderDependency {
+                kind: ProviderDependencyKind::TemplatePrelude {
+                    package_prefix: second,
+                },
+                interface: &second_interface,
+            },
+        ])
+        .expect("both standard template prelude providers should register");
+
+        let failure = match fixture.compile_moth_template_ast_with_providers(
+            "src/intro.mtf",
+            &["src/intro.mtf"],
+            &provider_dependencies,
+        ) {
+            Err(PreparedFailure::Infrastructure(errors)) => errors.primary,
+            Err(other) => {
+                panic!("a duplicate prelude name must fail in the infrastructure lane: {other:?}")
+            }
+            Ok(_) => panic!("a duplicate prelude name must be rejected"),
+        };
+        assert_eq!(failure.stage, CompilerStage::HeaderParsing);
+        for expected in ["'@html'", "'@styles'", "'shared_name'"] {
+            assert!(
+                failure.message().contains(expected),
+                "collision message should name {expected}: {}",
+                failure.message()
+            );
+        }
+        messages.push(failure.message().to_owned());
+    }
+
+    assert_eq!(
+        messages[0], messages[1],
+        "the collision message must not depend on provider input order"
+    );
 }
 #[test]
 fn moth_template_unknown_template_condition_is_rejected_by_const_template_folding() {

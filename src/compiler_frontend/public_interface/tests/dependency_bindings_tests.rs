@@ -2,8 +2,8 @@
 //!
 //! WHAT: proves `SourceProviderDependencySet` resolves retained dependency shells by `DependencyShellId`,
 //!       assigns one dense `ProviderInterfaceId` per unique interface, rejects duplicate shells
-//!       and duplicate template preludes, and fails deterministically when equal module origins
-//!       disagree.
+//!       and duplicate or shared template prelude packages, and fails deterministically when
+//!       equal module origins disagree.
 //! WHY: one exact build-local provider identity replaces optional shell/prefix/boolean
 //!      provider states and module-origin cache keys; these hidden join invariants are
 //!      not observable through end-to-end output.
@@ -44,9 +44,12 @@ fn authored(
     }
 }
 
-fn template_prelude(interface: &PublicSemanticInterface) -> SourceProviderDependency<'_> {
+fn template_prelude<'a>(
+    package_prefix: &'static str,
+    interface: &'a PublicSemanticInterface,
+) -> SourceProviderDependency<'a> {
     SourceProviderDependency {
-        kind: ProviderDependencyKind::TemplatePrelude,
+        kind: ProviderDependencyKind::TemplatePrelude { package_prefix },
         interface,
     }
 }
@@ -131,16 +134,31 @@ fn one_shell_resolves_one_provider_surface() {
 }
 
 #[test]
-fn duplicate_template_prelude_fails() {
+fn duplicate_template_prelude_package_fails() {
     let provider = provider_interface("html");
 
     let error = SourceProviderDependencySet::new(vec![
-        template_prelude(&provider),
-        template_prelude(&provider),
+        template_prelude("html", &provider),
+        template_prelude("html", &provider),
     ])
-    .expect_err("the template prelude must not register twice");
+    .expect_err("one template prelude package must not register twice");
 
     assert!(error.message.contains("template prelude @html"));
+}
+
+#[test]
+fn template_prelude_packages_must_resolve_distinct_interfaces() {
+    let provider = provider_interface("shared");
+
+    let error = SourceProviderDependencySet::new(vec![
+        template_prelude("html", &provider),
+        template_prelude("styles", &provider),
+    ])
+    .expect_err("two prelude packages must not share one completed interface");
+
+    assert!(error.message.contains(
+        "template prelude packages @html and @styles resolved to the same provider interface"
+    ));
 }
 
 #[test]
@@ -285,18 +303,33 @@ fn unbound_shell_stays_outside_the_provider_map() {
 }
 
 #[test]
-fn template_prelude_has_no_shell_and_keeps_its_prefix() {
-    let provider = provider_interface("html");
-    let set = SourceProviderDependencySet::new(vec![template_prelude(&provider)])
-        .expect("one template prelude provider should register");
+fn template_prelude_has_no_shell_and_keeps_its_prefixes() {
+    let html = provider_interface("html");
+    let styles = provider_interface("styles");
+    let set = SourceProviderDependencySet::new(vec![
+        template_prelude("html", &html),
+        template_prelude("styles", &styles),
+    ])
+    .expect("both fixed template prelude packages should register");
 
-    let provider_id = set
-        .template_prelude_provider()
-        .expect("the fixed template prelude should resolve");
+    let providers = set.template_prelude_providers();
+    assert_eq!(
+        providers
+            .iter()
+            .map(|provider| provider.package_prefix)
+            .collect::<Vec<_>>(),
+        vec!["html", "styles"],
+        "canonical prelude input order must be preserved"
+    );
     assert!(std::ptr::eq(
-        set.interface(provider_id)
-            .expect("prelude provider resolves"),
-        &provider,
+        set.interface(providers[0].provider)
+            .expect("html prelude provider resolves"),
+        &html,
+    ));
+    assert!(std::ptr::eq(
+        set.interface(providers[1].provider)
+            .expect("styles prelude provider resolves"),
+        &styles,
     ));
     assert!(
         set.resolve_clause(DependencyShellId::new(SourceId::from_index(0), 0))

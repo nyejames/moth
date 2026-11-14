@@ -1,10 +1,10 @@
 //! Build-resolved source-provider inputs consumed by header interface binding.
 //!
-//! WHAT: associates one retained dependency shell or the fixed template prelude with the
+//! WHAT: associates one retained dependency shell or one fixed template-prelude package with the
 //! immutable public semantic interface selected by Stage 0 through one dense provider set. The
 //! set assigns a build-local [`ProviderInterfaceId`] per unique completed interface and validates
-//! duplicate shells, a duplicate template prelude and equal-origin interface agreement while it
-//! builds.
+//! duplicate shells, duplicate template prelude packages and equal-origin interface agreement
+//! while it builds.
 //! WHY: the compiler binds names and semantic facts, while the build system owns graph and
 //! namespace resolution. This narrow borrowed input keeps build-local `ModuleId` values out of
 //! the compiler, prevents header binding from probing the filesystem or comparing path
@@ -13,7 +13,6 @@
 
 use super::interface_view::ProviderBindingView;
 use super::model::PublicSemanticInterface;
-use crate::builder_surface::definition::TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -50,15 +49,27 @@ pub(crate) struct ResolvedDependencyClause {
 
 /// Explicit provider-dependency state for one binding.
 ///
-/// WHAT: an authored dependency carries its retained clause-shell identity, while the single
-///       compiler-standard template prelude names the provider kind alone.
+/// WHAT: an authored dependency carries its retained clause-shell identity, while each
+///       compiler-standard template prelude dependency names the official package it supplies.
 /// WHY: optional shells, optional prefixes and boolean flags form invalid combinations; the
 ///      two-arm enum makes every provider input state representable and complete. The template
-///      prelude package prefix is fixed by compiler policy, not selected by the active builder.
+///      prelude package set is fixed by compiler policy, not selected by the active builder.
 #[derive(Debug)]
 pub(crate) enum ProviderDependencyKind {
     Authored { shell: DependencyShellId },
-    TemplatePrelude,
+    TemplatePrelude { package_prefix: &'static str },
+}
+
+/// One official Core source package supplying the fixed `.mtf` constant prelude.
+///
+/// WHAT: pairs the fixed package prefix with the dense provider identity of its completed
+///       interface.
+/// WHY: header binding needs the prefix to select the package's header-built export lane and to
+///      keep its synthetic prelude paths distinct from the other provider's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TemplatePreludeProvider {
+    pub(crate) package_prefix: &'static str,
+    pub(crate) provider: ProviderInterfaceId,
 }
 
 #[derive(Debug)]
@@ -70,8 +81,8 @@ pub(crate) struct SourceProviderDependency<'a> {
 /// One dense provider interface set per module binding operation.
 ///
 /// WHAT: maps `ProviderInterfaceId` to the borrowed completed interface, retained shells and the
-/// fixed template prelude to provider IDs, and validates equal-origin agreement once per unique
-/// origin while it is constructed.
+/// fixed template prelude packages to provider IDs, and validates equal-origin agreement once per
+/// unique origin while it is constructed.
 /// WHY: header binding and re-export caches query provider facts by dense identity, so the
 /// module never re-runs publication validation or compares origins per shell.
 #[derive(Debug, Default)]
@@ -79,7 +90,7 @@ pub(crate) struct SourceProviderDependencySet<'a> {
     interfaces: Vec<&'a PublicSemanticInterface>,
     binding_views: Vec<ProviderBindingView<'a>>,
     by_shell: FxHashMap<DependencyShellId, ProviderInterfaceId>,
-    template_prelude: Option<ProviderInterfaceId>,
+    template_prelude: Vec<TemplatePreludeProvider>,
     by_origin: FxHashMap<StableModuleOriginIdentity, ProviderInterfaceId>,
 }
 
@@ -91,7 +102,7 @@ impl<'a> SourceProviderDependencySet<'a> {
             interfaces: Vec::with_capacity(dependencies.len()),
             binding_views: Vec::with_capacity(dependencies.len()),
             by_shell: FxHashMap::default(),
-            template_prelude: None,
+            template_prelude: Vec::new(),
             by_origin: FxHashMap::default(),
         };
 
@@ -110,22 +121,58 @@ impl<'a> SourceProviderDependencySet<'a> {
                     let provider_id = set.register(dependency.interface)?;
                     set.by_shell.insert(shell, provider_id);
                 }
-                ProviderDependencyKind::TemplatePrelude => {
-                    if set.template_prelude.is_some() {
-                        return Err(InfrastructureFailure::internal(
-                            CompilerStage::AstConstruction,
-                            format!(
-                                "source provider input set registered the template prelude @{TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX} more than once"
-                            ),
-                        ));
-                    }
-                    let provider_id = set.register(dependency.interface)?;
-                    set.template_prelude = Some(provider_id);
+                ProviderDependencyKind::TemplatePrelude { package_prefix } => {
+                    set.register_template_prelude(package_prefix, dependency.interface)?;
                 }
             }
         }
 
         Ok(set)
+    }
+
+    /// Register one official package as a template prelude provider.
+    ///
+    /// WHAT: rejects a repeated package prefix and two prefixes that resolve to one completed
+    ///       interface.
+    /// WHY: the prelude merges exported constants across the registered packages, so a repeated
+    ///      prefix or a shared interface would compare one package's exports against themselves
+    ///      and hide the real merge state from the consumer.
+    fn register_template_prelude(
+        &mut self,
+        package_prefix: &'static str,
+        interface: &'a PublicSemanticInterface,
+    ) -> Result<(), InfrastructureFailure> {
+        if self
+            .template_prelude
+            .iter()
+            .any(|provider| provider.package_prefix == package_prefix)
+        {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "source provider input set registered the template prelude @{package_prefix} more than once"
+                ),
+            ));
+        }
+        let provider_id = self.register(interface)?;
+        if let Some(existing) = self
+            .template_prelude
+            .iter()
+            .find(|provider| provider.provider == provider_id)
+        {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "template prelude packages @{} and @{package_prefix} resolved to the same provider interface",
+                    existing.package_prefix
+                ),
+            ));
+        }
+        self.template_prelude.push(TemplatePreludeProvider {
+            package_prefix,
+            provider: provider_id,
+        });
+        Ok(())
     }
 
     /// Register one completed interface, collapsing exact repeats and rejecting equal-origin
@@ -252,13 +299,13 @@ impl<'a> SourceProviderDependencySet<'a> {
         })
     }
 
-    /// The fixed compiler-standard template prelude provider, when the builder supplies it.
+    /// The fixed compiler-standard template prelude providers, in canonical input order.
     ///
-    /// WHAT: exposes the prelude provider ID so header binding can register the flat `.mtf`
-    ///       constant prelude.
-    /// WHY: the package is chosen by compiler policy, not by a builder capability list or by an
+    /// WHAT: exposes the prelude package prefixes with their provider IDs so header binding can
+    ///       merge their public compile-time constants into the flat `.mtf` prelude.
+    /// WHY: the packages are chosen by compiler policy, not by a builder capability list or by an
     ///       explicit dependency clause in the template source.
-    pub(crate) fn template_prelude_provider(&self) -> Option<ProviderInterfaceId> {
-        self.template_prelude
+    pub(crate) fn template_prelude_providers(&self) -> &[TemplatePreludeProvider] {
+        &self.template_prelude
     }
 }
