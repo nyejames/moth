@@ -192,6 +192,28 @@ fn generic_declarations_in_executable_bodies_require_module_top_level() {
     }
 }
 
+/// A missing initializer at the end of a deferred function view keeps an authored span.
+///
+/// WHY: the header hands AST a body range that ends right after `=`, so resolving the primary
+///      from the cursor would render RULE-0043 with no path or position.
+#[test]
+fn missing_initializer_at_the_end_of_a_function_view_keeps_the_equals_span() {
+    let source = "f ||:\n    x = 1\n    y =;\nio.line(\"a\")\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0043",
+        Some("invalid_declaration.missing_initializer_expression"),
+    );
+    let start = source.find("y =").expect("the declaration must occur") as u32 + 2;
+    let mut builder = ExtendedSpanBuilder::new();
+    let span = LocalSpan::exact(start, 1, &mut builder).expect("the `=` span must fit");
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
+    );
+}
+
 #[test]
 fn function_default_path_token_reports_structured_diagnostic_not_panic() {
     // A path token nested in a template default lives in the detached parameter

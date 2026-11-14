@@ -488,6 +488,13 @@ pub(crate) fn first_ast_error_view(result: &CompilationResult<()>) -> Diagnostic
     diagnostic
 }
 
+/// The number of error diagnostics a frozen AST result carries.
+pub(crate) fn ast_error_count(result: &CompilationResult<()>) -> usize {
+    diagnostic_reports(result)
+        .iter_severity(DiagnosticSeverity::Error)
+        .count()
+}
+
 pub(crate) fn ast_first_error_type_display(
     result: &CompilationResult<()>,
     id: TypeDisplayId,

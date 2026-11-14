@@ -1898,6 +1898,44 @@ fn malformed_groups_keep_group_operand_diagnostics() {
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, lone_span))
     );
 }
+
+#[test]
+fn closer_layout_defers_to_a_missing_right_operand() {
+    // A `;` directly after a dangling operator is not the first structural error: the expression
+    // needs an operand at an earlier token. Both an AST-owned block closer and a Stage 2 function
+    // closer must leave that report to the expression parser, and a later invalid function closer
+    // must not replace a missing operand inside an earlier block.
+    let sources = [
+        "if true:\n    value = 1 + ;\n",
+        "run ||:\n    value = 1 + ;\n",
+        "run ||:\n    if true:\n        value = 1 +\n    ;\n    y = 2;\n",
+    ];
+
+    for source in sources {
+        let failure = parse_single_file_ast_diagnostic(source);
+        let diagnostic = assert_ast_diagnostic(&failure, "MOTH-SYNTAX-0024", None);
+        let facts = diagnostic
+            .family_view::<MissingOperatorOperandView>()
+            .expect("missing-operand diagnostic should retain typed position");
+        assert_eq!(
+            facts.position,
+            OperatorOperandPosition::BinaryRight,
+            "{source}"
+        );
+
+        let operator_start = source
+            .rfind('+')
+            .expect("the dangling plus should be present") as u32;
+        let mut span_builder = ExtendedSpanBuilder::new();
+        let operator_span = LocalSpan::exact(operator_start, 1, &mut span_builder)
+            .expect("the dangling operator span should fit inline");
+        assert_eq!(
+            ast_error_primary_span(diagnostic),
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, operator_span)),
+            "{source}"
+        );
+    }
+}
 #[test]
 fn completed_evaluator_results_contain_no_pending_syntax() {
     let source = concat!(

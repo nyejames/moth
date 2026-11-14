@@ -342,6 +342,44 @@ fn schema_classifications_match_frontend_semantics() {
         assert!(tag.continues_expression());
     }
     assert!(!TokenTag::SYMBOL.continues_expression());
+    // Operators and member access need input after them even when they are not newline
+    // continuations. Scope-closer layout uses this to leave a missing operand to the expression
+    // parser instead of reporting the closer first.
+    for tag in [
+        TokenTag::ASSIGN,
+        TokenTag::ADD,
+        TokenTag::SUBTRACT,
+        TokenTag::MULTIPLY,
+        TokenTag::DIVIDE,
+        TokenTag::MODULUS,
+        TokenTag::INT_DIVIDE,
+        TokenTag::EXPONENT,
+        TokenTag::IS,
+        TokenTag::LESS_THAN,
+        TokenTag::LESS_THAN_OR_EQUAL,
+        TokenTag::GREATER_THAN,
+        TokenTag::GREATER_THAN_OR_EQUAL,
+        TokenTag::AND,
+        TokenTag::OR,
+        TokenTag::NEGATIVE,
+        TokenTag::DOT,
+    ] {
+        assert!(tag.requires_following_operand());
+    }
+    // `not` may follow a complete operand (`true not`), so it can be the last accepted
+    // token before a closer; it must keep its layout report.
+    assert!(!TokenTag::NOT.requires_following_operand());
+    for tag in [
+        TokenTag::SYMBOL,
+        TokenTag::END,
+        TokenTag::COLON,
+        TokenTag::COMMA,
+        TokenTag::OPEN_PARENTHESIS,
+        TokenTag::TYPE_PARAMETER_BRACKET,
+        TokenTag::ARROW,
+    ] {
+        assert!(!tag.requires_following_operand());
+    }
     for tag in [
         TokenTag::SYMBOL,
         TokenTag::THIS,

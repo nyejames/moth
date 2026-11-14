@@ -139,6 +139,36 @@ pub(crate) fn has_physical_line_break_between(
     false
 }
 
+/// Whether the meaningful token before `closer` cannot end an expression.
+///
+/// WHAT: walks back over `NEWLINE` trivia to the last authored token and reports when its grammar
+///       still requires expression input after it.
+/// WHY: a `;` written directly after such a token is not the first structural error. The
+///      incomplete expression is earlier in source and the expression parser owns its report, so
+///      a closer-layout diagnostic must stay silent and let that owner run. The tokenizer schema
+///      owns which tokens require a following operand; delimiters and headers do not.
+pub(crate) fn closer_follows_incomplete_expression(
+    tokens: &SourceTokens,
+    closer: TokenIndex,
+) -> bool {
+    let mut index = closer.index();
+    while let Some(previous) = index.checked_sub(1) {
+        let Some(previous_index) = TokenIndex::try_from_index(previous) else {
+            return false;
+        };
+        let Ok(token) = tokens.token(previous_index) else {
+            return false;
+        };
+        let tag = token.shape().tag();
+        if tag == TokenTag::NEWLINE {
+            index = previous;
+            continue;
+        }
+        return tag.requires_following_operand();
+    }
+    false
+}
+
 /// Build the layout diagnostic for a second scope opener that shares an enclosing opener's line.
 ///
 /// WHAT: reports `NestedScopeOpenerOnLine` at `opener` and labels `enclosing` when no physical line
@@ -251,6 +281,48 @@ pub(crate) fn closer_layout_diagnostic(
     closer_layout_diagnostic_for_placement(tokens, placement, opening_span, closer, closer_span)
 }
 
+/// Build the trailing half of a scope closer's layout diagnostic.
+///
+/// WHAT: reports an additional closer or authored content after `closer`, ignoring placement.
+/// WHY: an incomplete expression before the closer suppresses the placement reason because the
+///      expression parser owns that earlier report, but trailing tokens change how the rest of
+///      the line parses. The closer's owner must still report them.
+pub(crate) fn closer_trailing_diagnostic(
+    tokens: &SourceTokens,
+    closer: TokenIndex,
+    closer_span: SourceSpan,
+) -> Option<DiagnosticDraft> {
+    use crate::compiler_frontend::compiler_messages::InvalidScopeLayoutReason;
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+    use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
+
+    match closer_trailing(tokens, closer) {
+        CloserTrailing::LineEnd => None,
+        CloserTrailing::AdditionalCloser {
+            closer: extra_closer,
+        } => Some(
+            token_lexical::invalid_scope_layout(
+                InvalidScopeLayoutReason::AdditionalCloserOnLine,
+                Some(extra_closer),
+            )
+            .with_label(
+                Some(closer_span),
+                Some(LabelDraftMessage::ScopeCloserBeforeThis),
+            ),
+        ),
+        CloserTrailing::Content { first } => Some(
+            token_lexical::invalid_scope_layout(
+                InvalidScopeLayoutReason::ContentAfterCloser,
+                Some(first),
+            )
+            .with_label(
+                Some(closer_span),
+                Some(LabelDraftMessage::ScopeCloserBeforeThis),
+            ),
+        ),
+    }
+}
+
 /// Build the layout diagnostic for an already classified closer.
 ///
 /// WHAT: maps one placement and the closer's trailing token to the same typed draft as
@@ -296,31 +368,7 @@ pub(crate) fn closer_layout_diagnostic_for_placement(
         Some(CloserPlacement::Inline | CloserPlacement::Standalone) | None => {}
     }
 
-    match closer_trailing(tokens, closer) {
-        CloserTrailing::LineEnd => None,
-        CloserTrailing::AdditionalCloser {
-            closer: extra_closer,
-        } => Some(
-            token_lexical::invalid_scope_layout(
-                InvalidScopeLayoutReason::AdditionalCloserOnLine,
-                Some(extra_closer),
-            )
-            .with_label(
-                Some(closer_span),
-                Some(LabelDraftMessage::ScopeCloserBeforeThis),
-            ),
-        ),
-        CloserTrailing::Content { first } => Some(
-            token_lexical::invalid_scope_layout(
-                InvalidScopeLayoutReason::ContentAfterCloser,
-                Some(first),
-            )
-            .with_label(
-                Some(closer_span),
-                Some(LabelDraftMessage::ScopeCloserBeforeThis),
-            ),
-        ),
-    }
+    closer_trailing_diagnostic(tokens, closer, closer_span)
 }
 
 #[cfg(test)]

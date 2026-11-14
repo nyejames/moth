@@ -21,7 +21,8 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::line_scanning::{
-    ScopeOpening, closer_layout_diagnostic, nested_scope_opening_diagnostic,
+    ScopeOpening, closer_follows_incomplete_expression, closer_layout_diagnostic,
+    closer_trailing_diagnostic, nested_scope_opening_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenRef, TokenTag};
 
@@ -267,8 +268,15 @@ pub(crate) fn scope_closer_layout_error(
     opening: ScopeOpening,
 ) -> Option<DiagnosticDraft> {
     let closer = token_stream.current()?;
+    let tokens = token_stream.source_tokens();
+    // An incomplete expression before the closer is earlier in source and belongs to the
+    // expression parser, so the placement reason must stay silent. Trailing tokens still change
+    // how the rest of the line parses, so their owner keeps reporting them.
+    if closer_follows_incomplete_expression(tokens, closer.index()) {
+        return closer_trailing_diagnostic(tokens, closer.index(), closer.source_span());
+    }
     closer_layout_diagnostic(
-        token_stream.source_tokens(),
+        tokens,
         opening.site,
         opening.label_span,
         closer.index(),

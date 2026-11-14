@@ -72,6 +72,9 @@ const TOKEN_CLASS_WORD_OPERATOR: u16 = 1 << 5;
 const TOKEN_CLASS_LITERAL: u16 = 1 << 6;
 const TOKEN_CLASS_BUILTIN_TYPE: u16 = 1 << 7;
 const TOKEN_CLASS_DELIMITER: u16 = 1 << 8;
+/// A token whose grammar requires expression input after it: operators, assignments and member
+/// access. This is narrower than `CONTINUES_EXPRESSION`, which owns newline continuation only.
+const TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND: u16 = 1 << 9;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct TokenSchema {
@@ -194,6 +197,14 @@ macro_rules! token_schema {
             pub(crate) fn continues_expression(self) -> bool {
                 self.schema().is_some_and(|schema| {
                     schema.has_class(TOKEN_CLASS_CONTINUES_EXPRESSION)
+                })
+            }
+
+            /// Whether this token cannot end an expression because its grammar requires input
+            /// after it.
+            pub(crate) fn requires_following_operand(self) -> bool {
+                self.schema().is_some_and(|schema| {
+                    schema.has_class(TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND)
                 })
             }
 
@@ -518,7 +529,7 @@ token_schema! {
         TOKEN_CLASS_DELIMITER | TOKEN_CLASS_CONTINUES_EXPRESSION,
         None
     ),
-    (Dot, DOT, 22, "`.`", Static, 0, TOKEN_CLASS_DELIMITER, None),
+    (Dot, DOT, 22, "`.`", Static, 0, TOKEN_CLASS_DELIMITER | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND, None),
     (
         Colon,
         COLON,
@@ -546,7 +557,9 @@ token_schema! {
         "`=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -703,12 +716,20 @@ token_schema! {
         TOKEN_CLASS_CAN_END_EXPRESSION,
         None
     ),
-    (Negative, NEGATIVE, 47, "unary `-`", Static, 0, 0, Some(6)),
-    (Exponent, EXPONENT, 48, "`^`", Static, 0, 0, Some(5)),
-    (Multiply, MULTIPLY, 49, "`*`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
-    (Divide, DIVIDE, 50, "`/`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
-    (Modulus, MODULUS, 51, "`%`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
-    (IntDivide, INT_DIVIDE, 52, "`//`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
+    (Negative, NEGATIVE, 47, "unary `-`", Static, 0, TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND, Some(6)),
+    (Exponent, EXPONENT, 48, "`^`", Static, 0, TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND, Some(5)),
+    (Multiply, MULTIPLY, 49, "`*`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
+        Some(4)),
+    (Divide, DIVIDE, 50, "`/`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
+        Some(4)),
+    (Modulus, MODULUS, 51, "`%`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
+        Some(4)),
+    (IntDivide, INT_DIVIDE, 52, "`//`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
+        Some(4)),
     (
         ExponentAssign,
         EXPONENT_ASSIGN,
@@ -716,7 +737,9 @@ token_schema! {
         "`^=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -726,7 +749,9 @@ token_schema! {
         "`*=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -736,7 +761,9 @@ token_schema! {
         "`/=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -746,7 +773,9 @@ token_schema! {
         "`%=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -756,7 +785,9 @@ token_schema! {
         "`//=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -766,7 +797,7 @@ token_schema! {
         "`+`",
         Static,
         0,
-        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_CONTINUES_EXPRESSION | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(3)
     ),
     (
@@ -776,7 +807,7 @@ token_schema! {
         "`-`",
         Static,
         0,
-        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_CONTINUES_EXPRESSION | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(3)
     ),
     (
@@ -786,7 +817,9 @@ token_schema! {
         "`+=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -796,7 +829,9 @@ token_schema! {
         "`-=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -816,7 +851,9 @@ token_schema! {
         "`is`",
         Static,
         0,
-        TOKEN_CLASS_WORD_OPERATOR | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_WORD_OPERATOR
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(2)
     ),
     (
@@ -826,7 +863,7 @@ token_schema! {
         "`<`",
         Static,
         0,
-        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_CONTINUES_EXPRESSION | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(2)
     ),
     (
@@ -836,7 +873,7 @@ token_schema! {
         "`<=`",
         Static,
         0,
-        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_CONTINUES_EXPRESSION | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(2)
     ),
     (
@@ -846,7 +883,7 @@ token_schema! {
         "`>`",
         Static,
         0,
-        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_CONTINUES_EXPRESSION | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(2)
     ),
     (
@@ -856,7 +893,7 @@ token_schema! {
         "`>=`",
         Static,
         0,
-        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_CONTINUES_EXPRESSION | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(2)
     ),
     (
@@ -866,10 +903,10 @@ token_schema! {
         "`and`",
         Static,
         0,
-        TOKEN_CLASS_WORD_OPERATOR,
+        TOKEN_CLASS_WORD_OPERATOR | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(1)
     ),
-    (Or, OR, 69, "`or`", Static, 0, TOKEN_CLASS_WORD_OPERATOR, Some(0)),
+    (Or, OR, 69, "`or`", Static, 0, TOKEN_CLASS_WORD_OPERATOR | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND, Some(0)),
     (If, IF, 70, "`if`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (Else, ELSE, 71, "`else`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (Return, RETURN, 72, "`return`", Static, 0, TOKEN_CLASS_KEYWORD, None),

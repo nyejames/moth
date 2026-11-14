@@ -55,8 +55,8 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::line_scanning::{
-    CloserPlacement, closer_layout_diagnostic_for_placement, closer_placement,
-    has_physical_line_break_between,
+    CloserPlacement, closer_follows_incomplete_expression, closer_layout_diagnostic_for_placement,
+    closer_placement, closer_trailing_diagnostic, has_physical_line_break_between,
 };
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
@@ -930,6 +930,19 @@ struct OpenScope {
     continuation_index: Option<TokenIndex>,
 }
 
+/// The first authored structural error the capture walk can prove.
+///
+/// WHAT: records either an invalid inner closer's layout diagnostic or an incomplete expression
+///       immediately before a closer.
+/// WHY: when the function closer is also invalid, the first of these in source order is the one
+///      the author must see. An invalid closer is ordering evidence only. An incomplete
+///      expression belongs to the expression parser, so the capture returns its body range and
+///      lets AST report the missing operand instead of replacing it with a layout error.
+enum CloserEvidence {
+    InvalidInner(DiagnosticDraft),
+    IncompleteExpression,
+}
+
 /// Classify an inner closer, applying the branch-continuation exception only when it is on the
 /// closer's physical line.
 ///
@@ -1021,10 +1034,10 @@ pub(super) fn capture_function_body_range_from_cursor(
     // direct child of the reported innermost scope, which is the only case where naming it is
     // exact. Nothing may have opened above it since.
     let mut last_inner_closer: Option<(usize, SourceSpan)> = None;
-    // The layout error of the first inner closer that is misplaced or followed by code on its
-    // line. Reported only when the function closer is also invalid, so the author sees the first
-    // structural error in the file. It is ordering evidence only: it never decides acceptance.
-    let mut earliest_invalid_inner: Option<DiagnosticDraft> = None;
+    // The first provable structural error in the body, in source order. Reported only when the
+    // function closer is also invalid, so the author sees the first error in the file. It is
+    // ordering evidence only: it never decides acceptance by itself.
+    let mut earliest_closer_evidence: Option<CloserEvidence> = None;
     // A `;` seen inside `(...)`, `{...}` or a template already names an earlier AST error. The
     // function-closer layout check must stay silent so the source-accurate grouped diagnostic wins.
     let mut saw_grouped_closer = false;
@@ -1069,9 +1082,9 @@ pub(super) fn capture_function_body_range_from_cursor(
             // the AST to report at its own span and the cursor keeps reading the rest of the body.
             TokenTag::END if !nesting.is_top_level() => {
                 block_header_pending = None;
-                // Source order decides which report wins. An earlier inner closer already
-                // recorded its layout error, so a later grouped `;` must not suppress it.
-                if earliest_invalid_inner.is_none() {
+                // Source order decides which report wins. An earlier closer already recorded its
+                // evidence, so a later grouped `;` must not suppress it.
+                if earliest_closer_evidence.is_none() {
                     saw_grouped_closer = true;
                 }
             }
@@ -1081,21 +1094,33 @@ pub(super) fn capture_function_body_range_from_cursor(
                 if match_body_floor.is_some_and(|floor| open_scopes.len() < floor) {
                     match_body_floor = None;
                 }
-                if open_scopes.is_empty() {
-                    body_end = Some(current.index());
-                    body_closer_span = Some(current.source_span());
-                } else if let Some(scope) = closed_scope {
-                    last_inner_closer = Some((open_scopes.len(), current.source_span()));
-                    if earliest_invalid_inner.is_none() {
-                        let placement = inner_closer_placement(source, &scope, current.index());
-                        earliest_invalid_inner = closer_layout_diagnostic_for_placement(
+                // An incomplete expression is earlier in source than the closer that exposed it,
+                // so it outranks any invalid-closer report. The expression parser owns that
+                // report; this stage only records that the closer must not speak first.
+                if earliest_closer_evidence.is_none() {
+                    if closer_follows_incomplete_expression(source, current.index()) {
+                        earliest_closer_evidence = Some(CloserEvidence::IncompleteExpression);
+                    } else if !open_scopes.is_empty()
+                        && let Some(scope) = &closed_scope
+                    {
+                        let placement = inner_closer_placement(source, scope, current.index());
+                        if let Some(diagnostic) = closer_layout_diagnostic_for_placement(
                             source,
                             placement,
                             scope.opening_span,
                             current.index(),
                             current.source_span(),
-                        );
+                        ) {
+                            earliest_closer_evidence =
+                                Some(CloserEvidence::InvalidInner(diagnostic));
+                        }
                     }
+                }
+                if open_scopes.is_empty() {
+                    body_end = Some(current.index());
+                    body_closer_span = Some(current.source_span());
+                } else if closed_scope.is_some() {
+                    last_inner_closer = Some((open_scopes.len(), current.source_span()));
                 }
             }
             // A block header only opens a source scope when the header itself sits at top-level
@@ -1206,8 +1231,14 @@ pub(super) fn capture_function_body_range_from_cursor(
                 // structural error in the file, and this header error ends the compilation, so
                 // AST never runs to report it. The authored `;` is more useful than the later
                 // truncation that its misuse exposed. A `;` inside grouping already names an
-                // earlier AST error, and that source-accurate report wins instead.
-                if !saw_grouped_closer && let Some(diagnostic) = earliest_invalid_inner {
+                // earlier AST error, and that source-accurate report wins instead. An incomplete
+                // expression before a closer is earlier still, but a body that never closed has
+                // no range to hand to AST, so the unclosed-scope report below remains its only
+                // available end-of-file fact.
+                if !saw_grouped_closer
+                    && let Some(CloserEvidence::InvalidInner(diagnostic)) =
+                        earliest_closer_evidence.take()
+                {
                     return Err(diagnostic.into());
                 }
                 // A still-open `(`/`{`/template already names its own opener. Otherwise the
@@ -1283,18 +1314,29 @@ pub(super) fn capture_function_body_range_from_cursor(
             body_end,
             body_closer_span,
         );
-        // When the function closer is itself invalid, report the earliest invalid inner closer
-        // instead: it is the first structural error in the file. The header error ends this
-        // file's compilation, so AST never runs to report that inner closer, and the
-        // classification above is only evidence for this ordering decision. If the function
-        // closer is valid, inner closers stay AST's responsibility.
-        if function_diagnostic.is_some()
-            && let Some(diagnostic) = earliest_invalid_inner
-        {
-            return Err(HeaderParseFailure::Diagnostic(diagnostic));
-        }
-        if let Some(diagnostic) = function_diagnostic {
-            return Err(HeaderParseFailure::Diagnostic(diagnostic));
+        // When the function closer is itself invalid, the first provable structural error in the
+        // file still outranks it. An invalid inner closer is reported from here because the
+        // header error ends this file's compilation. An incomplete expression before a closer is
+        // earlier in source and belongs to the expression parser, so the range returns and AST
+        // reports the missing operand instead. If the function closer is valid, inner closers
+        // stay AST's responsibility.
+        if let Some(function_diagnostic) = function_diagnostic {
+            match earliest_closer_evidence.take() {
+                Some(CloserEvidence::InvalidInner(diagnostic)) => {
+                    return Err(HeaderParseFailure::Diagnostic(diagnostic));
+                }
+                Some(CloserEvidence::IncompleteExpression) => {
+                    // Only the function closer's placement defers to the earlier expression
+                    // report. Its trailing tokens still change how the rest of the line parses,
+                    // so they keep their report whichever closer exposed the operand error.
+                    if let Some(trailing) =
+                        closer_trailing_diagnostic(source, body_end, body_closer_span)
+                    {
+                        return Err(HeaderParseFailure::Diagnostic(trailing));
+                    }
+                }
+                None => return Err(HeaderParseFailure::Diagnostic(function_diagnostic)),
+            }
         }
     }
     TokenRange::try_new_for(source, body_start, body_end).map_err(|error| {

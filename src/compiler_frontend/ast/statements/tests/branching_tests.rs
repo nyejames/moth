@@ -29,8 +29,8 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId,
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
-    LayoutSite, assert_ast_diagnostic, assert_ast_scope_layout, ast_error_label_spans,
-    ast_error_primary_span, first_ast_error_view, parse_single_file_ast,
+    LayoutSite, assert_ast_diagnostic, assert_ast_scope_layout, ast_error_count,
+    ast_error_label_spans, ast_error_primary_span, first_ast_error_view, parse_single_file_ast,
     parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -905,14 +905,21 @@ fn parses_relational_match_patterns() {
 
 #[test]
 fn rejects_semicolon_between_match_arms() {
-    let failure = parse_single_file_ast_diagnostic(
+    let sources = [
         "value = 1\nif value is:\n    1 => io.line([: [\"one\"]]);\n    2 => io.line([: [\"two\"]])\n    else => io.line([: [\"other\"]])\n;\n",
-    );
-    assert_ast_diagnostic(
-        &failure,
-        "MOTH-SYNTAX-0028",
-        Some("invalid_match_arm.semicolon_delimiter"),
-    );
+        // A nested inline scope is legal inside an arm, so the line-initial `;` after it is still
+        // the match-arm delimiter error and not a scope-layout error.
+        "value = 1\nif value is:\n    1 => if true: io.line([: [\"one\"]]);\n    ;\n    2 => io.line([: [\"two\"]])\n    else => io.line([: [\"other\"]])\n;\n",
+    ];
+
+    for source in sources {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_diagnostic(
+            &failure,
+            "MOTH-SYNTAX-0028",
+            Some("invalid_match_arm.semicolon_delimiter"),
+        );
+    }
 }
 
 #[test]
@@ -1482,12 +1489,77 @@ fn rejects_statement_if_scope_layout_violations() {
             LayoutSite::first("else"),
             LayoutSite::first(";"),
         ),
+        (
+            // The then body's `;` completes the `if`, so `else if` is trailing content rather than
+            // the separate same-line `else if` rejection that applies when no closer ended it.
+            "if true: io.line(\"x\"); else if false: io.line(\"y\");\n",
+            "invalid_scope_layout.content_after_closer",
+            LayoutSite::first("else"),
+            LayoutSite::first(";"),
+        ),
+        (
+            // Postfix `not` completes its operand, so the closer still owns its placement error.
+            "if true:\n    x = true not;\n",
+            "invalid_scope_layout.multiline_closer_after_code",
+            LayoutSite::first(";"),
+            LayoutSite::first(":"),
+        ),
+        (
+            // The earlier incomplete expression defers only the placement report; trailing code
+            // still changes how the rest of the line parses and keeps its own error.
+            "if true:\n    x = 1 + ; other\n",
+            "invalid_scope_layout.content_after_closer",
+            LayoutSite::first("other"),
+            LayoutSite::first(";"),
+        ),
     ];
 
     for (source, reason, primary, label) in rows {
         let failure = parse_single_file_ast_diagnostic(source);
         assert_ast_scope_layout(&failure, source, reason, primary, label);
     }
+}
+
+/// A stacked closer after one legal inline closer is one diagnostic, not a closer plus a stray
+/// top-level `;`.
+///
+/// WHY: the second `;` is both an extra closer and (after the scope completed) a token the module
+///      body could otherwise report as unmatched. Only the more specific layout reason may appear.
+#[test]
+fn an_extra_closer_after_an_inline_if_reports_once() {
+    let source = "if true: io.line(\"x\");;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_scope_layout(
+        &failure,
+        source,
+        "invalid_scope_layout.additional_closer_on_line",
+        LayoutSite::nth(";", 1),
+        LayoutSite::first(";"),
+    );
+    assert_eq!(
+        ast_error_count(&failure),
+        1,
+        "a stacked closer after a legal closer must not also report a top-level stray `;`"
+    );
+}
+
+/// A grouped `;` inside a match arm still reports the expression token at its own span.
+///
+/// WHY: the arm's closer is later and legal, so the grouped delimiter inside the call remains the
+///      first structural error and must not become a scope-layout report.
+#[test]
+fn grouped_semicolon_in_a_match_arm_keeps_its_expression_diagnostic() {
+    let source = "value = 1\nif value is:\n    1 => io.line(\"a\"; \"b\")\n    else => io.line(\"other\")\n;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-SYNTAX-0002", None);
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(LayoutSite::first(";").span_in(source))
+    );
+    assert!(
+        ast_error_label_spans(diagnostic).is_empty(),
+        "the grouped `;` is reported without a scope label"
+    );
 }
 
 /// Rejected statement-match layouts: a stacked closer after the match and code after it.

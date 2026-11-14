@@ -1024,6 +1024,50 @@ fn function_closer_trailing_code_reports_the_first_trailing_token() {
     );
 }
 
+/// A postfix `not` can follow a complete operand, so it does not excuse a misplaced closer.
+///
+/// WHY: treating `not` as an operator that still needs an operand would let `x = true not;`
+///      compile with the closer on the body's line.
+#[test]
+fn function_closer_after_a_postfix_not_reports_the_closer() {
+    let source = "run ||:\n    x = true not;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "multiline function closer after postfix not",
+        "invalid_scope_layout.multiline_closer_after_code",
+        source_span_for(source, ";", 0),
+        &[(
+            ExpectedScopeLayoutLabel::OpenerStartsHere,
+            source_span_for(source, ":", 0),
+        )],
+    );
+}
+
+/// An incomplete expression defers only the placement reason, never the trailing reason.
+///
+/// WHY: code after the closer changes how the rest of the line parses, so losing
+///      ContentAfterCloser would replace it with a generic later statement error.
+#[test]
+fn function_closer_with_trailing_code_after_an_incomplete_expression_reports_trailing() {
+    let source = "run ||:\n    x = 1 + ; other ||:\n    x = 2;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "function closer trailing code after an incomplete expression",
+        "invalid_scope_layout.content_after_closer",
+        source_span_for(source, "other", 0),
+        &[(
+            ExpectedScopeLayoutLabel::EarlierCloser,
+            source_span_for(source, ";", 0),
+        )],
+    );
+}
+
 #[test]
 fn stacked_function_closers_report_the_second_closer() {
     let source = "run ||: io.line(\"x\");;\n";
@@ -1279,6 +1323,29 @@ fn a_grouped_semicolon_is_left_to_the_expression_parser() {
         parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
 
     expect_header_success(outcome, "grouped semicolon before the function closer");
+}
+
+#[test]
+fn an_incomplete_expression_defers_an_invalid_function_closer() {
+    // The incomplete expression is earlier in source than the closer placement that exposed it,
+    // and the expression parser owns its report. Capture must return the body range instead of
+    // replacing that specific diagnostic with a layout error on the later `;`.
+    let cases = [
+        (
+            "function closer after an incomplete expression",
+            "run ||:\n    value = 1 + ;\n",
+        ),
+        (
+            "invalid function closer after an earlier incomplete expression",
+            "run ||:\n    if true:\n        value = 1 +\n    ;\n    y = 2;\n",
+        ),
+    ];
+
+    for (case, source) in cases {
+        let outcome =
+            parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+        expect_header_success(outcome, case);
+    }
 }
 
 #[test]

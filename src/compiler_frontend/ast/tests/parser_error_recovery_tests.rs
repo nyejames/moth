@@ -95,6 +95,27 @@ fn reports_stray_comma_in_function_body() {
 }
 
 #[test]
+fn reports_an_isolated_top_level_closer_after_an_inline_scope() {
+    // The inline `if` is closed by its own `;`, so the line-initial `;` closes nothing and keeps
+    // the top-level unmatched-closer identity rather than becoming a stacked-closer layout error.
+    let source = "if true: io.line(\"x\");\n;\n";
+    let failure = assert_failure(
+        source,
+        "MOTH-SYNTAX-0030",
+        "invalid_statement_position.unexpected_scope_close_at_top_level",
+    );
+    let diagnostic = first_ast_error_view(&failure);
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(LayoutSite::nth(";", 1).span_in(source))
+    );
+    assert!(
+        ast_error_label_spans(diagnostic).is_empty(),
+        "an isolated top-level `;` has no open scope to label"
+    );
+}
+
+#[test]
 fn reports_invalid_match_pattern_forms_as_permanent_rule_errors() {
     let cases = [
         InvalidMatchPatternCase {
