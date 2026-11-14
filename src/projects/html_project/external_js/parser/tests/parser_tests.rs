@@ -1991,7 +1991,10 @@ export function fillRect(ctx, x, y, width, height) {
 
 #[test]
 fn builtin_web_canvas_package_parses_expanded_surface() {
-    let source = include_str!("../../../binding_packages/web/canvas/canvas.js");
+    let source = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/packages/web/canvas/canvas.js"
+    ));
     let parsed = parse(source);
 
     assert_no_diagnostics(&parsed);

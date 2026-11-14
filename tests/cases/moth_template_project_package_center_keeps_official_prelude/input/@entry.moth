@@ -1,0 +1,5 @@
+@docs intro_content, selected_local_center
+
+~[:[intro_content]]
+
+io.line([: project support=[selected_local_center]])

@@ -8,9 +8,7 @@
 //!      and stable semantic facts; this owner turns them back into executable consumer state.
 //! MUST NOT: retain or interpret provider-local expression, value or HIR identities.
 
-use super::artefact_emit::{
-    ModuleMaterialisationContext, RetainedIdentityArcs, StableFunctionMaterialisationContext,
-};
+use super::artefact_emit::{ModuleMaterialisationContext, StableFunctionMaterialisationContext};
 use super::nominal_blueprints::{
     intern_generated_canonical_type, materialised_nominal_declaration, materialised_struct_fields,
 };
@@ -885,10 +883,8 @@ fn install_materialised_const_executables(
     imported_local_path: PathId,
     target: &mut ConstFunctionMaterialisationTarget<'_>,
 ) -> Result<(), InfrastructureFailure> {
-    let identity_tables = context.const_identity_arcs()?;
     for materialised in &closure.rows {
-        let executable =
-            materialise_const_executable(context, materialised, identity_tables, &closure, target)?;
+        let executable = materialise_const_executable(context, materialised, &closure, target)?;
         let function_path = materialised.row.function_path;
         target
             .const_function_executables
@@ -913,7 +909,6 @@ fn install_materialised_const_executables(
 fn materialise_const_executable(
     context: &ModuleMaterialisationContext,
     materialised: &MaterialisedConstRow<'_>,
-    identity_tables: RetainedIdentityArcs<'_>,
     closure: &MaterialisedProviderClosure<'_>,
     target: &mut ConstFunctionMaterialisationTarget<'_>,
 ) -> Result<ConstFunctionExecutable, InfrastructureFailure> {
@@ -924,12 +919,7 @@ fn materialise_const_executable(
         .path_fork
         .parent(row.function_path)
         .unwrap_or(PathId::ROOT);
-    let materialised_body = row.body.materialise(
-        source_file,
-        target.path_fork,
-        target.string_table,
-        identity_tables,
-    )?;
+    let materialised_body = row.body.materialise(source_file, target.path_fork)?;
     let body_services = target.file_value_resolution.map(|services| {
         Rc::new(FileValueResolutionServices {
             stage0_resolution_facts: Some(Arc::clone(&materialised_body.resolution_facts)),
@@ -1008,6 +998,7 @@ fn materialise_const_executable(
     let nodes = function_body_to_ast(
         &mut cursor,
         scope,
+        None,
         &mut type_interner,
         target.expression_builder,
         target.const_values,

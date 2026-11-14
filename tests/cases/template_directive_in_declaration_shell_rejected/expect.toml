@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0021"]
+message_contains = ["Template directive 'slot' can only appear in a template head, not in source code."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+reason = "invalid_template_directive.wrong_context"
+path = "input/@entry.moth"
+line = 2
+column = 5

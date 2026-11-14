@@ -6,7 +6,7 @@
 @fallible-casts-basic content as fallible_casts_basic
 @cast-evidence content as cast_evidence
 @cast-evidence-basic content as cast_evidence_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

@@ -408,12 +408,7 @@ fn frozen_content_value_captures_and_reinterns_resource_pieces() {
         .expect("test path fits");
     let path_id = frozen.resolved_file_references[0].path_syntax;
     let materialised = frozen
-        .materialise(
-            generated_source_file,
-            &mut path_fork,
-            &mut generated_table,
-            None,
-        )
+        .materialise(generated_source_file, &mut path_fork)
         .expect("frozen content body should materialise");
     let Stage0ResolvedFileReferenceOutcome::Content {
         logical_path: None,
@@ -544,12 +539,7 @@ fn frozen_body_preserves_donor_range_and_path_spelling() {
         .expect("test path fits");
     let path_id = frozen.resolved_file_references[0].path_syntax;
     let materialised = frozen
-        .materialise(
-            generated_source_file,
-            &mut generated_path_fork,
-            &mut generated_table,
-            None,
-        )
+        .materialise(generated_source_file, &mut generated_path_fork)
         .expect("frozen body should materialise");
     assert_eq!(
         materialised.donor_file_id(),
@@ -619,12 +609,7 @@ fn frozen_body_keeps_declaration_path_distinct_from_owning_source_file() {
         .try_intern_portable_path("src/@mod.moth", &mut generated_table)
         .expect("test path fits");
     let materialised = frozen
-        .materialise(
-            generated_source_file,
-            &mut path_fork,
-            &mut generated_table,
-            None,
-        )
+        .materialise(generated_source_file, &mut path_fork)
         .expect("the frozen body should retain its distinct declaration and file identities");
 
     assert_eq!(
@@ -778,12 +763,7 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
         .try_intern_portable_path("src/@mod.moth", &mut generated_table)
         .expect("test path fits");
     let materialised = frozen
-        .materialise(
-            generated_source_file,
-            &mut path_fork,
-            &mut generated_table,
-            None,
-        )
+        .materialise(generated_source_file, &mut path_fork)
         .expect("remapping fixture body should materialise");
     let materialised_owner = materialised.donor_file_id();
     let materialised_body = materialised
@@ -949,12 +929,7 @@ fn source_body_captures_share_donor_strings_after_construction_owners_drop() {
     drop(body);
 
     let materialised = first
-        .materialise(
-            generated_source_file,
-            &mut generated_path_fork,
-            &mut generated_table,
-            None,
-        )
+        .materialise(generated_source_file, &mut generated_path_fork)
         .expect("shared donor strings should keep the body materialisable after source drop");
     let materialised_body = materialised
         .into_generic_body()
@@ -1094,12 +1069,7 @@ fn canonical_string_only_donors_borrow_identity_without_retaining_file_tokens() 
         "the fixture must exercise a colliding StringId",
     );
     let materialised = frozen
-        .materialise(
-            source_file,
-            &mut materialised_path_fork,
-            &mut materialised_strings,
-            None,
-        )
+        .materialise(source_file, &mut materialised_path_fork)
         .expect("a string-only canonical donor should stay on the canonical lane");
     let materialised_body = materialised
         .into_generic_body()
@@ -1275,12 +1245,7 @@ fn donor_numeric_literal_text_renders_through_borrowed_origin() {
         "the fixture must collide with the donor's normalized-text StringId",
     );
     let materialised_body = stable
-        .materialise(
-            source_file,
-            &mut materialised_path_fork,
-            &mut materialised_strings,
-            None,
-        )
+        .materialise(source_file, &mut materialised_path_fork)
         .expect("a numeric donor body should materialise")
         .into_generic_body()
         .expect("a numeric donor body should retain its checked range");
@@ -2814,12 +2779,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
             .try_intern_portable_path("body.moth", &mut generated_table)
             .expect("test path fits");
         let materialised = frozen
-            .materialise(
-                generated_source_file,
-                &mut path_fork,
-                &mut generated_table,
-                None,
-            )
+            .materialise(generated_source_file, &mut path_fork)
             .expect("collision fixture body should materialise");
         materialised
             .into_generic_body()

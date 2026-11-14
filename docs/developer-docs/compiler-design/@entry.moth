@@ -1,5 +1,5 @@
 @overview content as reference_content
-@styles navbar, section, theme_css, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_css, theme_head, sidebar, init_docs_sidebar
 @diagrams css as diagrams_css
 
 [$in title:["Compiler design: source to page"]]

@@ -1220,12 +1220,16 @@ fn parse_catch_fallible_handler_body(
 
     let handler_scope = handler_context.scope;
 
+    // A block catch closes with `;` like any other block, so its colon labels the missing closer
+    // when the file ends inside the handler.
+    let body_opening_span = Some(token_stream.current_span());
     token_stream.advance();
 
     let mut body_warnings = DiagnosticBag::new();
     let parsed_body_result = function_body_to_ast(
         token_stream,
         handler_context,
+        body_opening_span,
         type_interner,
         expression_builder,
         const_values,

@@ -719,6 +719,7 @@ fn runtime_expression(
                 operator:
                     crate::compiler_frontend::ast::expressions::expression_kind::Operator::Equality,
                 span: None,
+                preceded_by_operand: true,
             },
         ],
         builtin_type_ids::BOOL,

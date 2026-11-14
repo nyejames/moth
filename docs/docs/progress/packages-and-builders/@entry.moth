@@ -1,5 +1,6 @@
-@html center, span
-@styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
+@html span
+@styles center
+@docs_styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Packages and Builders Progress Matrix"]]
 [$in description:["Current implementation status, coverage and accepted follow-ups for Moth packages and project builders."]]
@@ -131,9 +132,9 @@ init_docs_sidebar()!
         [data:
             [: Builder-provided source-backed packages]
             [: Partial]
-            [: Targeted builder source-backed registration and HTML Builder package coverage. Direct-file and directory consumers share HTML/Canvas package boundaries and reject registered-package source collisions, including case-only names and child scopes. Missing direct-file dependencies retain authored spans, and ordinary/Boracle package failures retain source context. No-dependency direct-file consumers skip package bodies but validate namespaces. Template file values retain implicit HTML helpers. Nested and flat registered-package graphs exercise the real writer and Node with distinct logical JS paths, exact provider bytes, runtime values and stable import/wrapper order across repeated and reversed creation/registration. Multi-component package paths such as [$html:<code>@x/y</code>] resolve by whole components through a real build. Registration rejects overlapping source paths, and an entry-root folder at the exact package path collides while ancestor folders stay allowed.]
+            [: Targeted builder source-backed registration and HTML/Canvas package coverage. Direct-file and directory consumers share HTML/Canvas package boundaries and reject registered-package source collisions, including case-only names and child scopes. Missing direct-file dependencies retain authored spans, and ordinary/Boracle package failures retain source context. No-dependency direct-file consumers skip package bodies but validate namespaces. Template file values resolve the fixed Core helper prelude. Nested and flat registered-package graphs exercise the real writer and Node with distinct logical JS paths, exact provider bytes, runtime values and stable import/wrapper order across repeated and reversed creation/registration. Multi-component package paths such as [$html:<code>@x/y</code>] resolve by whole components through a real build. Registration rejects overlapping source paths, and an entry-root folder at the exact package path collides while ancestor folders stay allowed.]
             [: Frontend / HTML]
-            [$md: Builders expose source-backed packages through [$html:<code>BuilderSurface.source_packages</code>], including HTML's [$html:<code>@html</code>]. Registered-provider fixtures use normal [$html:<code>@mod.moth</code>] roots, without changing structural [$html:<code>+*.moth</code>] support packages. Builder/project-local prefix collisions remain hard config errors. Distinct project/package providers at the same boundary-relative path still collide independently. The @https://github.com/nyejames/moth/blob/main/docs/roadmap/evidence/js-import-linking-and-failure-reporting-review.md#independent-provider-identity-collision (retained collision report) records the stable-package-identity handoff needed next. General cross-package provider-prefix support remains incomplete.]
+            [$md: Builders expose source-backed packages through [$html:<code>BuilderSurface.source_packages</code>]; the mandatory [$html:<code>@html</code>] and [$html:<code>@styles</code>] Core roots are registered by the common builder surface instead. Registered-provider fixtures use normal [$html:<code>@mod.moth</code>] roots, without changing structural [$html:<code>+*.moth</code>] support packages. Builder/project-local prefix collisions remain hard config errors. Distinct project/package providers at the same boundary-relative path still collide independently. The @https://github.com/nyejames/moth/blob/main/docs/roadmap/evidence/js-import-linking-and-failure-reporting-review.md#independent-provider-identity-collision (retained collision report) records the stable-package-identity handoff needed next. General cross-package provider-prefix support remains incomplete.]
         ]
 
         [data:
@@ -149,7 +150,7 @@ init_docs_sidebar()!
             [: Partial]
             [: Targeted definition registration, rejection, project build driver, build profile and external-crate compile coverage.]
             [: Frontend / Rust]
-            [$md: [$html:<code>moth::builder::BuilderDefinition</code>] registers Builder-origin source packages, native host packages described with [$html:<code>moth::host::HostFunction</code>] and [$html:<code>.md</code>] source kinds through the existing registries; [$html:<code>markdown()</code>] accepts plain Markdown. [$html:<code>.mtf</code>] templates and the [$html:<code>@html</code>] prelude stay reserved for the official HTML builder. [$html:<code>finish</code>] rejects invalid builder identities, duplicate or overlapping package paths, reserved [$html:<code>@project</code>] and [$html:<code>@core</code>] paths, a source package at the reserved [$html:<code>@html</code>] prelude root, relative, missing or non-directory [$html:<code>from_dir</code>] roots and host signatures outside the V1 profile. [$html:<code>moth::builder::build_project</code>] compiles a project through the shared build orchestration and calls the builder's [$html:<code>build</code>] step with an immutable compiled project, so source diagnostics never reach [$html:<code>build</code>]. [$html:<code>moth::builder::BuildProfile</code>] selects the development or release profile for one request, and the builder reads the selected profile through [$html:<code>BuildContext::profile</code>]. A missing facade is a builder error, and [$html:<code>ProjectPackage</code>] has no public methods yet. [$html:<code>.config(...)</code>], [$html:<code>CompiledProject::settings</code>], [$html:<code>BuildContext::compile_wasm</code>], non-empty [$html:<code>BuildArtifacts</code>] registration and publication, native host adapters and the Lappet runtime remain incomplete. The driver discards the current empty artefact set. Host-binding macros are accepted future conveniences, not current APIs.]
+            [$md: [$html:<code>moth::builder::BuilderDefinition</code>] registers Builder-origin source packages, native host packages described with [$html:<code>moth::host::HostFunction</code>] and optional [$html:<code>.md</code>] source kinds through the existing registries; [$html:<code>markdown()</code>] accepts plain Markdown. [$html:<code>.mtf</code>] templates are compiler-supported under every builder, so a custom builder needs no source-kind or prelude registration; the mandatory Core [$html:<code>@html</code>] and [$html:<code>@styles</code>] roots are already registered. [$html:<code>finish</code>] rejects invalid builder identities, duplicate or overlapping package paths, reserved [$html:<code>@project</code>] and [$html:<code>@core</code>] paths, a source package overlapping a reserved Core root prefix ([$html:<code>@html</code>] or [$html:<code>@styles</code>]), relative, missing or non-directory [$html:<code>from_dir</code>] roots and host signatures outside the V1 profile. [$html:<code>moth::builder::build_project</code>] compiles a project through the shared build orchestration and calls the builder's [$html:<code>build</code>] step with an immutable compiled project, so source diagnostics never reach [$html:<code>build</code>]. [$html:<code>moth::builder::BuildProfile</code>] selects the development or release profile for one request, and the builder reads the selected profile through [$html:<code>BuildContext::profile</code>]. A missing facade is a builder error, and [$html:<code>ProjectPackage</code>] has no public methods yet. [$html:<code>.config(...)</code>], [$html:<code>CompiledProject::settings</code>], [$html:<code>BuildContext::compile_wasm</code>], non-empty [$html:<code>BuildArtifacts</code>] registration and publication, native host adapters and the Lappet runtime remain incomplete. The driver discards the current empty artefact set. Host-binding macros are accepted future conveniences, not current APIs.]
         ]
 
         [data:
@@ -252,9 +253,9 @@ init_docs_sidebar()!
         [data:
             [: Moth template [$html:<code>.mtf</code>] content assets]
             [: Partial]
-            [: Targeted compiler-integrated dependency binding, synthetic content constant, markdown folding, module-root re-export, direct API, diagnostics and integration coverage.]
-            [: HTML builder / frontend]
-            [: [$html:<code>.mtf</code>] files are builder-supported source assets that synthesize one private compile-time [$html:<code>content #String</code>] constant from an implicit [$html:<code>$md</code>] template body. Nested templates without an explicit directive also default to Markdown and explicit directives override that default. They bind extensionlessly into [$html:<code>.moth</code>] and must fully fold.]
+            [: Targeted compiler-integrated dependency binding, synthetic content constant, markdown folding, module-root re-export, direct API, diagnostics and integration coverage. Directory tests cover builder parity, and single-file and check-only tests cover both prelude providers. Integration cases cover project-facade isolation, and a header-binding fixture covers duplicate-prelude rejection.]
+            [: Every builder / frontend]
+            [: [$html:<code>.mtf</code>] is a fixed compiler-supported source kind under every builder, including custom SDK builders. It synthesizes one private compile-time [$html:<code>content #String</code>] constant from an implicit [$html:<code>$md</code>] template body. Nested templates without an explicit directive also default to Markdown and explicit directives override that default. They bind extensionlessly into [$html:<code>.moth</code>] and must fully fold. The fixed flat constant prelude reads the official [$html:<code>@html</code>] and [$html:<code>@styles</code>] Core/MothSource packages; project-local packages, runtime values, types and private constants never enter it. Duplicate public constants across the two providers fail during header binding before any consumer body evaluates.]
         ]
 
         [data:
@@ -266,19 +267,27 @@ init_docs_sidebar()!
         ]
 
         [data:
-            [: Builder-supported source file kinds]
+            [: Compiler and builder source file kinds]
             [: Partial]
-            [: Targeted moth template and Markdown source-kind registry, extensionless resolution, unsupported-kind diagnostics, source discovery and tokenizer/preparation coverage.]
+            [: Targeted fixed [$html:<code>.moth</code>]/[$html:<code>.mtf</code>] classification, optional Markdown registration, extensionless resolution, unsupported-kind diagnostics, source discovery and tokenizer/preparation coverage.]
             [: Stage 0 / frontend]
-            [: Builders can declare non-[$html:<code>.moth</code>] source file kinds that participate in source dependency discovery and frontend preparation. The HTML builder currently implements [$html:<code>.mtf</code>] and plain Markdown [$html:<code>.md</code>] content assets.]
+            [: [$html:<code>.moth</code>] and [$html:<code>.mtf</code>] are fixed compiler-supported kinds under every builder. A builder cannot disable, reassign or substitute them. Builders may register optional kinds that participate in source dependency discovery and frontend preparation; the HTML builder registers plain Markdown [$html:<code>.md</code>] content assets.]
         ]
 
         [data:
-            [: HTML Builder package [$html:<code>@html</code>]]
+            [: Core HTML package [$html:<code>@html</code>]]
             [: Partial]
-            [: Targeted source-backed Builder package registration plus docs-site use across templates, style helpers, tables, code blocks and canvas wrappers.]
-            [: HTML builder]
-            [: [$html:<code>@html</code>] provides compile-time HTML helpers and source-owned wrappers over lower-level builder bindings such as [$html:<code>@web/canvas</code>]. It should grow only where helpers are broadly useful to HTML projects rather than becoming a general web framework.]
+            [: Targeted Core/MothSource registration, docs-site use across templates, tables and code blocks, the canvas markup helper, and [$html:<code>.mtf</code>] prelude composition and collision coverage.]
+            [: Every builder / frontend]
+            [: [$html:<code>@html</code>] provides compile-time HTML markup helpers, including the [$html:<code>canvas</code>] element helper. It is a mandatory Core/MothSource package registered under every builder. Runtime canvas types and drawing calls belong to [$html:<code>@web/canvas</code>], which a browser-capable HTML builder provides. It should grow only where helpers are broadly useful rather than becoming a general web framework.]
+        ]
+
+        [data:
+            [: Core styles package [$html:<code>@styles</code>]]
+            [: Supported]
+            [: Targeted Core/MothSource registration, the six exported style fragments, docs-site heading composition, [$html:<code>.mtf</code>] prelude composition and project-facade isolation coverage.]
+            [: Every builder / frontend]
+            [: [$html:<code>@styles</code>] owns exactly [$html:<code>center</code>], [$html:<code>right</code>], [$html:<code>left</code>], [$html:<code>smaller</code>], [$html:<code>medium</code>] and [$html:<code>larger</code>]. Each is a compile-time [$html:<code>&#91;$in style:...&#93;</code>] fragment that fills the [$html:<code>style</code>] slot exposed by [$html:<code>@html</code>]. The package is registered under every builder and contributes to the fixed [$html:<code>.mtf</code>] constant prelude. Runtime canvas, DOM and component surfaces stay out of it.]
         ]
 
         [data:

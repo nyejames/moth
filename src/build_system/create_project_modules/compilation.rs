@@ -49,7 +49,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use crate::builder_surface::BuilderSurface;
 use crate::builder_surface::SourceFileKind;
-use crate::builder_surface::definition::TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
+use crate::builder_surface::definition::CORE_SOURCE_PACKAGE_PREFIXES;
 use crate::projects::settings::Config;
 
 use std::sync::Arc;
@@ -58,12 +58,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::FrontendCompilationMode;
 use super::compiled_boundary::{
-    CompiledSourcePackage, CompletedSourcePackageRegistry, PackageBoundaryId,
+    BlockedProvider, CompiledSourcePackage, CompletedSourcePackageRegistry, PackageBoundaryId,
     ProjectDiagnosticBudget, ProjectFrontendCompilation, TransientPreparedBatch,
 };
 use super::config_boundary;
 use super::generated_store::BoundaryGeneratedFunctionStore;
-use super::module_artifact_store::ModuleArtifactStore;
+use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
 use super::module_identity::ModuleId;
 use super::module_inventory;
 use super::module_namespace::{DirectoryDependencyResolution, ModuleNamespaceSet};
@@ -682,18 +682,29 @@ pub(crate) fn build_source_package_dependency_index(
     index
 }
 
-/// Index every consumer module's direct package dependencies once per boundary.
+/// Index every consumer module's package providers once per boundary.
 ///
-/// WHAT: resolves each source-package dependency to its dense [`PackageBoundaryId`] and
-///       groups the IDs by consumer module, deduplicated and sorted in package order.
-/// WHY: readiness checks must walk only the current module's package dependencies. Building
-///      the grouped index once per boundary keeps that walk proportional to direct dependencies.
+/// WHAT: groups each consumer module's authored source-package dependencies and, when the module
+///       prepares a Moth template, the fixed template-prelude packages, as dense
+///       [`PackageBoundaryId`] values sorted and deduplicated in package order.
+/// WHY: readiness must walk only the current module's providers, so one grouped index keeps that
+///      walk proportional to the direct inputs. Authored dependencies and the implicit prelude
+///      follow the same classifier but arrive from different owners, so they stay separate
+///      construction passes whose results join in this index rather than in the readiness loop.
+///      The prelude providers are compiler policy and never appear in the authored dependency
+///      vector. A `.mtf` authored inside one of the fixed prelude packages is unsupported content:
+///      its own package cannot have completed yet, so that unresolved provider returns an internal
+///      infrastructure failure naming the unfinished provider instead of a compiler bug. Sorting
+///      by dense package identity also settles which failed provider a consumer reports first when
+///      it observes more than one.
 pub(crate) fn build_module_package_dependency_index(
     source_package_dependencies: &[ResolvedSourcePackageDependency],
+    module_waves: &[Vec<module_inventory::ModuleCompilationJob>],
     completed_packages: &CompletedSourcePackageRegistry,
-) -> FxHashMap<ModuleId, Vec<PackageBoundaryId>> {
+) -> Result<FxHashMap<ModuleId, Vec<PackageBoundaryId>>, InfrastructureFailure> {
     let mut dependencies: FxHashMap<ModuleId, Vec<PackageBoundaryId>> = FxHashMap::default();
 
+    // Authored dependencies resolve through the prefix discovery retained on the graph edge.
     for package_dependency in source_package_dependencies {
         let package_id = completed_packages
             .by_prefix(package_dependency.dependency_prefix.as_str())
@@ -711,12 +722,78 @@ pub(crate) fn build_module_package_dependency_index(
             .push(package_id);
     }
 
+    // Implicit prelude dependencies come from compiler policy, not the authored dependency vector.
+    for job in module_waves.iter().flatten() {
+        if !job.prepared.contains_moth_template {
+            continue;
+        }
+        for prefix in CORE_SOURCE_PACKAGE_PREFIXES {
+            let Some(package_id) = completed_packages.by_prefix(prefix) else {
+                // A Moth template authored inside one installed prelude root cannot bind while
+                // that root is still compiling: its own package is not published yet and the
+                // fixed provider set has no ordering edge between the two roots. That package
+                // content is unsupported rather than a proven-impossible state.
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "Moth template ModuleId {} cannot bind the fixed template prelude: Moth \
+                         templates inside a fixed prelude package are unsupported, and prelude \
+                         package @{} has not completed",
+                        job.module_id.index(),
+                        prefix
+                    ),
+                ));
+            };
+            dependencies
+                .entry(job.module_id)
+                .or_default()
+                .push(package_id);
+        }
+    }
+
     for package_ids in dependencies.values_mut() {
         package_ids.sort_unstable();
         package_ids.dedup();
     }
 
-    dependencies
+    Ok(dependencies)
+}
+
+/// Classify one consumer's already-resolved source-package providers for readiness.
+///
+/// WHAT: returns the first diagnosed or blocked provider package, and raises the canonical
+///       readiness invariant when a provider never completed its facade while the lane is open.
+/// WHY: authored package dependencies and the implicit `.mtf` prelude providers share one rule.
+///      A failed provider must block its consumer so the provider's diagnostic stays the primary
+///      result instead of the consumer failing on a missing facade.
+pub(crate) fn classify_blocked_package_provider(
+    completed_packages: &CompletedSourcePackageRegistry,
+    consumer_module_id: ModuleId,
+    package_ids: impl IntoIterator<Item = PackageBoundaryId>,
+) -> Result<Option<BlockedProvider>, InfrastructureFailure> {
+    for package_id in package_ids {
+        let package = completed_packages.package(package_id)?;
+        match package.root_slot()? {
+            ProviderSlot::Successful(_) => {}
+            ProviderSlot::Diagnosed | ProviderSlot::Blocked => {
+                return Ok(Some(BlockedProvider::SourcePackage(
+                    package.package_identity.clone(),
+                )));
+            }
+            ProviderSlot::Unavailable => {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "ModuleId {} became ready before source package @{} completed its facade",
+                        consumer_module_id.index(),
+                        package.package_prefix()
+                    ),
+                ));
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 fn inventory_contains_moth_template(inventory: &SourcePackageModuleInventory) -> bool {
@@ -728,17 +805,19 @@ fn inventory_contains_moth_template(inventory: &SourcePackageModuleInventory) ->
     })
 }
 
-/// Adds the compiler-owned ordering edge from template-bearing packages to the prelude package.
+/// Adds the compiler-owned ordering edges from template-bearing packages to the prelude packages.
 ///
-/// WHAT: a source package that contains at least one `.mtf` source depends on the official
-///       `@html` package before its module boundary can bind the flat helper prelude.
-/// WHY: authored package edges alone do not order the prelude package; without this edge a
-///      package such as `@docs` can publish before `@html`, and prelude interface lookup then
-///      fails even though the builder registered the official package.
+/// WHAT: a source package that contains at least one `.mtf` source depends on every official Core
+///       prelude package before its module boundary can bind the flat helper prelude.
+/// WHY: authored package edges alone do not order the prelude packages; without these edges a
+///      package such as `@docs` can publish before `@html` or `@styles`, and prelude interface
+///      lookup then fails even though the builder registered the official packages.
 ///
-/// The prelude package itself is never given a self edge. A `.mtf` authored inside `@html` is not
-/// part of any first-party package set; the canonical prelude lookup reports it as an unavailable
-/// prelude provider instead of inventing a self-dependency cycle.
+/// A prelude package is never given a self edge, and the prelude packages never depend on each
+/// other: one fixed set of compiler-owned roots has no ordering relation of its own. A `.mtf`
+/// authored inside a prelude package would therefore gain no edge to its companion. That case
+/// cannot occur: both roots are compiler-shipped `Core`/`MothSource` packages whose committed
+/// source trees contain no Moth template, and a builder or project package cannot replace them.
 pub(crate) fn add_template_prelude_ordering_dependencies(
     package_prefixes: &[String],
     contains_moth_template: &[bool],
@@ -746,10 +825,11 @@ pub(crate) fn add_template_prelude_ordering_dependencies(
 ) {
     debug_assert_eq!(package_prefixes.len(), contains_moth_template.len());
     debug_assert_eq!(package_prefixes.len(), dependencies.len());
-    if !package_prefixes
-        .iter()
-        .any(|prefix| prefix == TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX)
-    {
+    let prelude_prefixes = CORE_SOURCE_PACKAGE_PREFIXES
+        .into_iter()
+        .filter(|prelude| package_prefixes.iter().any(|prefix| prefix == prelude))
+        .collect::<Vec<_>>();
+    if prelude_prefixes.is_empty() {
         return;
     }
     for ((prefix, has_template), dependencies) in package_prefixes
@@ -757,14 +837,16 @@ pub(crate) fn add_template_prelude_ordering_dependencies(
         .zip(contains_moth_template)
         .zip(dependencies)
     {
-        if !has_template || prefix == TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX {
+        // The fixed prelude packages order as one compiler-owned set: a template authored inside
+        // one of them gains no self edge and no edge to the other. The canonical lookup reports
+        // its missing companion instead of inventing a package cycle.
+        if !has_template || prelude_prefixes.contains(&prefix.as_str()) {
             continue;
         }
-        if !dependencies
-            .iter()
-            .any(|dependency| dependency == TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX)
-        {
-            dependencies.push(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX.to_owned());
+        for prelude in &prelude_prefixes {
+            if !dependencies.iter().any(|dependency| dependency == prelude) {
+                dependencies.push((*prelude).to_owned());
+            }
         }
     }
 }

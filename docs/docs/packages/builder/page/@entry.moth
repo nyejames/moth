@@ -1,6 +1,6 @@
 @page content as page_advanced
 @page-basic content as page_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

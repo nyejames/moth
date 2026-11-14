@@ -1,0 +1,3 @@
+PAGE_LABEL #= "runtime_template_value"
+
+~[:runtime_template_constant [PAGE_LABEL]]

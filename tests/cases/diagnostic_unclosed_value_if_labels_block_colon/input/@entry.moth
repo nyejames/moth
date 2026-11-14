@@ -1,0 +1,3 @@
+ready ~= true
+value = if ready:
+    then 1

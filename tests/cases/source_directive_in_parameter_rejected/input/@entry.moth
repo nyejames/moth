@@ -1,0 +1,3 @@
+parse |$doc [:Param.] source String| -> String:
+    return source
+;

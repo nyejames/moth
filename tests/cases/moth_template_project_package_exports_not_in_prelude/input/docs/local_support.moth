@@ -1,0 +1,10 @@
+@docs_styles local_center, center
+
+-- The docs module selects both facade exports: the compile-time constant through a folded local
+-- value, and the runtime function through a checked call. Neither export is a Core prelude
+-- provider, so this scope must not reach the sibling `.mtf` template.
+selected_local_center #= local_center
+
+render_center || -> String:
+    return center()
+;

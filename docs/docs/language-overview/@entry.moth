@@ -9,7 +9,7 @@
 @mon-syntax content as mon_syntax
 @mon-syntax-basic content as mon_syntax_basic
 
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

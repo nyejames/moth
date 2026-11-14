@@ -1,0 +1,13 @@
+-- Inline style fragments for the standard style slots in @html.
+$export
+center #String = [$in style:text-align: center;]
+$export
+right #String = [$in style:text-align: right;]
+$export
+left #String = [$in style:text-align: left;]
+$export
+smaller #String = [$in style:font-size: smaller;]
+$export
+medium #String = [$in style:font-size: medium;]
+$export
+larger #String = [$in style:font-size: larger;]

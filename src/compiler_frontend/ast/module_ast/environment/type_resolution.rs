@@ -1415,6 +1415,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let node = function_body_to_ast(
             &mut body_cursor,
             context,
+            None,
             &mut type_interner,
             &mut self.context.expression_builder,
             &mut self.context.const_values,

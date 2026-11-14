@@ -1,0 +1,21 @@
+entry = "."
+
+# Closing an entry block with `;` keeps the child scope and loop membership exactly as before: the
+# closed `if` leaves `secret` out of scope and the closed loop leaves `continue` outside a loop.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0034", "MOTH-RULE-0042"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0034"
+path = "input/closed_if/@entry.moth"
+line = 5
+column = 9
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0042"
+path = "input/closed_loop/@entry.moth"
+line = 5
+column = 1

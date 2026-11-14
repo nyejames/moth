@@ -10,7 +10,7 @@
 @template-control-flow-basic content as template_control_flow_basic
 @markdown-formatting content as markdown_formatting
 @markdown-formatting-basic content as markdown_formatting_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

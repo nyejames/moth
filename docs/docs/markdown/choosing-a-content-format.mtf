@@ -11,7 +11,7 @@ Choose the content format based on what the content needs.
 ### Use `.mtf` when
 
 - The content needs compile-time Moth constants from the same-directory module root.
-- Nested templates or builder helpers such as `codeblock` are needed.
+- Nested templates or `@html` helpers such as `codeblock` are needed.
 - The `$md` Markdown subset is sufficient for the content's formatting needs.
 - Moth-aware link syntax `@path (label)` is useful.
 

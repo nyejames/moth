@@ -128,6 +128,13 @@ pub(crate) enum ExpressionRpnItem {
     Operator {
         operator: Operator,
         span: Option<SourceSpan>,
+        /// Whether an authored operand directly precedes this operator in its expression frame.
+        ///
+        /// WHY: postfix ordering cannot tell `1 +` from `(* 1)`; both leave one operand for the
+        ///      operator's right slot. Result typing needs the authored side to name the operand
+        ///      the author actually omitted, so the parser records it while sibling order is
+        ///      still the authored order.
+        preceded_by_operand: bool,
     },
     /// Completed operator facts selected once by AST result-type resolution.
     ResolvedOperator(ResolvedOperation),

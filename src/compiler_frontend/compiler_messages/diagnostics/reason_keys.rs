@@ -238,6 +238,7 @@ define_stable_reason_keys! {
     &UnsupportedBackendFeatureReason::LinkedFunctionTargets => "unsupported_backend_feature.linked_function_targets",
     &UnsupportedBackendFeatureReason::MatchTerminators => "unsupported_backend_feature.match_terminators",
     &UnsupportedBackendFeatureReason::ProjectedAssignmentTargets => "unsupported_backend_feature.projected_assignment_targets",
+    &UnsupportedBackendFeatureReason::PayloadFreeVariantValues => "unsupported_backend_feature.payload_free_variant_values",
     },
 
     NumberLiteralErrorReason => {

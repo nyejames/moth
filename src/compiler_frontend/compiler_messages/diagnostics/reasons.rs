@@ -324,6 +324,7 @@ pub enum UnsupportedBackendFeatureReason {
     LinkedFunctionTargets,
     MatchTerminators,
     ProjectedAssignmentTargets,
+    PayloadFreeVariantValues,
 }
 
 impl UnsupportedBackendFeatureReason {
@@ -359,6 +360,7 @@ impl UnsupportedBackendFeatureReason {
             Self::LinkedFunctionTargets => "module-private and generated function calls",
             Self::MatchTerminators => "match control flow",
             Self::ProjectedAssignmentTargets => "projected assignment targets",
+            Self::PayloadFreeVariantValues => "payload-free variant values",
         }
     }
 }

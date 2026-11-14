@@ -258,7 +258,9 @@ fn module_package_dependency_index_walks_only_direct_dependencies() {
         dependency_shell_id: shell,
     }];
 
-    let index = super::compilation::build_module_package_dependency_index(&dependencies, &registry);
+    let index =
+        super::compilation::build_module_package_dependency_index(&dependencies, &[], &registry)
+            .expect("an authored dependency over a completed package must index");
     assert_eq!(
         index.len(),
         1,
@@ -277,28 +279,79 @@ fn module_package_dependency_index_walks_only_direct_dependencies() {
 }
 
 #[test]
-fn template_bearing_packages_order_after_the_html_prelude_package() {
-    let package_prefixes = vec!["docs".to_owned(), "html".to_owned()];
-    let mut dependencies = vec![Vec::new(), Vec::new()];
+fn template_bearing_packages_order_after_both_prelude_packages() {
+    let package_prefixes = vec!["docs".to_owned(), "html".to_owned(), "styles".to_owned()];
+    let mut dependencies = vec![Vec::new(), Vec::new(), Vec::new()];
     super::compilation::add_template_prelude_ordering_dependencies(
         &package_prefixes,
-        &[true, false],
+        &[true, false, false],
         &mut dependencies,
     );
-    assert_eq!(dependencies[0], vec!["html".to_owned()]);
-
-    let order = super::compilation::order_packages_by_dependency(&package_prefixes, &dependencies)
-        .expect("the template edge orders the prelude package first");
-    assert_eq!(package_prefixes[order[0]], "html");
-
-    let mut dependencies = vec![Vec::new(), Vec::new()];
-    super::compilation::add_template_prelude_ordering_dependencies(
-        &package_prefixes,
-        &[false, true],
-        &mut dependencies,
+    assert_eq!(
+        dependencies[0],
+        vec!["html".to_owned(), "styles".to_owned()],
+        "a template-bearing package must wait for both fixed prelude providers"
     );
     assert!(
         dependencies[1].is_empty(),
-        "the prelude package must not depend on itself"
+        "the @html package must not depend on itself"
+    );
+    assert!(
+        dependencies[2].is_empty(),
+        "the fixed prelude packages must not depend on each other"
+    );
+
+    let order = super::compilation::order_packages_by_dependency(&package_prefixes, &dependencies)
+        .expect("the template edges order both prelude packages first");
+    assert_eq!(package_prefixes[order[0]], "html");
+    assert_eq!(package_prefixes[order[1]], "styles");
+    assert_eq!(package_prefixes[order[2]], "docs");
+
+    // A `.mtf` authored inside a prelude package adds no self or sibling prelude edge. The
+    // compiler-owned prelude set has no ordering relation of its own.
+    let mut dependencies = vec![Vec::new(), Vec::new(), Vec::new()];
+    super::compilation::add_template_prelude_ordering_dependencies(
+        &package_prefixes,
+        &[false, true, true],
+        &mut dependencies,
+    );
+    assert!(
+        dependencies.iter().all(Vec::is_empty),
+        "prelude packages must stay free of self and each-other edges: {dependencies:?}"
+    );
+}
+
+#[test]
+fn template_prelude_readiness_blocks_a_consumer_of_the_diagnosed_provider() {
+    // A `.mtf` consumer's implicit prelude providers go through the same readiness rule as its
+    // authored package dependencies: a failed provider blocks the consumer so the provider's
+    // diagnostic stays primary, instead of the consumer failing while resolving the facade.
+    let mut registry = CompletedSourcePackageRegistry::new();
+    let html = registry
+        .publish(compiled_package("html"), &[])
+        .expect("the html provider should publish");
+    let styles = registry
+        .publish(diagnosed_package("styles"), &[])
+        .expect("a diagnosed styles provider should publish");
+    let consumer = ModuleId::from_index(3);
+
+    assert_eq!(
+        super::compilation::classify_blocked_package_provider(&registry, consumer, [html])
+            .expect("a successful provider must classify without a blocker"),
+        None,
+        "a successful prelude provider must keep the consumer ready"
+    );
+
+    let styles_identity = registry
+        .package(styles)
+        .expect("the styles package should be indexed")
+        .package_identity
+        .clone();
+    assert_eq!(
+        super::compilation::classify_blocked_package_provider(&registry, consumer, [html, styles])
+            .expect("a diagnosed provider must block, not raise an infrastructure failure"),
+        Some(super::compiled_boundary::BlockedProvider::SourcePackage(
+            styles_identity
+        ))
     );
 }

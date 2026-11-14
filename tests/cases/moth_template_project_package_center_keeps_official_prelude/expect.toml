@@ -1,0 +1,15 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+# The project facade exports its own `center` runtime name and a `local_center` constant, and the
+# sibling `.moth` in this module selects both. The `.mtf` bare `center` must still be the official
+# `@styles` constant: the rendered `<p>` carries its inline style, while the project constant only
+# appears where project code reads it.
+rendered_output_contains = [
+    "<p style=\"text-align: center;\">",
+    "official prelude",
+    "project support=project local only",
+]

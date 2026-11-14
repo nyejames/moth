@@ -9479,6 +9479,13 @@ contract = "language.syntax.c_style_operator_rejected"
 role = "boundary"
 
 [[case]]
+id = "diagnostic_expression_missing_right_operand"
+path = "diagnostic_expression_missing_right_operand"
+tags = ["integration", "diagnostics"]
+contract = "language.syntax.dangling_operator_missing_right_operand"
+role = "primary"
+
+[[case]]
 id = "diagnostic_expression_or_or"
 path = "diagnostic_expression_or_or"
 tags = ["integration", "diagnostics"]
@@ -12112,6 +12119,13 @@ contract = "backend.html_wasm.external_js_function_unsupported"
 role = "backend"
 
 [[case]]
+id = "web_canvas_unused"
+path = "web_canvas_unused"
+tags = ["integration", "external-imports", "web-canvas", "html", "html-wasm", "reachability"]
+contract = "backend.html.unreachable_external_helper_no_assets"
+role = "backend"
+
+[[case]]
 id = "web_graphics_empty_package_resolves"
 path = "web_graphics_empty_package_resolves"
 tags = ["integration", "external-imports", "web-graphics", "positive", "js-backend"]
@@ -12126,10 +12140,10 @@ contract = "language.dependencies.web_graphics_missing_symbol_rejected"
 role = "primary"
 
 [[case]]
-id = "html_wasm_unused_html_canvas_constant"
-path = "html_wasm_unused_html_canvas_constant"
-tags = ["integration", "external-imports", "web-canvas", "html-wasm", "reachability"]
-contract = "backend.html_wasm.unreachable_canvas_constant_ignored"
+id = "html_wasm_runtime_template_top_level_constant"
+path = "html_wasm_runtime_template_top_level_constant"
+tags = ["integration", "html-wasm", "constants", "templates", "runtime"]
+contract = "backend.html_wasm.runtime_template_top_level_constant_render"
 role = "backend"
 
 [[case]]
@@ -12147,32 +12161,25 @@ contract = "backend.html_wasm.generic_runtime_value_unsupported"
 role = "backend"
 
 [[case]]
-id = "html_canvas_helper_unused_no_runtime_assets"
-path = "html_canvas_helper_unused_no_runtime_assets"
-tags = ["integration", "source-packages", "external-imports", "web-canvas", "html", "html-wasm", "reachability"]
-contract = "backend.html.unreachable_external_helper_no_assets"
+id = "html_canvas_markup_unused_no_runtime_assets"
+path = "html_canvas_markup_unused_no_runtime_assets"
+tags = ["integration", "source-packages", "web-canvas", "html", "html-wasm", "reachability"]
+contract = "backend.html.unreachable_html_markup_helper_no_runtime_assets"
 role = "backend"
 
 [[case]]
-id = "html_canvas_helper_reachable_runtime_assets"
-path = "html_canvas_helper_reachable_runtime_assets"
+id = "html_web_canvas_reachable_runtime_assets"
+path = "html_web_canvas_reachable_runtime_assets"
 tags = ["integration", "source-packages", "external-imports", "web-canvas", "html", "reachability"]
 contract = "backend.html.reachable_external_helper_emits_assets"
 role = "backend"
 
 [[case]]
-id = "html_canvas_helper_reachable_wasm_unsupported"
-path = "html_canvas_helper_reachable_wasm_unsupported"
+id = "html_web_canvas_reachable_wasm_unsupported"
+path = "html_web_canvas_reachable_wasm_unsupported"
 tags = ["integration", "source-packages", "external-imports", "web-canvas", "html-wasm", "diagnostics", "reachability"]
 contract = "backend.html_wasm.external_js_function_unsupported"
 role = "backend"
-
-[[case]]
-id = "html_canvas_raw_context_2d_not_reexported"
-path = "html_canvas_raw_context_2d_not_reexported"
-tags = ["integration", "source-packages", "external-imports", "web-canvas", "diagnostics", "facade"]
-contract = "language.dependencies.module_facade_non_exported_symbol_rejected"
-role = "boundary"
 
 [[case]]
 id = "receiver_method_source_visibility_rejected"
@@ -13113,6 +13120,20 @@ contract = "language.dependencies.moth_template_unrelated_source_package_implici
 role = "primary"
 
 [[case]]
+id = "moth_template_project_package_exports_not_in_prelude"
+path = "moth_template_project_package_exports_not_in_prelude"
+tags = ["integration", "moth_template", "html", "diagnostics", "dependencies", "source-packages"]
+contract = "language.dependencies.moth_template_project_package_exports_not_in_prelude"
+role = "primary"
+
+[[case]]
+id = "moth_template_project_package_center_keeps_official_prelude"
+path = "moth_template_project_package_center_keeps_official_prelude"
+tags = ["integration", "moth_template", "html", "dependencies", "source-packages"]
+contract = "language.dependencies.moth_template_project_package_center_keeps_official_prelude"
+role = "primary"
+
+[[case]]
 id = "moth_template_direct_selection_alias_dependency"
 path = "moth_template_direct_selection_alias_dependency"
 tags = ["integration", "moth_template", "html", "dependencies"]
@@ -13187,13 +13208,6 @@ id = "moth_template_facade_nonconstant_not_visible"
 path = "moth_template_facade_nonconstant_not_visible"
 tags = ["integration", "moth_template", "html", "diagnostics", "dependencies"]
 contract = "language.moth_template.facade_nonconstant_not_visible_in_content_rejected"
-role = "primary"
-
-[[case]]
-id = "moth_template_html_runtime_api_not_visible"
-path = "moth_template_html_runtime_api_not_visible"
-tags = ["integration", "moth_template", "html", "diagnostics", "dependencies"]
-contract = "language.moth_template.html_runtime_api_not_visible_in_content_rejected"
 role = "primary"
 
 [[case]]
@@ -18812,6 +18826,20 @@ contract = "backend.html_wasm.unsupported_backend_feature_rejected"
 role = "adversarial"
 
 [[case]]
+id = "wasm_payload_free_choice_variant_rejected"
+path = "wasm_payload_free_choice_variant_rejected"
+tags = ["integration", "backend", "wasm", "diagnostics"]
+contract = "backend.html_wasm.unsupported_backend_feature_rejected"
+role = "adversarial"
+
+[[case]]
+id = "wasm_payload_free_option_none_rejected"
+path = "wasm_payload_free_option_none_rejected"
+tags = ["integration", "backend", "wasm", "diagnostics"]
+contract = "backend.html_wasm.unsupported_backend_feature_rejected"
+role = "adversarial"
+
+[[case]]
 id = "wasm_generic_function_call_rejected"
 path = "wasm_generic_function_call_rejected"
 tags = ["integration", "backend", "wasm", "diagnostics"]
@@ -20168,4 +20196,193 @@ id = "const_function_repeated_handler_success"
 path = "const_function_repeated_handler_success"
 tags = ["integration", "functions", "const", "runtime"]
 contract = "language.functions.const_repeated_handler_execution_matches_runtime"
+role = "primary"
+
+[[case]]
+id = "function_body_semicolon_inside_call_rejected"
+path = "function_body_semicolon_inside_call_rejected"
+tags = ["integration", "functions", "diagnostics"]
+contract = "language.functions.semicolon_inside_call_is_not_a_block_closer"
+role = "primary"
+
+[[case]]
+id = "function_body_balanced_blocks_template_semicolon_success"
+path = "function_body_balanced_blocks_template_semicolon_success"
+tags = ["integration", "functions", "templates"]
+contract = "language.functions.nested_block_closers_preserve_the_function_body"
+role = "smoke"
+
+[[case]]
+id = "catch_inside_call_argument_rejected"
+path = "catch_inside_call_argument_rejected"
+tags = ["integration", "functions", "diagnostics", "results"]
+contract = "language.results.catch_requires_receiving_site"
+role = "primary"
+
+[[case]]
+id = "collection_literal_semicolon_in_function_body_rejected"
+path = "collection_literal_semicolon_in_function_body_rejected"
+tags = ["integration", "collections", "functions", "diagnostics"]
+contract = "language.collections.statement_terminator_is_not_an_entry_separator"
+role = "primary"
+
+[[case]]
+id = "collection_literal_semicolon_at_top_level_rejected"
+path = "collection_literal_semicolon_at_top_level_rejected"
+tags = ["integration", "collections", "diagnostics"]
+contract = "language.collections.statement_terminator_in_top_level_entry_rejected"
+role = "primary"
+
+[[case]]
+id = "source_directive_unclosed_template_operand_rejected"
+path = "source_directive_unclosed_template_operand_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.unclosed_source_directive_operand_rejected"
+role = "primary"
+
+[[case]]
+id = "source_directive_unclosed_parenthesis_operand_rejected"
+path = "source_directive_unclosed_parenthesis_operand_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.unclosed_source_directive_operand_rejected"
+role = "boundary"
+
+[[case]]
+id = "source_directive_unclosed_brace_operand_rejected"
+path = "source_directive_unclosed_brace_operand_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.unclosed_source_directive_operand_rejected"
+role = "boundary"
+
+[[case]]
+id = "source_directive_unclosed_statement_operand_rejected"
+path = "source_directive_unclosed_statement_operand_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.unclosed_statement_source_directive_operand_rejected"
+role = "primary"
+
+[[case]]
+id = "source_directive_multiline_operand_success"
+path = "source_directive_multiline_operand_success"
+tags = ["integration", "directives"]
+contract = "language.directives.balanced_multiline_source_directive_operand_acceptance"
+role = "primary"
+
+[[case]]
+id = "source_directive_in_choice_variant_rejected"
+path = "source_directive_in_choice_variant_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.source_directive_in_declaration_shell_rejected"
+role = "primary"
+
+[[case]]
+id = "source_directive_in_struct_field_rejected"
+path = "source_directive_in_struct_field_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.source_directive_in_declaration_shell_rejected"
+role = "boundary"
+
+[[case]]
+id = "source_directive_in_parameter_rejected"
+path = "source_directive_in_parameter_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.source_directive_in_declaration_shell_rejected"
+role = "boundary"
+
+[[case]]
+id = "template_directive_in_declaration_shell_rejected"
+path = "template_directive_in_declaration_shell_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.template_directive_in_source_position_rejected"
+role = "primary"
+
+[[case]]
+id = "declaration_shell_unknown_token_rejected"
+path = "declaration_shell_unknown_token_rejected"
+tags = ["integration", "declaration", "diagnostics"]
+contract = "language.declarations.declaration_shell_unknown_token_rejected"
+role = "primary"
+
+[[case]]
+id = "inline_value_if_missing_branch_keyword_rejected"
+path = "inline_value_if_missing_branch_keyword_rejected"
+tags = ["integration", "language", "value-blocks", "if", "diagnostics"]
+contract = "language.expressions.inline_value_if_missing_branch_keyword_rejected"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_entry_if_rejected"
+path = "diagnostic_unclosed_entry_if_rejected"
+tags = ["integration", "entry-start", "diagnostics", "control-flow"]
+contract = "language.syntax.entry_block_requires_explicit_closer"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_entry_loop_rejected"
+path = "diagnostic_unclosed_entry_loop_rejected"
+tags = ["integration", "entry-start", "diagnostics", "loops"]
+contract = "language.syntax.entry_loop_requires_explicit_closer"
+role = "primary"
+
+[[case]]
+id = "diagnostic_closed_entry_blocks_keep_scope_errors"
+path = "diagnostic_closed_entry_blocks_keep_scope_errors"
+tags = ["integration", "entry-start", "diagnostics", "control-flow", "scopes"]
+contract = "language.syntax.closed_entry_block_keeps_child_scope_and_loop_membership"
+role = "primary"
+
+[[case]]
+id = "diagnostic_missing_function_closer_labels_opening_colon"
+path = "diagnostic_missing_function_closer_labels_opening_colon"
+tags = ["integration", "functions", "diagnostics", "labels"]
+contract = "language.functions.missing_closer_names_the_open_body"
+role = "primary"
+
+[[case]]
+id = "diagnostic_stolen_function_closer_labels_inner_closer"
+path = "diagnostic_stolen_function_closer_labels_inner_closer"
+tags = ["integration", "functions", "diagnostics", "labels"]
+contract = "language.functions.inner_block_closer_leaves_function_body_open"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_trait_labels_opening_colon"
+path = "diagnostic_unclosed_trait_labels_opening_colon"
+tags = ["integration", "traits", "diagnostics", "labels"]
+contract = "language.traits.missing_closer_names_the_open_declaration"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_call_before_function_closer_labels_paren"
+path = "diagnostic_unclosed_call_before_function_closer_labels_paren"
+tags = ["integration", "functions", "diagnostics", "labels"]
+contract = "language.syntax.unclosed_parenthesis_names_its_opener"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_collection_before_function_closer_labels_brace"
+path = "diagnostic_unclosed_collection_before_function_closer_labels_brace"
+tags = ["integration", "collections", "diagnostics", "labels"]
+contract = "language.syntax.unclosed_collection_names_its_opener"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_value_if_labels_block_colon"
+path = "diagnostic_unclosed_value_if_labels_block_colon"
+tags = ["integration", "control-flow", "diagnostics", "labels"]
+contract = "language.syntax.unclosed_value_block_names_its_opener"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_entry_catch_rejected"
+path = "diagnostic_unclosed_entry_catch_rejected"
+tags = ["integration", "entry-start", "diagnostics", "fallible"]
+contract = "language.syntax.entry_catch_requires_explicit_closer"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_entry_catch_swallows_statement_rejected"
+path = "diagnostic_unclosed_entry_catch_swallows_statement_rejected"
+tags = ["integration", "entry-start", "diagnostics", "fallible", "scopes"]
+contract = "language.syntax.entry_catch_closer_keeps_handler_scope"
 role = "primary"

@@ -1,6 +1,6 @@
 @directives content as directives
 @directives-basic content as directives_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

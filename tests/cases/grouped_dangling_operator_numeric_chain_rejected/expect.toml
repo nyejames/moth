@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-SYNTAX-0024"]
-message_contains = ["Missing left-hand operand for operator '+'"]
+message_contains = ["Missing right-hand operand for operator '+'"]

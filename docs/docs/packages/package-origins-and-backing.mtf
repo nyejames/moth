@@ -4,8 +4,8 @@ Every package has two independent classifications: where it comes from and how t
 
 Origin describes ownership and distribution:
 
-- **Core**: compiler-owned packages such as `@core/io` and `@core/math`.
-- **Builder**: packages selected by a project builder, including `@html` and `@web/canvas`.
+- **Core**: compiler-owned packages such as `@html`, `@styles`, `@core/io` and `@core/math`.
+- **Builder**: packages selected by a project builder, including `@web/site` and `@web/canvas`.
 - **ProjectLocal**: scoped `@package.moth` support packages, the project-root package facade and annotated project-local JavaScript files.
 - **Dependency**: reserved for future package-system support.
 
@@ -25,7 +25,8 @@ Backing is semantic, not a file-format choice. Precompiling or emitting a `MothS
         [: **Backing**]
     ]
 
-    [td: [:`@html`, `@web/site`] [: Builder] [: MothSource]]
+    [td: [:`@html`, `@styles`] [: Core] [: MothSource]]
+    [td: [:`@web/site`] [: Builder] [: MothSource]]
     [td: [:`@core/collections`, `@core/io`, `@core/math`, `@core/text`, `@core/random`, `@core/time`] [: Core] [: ExternalBinding]]
     [td: [:`@web/canvas`, `@web/graphics`, `@web/page`] [: Builder] [: ExternalBinding]]
     [td: [: Scoped `@package.moth` support package] [: ProjectLocal] [: MothSource]]
@@ -37,7 +38,7 @@ Origin and backing don't change dependency clause syntax or module visibility. S
 
 ### Prelude is visibility policy
 
-The prelude is implicit dependency policy, not an origin or backing. It exposes the bare `io` namespace as an alias to `@core/io`. Package metadata belongs to `@core/io`, while bare-name visibility belongs to the prelude.
+The prelude is implicit dependency policy, not an origin or backing. The ordinary Moth prelude exposes `io` as an alias to `@core/io`. The separate `.mtf` prelude makes public compile-time constants from `@html` and `@styles` visible by bare name. Package metadata remains independent of these visibility policies.
 
 ### Builder-selected availability
 
@@ -48,6 +49,12 @@ may provide a subset or no public Core implementation. Reserved Core identities
 and the `io` prelude keep their meaning even when an operation is unavailable.
 The progress matrix records current implementation gaps separately from this
 design contract.
+
+The mandatory Core source packages `@html` and `@styles` are an exception to
+builder-selected availability. The common builder surface registers both roots
+under every builder, including custom SDK builders, because they supply
+compiler-level template helpers rather than host capabilities. A builder cannot
+replace either root or register a package under its prefix.
 
 The future official package manager classifies managed Moth-source packages as
 no-core or Core-dependent over their complete dependency closure. Official

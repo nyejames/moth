@@ -1,0 +1,4 @@
+Box = |
+    $doc [:Field docs.]
+    label String,
+|

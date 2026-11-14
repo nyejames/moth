@@ -112,8 +112,7 @@ fn indexed_discovery_keeps_authored_kind_when_canonical_extension_disagrees() {
         .expect("should symlink a template name onto the payload");
 
     let config = Config::new(source_root.clone());
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");

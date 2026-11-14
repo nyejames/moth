@@ -133,9 +133,9 @@ fn compile_fixture(files: &[(&str, &str)]) -> ProjectFrontendCompilation {
 
 /// Compiles one `.mtf`-bearing directory project through the real HTML builder surface.
 ///
-/// WHY: the HTML builder registers `MothTemplate` source kinds. A fixture that uses `.mtf`
-///      content must compile through the same surface a real HTML project uses, not a bare
-///      mandatory-core surface that would reject the template source.
+/// WHY: these fixtures exercise HTML output and slots, so they compile through the same surface a
+///      real HTML project uses rather than a bare mandatory-core surface. `.mtf` support itself
+///      is compiler-owned and no longer depends on this builder.
 fn compile_template_fixture(files: &[(&str, &str)]) -> ProjectFrontendCompilation {
     compile_template_fixture_with_profile(files, BuildProfile::Dev)
 }
@@ -174,21 +174,33 @@ fn compile_fixture_result(
     template_surface: bool,
     profile: BuildProfile,
 ) -> CompilationResult<ProjectFrontendCompilation> {
-    let temporary_directory = write_project_fixture(files);
-    let mut config = Config::new(temporary_directory.path().to_path_buf());
-    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
-    let style_directives = StyleDirectiveRegistry::built_ins();
     let mut frontend_surface = if template_surface {
         HtmlProjectBuilder::new().frontend_surface()
     } else {
         BuilderSurface::with_mandatory_core()
     };
+    compile_fixture_result_with_surface(files, profile, &mut frontend_surface)
+}
+
+/// Compiles one directory fixture through an explicitly selected builder surface.
+///
+/// WHY: `.mtf` prelude policy is compiler-owned, so parity tests compile the same fixture through
+///      the HTML surface and the minimal mandatory-core surface instead of assuming one default.
+fn compile_fixture_result_with_surface(
+    files: &[(&str, &str)],
+    profile: BuildProfile,
+    frontend_surface: &mut BuilderSurface,
+) -> CompilationResult<ProjectFrontendCompilation> {
+    let temporary_directory = write_project_fixture(files);
+    let mut config = Config::new(temporary_directory.path().to_path_buf());
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let style_directives = StyleDirectiveRegistry::built_ins();
     compile_project_frontend(
         &mut config,
         profile,
         None,
         &style_directives,
-        &mut frontend_surface,
+        frontend_surface,
         &mut warning_owner,
     )
 }
@@ -340,3 +352,5 @@ mod scheduling_budget_tests;
 mod single_file_directory_discovery_tests;
 #[path = "source_identity_loading_tests.rs"]
 mod source_identity_loading_tests;
+#[path = "template_prelude_tests.rs"]
+mod template_prelude_tests;

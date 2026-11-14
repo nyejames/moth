@@ -257,8 +257,7 @@ fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
     .expect("config should parse");
 
     let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
-    source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
+    source_file_kinds.register(crate::builder_surface::OptionalSourceKind::PlainMarkdown);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let modules = successful_compilation_value(discover_modules_for_test(
@@ -1379,7 +1378,7 @@ fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() 
     )
     .expect("config should parse");
     let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
+    source_file_kinds.register(crate::builder_surface::OptionalSourceKind::PlainMarkdown);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let failure = discover_modules_for_test(&config, &resolver, &style_directives);
@@ -1703,8 +1702,7 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
     .expect("config should parse");
 
     let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
-    source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
+    source_file_kinds.register(crate::builder_surface::OptionalSourceKind::PlainMarkdown);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let (modules, source_files) = successful_compilation_value(

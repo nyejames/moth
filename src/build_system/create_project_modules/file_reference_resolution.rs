@@ -1102,9 +1102,10 @@ impl<'a> SingleFileReferenceResolver<'a> {
                 .extension()
                 .and_then(|extension| extension.to_str())
                 .unwrap_or_default();
-            if !self
+            if self
                 .source_file_kinds
-                .supports_recognized_extension(extension)
+                .kind_for_extension(extension)
+                .is_none()
             {
                 let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
                 return Ok(SingleFileResolvedReference {

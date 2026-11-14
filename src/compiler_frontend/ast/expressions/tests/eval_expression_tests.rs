@@ -251,6 +251,7 @@ fn ordinary_expression_rejects_path_string_concatenation() {
         ExpressionRpnItem::Operator {
             operator: Operator::Add,
             span: None,
+            preceded_by_operand: true,
         },
         ExpressionRpnItem::Operand(suffix.id()),
     ];
@@ -323,6 +324,7 @@ fn structural_string_equality_is_refused_only_in_a_constant_context() {
             ExpressionRpnItem::Operator {
                 operator: Operator::Equality,
                 span: None,
+                preceded_by_operand: true,
             },
         ]
     };
@@ -1827,14 +1829,15 @@ fn dec_contextual_arithmetic_preserves_literal_type_and_coefficient() {
 #[test]
 fn malformed_groups_keep_group_operand_diagnostics() {
     // `x = 2 * (1 + )` must report the dangling `+`, not the outer `*`: eager group
-    // evaluation keeps the diagnostic at the group's own operator span.
+    // evaluation keeps the diagnostic at the group's own operator span. The `+` follows an
+    // authored operand, so the missing operand is its right-hand side.
     let plus_source = "value = 2 * (1 + )\n";
     let plus = parse_single_file_ast_diagnostic(plus_source);
     let plus_diagnostic = assert_ast_diagnostic(&plus, "MOTH-SYNTAX-0024", None);
     let plus_facts = plus_diagnostic
         .family_view::<MissingOperatorOperandView>()
         .expect("missing-operand diagnostic should retain typed position");
-    assert_eq!(plus_facts.position, OperatorOperandPosition::BinaryLeft);
+    assert_eq!(plus_facts.position, OperatorOperandPosition::BinaryRight);
     let mut span_builder = ExtendedSpanBuilder::new();
     let plus_span = LocalSpan::exact(
         plus_source
@@ -1870,6 +1873,29 @@ fn malformed_groups_keep_group_operand_diagnostics() {
     assert_eq!(
         ast_error_primary_span(star_diagnostic),
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, star_span))
+    );
+
+    // A group holding only a binary operator has no operand at all. The operator opened its
+    // frame, so the single-operator fast path names the left-hand side as the missing one.
+    let lone_source = "value = ( * )\n";
+    let lone = parse_single_file_ast_diagnostic(lone_source);
+    let lone_diagnostic = assert_ast_diagnostic(&lone, "MOTH-SYNTAX-0024", None);
+    let lone_facts = lone_diagnostic
+        .family_view::<MissingOperatorOperandView>()
+        .expect("missing-operand diagnostic should retain typed position");
+    assert_eq!(lone_facts.position, OperatorOperandPosition::BinaryLeft);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let lone_span = LocalSpan::exact(
+        lone_source
+            .find('*')
+            .expect("lone operator should be present") as u32,
+        1,
+        &mut span_builder,
+    )
+    .expect("the lone operator span should fit inline");
+    assert_eq!(
+        ast_error_primary_span(lone_diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, lone_span))
     );
 }
 #[test]

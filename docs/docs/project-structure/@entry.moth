@@ -16,7 +16,7 @@
 @entry-config-basic content as entry_config_basic
 @project-package-facade content as project_package_facade
 @project-package-facade-basic content as project_package_facade_basic
-@styles navbar,
+@docs_styles navbar,
     section,
     language_theme_head,
     doc_level,

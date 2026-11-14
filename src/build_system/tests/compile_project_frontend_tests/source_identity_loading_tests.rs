@@ -239,7 +239,7 @@ fn unselected_preload_read_failure_stays_inert() {
         frontend.transient_batches
     );
     assert_eq!(
-        frontend.successful_module_views().count(),
+        frontend.project.successful_module_views().count(),
         1,
         "the one selected module must still compile successfully"
     );

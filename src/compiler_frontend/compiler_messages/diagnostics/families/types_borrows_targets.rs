@@ -132,6 +132,7 @@ unit_code! {
         LinkedFunctionTargets = 24,
         MatchTerminators = 25,
         ProjectedAssignmentTargets = 26,
+        PayloadFreeVariantValues = 27,
     }
 }
 

@@ -530,44 +530,51 @@ fn parse_unary_operator(
             if token_stream.peek_next_tag() == Some(TokenTag::NUMERIC_LITERAL) {
                 *next_number_negative = true;
             } else {
-                let span = Some(token_stream.current_span());
-                expression.push(ExpressionRpnItem::Operator {
-                    operator: Operator::Negate,
-                    span,
-                });
+                push_operator_item(
+                    expression,
+                    Some(token_stream.current_span()),
+                    Operator::Negate,
+                );
             }
             true
         }
         TokenTag::NOT => {
-            let span = Some(token_stream.current_span());
-            expression.push(ExpressionRpnItem::Operator {
-                operator: Operator::Not,
-                span,
-            });
+            push_operator_item(expression, Some(token_stream.current_span()), Operator::Not);
             true
         }
         _ => false,
     }
 }
 
+/// Pushes one authored operator item onto the expression stack.
+///
+/// WHAT: records whether an operand directly precedes the operator in its expression frame.
+/// WHY: operators are pushed in authored order, before shunting-yard ordering loses the
+///      difference between `1 +` and `(* 1)`. Expression result typing reports the operand side
+///      the author omitted from this fact, not from the postfix pop order.
 fn push_operator_item(
     expression: &mut Vec<ExpressionRpnItem>,
-    _context: &ScopeContext,
     span: Option<SourceSpan>,
     operator: Operator,
 ) {
-    expression.push(ExpressionRpnItem::Operator { operator, span });
+    let preceded_by_operand = expression
+        .last()
+        .is_some_and(ExpressionRpnItem::is_operand_shape);
+    expression.push(ExpressionRpnItem::Operator {
+        operator,
+        span,
+        preceded_by_operand,
+    });
 }
 
-/// Convenience for the common match arm that pushes an operator and advances.
+/// Convenience for the common match arm that pushes a binary operator and advances.
 fn advance_with_operator(
     expression: &mut Vec<ExpressionRpnItem>,
-    context: &ScopeContext,
     token_stream: &AstCursor,
     operator: Operator,
 ) -> ExpressionTokenStep {
     let span = Some(token_stream.current_span());
-    push_operator_item(expression, context, span, operator);
+    push_operator_item(expression, span, operator);
     ExpressionTokenStep::Advance
 }
 
@@ -645,7 +652,6 @@ fn dispatch_non_group_expression_token(
     if let Some(operator) = binary_operator_for_tag(token) {
         return Ok(advance_with_operator(
             state.expression,
-            context,
             token_stream,
             operator,
         ));
@@ -1630,7 +1636,6 @@ fn dispatch_is_token(
     };
     Ok(advance_with_operator(
         state.expression,
-        context,
         token_stream,
         operator,
     ))

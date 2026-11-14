@@ -345,6 +345,76 @@ fn source_tree_index_rejects_exact_nested_package_path_but_allows_ancestor() {
 }
 
 #[test]
+fn source_tree_index_rejects_project_folders_that_claim_official_core_package_prefixes() {
+    // `@html` and `@styles` are registered Core roots on every builder, so a project folder at
+    // the same entry-root-relative path would claim an official package namespace. Discovery
+    // reports that collision instead of giving the local folder precedence over the Core package,
+    // and folder identity compares ASCII-case-insensitively like every package path.
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = fs::canonicalize(temp.path()).expect("temp dir should canonicalize");
+    let entry = root.join("src");
+    fs::create_dir_all(&entry).expect("should create entry root");
+    fs::write(entry.join("@entry.moth"), "").expect("should write entry root");
+    let config = Config::new(root.clone());
+    let packages = crate::builder_surface::BuilderSurface::with_mandatory_core().source_packages;
+    let discover = || {
+        super::source_tree_index::SourceTreeIndex::discover(
+            entry.clone(),
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &root,
+                validated_output_settings: None,
+            },
+            &config,
+            &packages,
+            &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
+            &mut StringTable::new(),
+        )
+    };
+    let assert_collision = |folder: &str, reason: &str| {
+        let reports = diagnosed_reports(discover().expect_err(reason));
+        let (report, diagnostic) = first_invalid_config(&reports);
+        let facts = diagnostic
+            .family_view::<InvalidConfigView>()
+            .expect("config failure should retain typed facts");
+        assert_eq!(
+            facts.reason,
+            InvalidConfigCode::EntryRootPackagePrefixCollision,
+            "{reason}"
+        );
+        assert_eq!(
+            report
+                .context()
+                .strings()
+                .resolve(diagnostic.string_ids()[0]),
+            "styles",
+            "{reason}: the collision must name the registered Core prefix"
+        );
+        assert_eq!(
+            report
+                .context()
+                .strings()
+                .resolve(diagnostic.string_ids()[1]),
+            entry.join(folder).display().to_string(),
+            "{reason}"
+        );
+    };
+
+    for folder in ["styles", "Styles"] {
+        fs::create_dir(entry.join(folder)).expect("should create project folder");
+        assert_collision(
+            folder,
+            "a project folder claiming the Core @styles prefix must collide",
+        );
+        fs::remove_dir(entry.join(folder)).expect("should remove colliding folder");
+    }
+
+    // Only the registered prefix is reserved; a folder that merely starts with it stays available.
+    fs::create_dir(entry.join("styles_local")).expect("should create unrelated project folder");
+    discover().expect("a folder outside the official prefix must not collide");
+}
+
+#[test]
 fn source_tree_index_detects_collision_in_non_skipped_directory() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();

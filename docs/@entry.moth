@@ -1,4 +1,4 @@
-@styles navbar, section, theme_head, highlight, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, highlight, sidebar, init_docs_sidebar
 @html img, div
 
 [$in title:["What is Moth?"]]
@@ -79,7 +79,7 @@ init_docs_sidebar()!
     When every input resolves at compile time, Moth folds the whole template to a string before HIR and code generation. 
     When runtime work remains, only that work survives. 
     
-    The HTML builder then brings Moth source, `.mtf` templates, Markdown, assets, routing and hot reload into the same project flow. 
+    The compiler supplies `.mtf` templates under every builder. The HTML builder then brings Moth source, Markdown, assets, routing and hot reload into the same project flow.
     Static content leaves no general template engine behind, and builders consume compiler graphs and link plans instead of inventing a second understanding of the program. 
     
     [highlight, $md:*This docs site already runs through this toolchain.*]

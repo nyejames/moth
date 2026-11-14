@@ -1,41 +1,44 @@
 //! Unit tests for the source file kind registry.
 
-use crate::builder_surface::source_file_kind_registry::{SourceFileKind, SourceFileKindRegistry};
+use crate::builder_surface::source_file_kind_registry::{
+    OptionalSourceKind, SourceFileKind, SourceFileKindRegistry,
+};
 
 #[test]
-fn empty_registry_has_no_supported_kinds() {
+fn empty_registry_supports_compiler_owned_kinds_only() {
     let registry = SourceFileKindRegistry::new();
 
-    assert!(!registry.is_supported("mtf"));
-    assert!(!registry.is_supported("md"));
-    assert!(!registry.is_supported("moth"));
-    assert_eq!(registry.supported_kinds().len(), 0);
-}
-
-#[test]
-fn register_moth_template_lookup_succeeds() {
-    let mut registry = SourceFileKindRegistry::new();
-    registry.register("mtf", SourceFileKind::MothTemplate);
-
-    assert!(registry.is_supported("mtf"));
+    assert_eq!(
+        registry.kind_for_extension("moth"),
+        Some(SourceFileKind::Moth)
+    );
     assert_eq!(
         registry.kind_for_extension("mtf"),
         Some(SourceFileKind::MothTemplate)
     );
+    assert_eq!(registry.kind_for_extension("md"), None);
 }
 
 #[test]
-fn compiler_owned_moth_is_supported_without_registration() {
-    let registry = SourceFileKindRegistry::new();
+fn register_plain_markdown_makes_it_supported_without_reassigning_templates() {
+    let mut registry = SourceFileKindRegistry::new();
+    registry.register(OptionalSourceKind::PlainMarkdown);
 
-    assert!(registry.supports_recognized_extension("moth"));
-    assert!(!registry.is_supported("moth"));
-    assert!(!registry.supports_recognized_extension("mtf"));
+    assert_eq!(
+        registry.kind_for_extension("md"),
+        Some(SourceFileKind::PlainMarkdown)
+    );
+    assert_eq!(
+        registry.kind_for_extension("mtf"),
+        Some(SourceFileKind::MothTemplate),
+        "selecting an optional kind cannot reassign a compiler-owned extension"
+    );
 }
 
 #[test]
 fn unsupported_extension_returns_none() {
-    let registry = SourceFileKindRegistry::new();
+    let mut registry = SourceFileKindRegistry::new();
+    registry.register(OptionalSourceKind::PlainMarkdown);
 
     assert_eq!(registry.kind_for_extension("css"), None);
     assert_eq!(registry.kind_for_extension("json"), None);
@@ -43,39 +46,13 @@ fn unsupported_extension_returns_none() {
 }
 
 #[test]
-fn empty_registry_recognizes_markdown_but_does_not_support_it() {
-    let registry = SourceFileKindRegistry::new();
-
-    assert!(!registry.is_supported("md"));
-    assert!(!registry.supports_recognized_extension("md"));
-    assert_eq!(registry.kind_for_extension("md"), None);
-}
-
-#[test]
-fn register_plain_markdown_makes_it_supported() {
-    let mut registry = SourceFileKindRegistry::new();
-    registry.register("md", SourceFileKind::PlainMarkdown);
-
-    assert!(registry.is_supported("md"));
-    assert!(registry.supports_recognized_extension("md"));
+fn compiler_owned_kinds_are_never_optional() {
+    assert_eq!(SourceFileKind::Moth.optional(), None);
+    assert_eq!(SourceFileKind::MothTemplate.optional(), None);
     assert_eq!(
-        registry.kind_for_extension("md"),
-        Some(SourceFileKind::PlainMarkdown)
+        SourceFileKind::PlainMarkdown.optional(),
+        Some(OptionalSourceKind::PlainMarkdown)
     );
-}
-
-#[test]
-fn supported_kinds_sorts_multiple_kinds_deterministically() {
-    let mut registry = SourceFileKindRegistry::new();
-    registry.register("md", SourceFileKind::PlainMarkdown);
-    registry.register("mtf", SourceFileKind::MothTemplate);
-
-    let kinds = registry.supported_kinds();
-    assert_eq!(kinds.len(), 2);
-    assert_eq!(kinds[0].extension, "md");
-    assert_eq!(kinds[0].kind, SourceFileKind::PlainMarkdown);
-    assert_eq!(kinds[1].extension, "mtf");
-    assert_eq!(kinds[1].kind, SourceFileKind::MothTemplate);
 }
 
 #[test]
@@ -91,12 +68,11 @@ fn plain_markdown_extension_round_trips() {
 #[test]
 fn registry_is_cloneable() {
     let mut registry = SourceFileKindRegistry::new();
-    registry.register("mtf", SourceFileKind::MothTemplate);
+    registry.register(OptionalSourceKind::PlainMarkdown);
 
     let cloned = registry.clone();
-    assert!(cloned.is_supported("mtf"));
     assert_eq!(
-        cloned.kind_for_extension("mtf"),
-        Some(SourceFileKind::MothTemplate)
+        cloned.kind_for_extension("md"),
+        Some(SourceFileKind::PlainMarkdown)
     );
 }

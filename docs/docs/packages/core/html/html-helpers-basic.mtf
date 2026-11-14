@@ -1,0 +1,67 @@
+`@html` gives you compile-time HTML helpers. The constants fold into HTML
+strings during compilation and produce no runtime code.
+
+### Using helpers in `.mtf` files
+
+`.mtf` files see `@html` and `@styles` constants without a dependency clause. The compiler supplies the official `packages/html` and `packages/styles` packages. You can use the helpers directly:
+
+[codeblock, $code "text":
+    -- docs/intro.mtf
+    [p: A paragraph.]
+
+    [codeblock, $code "moth": value = 42]
+]
+
+The prelude supplies `@html` and `@styles` constants only. Your own values need a qualified reference to a helper file. A template head names the helper path and one selected value, for example `@settings` then `site_name`. Root files never expose their declarations to a template.
+
+### Binding helpers in `.moth` files
+
+`.moth` files need an explicit dependency clause to use `@html` symbols.
+
+[codeblock, $code "moth":
+    @html table, th, td
+]
+
+### Available helpers
+
+- `p`, `h1` through `h6`, `small`, `large`, `div`, `span` for structure
+- `canvas` for `<canvas>` elements with `id` and `style` slots
+- `bold`, `italic`, `underline`, `strikethrough` for formatting
+- `codeblock`, `table`, `th`, `td` for code and tables
+- `img` for images with `src`, `alt` and `style` slots
+
+The six basic style inserts (`center`, `right`, `left`, `smaller`, `medium`, `larger`) belong to `@styles`. They are available bare inside `.mtf` files and need an explicit import in `.moth` files, such as `@styles center`. See @../styles/ (@styles) for the fragments and the slots they fill.
+
+### `$code` code blocks
+
+`$code` highlights a balanced template body as a code block. The compiler owns
+the directive and its formatter, so it works under every builder, not only the
+HTML one.
+
+[codeblock, $code "moth":
+    [codeblock, $code "moth": value = 42]
+]
+
+Supported aliases: `text`/`txt`, `html`, `markdown`/`md`, `toml`, `json`,
+`yaml`/`yml`, `css`, `c`, `sql`, `moth`, `javascript`/`js`,
+`typescript`/`ts`, `python`/`py`, `rust`/`rs`, `bash`/`sh`/`shell`.
+
+`$code` escapes HTML and applies lexical presentation only. Dynamic expression
+anchors pass through sealed. It never checks the snippet or reports errors. All
+profiles share the same palette.
+
+### Canvas
+
+`@html` provides the `<canvas>` markup helper. Browser drawing is provided by `@web/canvas` and is available only when the builder supports the browser runtime.
+
+[codeblock, $code "moth":
+    @web/canvas get_canvas, context_2d, set_fill_style, fill_rect
+
+    element = get_canvas("my-canvas")!
+    context ~= context_2d(element)!
+
+    set_fill_style(~context, "red")
+    fill_rect(~context, 10.0, 10.0, 50.0, 50.0)
+]
+For the full export surface and deferred additions,
+see @#html-helpers (@html advanced).

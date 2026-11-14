@@ -1,28 +1,4 @@
--- Basic HTML components and utility formatters for HTML project builds.
--- Provided by the HTML project builder as a source-backed Builder package.
-@web/canvas Canvas2d,
-    get_canvas as raw_get_canvas,
-    context_2d as raw_context_2d,
-    set_fill_style as raw_set_fill_style,
-    fill_rect as raw_fill_rect,
-    clear_rect as raw_clear_rect,
-    stroke_rect as raw_stroke_rect
-
-set_fill_style |this ~Canvas, color String|:
-    raw_set_fill_style(~this.context, color)
-;
-
-fill_rect |this ~Canvas, x F64, y F64, width F64, height F64|:
-    raw_fill_rect(~this.context, x, y, width, height)
-;
-
-clear_rect |this ~Canvas, x F64, y F64, width F64, height F64|:
-    raw_clear_rect(~this.context, x, y, width, height)
-;
-
-stroke_rect |this ~Canvas, x F64, y F64, width F64, height F64|:
-    raw_stroke_rect(~this.context, x, y, width, height)
-;
+-- HTML markup helpers shared by all project builders.
 
 -- Basic tags
 $export
@@ -100,39 +76,6 @@ th #= [$html:
     ]
 ]
 
--- Utility style inserts
-$export
-center #String = [$in style:text-align: center;]
-$export
-right #String = [$in style:text-align: right;]
-$export
-left #String = [$in style:text-align: left;]
-$export
-smaller #String = [$in style:font-size: smaller;]
-$export
-medium #String = [$in style:font-size: medium;]
-$export
-larger #String = [$in style:font-size: larger;]
-
 -- Basic Canvas component
 $export
 canvas #String = [$html:<canvas id="[$slot id]" style="[$slot style]"></canvas>]
-
--- Get the basic canvas element and 2D context for drawing (opaque JS interop)
-$export
-get_canvas_context |id String| -> Canvas2d, Error!:
-    canvas_element = raw_get_canvas(id)!
-    return raw_context_2d(canvas_element)!
-;
-
--- Source-owned wrapper that provides method-style canvas drawing ergonomics.
-$export
-Canvas = |
-    context Canvas2d,
-|
-
-$export
-get_canvas |id String| -> Canvas, Error!:
-    context = get_canvas_context(id)!
-    return Canvas(context)
-;

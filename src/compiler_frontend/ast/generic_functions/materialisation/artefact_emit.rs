@@ -121,7 +121,7 @@ pub(crate) struct ModuleMaterialisationContext {
     pub(super) const_source_string_table: Option<Arc<FrozenStringTable>>,
 }
 
-pub(super) type RetainedIdentityArcs<'a> = Option<(&'a Arc<PathTable>, &'a Arc<FrozenStringTable>)>;
+type RetainedIdentityArcs<'a> = Option<(&'a Arc<PathTable>, &'a Arc<FrozenStringTable>)>;
 
 /// Pair one context's retained issuing tables, rejecting a half-installed pair.
 ///
@@ -240,19 +240,14 @@ impl ModuleMaterialisationContext {
     pub(crate) fn retained_identity_tables(
         &self,
     ) -> Result<Option<(&PathTable, &FrozenStringTable)>, InfrastructureFailure> {
-        self.retained_identity_arcs().map(|pair| {
-            pair.map(|(path_table, source_strings)| (path_table.as_ref(), source_strings.as_ref()))
-        })
-    }
-
-    pub(crate) fn retained_identity_arcs(
-        &self,
-    ) -> Result<RetainedIdentityArcs<'_>, InfrastructureFailure> {
         complete_identity_arcs(
             &self.path_table,
             &self.source_string_table,
             "published materialisation context has an incomplete identity table pair",
         )
+        .map(|pair| {
+            pair.map(|(path_table, source_strings)| (path_table.as_ref(), source_strings.as_ref()))
+        })
     }
 
     /// Retained identity pair that issued the published const rows.
@@ -451,12 +446,9 @@ impl GenericTemplateArtefact {
         let source_file = self.source_file;
         let function_path = self.function_path;
         let entry_dir = path_fork.parent(source_file).unwrap_or(PathId::ROOT);
-        let identity_tables = context
-            .retained_identity_arcs()
-            .map_err(PreparedFailure::from)?;
         let materialised_body = self
             .body
-            .materialise(source_file, path_fork, string_table, identity_tables)
+            .materialise(source_file, path_fork)
             .map_err(PreparedFailure::from)?;
         let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
         let file_value_resolution = generated_file_value_resolution_services(
@@ -645,7 +637,6 @@ impl GenericTemplateArtefact {
         let external_package_registry = services.external_registry;
         let template_ir_store = services.template_ir_store;
         let module_resources = Rc::clone(&services.module_resources);
-        let identity_tables = context.retained_identity_arcs()?;
         for nominal in &self.nominals {
             let type_id = intern_generated_canonical_type(
                 &nominal.identity,
@@ -1238,7 +1229,7 @@ impl GenericTemplateArtefact {
             } else {
                 nested
                     .body
-                    .materialise(source_file, path_fork, string_table, identity_tables)?
+                    .materialise(source_file, path_fork)?
                     .into_generic_body()?
             };
             let template = GenericFunctionTemplate {

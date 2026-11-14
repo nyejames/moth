@@ -390,6 +390,69 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
 }
 
 #[test]
+fn exhausted_group_reports_the_authored_opening_parenthesis() {
+    let mut string_table = StringTable::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut path_fork = PathInternerFork::empty();
+    let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    // The opener follows a leading comment in the modelled source, so the file-start fallback
+    // of an exhausted cursor cannot coincide with the span this test asserts.
+    let opening_span = LocalSpan::exact(26, 1, &mut span_builder)
+        .expect("opening parenthesis span should fit inline");
+    let operand_span =
+        LocalSpan::exact(27, 1, &mut span_builder).expect("operand span should fit inline");
+
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    builder
+        .push_static(TokenTag::OPEN_PARENTHESIS, opening_span)
+        .expect("opening parenthesis token should build");
+    builder
+        .push_numeric(
+            NumericLiteralToken::test_new("1", &mut string_table),
+            operand_span,
+        )
+        .expect("numeric operand token should build");
+    // No closing `)` and no EOF token: the group's parser window itself is exhausted.
+    let owner = finish_tokens(builder);
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
+        .expect("test token stream must expose an AST cursor");
+    let mut data_type = ExpectedType::Infer;
+
+    let error = create_expression_until_for_test(
+        &mut stream,
+        &context,
+        &mut expression_builder,
+        &mut const_values,
+        &mut data_type,
+        &ValueMode::ImmutableOwned,
+        &[],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("an exhausted group should error");
+
+    let ExpressionParseError::Diagnostic(diagnostic) = error else {
+        panic!("expected user diagnostic, found infrastructure error: {error:?}");
+    };
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0012");
+    assert!(
+        matches!(
+            diagnostic.primary_site(),
+            SiteRef::Local(span)
+                if span == SourceSpan::new(SourceId::COMPILATION_ROOT, opening_span)
+        ),
+        "the diagnostic should underline the authored `(` of the exhausted group"
+    );
+}
+
+#[test]
 fn mutable_receiver_unexpected_operand_reports_marker_span() {
     let mut string_table = StringTable::new();
     let mut expression_builder = AstExpressionBuilder::new().unwrap();

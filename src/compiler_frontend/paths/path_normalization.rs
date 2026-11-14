@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 /// A source-file dependency candidate derived from one extensionless dependency path.
 ///
 /// WHAT: carries the concrete filesystem candidate plus its typed source kind.
-/// WHY: Stage 0 must keep Moth `.moth` and builder-supported kinds such as Moth template `.mtf`
-///      distinct before later frontend stages choose the right preparation path.
+/// WHY: Stage 0 must keep compiler-supported `.moth` and `.mtf` distinct from a builder-selected
+///      kind such as plain Markdown `.md` before later frontend stages choose the right
+///      preparation path.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DependencyCandidate {
     pub(crate) path: PathBuf,
@@ -125,7 +126,10 @@ fn add_source_kind_candidates(
 ) {
     for recognized in SourceFileKind::recognized_kinds() {
         let path = with_extension(base_path.clone(), recognized.extension);
-        let support = if source_file_kinds.supports_recognized_extension(recognized.extension) {
+        let support = if source_file_kinds
+            .kind_for_extension(recognized.extension)
+            .is_some()
+        {
             DependencyCandidateSupport::Supported
         } else {
             DependencyCandidateSupport::RecognizedButUnsupported

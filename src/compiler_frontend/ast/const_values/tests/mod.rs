@@ -89,6 +89,7 @@ impl Fixture {
                 ExpressionRpnItem::Operator {
                     operator,
                     span: None,
+                    preceded_by_operand: true,
                 },
             ],
             builtin_type_ids::fixed_scalar(FixedScalar::I32),

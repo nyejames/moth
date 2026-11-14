@@ -408,6 +408,7 @@ fn numeric_root(
             ExpressionRpnItem::Operator {
                 operator: Operator::Add,
                 span: None,
+                preceded_by_operand: true,
             },
         ],
         builtin_type_ids::fixed_scalar(FixedScalar::I32),

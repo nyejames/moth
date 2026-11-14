@@ -16,7 +16,7 @@ metadata, while an ordinary const fragment renders into the body.
 
 [codeblock, $code "moth":
     [$in title:About]
-    [$in stylesheets:[@styles/site.css]]
+    [$in stylesheets:[@assets/site.css]]
 
     [$md:
         # Compile-time heading

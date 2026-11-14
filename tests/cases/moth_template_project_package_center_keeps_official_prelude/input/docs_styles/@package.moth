@@ -1,0 +1,11 @@
+-- A project-local support facade, like the docs project's renamed `@docs_styles`. Its exported
+-- names belong to the project package surface; they are not Core prelude providers.
+$export
+local_center #= "project local only"
+
+-- Same spelling as the official `@styles` prelude constant, but exported as a runtime function:
+-- the `.mtf` body must keep binding the official constant rather than this package's name.
+$export
+center || -> String:
+    return "project-local center"
+;

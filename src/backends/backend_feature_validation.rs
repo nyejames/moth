@@ -45,7 +45,9 @@ use crate::compiler_frontend::hir::reachability::{
     ReachableRuntimeCastForm, ReachableRuntimeCastUse,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
-use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
+use crate::compiler_frontend::hir::terminators::{
+    HirAssertionMessageEvaluation, HirFallibleOperation, HirTerminator,
+};
 use crate::compiler_frontend::source::SourceSpan;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
@@ -1093,8 +1095,9 @@ fn validate_wasm_mutable_local_aliases(
 ///
 /// WHAT: walks selected statements and terminators, then every expression tree they reach, and
 ///       reports one shape: the first authored occurrence, else the first spanless one.
-/// WHY: each rule mirrors a lowering site that is a `compiler_bug!`. A shape rejected here
-///      never reaches that site, and a shape accepted here must lower.
+/// WHY: each rule mirrors a lowering site that either rejects the shape as a `compiler_bug!` or
+///      emits a carrier that disagrees with the type ABI. A shape rejected here never reaches
+///      lowering, and a shape accepted here must lower.
 fn validate_wasm_unsupported_shapes(
     hir: &HirModule,
     type_environment: Option<&TypeEnvironment>,
@@ -1326,10 +1329,16 @@ fn search_terminator(
             message,
             message_evaluation,
         } => match (message_evaluation, &expressions.expression(*message).kind) {
+            // WHAT: the default message lowers to a static string without reading the carrier
+            //       (`terminator.rs`).
+            // WHY: `none` is never lowered here, so its payload-free construction must not be
+            //      rejected as an unsupported variant value.
+            (HirAssertionMessageEvaluation::Default, _) => {}
+
             // WHAT: a folded message lowers only its `Some` payload (`terminator.rs`).
             // WHY: the carrier itself is never lowered, so it must not be rejected as a payload.
             (
-                crate::compiler_frontend::hir::terminators::HirAssertionMessageEvaluation::Folded,
+                HirAssertionMessageEvaluation::Folded,
                 HirExpressionKind::VariantConstruct {
                     carrier: HirVariantCarrier::Option,
                     variant_index: 1,
@@ -1340,6 +1349,7 @@ fn search_terminator(
                     search_expression(hir, type_environment, field.value, search);
                 }
             }
+
             _ => search_expression(hir, type_environment, *message, search),
         },
     }
@@ -1361,12 +1371,16 @@ fn search_expression(
         let expression = expressions.expression(current);
         match &expression.kind {
             HirExpressionKind::VariantConstruct { fields, .. } => {
-                if !expressions.variant_fields(*fields).is_empty() {
-                    search.record(
-                        UnsupportedBackendFeatureReason::VariantPayloadValues,
-                        expression.span,
-                    );
-                }
+                // WHAT: payload-bearing constructions lack a payload representation and
+                //       payload-free constructions lack a carrier representation.
+                // WHY: `lower_type_to_abi` gives every choice/option type a `Handle` carrier,
+                //      while lowering emits an `I64` tag, so neither shape can lower.
+                let reason = if expressions.variant_fields(*fields).is_empty() {
+                    UnsupportedBackendFeatureReason::PayloadFreeVariantValues
+                } else {
+                    UnsupportedBackendFeatureReason::VariantPayloadValues
+                };
+                search.record(reason, expression.span);
             }
             HirExpressionKind::UnaryOp { .. } => {
                 search.record(

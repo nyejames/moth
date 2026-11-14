@@ -1,4 +1,4 @@
-A `.mtf` file has a small compile-time scope. It sees the fixed HTML prelude and can select declarations from same-module helper files with qualified references. It has no implicit access to module root declarations.
+A `.mtf` file has a small compile-time scope. It sees the fixed template prelude and can select declarations from same-module helper files with qualified references. It has no implicit access to module root declarations.
 
 ### Same-module helpers
 
@@ -37,20 +37,22 @@ The unqualified name fails with a root-local visibility diagnostic instead of re
 
 Move the shared value into an ordinary helper file when a template needs it. A helper declaration is shared by every root and selectable from the template.
 
-### The fixed HTML prelude
+### The fixed template prelude
 
-Exported compile-time constants from `@html` are visible flat inside every `.mtf` body. This includes helpers such as `p`, `codeblock` and other HTML constants.
+Exported compile-time constants from `@html` and `@styles` are visible flat inside every `.mtf` body. This includes HTML helpers such as `p` and `codeblock`, and style fragments such as `center`.
 
 [codeblock, $code "text":
     -- docs/intro.mtf
     [p: This paragraph uses the @html p helper.]
 
+    [h1, center: This heading uses the @styles center fragment.]
+
     [codeblock, $code "moth": value = 42]
 ]
 
-The prelude is fixed compiler policy. It always resolves to the official `packages/html/@mod.moth` source package with its Builder origin and MothSource backing intact. A builder that enables `.mtf` sources must register that official package set. `@html` is reserved for it. Source packages that contain `.mtf` files order after `@html`.
+The prelude is fixed compiler policy under every builder, including custom SDK builders. It reads the official `packages/html` and `packages/styles` Moth source packages, which are registered once as Core/MothSource roots. A builder cannot replace either package or change `.mtf` availability. Both packages precede every `.mtf` consumer, so a failed prelude package blocks the consumer.
 
-The prelude supplies compile-time constants only. It is not a general template-wide import mechanism and it never includes arbitrary builder-registered constants.
+The prelude supplies compile-time constants only. It is not a general template-wide import mechanism, and it never includes runtime values, types, private constants, project-local packages or arbitrary builder-registered constants. A public constant declared anywhere inside a provider package enters it under its exported name, including when another file in that package exports it with `as`. A re-export or alias of a declaration from another package does not.
 
 ### Collision semantics
 
@@ -110,7 +112,7 @@ To output literal template delimiters, use string insertion:
 
 ### Content helpers
 
-Content helpers such as `codeblock` come from the fixed `@html` prelude above, not from the active builder. A `.mtf` file can also name an ordinary helper with an explicit qualified reference. It does not gain that helper's declarations automatically.
+Content helpers such as `codeblock` come from the fixed `@html` prelude above, and style fragments come from `@styles`. Neither comes from the active builder. A `.mtf` file can also name an ordinary helper with an explicit qualified reference. It does not gain that helper's declarations automatically.
 
 ### Concepts related to template scope
 

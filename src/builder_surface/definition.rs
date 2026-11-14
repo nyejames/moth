@@ -8,8 +8,6 @@
 use crate::build_system::output::{
     DEV_OUTPUT_FIELD, RELEASE_OUTPUT_FIELD, ensure_single_output_root_owner,
 };
-use crate::builder_surface::SourceFileKind;
-use crate::builder_surface::SourcePackageRegistry;
 use crate::builder_surface::config_schema::{
     ConfigFieldShape, ConfigSchema, ConfigSchemaField, ConfigSchemas, UnknownFieldPolicy,
 };
@@ -20,6 +18,7 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::builder_surface::package_metadata::package_paths_overlap;
 use crate::builder_surface::source_file_kind_registry::SourceFileKindRegistry;
 use crate::builder_surface::source_package_registry::ProvidedSourceRoot;
+use crate::builder_surface::{PackageOrigin, SourcePackageRegistry};
 use crate::compiler_frontend::build_config::{
     BuildInputName, BuilderConfigGlobalError, BuilderConfigGlobalSet, PrimitiveBuildValue,
 };
@@ -30,8 +29,9 @@ use moth_lexical::identifier::is_identifier;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::words::classify_source_word;
 use std::collections::BTreeSet;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock};
 
 /// The complete builder surface a backend exposes to a project.
 ///
@@ -63,31 +63,71 @@ pub(crate) enum BuilderSurfaceValidationError {
     Infrastructure(InfrastructureFailure),
 }
 
-const BUILTIN_SOURCE_PACKAGES_DIR: &str = "packages";
+const BUILTIN_PACKAGES_DIR: &str = "packages";
 
-/// Source package that supplies the compiler-standard flat `.mtf` helper prelude.
+/// Directory holding every compiler-shipped package file for this process: the source packages
+/// (`@html`, `@styles`, `@web/site`) and the `@web/*` binding assets the HTML builder emits.
 ///
-/// WHAT: one fixed source-package prefix whose public compile-time constants are visible by bare
-///       name inside every `.mtf` body.
-/// WHY: the HTML helper prelude is part of the language surface, not a builder-configurable
-///      capability. The prefix is a compiler constant, and the standard HTML builder package set
-///      registers it from the official `packages/html` directory. An SDK builder cannot substitute
-///      another directory: surface validation requires the registered `html` root to equal
-///      [`BuilderSurface::builtin_source_package_root`], and SDK builders enabling `.mtf` without
-///      that package receive a typed capability error instead of a silently reduced scope.
-pub const TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX: &str = "html";
+/// WHAT: `packages/` beside the canonical executable when that directory exists, which is the
+///       release archive layout; otherwise the `packages/` directory of the source checkout that
+///       compiled this binary (cargo builds, tests and hosts built from source).
+/// WHY: released binaries run without the checkout, so the installed copy must win. The choice
+///      is made once for the whole set, never per package or file, so an installation can't mix
+///      its files with another version's from the checkout. Every registration, the
+///      official-root check and asset reads join onto this one path.
+pub(crate) static BUILTIN_PACKAGES_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
+    std::env::current_exe()
+        .and_then(fs::canonicalize)
+        .ok()
+        .and_then(|executable| Some(executable.parent()?.join(BUILTIN_PACKAGES_DIR)))
+        .filter(|installed| installed.is_dir())
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(BUILTIN_PACKAGES_DIR))
+});
+
+/// Explains a failed read below [`BUILTIN_PACKAGES_ROOT`] as a damaged package set.
+///
+/// WHAT: returns the damaged-installation report for a path inside the selected package root,
+///       or `None` for any other path.
+/// WHY: the root is selected once for the whole set, so a missing file below it means that set
+///      is incomplete. Readers report it instead of looking for the file anywhere else.
+pub(crate) fn damaged_package_set_report(path: &Path) -> Option<String> {
+    path.starts_with(&*BUILTIN_PACKAGES_ROOT).then(|| {
+        format!(
+            "The compiler-shipped package set at '{}' is incomplete. Reinstall Moth with the \
+             complete `packages/` directory from its release archive beside the executable.",
+            BUILTIN_PACKAGES_ROOT.display()
+        )
+    })
+}
+
+/// The mandatory Core source roots, which are also the fixed `.mtf` constant prelude providers.
+///
+/// WHAT: every builder surface registers one Core/MothSource root per prefix, and the compiler
+///       merges public compile-time constants from the same roots into the flat `.mtf` prelude.
+/// WHY: one owner keeps the roots a builder cannot replace identical to the packages whose
+///      exported constants a template may name without an import.
+pub const CORE_SOURCE_PACKAGE_PREFIXES: [&str; 2] = ["html", "styles"];
 
 impl BuilderSurface {
-    /// Builds a builder surface with mandatory compiler core packages and no source-backed packages.
+    /// Builds a builder surface with mandatory compiler core packages.
     ///
-    /// WHAT: the minimal default every builder starts from: prelude, core IO namespace, compiler-owned
-    /// collection helpers, and error helpers.
+    /// WHAT: the minimal default every builder starts from, including source-only HTML and styles.
     /// WHY: user-facing optional core packages such as `@core/math` and `@core/text`
     /// must be explicit builder opt-ins.
     pub fn with_mandatory_core() -> Self {
+        let mut source_packages = SourcePackageRegistry::new();
+        for prefix in CORE_SOURCE_PACKAGE_PREFIXES {
+            source_packages
+                .register_filesystem_root(
+                    prefix,
+                    Self::builtin_source_package_root(prefix),
+                    PackageOrigin::Core,
+                )
+                .expect("the official Core source packages have distinct reserved roots");
+        }
         Self {
             binding_packages: ExternalPackageRegistry::new(),
-            source_packages: SourcePackageRegistry::default(),
+            source_packages,
             config_schemas: ConfigSchemas::new(compiler_project_record_schema()),
             config_globals: BuilderConfigGlobalSet::new(),
             external_import_providers: ExternalImportProviderRegistry::empty(),
@@ -153,48 +193,20 @@ impl BuilderSurface {
                 }
             }
         }
-        // The template prelude belongs to the standard HTML builder package set. A builder may
-        // register `@html`, but only at the official package directory; an SDK builder cannot
-        // substitute an arbitrary directory of constants under that fixed name.
-        if let Some(html_root) = self
-            .source_packages
-            .get_root(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX)
-        {
-            let ProvidedSourceRoot::Filesystem(html_path) = &html_root.root;
-            let standard_root =
-                BuilderSurface::builtin_source_package_root(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX);
-            if html_path != &standard_root {
+        for prefix in CORE_SOURCE_PACKAGE_PREFIXES {
+            let Some(root) = self.source_packages.get_root(prefix) else {
                 return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
-                    "Source package '@{}' is reserved for the standard HTML builder package set; \
-                     the template prelude can only come from the official package at '{}', not \
-                     '{}'. A builder enabling '{}' must use the standard HTML builder package set.",
-                    TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
-                    standard_root.display(),
-                    html_path.display(),
-                    SourceFileKind::MothTemplate.extension()
+                    "Mandatory Core source package '@{prefix}' is missing."
+                )));
+            };
+            let ProvidedSourceRoot::Filesystem(path) = &root.root;
+            if root.metadata.origin != PackageOrigin::Core
+                || path != &Self::builtin_source_package_root(prefix)
+            {
+                return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
+                    "Core source package '@{prefix}' must use its official source root and Core origin."
                 )));
             }
-        }
-        // A builder that accepts `.mtf` sources must provide the compiler-standard template
-        // prelude. The prelude is not configurable, so a missing standard package is a builder
-        // capability error rather than a silently reduced template scope.
-        if self
-            .source_file_kinds
-            .kind_for_extension(SourceFileKind::MothTemplate.extension())
-            == Some(SourceFileKind::MothTemplate)
-            && self
-                .source_packages
-                .get_root(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX)
-                .is_none()
-        {
-            return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
-                "Source file kind '{}' requires the standard HTML builder package set, which \
-                 registers the official '@{}' source package for the template prelude. A custom \
-                 '@{}' source package cannot supply it.",
-                SourceFileKind::MothTemplate.extension(),
-                TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
-                TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX
-            )));
         }
         let binding_paths = self
             .binding_packages
@@ -243,10 +255,9 @@ impl BuilderSurface {
         self.config_globals.insert(name, value)
     }
 
+    /// Root of one compiler-shipped source package, such as `@html`, `@styles` or `@web/site`.
     pub fn builtin_source_package_root(prefix: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join(BUILTIN_SOURCE_PACKAGES_DIR)
-            .join(prefix)
+        BUILTIN_PACKAGES_ROOT.join(prefix)
     }
 }
 

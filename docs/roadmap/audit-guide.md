@@ -4,7 +4,7 @@ This document owns the rules for running a structured codebase audit: what to au
 
 An audit is an **explicitly invoked** activity. It is not the Slice review in [AGENTS.md](../../AGENTS.md), which every non-trivial change ends with. The Slice review needs no scope, produces no report and never writes here. Do not block one on the other.
 
-Focused checklists live under [audit-kinds](./audit-kinds/README.md). Reports live under [audits](./audits/README.md). Coverage lives in the [audit log](./audit-log.md). Unresolved work lives in [open findings](./open-audit-findings.md).
+Focused checklists live under [audit-kinds](./audit-kinds/README.md). Reports live under [audits](./audits/README.md), split into [open audits](./audits/open_audits/) and [closed audits](./audits/closed_audits/). Coverage lives in the [audit log](./audit-log.md), unresolved work in [open findings](./open-audit-findings.md) and resolution history in the [completed audits log](./completed_audits_log.md).
 
 ## What an audit is for
 
@@ -21,7 +21,7 @@ Follow [AGENTS.md](../../AGENTS.md) task routing first. Then read:
 
 1. The chosen checklist under [audit-kinds](./audit-kinds/).
 2. The [audit log](./audit-log.md) row for the area, if it has one.
-3. Open findings and any recent report for the same area.
+3. Open findings, any recent report for the same area and the completed audits log when checking earlier resolutions.
 4. The canonical authorities the area's subject matter routes to, plus the [progress matrix](../docs/progress/@entry.moth) when current support status matters.
 
 Do not blanket-read every design document. Follow the routing.
@@ -53,7 +53,7 @@ If you cannot cover the whole area, cover part of it and say which part. A parti
 
 ### 1. Reserve the report
 
-Pick the next unused `AUD-####`, create the report from the skeleton in [audits/README.md](./audits/README.md), and add it under `Audits in progress` in [open findings](./open-audit-findings.md). Do this before inspecting anything, so concurrent runs collide visibly rather than silently.
+Pick the next unused `AUD-####` across both report folders, create the report under `audits/open_audits/` from the skeleton in [audits/README.md](./audits/README.md), and add it under `Audits in progress` in [open findings](./open-audit-findings.md). Do this before inspecting anything, so concurrent runs collide visibly rather than silently.
 
 ### 2. Record the baseline
 
@@ -87,12 +87,13 @@ Use the report schema. Every finding needs: the problem, concrete evidence, the 
 - Mark coverage `complete` or `partial`, honestly.
 - Add unresolved findings to [open findings](./open-audit-findings.md) and remove the report from `Audits in progress`.
 - Update the audit log row for the area and kind you ran. Do not touch any other row.
+- If the report has no unresolved findings, move it to `audits/closed_audits/` and add a brief entry in the [completed audits log](./completed_audits_log.md). Update its incoming links.
 
 ## What an audit may change
 
 An audit run is read-only with respect to production code, tests, benchmarks, fixtures, canonical documents and implementation status.
 
-It may write **only**: its own report, the open-findings index, and the audit log.
+It may write **only**: its own report, the open-findings index, the audit coverage log and, when closing an audit, the completed audits log and report location.
 
 ## Authority
 
@@ -133,13 +134,22 @@ Do not accept a fix that keeps the replaced path alive behind a wrapper, suppres
 candidate -> accepted -> fixed -> closed
 ```
 
-A candidate may instead be rejected, superseded or blocked on a design decision. Reports keep the full history; the open-findings index keeps only unresolved work.
+A candidate may instead be rejected, superseded or blocked on a design decision. Reports keep the full history. The open-findings index keeps only unresolved work. Record the evidence and reason for a rejected or superseded finding in its report before removing it from the index.
 
 **Triage** is a separate decision after the report is complete. It confirms the evidence, the root owner and the fix boundary, then accepts, rejects or blocks. Acceptance authorises the bounded finding, not a particular patch.
 
 **Implementation** is a separate task. Fix the root owner, delete the path you replace, and return the finding to triage if a correct fix needs a wider boundary than was accepted.
 
 **Verification** is done by someone other than the implementer. Read the original evidence, inspect the changed boundary, confirm no parallel path survives, and confirm linked test or documentation changes were independently authorised. A green suite is necessary and not sufficient.
+
+### Closing and archiving
+
+- Keep a report in `audits/open_audits/` while any finding remains a candidate, accepted, in progress, blocked or fixed awaiting verification. A completed *run* may still have open findings.
+- Once every finding is closed, rejected or superseded, move the report to `audits/closed_audits/`. A clean run with no findings also closes immediately. Preserve its ID, findings, evidence and triage history.
+- Remove all of its entries from the open-findings index. Add one report entry and a concise resolution or no-findings record to `completed_audits_log.md`. Link to the moved report and retain useful validation evidence.
+- Keep `audit-log.md` as the coverage ledger. Archiving does not change coverage or freshness. Update navigational links to the new location, without rewriting historical evidence paths inside reports.
+
+Older reports archived before this folder rule may retain `fixed` or other historical status labels even where the resolution log records their closeout. Do not silently reopen them or rewrite their original evidence. Apply the verification gate to new closeouts.
 
 Use `just validate` for code-bearing fixes and the documentation release-build gate for documentation-only work. See the [validation guide](../developer-docs/style-guide/validation.mtf). Record exactly what ran, passed, failed and was not run.
 

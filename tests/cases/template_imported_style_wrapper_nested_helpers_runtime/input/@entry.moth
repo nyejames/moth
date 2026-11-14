@@ -1,4 +1,4 @@
-@styles/docs_style table
+@site_styles/docs_style table
 
 label ~= "A"
 

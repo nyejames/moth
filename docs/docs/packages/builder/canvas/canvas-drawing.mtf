@@ -1181,7 +1181,6 @@ These are host-operation categories, not HTTP status semantics.
 - Do not construct opaque types with struct syntax.
 - Do not inspect opaque type fields.
 - Opaque types have no source-visible methods. Use the free functions.
-- The `@html` package provides a `Canvas` wrapper struct with receiver methods for a more ergonomic drawing API.
 
 ### Backend behaviour
 
@@ -1208,4 +1207,4 @@ The Wasm backend rejects reachable `@web/canvas` calls before lowering. Canvas s
 
 - For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
 - For dependency-path rules see @../../#dependency-paths (Dependency paths).
-- For the `@html` source-backed wrapper see @../html (@html).
+- For the `@html` canvas markup helper see @../../core/html/ (@html).

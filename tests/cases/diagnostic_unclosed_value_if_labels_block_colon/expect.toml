@@ -1,0 +1,22 @@
+entry = "."
+
+# A value-producing `if` in a declaration initializer closes with `;`. Reaching end of file reports
+# the missing closer and labels the block's opening colon.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0017"]
+message_contains = ["expected ';'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0017"
+path = "input/@entry.moth"
+line = 3
+column = 11
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 2
+column = 17

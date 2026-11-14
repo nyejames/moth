@@ -1,6 +1,6 @@
 @browser-behaviour-basic content as browser_basic
 @browser-behaviour content as browser_advanced
-@styles navbar, section, language_theme_head, doc_level, doc_pager, sidebar, init_docs_sidebar
+@docs_styles navbar, section, language_theme_head, doc_level, doc_pager, sidebar, init_docs_sidebar
 
 [$in title:Browser behaviour]
 [$in description:Separate static HTML from runtime DOM operations and future typed event delivery.]

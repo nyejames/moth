@@ -1,5 +1,5 @@
 @checked-proof-budget-research content as reference_content
-@styles navbar, section, theme_head, sidebar, init_docs_sidebar
+@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Checked proof-budget research"]]
 [$in description:["Future research into opt-in deep static analysis for difficult borrow proofs."]]

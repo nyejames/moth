@@ -1,0 +1,6 @@
+flag #= true
+
+if flag:
+    $doc (see docs
+    ~[:a]
+;

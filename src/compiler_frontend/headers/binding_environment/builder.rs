@@ -7,7 +7,6 @@
 //!      makes the module structure easier to navigate.
 
 use crate::builder_surface::SourceFileKind;
-use crate::builder_surface::definition::TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -142,6 +141,19 @@ where
         }
     }
     Ok(())
+}
+
+/// One public compile-time constant selected for the fixed `.mtf` prelude.
+///
+/// WHAT: retains the flat export name, the official package that supplied it, and the
+///       consumer-local identity used to materialise the constant.
+/// WHY: duplicate detection needs the supplying package while binding needs the name and local
+///      path; one row keeps those facts together without parallel collections.
+struct TemplatePreludeConstant {
+    name: StringId,
+    package_prefix: &'static str,
+    path: PathId,
+    span: Option<SourceSpan>,
 }
 
 pub(crate) struct BindingEnvironmentBuilder<'a> {
@@ -973,13 +985,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
     /// Register the compiler-standard flat constant prelude for one Moth template file.
     ///
-    /// WHAT: makes the official `@html` package's public compile-time constants visible by bare
+    /// WHAT: makes the official Core packages' public compile-time constants visible by bare
     ///       name in every `.mtf` body. The constants travel through the ordinary visible-name
     ///       registry, so a genuine collision with another binding is still diagnosed.
     /// WHY: template helper ergonomics are a fixed language contract, not a builder capability
-    ///      list. Only compile-time constants enter the prelude; runtime values, functions and
-    ///      types stay unavailable. A binding set without a prelude provider (the standalone
-    ///      single-source template service, which has no builder surface) simply has no prelude.
+    ///      list. Only compile-time constants enter the prelude; runtime values, functions, types
+    ///      and private constants stay unavailable. A binding set without prelude providers (the
+    ///      standalone single-source template service, which has no builder surface) simply has
+    ///      no prelude.
     fn register_moth_template_constant_prelude(
         &mut self,
         file_visibility: &mut FileVisibility,
@@ -992,28 +1005,40 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         self.remove_moth_template_generated_self_constants(file_visibility, registry, source_file);
 
-        let Some(provider_id) = self
+        // Copy the fixed provider rows before collecting: collection needs the builder's mutable
+        // string table, path fork and environment. The set is two compiler-owned packages.
+        let prelude_providers = self
             .source_provider_dependencies
-            .template_prelude_provider()
-        else {
+            .template_prelude_providers()
+            .to_vec();
+        if prelude_providers.is_empty() {
             return Ok(());
-        };
+        }
 
         let mut prelude_constants = Vec::new();
-        self.collect_html_template_prelude_constants(provider_id, &mut prelude_constants)?;
-
-        for (name, path, span) in prelude_constants {
-            registry.register(
-                name,
-                VisibleNameBinding::SourceDependency {
-                    canonical_path: path,
-                },
-                span,
+        for provider in prelude_providers {
+            self.collect_template_prelude_constants(
+                provider.package_prefix,
+                provider.provider,
+                &mut prelude_constants,
             )?;
-            file_visibility.visible_declaration_paths_mut().insert(path);
+        }
+        self.reject_duplicate_template_prelude_constants(&prelude_constants)?;
+
+        for constant in prelude_constants {
+            registry.register(
+                constant.name,
+                VisibleNameBinding::SourceDependency {
+                    canonical_path: constant.path,
+                },
+                constant.span,
+            )?;
+            file_visibility
+                .visible_declaration_paths_mut()
+                .insert(constant.path);
             file_visibility
                 .visible_source_names
-                .insert(name, SourceDeclarationTarget::Local(path));
+                .insert(constant.name, SourceDeclarationTarget::Local(constant.path));
         }
 
         Ok(())
@@ -1064,12 +1089,18 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
     }
 
-    fn collect_html_template_prelude_constants(
+    /// Collect one official package's public compile-time constants under their flat names.
+    ///
+    /// WHAT: reads either the header-built public-export lane for a package root prepared in this
+    ///       module or the completed provider interface's constant declarations.
+    /// WHY: the official packages share one reader, so neither can grow a private collection path
+    ///      or a different declaration-kind filter.
+    fn collect_template_prelude_constants(
         &mut self,
+        package_prefix: &'static str,
         provider_id: ProviderInterfaceId,
-        prelude_constants: &mut Vec<(StringId, PathId, Option<SourceSpan>)>,
+        prelude_constants: &mut Vec<TemplatePreludeConstant>,
     ) -> BuilderResult<()> {
-        let prefix = TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
         self.register_provider_semantics_once(provider_id)?;
         let view = self
             .source_provider_dependencies
@@ -1082,10 +1113,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         if let Some(entries) = self
             .module_symbols
             .source_package_public_exports
-            .get(prefix)
+            .get(package_prefix)
             .filter(|entries| !entries.is_empty())
         {
-            self.collect_constant_exports(entries, prelude_constants);
+            self.collect_constant_exports(package_prefix, entries, prelude_constants);
             return Ok(());
         }
 
@@ -1101,6 +1132,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 continue;
             };
 
+            // A re-export naming another package's declaration is an imported alias, not a
+            // constant this provider declares; only the provider package's own public constants
+            // enter the flat prelude.
+            if declaration.origin.module_origin().package() != interface.module_origin.package() {
+                continue;
+            }
             if !matches!(
                 declaration.semantics,
                 PublicDeclarationSemantics::Constant(_)
@@ -1112,8 +1149,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
             // The synthetic path serves as the consumer-local identity for this cross-module
             // constant. Include the provider prefix so the prelude's identity stays distinct
-            // from local declarations in collision diagnostics.
-            let package_name = self.string_table.intern(prefix);
+            // from local declarations and from the other provider's same-spelled export in
+            // collision diagnostics.
+            let package_name = self.string_table.intern(package_prefix);
             let synthetic_path = self
                 .path_fork
                 .try_intern_components(&[package_name, name_id])
@@ -1124,7 +1162,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .or_insert_with(|| origin);
             // Provider declaration provenance does not cross the interface boundary. This
             // compiler-generated prelude binding therefore carries no authored span.
-            prelude_constants.push((name_id, synthetic_path, None));
+            prelude_constants.push(TemplatePreludeConstant {
+                name: name_id,
+                package_prefix,
+                path: synthetic_path,
+                span: None,
+            });
         }
 
         Ok(())
@@ -1132,8 +1175,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
     fn collect_constant_exports(
         &self,
+        package_prefix: &'static str,
         entries: &FxHashSet<PublicExportEntry>,
-        prelude_constants: &mut Vec<(StringId, PathId, Option<SourceSpan>)>,
+        prelude_constants: &mut Vec<TemplatePreludeConstant>,
     ) {
         for entry in entries {
             let Some(path) = entry.target.source_path() else {
@@ -1144,13 +1188,115 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 continue;
             }
 
+            // The header-built lane can record a public re-export that resolved to a source
+            // declaration prepared from another package or module. The flat prelude only merges
+            // what this provider declares itself, matching the completed-interface lane's
+            // package-ownership check.
+            let Some(declaring_source) = self
+                .module_symbols
+                .canonical_source_by_symbol_path
+                .get(path)
+            else {
+                continue;
+            };
+            if !self.declaring_source_belongs_to_package(*declaring_source, package_prefix) {
+                continue;
+            }
+
             let span = self
                 .module_symbols
                 .declaration_spans_by_symbol_path
                 .get(path)
                 .copied();
-            prelude_constants.push((entry.export_name, *path, span));
+            prelude_constants.push(TemplatePreludeConstant {
+                name: entry.export_name,
+                package_prefix,
+                path: *path,
+                span,
+            });
         }
+    }
+
+    /// Whether one prepared source file belongs to the given official package.
+    ///
+    /// WHAT: the package owns its public root file and every file below that root's directory.
+    /// WHY: a public re-export may retain the declaring source path of a declaration prepared
+    ///      from another package; ownership by declaring file keeps that imported alias out of
+    ///      this provider's flat-prelude contribution.
+    fn declaring_source_belongs_to_package(
+        &self,
+        declaring_source: PathId,
+        package_prefix: &str,
+    ) -> bool {
+        let Some(root_file) = self
+            .module_symbols
+            .source_package_root_files
+            .get(package_prefix)
+        else {
+            return false;
+        };
+        if declaring_source == *root_file {
+            return true;
+        }
+        self.path_fork
+            .parent(*root_file)
+            .is_some_and(|package_dir| self.path_fork.starts_with(declaring_source, package_dir))
+    }
+
+    /// Reject one public prelude name exported by more than one official Core package.
+    ///
+    /// WHAT: compares every collected constant name across the prelude providers before the
+    ///       first name is bound, and reports every collision in one deterministic message.
+    /// WHY: both packages are compiler-shipped Core roots, so a duplicate is a build-input defect
+    ///      no `.mtf` author can repair and no consumer needs to reference. It is not proven
+    ///      impossible, because the shipped package sources can still change, so it takes the
+    ///      internal infrastructure lane rather than `compiler_bug!`. Rejecting it here keeps it
+    ///      ahead of consumer body evaluation, where a visible-name collision would carry no
+    ///      authored span.
+    fn reject_duplicate_template_prelude_constants(
+        &self,
+        prelude_constants: &[TemplatePreludeConstant],
+    ) -> BuilderResult<()> {
+        let mut owner_by_name: FxHashMap<StringId, &'static str> = FxHashMap::default();
+        let mut collisions: Vec<(&'static str, &'static str, StringId)> = Vec::new();
+        for constant in prelude_constants {
+            match owner_by_name.get(&constant.name).copied() {
+                Some(owner) if owner == constant.package_prefix => {}
+                Some(owner) => {
+                    let (first, second) = if owner < constant.package_prefix {
+                        (owner, constant.package_prefix)
+                    } else {
+                        (constant.package_prefix, owner)
+                    };
+                    collisions.push((first, second, constant.name));
+                }
+                None => {
+                    owner_by_name.insert(constant.name, constant.package_prefix);
+                }
+            }
+        }
+        if collisions.is_empty() {
+            return Ok(());
+        }
+        collisions.sort_by(|left, right| {
+            self.string_table
+                .resolve(left.2)
+                .cmp(self.string_table.resolve(right.2))
+                .then_with(|| left.0.cmp(right.0))
+                .then_with(|| left.1.cmp(right.1))
+        });
+
+        let mut message = String::from(
+            "the fixed Moth template constant prelude rejects duplicate exported names",
+        );
+        for (first, second, name) in collisions {
+            message.push_str(&format!(
+                "; '@{first}' and '@{second}' both export the public constant '{}'",
+                self.string_table.resolve(name)
+            ));
+        }
+
+        Err(InfrastructureFailure::internal(CompilerStage::HeaderParsing, message).into())
     }
 
     fn symbol_origin_matches_source(&self, symbol_path: &PathId, source_file: &PathId) -> bool {

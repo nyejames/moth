@@ -921,8 +921,8 @@ Constant loops have a configurable iteration limit.
 ### Moth Markdown
 
 `$md` supports headings, paragraphs, lists, emphasis, links and same-line paired backtick code, while escaping raw HTML.
-Use `$code` for code blocks and `@html` helpers for tables. For HTML projects, import `@html table, th, td` in `.moth` files.
-The same helpers are available automatically in `.mtf` files:
+Use `$code` for code blocks and `@html` helpers for tables. In `.moth` files, import `@html table, th, td`.
+The `@html` and `@styles` constants are available automatically in `.mtf` files:
 
 [codeblock, $code "moth":
     [table, [th: [: Name] [: Score]]:
@@ -1116,12 +1116,12 @@ From `@entry.moth`, imports can bind:
     @pages page_heading          -- child module's exported name
     @shared badge                -- support package's exported name
     @core/math PI                -- Core package
-    @html table                  -- HTML builder package
+    @html table                  -- Core HTML package
     @charts plot                 -- registered external dependency
     @vendor/format.js emphasize  -- builder-provided JS binding
 ]
 
-The nested `pages/article/@mod.moth` can import the same support package and Builder packages:
+The nested `pages/article/@mod.moth` can import the same support package and Core packages:
 
 [codeblock, $code "moth":
     @shared badge
@@ -1230,7 +1230,7 @@ For an HTML page:
 [codeblock, $code "moth":
     [$in title:Moth]
     [$in description:A language for creating reliable software]
-    [$in stylesheets:[@styles/site.css]]
+    [$in stylesheets:[@assets/site.css]]
     [$in head:<meta name="theme-color" content="#ffffff">]
 
     [$md:

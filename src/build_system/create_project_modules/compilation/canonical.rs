@@ -7,7 +7,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::timing_scope_attributed;
 
 use crate::builder_surface::BuilderSurface;
-use crate::builder_surface::definition::TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
+use crate::builder_surface::definition::CORE_SOURCE_PACKAGE_PREFIXES;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::{
@@ -67,8 +67,8 @@ use super::super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePacka
 
 use super::{
     build_module_package_dependency_index, build_provider_binding_index,
-    build_source_package_dependency_index, publish_compiled_module,
-    seed_completed_package_materialisations,
+    build_source_package_dependency_index, classify_blocked_package_provider,
+    publish_compiled_module, seed_completed_package_materialisations,
 };
 
 struct DirectoryModuleTaskResult {
@@ -502,28 +502,33 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         }
 
         // The flat `.mtf` helper prelude is compiler policy, not a builder capability list. The
-        // constants come from the official compiled `@html` source package whenever a module
-        // contains a Moth template, so they keep normal provider identity and diagnostics.
+        // constants come from every official Core source package whenever a module contains a
+        // Moth template, so they keep normal provider identity and diagnostics. Canonical order
+        // follows the fixed prefix list, so the prelude input order never depends on discovery.
         if prepared.contains_moth_template {
-            let package_id = self
-                .boundary
-                .completed_packages
-                .by_prefix(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX)
-                .ok_or_else(|| {
-                    InfrastructureFailure::internal(
-                        CompilerStage::ProjectBuildAssembly,
-                        format!(
-                            "Moth template module cannot bind the template prelude because no \
-                             '@{TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX}' source package is registered"
-                        ),
-                    )
-                })?;
-            let package = self.boundary.completed_packages.package(package_id)?;
+            for prefix in CORE_SOURCE_PACKAGE_PREFIXES {
+                let package_id = self
+                    .boundary
+                    .completed_packages
+                    .by_prefix(prefix)
+                    .ok_or_else(|| {
+                        InfrastructureFailure::internal(
+                            CompilerStage::ProjectBuildAssembly,
+                            format!(
+                                "Moth template module cannot bind the template prelude because no \
+                                 '@{prefix}' source package is registered"
+                            ),
+                        )
+                    })?;
+                let package = self.boundary.completed_packages.package(package_id)?;
 
-            dependencies.push(SourceProviderDependency {
-                kind: ProviderDependencyKind::TemplatePrelude,
-                interface: package.root_interface()?,
-            });
+                dependencies.push(SourceProviderDependency {
+                    kind: ProviderDependencyKind::TemplatePrelude {
+                        package_prefix: prefix,
+                    },
+                    interface: package.root_interface()?,
+                });
+            }
         }
 
         SourceProviderDependencySet::new(dependencies)
@@ -540,12 +545,17 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
     /// completed first. Once the budget refuses new work, those same states mean the command
     /// stopped before visiting that work, so they are reported as `Unvisited` and the caller
     /// records the cutoff instead of claiming a blocker.
+    ///
+    /// `includes_moth_template` adds the same fixed prelude packages the canonical lane binds for
+    /// every `.mtf` consumer; both implicit providers are then classified like authored package
+    /// dependencies instead of failing facade lookup.
     fn classify_check_only_providers(
         &self,
         budget_open: bool,
         consumer_module_id: ModuleId,
         provider_bindings: &[module_inventory::CheckOnlyProviderBinding],
         source_package_dependencies: &[module_inventory::CheckOnlySourcePackageDependency],
+        includes_moth_template: bool,
     ) -> Result<CheckOnlyProviderClassification, InfrastructureFailure> {
         let mut saw_failed_provider = false;
         for binding in provider_bindings {
@@ -566,18 +576,27 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             }
         }
 
-        for dependency in source_package_dependencies {
+        let prelude_prefixes: &[&str] = if includes_moth_template {
+            &CORE_SOURCE_PACKAGE_PREFIXES
+        } else {
+            &[]
+        };
+        for dependency_prefix in source_package_dependencies
+            .iter()
+            .map(|dependency| dependency.dependency_prefix.as_str())
+            .chain(prelude_prefixes.iter().copied())
+        {
             let Some(package_id) = self
                 .boundary
                 .completed_packages
-                .by_prefix(dependency.dependency_prefix.as_str())
+                .by_prefix(dependency_prefix)
             else {
                 if budget_open {
                     crate::compiler_bug!(
                         CompilerStage::ProjectBuildAssembly,
                         "Check-only ModuleId {} depends on unindexed source package @{}",
                         consumer_module_id.index(),
-                        dependency.dependency_prefix
+                        dependency_prefix
                     );
                 }
                 return Ok(CheckOnlyProviderClassification::Unvisited);
@@ -982,6 +1001,7 @@ pub(super) fn compile_check_only_batches(
             owner_module_id,
             &check_only_job.provider_bindings,
             &check_only_job.source_package_dependencies,
+            check_only_job.prepared.contains_moth_template,
         ) {
             Ok(CheckOnlyProviderClassification::Blocked) => continue,
             Ok(CheckOnlyProviderClassification::Ready) => {}
@@ -1235,14 +1255,16 @@ pub(super) fn compile_module_waves_in_premerge_lane(
             warning_sink.as_deref_mut(),
         ));
     } else {
-        // Index each consumer module's direct package dependencies once per boundary so readiness
-        // walks only the packages that module actually depends on and never filters the full
-        // dependency vector for every job. A stopped command never admits a job that would resolve
-        // one of these facades, so the index is built only while the lane is open.
+        // Index each consumer module's package providers once per boundary so readiness walks
+        // only the providers that module actually observes and never filters the full dependency
+        // vector or joins the implicit prelude for every job. A stopped command never admits a job
+        // that would resolve one of these facades, so the index is built only while the lane is
+        // open.
         let module_package_dependencies = build_module_package_dependency_index(
             source_package_dependencies,
+            &module_waves,
             context.completed_packages(),
-        );
+        )?;
         'waves: for wave in module_waves {
             let mut ready = Vec::new();
             for job in wave {
@@ -1268,32 +1290,17 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                     }
                 }
 
-                if blocked_provider.is_none()
-                    && let Some(package_ids) = module_package_dependencies.get(&job.module_id)
-                {
-                    for package_id in package_ids {
-                        let package = context.completed_packages().package(*package_id)?;
-
-                        match package.root_slot()? {
-                            ProviderSlot::Successful(_) => {}
-                            ProviderSlot::Diagnosed | ProviderSlot::Blocked => {
-                                blocked_provider = Some(BlockedProvider::SourcePackage(
-                                    package.package_identity.clone(),
-                                ));
-                                break;
-                            }
-                            ProviderSlot::Unavailable => {
-                                return Err(
-                                InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
-                                    "ModuleId {} became ready before source package @{} completed its facade",
-                                    job.module_id.index(),
-                                    package.package_prefix()
-                                ))
-                                .into(),
-                            );
-                            }
-                        }
-                    }
+                if blocked_provider.is_none() {
+                    blocked_provider = classify_blocked_package_provider(
+                        context.completed_packages(),
+                        job.module_id,
+                        module_package_dependencies
+                            .get(&job.module_id)
+                            .map(Vec::as_slice)
+                            .unwrap_or_default()
+                            .iter()
+                            .copied(),
+                    )?;
                 }
                 if let Some(required_provider) = blocked_provider {
                     provider_store.mark_blocked(job.module_id)?;

@@ -1,4 +1,4 @@
-@styles navbar,
+@docs_styles navbar,
     section,
     styled_table,
     header,

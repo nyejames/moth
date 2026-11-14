@@ -834,8 +834,7 @@ fn qualified_occurrence_in_moth_template_queues_same_module_helper_source() {
         &style_directives,
     )
     .expect("config should parse");
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let (modules, _graph, _source_tree_index, _source_files, _string_table) =
@@ -920,8 +919,7 @@ fn qualified_occurrence_in_moth_source_queues_moth_template_content_source() {
         &style_directives,
     )
     .expect("config should parse");
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let (modules, _graph, _source_tree_index, _source_files, _string_table) =
@@ -1257,8 +1255,7 @@ fn facade_content_constant_qualified_reference_orders_provider_first() {
         &style_directives,
     )
     .expect("config should parse");
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
     let (_modules, graph, source_tree_index, _source_files, _string_table) =

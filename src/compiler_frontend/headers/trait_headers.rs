@@ -11,6 +11,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
     CapacityResource, InvalidDeclarationReason, InvalidSignatureMemberReason,
 };
@@ -87,6 +88,7 @@ pub(super) fn parse_trait_declaration(
     cursor: &mut TokenCursor<'_>,
     declaration_span: SourceSpan,
     declaration_name: StringId,
+    body_opening_span: SourceSpan,
     source_order: usize,
     context: &mut HeaderBuildContext<'_>,
 ) -> TraitHeaderResult<TraitDeclarationSyntax> {
@@ -112,10 +114,16 @@ pub(super) fn parse_trait_declaration(
             }
 
             TokenTag::EOF => {
+                // The trait body's `must:` colon is the only authored site that can explain which
+                // block is still open when the file ends.
                 return Err(HeaderParseFailure::Diagnostic(
                     token_lexical::unexpected_end_of_file(
                         Some(context.string_table.intern(";")),
                         cursor_span(cursor),
+                    )
+                    .with_label(
+                        Some(body_opening_span),
+                        Some(LabelDraftMessage::UnclosedBlockStartsHere),
                     ),
                 ));
             }

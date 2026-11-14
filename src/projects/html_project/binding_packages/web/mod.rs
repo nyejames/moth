@@ -1,10 +1,14 @@
 //! Built-in `@web/*` binding package registration.
 //!
-//! WHAT: each `@web/*` package is one annotated JavaScript asset in its own directory. This module
-//!       parses every asset, registers it as a Builder-origin binding package and returns runtime
-//!       asset metadata so reachable calls emit the asset and generated glue.
+//! WHAT: each `@web/*` package is one annotated JavaScript asset in its own directory under the
+//!       compiler-shipped `packages/web/`. This module parses every asset, registers it as a
+//!       Builder-origin binding package and returns runtime asset metadata so reachable calls emit
+//!       the asset and generated glue.
 //! WHY: builder-owned packages share the parser, registry and emission path used by project-local
-//!      `.js` imports. Only their package paths and asset locations are fixed here.
+//!      `.js` imports. Only their package paths and asset locations are fixed here. The binary
+//!      embeds each asset to register its bindings without filesystem access, while emitted output
+//!      copies the shipped file through the shared resource writer, so the asset must live where an
+//!      installed compiler finds its other shipped packages.
 //!
 //! Each package directory also holds a `README.md`. It owns the package's living design, development
 //! plan, binding prerequisites and future ideas. Accepted public API and semantics live under
@@ -12,6 +16,7 @@
 //! matrix.
 
 use crate::builder_surface::PackageOrigin;
+use crate::builder_surface::definition::BUILTIN_PACKAGES_ROOT;
 use crate::builder_surface::external_import_providers::provider::BuilderRuntimePackageMetadata;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
@@ -28,26 +33,36 @@ use std::path::{Path, PathBuf};
 struct WebBindingPackage {
     package_path: &'static str,
     source: &'static str,
-    /// Asset path relative to this directory. The file name doubles as the logical source path.
+    /// Asset path relative to the compiler-shipped packages directory. The file name doubles as
+    /// the logical source path.
     asset_path: &'static str,
 }
 
 const WEB_BINDING_PACKAGES: [WebBindingPackage; 3] = [
     WebBindingPackage {
         package_path: "@web/canvas",
-        source: include_str!("canvas/canvas.js"),
-        asset_path: "canvas/canvas.js",
+        source: include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/web/canvas/canvas.js"
+        )),
+        asset_path: "web/canvas/canvas.js",
     },
     // WebGL2. Registered with no public symbols. See its README for the binding prerequisites.
     WebBindingPackage {
         package_path: "@web/graphics",
-        source: include_str!("graphics/graphics.js"),
-        asset_path: "graphics/graphics.js",
+        source: include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/web/graphics/graphics.js"
+        )),
+        asset_path: "web/graphics/graphics.js",
     },
     WebBindingPackage {
         package_path: "@web/page",
-        source: include_str!("page/page.js"),
-        asset_path: "page/page.js",
+        source: include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/packages/web/page/page.js"
+        )),
+        asset_path: "web/page/page.js",
     },
 ];
 
@@ -99,9 +114,7 @@ fn register_web_binding_package(
 }
 
 fn canonical_source_path(package: &WebBindingPackage) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("src/projects/html_project/binding_packages/web")
-        .join(package.asset_path)
+    BUILTIN_PACKAGES_ROOT.join(package.asset_path)
 }
 
 fn logical_source_path(package: &WebBindingPackage) -> PortableResourcePath {

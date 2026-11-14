@@ -83,11 +83,12 @@ inherited by its consumer.
 
 ### Select source adapters and external providers
 
-`markdown` enables the compiler-known plain Markdown source adapter. An `.mtf`
-file contributes its const-required content through normal module compilation
-when the selected builder provides the standard HTML source package set. A
-`.md` file contributes rendered content. Registering a filename extension
-doesn't add a new Moth declaration grammar.
+`markdown` enables the compiler-known plain Markdown source adapter. `.mtf` is
+a fixed compiler-supported source kind, so every builder compiles `.mtf` files
+through normal module compilation without registering it. A `.md` file
+contributes rendered content. Builders register only optional source kinds,
+and registering a filename extension doesn't add a new Moth declaration
+grammar.
 
 Use `external_import_provider` for a foreign file format that supplies a typed
 binding surface. The provider declares its stable kind and supported

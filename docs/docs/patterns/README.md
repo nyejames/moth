@@ -174,9 +174,9 @@ the relevant unsuffixed references and the current roadmap/progress matrix:
   `docs/compiler-design-overview.md` for TIR, constant semantics and slots.
 - `docs/docs/directives/directives.mtf` for directive attachment/ownership.
 - `docs/docs/wiring/wiring.mtf` for Wire, Route and Channel constraints.
-- `docs/docs/packages/builder/` and
-  `docs/docs/packages/external-binding-contracts.mtf` for @html, @web/page,
-  DOM prerequisites and JS ABI limits.
+- `docs/docs/packages/core/`, `docs/docs/packages/builder/` and
+  `docs/docs/packages/external-binding-contracts.mtf` for @html, @styles,
+  @web/page, DOM prerequisites and JS ABI limits.
 - `docs/developer-docs/memory-management/overview.mtf` for safe sharing,
   lifetime ownership and builder/host boundaries.
 - `docs/roadmap/` for accepted work that has not reached implementation.

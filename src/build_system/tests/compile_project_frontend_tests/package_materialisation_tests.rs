@@ -303,11 +303,15 @@ fn registered_support_only_package_compiles_its_external_surface() {
         &[("@package.moth", "$export\nsupport_label #= \"support\"\n")],
         "@supportpkg support_label\n~[:[support_label]]\n",
     ));
-    assert_eq!(frontend.source_packages.len(), 1);
+    assert_eq!(
+        frontend.source_packages.len(),
+        3,
+        "directory compilation publishes the imported package plus official @html and @styles"
+    );
     let package = frontend
         .source_packages
         .iter()
-        .next()
+        .find(|package| package.package_identity.name() == "supportpkg")
         .expect("the imported package boundary should be retained");
     let artifact = package
         .boundary
@@ -349,11 +353,11 @@ fn registered_triple_root_package_keeps_its_entry_dormant() {
         ],
         "@triplepkg support_label\n~[:[support_label]]\n",
     ));
-    assert_eq!(frontend.source_packages.len(), 1);
+    assert_eq!(frontend.source_packages.len(), 3);
     let package = frontend
         .source_packages
         .iter()
-        .next()
+        .find(|package| package.package_identity.name() == "triplepkg")
         .expect("the imported package boundary should be retained");
     let artifact = package
         .boundary
@@ -750,7 +754,9 @@ independent_result I32 = independent(42)
                 .map(|counter| counter.value)
                 .unwrap_or(-1.0)
         };
-        assert_eq!(counter_value("convergence_initial_base_borrow_passes"), 1.0);
+        // One initial pass per compiled module: the project module plus the single-module
+        // mandatory Core packages `@html` and `@styles`, which every builder surface compiles.
+        assert_eq!(counter_value("convergence_initial_base_borrow_passes"), 3.0);
         assert_eq!(counter_value("convergence_base_borrow_passes"), 2.0);
         // Four materialisation passes, then rechecks only for `mutating_helper` and `caller`,
         // whose direct callee summaries widen. `seed_helper` and `independent` keep their

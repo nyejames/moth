@@ -206,24 +206,25 @@ fn prepared_invalid_config_reason(
 }
 
 #[test]
-fn frontend_surface_registers_content_source_kinds() {
+fn frontend_surface_supports_template_and_selected_markdown_kinds() {
     let builder = HtmlProjectBuilder::new();
     let frontend_surface = builder.frontend_surface();
 
     assert_eq!(
         frontend_surface.source_file_kinds.kind_for_extension("mtf"),
-        Some(crate::builder_surface::SourceFileKind::MothTemplate)
+        Some(crate::builder_surface::SourceFileKind::MothTemplate),
+        "`.mtf` is compiler-supported under every builder"
     );
     assert_eq!(
         frontend_surface.source_file_kinds.kind_for_extension("md"),
-        Some(crate::builder_surface::SourceFileKind::PlainMarkdown)
+        Some(crate::builder_surface::SourceFileKind::PlainMarkdown),
+        "the HTML builder selects plain Markdown"
     );
-
     assert_eq!(
         frontend_surface
             .source_file_kinds
             .kind_for_extension("moth"),
-        None
+        Some(crate::builder_surface::SourceFileKind::Moth)
     );
 }
 
@@ -252,16 +253,26 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
         );
     }
 
-    let html_package = frontend_surface
-        .source_packages
-        .get_root("html")
-        .expect("HTML frontend surface should register @html");
-    assert_eq!(
-        html_package.metadata,
-        crate::builder_surface::PackageMetadata::source(
-            crate::builder_surface::PackageOrigin::Builder,
-        )
-    );
+    for prefix in ["html", "styles"] {
+        let core_source = frontend_surface
+            .source_packages
+            .get_root(prefix)
+            .expect("every builder receives official Core source packages");
+        assert_eq!(
+            core_source.metadata,
+            crate::builder_surface::PackageMetadata::source(
+                crate::builder_surface::PackageOrigin::Core,
+            )
+        );
+        assert!(
+            matches!(
+                &core_source.root,
+                crate::builder_surface::source_package_registry::ProvidedSourceRoot::Filesystem(path)
+                    if path == &crate::builder_surface::BuilderSurface::builtin_source_package_root(prefix)
+            ),
+            "@{prefix} must stay on its official source root"
+        );
+    }
 
     let site_package = frontend_surface
         .source_packages

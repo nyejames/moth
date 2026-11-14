@@ -19,9 +19,17 @@ pub(crate) mod record_body;
 pub(crate) mod signature_members;
 pub(crate) mod r#struct;
 
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticToken;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    templates, token_lexical,
+};
+use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::style_directives::{StyleDirectiveKind, StyleDirectiveRegistry};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
     TokenCursor, TokenPayloadOrigin, TokenRef, TokenTag, TokenViewError,
@@ -217,4 +225,52 @@ impl<'a> DeclarationCursor<'a> {
             self.advance();
         }
     }
+}
+
+/// Builds the rejection for one token that cannot continue a declaration shell.
+///
+/// WHAT: a recognised directive is reported through the typed placement diagnostic that names it
+///       and its authored span; every other token keeps the generic unexpected-token diagnostic.
+/// WHY: directive recognition is already complete at tokenization, so a `$name` where a variant,
+///      field or parameter belongs is a misplaced directive, not an anonymous illegal token. The
+///      shell still rejects it: nothing is accepted, attached or recovered.
+pub(crate) fn declaration_shell_token_error(
+    token_stream: &DeclarationCursor<'_>,
+    string_table: &mut StringTable,
+) -> Result<DiagnosticDraft, HeaderParseFailure> {
+    let span = token_stream.current_span();
+    let Some(found) = token_stream
+        .current_diagnostic_token(string_table)
+        .map_err(|error| {
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::malformed_token_projection(
+                "declaration-shell diagnostic projection",
+                error,
+            ))
+        })?
+    else {
+        return Ok(token_lexical::unexpected_end_of_file(None, span));
+    };
+
+    if found.tag() == TokenTag::STYLE_DIRECTIVE {
+        let name_id = found.string_id();
+        let directive_name = string_table.resolve(name_id);
+        let style_directives = StyleDirectiveRegistry::built_ins();
+        if let Some(spec) = style_directives.find(directive_name) {
+            let reason = match spec.kind {
+                StyleDirectiveKind::SourceModifier { .. }
+                    if spec.contexts.allows_source_modifier() =>
+                {
+                    InvalidTemplateDirectiveReason::WrongTarget
+                }
+                _ => InvalidTemplateDirectiveReason::WrongContext,
+            };
+            return Ok(templates::invalid_template_directive(
+                Some(name_id),
+                reason,
+                span,
+            ));
+        }
+    }
+
+    Ok(token_lexical::unexpected_token_from_tag(found, span))
 }

@@ -22,7 +22,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView, MapEntry, OwnedExpr,
 };
 use crate::compiler_frontend::ast::expressions::parse_expression::{
-    create_expression_until, create_expression_with_trailing_newline_policy,
+    create_complete_expression_until, create_expression_with_trailing_newline_policy,
 };
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
@@ -46,7 +46,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     calls_data, token_lexical, types_borrows_targets,
 };
 use crate::compiler_frontend::compiler_messages::{
-    InvalidCollectionTypeReason, InvalidMapLiteralReason, TypeMismatchContext, ValueReceiverContext,
+    DiagnosticToken, InvalidCollectionTypeReason, InvalidMapLiteralReason, TypeMismatchContext,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -533,6 +534,13 @@ fn parse_curly_entry(
         )?);
     }
 
+    // `;` closes a statement block, never a literal entry. Name it before the expression parser
+    // runs, which would otherwise receive an empty fragment for `{; ...}` and report a compiler
+    // invariant instead of the authored token.
+    if token_stream.current_tag() == TokenTag::END {
+        return Err(unexpected_statement_end(token_stream));
+    }
+
     let mut entry_context = context.new_child_expression(expectation.expected_types.clone());
     // Propagate the parent context kind so that constant-context restrictions apply to entries.
     entry_context.kind = context.kind.clone();
@@ -567,7 +575,7 @@ fn parse_curly_entry(
     };
 
     let parsed = match end {
-        CurlyEntryEnd::ItemOrKey => create_expression_until(
+        CurlyEntryEnd::ItemOrKey => create_complete_expression_until(
             input,
             &[TokenTag::ASSIGN, TokenTag::COMMA, TokenTag::CLOSE_CURLY],
         ),
@@ -1470,6 +1478,19 @@ fn validate_map_key_entry(
     record_known_map_key(known_keys, key, const_values, string_table)
 }
 
+/// Report a statement terminator where a literal entry belongs.
+///
+/// WHAT: names the authored `;` as the unexpected token at its own span.
+/// WHY: `;` closes a statement block, never a literal entry, so the literal owner names the token
+///      instead of falling through to missing-item wording or an empty fragment.
+fn unexpected_statement_end(token_stream: &AstCursor) -> ExpressionParseError {
+    token_lexical::unexpected_token_from_tag(
+        DiagnosticToken::from_static_tag(TokenTag::END),
+        Some(token_stream.current_span()),
+    )
+    .into()
+}
+
 fn mixed_collection_entry_error(token_stream: &AstCursor) -> Option<DiagnosticDraft> {
     if token_stream.current_tag() != TokenTag::ASSIGN {
         return None;
@@ -1658,6 +1679,10 @@ fn parse_map_entries(
                 awaiting_entry = true;
                 token_stream.advance();
             }
+
+            // A map value's expression stops at a statement terminator, which never separates
+            // entries.
+            TokenTag::END => return Err(unexpected_statement_end(token_stream)),
 
             _ => {
                 if !awaiting_entry {

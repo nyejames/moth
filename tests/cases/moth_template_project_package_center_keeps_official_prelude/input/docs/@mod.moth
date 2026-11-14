@@ -1,0 +1,7 @@
+@local_support selected_local_center
+
+$export
+@intro content as intro_content
+
+$export
+@local_support selected_local_center

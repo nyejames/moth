@@ -12,19 +12,19 @@ path = "index.html"
 kind = "html"
 must_contain_in_order = [
     "<link rel=\"icon\" href=\"./static/dot.svg\">",
-    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/docs.css\">",
     "<link rel=\"preload\" href=\"./static/preload.bin\">",
     "<body style=",
     "<p>resource liveness body</p>",
 ]
 must_contain_exactly_once = [
     "<link rel=\"icon\" href=\"./static/dot.svg\">",
-    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/docs.css\">",
     "<link rel=\"preload\" href=\"./static/preload.bin\">",
 ]
 
 [[backends.html.artifact_assertions]]
-path = "styles/docs.css"
+path = "site_styles/docs.css"
 kind = "binary"
 
 [[backends.html.artifact_assertions]]
@@ -44,19 +44,19 @@ path = "index.html"
 kind = "html"
 must_contain_in_order = [
     "<link rel=\"icon\" href=\"./static/dot.svg\">",
-    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/docs.css\">",
     "<link rel=\"preload\" href=\"./static/preload.bin\">",
     "<body style=",
     "<p>resource liveness body</p>",
 ]
 must_contain_exactly_once = [
     "<link rel=\"icon\" href=\"./static/dot.svg\">",
-    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
+    "<link rel=\"stylesheet\" href=\"./site_styles/docs.css\">",
     "<link rel=\"preload\" href=\"./static/preload.bin\">",
 ]
 
 [[backends.html_wasm.artifact_assertions]]
-path = "styles/docs.css"
+path = "site_styles/docs.css"
 kind = "binary"
 
 [[backends.html_wasm.artifact_assertions]]
