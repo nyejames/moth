@@ -6,13 +6,14 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 
 - [moth CLI package](crates/moth-cli/Cargo.toml) and [entry](crates/moth-cli/src/main.rs): owns the `moth` executable and depends on the compiler library and Lappet.
     - [command dispatch](crates/moth-cli/src/cli.rs), [status presentation](crates/moth-cli/src/command_status.rs) and [HTML scaffolding](crates/moth-cli/src/scaffold/).
-    - [parser tests](crates/moth-cli/src/tests/cli_tests.rs) and [subprocess contracts](crates/moth-cli/tests/cli_exit_status.rs).
+    - [parser tests](crates/moth-cli/src/tests/cli_tests.rs), [subprocess contracts](crates/moth-cli/tests/cli_exit_status.rs) and [installed-layout contracts](crates/moth-cli/tests/installed_layout.rs) for a relocated executable reading its own `packages/`.
 - [crate module surface](src/lib.rs), including the public convenience re-export `moth::mon` for the standalone [moth-mon crate](crates/moth-mon/) (owned values, prepared schemas, literal-only encode/decode)
 - [timing facade](src/timing.rs), [typed timing schema](src/timing/enabled/schema.rs), [collector](src/timing/enabled/collector.rs), and [summary](src/timing/enabled/summary.rs): compile-erasing timing/counter entry points, schema-v1 metric ownership, immutable process configuration, command/raw session channels, aggregate snapshots and inactive fast-path policy.
-- [Moth source packages](packages/): compiler-shipped source-backed packages.
+- [Moth source packages](packages/): compiler-shipped package files (source-backed packages and Builder binding assets), read from `packages/` beside an installed executable or from this checkout for source builds; the release archive ships this directory.
     - [@html Core package](packages/html/@mod.moth): compile-time HTML markup helper templates (`canvas`, `p`, `h1`-`h6`, `div`, `table`, etc.). Internal helpers live in [packages/html/private_helpers.moth](packages/html/private_helpers.moth).
     - [@styles Core package](packages/styles/@mod.moth): compile-time inline style fragments (`center`, `right`, `left`, `smaller`, `medium`, `larger`) that fill `@html` `style` slots.
     - [@web/site Builder package](packages/web/site/@mod.moth): static structural site-root URL helpers (`root`, `url`). Its [README](packages/web/site/README.md) holds the package boundary.
+    - [@web/canvas](packages/web/canvas/), [@web/graphics](packages/web/graphics/) and [@web/page](packages/web/page/) Builder binding assets: `canvas.js` backs the Canvas 2D free functions, `graphics.js` is the WebGL2 package with no public symbols yet, and `page.js` gives live browser document and viewport snapshots plus the opt-in `sync_navigation` helper. Each directory's `README.md` holds the package's living design and plan; the HTML builder emits the shipped file when calls reach it.
     - [Core binding packages](src/builder_surface/core_packages/): compiler-owned operations and prelude visibility policy.
 - [validate/bench/docs workflow](justfile)
 - [contributor workflow and validation commands](CONTRIBUTING.md)
@@ -76,7 +77,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
     - [error.rs](src/builder/error.rs): the public error kinds and the rendered compiler messages.
 - [host descriptors](src/host/mod.rs): public `moth::host` closed V1 vocabulary for manual native Rust host function descriptors, mapped onto the external-package registry specification.
 - [builder surface](src/builder_surface/): core packages, external import providers and package metadata.
-    - [definition.rs](src/builder_surface/definition.rs): the common surface, including the mandatory `@html` and `@styles` Core/MothSource roots.
+    - [definition.rs](src/builder_surface/definition.rs): the common surface, including the mandatory `@html` and `@styles` Core/MothSource roots and the one compiler-shipped package directory resolution.
     - [source_file_kind_registry.rs](src/builder_surface/source_file_kind_registry.rs): compiler-owned `.moth`/`.mtf` classification plus optional builder registrations such as plain Markdown.
     - [core_packages/](src/builder_surface/core_packages/): prelude, io, math, collections, text, random and time.
     - [external_import_providers/](src/builder_surface/external_import_providers/): provider registry and resolution table.
@@ -270,10 +271,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
     - [parser](src/projects/html_project/external_js/parser/mod.rs): annotation extraction, JS export/import scanning and binding orchestration.
         - [binding.rs](src/projects/html_project/external_js/parser/binding.rs): annotation/export matching, signature and type validation, U32 literal materialisation and runtime-import deduplication.
 - [binding_packages](src/projects/html_project/binding_packages/): builder-owned binding packages for HTML projects.
-    - [@web packages](src/projects/html_project/binding_packages/web/mod.rs): shared registration of every built-in `@web/*` JS asset. Each package directory holds its asset and a `README.md` with its living design and plan.
-        - [@web/canvas](src/projects/html_project/binding_packages/web/canvas/): Canvas 2D asset (`canvas.js`) backing the `@web/canvas` free functions.
-        - [@web/graphics](src/projects/html_project/binding_packages/web/graphics/): WebGL2 package, registered with no public symbols yet.
-        - [@web/page](src/projects/html_project/binding_packages/web/page/): live browser document and viewport snapshots plus the opt-in `sync_navigation` helper (`page.js`).
+    - [@web packages](src/projects/html_project/binding_packages/web/mod.rs): shared registration of every built-in `@web/*` JS asset. The assets and their living-design READMEs ship under `packages/web/` (see the Moth source packages entry); node-run asset tests live in [web/tests/](src/projects/html_project/binding_packages/web/tests/).
 - [moth_template](src/projects/html_project/moth_template/): direct .mtf request normalization, content-source discovery and output packaging around the compiler's [Moth template service](src/compiler_frontend/single_source_compilation/moth_template.rs), retaining per-document source contexts with warnings.
 - [HTML scaffold](crates/moth-cli/src/scaffold/): CLI-owned project creation and terminal prompts.
 
@@ -304,6 +302,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 - [memory management design](docs/developer-docs/memory-management/overview.mtf)
 - [codebase style guide](docs/developer-docs/style-guide/style-guide.mtf)
 - [language cheatsheet](docs/docs/cheatsheet/moth-language-cheatsheet.mtf)
+- [Core package pages](docs/docs/packages/core/@entry.moth): [@html](docs/docs/packages/core/html/@entry.moth) and [@styles](docs/docs/packages/core/styles/@entry.moth), plus the binding-backed Core packages. [Builder package pages](docs/docs/packages/builder/@entry.moth) hold the opt-in builder packages.
 - [docs website source](docs/docs/); [developer docs source](docs/developer-docs/); [generated output](docs/_release/)
 - [docs site support package](docs/docs_styles/@package.moth): project-local `@docs_styles` helpers and assets for the docs pages.
 - [language support progress matrix](docs/docs/progress/@entry.moth)

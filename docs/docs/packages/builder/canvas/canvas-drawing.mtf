@@ -1207,4 +1207,4 @@ The Wasm backend rejects reachable `@web/canvas` calls before lowering. Canvas s
 
 - For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
 - For dependency-path rules see @../../#dependency-paths (Dependency paths).
-- For the `@html` canvas markup helper see @../html (@html).
+- For the `@html` canvas markup helper see @../../core/html/ (@html).

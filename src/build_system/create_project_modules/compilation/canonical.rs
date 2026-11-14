@@ -66,10 +66,9 @@ use super::super::resource_inputs::ResourceInputRegistry;
 use super::super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageDependency};
 
 use super::{
-    build_module_package_dependency_index, build_module_template_prelude_dependency_index,
-    build_provider_binding_index, build_source_package_dependency_index,
-    classify_blocked_package_provider, publish_compiled_module,
-    seed_completed_package_materialisations,
+    build_module_package_dependency_index, build_provider_binding_index,
+    build_source_package_dependency_index, classify_blocked_package_provider,
+    publish_compiled_module, seed_completed_package_materialisations,
 };
 
 struct DirectoryModuleTaskResult {
@@ -1256,15 +1255,13 @@ pub(super) fn compile_module_waves_in_premerge_lane(
             warning_sink.as_deref_mut(),
         ));
     } else {
-        // Index each consumer module's direct package dependencies once per boundary so readiness
-        // walks only the packages that module actually depends on and never filters the full
-        // dependency vector for every job. A stopped command never admits a job that would resolve
-        // one of these facades, so the index is built only while the lane is open.
+        // Index each consumer module's package providers once per boundary so readiness walks
+        // only the providers that module actually observes and never filters the full dependency
+        // vector or joins the implicit prelude for every job. A stopped command never admits a job
+        // that would resolve one of these facades, so the index is built only while the lane is
+        // open.
         let module_package_dependencies = build_module_package_dependency_index(
             source_package_dependencies,
-            context.completed_packages(),
-        );
-        let module_template_prelude_dependencies = build_module_template_prelude_dependency_index(
             &module_waves,
             context.completed_packages(),
         )?;
@@ -1294,20 +1291,14 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                 }
 
                 if blocked_provider.is_none() {
-                    let authored_package_ids = module_package_dependencies
-                        .get(&job.module_id)
-                        .map(Vec::as_slice)
-                        .unwrap_or_default();
-                    let prelude_package_ids = module_template_prelude_dependencies
-                        .get(&job.module_id)
-                        .map(Vec::as_slice)
-                        .unwrap_or_default();
                     blocked_provider = classify_blocked_package_provider(
                         context.completed_packages(),
                         job.module_id,
-                        authored_package_ids
+                        module_package_dependencies
+                            .get(&job.module_id)
+                            .map(Vec::as_slice)
+                            .unwrap_or_default()
                             .iter()
-                            .chain(prelude_package_ids)
                             .copied(),
                     )?;
                 }

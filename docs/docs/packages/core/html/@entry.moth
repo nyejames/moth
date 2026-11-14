@@ -21,6 +21,8 @@ init_docs_sidebar()!
     `@html` provides compile-time layout and formatting helpers through a
     source-backed Core package. Each helper remains an ordinary exported
     constant that folds into a `String`, rather than a hidden HTML syntax layer.
+    The common builder surface registers `@html` under every builder, including
+    custom SDK builders, so it is never selected by builder configuration.
 ]
 
 [section:
@@ -36,8 +38,8 @@ init_docs_sidebar()!
 [section:
     [doc_pager:
         [$in previous_path:../]
-        [$in previous_title:Builder packages]
-        [$in next_path:../canvas/]
-        [$in next_title:@web/canvas]
+        [$in previous_title:Core packages]
+        [$in next_path:../styles/]
+        [$in next_title:@styles]
     ]
 ]

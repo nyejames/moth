@@ -258,7 +258,9 @@ fn module_package_dependency_index_walks_only_direct_dependencies() {
         dependency_shell_id: shell,
     }];
 
-    let index = super::compilation::build_module_package_dependency_index(&dependencies, &registry);
+    let index =
+        super::compilation::build_module_package_dependency_index(&dependencies, &[], &registry)
+            .expect("an authored dependency over a completed package must index");
     assert_eq!(
         index.len(),
         1,

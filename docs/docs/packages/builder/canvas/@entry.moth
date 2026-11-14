@@ -35,8 +35,8 @@ init_docs_sidebar()!
 
 [section:
     [doc_pager:
-        [$in previous_path:../html/]
-        [$in previous_title:@html]
+        [$in previous_path:../]
+        [$in previous_title:Builder packages]
         [$in next_path:../graphics/]
         [$in next_title:@web/graphics]
     ]

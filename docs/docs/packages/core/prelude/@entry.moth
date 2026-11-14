@@ -36,8 +36,8 @@ init_docs_sidebar()!
 
 [section:
     [doc_pager:
-        [$in previous_path:../]
-        [$in previous_title:Core packages]
+        [$in previous_path:../styles/]
+        [$in previous_title:@styles]
         [$in next_path:../io/]
         [$in next_title:Core IO]
     ]

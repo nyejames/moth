@@ -16,6 +16,7 @@
 //! through duplicated per-module records.
 use super::module_identity::{ModuleId, ModuleIdentityRecord, ModuleIdentityTable};
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
+use crate::builder_surface::definition::damaged_package_set_report;
 use crate::builder_surface::external_import_providers::provider::ExternalFileExtension;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
@@ -1574,43 +1575,28 @@ fn aliased_root_files_error(
 /// A package may carry any combination of normal, support and entry roots, but it needs at
 /// least one API facade root. A support root beside a normal root is the external package
 /// surface; the normal root remains the internal interface. Missing roots and aliased roots keep
-/// package-specific typed diagnostics.
+/// package-specific typed diagnostics, except in a compiler-shipped package, where a missing
+/// facade means the installed package set is incomplete.
 fn classify_package_root_directory(
     directory: &Path,
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
     package_prefix: &str,
     string_table: &mut StringTable,
 ) -> Result<ClassifiedDirectoryRoots, PreparedFailure> {
-    if directory_roots.is_empty() {
-        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-        let diagnostic =
-            project_structure_diagnostic(InvalidConfigReason::SourcePackageMissingRoot {
-                prefix: diagnostic_strings.intern(package_prefix),
-                root: path_id(directory, &mut diagnostic_strings),
-            });
-        let table = string_table.take_for_handoff();
-        return Err(PreparedFailure::Diagnosed(
-            PreparedDiagnosticBatch::capture_from_bag(
-                DiagnosticBag::from(diagnostic),
-                table,
-                None,
-                None,
-            ),
-        ));
-    }
-
-    let normal_count = directory_roots
-        .iter()
-        .filter(|root| root.role == ModuleRootRole::Normal)
-        .count();
-    let support_count = directory_roots
-        .iter()
-        .filter(|root| root.role == ModuleRootRole::Support)
-        .count();
-
     // A registered source package is importable, so it needs at least one API facade root.
     // An entry-only package root has no public surface and cannot satisfy the package contract.
-    if normal_count == 0 && support_count == 0 {
+    let has_facade = directory_roots
+        .iter()
+        .any(|root| matches!(root.role, ModuleRootRole::Normal | ModuleRootRole::Support));
+    if !has_facade {
+        if let Some(report) = damaged_package_set_report(directory) {
+            return Err(InfrastructureFailure::filesystem(
+                CompilerStage::ProjectBuildAssembly,
+                directory,
+                format!("Source package @{package_prefix} has no API facade root. {report}"),
+            )
+            .into());
+        }
         let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
         let diagnostic =
             project_structure_diagnostic(InvalidConfigReason::SourcePackageMissingRoot {

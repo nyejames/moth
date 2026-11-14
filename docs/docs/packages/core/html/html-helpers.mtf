@@ -138,44 +138,7 @@ All helpers are compile-time `#String` constants that produce HTML strings. They
 
 #### Utility style inserts from `@styles`
 
-These constants belong to the separate `@styles` Core source package. They produce CSS property values for the `style` slots exposed by `@html`.
-
-[table:
-    [th:
-        [: Helper]
-        [: CSS]
-    ]
-
-    [td:
-        [: `center`]
-        [: `text-align: center;`]
-    ]
-
-    [td:
-        [: `right`]
-        [: `text-align: right;`]
-    ]
-
-    [td:
-        [: `left`]
-        [: `text-align: left;`]
-    ]
-
-    [td:
-        [: `smaller`]
-        [: `font-size: smaller;`]
-    ]
-
-    [td:
-        [: `medium`]
-        [: `font-size: medium;`]
-    ]
-
-    [td:
-        [: `larger`]
-        [: `font-size: larger;`]
-    ]
-]
+The `style` slots exposed by the helpers above accept the six inline fragments from the separate `@styles` Core package, including `center` and `larger`. See @../styles/ (@styles) for the export table and prelude rules.
 
 ### The `$code` directive
 
@@ -237,7 +200,7 @@ The `canvas` markup helper remains in `@html`. Drawing functions and opaque canv
 
 The compile-time constants need no runtime assets. They fold into HTML strings during compilation.
 
-Calls to `@web/canvas` emit JavaScript runtime assets when reachable. See @../canvas (@web/canvas) for the runtime asset contract.
+Calls to `@web/canvas` emit JavaScript runtime assets when reachable. See @../../builder/canvas/ (@web/canvas) for the runtime asset contract.
 
 ### Unsupported source forms
 
@@ -254,4 +217,4 @@ Calls to `@web/canvas` emit JavaScript runtime assets when reachable. See @../ca
 - For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
 - For dependency-path rules see @../../#dependency-paths (Dependency paths).
 - For `.mtf` template scope and the fixed prelude see @../../../moth-templates/#template-scope (Template scope).
-- For the `@web/canvas` runtime package see @../canvas (@web/canvas).
+- For the `@web/canvas` runtime package see @../../builder/canvas/ (@web/canvas).

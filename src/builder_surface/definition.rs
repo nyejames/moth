@@ -29,8 +29,9 @@ use moth_lexical::identifier::is_identifier;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::words::classify_source_word;
 use std::collections::BTreeSet;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock};
 
 /// The complete builder surface a backend exposes to a project.
 ///
@@ -62,7 +63,42 @@ pub(crate) enum BuilderSurfaceValidationError {
     Infrastructure(InfrastructureFailure),
 }
 
-const BUILTIN_SOURCE_PACKAGES_DIR: &str = "packages";
+const BUILTIN_PACKAGES_DIR: &str = "packages";
+
+/// Directory holding every compiler-shipped package file for this process: the source packages
+/// (`@html`, `@styles`, `@web/site`) and the `@web/*` binding assets the HTML builder emits.
+///
+/// WHAT: `packages/` beside the canonical executable when that directory exists, which is the
+///       release archive layout; otherwise the `packages/` directory of the source checkout that
+///       compiled this binary (cargo builds, tests and hosts built from source).
+/// WHY: released binaries run without the checkout, so the installed copy must win. The choice
+///      is made once for the whole set, never per package or file, so an installation can't mix
+///      its files with another version's from the checkout. Every registration, the
+///      official-root check and asset reads join onto this one path.
+pub(crate) static BUILTIN_PACKAGES_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
+    std::env::current_exe()
+        .and_then(fs::canonicalize)
+        .ok()
+        .and_then(|executable| Some(executable.parent()?.join(BUILTIN_PACKAGES_DIR)))
+        .filter(|installed| installed.is_dir())
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(BUILTIN_PACKAGES_DIR))
+});
+
+/// Explains a failed read below [`BUILTIN_PACKAGES_ROOT`] as a damaged package set.
+///
+/// WHAT: returns the damaged-installation report for a path inside the selected package root,
+///       or `None` for any other path.
+/// WHY: the root is selected once for the whole set, so a missing file below it means that set
+///      is incomplete. Readers report it instead of looking for the file anywhere else.
+pub(crate) fn damaged_package_set_report(path: &Path) -> Option<String> {
+    path.starts_with(&*BUILTIN_PACKAGES_ROOT).then(|| {
+        format!(
+            "The compiler-shipped package set at '{}' is incomplete. Reinstall Moth with the \
+             complete `packages/` directory from its release archive beside the executable.",
+            BUILTIN_PACKAGES_ROOT.display()
+        )
+    })
+}
 
 /// The mandatory Core source roots, which are also the fixed `.mtf` constant prelude providers.
 ///
@@ -219,10 +255,9 @@ impl BuilderSurface {
         self.config_globals.insert(name, value)
     }
 
+    /// Root of one compiler-shipped source package, such as `@html`, `@styles` or `@web/site`.
     pub fn builtin_source_package_root(prefix: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join(BUILTIN_SOURCE_PACKAGES_DIR)
-            .join(prefix)
+        BUILTIN_PACKAGES_ROOT.join(prefix)
     }
 }
 

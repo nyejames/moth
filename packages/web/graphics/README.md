@@ -14,7 +14,7 @@ This README is the package's living development document. It holds design direct
 
 ## Current state
 
-- `../mod.rs` registers `@web/graphics` as a Builder-origin binding package with no public symbols.
+- `src/projects/html_project/binding_packages/web/mod.rs` registers `@web/graphics` as a Builder-origin binding package with no public symbols.
 - `graphics.js` exports nothing. Registration still parses it on every HTML build, so the asset can't drift out of the accepted annotation subset.
 - The package is HTML-JS only. A future Wasm path follows the same rule as `@web/canvas`: reachable calls are rejected before lowering until a lowering exists.
 - No API slice has started. Every Phase 1 operation depends on at least one binding prerequisite below.
@@ -74,7 +74,7 @@ The public API isn't built from unexplained numeric WebGL constants. Primitive m
 
 ### Numeric precision
 
-WebGL consumes 32-bit floats for vertex data, uniforms and clear values. `F32` gives an exact binary32 slot where the API needs it and `F64` keeps its binary64 width. The shared boundary requires finite values at each declared precision. `F32` parameters arrive as exact binary32 values and `F32` results round once at binary32. The [external binding contract](../../../../../../docs/docs/packages/external-binding-contracts.mtf) owns the validation and failure rules.
+WebGL consumes 32-bit floats for vertex data, uniforms and clear values. `F32` gives an exact binary32 slot where the API needs it and `F64` keeps its binary64 width. The shared boundary requires finite values at each declared precision. `F32` parameters arrive as exact binary32 values and `F32` results round once at binary32. The [external binding contract](../../../docs/docs/packages/external-binding-contracts.mtf) owns the validation and failure rules.
 
 ### Async and callback boundary
 
@@ -90,7 +90,7 @@ Unresolved. Context creation needs the canonical `CanvasElement` owned by `@web/
 
 - An opaque external type's identity is its package, symbol path and origin (`CanonicalBindingSymbolIdentity` in `src/compiler_frontend/external_packages/ids.rs`). Compiler type equality uses the registered `ExternalTypeId`.
 - Annotated JavaScript resolves a signature type name only against built-in scalars and `@moth.opaque` declarations in the same file (`validate_type_name` in `src/projects/html_project/external_js/parser/binding.rs`). A second `@moth.opaque CanvasElement` in `graphics.js` would mint a different, incompatible type.
-- Moth source already crosses this boundary. `packages/html/@mod.moth` names `@web/canvas` handle types in its own signatures, and source re-exports preserve canonical identity.
+- A Moth source re-export preserves the selected declaration's canonical identity, so a source package can expose another package's handle type without minting a new one.
 
 Candidate routes, tentative:
 

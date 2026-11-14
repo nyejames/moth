@@ -92,4 +92,4 @@ behaviour in a separately invoked function, covered in
 @../browser-behaviour/ (Browser behaviour).
 
 See @../../constants (Constants), @../../resources (Resources) and
-@../../packages/builder/html/ (@html).
+@../../packages/core/html/ (@html).

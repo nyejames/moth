@@ -52,7 +52,7 @@ Exported compile-time constants from `@html` and `@styles` are visible flat insi
 
 The prelude is fixed compiler policy under every builder, including custom SDK builders. It reads the official `packages/html` and `packages/styles` Moth source packages, which are registered once as Core/MothSource roots. A builder cannot replace either package or change `.mtf` availability. Both packages precede every `.mtf` consumer, so a failed prelude package blocks the consumer.
 
-The prelude supplies compile-time constants only. It is not a general template-wide import mechanism and it never includes runtime values, types, private constants, imported aliases, project-local packages or arbitrary builder-registered constants.
+The prelude supplies compile-time constants only. It is not a general template-wide import mechanism, and it never includes runtime values, types, private constants, project-local packages or arbitrary builder-registered constants. A public constant declared anywhere inside a provider package enters it under its exported name, including when another file in that package exports it with `as`. A re-export or alias of a declaration from another package does not.
 
 ### Collision semantics
 

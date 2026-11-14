@@ -682,18 +682,29 @@ pub(crate) fn build_source_package_dependency_index(
     index
 }
 
-/// Index every consumer module's direct package dependencies once per boundary.
+/// Index every consumer module's package providers once per boundary.
 ///
-/// WHAT: resolves each source-package dependency to its dense [`PackageBoundaryId`] and
-///       groups the IDs by consumer module, deduplicated and sorted in package order.
-/// WHY: readiness checks must walk only the current module's package dependencies. Building
-///      the grouped index once per boundary keeps that walk proportional to direct dependencies.
+/// WHAT: groups each consumer module's authored source-package dependencies and, when the module
+///       prepares a Moth template, the fixed template-prelude packages, as dense
+///       [`PackageBoundaryId`] values sorted and deduplicated in package order.
+/// WHY: readiness must walk only the current module's providers, so one grouped index keeps that
+///      walk proportional to the direct inputs. Authored dependencies and the implicit prelude
+///      follow the same classifier but arrive from different owners, so they stay separate
+///      construction passes whose results join in this index rather than in the readiness loop.
+///      The prelude providers are compiler policy and never appear in the authored dependency
+///      vector. A `.mtf` authored inside one of the fixed prelude packages is unsupported content:
+///      its own package cannot have completed yet, so that unresolved provider returns an internal
+///      infrastructure failure naming the unfinished provider instead of a compiler bug. Sorting
+///      by dense package identity also settles which failed provider a consumer reports first when
+///      it observes more than one.
 pub(crate) fn build_module_package_dependency_index(
     source_package_dependencies: &[ResolvedSourcePackageDependency],
+    module_waves: &[Vec<module_inventory::ModuleCompilationJob>],
     completed_packages: &CompletedSourcePackageRegistry,
-) -> FxHashMap<ModuleId, Vec<PackageBoundaryId>> {
+) -> Result<FxHashMap<ModuleId, Vec<PackageBoundaryId>>, InfrastructureFailure> {
     let mut dependencies: FxHashMap<ModuleId, Vec<PackageBoundaryId>> = FxHashMap::default();
 
+    // Authored dependencies resolve through the prefix discovery retained on the graph edge.
     for package_dependency in source_package_dependencies {
         let package_id = completed_packages
             .by_prefix(package_dependency.dependency_prefix.as_str())
@@ -711,30 +722,7 @@ pub(crate) fn build_module_package_dependency_index(
             .push(package_id);
     }
 
-    for package_ids in dependencies.values_mut() {
-        package_ids.sort_unstable();
-        package_ids.dedup();
-    }
-
-    dependencies
-}
-
-/// Index the fixed template-prelude packages every `.mtf` consumer must observe completed.
-///
-/// WHAT: maps each module whose prepared sources include a Moth template to one dense package
-///       identity per official Core prelude package, in the fixed prefix order.
-/// WHY: the prelude providers are compiler policy, so they never appear in the authored package
-///      dependency vector. Readiness must still classify them exactly like authored package
-///      dependencies; one boundary-local index keeps that walk to the direct inputs. A `.mtf`
-///      authored inside one of the fixed prelude packages is unsupported content: its own package
-///      cannot have completed yet, so the index returns an internal infrastructure failure naming
-///      the unfinished provider instead of treating the state as a compiler bug.
-pub(crate) fn build_module_template_prelude_dependency_index(
-    module_waves: &[Vec<module_inventory::ModuleCompilationJob>],
-    completed_packages: &CompletedSourcePackageRegistry,
-) -> Result<FxHashMap<ModuleId, Vec<PackageBoundaryId>>, InfrastructureFailure> {
-    let mut dependencies: FxHashMap<ModuleId, Vec<PackageBoundaryId>> = FxHashMap::default();
-
+    // Implicit prelude dependencies come from compiler policy, not the authored dependency vector.
     for job in module_waves.iter().flatten() {
         if !job.prepared.contains_moth_template {
             continue;

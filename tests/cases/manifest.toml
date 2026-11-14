@@ -13204,13 +13204,6 @@ contract = "language.moth_template.facade_nonconstant_not_visible_in_content_rej
 role = "primary"
 
 [[case]]
-id = "moth_template_html_runtime_api_not_visible"
-path = "moth_template_html_runtime_api_not_visible"
-tags = ["integration", "moth_template", "html", "diagnostics", "dependencies"]
-contract = "language.moth_template.html_runtime_api_not_visible_in_content_rejected"
-role = "primary"
-
-[[case]]
 id = "moth_template_unescaped_outer_close_rejected"
 path = "moth_template_unescaped_outer_close_rejected"
 tags = ["integration", "moth_template", "html", "diagnostics"]

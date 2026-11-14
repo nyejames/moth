@@ -43,6 +43,10 @@ A configurable value uses `$config` before one explicitly typed top-level `#` bi
 - `.moth_manifest` files are build-system metadata used for safe stale-output cleanup. They are not source.
 - A directory component below the selected root whose name starts with `_` is excluded from that build. Select it directly to compile it.
 
+### Reserved package folder names
+
+A top-level project folder named `html` or `styles`, in any ASCII case, is rejected because it collides with the mandatory Core package prefixes. Keep ordinary HTML and CSS resources in another folder such as `assets/`. Only the exact prefix is reserved, so `styles_local` and other names that start with it remain available.
+
 ### Root files inside source directories
 
 A source directory recognises exactly three optional root files: `@mod.moth`, `@package.moth` and `@entry.moth`. The directory may contain any present subset. One directory forms one structural module with shared helper files.

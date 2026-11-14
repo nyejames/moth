@@ -131,6 +131,12 @@ When distributing a builder, install those files at a known location and pass
 that location explicitly. An absolute installation path locates bytes. It is
 not the package's semantic identity.
 
+Every builder also compiles the compiler-shipped Core `@html` and `@styles`
+packages. A distributed builder executable needs the compiler's `packages/`
+directory beside it, as in the `moth` release archive. When that directory is
+absent, the compiler reads the source checkout that built it, which exists only
+on the build machine.
+
 Building and writing are separate operations so an embedding tool can inspect
 results before committing output. An unsuccessful compilation never supplies a
 partial `CompiledProject` to `build`. A failed build never authorises stale

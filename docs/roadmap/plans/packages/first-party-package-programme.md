@@ -109,7 +109,7 @@ This programme owns:
 - useful v1 completion work for existing Core packages
 - deeper expansion of `@web/canvas`
 - `@web/graphics` WebGL2 package design, binding prerequisites and implementation
-- secondary `@html` wrapper and helper work required by package additions
+- secondary `@html` helper work required by package additions
 - one newly accepted Core package, `@core/json`, after its own design checkpoint
 - JavaScript runtime implementations plus compiler-owned Rust semantic functions for Core constant
   evaluation where the delivered evaluator contract permits them
@@ -504,9 +504,9 @@ materially safer to implement. Record the reason in the tracker rather than sile
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
 | 3 | `@core/math` | [core-math.md](./core-math.md) | Activated ahead of order 2 because its existing surface needs no new compiler capability; current-surface coverage, registration cleanup and the accepted scalar expansion with its published numerical contract are delivered; F64-only exact migration pending | Preserve all six constants, thirty-one helpers, their mathematical contracts and shared finite-result boundaries |
 | 4 | `@core/time` | [core-time.md](./core-time.md) | v1 delivered: the semantic contract is published, the four defects it exposed are corrected and the accepted Duration and Timestamp arithmetic is registered and covered | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
-| 5 | `@web/canvas` | [canvas README](../../../../src/projects/html_project/binding_packages/web/canvas/README.md) | README seeded from accepted direction and the deferred notes formerly in `canvas.js`; expansion not started | Expand drawing, state, path, transform, text, image and pixel workflows deeply enough to support substantial visual stress-test programs |
-| 5a | `@html` | `html.md` | TODO: create only when needed | Add source-backed wrappers or broadly useful helpers required by canvas and HTML package work, without turning `@html` into a framework |
-| 5b | `@web/graphics` | [graphics README](../../../../src/projects/html_project/binding_packages/web/graphics/README.md) | Scaffolded: registered with no public symbols, canonical page and progress row added. Fixed `U32`/`F32` scalar slots, flat named `U32` constants and compiler-owned error-code exports are delivered. Cross-package opaque types, nested annotated paths and bulk collection/data mapping still await user design review | A WebGL2 renderer written directly against `graphics.gl`, through textured, indexed and instanced drawing, without placeholder APIs |
+| 5 | `@web/canvas` | [canvas README](../../../../packages/web/canvas/README.md) | README seeded from accepted direction and the deferred notes formerly in `canvas.js`; expansion not started | Expand drawing, state, path, transform, text, image and pixel workflows deeply enough to support substantial visual stress-test programs |
+| 5a | `@html` | `html.md` | TODO: create only when needed | Add broadly useful source-backed markup helpers required by HTML package work, without turning `@html` into a framework. Runtime canvas wrappers stay in `@web/canvas` |
+| 5b | `@web/graphics` | [graphics README](../../../../packages/web/graphics/README.md) | Scaffolded: registered with no public symbols, canonical page and progress row added. Fixed `U32`/`F32` scalar slots, flat named `U32` constants and compiler-owned error-code exports are delivered. Cross-package opaque types, nested annotated paths and bulk collection/data mapping still await user design review | A WebGL2 renderer written directly against `graphics.gl`, through textured, indexed and instanced drawing, without placeholder APIs |
 | 6 | `@core/io` | [core-io.md](./core-io.md) | Scope review accepted and Phase 1 snapshot input hardening complete; Phase 2 candidates await user selection | Add portable snapshot input, then an ordered queue only where its final value shape crosses the binding boundary |
 | 7 | `@core/collections` | `core-collections.md` | TODO: create when activated | Audit common non-sorting gaps and integrate specialised collection work without duplicating its accepted contracts |
 | 7a | Collection sorting | [core-collections-sorting.md](./core-collections-sorting.md) | Accepted and queued behind mixed-backend prerequisites | Preserve stable-by-default sort and consume delivered fixed numeric/Byte ordering and compact layouts |
@@ -827,10 +827,11 @@ candidates are a Wasm lowering set and explicit duration range rules.
 Mandatory closeout: full phase gate plus deterministic parsing, conversion and monotonic-time
 contract coverage. Keep wall-clock tests independent of the machine's current date and time.
 
-### Phase 6 - `@web/canvas` expansion and optional `@html` wrappers
+### Phase 6 - `@web/canvas` expansion
 
-Refresh the canvas README and accept the slice scope with the user. Create `html.md` only when the
-wrapper work is substantial enough to need its own implementation memory.
+Refresh the canvas README and accept the slice scope with the user. Runtime canvas wrappers stay in
+`@web/canvas`, never in `@html`. Create `html.md` only when separate broadly useful `@html` helper
+work is substantial enough to need its own implementation memory.
 
 Mandatory closeout: full phase gate plus at least one substantial visual-program integration case,
 runtime asset reachability checks and failure coverage for unavailable handles or invalid operations.

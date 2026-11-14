@@ -30,7 +30,7 @@ The prelude supplies `@html` and `@styles` constants only. Your own values need 
 - `codeblock`, `table`, `th`, `td` for code and tables
 - `img` for images with `src`, `alt` and `style` slots
 
-The six basic style inserts (`center`, `right`, `left`, `smaller`, `medium`, `larger`) belong to `@styles`. They are available bare inside `.mtf` files and need an explicit import in `.moth` files, such as `@styles center`.
+The six basic style inserts (`center`, `right`, `left`, `smaller`, `medium`, `larger`) belong to `@styles`. They are available bare inside `.mtf` files and need an explicit import in `.moth` files, such as `@styles center`. See @../styles/ (@styles) for the fragments and the slots they fill.
 
 ### `$code` code blocks
 

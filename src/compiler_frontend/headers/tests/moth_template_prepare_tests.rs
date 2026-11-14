@@ -1834,6 +1834,67 @@ fn cross_package_constant_reexport_does_not_enter_the_flat_prelude() {
 }
 
 #[test]
+fn same_package_constant_reexport_enters_the_flat_prelude() {
+    // A provider may spread its declarations across files and re-export an alias from its root.
+    // The declaring file still belongs to the provider package, so the alias is the provider's
+    // own surface and must enter the flat prelude under its exported name.
+    let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[stacked_constant]")]);
+
+    let html_interface = empty_provider_interface("html");
+    let styles_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("styles"),
+        "styles/@mod.moth".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let declaring_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("styles"),
+        "styles/constants.moth".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let constant_origin = OriginDeclarationId::Constant(OriginConstantId::new(
+        declaring_origin,
+        "constants_source_name".to_owned(),
+    ));
+    let styles_interface = PublicSemanticInterface {
+        module_origin: styles_origin.clone(),
+        export_bindings: vec![ExportBinding::new(
+            styles_origin,
+            "stacked_constant".to_owned(),
+            constant_origin.clone(),
+        )],
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: vec![PublicDeclarationRecord {
+            origin: constant_origin,
+            synthetic_interface_provenance: Default::default(),
+            semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
+                type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+                folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
+                    "from styles constants".to_owned(),
+                )),
+            }),
+        }],
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    };
+    styles_interface
+        .validate_for_publication()
+        .expect("a same-package re-export must satisfy publication validation");
+    let provider_dependencies =
+        standard_template_prelude_dependencies(&html_interface, &styles_interface);
+
+    let (ast, string_table, path_fork) = fixture
+        .compile_moth_template_ast_with_providers(
+            "src/intro.mtf",
+            &["src/intro.mtf"],
+            &provider_dependencies,
+        )
+        .expect("a same-package re-export should enter the flat prelude");
+
+    folded_content_contains(&ast, &string_table, &path_fork, "from styles constants");
+}
+
+#[test]
 fn duplicate_prelude_constants_across_official_packages_fail_before_body_evaluation() {
     // Both official Core packages exporting one public constant name breaks a fixed
     // compiler-shipped contract: no consumer source can repair it and no template needs to

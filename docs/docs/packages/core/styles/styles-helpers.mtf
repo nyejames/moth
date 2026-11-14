@@ -1,0 +1,70 @@
+`@styles` provides compile-time inline CSS fragments for the `style` slots exposed by `@html`. It carries Core origin with MothSource backing. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+
+The compiler reads `packages/styles/@mod.moth`, and the common builder surface registers the root under every builder, including custom SDK builders. A project cannot replace the package or remove it from the `.mtf` prelude.
+
+### Exports
+
+Every export is a compile-time `#String`. The value is one styled template fragment with a trailing semicolon:
+
+[table:
+    [th:
+        [: Constant]
+        [: CSS]
+    ]
+
+    [td:
+        [: `center`]
+        [: `text-align: center;`]
+    ]
+
+    [td:
+        [: `right`]
+        [: `text-align: right;`]
+    ]
+
+    [td:
+        [: `left`]
+        [: `text-align: left;`]
+    ]
+
+    [td:
+        [: `smaller`]
+        [: `font-size: smaller;`]
+    ]
+
+    [td:
+        [: `medium`]
+        [: `font-size: medium;`]
+    ]
+
+    [td:
+        [: `larger`]
+        [: `font-size: larger;`]
+    ]
+]
+
+### Relationship to `@html` slots
+
+Each fragment is written as an `$in style:` contribution. Template heads pass the constant by name, so the CSS lands in the `style` attribute exposed by the `@html` helper:
+
+[codeblock, $code "text":
+    [h1, center: A centred heading.]
+]
+
+A `.moth` file binds constants before it builds or inserts a template:
+
+[codeblock, $code "moth":
+    @styles center, larger
+]
+
+The fragments carry no runtime behaviour and need no runtime assets. Only compile-time constants enter the `.mtf` prelude. Functions, types and private constants require an explicit dependency clause in `.moth` files.
+
+### Prelude contribution
+
+`@styles` contributes all six constants to the fixed `.mtf` prelude. A public constant declared by the package enters that prelude even when another file in the package exports it. A re-export of another package's declaration does not. See @../html/#html-helpers (HTML helpers) and @../../../moth-templates/#template-scope (Template scope).
+
+### Related concepts
+
+- For the markup helpers that expose these slots see @../html/ (@html).
+- For the package origin and backing model see @../../#package-origins-and-backing (Package origins and backing).
+- For dependency-path rules see @../../#dependency-paths (Dependency paths).
