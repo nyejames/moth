@@ -47,7 +47,7 @@ Open findings had no unresolved candidates. AUD-0005 and AUD-0014 touch tokenize
 
 ### AUD-0017-F01: Unclosed blocks in the entry start body are accepted and swallow later statements
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Correctness`
 
 #### Evidence
@@ -131,7 +131,7 @@ None. Filed in the Correctness lane from this Diagnostics run because legality i
 
 ### AUD-0017-F02: A missing block closer is reported as unexpected end of file and does not name the open block
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Diagnostics`
 
 #### Evidence
@@ -223,7 +223,7 @@ AUD-0017-F01 is the start-body case this report does not cover, because that cas
 
 ### AUD-0017-F03: A semicolon used as a statement terminator is not identified, so the follow-on error blames the wrong token
 
-- State: `candidate`
+- State: `rejected`
 - Kind: `Diagnostics`
 
 #### Evidence
@@ -298,7 +298,7 @@ None.
 
 ### AUD-0017-F04: An unclosed parenthesis at the end of an expression is reported at the start of the file
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Diagnostics`
 
 #### Evidence
@@ -357,7 +357,7 @@ AUD-0017-F02. `unclosed_delimiter_eof_diagnostic` computes a `(` opener span and
 
 ### AUD-0017-F05: Expression-end expected tokens are rendered as TokenTag debug names
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Diagnostics`
 
 #### Evidence
@@ -408,7 +408,7 @@ None.
 
 ### AUD-0017-F06: Ending a binary expression reports the missing operand on the wrong side
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Diagnostics`
 
 #### Evidence
@@ -463,7 +463,7 @@ AUD-0017-F07.
 
 ### AUD-0017-F07: Dangling-operator tests pin the wrong operand side
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Tests`
 
 #### Evidence
@@ -503,6 +503,42 @@ The updated unit test and HTML case, then `just validate`. Lands with AUD-0017-F
 #### Linked findings
 
 AUD-0017-F06.
+
+## Triage (2026-11-13)
+
+Source review against `fd695d18b`, which retains the audited `c62bbe560` implementation. No compiler binary or Rust toolchain was available for fresh reproduction. The original disposable probes remain the executable evidence. These decisions authorise bounded investigation, not a patch design.
+
+- **F01 accepted.** `body_dispatch.rs` accepts EOF for any statement context, while entry start capture tracks `executable_block_depth` only to distinguish nested runtime items. No remaining closer check exists. Preserve implicit start's own EOF termination while requiring explicit nested blocks to close.
+- **F02 accepted.** Function header capture knows scope depth but retains no colon spans. The common delimiter scanner retains an opener only for templates. Improve diagnostics at the owning scans, without inventing a source-wide rescan. The proposed special wording for a closer consumed by an inner block is contingent on being able to identify that closer precisely.
+- **F03 rejected.** Both reported tokens are genuinely invalid in their parsed contexts: the first `;` legally ends the function and a later top-level `;` closes no active block, while `return` outside a function is invalid. Moth uses explicit delimiters and permits top-level executable statements after a function. Nothing in the source proves that the earlier semicolon was intended as a statement terminator rather than the function closer. Attaching blame to it would guess intent and can mislead for independently authored top-level errors. The existing `MOTH-SYNTAX-0030` and `MOTH-RULE-0042` reports correctly identify the first illegal token. This does not block future diagnostic improvements supported by unambiguous evidence.
+- **F04 accepted.** Exhausted `AstCursor::current_span` falls back to byte zero while `GroupFrame` retains the opening `(` span. Repair the group-exhaustion diagnostic rather than changing the global cursor fallback for unrelated callers.
+- **F05 accepted.** Both expression-boundary paths interpolate `TokenTag` through `Debug`, and the rendered error has no translation layer. Use one source-spelling formatter owned by expression parsing if a current helper can be reused.
+- **F06 accepted.** The binary RPN consumer pops the sole authored left operand into its right slot, then reports a missing left operand. Keep operand-side classification near the expression owner that can distinguish the authored side, without changing evaluation order.
+- **F07 accepted, linked to F06.** The two assertions expressly freeze the wrong side and would block its correction. Retain their operator-span and diagnostic-code checks.
+
+## Resolution (2026-11-13)
+
+**F01 fixed.** The EOF arm of `parse_function_body_statements` now owns the closer check for authored nested blocks. Each nested-body producer passes its block colon: statement `if`/`else` and option-capture `if`, every loop form, value-producing `if` blocks, and block-form statement `catch` handlers. EOF inside one of those bodies reports `MOTH-SYNTAX-0017` expected `;`, with an `unclosed block starts here` label on the colon. The compiler-owned entry start, header-balanced function bodies and match arms pass no opener and keep their existing EOF handling. An unclosed entry block therefore no longer swallows later statements into its scope. Closed blocks keep the existing `MOTH-RULE-0034` and `MOTH-RULE-0042` reports. The header-side `executable_block_depth` was considered and not used: a check there would preempt existing, more precise match, `else:` and initializer diagnostics. The AST owner already holds the opener span and fires only where parsing used to accept the source.
+
+**F02 fixed.** `MOTH-SYNTAX-0017` gains three secondary-label roles: `UnclosedBlockStartsHere`, `UnclosedDelimiterStartsHere` and `InnerBlockCloser`. Header function-body capture now keeps a stack of open-scope colon spans in place of its open and close counters, and records the last top-level `;` that closed a nested scope. At EOF it reports the unmatched `(` or `{` when one exists. Otherwise it labels the innermost open colon. The `this ';' closed the inner block` label appears only when the function body is the sole remaining scope, the only case where that closer is identified exactly, as Triage requires. `unclosed_delimiter_eof_diagnostic` now takes the opener the existing scan found, so `(` and `{` openers are labelled at no rescan cost. That covers signature-member defaults and AUD-0018's source-directive operand capture. The initializer open-construct scan records each opener's span as it visits it. Value-`if` and `catch` blocks label their colon, and template openers keep `MOTH-SYNTAX-0022`. Trait declarations label the `must:` colon. The kind-only `innermost_open_construct` helper and its two unit tests were removed. Existing `eof_in_*_reports_innermost_*` tests still cover innermost precedence. Focused tests now bind each label role to its site, because integration secondary-label assertions bind only the site.
+
+**F04 fixed.** The exhausted-window branch of `collect_expression_fragment_into` reports the innermost `GroupFrame::opening_span` instead of `AstCursor::current_span()`, whose exhausted fallback is byte 0. The global cursor fallback is unchanged. After AUD-0019, the report's original repro is rejected earlier by nesting-aware function-body capture, which reports the missing `)` at EOF. Both implementer and verifier probed widely, including with a debugger breakpoint, and found no user source that still reaches the branch. It is now a defensive owner. A focused bounded-view test ends a window mid-group with its opener away from byte 0. That test fails on the old code.
+
+**F05 fixed.** A single `stop_token_spellings` formatter, owned by expression parsing, renders stop tags through the schema-owned `TokenTag::descriptor().text()`. All four EOF sites in the two expression-boundary paths use it. `value = if 1` now reports `expected 'then, :'` where it used to report `expected 'TokenTag(75), TokenTag(23)'`.
+
+**F06 fixed.** `ExpressionRpnItem::Operator` now records `preceded_by_operand`, the authored fact the RPN consumer can no longer recover. It is set where operators are pushed, and compound assignment sets it to `true`. One helper, `binary_missing_operand_position`, decides the missing side for both the binary arm and the lone-operator fast path. `return 1 +` now reports `Missing right-hand operand`, `* 1` reports left, and unary diagnostics are unchanged.
+
+**F07 fixed.** `malformed_groups_keep_group_operand_diagnostics` now expects `BinaryRight` for `2 * (1 + )` and gains a `( * )` → `BinaryLeft` block. `grouped_dangling_operator_numeric_chain_rejected` now expects `Missing right-hand operand`. Operator spans and `MOTH-SYNTAX-0024` assertions are retained.
+
+**F03** remains rejected as triaged and was not changed.
+
+**F01, F02 and F04–F07 verified and closed.** Independent verifiers, not the implementers, reviewed each lane:
+
+- **F06/F07:** two rounds. Round 1 found that the lone-operator fast path still hard-coded `BinaryRight`. It now uses the shared helper.
+- **F04/F05:** one clean round. Three nits were noted and not acted on. The unreachable `let Some(end_tag) else` branches are pre-existing. The prose spellings for `newline` and `end of file` cannot reach these sites today. `'then' or ':'` would read better than `'then, :'`.
+- **F01/F02:** three rounds. Round 1 found that unclosed entry-start `catch:` handlers were still accepted. It also found untested header label roles, a trailing manifest newline, a missing progress-matrix clause and over-visible helpers. Round 2 found two problems: no regression test for the `InnerBlockCloser` precision guard, and an unreachable `None` arm in the trait-header opener. All were fixed.
+
+A final verifier reviewed the combined tree: base `f62e4f26b`, with the F04–F07 lanes and the F01/F02 diff on top. It returned clean after checking the manifest reconciliation, the absence of cross-lane interaction and the earlier lanes' repros. It ran the full library suite (7035 passed), the full integration suite (3409/3409), clippy and the format check. On its advice, the coordinator then reworded two fixture comments so they describe the observable contract, which is rejection. The coordinator's `just validate` result is recorded in the closeout commit message. Statement-boundary diagnostics changed materially, so the audit-log row is marked stale.
 
 ## Checked and clean
 

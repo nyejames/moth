@@ -1,0 +1,23 @@
+render || -> String:
+    values = {3, 4, 5}
+    if values.length() > 2:
+        if values.length() > 4:
+            return [: big; list]
+        ;
+        return [: many; items]
+    ;
+    count ~= 0
+    loop count < 2:
+        ~count += 1
+    ;
+    return [: small; list]
+;
+
+first_or_zero || -> I32:
+    values = {
+        3,
+        4,
+        5,
+    }
+    return values.get(9) catch then 0
+;

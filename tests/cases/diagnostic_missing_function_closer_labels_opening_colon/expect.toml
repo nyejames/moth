@@ -1,0 +1,22 @@
+entry = "."
+
+# A function body that reaches end of file without its `;` reports the missing closer and labels
+# the colon that opened the body, so the report names the construct that never closed.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0017"]
+message_contains = ["expected ';'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0017"
+path = "input/@entry.moth"
+line = 2
+column = 13
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 1
+column = 18

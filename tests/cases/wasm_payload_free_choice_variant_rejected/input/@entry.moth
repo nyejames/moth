@@ -1,0 +1,7 @@
+Reading ::
+    Empty,
+    Done,
+;
+
+value = Reading::Empty
+~[:payload-free choice variant]

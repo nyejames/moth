@@ -430,6 +430,18 @@ fn every_label_message_maps_to_its_code() {
             LabelMessageCode::TEMPLATE_STARTS_HERE,
         ),
         (
+            LabelDraftMessage::UnclosedBlockStartsHere,
+            LabelMessageCode::UNCLOSED_BLOCK_STARTS_HERE,
+        ),
+        (
+            LabelDraftMessage::UnclosedDelimiterStartsHere,
+            LabelMessageCode::UNCLOSED_DELIMITER_STARTS_HERE,
+        ),
+        (
+            LabelDraftMessage::InnerBlockCloser,
+            LabelMessageCode::INNER_BLOCK_CLOSER,
+        ),
+        (
             LabelDraftMessage::GenericInstantiationBodySite,
             LabelMessageCode::GENERIC_INSTANTIATION_BODY_SITE,
         ),
@@ -488,7 +500,7 @@ fn every_label_message_maps_to_its_code() {
             LabelMessageCode::EXTERNAL_IMPORT_SITE,
         ),
     ];
-    assert_eq!(cases.len(), 21);
+    assert_eq!(cases.len(), 24);
     for (message, code) in cases {
         let (label, _) = encode(message);
         assert_eq!(label.message, code);

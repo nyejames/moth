@@ -46,7 +46,7 @@ use moth_lexical::numeric::grammar::NumericLiteralKind;
 use moth_lexical::numeric::parse::literal_kind_initialises;
 
 use super::ordering;
-use super::result_type::resolve_expression_result_type;
+use super::result_type::{binary_missing_operand_position, resolve_expression_result_type};
 use super::typing_error::ExpressionTypingError;
 
 /// Resolve a parsed expression fragment into one fully typed, owner-bound expression handle.
@@ -358,7 +358,7 @@ fn lone_operator_missing_operand(
     string_table: &mut StringTable,
 ) -> ExpressionTypingError {
     let (operator, span) = match item {
-        ExpressionRpnItem::Operator { operator, span } => (operator, *span),
+        ExpressionRpnItem::Operator { operator, span, .. } => (operator, *span),
         ExpressionRpnItem::ResolvedOperator(ResolvedOperation { operator, span, .. }) => {
             (operator, *span)
         }
@@ -373,7 +373,7 @@ fn lone_operator_missing_operand(
     let position = if operator.required_values() == 1 {
         OperatorOperandPosition::Unary
     } else {
-        OperatorOperandPosition::BinaryRight
+        binary_missing_operand_position(item)
     };
     token_lexical::missing_operator_operand(string_table.intern(operator.to_str()), position, span)
         .into()

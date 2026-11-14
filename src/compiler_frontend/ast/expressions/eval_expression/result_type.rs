@@ -144,7 +144,7 @@ fn index_expression_nodes(
             | ExpressionRpnItem::NeverCall(_) => {
                 return Err(pending_expression_item_bug("expression result typing").into());
             }
-            ExpressionRpnItem::Operator { operator, span }
+            ExpressionRpnItem::Operator { operator, span, .. }
             | ExpressionRpnItem::ResolvedOperator(ResolvedOperation { operator, span, .. }) => {
                 match operator.required_values() {
                     1 => {
@@ -164,10 +164,11 @@ fn index_expression_nodes(
                         }
                     }
                     2 => {
+                        let missing_operand_position = binary_missing_operand_position(item);
                         let right = stack.pop().ok_or_else(|| {
                             missing_operand_error(
                                 operator,
-                                OperatorOperandPosition::BinaryRight,
+                                missing_operand_position,
                                 *span,
                                 string_table,
                             )
@@ -175,7 +176,7 @@ fn index_expression_nodes(
                         let left = stack.pop().ok_or_else(|| {
                             missing_operand_error(
                                 operator,
-                                OperatorOperandPosition::BinaryLeft,
+                                missing_operand_position,
                                 *span,
                                 string_table,
                             )
@@ -489,7 +490,7 @@ fn resolve_indexed_expression(
                     nodes[index].type_id = Some(operation.result_type);
                     continue;
                 }
-                let ExpressionRpnItem::Operator { operator, span } = &items[index] else {
+                let ExpressionRpnItem::Operator { operator, span, .. } = &items[index] else {
                     return Err(InfrastructureFailure::internal(
                         CompilerStage::AstConstruction,
                         "Expression typing lost an indexed operator.",
@@ -719,6 +720,26 @@ fn literal_peer_shape(
         return Some(LiteralPeerShape::CompoundContextual { compound, peer });
     }
     None
+}
+
+/// The operand side a binary operator is missing, from the authored fact the parser recorded.
+///
+/// WHAT: an operator that opened its expression frame was authored with no operand before it, so
+///       its left operand is the missing one; any other operator was authored after an operand
+///       and is missing its right.
+/// WHY: postfix ordering cannot tell `1 +` from `(* 1)`, and a lone operator has the same problem
+///      in the single-item fast path. Every expression typing entry point reads this one rule
+///      instead of re-deriving the side from its own stack pop.
+pub(super) fn binary_missing_operand_position(item: &ExpressionRpnItem) -> OperatorOperandPosition {
+    match item {
+        ExpressionRpnItem::Operator {
+            preceded_by_operand: false,
+            ..
+        } => OperatorOperandPosition::BinaryLeft,
+        // A resolved operator already had both operands when typing produced it; the right-side
+        // reading is the defensive fallback for that item.
+        _ => OperatorOperandPosition::BinaryRight,
+    }
 }
 
 /// Build a missing-operand diagnostic for the given operator and stack position.

@@ -1,0 +1,4 @@
+ready ~= false
+if ready:
+    secret = "hidden"
+io.line(secret)

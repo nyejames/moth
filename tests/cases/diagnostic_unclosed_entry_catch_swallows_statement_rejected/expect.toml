@@ -1,0 +1,23 @@
+entry = "."
+
+# An unclosed statement `catch` handler is rejected rather than silently taking the statements
+# after it into the handler scope, where the hidden binding would resolve. The report names the
+# handler on its colon and points at end of file for the missing `;`.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0017"]
+message_contains = ["expected ';'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0017"
+path = "input/@entry.moth"
+line = 4
+column = 21
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 2
+column = 24

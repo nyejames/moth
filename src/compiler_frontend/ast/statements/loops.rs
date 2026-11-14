@@ -161,12 +161,14 @@ pub fn create_loop(
     warnings.append(DiagnosticBag::from_diagnostics(header_warnings));
     let (parsed_loop_header, body_context) = header_result?;
 
+    let body_opening_span = token_stream.span_at(colon_index);
     token_stream.set_position(colon_index.saturating_add(1))?;
 
     let body_scope = body_context.scope;
     let parsed_body = parse_function_body_statements(
         token_stream,
         body_context,
+        body_opening_span,
         type_interner,
         expression_builder,
         const_values,

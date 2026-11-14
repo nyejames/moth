@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0021"]
+message_contains = ["`$doc` must attach to an eligible declaration."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+reason = "invalid_template_directive.wrong_target"
+path = "input/@entry.moth"
+line = 2
+column = 5

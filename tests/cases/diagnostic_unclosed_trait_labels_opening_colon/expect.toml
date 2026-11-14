@@ -1,0 +1,22 @@
+entry = "."
+
+# A trait declaration that reaches end of file without its `;` labels the `must:` colon, so the
+# report names the open declaration instead of only the truncation column.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0017"]
+message_contains = ["expected ';'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0017"
+path = "input/@entry.moth"
+line = 2
+column = 27
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 1
+column = 11

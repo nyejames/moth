@@ -1039,13 +1039,15 @@ fn pending_binding_leaf_numeric_chain_256_check_within_the_default_windows_main_
     );
 }
 
-/// Malformed deep groups must end in one diagnostic, never a native stack overflow.
+/// Malformed deep groups must end in one diagnostic, never a native stack overflow. The unclosed
+/// groups leave the function body unterminated, so the header names the innermost missing `)` at
+/// end of file.
 #[test]
 fn unclosed_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack() {
     run_stack_budgeted_rejection_test(
         "unclosed_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack",
         || unclosed_numeric_group_source(NESTED_NUMERIC_GROUP_DEPTH_2048),
-        "MOTH-SYNTAX-0002",
+        "MOTH-SYNTAX-0017",
         "2048 unclosed numeric groups",
     );
 }

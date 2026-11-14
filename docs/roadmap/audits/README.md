@@ -2,15 +2,19 @@
 
 One report per audit run: one kind, one area. Read the [audit guide](../audit-guide.md) first.
 
+- [open_audits](./open_audits/) contains runs in progress and completed runs with unresolved findings.
+- [closed_audits](./closed_audits/) contains runs whose findings have all been resolved, rejected or superseded, plus clean runs.
+- [Open findings](../open-audit-findings.md) tracks current work. The [completed audits log](../completed_audits_log.md) keeps historic resolutions. The [audit log](../audit-log.md) tracks coverage independently.
+
 ```text
 AUD-0001-short-description.md
 ```
 
 Findings inside use stable IDs: `AUD-0001-F01`, `AUD-0001-F02`.
 
-Create the skeleton and add it under `Audits in progress` **before** inspecting anything. This reserves the ID and makes concurrent runs collide visibly.
+Create the skeleton in `open_audits/` and add it under `Audits in progress` **before** inspecting anything. Reserve the next unused ID across both folders, so concurrent runs collide visibly.
 
-Rejected, superseded and closed findings stay in their report. Only unresolved work stays in the [open-findings index](../open-audit-findings.md). Do not store raw profiles or generated inventories here - summarise, and name the command that reproduces them.
+Rejected, superseded and closed findings stay in their report. Move the report to `closed_audits/` when no finding remains open, record its closeout in the completed audits log and update incoming links. Do not store raw profiles or generated inventories here - summarise, and name the command that reproduces them.
 
 ## Skeleton
 
@@ -71,7 +75,7 @@ What was not covered and why.
 ## Open-findings entry
 
 ```markdown
-- [AUD-####-F##: Title](./audits/AUD-####-short-description.md#anchor)
+- [AUD-####-F##: Title](./audits/open_audits/AUD-####-short-description.md#anchor)
   - `<kind>` | `<area>`
 ```
 

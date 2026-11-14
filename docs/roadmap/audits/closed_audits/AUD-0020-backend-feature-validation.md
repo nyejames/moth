@@ -39,7 +39,7 @@ Open findings AUD-0017-F01..F07, AUD-0018-F01..F02 and AUD-0019-F01 all own fron
 
 ### AUD-0020-F01: Reachable payload-free variant values are accepted and then crash Wasm lowering
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Correctness`
 
 #### Evidence
@@ -124,6 +124,20 @@ Each probe above must report `MOTH-RULE-0064` at an authored span instead of a b
 
 None.
 
+## Triage (2026-11-13)
+
+**F01 accepted** after source review at `fd695d18b`. The reachable-shape check only records `VariantPayloadValues` when a `VariantConstruct` has fields. The Wasm lowerer emits an `I64` for an empty constructor, while `lower_type_to_abi` assigns `Handle` to that option/choice type. This proves incompatible carriers at the handoff, consistent with the report's three build failures. Reject unsupported reachable constructions before lowering. Preserve the folded and default assertion-message exceptions because their lowerer paths never consume the variant carrier. Do not implement variant storage as part of the audit follow-up. Fresh execution was unavailable without a compiler binary or Rust toolchain.
+
+## Resolution (2026-11-13)
+
+**F01 fixed.** The `VariantConstruct` arm of `search_expression` no longer exempts empty-field constructions. A payload-bearing construction keeps `VariantPayloadValues`. A payload-free one (unit choice variant, `Option` `none`) records the new `PayloadFreeVariantValues` reason (`unsupported_backend_feature.payload_free_variant_values`, rendered "payload-free variant values"), so the user receives `MOTH-RULE-0064` at the authored construction instead of a backend-lowering failure. A new reason was needed because `VariantPayloadValues` renders "variant payload fields", which is false for a value without fields, and its wording is pinned for `Some` by `cast_optional_success_wraps_inner_value`. The `AssertFailure` arm now skips the `Default` message carrier explicitly, because `terminator.rs` lowers that message as a static string without reading the carrier. The `Folded` carve-out is unchanged. No lowering, `lower_type_to_abi` or JS change.
+
+Regression cases `wasm_payload_free_choice_variant_rejected` (reachable unit choice binding) and `wasm_payload_free_option_none_rejected` (`none` as a call argument) pin the reason and authored line, with HTML-JS success lanes. Existing tests were not modified.
+
+An earlier verifier objected that `Reading::Empty is Reading::Done`, two fresh constructions compared, lowered before the fix and is now rejected. The coordinator did not accept this. The progress matrix claims choices only for JS/HTML, no passing HTML-Wasm case constructs a choice or option value, and carving out a constant comparison would keep accidental exposure of deferred surface behind a context-sensitive exception. The final verifier agreed.
+
+**F01 verified and closed.** An independent verifier, not the implementer, re-ran the original probes and the call-argument probe on a rebuilt debug compiler. Each reports `MOTH-RULE-0064` at an authored span. A reachable `return`, an omitted default parameter, value-`if` branches and a compile-time `#=` constant used at runtime are also gated. Struct fields, collections and match arms are still intercepted by their existing parent reasons. An uncalled helper and an uncalled default parameter still build. Default and folded assertion messages still build, and runtime messages are still rejected with `RuntimeAssertionMessages`. The verifier ran clippy, the format check, `cargo test -p moth` for `backends::`, `compiler_messages` and `integration_test_runner`, and `moth tests --backend html_wasm --terse` (508/508). The coordinator's `just validate` result is recorded in the closeout commit message. Implementation changed target validation materially, so the audit-log row is marked stale.
+
 ## Checked and clean
 
 - Gate ordering and priority: routes, fixed scalars, `Dec`, assertions, cross-module calls, maps, casts, numerics, range candidates, floats, loop-step failures, generics, errors, fallible flow, mutable parameters, mutable aliases, shapes. Narrower type/operation reasons keep priority over later gates (pinned by `wasm_mutable_parameter_gate_preserves_existing_type_reason_precedence` and the builder running linked targets last).
@@ -137,7 +151,6 @@ None.
 - Unsupported-shape walker: exhaustive over selected statements, terminators and expression trees through the shared child walker; `PushRuntimeFragment`, match scrutinee/pattern/guard and `Invoke` operands are all visited. `Bool`/`Char` template chunks are rejected (`wasm_bool_template_chunk_rejected` fixture plus probes); `Byte` chunks never arrive (frontend `MOTH-SYNTAX-0022`, probed); narrow-integer chunks are accepted and lower (probed `U8`/`I8`/`U16`/`I16`); nested `StringAppend` chains are fully descended.
 - `BackendTypeFacts`: cycle-safe. Open-cycle visits are never memoised, so recursive nominal types recompute rather than cache provisional facts; scalar/error/number facts still propagate to the outermost querier.
 - `Dec`: literals, comparisons and conversions are all rejected before lowering's `compiler_bug!` arms via the `NumberValues` shape scan and the cast gate.
-- Fixture census: 165 `MOTH-RULE-0064` fixtures pin 24 of 27 reasons. The three with no `tests/cases` pin are `CrossModuleCalls`, `RuntimeAssertionMessages` and `FloatBoundaryValidation`... no — recount: every reason except `CrossModuleCalls`, `FloatFormatting` and `FloatBoundaryValidation` has at least one pin; those three are covered by Rust unit tests instead. (Corrected during closeout: the census command output lists `runtime_assertion_messages` once; the unpinned three are cross-module calls and the two float-statement reasons.)
 
 ## Limitations
 

@@ -64,6 +64,9 @@ static ALL_LABEL_ROLES_FAMILY: FamilyRow = FamilyRow {
         LabelMessageCode::EARLIER_TEMPLATE_HEAD_ITEM,
         LabelMessageCode::CONFLICTS_WITH_EARLIER_HEAD_ITEM,
         LabelMessageCode::TEMPLATE_STARTS_HERE,
+        LabelMessageCode::UNCLOSED_BLOCK_STARTS_HERE,
+        LabelMessageCode::UNCLOSED_DELIMITER_STARTS_HERE,
+        LabelMessageCode::INNER_BLOCK_CLOSER,
         LabelMessageCode::GENERIC_INFERENCE_PREVIOUS_EVIDENCE,
         LabelMessageCode::IMMUTABLE_BINDING_DECLARATION,
         LabelMessageCode::TYPED_FAILURE_PRODUCER,
@@ -128,6 +131,18 @@ fn label_cases(
         (
             LabelDraftMessage::TemplateStartsHere,
             "Template starts here".to_owned(),
+        ),
+        (
+            LabelDraftMessage::UnclosedBlockStartsHere,
+            "unclosed block starts here".to_owned(),
+        ),
+        (
+            LabelDraftMessage::UnclosedDelimiterStartsHere,
+            "unclosed delimiter starts here".to_owned(),
+        ),
+        (
+            LabelDraftMessage::InnerBlockCloser,
+            "this `;` closed the inner block".to_owned(),
         ),
         (
             LabelDraftMessage::GenericInstantiationBodySite,

@@ -73,6 +73,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 #[path = "parse_file_headers_cast_trait_tests.rs"]
 mod parse_file_headers_cast_trait_tests;
+#[path = "parse_file_headers_closer_label_tests.rs"]
+mod parse_file_headers_closer_label_tests;
 #[path = "parse_file_headers_declaration_tests.rs"]
 mod parse_file_headers_declaration_tests;
 #[path = "parse_file_headers_default_tests.rs"]

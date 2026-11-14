@@ -1,0 +1,8 @@
+show ||:
+    io.line("x"; "y")
+    io.line("still inside the function")
+;
+
+later || -> I32:
+    return 1
+;

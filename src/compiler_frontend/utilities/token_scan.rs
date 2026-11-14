@@ -13,6 +13,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::{
     draft::DiagnosticDraft,
     families::{templates, token_lexical},
+    labels::LabelDraftMessage,
 };
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_binding_target_syntax;
@@ -733,7 +734,7 @@ fn item_at_offset_is_named(token_stream: &AstCursor, offset: usize) -> bool {
 ///      block, a catch body, a parenthesis or a collection. Each construct owns its
 ///      own terminator and must report it precisely at end-of-file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum OpenConstruct {
+enum OpenConstruct {
     Template,
     Parenthesis,
     CollectionOrMap,
@@ -894,25 +895,42 @@ fn record_pipe_action(
     }
 }
 
-/// Returns the construct that most recently opened and still owns a closing delimiter.
+/// One construct the declaration-initializer scanner has opened and not yet closed.
 ///
-/// WHY: depth counters can say which construct kinds are open but not their nesting order.
-/// The scanner keeps this stack so mixed forms report the actual innermost delimiter.
-pub(crate) fn innermost_open_construct(open_constructs: &[OpenConstruct]) -> Option<OpenConstruct> {
-    open_constructs.last().copied()
+/// WHAT: pairs the construct kind with the authored opener that owns its closing delimiter.
+/// WHY: the end-of-file diagnostic labels that opener, so the kind and its span travel as one
+///      stack entry. Separate stacks could drift and label the wrong token.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct OpenConstructSite {
+    construct: OpenConstruct,
+    opening_span: SourceSpan,
 }
 
-fn close_open_construct(open_constructs: &mut Vec<OpenConstruct>, expected: OpenConstruct) {
-    if open_constructs.last() == Some(&expected) {
+impl OpenConstructSite {
+    const fn new(construct: OpenConstruct, opening_span: SourceSpan) -> Self {
+        Self {
+            construct,
+            opening_span,
+        }
+    }
+}
+
+fn close_open_construct(open_constructs: &mut Vec<OpenConstructSite>, expected: OpenConstruct) {
+    if open_constructs
+        .last()
+        .is_some_and(|site| site.construct == expected)
+    {
         open_constructs.pop();
     }
 }
 
-fn close_statement_construct(open_constructs: &mut Vec<OpenConstruct>) {
-    if matches!(
-        open_constructs.last(),
-        Some(OpenConstruct::CatchBlock | OpenConstruct::ValueIfBlock)
-    ) {
+fn close_statement_construct(open_constructs: &mut Vec<OpenConstructSite>) {
+    if open_constructs.last().is_some_and(|site| {
+        matches!(
+            site.construct,
+            OpenConstruct::CatchBlock | OpenConstruct::ValueIfBlock
+        )
+    }) {
         open_constructs.pop();
     }
 }
@@ -1014,6 +1032,13 @@ impl UnclosedDelimiter {
             Self::Collection(_) => "}",
         }
     }
+
+    /// The authored opener that still owns a closing delimiter.
+    const fn opening_span(self) -> SourceSpan {
+        match self {
+            Self::Template(span) | Self::Parenthesis(span) | Self::Collection(span) => span,
+        }
+    }
 }
 
 /// Which kind of opener the forward EOF scan found.
@@ -1055,27 +1080,31 @@ pub(crate) fn innermost_unclosed_template_opening(
     }
 }
 
-/// Builds the EOF diagnostic for the innermost delimiter left open by a truncated scan.
+/// Builds the EOF diagnostic for a token region left open by a truncated scan.
 ///
 /// WHAT: names a missing template bracket or the innermost unmatched `)`/`}`, falling back to
 /// the caller's expected delimiter (or a bare EOF) when the region balances.
 /// WHY: header function-body capture and signature-member default scanning share one EOF rule;
-/// keeping it here makes their template-vs-delimiter precedence and wording identical.
+/// keeping it here makes their template-vs-delimiter precedence and wording identical. The
+/// opener label is the only link from the truncation back to the authored `(` or `{`, so callers
+/// pass the opener the scan already found rather than rescanning the region here.
 pub(crate) fn unclosed_delimiter_eof_diagnostic(
-    source: &SourceTokens,
-    start: TokenIndex,
-    eof: TokenIndex,
+    unclosed: Option<UnclosedDelimiter>,
     eof_span: Option<SourceSpan>,
     fallback_expected_delimiter: Option<&'static str>,
     string_table: &mut StringTable,
 ) -> DiagnosticDraft {
-    match innermost_unclosed_delimiter(source, start, eof) {
+    match unclosed {
         Some(UnclosedDelimiter::Template(opening)) => {
             templates::missing_closing_bracket(eof_span, Some(opening))
         }
         Some(delimiter) => token_lexical::unexpected_end_of_file(
             Some(string_table.intern(delimiter.expected_delimiter())),
             eof_span,
+        )
+        .with_label(
+            Some(delimiter.opening_span()),
+            Some(LabelDraftMessage::UnclosedDelimiterStartsHere),
         ),
         None => token_lexical::unexpected_end_of_file(
             fallback_expected_delimiter.map(|delimiter| string_table.intern(delimiter)),
@@ -1176,7 +1205,7 @@ pub(crate) fn collect_declaration_initializer_range(
     let mut loop_header_pending = false;
     let mut inline_value_if_missing_else_depth = 0usize;
     let mut initializer_closed_by_statement_block = false;
-    let mut open_constructs = Vec::new();
+    let mut open_constructs: Vec<OpenConstructSite> = Vec::new();
     let mut record_pipe_depth = 0usize;
     let mut last_closed_record_pipe = false;
 
@@ -1290,39 +1319,42 @@ pub(crate) fn collect_declaration_initializer_range(
         }
 
         if current_tag == TokenTag::EOF && (!at_top_level || inside_record_region) {
-            if matches!(
-                innermost_open_construct(&open_constructs),
-                Some(OpenConstruct::Template)
-            ) {
+            let Some(innermost) = open_constructs.last().copied() else {
+                return Err(TokenScanFailure::Infrastructure(
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "declaration-initializer scanner reported a nested state with no open construct",
+                    ),
+                ));
+            };
+            if innermost.construct == OpenConstruct::Template {
                 return Err(TokenScanFailure::Diagnostic(
                     templates::missing_closing_bracket(
                         Some(current_ref.source_span()),
-                        innermost_unclosed_template_opening(
-                            source_tokens,
-                            start,
-                            current_ref.index(),
-                        ),
+                        Some(innermost.opening_span),
                     ),
                 ));
             }
-            let expected_delimiter = match innermost_open_construct(&open_constructs) {
-                Some(open_construct) => {
-                    Some(string_table.get_or_intern(open_construct.expected_delimiter().to_owned()))
+            let expected_delimiter = Some(
+                string_table.get_or_intern(innermost.construct.expected_delimiter().to_owned()),
+            );
+            let opener_label = match innermost.construct {
+                // A value-producing block and a catch handler open with a colon and close with
+                // `;`, so the same label a function body uses names the still-open block.
+                OpenConstruct::CatchBlock | OpenConstruct::ValueIfBlock => {
+                    LabelDraftMessage::UnclosedBlockStartsHere
                 }
-                None => {
-                    return Err(TokenScanFailure::Infrastructure(
-                        InfrastructureFailure::internal(
-                            CompilerStage::AstConstruction,
-                            "declaration-initializer scanner reported a nested state with no open construct",
-                        ),
-                    ));
-                }
+                OpenConstruct::Template
+                | OpenConstruct::Parenthesis
+                | OpenConstruct::CollectionOrMap
+                | OpenConstruct::PipeList => LabelDraftMessage::UnclosedDelimiterStartsHere,
             };
             return Err(TokenScanFailure::Diagnostic(
                 token_lexical::unexpected_end_of_file(
                     expected_delimiter,
                     Some(current_ref.source_span()),
-                ),
+                )
+                .with_label(Some(innermost.opening_span), Some(opener_label)),
             ));
         }
 
@@ -1339,7 +1371,10 @@ pub(crate) fn collect_declaration_initializer_range(
                     value_if_header_pending = false;
                     loop_header_pending = false;
                     catch_block_depth = catch_block_depth.saturating_add(1);
-                    open_constructs.push(OpenConstruct::CatchBlock);
+                    open_constructs.push(OpenConstructSite::new(
+                        OpenConstruct::CatchBlock,
+                        current_ref.source_span(),
+                    ));
                 }
                 // Inside a catch, nested statement blocks remain catch-tagged so the closing
                 // `;` pairs with the same counter that opened it.
@@ -1347,13 +1382,19 @@ pub(crate) fn collect_declaration_initializer_range(
                     value_if_header_pending = false;
                     loop_header_pending = false;
                     catch_block_depth = catch_block_depth.saturating_add(1);
-                    open_constructs.push(OpenConstruct::CatchBlock);
+                    open_constructs.push(OpenConstructSite::new(
+                        OpenConstruct::CatchBlock,
+                        current_ref.source_span(),
+                    ));
                 }
                 TokenTag::COLON if value_if_header_pending || loop_header_pending => {
                     value_if_header_pending = false;
                     loop_header_pending = false;
                     value_if_block_depth = value_if_block_depth.saturating_add(1);
-                    open_constructs.push(OpenConstruct::ValueIfBlock);
+                    open_constructs.push(OpenConstructSite::new(
+                        OpenConstruct::ValueIfBlock,
+                        current_ref.source_span(),
+                    ));
                 }
                 // A colon without an `if`, `loop` or `catch` header above it cannot open a
                 // block. Match-arm headers such as `1:` or `else:` stay arm syntax, and the arm
@@ -1406,15 +1447,30 @@ pub(crate) fn collect_declaration_initializer_range(
         }
 
         match current_tag {
-            TokenTag::OPEN_PARENTHESIS => open_constructs.push(OpenConstruct::Parenthesis),
+            TokenTag::OPEN_PARENTHESIS => {
+                open_constructs.push(OpenConstructSite::new(
+                    OpenConstruct::Parenthesis,
+                    current_ref.source_span(),
+                ));
+            }
             TokenTag::CLOSE_PARENTHESIS => {
                 close_open_construct(&mut open_constructs, OpenConstruct::Parenthesis);
             }
-            TokenTag::OPEN_CURLY => open_constructs.push(OpenConstruct::CollectionOrMap),
+            TokenTag::OPEN_CURLY => {
+                open_constructs.push(OpenConstructSite::new(
+                    OpenConstruct::CollectionOrMap,
+                    current_ref.source_span(),
+                ));
+            }
             TokenTag::CLOSE_CURLY => {
                 close_open_construct(&mut open_constructs, OpenConstruct::CollectionOrMap);
             }
-            TokenTag::TEMPLATE_HEAD => open_constructs.push(OpenConstruct::Template),
+            TokenTag::TEMPLATE_HEAD => {
+                open_constructs.push(OpenConstructSite::new(
+                    OpenConstruct::Template,
+                    current_ref.source_span(),
+                ));
+            }
             TokenTag::TEMPLATE_CLOSE => {
                 close_open_construct(&mut open_constructs, OpenConstruct::Template);
             }
@@ -1426,7 +1482,10 @@ pub(crate) fn collect_declaration_initializer_range(
                     collected.iter().all(|token| token.tag == TokenTag::NEWLINE),
                 ) {
                     RecordPipeAction::Open => {
-                        open_constructs.push(OpenConstruct::PipeList);
+                        open_constructs.push(OpenConstructSite::new(
+                            OpenConstruct::PipeList,
+                            current_ref.source_span(),
+                        ));
                         record_pipe_depth = record_pipe_depth.saturating_add(1);
                         last_closed_record_pipe = false;
                     }

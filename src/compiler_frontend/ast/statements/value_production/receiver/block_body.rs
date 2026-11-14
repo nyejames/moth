@@ -28,6 +28,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, InvalidControlFlowStatementReason,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -143,6 +144,8 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
         path_fork,
     } = input;
 
+    // One `;` closes the whole `if`/`else` value block, so both bodies report the same opener.
+    let body_opening_span = Some(token_stream.current_span());
     token_stream.advance(); // consume `:`
 
     let then_request_start = outer_context.generic_request_checkpoint();
@@ -150,6 +153,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
         token_stream,
         then_parent,
         outer_context,
+        body_opening_span,
         type_interner,
         expression_builder,
         const_values,
@@ -172,6 +176,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
         token_stream,
         else_parent,
         outer_context,
+        body_opening_span,
         type_interner,
         expression_builder,
         const_values,
@@ -199,6 +204,7 @@ fn parse_one_value_block_body(
     token_stream: &mut AstCursor,
     parent: &ScopeContext,
     outer_context: &ScopeContext,
+    body_opening_span: Option<SourceSpan>,
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
@@ -215,6 +221,7 @@ fn parse_one_value_block_body(
     let parsed_body = parse_function_body_statements(
         token_stream,
         branch_context,
+        body_opening_span,
         type_interner,
         expression_builder,
         const_values,

@@ -153,7 +153,11 @@ pub(crate) fn runtime_operator_item(
     operator: Operator,
     span: Option<SourceSpan>,
 ) -> ExpressionRpnItem {
-    ExpressionRpnItem::Operator { operator, span }
+    ExpressionRpnItem::Operator {
+        operator,
+        span,
+        preceded_by_operand: true,
+    }
 }
 
 pub(crate) fn runtime_function_call_item(

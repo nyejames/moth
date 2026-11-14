@@ -1,0 +1,22 @@
+entry = "."
+
+# An entry-start `if` body closes with `;` like any other block. Omitting it is rejected rather
+# than silently taking later statements into the block; the report names the block on its colon.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0017"]
+message_contains = ["expected ';'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0017"
+path = "input/@entry.moth"
+line = 4
+column = 16
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 2
+column = 9

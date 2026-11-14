@@ -3,6 +3,7 @@ use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::{
     families::templates::{InvalidTemplateStructureCode, InvalidTemplateStructureView},
     families::token_lexical::UnexpectedEndOfFileView,
+    foreign::SiteRef,
     labels::DurableLabelMessage,
     test_support::compact_bag_for_test,
 };
@@ -13,10 +14,10 @@ use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TestSourceTokensBuilder, TokenCursor, TokenIndex, TokenRange, TokenTag,
 };
 use crate::compiler_frontend::utilities::token_scan::{
-    InitializerReference, OpenConstruct, TokenFactView, TokenScanFailure, UnclosedDelimiter,
+    InitializerReference, TokenFactView, TokenScanFailure, UnclosedDelimiter,
     collect_declaration_initializer_range, collect_scanned_symbol_references,
     consume_balanced_template_region_from_source, has_top_level_comma_before_statement_end,
-    innermost_open_construct, innermost_unclosed_delimiter, innermost_unclosed_template_opening,
+    innermost_unclosed_delimiter, innermost_unclosed_template_opening,
 };
 use std::sync::Arc;
 
@@ -764,6 +765,36 @@ fn eof_expected_delimiter(failure: TokenScanFailure, string_table: &StringTable)
         .map(|id| string_table.resolve(id).to_owned())
 }
 
+/// Asserts a failed declaration-initializer scan reported one EOF opener label, and returns its
+/// span. `matches_expected` names the label role the report must carry.
+fn eof_opener_label_span(
+    failure: TokenScanFailure,
+    matches_expected: impl Fn(&DurableLabelMessage<'_>) -> bool,
+) -> Option<SourceSpan> {
+    let draft = match failure {
+        TokenScanFailure::Diagnostic(diagnostic) => diagnostic,
+        TokenScanFailure::Infrastructure(error) => {
+            panic!("token scanner infrastructure failure: {error:?}")
+        }
+    };
+    let compacted = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = compacted
+        .first()
+        .expect("the failed scan should retain its diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0017");
+    let labels: Vec<_> = diagnostic.durable_labels().collect();
+    assert_eq!(
+        labels.len(),
+        1,
+        "the EOF report should carry exactly its opener label"
+    );
+    assert!(matches_expected(&labels[0].message));
+    match labels[0].site {
+        SiteRef::Local(span) => Some(span),
+        SiteRef::Absent | SiteRef::Foreign { .. } => None,
+    }
+}
+
 /// Asserts a failed declaration-initializer scan reported an unclosed template.
 fn assert_template_missing_close(failure: TokenScanFailure) {
     let draft = match failure {
@@ -966,20 +997,85 @@ fn eof_in_template_inside_parenthesis_reports_innermost_template() {
 }
 
 #[test]
-fn innermost_open_construct_is_none_when_nothing_is_open() {
-    assert_eq!(innermost_open_construct(&[]), None);
+fn eof_in_parenthesis_labels_its_opening_span() {
+    let mut string_table = StringTable::new();
+    let opening = fixture_span(4, 1);
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::Symbol(string_table.intern("call")),
+            FixturePart::SpannedStatic(TokenTag::OPEN_PARENTHESIS, opening),
+            FixturePart::Static(TokenTag::EOF),
+        ],
+    );
+
+    let failure = scan_initializer(&owner, &mut string_table)
+        .expect_err("unterminated parenthesis should report EOF");
+    let label_span = eof_opener_label_span(failure, |message| {
+        matches!(message, DurableLabelMessage::UnclosedDelimiterStartsHere)
+    });
+    assert_eq!(
+        label_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, opening)),
+        "the report should label the authored `(`"
+    );
 }
 
 #[test]
-fn innermost_open_construct_prioritizes_depth_over_statement_blocks() {
-    let open_constructs = [
-        OpenConstruct::CatchBlock,
-        OpenConstruct::ValueIfBlock,
-        OpenConstruct::Parenthesis,
-    ];
+fn eof_in_catch_block_labels_the_block_colon() {
+    let mut string_table = StringTable::new();
+    let load_name = string_table.intern("load");
+    let colon = fixture_span(20, 1);
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::Symbol(load_name),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::CATCH),
+            FixturePart::SpannedStatic(TokenTag::COLON, colon),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
+        ],
+    );
+
+    let failure = scan_initializer(&owner, &mut string_table)
+        .expect_err("unterminated catch block should report EOF");
+    let label_span = eof_opener_label_span(failure, |message| {
+        matches!(message, DurableLabelMessage::UnclosedBlockStartsHere)
+    });
     assert_eq!(
-        innermost_open_construct(&open_constructs),
-        Some(OpenConstruct::Parenthesis)
+        label_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, colon)),
+        "the report should label the catch block's opening colon"
+    );
+}
+
+#[test]
+fn eof_in_value_producing_if_labels_the_block_colon() {
+    let mut string_table = StringTable::new();
+    let condition_name = string_table.intern("ready");
+    let colon = fixture_span(11, 1);
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::Static(TokenTag::IF),
+            FixturePart::Symbol(condition_name),
+            FixturePart::SpannedStatic(TokenTag::COLON, colon),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
+        ],
+    );
+
+    let failure = scan_initializer(&owner, &mut string_table)
+        .expect_err("unterminated value-producing if should report EOF");
+    let label_span = eof_opener_label_span(failure, |message| {
+        matches!(message, DurableLabelMessage::UnclosedBlockStartsHere)
+    });
+    assert_eq!(
+        label_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, colon)),
+        "the report should label the value-producing block's opening colon"
     );
 }
 

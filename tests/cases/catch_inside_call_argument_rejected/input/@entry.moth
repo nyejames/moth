@@ -1,0 +1,7 @@
+load || -> String:
+    return "ok"
+;
+
+show ||:
+    io.line(load() catch: then "x")
+;

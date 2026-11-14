@@ -201,6 +201,7 @@ impl IntakeBody {
                 ExpressionRpnItem::Operator {
                     operator: Operator::LessThan,
                     span: None,
+                    preceded_by_operand: true,
                 },
             ],
             expected: ExpectedType::Infer,
