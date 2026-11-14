@@ -1169,6 +1169,32 @@ pub enum InvalidScopeLayoutReason {
     AdditionalCloserOnLine,
 }
 
+/// The authored source construct whose closing `;` the file ended without.
+///
+/// WHAT: names the still-open construct that an end-of-file report must describe.
+/// WHY: the parser that recognises the opener already knows which construct it began. Carrying
+///      that typed value beside the opening site stops the end-of-file path from guessing the
+///      construct from the surrounding tokens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SourceScopeConstruct {
+    /// A function body opened by the signature `:`.
+    FunctionBody,
+    /// An `if` body opened by its header `:`.
+    IfBlock,
+    /// A `loop` body opened by its header `:`.
+    LoopBlock,
+    /// A `catch` handler opened by its header `:`.
+    CatchHandler,
+    /// A match body opened by the `is:` of its header.
+    MatchBlock,
+    /// A choice declaration opened by `::`.
+    ChoiceDeclaration,
+    /// A trait declaration opened by its `must:` colon.
+    TraitDeclaration,
+    /// A declared region opened by the line-initial `name:`.
+    DeclaredRegion,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ReservedNameOwner {
     BuiltinType,
@@ -1228,7 +1254,6 @@ pub enum InvalidControlFlowStatementReason {
     ReturnBangOutsideErrorFunction,
     ExpectedColonAfterCondition,
     ExpectedConditionAfterIf,
-    UnexpectedEndOfFileInMatch,
     CaseRequiredBeforeElse,
     DuplicateElseArm,
     ExpectedFatArrow,

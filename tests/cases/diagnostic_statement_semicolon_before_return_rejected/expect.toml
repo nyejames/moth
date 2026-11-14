@@ -1,0 +1,24 @@
+entry = "."
+
+# A statement-terminating `;` is the first structural error, so it is reported before the later
+# end of file that its misuse exposes. The report names the `;` and labels the `if` it prematurely
+# closed instead of blaming the missing function closer.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0041"]
+message_contains = ["`;` closes a scope, not a statement"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0041"
+reason = "invalid_scope_layout.multiline_closer_after_code"
+path = "input/@entry.moth"
+line = 3
+column = 17
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 2
+column = 13

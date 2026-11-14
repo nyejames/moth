@@ -16,10 +16,12 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DeferredFeatureReason;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::InvalidChoiceVariantReason;
+use crate::compiler_frontend::compiler_messages::SourceScopeConstruct;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
@@ -208,7 +210,13 @@ pub(crate) fn parse_choice_shell(
                 // Make sure this is not a duplicate variant name.
                 if let Some(first_span) = seen_variants.get(&variant_name) {
                     if duplicate_diagnostic.is_none() {
-                        duplicate_diagnostic = Some(names_declarations::duplicate_declaration(variant_name, current_span).with_label(Some(*first_span), Some(crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage::PreviousDeclaration)));
+                        duplicate_diagnostic = Some(
+                            names_declarations::duplicate_declaration(variant_name, current_span)
+                                .with_label(
+                                    Some(*first_span),
+                                    Some(LabelDraftMessage::PreviousDeclaration),
+                                ),
+                        );
                     }
                 } else if let Some(variant_span) = current_span {
                     seen_variants.insert(variant_name, variant_span);
@@ -400,9 +408,13 @@ pub(crate) fn parse_choice_shell(
                         }
                     }
                     TokenTag::EOF => {
-                        return Err(token_lexical::unexpected_end_of_file(
-                            Some(string_table.intern(";")),
+                        return Err(token_lexical::unclosed_source_scope(
+                            SourceScopeConstruct::ChoiceDeclaration,
                             current_source_span(token_stream),
+                        )
+                        .with_label(
+                            Some(opening_span),
+                            Some(LabelDraftMessage::UnclosedScopeStartsHere),
                         )
                         .into());
                     }
@@ -444,9 +456,13 @@ pub(crate) fn parse_choice_shell(
                 break;
             }
             TokenTag::EOF => {
-                return Err(token_lexical::unexpected_end_of_file(
-                    Some(string_table.intern(";")),
+                return Err(token_lexical::unclosed_source_scope(
+                    SourceScopeConstruct::ChoiceDeclaration,
                     current_span,
+                )
+                .with_label(
+                    Some(opening_span),
+                    Some(LabelDraftMessage::UnclosedScopeStartsHere),
                 )
                 .into());
             }

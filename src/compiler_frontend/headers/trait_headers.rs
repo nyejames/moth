@@ -13,7 +13,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::names_de
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    CapacityResource, InvalidDeclarationReason, InvalidSignatureMemberReason,
+    CapacityResource, InvalidDeclarationReason, InvalidSignatureMemberReason, SourceScopeConstruct,
 };
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::signature_members::parse_trait_requirement_signature_syntax;
@@ -171,15 +171,15 @@ pub(super) fn parse_trait_declaration(
 
             TokenTag::EOF => {
                 // The trait body's `must:` colon is the only authored site that can explain which
-                // block is still open when the file ends.
+                // declaration is still open when the file ends.
                 return Err(HeaderParseFailure::Diagnostic(
-                    token_lexical::unexpected_end_of_file(
-                        Some(context.string_table.intern(";")),
+                    token_lexical::unclosed_source_scope(
+                        SourceScopeConstruct::TraitDeclaration,
                         cursor_span(cursor),
                     )
                     .with_label(
                         Some(body_opening_span),
-                        Some(LabelDraftMessage::UnclosedBlockStartsHere),
+                        Some(LabelDraftMessage::UnclosedScopeStartsHere),
                     ),
                 ));
             }

@@ -21,16 +21,16 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_invalid_expression, render_invalid_number_literal, render_invalid_path,
     render_invalid_scope_layout, render_invalid_string_escape, render_missing_closing_delimiter,
     render_missing_collection_item, render_missing_operator_operand, render_non_utf8_source,
-    render_source_span_capacity, render_title_only, render_unexpected_end_of_file,
-    render_unexpected_token, render_unexpected_trailing_comma,
+    render_source_span_capacity, render_title_only, render_unclosed_source_scope,
+    render_unexpected_end_of_file, render_unexpected_token, render_unexpected_trailing_comma,
 };
 use crate::compiler_frontend::compiler_messages::{
     AstCapacityResource, CapacityResource, ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason,
     DiagnosticCapacityResource, DiagnosticCompoundAssignmentOperator, DiagnosticOperator,
     DiagnosticSeverity, DiagnosticToken, HirCapacityResource, InvalidExpressionReason,
     InvalidMultiBindReason, InvalidScopeLayoutReason, InvalidStringEscapeReason, MissingWhitespace,
-    OperatorOperandPosition, PathKind, SourceSpanCapacityResource, SymbolicSpacingConstruct,
-    SymbolicSpacingError,
+    OperatorOperandPosition, PathKind, SourceScopeConstruct, SourceSpanCapacityResource,
+    SymbolicSpacingConstruct, SymbolicSpacingError,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -913,11 +913,7 @@ diagnostic_family! {
         severity: DiagnosticSeverity::Error,
         title: "Unexpected end of file",
         facts: [expected_delimiter: OptStringFact],
-        labels: [
-            LabelMessageCode::UNCLOSED_BLOCK_STARTS_HERE,
-            LabelMessageCode::UNCLOSED_DELIMITER_STARTS_HERE,
-            LabelMessageCode::INNER_BLOCK_CLOSER,
-        ],
+        labels: [LabelMessageCode::UNCLOSED_DELIMITER_STARTS_HERE],
         extra: None,
         ctor: generated unexpected_end_of_file,
         view: UnexpectedEndOfFileView,
@@ -1448,6 +1444,52 @@ pub(crate) fn invalid_scope_layout(
     })
 }
 
+unit_code! {
+    impl SourceScopeConstruct {
+        FunctionBody = 1,
+        IfBlock = 2,
+        LoopBlock = 3,
+        CatchHandler = 4,
+        MatchBlock = 5,
+        ChoiceDeclaration = 6,
+        TraitDeclaration = 7,
+        DeclaredRegion = 8,
+    }
+}
+
+diagnostic_family! {
+    UNCLOSED_SOURCE_SCOPE {
+        internal: 1042,
+        stable: "MOTH-SYNTAX-0042",
+        category: DiagnosticCategory::Syntax,
+        severity: DiagnosticSeverity::Error,
+        title: "Unclosed source scope",
+        facts: [reason: UnitFact<SourceScopeConstruct>],
+        labels: [
+            LabelMessageCode::UNCLOSED_SCOPE_STARTS_HERE,
+            LabelMessageCode::INNER_BLOCK_CLOSER,
+        ],
+        extra: None,
+        ctor: manual,
+        reason_key: reason,
+        view: UnclosedSourceScopeView,
+        render: render_unclosed_source_scope,
+    }
+}
+
+/// The unclosed-source-scope draft for `construct` at `span`.
+///
+/// The emitting owner labels the innermost still-open opener and, when a visible `;` closed an
+/// inner scope instead, that closer. The draft never claims which scope the author meant to close.
+pub(crate) fn unclosed_source_scope(
+    construct: SourceScopeConstruct,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    DiagnosticDraft::with_facts(&UNCLOSED_SOURCE_SCOPE, span, |cursor| {
+        cursor.push::<UnitFact<SourceScopeConstruct>>(&construct)
+    })
+}
+
 pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     EXPECTED_TOKEN,
     COMPILER_CAPACITY_EXCEEDED,
@@ -1471,4 +1513,5 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES:
     SOURCE_SPAN_CAPACITY,
     NON_UTF8_SOURCE,
     INVALID_SCOPE_LAYOUT,
+    UNCLOSED_SOURCE_SCOPE,
 ];

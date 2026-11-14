@@ -24,8 +24,8 @@ use crate::compiler_frontend::ast::statements::body_symbol::{
 use crate::compiler_frontend::ast::statements::branching::create_branch;
 use crate::compiler_frontend::ast::statements::declared_regions::classify_deferred_declared_region_header;
 use crate::compiler_frontend::ast::statements::diagnostics::{
-    UnexpectedScopeCloseContext, scope_closer_layout_error, unexpected_scope_close,
-    unexpected_statement_token,
+    UnexpectedScopeCloseContext, last_child_closer_span, scope_closer_layout_error,
+    unexpected_scope_close, unexpected_statement_token,
 };
 use crate::compiler_frontend::ast::statements::loops::create_loop;
 use crate::compiler_frontend::ast::statements::match_arm_boundaries::{
@@ -55,6 +55,7 @@ use crate::compiler_frontend::compiler_messages::{
     DeferredFeatureReason, DiagnosticBag, InvalidAssignmentTargetReason,
     InvalidControlFlowStatementReason, InvalidFallibleHandlingReason, InvalidMatchArmReason,
     InvalidStandaloneStatementReason, InvalidTemplateDirectiveReason, ReservedNameOwner,
+    SourceScopeConstruct,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy;
@@ -152,7 +153,9 @@ fn function_signature_opening(
     }
     Ok(Some(ScopeOpening {
         site: opener.index(),
+        opener: opener.index(),
         label_span: opener.source_span(),
+        construct: SourceScopeConstruct::FunctionBody,
     }))
 }
 
@@ -846,16 +849,25 @@ pub(crate) fn parse_function_body_statements(
                 // that block was never closed, so the statements before it must not publish as if
                 // the body had ended normally.
                 if let Some(opening) = body_opening {
-                    return Err(statement_dispatch_error(
-                        token_lexical::unexpected_end_of_file(
-                            Some(string_table.intern(";")),
-                            Some(token_stream.current_span()),
-                        )
-                        .with_label(
-                            Some(opening.label_span),
-                            Some(LabelDraftMessage::UnclosedBlockStartsHere),
-                        ),
-                    ));
+                    let diagnostic = token_lexical::unclosed_source_scope(
+                        opening.construct,
+                        Some(token_stream.current_span()),
+                    )
+                    .with_label(
+                        Some(opening.label_span),
+                        Some(LabelDraftMessage::UnclosedScopeStartsHere),
+                    );
+                    // The last `;` after this opener closed the innermost child scope. It is
+                    // exact here because this body is the innermost open scope at end of file.
+                    let diagnostic = if let Some(closer) =
+                        last_child_closer_span(token_stream, opening.opener)
+                    {
+                        diagnostic
+                            .with_label(Some(closer), Some(LabelDraftMessage::InnerBlockCloser))
+                    } else {
+                        diagnostic
+                    };
+                    return Err(statement_dispatch_error(diagnostic));
                 }
                 break;
             }

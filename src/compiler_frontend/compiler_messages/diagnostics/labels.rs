@@ -47,7 +47,8 @@ pub(crate) enum LabelDraftMessage {
     EarlierTemplateHeadItem,
     ConflictsWithEarlierHeadItem,
     TemplateStartsHere,
-    UnclosedBlockStartsHere,
+    /// The innermost source scope that the file ended without closing.
+    UnclosedScopeStartsHere,
     UnclosedDelimiterStartsHere,
     InnerBlockCloser,
     /// The active opener of the scope that a misplaced closer tried to close.
@@ -111,7 +112,7 @@ impl LabelMessageCode {
     pub(super) const EARLIER_SECTION_MARKER: Self = Self(24);
     pub(super) const DEPENDENCY_CYCLE_PARTICIPANT: Self = Self(25);
     pub(super) const CONST_CALL_SITE: Self = Self(26);
-    pub(super) const UNCLOSED_BLOCK_STARTS_HERE: Self = Self(27);
+    pub(super) const UNCLOSED_SCOPE_STARTS_HERE: Self = Self(27);
     pub(super) const UNCLOSED_DELIMITER_STARTS_HERE: Self = Self(28);
     pub(super) const INNER_BLOCK_CLOSER: Self = Self(29);
     pub(super) const SCOPE_OPENER_STARTS_HERE: Self = Self(30);
@@ -162,7 +163,7 @@ impl LabelMessageCode {
             Self::RECEIVER_METHOD_SITE => "RECEIVER_METHOD_SITE",
             Self::EARLIER_TEMPLATE_HEAD_ITEM => "EARLIER_TEMPLATE_HEAD_ITEM",
             Self::TEMPLATE_STARTS_HERE => "TEMPLATE_STARTS_HERE",
-            Self::UNCLOSED_BLOCK_STARTS_HERE => "UNCLOSED_BLOCK_STARTS_HERE",
+            Self::UNCLOSED_SCOPE_STARTS_HERE => "UNCLOSED_SCOPE_STARTS_HERE",
             Self::UNCLOSED_DELIMITER_STARTS_HERE => "UNCLOSED_DELIMITER_STARTS_HERE",
             Self::INNER_BLOCK_CLOSER => "INNER_BLOCK_CLOSER",
             Self::SCOPE_OPENER_STARTS_HERE => "SCOPE_OPENER_STARTS_HERE",
@@ -265,8 +266,8 @@ pub(super) fn encode_label(
             plain(LabelMessageCode::CONFLICTS_WITH_EARLIER_HEAD_ITEM)
         }
         LabelDraftMessage::TemplateStartsHere => plain(LabelMessageCode::TEMPLATE_STARTS_HERE),
-        LabelDraftMessage::UnclosedBlockStartsHere => {
-            plain(LabelMessageCode::UNCLOSED_BLOCK_STARTS_HERE)
+        LabelDraftMessage::UnclosedScopeStartsHere => {
+            plain(LabelMessageCode::UNCLOSED_SCOPE_STARTS_HERE)
         }
         LabelDraftMessage::UnclosedDelimiterStartsHere => {
             plain(LabelMessageCode::UNCLOSED_DELIMITER_STARTS_HERE)
@@ -481,8 +482,8 @@ impl LabelWord {
                 DurableLabelMessage::ConflictsWithEarlierHeadItem
             }
             LabelMessageCode::TEMPLATE_STARTS_HERE => DurableLabelMessage::TemplateStartsHere,
-            LabelMessageCode::UNCLOSED_BLOCK_STARTS_HERE => {
-                DurableLabelMessage::UnclosedBlockStartsHere
+            LabelMessageCode::UNCLOSED_SCOPE_STARTS_HERE => {
+                DurableLabelMessage::UnclosedScopeStartsHere
             }
             LabelMessageCode::UNCLOSED_DELIMITER_STARTS_HERE => {
                 DurableLabelMessage::UnclosedDelimiterStartsHere
@@ -565,7 +566,8 @@ pub(crate) enum DurableLabelMessage<'a> {
     EarlierTemplateHeadItem,
     ConflictsWithEarlierHeadItem,
     TemplateStartsHere,
-    UnclosedBlockStartsHere,
+    /// The innermost source scope that the file ended without closing.
+    UnclosedScopeStartsHere,
     UnclosedDelimiterStartsHere,
     InnerBlockCloser,
     /// The active opener of the scope that a misplaced closer tried to close.

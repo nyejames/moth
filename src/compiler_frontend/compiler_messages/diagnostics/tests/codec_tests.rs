@@ -430,8 +430,8 @@ fn every_label_message_maps_to_its_code() {
             LabelMessageCode::TEMPLATE_STARTS_HERE,
         ),
         (
-            LabelDraftMessage::UnclosedBlockStartsHere,
-            LabelMessageCode::UNCLOSED_BLOCK_STARTS_HERE,
+            LabelDraftMessage::UnclosedScopeStartsHere,
+            LabelMessageCode::UNCLOSED_SCOPE_STARTS_HERE,
         ),
         (
             LabelDraftMessage::UnclosedDelimiterStartsHere,

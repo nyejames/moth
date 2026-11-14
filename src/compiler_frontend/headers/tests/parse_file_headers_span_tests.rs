@@ -1200,6 +1200,26 @@ fn the_earliest_invalid_inner_closer_wins_when_the_function_closer_is_invalid() 
 }
 
 #[test]
+fn an_earlier_inner_closer_wins_over_a_later_grouped_semicolon() {
+    // The inner `;` after code is the first structural error. A later `;` inside a call is
+    // grouped, and grouped precedence must not reach back over the earlier authored error.
+    let source = "f ||:\n    if true:\n        io.line(\"x\");\n    io.line(1; 2)\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "earlier inner closer before grouped `;`",
+        "invalid_scope_layout.multiline_closer_after_code",
+        source_span_for(source, ";", 0),
+        &[(
+            ExpectedScopeLayoutLabel::OpenerStartsHere,
+            source_span_for(source, ":", 1),
+        )],
+    );
+}
+
+#[test]
 fn the_earliest_invalid_inner_closer_of_three_stacked_closers_wins() {
     // The first `;` closes the multiline `if b` after code and is the first error. The other two
     // closers are also invalid, but Stage 2 must not report them ahead of it.

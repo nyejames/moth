@@ -5,6 +5,7 @@
 //! WHY: dependency-adjacent classifiers only need their line; per-query whole-source
 //!      projection pays allocation for untouched tokens.
 
+use crate::compiler_frontend::compiler_messages::SourceScopeConstruct;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenIndex, TokenTag};
@@ -54,8 +55,13 @@ fn find_top_level_fat_arrow_on_line_in_view(
 pub(crate) struct ScopeOpening {
     /// The canonical token whose physical line the opener owns.
     pub(crate) site: TokenIndex,
+    /// The canonical colon that opened the construct, before any branch continuation moves
+    /// `site` to `else` or `=>`.
+    pub(crate) opener: TokenIndex,
     /// The span that labels the construct that opened.
     pub(crate) label_span: SourceSpan,
+    /// The construct this opener began, named by an end-of-file report.
+    pub(crate) construct: SourceScopeConstruct,
 }
 
 impl ScopeOpening {
@@ -65,10 +71,7 @@ impl ScopeOpening {
     /// WHY: `if`/`else` and match terminal arms close on the line of their terminal body, but the
     ///      label must still name the colon that opened the construct.
     pub(crate) fn at_site(self, site: TokenIndex) -> Self {
-        Self {
-            site,
-            label_span: self.label_span,
-        }
+        Self { site, ..self }
     }
 }
 

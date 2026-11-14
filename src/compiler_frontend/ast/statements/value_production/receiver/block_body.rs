@@ -29,7 +29,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, InvalidControlFlowStatementReason,
+    DiagnosticBag, InvalidControlFlowStatementReason, SourceScopeConstruct,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -55,6 +55,8 @@ pub(in crate::compiler_frontend::ast::statements::value_production) struct Block
     pub string_table: &'a mut StringTable,
     pub active_target: ActiveValueProductionTarget,
     pub path_fork: &'a mut PathInternerFork,
+    /// The value-block form this body closes, which names a missing `;` at end of file.
+    pub construct: SourceScopeConstruct,
 }
 
 pub(in crate::compiler_frontend::ast::statements::value_production) struct ParsedValueBlockBodies {
@@ -145,10 +147,11 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
         string_table,
         active_target,
         path_fork,
+        construct,
     } = input;
 
     // One `;` closes the whole `if`/`else` value block, so both bodies report the same opener.
-    let opening = current_scope_opening(token_stream)?;
+    let opening = current_scope_opening(token_stream, construct)?;
     if let Some(diagnostic) = nested_scope_opener_error(token_stream, outer_context, opening) {
         return Err(diagnostic.into());
     }

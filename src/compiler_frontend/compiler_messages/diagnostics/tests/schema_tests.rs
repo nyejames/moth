@@ -24,7 +24,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     self, COMPILER_CAPACITY_EXCEEDED, EXPECTED_TOKEN, INVALID_SCOPE_LAYOUT, InvalidScopeLayoutCode,
-    InvalidScopeLayoutView,
+    InvalidScopeLayoutView, UNCLOSED_SOURCE_SCOPE, UnclosedSourceScopeView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
     self, TYPE_MISMATCH, USE_OF_UNINITIALIZED_LOCAL, UnsupportedBackendFeatureView,
@@ -46,7 +46,8 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidCollectionTypeReason, InvalidConfigReason, InvalidDeclarationReason,
     InvalidExternalModuleReason, InvalidMapTypeReason, InvalidMultiBindReason,
     InvalidOutputFolderReason, InvalidScopeLayoutReason, InvalidTypeAnnotationReason,
-    NonExhaustiveMatchReason, TypeAnnotationContext, UnsupportedBackendFeatureReason,
+    NonExhaustiveMatchReason, SourceScopeConstruct, TypeAnnotationContext,
+    UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -561,6 +562,85 @@ fn invalid_scope_layout_pins_codes_reason_keys_and_messages() {
             .family_view::<InvalidScopeLayoutView>()
             .expect("scope-layout reason facts remain typed");
         assert_eq!(facts.reason, expected_code);
+        let guidance = terminal::format_guidance_view(view, context).join("\n");
+        assert_eq!(guidance, expected_message);
+    }
+}
+
+#[test]
+fn unclosed_source_scope_pins_constructs_reason_keys_and_messages() {
+    let cases = [
+        (
+            SourceScopeConstruct::FunctionBody,
+            "unclosed_source_scope.function_body",
+            "This function body is never closed. Add `;` on its own line after its body.",
+        ),
+        (
+            SourceScopeConstruct::IfBlock,
+            "unclosed_source_scope.if_block",
+            "This `if` block is never closed. Add `;` on its own line after its body.",
+        ),
+        (
+            SourceScopeConstruct::LoopBlock,
+            "unclosed_source_scope.loop_block",
+            "This `loop` block is never closed. Add `;` on its own line after its body.",
+        ),
+        (
+            SourceScopeConstruct::CatchHandler,
+            "unclosed_source_scope.catch_handler",
+            "This `catch` block is never closed. Add `;` on its own line after its body.",
+        ),
+        (
+            SourceScopeConstruct::MatchBlock,
+            "unclosed_source_scope.match_block",
+            "This match block is never closed. Add `;` on its own line after its body.",
+        ),
+        (
+            SourceScopeConstruct::ChoiceDeclaration,
+            "unclosed_source_scope.choice_declaration",
+            "This choice declaration is never closed. Add `;` on its own line after its variants.",
+        ),
+        (
+            SourceScopeConstruct::TraitDeclaration,
+            "unclosed_source_scope.trait_declaration",
+            "This trait declaration is never closed. Add `;` on its own line after its requirements.",
+        ),
+        (
+            SourceScopeConstruct::DeclaredRegion,
+            "unclosed_source_scope.declared_region",
+            "This declared region is never closed. Add `;` on its own line after its body.",
+        ),
+    ];
+
+    assert_eq!(UNCLOSED_SOURCE_SCOPE.descriptor.code, "MOTH-SYNTAX-0042");
+    assert_eq!(UNCLOSED_SOURCE_SCOPE.word_count(), 1);
+    assert_eq!(UNCLOSED_SOURCE_SCOPE.pending_mask(), 0);
+    assert_eq!(
+        UNCLOSED_SOURCE_SCOPE.descriptor.default_severity,
+        DiagnosticSeverity::Error
+    );
+
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let span = exact_span_in_source(SourceId::from_index(1), 6, 1, &mut span_builder);
+    let string_table = StringTable::new();
+    let context = DiagnosticRenderContext::new(&string_table);
+
+    for (construct, expected_key, expected_message) in cases {
+        assert_eq!(construct.stable_reason_key(), expected_key);
+
+        let compact = compact_bag_for_test(
+            DiagnosticBag::from(token_lexical::unclosed_source_scope(construct, Some(span))),
+            None,
+        );
+        let view = compact.first().expect("unclosed-scope draft compacts");
+        assert_eq!(view.descriptor().code, "MOTH-SYNTAX-0042");
+        assert_eq!(view.severity(), DiagnosticSeverity::Error);
+        assert_eq!(view.reason_key(), Some(expected_key));
+        assert!(matches!(view.primary_site(), SiteRef::Local(primary) if primary == span));
+        let facts = view
+            .family_view::<UnclosedSourceScopeView>()
+            .expect("unclosed-scope construct facts remain typed");
+        assert_eq!(facts.reason, construct);
         let guidance = terminal::format_guidance_view(view, context).join("\n");
         assert_eq!(guidance, expected_message);
     }

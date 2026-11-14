@@ -10,6 +10,7 @@
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::SourceScopeConstruct;
 use crate::compiler_frontend::compiler_messages::diagnostics::{
     draft::DiagnosticDraft,
     families::{templates, token_lexical},
@@ -738,9 +739,9 @@ enum OpenConstruct {
     Template,
     Parenthesis,
     CollectionOrMap,
-    CatchBlock,
-    ValueIfBlock,
     PipeList,
+    /// A `;`-terminated source scope opened inside the declaration initializer.
+    SourceScope(SourceScopeConstruct),
 }
 
 impl OpenConstruct {
@@ -749,10 +750,38 @@ impl OpenConstruct {
             OpenConstruct::Template => "]",
             OpenConstruct::Parenthesis => ")",
             OpenConstruct::CollectionOrMap => "}",
-            OpenConstruct::CatchBlock => ";",
-            OpenConstruct::ValueIfBlock => ";",
             OpenConstruct::PipeList => "|",
+            OpenConstruct::SourceScope(_) => ";",
         }
+    }
+
+    /// The source construct this opener began, when it closes with `;`.
+    ///
+    /// WHAT: distinguishes a missing source closer from an unrelated expected delimiter.
+    /// WHY: a `;`-terminated block is a source scope, so its truncation must name the construct
+    ///      rather than the delimiter family that an open `(` or `{` still owns.
+    const fn source_scope(self) -> Option<SourceScopeConstruct> {
+        match self {
+            OpenConstruct::SourceScope(construct) => Some(construct),
+            OpenConstruct::Template
+            | OpenConstruct::Parenthesis
+            | OpenConstruct::CollectionOrMap
+            | OpenConstruct::PipeList => None,
+        }
+    }
+}
+
+/// The construct an `if` header opened, refined to a match when `is` ends its header.
+///
+/// WHAT: the token before the body colon is the one fact that distinguishes `if cond:` from
+///       `if subject is:` in a declaration initializer.
+/// WHY: both forms open a source scope that closes with `;`, but the report must name the
+///      construct the author wrote.
+fn if_header_construct(previous_meaningful_tag: Option<TokenTag>) -> SourceScopeConstruct {
+    if previous_meaningful_tag == Some(TokenTag::IS) {
+        SourceScopeConstruct::MatchBlock
+    } else {
+        SourceScopeConstruct::IfBlock
     }
 }
 
@@ -924,14 +953,20 @@ fn close_open_construct(open_constructs: &mut Vec<OpenConstructSite>, expected: 
     }
 }
 
-fn close_statement_construct(open_constructs: &mut Vec<OpenConstructSite>) {
-    if open_constructs.last().is_some_and(|site| {
-        matches!(
-            site.construct,
-            OpenConstruct::CatchBlock | OpenConstruct::ValueIfBlock
-        )
-    }) {
+/// Pop the innermost open source scope when a `;` closes it.
+///
+/// WHAT: returns whether a source scope was closed, so the caller can record the closer span.
+/// WHY: the end-of-file report names the last `;` only when it closed a direct child of the
+///      still-open innermost scope.
+fn close_statement_construct(open_constructs: &mut Vec<OpenConstructSite>) -> bool {
+    if open_constructs
+        .last()
+        .is_some_and(|site| site.construct.source_scope().is_some())
+    {
         open_constructs.pop();
+        true
+    } else {
+        false
     }
 }
 
@@ -1057,6 +1092,11 @@ enum UnclosedDelimiterKind {
 /// WHY: template tokens carry their own open/close structure, so a reverse pass over authored
 /// template heads identifies the innermost unmatched opener without reconstructing literal-body
 /// rules. The scan only runs on the EOF diagnostic path.
+///
+/// `|...|` member lists are not tracked here. `TYPE_PARAMETER_BRACKET` is shared by every pipe
+/// use, so recognising an opener needs the declaration-initializer scanner's lookahead
+/// classification. A truncation there reports the enclosing source scope when one is open, or the
+/// generic delimiter path otherwise.
 pub(crate) fn innermost_unclosed_delimiter(
     source: &SourceTokens,
     start: TokenIndex,
@@ -1206,8 +1246,13 @@ pub(crate) fn collect_declaration_initializer_range(
     let mut inline_value_if_missing_else_depth = 0usize;
     let mut initializer_closed_by_statement_block = false;
     let mut open_constructs: Vec<OpenConstructSite> = Vec::new();
+    // The most recent `;` that closed a nested source scope, with the stack depth left behind.
+    // At end of file that depth identifies a direct child of the reported innermost scope.
+    let mut last_inner_closer: Option<(usize, SourceSpan)> = None;
     let mut record_pipe_depth = 0usize;
     let mut last_closed_record_pipe = false;
+    // The token before a body colon distinguishes `if cond:` from `if subject is:`.
+    let mut previous_meaningful_tag: Option<TokenTag> = None;
 
     loop {
         if initializer_closed_by_statement_block {
@@ -1335,26 +1380,40 @@ pub(crate) fn collect_declaration_initializer_range(
                     ),
                 ));
             }
+            // A `;`-terminated block names the construct that never closed. Its opener is the
+            // only authored site that explains why the initializer has not ended yet.
+            if let Some(construct) = innermost.construct.source_scope() {
+                let diagnostic = token_lexical::unclosed_source_scope(
+                    construct,
+                    Some(current_ref.source_span()),
+                )
+                .with_label(
+                    Some(innermost.opening_span),
+                    Some(LabelDraftMessage::UnclosedScopeStartsHere),
+                );
+                // Name the last closer only when it closed a direct child of the reported
+                // innermost scope and nothing has opened above it since.
+                let diagnostic = if let Some((closer_depth, closer)) = last_inner_closer
+                    && closer_depth == open_constructs.len()
+                {
+                    diagnostic.with_label(Some(closer), Some(LabelDraftMessage::InnerBlockCloser))
+                } else {
+                    diagnostic
+                };
+                return Err(TokenScanFailure::Diagnostic(diagnostic));
+            }
             let expected_delimiter = Some(
                 string_table.get_or_intern(innermost.construct.expected_delimiter().to_owned()),
             );
-            let opener_label = match innermost.construct {
-                // A value-producing block and a catch handler open with a colon and close with
-                // `;`, so the same label a function body uses names the still-open block.
-                OpenConstruct::CatchBlock | OpenConstruct::ValueIfBlock => {
-                    LabelDraftMessage::UnclosedBlockStartsHere
-                }
-                OpenConstruct::Template
-                | OpenConstruct::Parenthesis
-                | OpenConstruct::CollectionOrMap
-                | OpenConstruct::PipeList => LabelDraftMessage::UnclosedDelimiterStartsHere,
-            };
             return Err(TokenScanFailure::Diagnostic(
                 token_lexical::unexpected_end_of_file(
                     expected_delimiter,
                     Some(current_ref.source_span()),
                 )
-                .with_label(Some(innermost.opening_span), Some(opener_label)),
+                .with_label(
+                    Some(innermost.opening_span),
+                    Some(LabelDraftMessage::UnclosedDelimiterStartsHere),
+                ),
             ));
         }
 
@@ -1372,27 +1431,42 @@ pub(crate) fn collect_declaration_initializer_range(
                     loop_header_pending = false;
                     catch_block_depth = catch_block_depth.saturating_add(1);
                     open_constructs.push(OpenConstructSite::new(
-                        OpenConstruct::CatchBlock,
+                        OpenConstruct::SourceScope(SourceScopeConstruct::CatchHandler),
                         current_ref.source_span(),
                     ));
                 }
-                // Inside a catch, nested statement blocks remain catch-tagged so the closing
-                // `;` pairs with the same counter that opened it.
+                // The catch counter balances every nested colon so the closing `;` pairs with
+                // the same counter that opened it. The pushed site still names the header that
+                // opened this block, so an end-of-file report can name the innermost construct.
                 TokenTag::COLON if catch_block_depth > 0 => {
+                    let construct = if value_if_header_pending {
+                        if_header_construct(previous_meaningful_tag)
+                    } else if loop_header_pending {
+                        SourceScopeConstruct::LoopBlock
+                    } else {
+                        // A colon with no recognised header still belongs to the catch body, so
+                        // the catch remains the innermost scope that can be named.
+                        SourceScopeConstruct::CatchHandler
+                    };
                     value_if_header_pending = false;
                     loop_header_pending = false;
                     catch_block_depth = catch_block_depth.saturating_add(1);
                     open_constructs.push(OpenConstructSite::new(
-                        OpenConstruct::CatchBlock,
+                        OpenConstruct::SourceScope(construct),
                         current_ref.source_span(),
                     ));
                 }
                 TokenTag::COLON if value_if_header_pending || loop_header_pending => {
+                    let construct = if value_if_header_pending {
+                        if_header_construct(previous_meaningful_tag)
+                    } else {
+                        SourceScopeConstruct::LoopBlock
+                    };
                     value_if_header_pending = false;
                     loop_header_pending = false;
                     value_if_block_depth = value_if_block_depth.saturating_add(1);
                     open_constructs.push(OpenConstructSite::new(
-                        OpenConstruct::ValueIfBlock,
+                        OpenConstruct::SourceScope(construct),
                         current_ref.source_span(),
                     ));
                 }
@@ -1419,7 +1493,10 @@ pub(crate) fn collect_declaration_initializer_range(
                     catch_header_pending = false;
                     loop_header_pending = false;
                     initializer_closed_by_statement_block = closing_outer_catch_block;
-                    close_statement_construct(&mut open_constructs);
+                    if close_statement_construct(&mut open_constructs) {
+                        last_inner_closer =
+                            Some((open_constructs.len(), current_ref.source_span()));
+                    }
                 }
                 TokenTag::END if value_if_block_depth > 0 => {
                     let closing_outer_value_if_block = value_if_block_depth == 1;
@@ -1427,7 +1504,10 @@ pub(crate) fn collect_declaration_initializer_range(
                     value_if_header_pending = false;
                     loop_header_pending = false;
                     initializer_closed_by_statement_block = closing_outer_value_if_block;
-                    close_statement_construct(&mut open_constructs);
+                    if close_statement_construct(&mut open_constructs) {
+                        last_inner_closer =
+                            Some((open_constructs.len(), current_ref.source_span()));
+                    }
                 }
                 // A newline may continue an `if` or `loop` condition, so only the catch header
                 // clears here. `then` and `->` end an inline header, and EOF ends the scan.
@@ -1505,6 +1585,9 @@ pub(crate) fn collect_declaration_initializer_range(
             TokenTag::TYPE_PARAMETER_BRACKET | TokenTag::NEWLINE
         ) {
             last_closed_record_pipe = false;
+        }
+        if current_tag != TokenTag::NEWLINE {
+            previous_meaningful_tag = Some(current_tag);
         }
         depth.step_tag(current_tag);
         collected.push(ScannedToken {

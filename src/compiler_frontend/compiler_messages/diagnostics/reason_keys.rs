@@ -573,6 +573,17 @@ define_stable_reason_keys! {
         &InvalidScopeLayoutCode::AdditionalCloserOnLine => "invalid_scope_layout.additional_closer_on_line",
     },
 
+    SourceScopeConstruct => {
+        &SourceScopeConstruct::FunctionBody => "unclosed_source_scope.function_body",
+        &SourceScopeConstruct::IfBlock => "unclosed_source_scope.if_block",
+        &SourceScopeConstruct::LoopBlock => "unclosed_source_scope.loop_block",
+        &SourceScopeConstruct::CatchHandler => "unclosed_source_scope.catch_handler",
+        &SourceScopeConstruct::MatchBlock => "unclosed_source_scope.match_block",
+        &SourceScopeConstruct::ChoiceDeclaration => "unclosed_source_scope.choice_declaration",
+        &SourceScopeConstruct::TraitDeclaration => "unclosed_source_scope.trait_declaration",
+        &SourceScopeConstruct::DeclaredRegion => "unclosed_source_scope.declared_region",
+    },
+
     InvalidThisUsageReason => {
         @delegate(reason => InvalidThisUsageCode::of(reason).stable_reason_key());
     },
@@ -618,7 +629,6 @@ define_stable_reason_keys! {
     &InvalidControlFlowStatementReason::ReturnBangOutsideErrorFunction => "invalid_control_flow_statement.return_bang_outside_error_function",
     &InvalidControlFlowStatementReason::ExpectedColonAfterCondition => "invalid_control_flow_statement.expected_colon_after_condition",
     &InvalidControlFlowStatementReason::ExpectedConditionAfterIf => "invalid_control_flow_statement.expected_condition_after_if",
-    &InvalidControlFlowStatementReason::UnexpectedEndOfFileInMatch => "invalid_control_flow_statement.unexpected_end_of_file_in_match",
     &InvalidControlFlowStatementReason::CaseRequiredBeforeElse => "invalid_control_flow_statement.case_required_before_else",
     &InvalidControlFlowStatementReason::DuplicateElseArm => "invalid_control_flow_statement.duplicate_else_arm",
     &InvalidControlFlowStatementReason::ExpectedFatArrow => "invalid_control_flow_statement.expected_fat_arrow",

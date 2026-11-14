@@ -28,7 +28,7 @@ use crate::compiler_frontend::ast::statements::body_dispatch::{
 };
 use crate::compiler_frontend::ast::statements::condition_validation::ensure_match_guard_condition;
 use crate::compiler_frontend::ast::statements::diagnostics::{
-    current_scope_opening, current_token_index, nested_scope_opener_error,
+    current_scope_opening, current_token_index, last_child_closer_span, nested_scope_opener_error,
     scope_closer_layout_error,
 };
 use crate::compiler_frontend::ast::statements::if_headers::{ParsedIfHeader, parse_if_header};
@@ -52,9 +52,13 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::{
+    choices_control_flow, token_lexical,
+};
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, InvalidControlFlowStatementReason, InvalidMatchArmReason, ValueReceiverContext,
+    DiagnosticBag, InvalidControlFlowStatementReason, InvalidMatchArmReason, SourceScopeConstruct,
+    ValueReceiverContext,
 };
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
@@ -369,7 +373,7 @@ pub fn create_branch(
     }
     // One `;` closes the whole `if`/`else` structure, so both bodies report the same opener. A
     // nested opener may not share the enclosing scope's opening line.
-    let opening = current_scope_opening(token_stream)?;
+    let opening = current_scope_opening(token_stream, SourceScopeConstruct::IfBlock)?;
     if let Some(diagnostic) = nested_scope_opener_error(token_stream, &context, opening) {
         return Err(branching_error(diagnostic));
     }
@@ -519,7 +523,7 @@ fn create_option_present_capture_branch(
             ),
         ));
     }
-    let opening = current_scope_opening(token_stream)?;
+    let opening = current_scope_opening(token_stream, SourceScopeConstruct::IfBlock)?;
     if let Some(diagnostic) = nested_scope_opener_error(token_stream, context, opening) {
         return Err(branching_error(diagnostic));
     }
@@ -741,7 +745,7 @@ pub(crate) fn parse_match_block(
         ));
     }
 
-    let opening = current_scope_opening(token_stream)?;
+    let opening = current_scope_opening(token_stream, SourceScopeConstruct::MatchBlock)?;
     if let Some(diagnostic) = nested_scope_opener_error(token_stream, context, opening) {
         return Err(branching_error(diagnostic));
     }
@@ -821,12 +825,24 @@ pub(crate) fn parse_match_block(
             }
 
             TokenTag::EOF => {
-                return Err(branching_error(
-                    choices_control_flow::invalid_control_flow_statement(
-                        InvalidControlFlowStatementReason::UnexpectedEndOfFileInMatch,
-                        Some(token_stream.current_span()),
-                    ),
-                ));
+                let diagnostic = token_lexical::unclosed_source_scope(
+                    opening.construct,
+                    Some(token_stream.current_span()),
+                )
+                .with_label(
+                    Some(opening.label_span),
+                    Some(LabelDraftMessage::UnclosedScopeStartsHere),
+                );
+                // The last `;` after the match opener closed the innermost child scope. The
+                // match is the innermost open scope at this point, so the label is exact.
+                let diagnostic = if let Some(closer) =
+                    last_child_closer_span(token_stream, opening.opener)
+                {
+                    diagnostic.with_label(Some(closer), Some(LabelDraftMessage::InnerBlockCloser))
+                } else {
+                    diagnostic
+                };
+                return Err(branching_error(diagnostic));
             }
 
             TokenTag::ELSE => {

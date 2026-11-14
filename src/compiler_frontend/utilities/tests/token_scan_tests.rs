@@ -1,8 +1,9 @@
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::SourceScopeConstruct;
 use crate::compiler_frontend::compiler_messages::diagnostics::{
     families::templates::{InvalidTemplateStructureCode, InvalidTemplateStructureView},
-    families::token_lexical::UnexpectedEndOfFileView,
+    families::token_lexical::{UnclosedSourceScopeView, UnexpectedEndOfFileView},
     foreign::SiteRef,
     labels::DurableLabelMessage,
     test_support::compact_bag_for_test,
@@ -765,6 +766,52 @@ fn eof_expected_delimiter(failure: TokenScanFailure, string_table: &StringTable)
         .map(|id| string_table.resolve(id).to_owned())
 }
 
+/// Asserts a failed declaration-initializer scan named `expected_construct` as the open source
+/// scope and returns the span of every related label, opener first.
+fn source_scope_eof_label_spans(
+    failure: TokenScanFailure,
+    expected_construct: SourceScopeConstruct,
+) -> Vec<Option<SourceSpan>> {
+    let draft = match failure {
+        TokenScanFailure::Diagnostic(diagnostic) => diagnostic,
+        TokenScanFailure::Infrastructure(error) => {
+            panic!("token scanner infrastructure failure: {error:?}")
+        }
+    };
+    let compacted = compact_bag_for_test(DiagnosticBag::from(draft), None);
+    let diagnostic = compacted
+        .first()
+        .expect("the failed scan should retain its diagnostic");
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-SYNTAX-0042",
+        "a `;`-terminated source scope must not report the delimiter family"
+    );
+    let facts = diagnostic
+        .family_view::<UnclosedSourceScopeView>()
+        .expect("the failed scan should retain its open construct");
+    assert_eq!(facts.reason, expected_construct);
+    let labels: Vec<_> = diagnostic.durable_labels().collect();
+    assert!(!labels.is_empty(), "the report should label its opener");
+    assert!(matches!(
+        labels[0].message,
+        DurableLabelMessage::UnclosedScopeStartsHere
+    ));
+    for label in &labels[1..] {
+        assert!(
+            matches!(label.message, DurableLabelMessage::InnerBlockCloser),
+            "only the opener and an exact inner closer may be labelled"
+        );
+    }
+    labels
+        .into_iter()
+        .map(|label| match label.site {
+            SiteRef::Local(span) => Some(span),
+            SiteRef::Absent | SiteRef::Foreign { .. } => None,
+        })
+        .collect()
+}
+
 /// Asserts a failed declaration-initializer scan reported one EOF opener label, and returns its
 /// span. `matches_expected` names the label role the report must carry.
 fn eof_opener_label_span(
@@ -883,56 +930,6 @@ fn eof_in_collection_reports_closing_brace() {
 }
 
 #[test]
-fn eof_in_catch_block_reports_semicolon() {
-    let mut string_table = StringTable::new();
-    let load_name = string_table.intern("load");
-    let owner = source_tokens_from_parts(
-        SourceId::COMPILATION_ROOT,
-        vec![
-            FixturePart::Symbol(load_name),
-            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
-            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
-            FixturePart::Static(TokenTag::CATCH),
-            FixturePart::Static(TokenTag::COLON),
-            FixturePart::Static(TokenTag::NEWLINE),
-            FixturePart::Static(TokenTag::EOF),
-        ],
-    );
-
-    let error = scan_initializer(&owner, &mut string_table)
-        .expect_err("unterminated catch block should report EOF");
-    assert_eq!(
-        eof_expected_delimiter(error, &string_table),
-        Some(";".to_owned()),
-        "open catch block expects ;"
-    );
-}
-
-#[test]
-fn eof_in_value_producing_if_reports_semicolon() {
-    let mut string_table = StringTable::new();
-    let condition_name = string_table.intern("ready");
-    let owner = source_tokens_from_parts(
-        SourceId::COMPILATION_ROOT,
-        vec![
-            FixturePart::Static(TokenTag::IF),
-            FixturePart::Symbol(condition_name),
-            FixturePart::Static(TokenTag::COLON),
-            FixturePart::Static(TokenTag::NEWLINE),
-            FixturePart::Static(TokenTag::EOF),
-        ],
-    );
-
-    let error = scan_initializer(&owner, &mut string_table)
-        .expect_err("unterminated value-producing if should report EOF");
-    assert_eq!(
-        eof_expected_delimiter(error, &string_table),
-        Some(";".to_owned()),
-        "open value-producing if expects ;"
-    );
-}
-
-#[test]
 fn eof_in_nested_parenthesis_inside_catch_reports_innermost_paren() {
     let mut string_table = StringTable::new();
     let owner = source_tokens_from_parts(
@@ -1041,12 +1038,9 @@ fn eof_in_catch_block_labels_the_block_colon() {
 
     let failure = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated catch block should report EOF");
-    let label_span = eof_opener_label_span(failure, |message| {
-        matches!(message, DurableLabelMessage::UnclosedBlockStartsHere)
-    });
     assert_eq!(
-        label_span,
-        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, colon)),
+        source_scope_eof_label_spans(failure, SourceScopeConstruct::CatchHandler),
+        vec![Some(SourceSpan::new(SourceId::COMPILATION_ROOT, colon))],
         "the report should label the catch block's opening colon"
     );
 }
@@ -1069,13 +1063,129 @@ fn eof_in_value_producing_if_labels_the_block_colon() {
 
     let failure = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated value-producing if should report EOF");
-    let label_span = eof_opener_label_span(failure, |message| {
-        matches!(message, DurableLabelMessage::UnclosedBlockStartsHere)
-    });
     assert_eq!(
-        label_span,
-        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, colon)),
+        source_scope_eof_label_spans(failure, SourceScopeConstruct::IfBlock),
+        vec![Some(SourceSpan::new(SourceId::COMPILATION_ROOT, colon))],
         "the report should label the value-producing block's opening colon"
+    );
+}
+
+#[test]
+fn eof_in_value_producing_loop_names_the_loop_block() {
+    let mut string_table = StringTable::new();
+    let source_name = string_table.intern("items");
+    let colon = fixture_span(15, 1);
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::Static(TokenTag::LOOP),
+            FixturePart::Symbol(source_name),
+            FixturePart::SpannedStatic(TokenTag::COLON, colon),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
+        ],
+    );
+
+    let failure = scan_initializer(&owner, &mut string_table)
+        .expect_err("unterminated value-producing loop should report EOF");
+    assert_eq!(
+        source_scope_eof_label_spans(failure, SourceScopeConstruct::LoopBlock),
+        vec![Some(SourceSpan::new(SourceId::COMPILATION_ROOT, colon))],
+        "the report should label the loop body's opening colon"
+    );
+}
+
+#[test]
+fn eof_in_value_producing_match_names_the_match_block() {
+    let mut string_table = StringTable::new();
+    let subject_name = string_table.intern("value");
+    let colon = fixture_span(20, 1);
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::Static(TokenTag::IF),
+            FixturePart::Symbol(subject_name),
+            FixturePart::Static(TokenTag::IS),
+            FixturePart::SpannedStatic(TokenTag::COLON, colon),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
+        ],
+    );
+
+    let failure = scan_initializer(&owner, &mut string_table)
+        .expect_err("unterminated value-producing match should report EOF");
+    assert_eq!(
+        source_scope_eof_label_spans(failure, SourceScopeConstruct::MatchBlock),
+        vec![Some(SourceSpan::new(SourceId::COMPILATION_ROOT, colon))],
+        "the report should label the match body's opening colon"
+    );
+}
+
+#[test]
+fn eof_in_nested_if_inside_catch_names_the_if_block() {
+    let mut string_table = StringTable::new();
+    let condition_name = string_table.intern("ready");
+    let catch_colon = fixture_span(12, 1);
+    let if_colon = fixture_span(26, 1);
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::Static(TokenTag::CATCH),
+            FixturePart::SpannedStatic(TokenTag::COLON, catch_colon),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::IF),
+            FixturePart::Symbol(condition_name),
+            FixturePart::SpannedStatic(TokenTag::COLON, if_colon),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
+        ],
+    );
+
+    let failure = scan_initializer(&owner, &mut string_table)
+        .expect_err("unterminated nested if inside a catch should report EOF");
+    assert_eq!(
+        source_scope_eof_label_spans(failure, SourceScopeConstruct::IfBlock),
+        vec![Some(SourceSpan::new(SourceId::COMPILATION_ROOT, if_colon))],
+        "the report should label the innermost open block, not the enclosing catch"
+    );
+}
+
+#[test]
+fn eof_after_a_nested_closer_labels_that_closer() {
+    let mut string_table = StringTable::new();
+    let condition_name = string_table.intern("ready");
+    let call_name = string_table.intern("load");
+    let catch_colon = fixture_span(12, 1);
+    let if_colon = fixture_span(26, 1);
+    let semicolon = fixture_span(40, 1);
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::Static(TokenTag::CATCH),
+            FixturePart::SpannedStatic(TokenTag::COLON, catch_colon),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::IF),
+            FixturePart::Symbol(condition_name),
+            FixturePart::SpannedStatic(TokenTag::COLON, if_colon),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(call_name),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::SpannedStatic(TokenTag::END, semicolon),
+            FixturePart::Static(TokenTag::EOF),
+        ],
+    );
+
+    let failure = scan_initializer(&owner, &mut string_table)
+        .expect_err("the unclosed catch should report EOF after its inner closer");
+    assert_eq!(
+        source_scope_eof_label_spans(failure, SourceScopeConstruct::CatchHandler),
+        vec![
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, catch_colon)),
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, semicolon)),
+        ],
+        "the report should label the catch opener and the `;` that closed its child"
     );
 }
 

@@ -29,7 +29,9 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
-use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidLoopHeaderReason};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, InvalidLoopHeaderReason, SourceScopeConstruct,
+};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -166,7 +168,7 @@ pub fn create_loop(
 
     // The header parsed through this scope's own context, so the body still carries the enclosing
     // opener. A loop opened on that opener's line is a second scope on one line.
-    let opening = scope_opening_at(token_stream, colon_index)?;
+    let opening = scope_opening_at(token_stream, colon_index, SourceScopeConstruct::LoopBlock)?;
     if let Some(diagnostic) = nested_scope_opener_error(token_stream, &body_context, opening) {
         return Err(diagnostic.into());
     }

@@ -10,9 +10,10 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, InvalidConfigReason, InvalidDeclarationReason,
+    DiagnosticBag, InvalidConfigReason, InvalidDeclarationReason, SourceScopeConstruct,
 };
 use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterList;
@@ -924,6 +925,8 @@ fn mark_branch_continuation(
 struct OpenScope {
     opening_index: TokenIndex,
     opening_span: SourceSpan,
+    /// The construct this opener began, named by the end-of-file report.
+    construct: SourceScopeConstruct,
     continuation_index: Option<TokenIndex>,
 }
 
@@ -1010,12 +1013,14 @@ pub(super) fn capture_function_body_range_from_cursor(
     let mut open_scopes = vec![OpenScope {
         opening_index: body_opening_index,
         opening_span: body_opening_span,
+        construct: SourceScopeConstruct::FunctionBody,
         continuation_index: None,
     }];
-    // The most recent top-level `;` that closed a nested block. When only the function body is
-    // left open at end of file, that `;` is the one a reader would expect to have closed the
-    // function, so the report can point at it.
-    let mut last_inner_closer_span: Option<SourceSpan> = None;
+    // The most recent top-level `;` that closed a nested block, paired with the number of scopes
+    // left open immediately after it. At end of file that depth identifies a closer that was a
+    // direct child of the reported innermost scope, which is the only case where naming it is
+    // exact. Nothing may have opened above it since.
+    let mut last_inner_closer: Option<(usize, SourceSpan)> = None;
     // The layout error of the first inner closer that is misplaced or followed by code on its
     // line. Reported only when the function closer is also invalid, so the author sees the first
     // structural error in the file. It is ordering evidence only: it never decides acceptance.
@@ -1030,10 +1035,11 @@ pub(super) fn capture_function_body_range_from_cursor(
     let mut nesting = NestingDepth::default();
     // A block opener is the colon that ends an `if`, `catch` or `loop` header. Colons in
     // malformed match-arm headers (`1:` or `else:`) belong to the arm syntax and must not open a
-    // scope here, or this stage reports EOF before the AST can name the missing `=>`. The flag
-    // survives newlines because a condition may continue after an expression-continuing token,
-    // and it clears only when its colon is consumed or the header resolves inline through `then`.
-    let mut block_header_pending = false;
+    // scope here, or this stage reports EOF before the AST can name the missing `=>`. The pending
+    // construct survives newlines because a condition may continue after an expression-continuing
+    // token, and it clears only when its colon is consumed or the header resolves inline through
+    // `then`.
+    let mut block_header_pending: Option<SourceScopeConstruct> = None;
     // The scope depth of the outermost open match body. A match header ends `is:` while other
     // block headers keep a condition or binding before their colon. Its arms use `name =>`, so a
     // line-initial `name:` inside one is a malformed arm that the AST must name, and it cannot
@@ -1062,11 +1068,15 @@ pub(super) fn capture_function_body_range_from_cursor(
             // a template head it is not a block closer, so it stays in the captured body range for
             // the AST to report at its own span and the cursor keeps reading the rest of the body.
             TokenTag::END if !nesting.is_top_level() => {
-                block_header_pending = false;
-                saw_grouped_closer = true;
+                block_header_pending = None;
+                // Source order decides which report wins. An earlier inner closer already
+                // recorded its layout error, so a later grouped `;` must not suppress it.
+                if earliest_invalid_inner.is_none() {
+                    saw_grouped_closer = true;
+                }
             }
             TokenTag::END => {
-                block_header_pending = false;
+                block_header_pending = None;
                 let closed_scope = open_scopes.pop();
                 if match_body_floor.is_some_and(|floor| open_scopes.len() < floor) {
                     match_body_floor = None;
@@ -1075,7 +1085,7 @@ pub(super) fn capture_function_body_range_from_cursor(
                     body_end = Some(current.index());
                     body_closer_span = Some(current.source_span());
                 } else if let Some(scope) = closed_scope {
-                    last_inner_closer_span = Some(current.source_span());
+                    last_inner_closer = Some((open_scopes.len(), current.source_span()));
                     if earliest_invalid_inner.is_none() {
                         let placement = inner_closer_placement(source, &scope, current.index());
                         earliest_invalid_inner = closer_layout_diagnostic_for_placement(
@@ -1092,15 +1102,27 @@ pub(super) fn capture_function_body_range_from_cursor(
             // nesting. A header-shaped keyword inside `(...)`, `{...}` or a template head is
             // misplaced syntax that the AST names, and leaving a pending colon armed there would
             // let it open a phantom scope on a later top-level colon.
-            TokenTag::IF | TokenTag::CATCH | TokenTag::LOOP => {
-                block_header_pending = nesting.is_top_level();
+            TokenTag::IF => {
+                block_header_pending = nesting
+                    .is_top_level()
+                    .then_some(SourceScopeConstruct::IfBlock);
+            }
+            TokenTag::CATCH => {
+                block_header_pending = nesting
+                    .is_top_level()
+                    .then_some(SourceScopeConstruct::CatchHandler);
+            }
+            TokenTag::LOOP => {
+                block_header_pending = nesting
+                    .is_top_level()
+                    .then_some(SourceScopeConstruct::LoopBlock);
             }
             // Inline headers resolve through `then`, so they open no source scope.
-            TokenTag::THEN => block_header_pending = false,
+            TokenTag::THEN => block_header_pending = None,
             // A match guard resolves through `=>`. The match body stays open, but its terminal
             // arm may legally share its line with the closing `;`, so record that continuation.
             TokenTag::FAT_ARROW => {
-                block_header_pending = false;
+                block_header_pending = None;
                 // A `=>` directly after a closer cannot continue an arm of the scope that is
                 // still open; recording it would invent an exception for the innermost scope.
                 if previous_meaningful_tag != Some(TokenTag::END) {
@@ -1124,17 +1146,27 @@ pub(super) fn capture_function_body_range_from_cursor(
             }
             // Colons used in templates parse into a different token (`StartTemplateBody`), so
             // only a block-header colon still contributes one balanced source scope.
-            TokenTag::COLON if block_header_pending => {
-                block_header_pending = false;
-                // Only a top-level colon opens a block. A colon inside a group belongs to
-                // malformed header syntax and must not unbalance the captured function body.
-                if nesting.is_top_level() {
+            TokenTag::COLON => {
+                // An arm-header colon or `else:` inside a match block stays part of that block,
+                // and a colon inside a group belongs to malformed header syntax. Neither may
+                // unbalance the captured function body.
+                if let Some(pending_construct) = block_header_pending.take()
+                    && nesting.is_top_level()
+                {
+                    // A match header ends `is:`, so the keyword alone cannot name its construct.
+                    // Every other block header keeps the construct its keyword armed.
+                    let construct = if previous_meaningful_tag == Some(TokenTag::IS) {
+                        SourceScopeConstruct::MatchBlock
+                    } else {
+                        pending_construct
+                    };
                     open_scopes.push(OpenScope {
                         opening_index: current.index(),
                         opening_span: current.source_span(),
+                        construct,
                         continuation_index: None,
                     });
-                    if previous_meaningful_tag == Some(TokenTag::IS) {
+                    if construct == SourceScopeConstruct::MatchBlock {
                         let depth = open_scopes.len();
                         match_body_floor =
                             Some(match_body_floor.map_or(depth, |floor| floor.min(depth)));
@@ -1151,37 +1183,71 @@ pub(super) fn capture_function_body_range_from_cursor(
                         .peek()
                         .is_some_and(|token| token.tag() == TokenTag::COLON) =>
             {
+                let construct = SourceScopeConstruct::DeclaredRegion;
                 let region_opening = cursor.peek().map_or_else(
                     || OpenScope {
                         opening_index: current.index(),
                         opening_span: current.source_span(),
+                        construct,
                         continuation_index: None,
                     },
                     |token| OpenScope {
                         opening_index: token.index(),
                         opening_span: token.source_span(),
+                        construct,
                         continuation_index: None,
                     },
                 );
                 open_scopes.push(region_opening);
             }
-            // An arm-header colon or `else:` inside a match block stays part of that block.
-            TokenTag::COLON => {}
             TokenTag::DOUBLE_COLON => {}
             TokenTag::EOF => {
-                let unclosed = innermost_unclosed_delimiter(source, body_start, current.index());
-                let diagnostic = unclosed_delimiter_eof_diagnostic(
-                    unclosed,
+                // An inner closer that was already misplaced or followed by code is the first
+                // structural error in the file, and this header error ends the compilation, so
+                // AST never runs to report it. The authored `;` is more useful than the later
+                // truncation that its misuse exposed. A `;` inside grouping already names an
+                // earlier AST error, and that source-accurate report wins instead.
+                if !saw_grouped_closer && let Some(diagnostic) = earliest_invalid_inner {
+                    return Err(diagnostic.into());
+                }
+                // A still-open `(`/`{`/template already names its own opener. Otherwise the
+                // innermost source scope that never closed owns the report.
+                if let Some(unclosed) =
+                    innermost_unclosed_delimiter(source, body_start, current.index())
+                {
+                    return Err(unclosed_delimiter_eof_diagnostic(
+                        Some(unclosed),
+                        Some(current.source_span()),
+                        Some(";"),
+                        string_table,
+                    )
+                    .into());
+                }
+                let Some(innermost_open) = open_scopes.last() else {
+                    return Err(HeaderParseFailure::Infrastructure(
+                        internal_header_dispatch_error(
+                            "Function body capture reached end of file with no open scope.",
+                            Some(current.source_span()),
+                        ),
+                    ));
+                };
+                let diagnostic = token_lexical::unclosed_source_scope(
+                    innermost_open.construct,
                     Some(current.source_span()),
-                    Some(";"),
-                    string_table,
+                )
+                .with_label(
+                    Some(innermost_open.opening_span),
+                    Some(LabelDraftMessage::UnclosedScopeStartsHere),
                 );
-                // A still-open `(`/`{`/template already names its own opener. Otherwise the block
-                // that never closed owns the report.
-                let diagnostic = if unclosed.is_some() {
-                    diagnostic
+                // Name the last closer only when it closed a direct child of the reported
+                // innermost scope and nothing has opened above it since: the stack is the same
+                // depth it had immediately after that `;`.
+                let diagnostic = if let Some((closer_depth, closer)) = last_inner_closer
+                    && closer_depth == open_scopes.len()
+                {
+                    diagnostic.with_label(Some(closer), Some(LabelDraftMessage::InnerBlockCloser))
                 } else {
-                    add_function_body_eof_labels(&open_scopes, last_inner_closer_span, diagnostic)
+                    diagnostic
                 };
                 return Err(diagnostic.into());
             }
@@ -1239,33 +1305,6 @@ pub(super) fn capture_function_body_range_from_cursor(
     })
 }
 
-/// Attach the block that never closed, and any stolen closer, to a function-body EOF report.
-///
-/// WHAT: labels the innermost still-open block's opening colon. When only the function body
-/// remains open, also labels the last top-level `;` that closed a nested block.
-/// WHY: "expected ';'" at the end of file does not say which block is open. A reader who wrote a
-/// `;` needs to see that it closed an inner block, leaving the function unclosed.
-fn add_function_body_eof_labels(
-    open_scopes: &[OpenScope],
-    last_inner_closer: Option<SourceSpan>,
-    diagnostic: DiagnosticDraft,
-) -> DiagnosticDraft {
-    let mut diagnostic = diagnostic;
-    if let Some(innermost_open) = open_scopes.last() {
-        diagnostic = diagnostic.with_label(
-            Some(innermost_open.opening_span),
-            Some(LabelDraftMessage::UnclosedBlockStartsHere),
-        );
-    }
-    // The stolen-closer explanation is only exact when the function body itself is the single
-    // remaining open scope: every consumed `;` then closed a nested block.
-    if open_scopes.len() == 1
-        && let Some(closer) = last_inner_closer
-    {
-        diagnostic = diagnostic.with_label(Some(closer), Some(LabelDraftMessage::InnerBlockCloser));
-    }
-    diagnostic
-}
 #[allow(
     clippy::too_many_arguments,
     reason = "the constant shell needs the shared cursor, context and two collection outputs \

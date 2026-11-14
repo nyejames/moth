@@ -301,7 +301,7 @@ pub(crate) fn compact_label_message_text(
             "conflicts with the earlier head item".to_owned()
         }
         DurableLabelMessage::TemplateStartsHere => "Template starts here".to_owned(),
-        DurableLabelMessage::UnclosedBlockStartsHere => "unclosed block starts here".to_owned(),
+        DurableLabelMessage::UnclosedScopeStartsHere => "the unclosed scope starts here".to_owned(),
         DurableLabelMessage::UnclosedDelimiterStartsHere => {
             "unclosed delimiter starts here".to_owned()
         }

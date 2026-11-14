@@ -12,9 +12,11 @@ use crate::compiler_frontend::ast::{
     Stage0ResolutionFacts,
 };
 use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::SourceScopeConstruct;
 use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::UnclosedSourceScopeView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
@@ -545,6 +547,20 @@ pub(crate) fn ast_error_label_spans(diagnostic: DiagnosticView<'_>) -> Vec<Optio
         .collect()
 }
 
+/// The zero-width span of the end-of-file token that follows `source`.
+///
+/// WHAT: builds the same anchor the lexer emits when it reaches the end of authored text.
+/// WHY: unclosed-scope reports point at the truncation, so a test must compare against that exact
+///      span rather than a nearby authored token.
+pub(crate) fn source_end_span(source: &str) -> SourceSpan {
+    let mut span_builder = ExtendedSpanBuilder::new();
+    SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(source.len() as u32, 0, &mut span_builder)
+            .expect("an end-of-file fixture span fits the inline domain"),
+    )
+}
+
 /// One authored site in a scope-layout table row, located by its literal source text.
 ///
 /// WHAT: a needle plus which occurrence of it the row means.
@@ -571,7 +587,7 @@ impl<'a> LayoutSite<'a> {
     }
 
     /// The authored span of this site inside `source`.
-    fn span_in(self, source: &str) -> SourceSpan {
+    pub(crate) fn span_in(self, source: &str) -> SourceSpan {
         let start = authored_needle_offset(source, self.needle, self.occurrence);
         let mut extended = ExtendedSpanBuilder::new();
         let span = LocalSpan::exact(start as u32, self.needle.len() as u32, &mut extended)
@@ -618,6 +634,40 @@ pub(crate) fn assert_ast_scope_layout(
         labels,
         vec![Some(label.span_in(source))],
         "{expected_reason_key}: related label"
+    );
+}
+
+/// Assert the first AST error is an unclosed source scope with `expected_construct`.
+///
+/// WHAT: pins the stable code, the typed construct, the truncation primary site and the one
+///       opener label against literal source text.
+/// WHY: every construct that a `;` closes must report its own identity at the truncation rather
+///       than fall back to the delimiter family.
+pub(crate) fn assert_ast_unclosed_source_scope(
+    result: &CompilationResult<()>,
+    source: &str,
+    case_name: &str,
+    expected_construct: SourceScopeConstruct,
+    expected_reason_key: &str,
+    opener: LayoutSite<'_>,
+) {
+    let diagnostic = assert_ast_diagnostic(result, "MOTH-SYNTAX-0042", Some(expected_reason_key));
+    let facts = diagnostic
+        .family_view::<UnclosedSourceScopeView>()
+        .expect("the unclosed scope should retain its typed construct");
+    assert_eq!(
+        facts.reason, expected_construct,
+        "{case_name}: typed construct"
+    );
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(source_end_span(source)),
+        "{case_name}: primary site"
+    );
+    assert_eq!(
+        ast_error_label_spans(diagnostic),
+        vec![Some(opener.span_in(source))],
+        "{case_name}: opener label"
     );
 }
 

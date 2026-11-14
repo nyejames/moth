@@ -21,6 +21,7 @@ use crate::compiler_frontend::ast::statements::value_production::expression_buil
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ParsedReceiverValue, ValueBlock, ValueIfBlock, ValueReceiverKind,
 };
+use crate::compiler_frontend::compiler_messages::SourceScopeConstruct;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -59,6 +60,7 @@ pub(super) fn parse_block_value_if(
         string_table,
         active_target: target.clone(),
         path_fork,
+        construct: SourceScopeConstruct::IfBlock,
     })?;
 
     let condition = match condition {

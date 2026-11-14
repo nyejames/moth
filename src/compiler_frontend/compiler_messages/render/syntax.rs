@@ -22,7 +22,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     CommonSyntaxMistakeView, ExpectedSymbolStatementView, InvalidExpressionView,
     InvalidScopeLayoutCode, InvalidScopeLayoutView, InvalidStringEscapeView,
-    MissingCollectionItemView, MissingOperatorOperandView,
+    MissingCollectionItemView, MissingOperatorOperandView, UnclosedSourceScopeView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
@@ -30,7 +30,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidMatchArmReason, InvalidParameterContractReason, InvalidStandaloneStatementReason,
     InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidThisUsageReason,
     InvalidTypeAnnotationReason, MissingWhitespace, OperatorOperandPosition, ParameterContractKind,
-    SymbolicSpacingConstruct, SymbolicSpacingError,
+    SourceScopeConstruct, SymbolicSpacingConstruct, SymbolicSpacingError,
 };
 use crate::compiler_frontend::style_directives::DirectiveOccurrence;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
@@ -684,6 +684,54 @@ pub(crate) fn render_invalid_scope_layout(
 ) -> RenderedPayload {
     RenderedPayload {
         message: invalid_scope_layout_message(facts.reason),
+        guidance: Vec::new(),
+    }
+}
+
+/// The user-facing explanation for one source construct that the file ended without closing.
+///
+/// WHAT: names the still-open construct and the `;` that must close it.
+/// WHY: end-of-file without a known construct is a token failure. Once the parser names the open
+///      scope, the reader needs to know which construct to close rather than where the file ended.
+pub(crate) fn unclosed_source_scope_message(construct: SourceScopeConstruct) -> String {
+    match construct {
+        SourceScopeConstruct::FunctionBody => {
+            "This function body is never closed. Add `;` on its own line after its body."
+        }
+        SourceScopeConstruct::IfBlock => {
+            "This `if` block is never closed. Add `;` on its own line after its body."
+        }
+        SourceScopeConstruct::LoopBlock => {
+            "This `loop` block is never closed. Add `;` on its own line after its body."
+        }
+        SourceScopeConstruct::CatchHandler => {
+            "This `catch` block is never closed. Add `;` on its own line after its body."
+        }
+        SourceScopeConstruct::MatchBlock => {
+            "This match block is never closed. Add `;` on its own line after its body."
+        }
+        SourceScopeConstruct::ChoiceDeclaration => {
+            "This choice declaration is never closed. Add `;` on its own line after its variants."
+        }
+        SourceScopeConstruct::TraitDeclaration => {
+            "This trait declaration is never closed. Add `;` on its own line after its requirements."
+        }
+        SourceScopeConstruct::DeclaredRegion => {
+            "This declared region is never closed. Add `;` on its own line after its body."
+        }
+    }
+    .to_string()
+}
+
+/// WHAT: renders an unclosed source scope from its typed construct.
+/// WHY: the compact row stores the construct that `unclosed_source_scope_message` consumes.
+pub(crate) fn render_unclosed_source_scope(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &UnclosedSourceScopeView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unclosed_source_scope_message(facts.reason),
         guidance: Vec::new(),
     }
 }

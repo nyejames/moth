@@ -34,6 +34,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::InvalidControlFlowStatementReason;
+use crate::compiler_frontend::compiler_messages::SourceScopeConstruct;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -171,6 +172,7 @@ fn parse_block_value_match(
         string_table,
         active_target: target.clone(),
         path_fork,
+        construct: SourceScopeConstruct::MatchBlock,
     })?;
 
     // A subject, pattern or branch body that still holds numeric continuations cannot be built

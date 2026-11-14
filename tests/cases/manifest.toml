@@ -20374,6 +20374,13 @@ contract = "language.functions.inner_block_closer_leaves_function_body_open"
 role = "primary"
 
 [[case]]
+id = "diagnostic_statement_semicolon_before_return_rejected"
+path = "diagnostic_statement_semicolon_before_return_rejected"
+tags = ["integration", "functions", "diagnostics", "control-flow"]
+contract = "language.scopes.statement_semicolon_before_return_names_the_scope"
+role = "primary"
+
+[[case]]
 id = "diagnostic_unclosed_trait_labels_opening_colon"
 path = "diagnostic_unclosed_trait_labels_opening_colon"
 tags = ["integration", "traits", "diagnostics", "labels"]

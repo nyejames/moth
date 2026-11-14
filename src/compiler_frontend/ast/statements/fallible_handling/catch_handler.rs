@@ -55,6 +55,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason;
+use crate::compiler_frontend::compiler_messages::SourceScopeConstruct;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     choices_control_flow, token_lexical,
 };
@@ -1209,7 +1210,7 @@ fn parse_catch_fallible_handler_body(
         .into());
     }
 
-    let opening = current_scope_opening(token_stream)?;
+    let opening = current_scope_opening(token_stream, SourceScopeConstruct::CatchHandler)?;
     if let Some(diagnostic) = nested_scope_opener_error(token_stream, context, opening) {
         return Err(diagnostic.into());
     }

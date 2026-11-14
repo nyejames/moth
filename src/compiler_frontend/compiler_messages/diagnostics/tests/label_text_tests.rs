@@ -64,7 +64,7 @@ static ALL_LABEL_ROLES_FAMILY: FamilyRow = FamilyRow {
         LabelMessageCode::EARLIER_TEMPLATE_HEAD_ITEM,
         LabelMessageCode::CONFLICTS_WITH_EARLIER_HEAD_ITEM,
         LabelMessageCode::TEMPLATE_STARTS_HERE,
-        LabelMessageCode::UNCLOSED_BLOCK_STARTS_HERE,
+        LabelMessageCode::UNCLOSED_SCOPE_STARTS_HERE,
         LabelMessageCode::UNCLOSED_DELIMITER_STARTS_HERE,
         LabelMessageCode::INNER_BLOCK_CLOSER,
         LabelMessageCode::GENERIC_INFERENCE_PREVIOUS_EVIDENCE,
@@ -136,8 +136,8 @@ fn label_cases(
             "Template starts here".to_owned(),
         ),
         (
-            LabelDraftMessage::UnclosedBlockStartsHere,
-            "unclosed block starts here".to_owned(),
+            LabelDraftMessage::UnclosedScopeStartsHere,
+            "the unclosed scope starts here".to_owned(),
         ),
         (
             LabelDraftMessage::UnclosedDelimiterStartsHere,

@@ -16,8 +16,9 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticToken, InvalidStatementPositionReason,
+    DiagnosticToken, InvalidStatementPositionReason, SourceScopeConstruct,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::line_scanning::{
     ScopeOpening, closer_layout_diagnostic, nested_scope_opening_diagnostic,
@@ -183,21 +184,25 @@ pub(crate) fn current_token_index(
 }
 
 /// Read the opener colon the cursor is on as one scope opening site.
+///
+/// `construct` is the construct this owner recognised before the colon, so an end-of-file report
+/// can name it without inferring the construct from the surrounding tokens.
 pub(crate) fn current_scope_opening(
     token_stream: &AstCursor,
+    construct: SourceScopeConstruct,
 ) -> Result<ScopeOpening, InfrastructureFailure> {
-    scope_opening_at(token_stream, token_stream.position())
+    scope_opening_at(token_stream, token_stream.position(), construct)
 }
 
 /// Read the opener colon at a parser coordinate as one scope opening site.
 ///
-/// WHAT: pairs the colon's canonical index with its authored span, which is the label a misplaced
-///       closer or a nested opener attaches to the construct.
+/// WHAT: pairs the colon's canonical index with its authored span and the construct it began.
 /// WHY: every opener owner has already validated the colon tag, so this only converts the token
 ///      into the layout vocabulary rather than repeating the lookup.
 pub(crate) fn scope_opening_at(
     token_stream: &AstCursor,
     index: usize,
+    construct: SourceScopeConstruct,
 ) -> Result<ScopeOpening, InfrastructureFailure> {
     let token = token_stream.token_ref_at(index).ok_or_else(|| {
         InfrastructureFailure::internal(
@@ -207,8 +212,35 @@ pub(crate) fn scope_opening_at(
     })?;
     Ok(ScopeOpening {
         site: token.index(),
+        opener: token.index(),
         label_span: token.source_span(),
+        construct,
     })
+}
+
+/// The span of the last `END` token between an opener colon and the current `EOF`.
+///
+/// WHAT: walks the canonical token store backward from the cursor's `EOF` token exclusive to
+///       `opener` inclusive and returns the first `END` it finds.
+/// WHY: at a 0042 EOF site the reported scope is the innermost open scope. Any deeper closed
+///      scope's parent must also have closed later, or the reported scope would not be
+///      innermost. Grouped `;` is rejected before EOF, so this last `END` closed the direct
+///      child that explains why the outer scope remains open.
+pub(crate) fn last_child_closer_span(
+    token_stream: &AstCursor,
+    opener: TokenIndex,
+) -> Option<SourceSpan> {
+    let eof = token_stream.current()?.index().index();
+    let opener = opener.index();
+    let mut index = eof.checked_sub(1)?;
+    while index >= opener {
+        let token = token_stream.canonical_token_ref_at(TokenIndex::from_raw(index as u32))?;
+        if token.tag() == TokenTag::END {
+            return Some(token.source_span());
+        }
+        index = index.checked_sub(1)?;
+    }
+    None
 }
 
 /// Report a nested opener that shares its physical line with the enclosing scope's opener.
