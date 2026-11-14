@@ -31,6 +31,8 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 - [Scope-closing semantics and diagnostics overhaul](./plans/scope-closing-semantics-and-diagnostics-plan.md) **NEXT** - Enforce one scope opener per physical line, inline versus multiline closing rules and no code after a semicolon. Rework scope and expression-end diagnostics with opener-aware labels, missing-closer suggestions and full source/test migration.
 
+- [Core/Builder package namespaces and config filename](./plans/core-builder-package-and-config-naming-plan.md) - Queued after scope-closing: Rename `config.moth` to `@config.moth` while keeping `@project`, require `@package.moth` for registered source packages, move HTML/CSS to `@core/html` and `@core/css`, group the web packages under `@builder/web/` and enforce namespace ownership. This unlocks parallel HTML/CSS package API work.
+
 - [Constraints and fast arithmetic](./plans/constraints-and-fast-math-plan.md) - Queued: Implement compiler-owned `$fast_math`, transitive `$safe_math` and `$infallible` constraints with portable fast integer and floating-point semantics. Ordinary arithmetic remains checked, Dec retains its ordinary behaviour and semantic traps follow the execution-instance fault policy.
 
 - [Numeric optimisation](./plans/numeric-optimisation-plan.md) - Queued after constraints and fast arithmetic: Remove redundant numeric result carriers, error branches and runtime checks through existing proof and backend-lowering systems. Preserve source semantics and measure performance improvements before extending the optimiser.
