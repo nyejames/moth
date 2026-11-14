@@ -51,7 +51,7 @@ render into the body. A metadata-only `@entry.moth` still produces a complete pa
     [$in description:A language for creating reliable software]
     [$in lang:en]
     [$in favicon:[@assets/favicon.svg]]
-    [$in stylesheets:[@styles/site.css]]
+    [$in stylesheets:[@assets/site.css]]
     [$in head:<meta name="theme-color" content="#ffffff">]
 
     [:<main>Hello Moth</main>]

@@ -6,7 +6,7 @@ Use when the content is ordinary Markdown with no Moth syntax needed.
 
 ### `.mtf` for Moth-aware Markdown
 
-Use when the content needs compile-time constants, nested templates or builder helpers.
+Use when the content needs compile-time constants, nested templates or `@html` helpers.
 
 ### `.moth` for full Moth
 

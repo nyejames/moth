@@ -128,8 +128,8 @@ Resource identity, byte source, emitted output path and rendered URL are four se
     context:  docs/getting-started/index.html
     URL:      ../../assets/logo.svg
 
-    resource: styles/fonts/site.woff2
-    context:  styles/site.css
+    resource: assets/fonts/site.woff2
+    context:  assets/site.css
     URL:      ./fonts/site.woff2
 ]
 

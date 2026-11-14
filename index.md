@@ -10,7 +10,8 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 - [crate module surface](src/lib.rs), including the public convenience re-export `moth::mon` for the standalone [moth-mon crate](crates/moth-mon/) (owned values, prepared schemas, literal-only encode/decode)
 - [timing facade](src/timing.rs), [typed timing schema](src/timing/enabled/schema.rs), [collector](src/timing/enabled/collector.rs), and [summary](src/timing/enabled/summary.rs): compile-erasing timing/counter entry points, schema-v1 metric ownership, immutable process configuration, command/raw session channels, aggregate snapshots and inactive fast-path policy.
 - [Moth source packages](packages/): compiler-shipped source-backed packages.
-    - [@html Builder package](packages/html/@mod.moth): compile-time HTML markup helper templates (`canvas`, `p`, `h1`-`h6`, `div`, `table`, etc.). Internal helpers live in [packages/html/private_helpers.moth](packages/html/private_helpers.moth).
+    - [@html Core package](packages/html/@mod.moth): compile-time HTML markup helper templates (`canvas`, `p`, `h1`-`h6`, `div`, `table`, etc.). Internal helpers live in [packages/html/private_helpers.moth](packages/html/private_helpers.moth).
+    - [@styles Core package](packages/styles/@mod.moth): compile-time inline style fragments (`center`, `right`, `left`, `smaller`, `medium`, `larger`) that fill `@html` `style` slots.
     - [@web/site Builder package](packages/web/site/@mod.moth): static structural site-root URL helpers (`root`, `url`). Its [README](packages/web/site/README.md) holds the package boundary.
     - [Core binding packages](src/builder_surface/core_packages/): compiler-owned operations and prelude visibility policy.
 - [validate/bench/docs workflow](justfile)
@@ -68,13 +69,15 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
         - [project_roots.rs](src/build_system/create_project_modules/project_roots.rs): project/entry roots.
         - [source_discovery_error.rs](src/build_system/create_project_modules/source_discovery_error.rs): diagnostic boundary.
     - [output](src/build_system/output/): validated output plans, portable path policy, prepared artifact writing, write orchestration, stale manifest cleanup and the output-root fields every builder section registers.
-- [builder SDK](src/builder/): public `moth::builder` definitions and build driver for custom Rust builders. `BuilderDefinition` registers source packages, native host packages and source kinds through the builder surface and validates them in one `finish`.
+- [builder SDK](src/builder/): public `moth::builder` definitions and build driver for custom Rust builders. `BuilderDefinition` registers source packages, native host packages and optional source kinds through the builder surface and validates them in one `finish`.
     - [definition.rs](src/builder/definition.rs): the public definition draft and the registered builder surface.
     - [project.rs](src/builder/project.rs): the public `ProjectBuilder` trait and the `build_project` driver over the shared build orchestration.
     - [compiled_project.rs](src/builder/compiled_project.rs): the compiled project handle, the owner-bound package facade handle, the build context and the artifact set.
     - [error.rs](src/builder/error.rs): the public error kinds and the rendered compiler messages.
 - [host descriptors](src/host/mod.rs): public `moth::host` closed V1 vocabulary for manual native Rust host function descriptors, mapped onto the external-package registry specification.
 - [builder surface](src/builder_surface/): core packages, external import providers and package metadata.
+    - [definition.rs](src/builder_surface/definition.rs): the common surface, including the mandatory `@html` and `@styles` Core/MothSource roots.
+    - [source_file_kind_registry.rs](src/builder_surface/source_file_kind_registry.rs): compiler-owned `.moth`/`.mtf` classification plus optional builder registrations such as plain Markdown.
     - [core_packages/](src/builder_surface/core_packages/): prelude, io, math, collections, text, random and time.
     - [external_import_providers/](src/builder_surface/external_import_providers/): provider registry and resolution table.
 
@@ -302,5 +305,6 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 - [codebase style guide](docs/developer-docs/style-guide/style-guide.mtf)
 - [language cheatsheet](docs/docs/cheatsheet/moth-language-cheatsheet.mtf)
 - [docs website source](docs/docs/); [developer docs source](docs/developer-docs/); [generated output](docs/_release/)
+- [docs site support package](docs/docs_styles/@package.moth): project-local `@docs_styles` helpers and assets for the docs pages.
 - [language support progress matrix](docs/docs/progress/@entry.moth)
 - [planned work and implementation plans](docs/roadmap/)

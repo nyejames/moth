@@ -521,8 +521,8 @@ fn walk_reachable_sources(
 ///
 /// WHAT: follows each Moth file's declared dependencies, resolves them to canonical typed source
 /// files and returns the completed final source identity domain with prepared inputs.
-/// WHY: source kind belongs to Stage 0 input discovery. Builder-supported content assets can be
-/// loaded and carried forward without being treated as Moth module roots.
+/// WHY: source kind belongs to Stage 0 input discovery. Supported content assets can be loaded and
+/// carried forward without being treated as Moth module roots.
 #[allow(
     clippy::too_many_arguments,
     reason = "reachable traversal keeps the entry point, resolver, directives, and mutable external-import/kind/resource/path/string state as separate borrows"

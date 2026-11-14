@@ -55,7 +55,7 @@ The selected builder does not supply or propagate a semantic numeric profile. It
 
 The capability surface contains mandatory Core source roots, builder source-backed packages, binding-backed packages, import providers, runtime requirements, optional source kinds, primitive build globals and target-affinity/capability metadata. Directives are not part of it: the compiler defines every directive and every builder sees the same set.
 
-Template constant scope is not a configurable capability. `.mtf` is compiler-supported under every builder alongside `.moth`. The compiler authority's Stage 2 source-kind section owns the fixed public-constant prelude from the official `@html` and `@styles` Core/MothSource packages. The common builder surface registers both roots through `SourcePackageRegistry`. Builders cannot substitute their own source packages or add arbitrary symbols to `.mtf` scope. Plain `.md` remains builder-selectable.
+Template constant scope is not a configurable capability. `.mtf` is a fixed compiler-supported source kind under every builder alongside `.moth`, so a builder cannot disable, reassign or substitute it. The compiler authority's Stage 2 source-kind section owns its implicit public-constant prelude. The common builder surface registers the official `@html` and `@styles` Core/MothSource roots through `SourcePackageRegistry` for every builder, including custom SDK builders. Builders cannot register a source package under either reserved prefix or add arbitrary symbols to `.mtf` scope. They may register optional source kinds; plain Markdown `.md` is the only one currently registered.
 
 Official executable environments provide the canonical Core catalogue through
 official native or browser implementations, with documented host-capability gates
@@ -239,7 +239,7 @@ Project-local packages are structural support facades, not a configurable `packa
 
 ### Semantic source set
 
-`SemanticSourceSet` contains the root, owned `.moth` files reachable through source clauses, reachable builder-supported source assets and other inputs explicitly classified as semantic by the selected builder.
+`SemanticSourceSet` contains the root, owned `.moth` files reachable through source clauses, reachable supported content-source assets and other inputs explicitly classified as semantic by the selected builder.
 
 A content asset reached through a dependency clause or an expression-position structural reference has the same membership and preparation. A qualified expression's provider target follows the same provider-discovery, visibility and registration contract as an authored direct selection. It adds the provider to the graph without adding a file-local binding. Only this set contributes canonical module declarations, HIR, interfaces and link facts. Its contents determine the semantic source fingerprint.
 

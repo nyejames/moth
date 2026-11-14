@@ -29,9 +29,10 @@ such as `@game/ui` and `@game/audio` don't overlap.
 ]
 
 Template scope is not a package registration option. The only implicit `.mtf`
-helper scope is the compiler-standard `@html` prelude, owned by the official
-HTML builder package set. A builder cannot substitute a source package under
-`@html` or opt arbitrary exported constants into template scope. Application
+helper scope is the compiler-standard prelude from the mandatory Core `@html`
+and `@styles` packages. The common builder surface registers both roots, so a
+builder cannot substitute either package, register another root under those
+prefixes or opt arbitrary exported constants into template scope. Application
 data reaches a template through an explicit qualified reference such as
 `@provider symbol`. Ambiguous visible names are still errors.
 

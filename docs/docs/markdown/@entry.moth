@@ -29,7 +29,7 @@ init_docs_sidebar()!
     inside the file.
 
     This keeps plain content portable across Markdown tools. Choose `.mtf` only
-    when content needs Moth constants, templates or builder helpers.
+    when content needs Moth constants, templates or `@html` helpers.
 ]
 
 [section:

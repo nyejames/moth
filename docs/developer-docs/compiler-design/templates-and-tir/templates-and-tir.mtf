@@ -123,7 +123,7 @@ An `.mtf` body can read application data with an explicit qualified reference:
     # Welcome to [@settings site_name]
 ]
 
-That is an ordinary dependency reference. It creates a provider edge and a local ordering edge but installs no name. `.mtf` has no implicit same-directory facade constants. The fixed `@html` helper prelude is the only bare-name scope, and root-local `@mod`, `@package` or `@entry` declarations stay invisible. Shared data belongs in an ordinary helper file. Both cycle directions are diagnosed by the normal Stage 0 and Stage 3 owners, never by a template-specific sorter.
+That is an ordinary dependency reference. It creates a provider edge and a local ordering edge but installs no name. `.mtf` has no implicit same-directory facade constants. The fixed constant prelude from the Core `@html` and `@styles` packages is the only bare-name scope, and root-local `@mod`, `@package` or `@entry` declarations stay invisible. Shared data belongs in an ordinary helper file. Both cycle directions are diagnosed by the normal Stage 0 and Stage 3 owners, never by a template-specific sorter.
 
 Tooling that wants folded `.mtf` content asks the compiler's **direct Moth template service**. That service is a shorter path over the same owners, stopping before HIR. It is not a second parser, and project tooling never prepares, binds, orders or folds the template itself.
 

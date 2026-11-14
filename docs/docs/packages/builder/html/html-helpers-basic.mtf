@@ -3,7 +3,7 @@ strings during compilation and produce no runtime code.
 
 ### Using helpers in `.mtf` files
 
-`.mtf` files see `@html` constants without a dependency clause. The compiler supplies the official `packages/html` package. You can use the helpers directly:
+`.mtf` files see `@html` and `@styles` constants without a dependency clause. The compiler supplies the official `packages/html` and `packages/styles` packages. You can use the helpers directly:
 
 [codeblock, $code "text":
     -- docs/intro.mtf
@@ -12,7 +12,7 @@ strings during compilation and produce no runtime code.
     [codeblock, $code "moth": value = 42]
 ]
 
-The prelude supplies HTML helpers only. Your own values need a qualified reference to a helper file. A template head names the helper path and one selected value, for example `@settings` then `site_name`. Root files never expose their declarations to a template.
+The prelude supplies `@html` and `@styles` constants only. Your own values need a qualified reference to a helper file. A template head names the helper path and one selected value, for example `@settings` then `site_name`. Root files never expose their declarations to a template.
 
 ### Binding helpers in `.moth` files
 
@@ -30,7 +30,7 @@ The prelude supplies HTML helpers only. Your own values need a qualified referen
 - `codeblock`, `table`, `th`, `td` for code and tables
 - `img` for images with `src`, `alt` and `style` slots
 
-The six basic style inserts (`center`, `right`, `left`, `smaller`, `medium`, `larger`) now belong to `@styles`. Import them explicitly in `.moth` files.
+The six basic style inserts (`center`, `right`, `left`, `smaller`, `medium`, `larger`) belong to `@styles`. They are available bare inside `.mtf` files and need an explicit import in `.moth` files, such as `@styles center`.
 
 ### `$code` code blocks
 

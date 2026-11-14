@@ -30,7 +30,7 @@ A `.mtf` file belongs to its surrounding module. Same-module files can bind its 
 
 ### Target and builder availability
 
-Moth template files are available in HTML project builds. The `.mtf` body sees a restricted flat compile-time scope provided by the builder. See @#template-scope (Template scope).
+Moth template files are compiler-supported under every builder, including custom SDK builders. The `.mtf` body sees a restricted flat compile-time scope provided by the compiler. See @#template-scope (Template scope).
 
 ### Concepts related to Moth template files
 

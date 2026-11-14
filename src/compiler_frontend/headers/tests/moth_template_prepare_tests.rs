@@ -457,9 +457,8 @@ fn standard_template_prelude_dependencies<'a>(
 
 /// Header-binding outcome for one fixture preparation.
 ///
-/// WHAT: keeps the ordinary frozen-diagnostic lane beside the infrastructure lane a malformed
-///       successful provider input produces. Cross-package prelude name collisions do not appear
-///       here: they violate the compiler-shipped prelude contract and use the compiler-bug lane.
+/// WHAT: keeps the ordinary frozen-diagnostic lane beside the infrastructure lane that malformed
+///       provider input and cross-package prelude name collisions produce.
 #[derive(Debug)]
 enum FixtureHeaderBindingFailure {
     Diagnosed(DiagnosticDraft, StringTable),

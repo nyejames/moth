@@ -50,6 +50,12 @@ and the `io` prelude keep their meaning even when an operation is unavailable.
 The progress matrix records current implementation gaps separately from this
 design contract.
 
+The mandatory Core source packages `@html` and `@styles` are an exception to
+builder-selected availability. The common builder surface registers both roots
+under every builder, including custom SDK builders, because they supply
+compiler-level template helpers rather than host capabilities. A builder cannot
+replace either root or register a package under its prefix.
+
 The future official package manager classifies managed Moth-source packages as
 no-core or Core-dependent over their complete dependency closure. Official
 certified environments may consume both. Custom builders receive no-core

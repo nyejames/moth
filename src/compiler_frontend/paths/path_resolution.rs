@@ -47,7 +47,7 @@ pub(crate) struct ProjectPathResolver {
     source_package_roots: PreparedSourcePackageRoots,
     /// Module roots prepared by Stage 0. Resolver construction never discovers them.
     module_roots: ModuleRootTable,
-    /// Builder-supported source file kinds available for this project.
+    /// Fixed compiler source kinds and optional builder registrations for this project.
     source_file_kinds: SourceFileKindRegistry,
 }
 

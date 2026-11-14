@@ -17,7 +17,7 @@
     init_docs_sidebar
 
 [$in title:["Moth template files"]]
-[$in description:["Moth-aware Markdown content files for HTML projects."]]
+[$in description:["Moth-aware Markdown content files available under every project builder."]]
 [$in head:[language_theme_head]]
 
 [navbar]

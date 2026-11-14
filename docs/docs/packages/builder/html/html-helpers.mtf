@@ -1,10 +1,10 @@
 `@html` provides compile-time HTML markup helpers as a universal Core package with MothSource backing. The compiler reads ordinary Moth source from `packages/html/@mod.moth`. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
-`@html` ships as a skeleton. Its exports cover common HTML tags, formatting helpers and table components. Basic style inserts now belong to `@styles`, while browser drawing stays in the builder-specific `@web/canvas` package.
+`@html` ships as a skeleton. Its exports cover common HTML tags, formatting helpers and table components. Basic style inserts belong to `@styles`, while browser drawing stays in the builder-specific `@web/canvas` package.
 
 ### The fixed template prelude
 
-Exported compile-time constants from `@html` are visible flat inside `.mtf` files without an explicit dependency clause. This is the standard HTML template prelude.
+Compile-time constants from `@html` and `@styles` are visible flat inside `.mtf` files without an explicit dependency clause. This is the fixed template prelude.
 
 [codeblock, $code "moth":
     -- docs/intro.mtf
@@ -13,7 +13,7 @@ Exported compile-time constants from `@html` are visible flat inside `.mtf` file
     [codeblock, $code "moth": value = 42]
 ]
 
-The prelude is compiler policy, not builder configuration. Every builder receives the official `@html` and `@styles` Core roots. The remaining migration makes `.mtf` universally available and includes both packages in its flat constant prelude. Source packages that contain `.mtf` files currently order after `@html`.
+The prelude is compiler policy, not builder configuration. Every builder receives the official `@html` and `@styles` Core roots, and `.mtf` is compiler-supported under every builder. Both packages precede every `.mtf` consumer.
 
 A `.moth` file that needs specific `@html` symbols binds them explicitly:
 
@@ -138,7 +138,7 @@ All helpers are compile-time `#String` constants that produce HTML strings. They
 
 #### Utility style inserts from `@styles`
 
-These constants now belong to the separate `@styles` Core source package. They produce CSS property values for the `style` slots exposed by `@html`.
+These constants belong to the separate `@styles` Core source package. They produce CSS property values for the `style` slots exposed by `@html`.
 
 [table:
     [th:
@@ -247,7 +247,7 @@ Calls to `@web/canvas` emit JavaScript runtime assets when reachable. See @../ca
 
 ### Deferred surfaces
 
-`@html` ships as a skeleton. Future expansions include richer semantic tag coverage and standard slots. More style fragments belong to `@styles`, while higher-level layouts and components belong to separate packages. See @../../../progress (progress matrix) for current status.
+`@html` ships as a skeleton. Future expansions include richer semantic tag coverage and standard slots. Higher-level layouts, components and additional style systems belong in separate packages. See @../../../progress (progress matrix) for current status.
 
 ### Related concepts
 
