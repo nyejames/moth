@@ -1,0 +1,22 @@
+entry = "."
+
+# An unclosed collection before the function's `;` reports the missing `}` and labels the `{` that
+# owns it, so the report points at authored source instead of only at end of file.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0017"]
+message_contains = ["expected '}'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0017"
+path = "input/@entry.moth"
+line = 3
+column = 2
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 2
+column = 12

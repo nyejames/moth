@@ -363,6 +363,8 @@ pub fn create_branch(
             ),
         ));
     }
+    // One `;` closes the whole `if`/`else` structure, so both bodies report the same opener.
+    let body_opening_span = Some(token_stream.current_span());
     token_stream.advance();
 
     // Both bodies publish provisional generic requests into the shared sink. Finalisation owns
@@ -375,6 +377,7 @@ pub fn create_branch(
         parse_function_body_statements(
             token_stream,
             then_context,
+            body_opening_span,
             type_interner,
             expression_builder,
             const_values,
@@ -396,6 +399,7 @@ pub fn create_branch(
             parse_function_body_statements(
                 token_stream,
                 else_context,
+                body_opening_span,
                 type_interner,
                 expression_builder,
                 const_values,
@@ -502,6 +506,7 @@ fn create_option_present_capture_branch(
             ),
         ));
     }
+    let body_opening_span = Some(token_stream.current_span());
     token_stream.advance();
     let body_context =
         then_context.new_child_control_flow(ContextKind::Branch, string_table, path_fork)?;
@@ -510,6 +515,7 @@ fn create_option_present_capture_branch(
         parse_function_body_statements(
             token_stream,
             body_context,
+            body_opening_span,
             type_interner,
             expression_builder,
             const_values,
@@ -530,6 +536,7 @@ fn create_option_present_capture_branch(
             parse_function_body_statements(
                 token_stream,
                 else_context,
+                body_opening_span,
                 type_interner,
                 expression_builder,
                 const_values,
@@ -1171,6 +1178,7 @@ fn parse_else_arm(
         parse_function_body_statements(
             token_stream,
             arm_context,
+            None,
             type_interner,
             expression_builder,
             const_values,
@@ -1243,6 +1251,7 @@ fn parse_match_arm(
         parse_function_body_statements(
             token_stream,
             arm_body_context,
+            None,
             type_interner,
             expression_builder,
             const_values,

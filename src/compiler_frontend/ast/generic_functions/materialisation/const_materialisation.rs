@@ -1008,6 +1008,7 @@ fn materialise_const_executable(
     let nodes = function_body_to_ast(
         &mut cursor,
         scope,
+        None,
         &mut type_interner,
         target.expression_builder,
         target.const_values,

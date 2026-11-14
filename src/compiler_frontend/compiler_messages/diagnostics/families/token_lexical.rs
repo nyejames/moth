@@ -11,6 +11,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
     CharFact, CountFact, FactCapacityError, FactCodec, IdRemap, OptPathFact, OptStringFact,
     OptTokenFact, PathFact, StringFact, TokenFact, UnitCode, UnitFact, unit_code,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelMessageCode;
 use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
@@ -911,7 +912,11 @@ diagnostic_family! {
         severity: DiagnosticSeverity::Error,
         title: "Unexpected end of file",
         facts: [expected_delimiter: OptStringFact],
-        labels: [],
+        labels: [
+            LabelMessageCode::UNCLOSED_BLOCK_STARTS_HERE,
+            LabelMessageCode::UNCLOSED_DELIMITER_STARTS_HERE,
+            LabelMessageCode::INNER_BLOCK_CLOSER,
+        ],
         extra: None,
         ctor: generated unexpected_end_of_file,
         view: UnexpectedEndOfFileView,

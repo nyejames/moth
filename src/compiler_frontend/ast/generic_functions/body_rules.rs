@@ -77,6 +77,7 @@ pub(crate) fn validate_generic_function_body(
     let parsed_body = function_body_to_ast(
         &mut body_cursor,
         context,
+        None,
         type_interner,
         expression_builder,
         const_values,

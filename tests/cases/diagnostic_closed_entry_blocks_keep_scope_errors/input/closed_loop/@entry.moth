@@ -1,0 +1,5 @@
+count ~= 0
+loop count < 3:
+    ~count += 1
+;
+continue

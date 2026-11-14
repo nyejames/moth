@@ -3477,6 +3477,7 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                             ExpressionRpnItem::Operator {
                                 operator: Operator::Add,
                                 span: None,
+                                preceded_by_operand: true,
                             },
                         ];
                         crate::compiler_frontend::tests::type_id_fixture_support::runtime_expr(
@@ -3517,6 +3518,7 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
         ExpressionRpnItem::Operator {
             operator: Operator::And,
             span: None,
+            preceded_by_operand: true,
         },
     ];
         crate::compiler_frontend::tests::type_id_fixture_support::runtime_expr(

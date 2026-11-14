@@ -399,14 +399,22 @@ impl FoldFixture {
         self.resolve_rpn_unfolded(vec![
             ExpressionRpnItem::Operand(lhs),
             ExpressionRpnItem::Operand(rhs),
-            ExpressionRpnItem::Operator { operator, span },
+            ExpressionRpnItem::Operator {
+                operator,
+                span,
+                preceded_by_operand: true,
+            },
         ])
     }
 
     fn unary(&mut self, operand: ExprId, operator: Operator, span: Option<SourceSpan>) -> ExprId {
         self.resolve_rpn_unfolded(vec![
             ExpressionRpnItem::Operand(operand),
-            ExpressionRpnItem::Operator { operator, span },
+            ExpressionRpnItem::Operator {
+                operator,
+                span,
+                preceded_by_operand: true,
+            },
         ])
     }
 
@@ -890,6 +898,7 @@ fn constant_fold_propagates_structural_string_text_unavailable_outcome() {
         ExpressionRpnItem::Operator {
             operator: Operator::Equality,
             span: None,
+            preceded_by_operand: true,
         },
     ]);
 
@@ -938,11 +947,13 @@ fn text_unavailable_refusal_keeps_the_items_that_follow_it() {
         ExpressionRpnItem::Operator {
             operator: Operator::Equality,
             span: None,
+            preceded_by_operand: true,
         },
         ExpressionRpnItem::Operand(flag),
         ExpressionRpnItem::Operator {
             operator: Operator::And,
             span: None,
+            preceded_by_operand: true,
         },
     ]);
 
@@ -1746,11 +1757,13 @@ fn evaluate_operator_rounds_fixed_float_results_once_in_the_operand_domain() {
         ExpressionRpnItem::Operator {
             operator: Operator::Add,
             span: None,
+            preceded_by_operand: true,
         },
         ExpressionRpnItem::Operand(chain_subtrahend),
         ExpressionRpnItem::Operator {
             operator: Operator::Subtract,
             span: None,
+            preceded_by_operand: true,
         },
     ]);
     let chained = expect_folded(f.fold(chain_root).expect("chained F16 fold should succeed"));
@@ -2112,10 +2125,12 @@ fn constant_fold_partially_folds_runtime_expression() {
         ExpressionRpnItem::Operator {
             operator: Operator::Add,
             span: None,
+            preceded_by_operand: true,
         },
         ExpressionRpnItem::Operator {
             operator: Operator::Multiply,
             span: None,
+            preceded_by_operand: true,
         },
     ]);
 
@@ -2165,10 +2180,12 @@ fn constant_fold_reports_static_failure_at_authored_operator_inside_runtime_expr
         ExpressionRpnItem::Operator {
             operator: Operator::Divide,
             span: Some(operator_span),
+            preceded_by_operand: true,
         },
         ExpressionRpnItem::Operator {
             operator: Operator::Add,
             span: None,
+            preceded_by_operand: true,
         },
     ];
     f.resolve_operator_types(&mut items);
@@ -2428,10 +2445,12 @@ fn partial_fold_keeps_the_folded_half_and_the_moved_half_distinct() {
         ExpressionRpnItem::Operator {
             operator: Operator::Add,
             span: Some(add_span),
+            preceded_by_operand: true,
         },
         ExpressionRpnItem::Operator {
             operator: Operator::Multiply,
             span: None,
+            preceded_by_operand: true,
         },
     ]);
 

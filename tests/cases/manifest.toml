@@ -9479,6 +9479,13 @@ contract = "language.syntax.c_style_operator_rejected"
 role = "boundary"
 
 [[case]]
+id = "diagnostic_expression_missing_right_operand"
+path = "diagnostic_expression_missing_right_operand"
+tags = ["integration", "diagnostics"]
+contract = "language.syntax.dangling_operator_missing_right_operand"
+role = "primary"
+
+[[case]]
 id = "diagnostic_expression_or_or"
 path = "diagnostic_expression_or_or"
 tags = ["integration", "diagnostics"]
@@ -20287,4 +20294,88 @@ id = "declaration_shell_unknown_token_rejected"
 path = "declaration_shell_unknown_token_rejected"
 tags = ["integration", "declaration", "diagnostics"]
 contract = "language.declarations.declaration_shell_unknown_token_rejected"
+role = "primary"
+
+[[case]]
+id = "inline_value_if_missing_branch_keyword_rejected"
+path = "inline_value_if_missing_branch_keyword_rejected"
+tags = ["integration", "language", "value-blocks", "if", "diagnostics"]
+contract = "language.expressions.inline_value_if_missing_branch_keyword_rejected"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_entry_if_rejected"
+path = "diagnostic_unclosed_entry_if_rejected"
+tags = ["integration", "entry-start", "diagnostics", "control-flow"]
+contract = "language.syntax.entry_block_requires_explicit_closer"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_entry_loop_rejected"
+path = "diagnostic_unclosed_entry_loop_rejected"
+tags = ["integration", "entry-start", "diagnostics", "loops"]
+contract = "language.syntax.entry_loop_requires_explicit_closer"
+role = "primary"
+
+[[case]]
+id = "diagnostic_closed_entry_blocks_keep_scope_errors"
+path = "diagnostic_closed_entry_blocks_keep_scope_errors"
+tags = ["integration", "entry-start", "diagnostics", "control-flow", "scopes"]
+contract = "language.syntax.closed_entry_block_keeps_child_scope_and_loop_membership"
+role = "primary"
+
+[[case]]
+id = "diagnostic_missing_function_closer_labels_opening_colon"
+path = "diagnostic_missing_function_closer_labels_opening_colon"
+tags = ["integration", "functions", "diagnostics", "labels"]
+contract = "language.functions.missing_closer_names_the_open_body"
+role = "primary"
+
+[[case]]
+id = "diagnostic_stolen_function_closer_labels_inner_closer"
+path = "diagnostic_stolen_function_closer_labels_inner_closer"
+tags = ["integration", "functions", "diagnostics", "labels"]
+contract = "language.functions.inner_block_closer_leaves_function_body_open"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_trait_labels_opening_colon"
+path = "diagnostic_unclosed_trait_labels_opening_colon"
+tags = ["integration", "traits", "diagnostics", "labels"]
+contract = "language.traits.missing_closer_names_the_open_declaration"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_call_before_function_closer_labels_paren"
+path = "diagnostic_unclosed_call_before_function_closer_labels_paren"
+tags = ["integration", "functions", "diagnostics", "labels"]
+contract = "language.syntax.unclosed_parenthesis_names_its_opener"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_collection_before_function_closer_labels_brace"
+path = "diagnostic_unclosed_collection_before_function_closer_labels_brace"
+tags = ["integration", "collections", "diagnostics", "labels"]
+contract = "language.syntax.unclosed_collection_names_its_opener"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_value_if_labels_block_colon"
+path = "diagnostic_unclosed_value_if_labels_block_colon"
+tags = ["integration", "control-flow", "diagnostics", "labels"]
+contract = "language.syntax.unclosed_value_block_names_its_opener"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_entry_catch_rejected"
+path = "diagnostic_unclosed_entry_catch_rejected"
+tags = ["integration", "entry-start", "diagnostics", "fallible"]
+contract = "language.syntax.entry_catch_requires_explicit_closer"
+role = "primary"
+
+[[case]]
+id = "diagnostic_unclosed_entry_catch_swallows_statement_rejected"
+path = "diagnostic_unclosed_entry_catch_swallows_statement_rejected"
+tags = ["integration", "entry-start", "diagnostics", "fallible", "scopes"]
+contract = "language.syntax.entry_catch_closer_keeps_handler_scope"
 role = "primary"

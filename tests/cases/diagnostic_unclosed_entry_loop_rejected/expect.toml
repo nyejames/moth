@@ -1,0 +1,22 @@
+entry = "."
+
+# A loop body in the entry start must close with `;`. Without it, the following `continue` must not
+# be pulled into the loop; the report names the loop block on its opening colon.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0017"]
+message_contains = ["expected ';'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0017"
+path = "input/@entry.moth"
+line = 4
+column = 9
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 2
+column = 15

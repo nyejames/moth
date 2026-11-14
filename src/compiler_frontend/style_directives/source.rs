@@ -39,7 +39,7 @@ use crate::compiler_frontend::tokenizer::tokens::{
 };
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::utilities::token_scan::{
-    NestingDepth, unclosed_delimiter_eof_diagnostic,
+    NestingDepth, innermost_unclosed_delimiter, unclosed_delimiter_eof_diagnostic,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::rc::Rc;
@@ -143,9 +143,7 @@ pub(crate) fn capture_source_directive_operand(
                 && eof.tag() == TokenTag::EOF
             {
                 return Err(unclosed_delimiter_eof_diagnostic(
-                    cursor.source_tokens(),
-                    start,
-                    cursor.position(),
+                    innermost_unclosed_delimiter(cursor.source_tokens(), start, cursor.position()),
                     Some(eof.source_span()),
                     None,
                     string_table,

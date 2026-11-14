@@ -37,7 +37,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRema
 use crate::compiler_frontend::syntax_errors::expression_position::separator_equality_mistake;
 use crate::compiler_frontend::tokenizer::tokens::{TokenRange, TokenTag};
 use crate::compiler_frontend::utilities::token_scan::{
-    NestingDepth, unclosed_delimiter_eof_diagnostic,
+    NestingDepth, innermost_unclosed_delimiter, unclosed_delimiter_eof_diagnostic,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
@@ -902,9 +902,7 @@ fn collect_member_default_range(
             let eof_span = current_source_span(token_stream);
             let cursor = token_stream.canonical_cursor();
             return Err(unclosed_delimiter_eof_diagnostic(
-                cursor.source_tokens(),
-                start,
-                cursor.position(),
+                innermost_unclosed_delimiter(cursor.source_tokens(), start, cursor.position()),
                 eof_span,
                 None,
                 string_table,

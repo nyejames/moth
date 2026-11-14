@@ -309,6 +309,20 @@ pub(crate) fn create_expression_until_with_seed(
     create_expression_until_with_seeded_items(input, stop_tokens, seed_items)
 }
 
+/// The authored spellings of every token that may end a bounded expression window.
+///
+/// WHAT: joins each stop tag's stable tokenizer spelling into the expected-delimiter fact.
+/// WHY: that fact is user-facing text. The tokenizer schema owns token spellings, so a tag's
+///      Debug form (`TokenTag(N)`) must never reach a diagnostic. The EOF renderer quotes the
+///      joined text, so the schema's inline-prose backticks are removed here.
+fn stop_token_spellings(stop_tokens: &[TokenTag]) -> String {
+    stop_tokens
+        .iter()
+        .map(|tag| tag.descriptor().text().trim_matches('`'))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn create_expression_until_with_seeded_items(
     mut input: ExpressionParseInput<'_, '_, '_>,
     stop_tokens: &[TokenTag],
@@ -367,12 +381,9 @@ fn create_expression_until_with_seeded_items_inner(
         .set_position(start_index)
         .expect("seeded expression boundary resume stays inside the active parser view");
     if end_index >= input.token_stream.length() {
-        let expected_tokens = stop_tokens
-            .iter()
-            .map(|token| format!("{token:?}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let expected_delimiter = input.string_table.intern(&expected_tokens);
+        let expected_delimiter = input
+            .string_table
+            .intern(&stop_token_spellings(stop_tokens));
         return Err(token_lexical::unexpected_end_of_file(
             Some(expected_delimiter),
             Some(input.token_stream.current_span()),
@@ -380,12 +391,9 @@ fn create_expression_until_with_seeded_items_inner(
         .into());
     }
     let Some(end_tag) = end_tag else {
-        let expected_tokens = stop_tokens
-            .iter()
-            .map(|token| format!("{token:?}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let expected_delimiter = input.string_table.intern(&expected_tokens);
+        let expected_delimiter = input
+            .string_table
+            .intern(&stop_token_spellings(stop_tokens));
         return Err(token_lexical::unexpected_end_of_file(
             Some(expected_delimiter),
             Some(input.token_stream.current_span()),
@@ -1292,11 +1300,13 @@ fn collect_expression_fragment_into(
         }
     }
 
-    if !group_frames.is_empty() {
-        // The stream ended before a group's `)`, so that group has no closing delimiter.
+    if let Some(innermost_group) = group_frames.last() {
+        // The window ended before the group's `)`, so that group has no closing delimiter.
+        // An exhausted cursor has no truncation token and its `current_span()` fallback is the
+        // file start. The frame retains the authored `(` span, which owns the missing delimiter.
         return Err(token_lexical::missing_closing_delimiter(
             input.string_table.intern(")"),
-            Some(input.token_stream.current_span()),
+            Some(innermost_group.opening_span),
         )
         .into());
     }
@@ -1392,13 +1402,9 @@ fn create_expression_until_with_policy(
     //  Validate window bounds
     // ------------------------
     if end_index >= input.token_stream.length() {
-        let formatted_stop_tokens: Vec<String> = stop_tokens
-            .iter()
-            .map(|token| format!("{token:?}"))
-            .collect();
-        let expected_tokens = formatted_stop_tokens.join(", ");
-
-        let expected_delimiter = input.string_table.intern(&expected_tokens);
+        let expected_delimiter = input
+            .string_table
+            .intern(&stop_token_spellings(stop_tokens));
         return Err(token_lexical::unexpected_end_of_file(
             Some(expected_delimiter),
             Some(input.token_stream.current_span()),
@@ -1407,13 +1413,9 @@ fn create_expression_until_with_policy(
     }
 
     let Some(end_tag) = end_tag else {
-        let formatted_stop_tokens: Vec<String> = stop_tokens
-            .iter()
-            .map(|token| format!("{token:?}"))
-            .collect();
-        let expected_tokens = formatted_stop_tokens.join(", ");
-
-        let expected_delimiter = input.string_table.intern(&expected_tokens);
+        let expected_delimiter = input
+            .string_table
+            .intern(&stop_token_spellings(stop_tokens));
         return Err(token_lexical::unexpected_end_of_file(
             Some(expected_delimiter),
             Some(input.token_stream.current_span()),

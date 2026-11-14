@@ -16,20 +16,7 @@ None.
 
 ## Accepted
 
-Triaged and authorised for bounded investigation or correction. Implementation has not begun.
-
-- [AUD-0017-F01: Unclosed blocks in the entry start body are accepted and swallow later statements](./audits/open_audits/AUD-0017-statement-boundary-diagnostics.md#aud-0017-f01-unclosed-blocks-in-the-entry-start-body-are-accepted-and-swallow-later-statements)
-  - `Correctness` | `frontend.statement_boundary_diagnostics`
-- [AUD-0017-F02: A missing block closer is reported as unexpected end of file and does not name the open block](./audits/open_audits/AUD-0017-statement-boundary-diagnostics.md#aud-0017-f02-a-missing-block-closer-is-reported-as-unexpected-end-of-file-and-does-not-name-the-open-block)
-  - `Diagnostics` | `frontend.statement_boundary_diagnostics`
-- [AUD-0017-F04: An unclosed parenthesis at the end of an expression is reported at the start of the file](./audits/open_audits/AUD-0017-statement-boundary-diagnostics.md#aud-0017-f04-an-unclosed-parenthesis-at-the-end-of-an-expression-is-reported-at-the-start-of-the-file)
-  - `Diagnostics` | `frontend.statement_boundary_diagnostics`
-- [AUD-0017-F05: Expression-end expected tokens are rendered as TokenTag debug names](./audits/open_audits/AUD-0017-statement-boundary-diagnostics.md#aud-0017-f05-expression-end-expected-tokens-are-rendered-as-tokentag-debug-names)
-  - `Diagnostics` | `frontend.statement_boundary_diagnostics`
-- [AUD-0017-F06: Ending a binary expression reports the missing operand on the wrong side](./audits/open_audits/AUD-0017-statement-boundary-diagnostics.md#aud-0017-f06-ending-a-binary-expression-reports-the-missing-operand-on-the-wrong-side)
-  - `Diagnostics` | `frontend.statement_boundary_diagnostics`
-- [AUD-0017-F07: Dangling-operator tests pin the wrong operand side](./audits/open_audits/AUD-0017-statement-boundary-diagnostics.md#aud-0017-f07-dangling-operator-tests-pin-the-wrong-operand-side)
-  - `Tests` | `frontend.statement_boundary_diagnostics`, linked to AUD-0017-F06
+None.
 
 ## In progress
 

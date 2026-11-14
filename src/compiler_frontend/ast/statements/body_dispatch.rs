@@ -47,8 +47,9 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
-    choices_control_flow, names_declarations, templates,
+    choices_control_flow, names_declarations, templates, token_lexical,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
     DeferredFeatureReason, DiagnosticBag, InvalidAssignmentTargetReason,
     InvalidControlFlowStatementReason, InvalidFallibleHandlingReason, InvalidMatchArmReason,
@@ -269,6 +270,13 @@ fn prefixed_nonplace_write(cursor: &AstCursor) -> bool {
     false
 }
 
+/// Parse the statements of one function, entry or nested block body.
+///
+/// `body_opening_span` is the `:` that opened an authored block body. End of file inside such a
+/// body is a missing `;` and is rejected with a label on that colon. `None` marks a body whose
+/// end of file is not a missing closer: the compiler-owned entry start, function bodies whose
+/// token range is already balanced by header capture, and match arms whose range ends with the
+/// enclosing match's own report.
 #[allow(
     clippy::too_many_arguments,
     reason = "function body keeps stream, scope, warnings and mutable parse resources apart"
@@ -276,6 +284,7 @@ fn prefixed_nonplace_write(cursor: &AstCursor) -> bool {
 pub(crate) fn parse_function_body_statements(
     token_stream: &mut AstCursor,
     mut context: ScopeContext,
+    body_opening_span: Option<SourceSpan>,
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
@@ -777,6 +786,21 @@ pub(crate) fn parse_function_body_statements(
 
             // End of file
             TokenTag::EOF => {
+                // An authored block body closes with `;`. Reaching the file end inside one means
+                // that block was never closed, so the statements before it must not publish as if
+                // the body had ended normally.
+                if let Some(body_opening_span) = body_opening_span {
+                    return Err(statement_dispatch_error(
+                        token_lexical::unexpected_end_of_file(
+                            Some(string_table.intern(";")),
+                            Some(token_stream.current_span()),
+                        )
+                        .with_label(
+                            Some(body_opening_span),
+                            Some(LabelDraftMessage::UnclosedBlockStartsHere),
+                        ),
+                    ));
+                }
                 break;
             }
 

@@ -24,11 +24,25 @@ Historical audit resolutions and the index of reports with no outstanding findin
 - [AUD-0014: Tokenizer line-break predicate redundancy](./audits/closed_audits/AUD-0014-tokenizer-line-break-redundancy.md)
 - [AUD-0015: MON schema preparation redundancy](./audits/closed_audits/AUD-0015-mon-schema-preparation-redundancy.md)
 - [AUD-0016: Empty-container documentation correctness](./audits/closed_audits/AUD-0016-empty-container-documentation.md)
+- [AUD-0017: Statement boundary diagnostics](./audits/closed_audits/AUD-0017-statement-boundary-diagnostics.md)
 - [AUD-0018: Source directive parsing](./audits/closed_audits/AUD-0018-source-directive-parsing.md)
 - [AUD-0019: Function body parsing](./audits/closed_audits/AUD-0019-function-body-parsing.md)
 - [AUD-0020: Backend feature validation](./audits/closed_audits/AUD-0020-backend-feature-validation.md)
 
 ## Resolution records
+
+- AUD-0017-F01, F02 and F04–F07 were accepted and resolved, and F03 stays rejected. An authored
+  nested block in the entry start body (`if`, loop, value `if` or block `catch`) that reaches EOF
+  unclosed now reports `MOTH-SYNTAX-0017` expected `;`, with the opener colon labelled, instead
+  of swallowing later statements. Missing function, trait, delimiter and initializer-block
+  closers now label the open construct. A `;` that closed an inner block is named only when it
+  can be identified exactly. An exhausted expression group reports its `(` rather than byte 0.
+  Expected stop tokens render as source spellings rather than `TokenTag(N)`. A missing binary
+  operand reports the side the author omitted, and the two tests that pinned the wrong side were
+  corrected under F07. After AUD-0019, F04 is defensive: no user source still reaches it, and a
+  focused unit test covers it. Each lane was verified independently until a round came back
+  clean, followed by a final verifier over the combined tree. The `just validate` result is
+  recorded in the closeout commit message. See the [AUD-0017 resolution](./audits/closed_audits/AUD-0017-statement-boundary-diagnostics.md#resolution-2026-11-13).
 
 - AUD-0018-F01 and AUD-0018-F02 were accepted and resolved. Source-directive operand capture now
   stops at EOF at any nesting depth, so an unclosed `[`, `(` or `{` operand no longer hangs the

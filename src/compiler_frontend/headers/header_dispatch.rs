@@ -6,9 +6,11 @@
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, InvalidConfigReason, InvalidDeclarationReason,
 };
@@ -58,7 +60,8 @@ use crate::compiler_frontend::traits::syntax::{
     ConformanceTargetKind, ConformanceTargetSyntax, TraitReferenceSyntax,
 };
 use crate::compiler_frontend::utilities::token_scan::{
-    InitializerReference, NestingDepth, unclosed_delimiter_eof_diagnostic,
+    InitializerReference, NestingDepth, innermost_unclosed_delimiter,
+    unclosed_delimiter_eof_diagnostic,
 };
 use rustc_hash::FxHashSet;
 use std::collections::HashSet;
@@ -312,6 +315,17 @@ pub(super) fn create_header(
             ensure_trait_name_is_all_caps(declaration_name, Some(name_span), context.string_table)?;
 
             // Trait declaration: `Name must: requirements ;`
+            // `next_tag` already established that `must` is followed by this colon.
+            let body_opening_span =
+                cursor
+                    .peek_next()
+                    .map(TokenRef::source_span)
+                    .ok_or_else(|| {
+                        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
+                            "Trait declaration handoff did not retain its `must:` colon.",
+                            Some(name_span),
+                        ))
+                    })?;
             let mut trait_cursor = *cursor;
             let _ = trait_cursor.advance(); // past must
             let _ = trait_cursor.advance(); // past :
@@ -320,6 +334,7 @@ pub(super) fn create_header(
                 &mut trait_cursor,
                 name_span,
                 declaration_name,
+                body_opening_span,
                 declaration_order,
                 context,
             )?;
@@ -467,8 +482,23 @@ pub(super) fn create_header(
                 )?;
             }
 
-            body_range =
-                capture_function_body_range_from_cursor(cursor, file_id, context.string_table)?;
+            // The signature parse exits immediately after its terminating `:`, which the body
+            // capture reports when the file ends before the function's own `;`.
+            let body_opening_span = cursor.parser_previous().map(TokenRef::source_span);
+            let Some(body_opening_span) = body_opening_span else {
+                return Err(HeaderParseFailure::Infrastructure(
+                    internal_header_dispatch_error(
+                        "Function signature handoff did not retain its terminating colon.",
+                        Some(name_span),
+                    ),
+                ));
+            };
+            body_range = capture_function_body_range_from_cursor(
+                cursor,
+                file_id,
+                body_opening_span,
+                context.string_table,
+            )?;
 
             kind = HeaderKind::Function {
                 generic_parameters,
@@ -868,16 +898,20 @@ fn tag_continues_into_next_line(tag: TokenTag) -> bool {
 /// Capture a function body directly from a canonical cursor.
 ///
 /// WHAT: consumes the cursor that the declaration parser left on the first body token and returns
-/// the source range from that token through its matching `;`, tracking scope depth so nested
-/// scopes (inner `if`/`loop`/etc.) close correctly.
+/// the source range from that token through its matching `;`, tracking the still-open scopes so
+/// nested scopes (inner `if`/`loop`/etc.) close correctly.
 /// WHY: the canonical header path must retain ranges, not clone a token vector or
 /// rescan source text, and the cursor is the sole source of parser position and EOF/span facts.
 /// Only the structural range is captured here: AST owns body syntax diagnostics, declaration
 /// ordering hints come from the signature, and Stage 0 records graph-active file references from
 /// its own source-owned start-body ranges.
+///
+/// `body_opening_span` is the `:` that ended the signature. It labels the missing closer when the
+/// file ends before the function body closes.
 pub(super) fn capture_function_body_range_from_cursor(
     cursor: &mut TokenCursor<'_>,
     file_id: SourceId,
+    body_opening_span: SourceSpan,
     string_table: &mut StringTable,
 ) -> HeaderDispatchResult<TokenRange> {
     let source = cursor.source_tokens();
@@ -891,8 +925,14 @@ pub(super) fn capture_function_body_range_from_cursor(
     }
 
     let body_start = cursor.position();
-    let mut scopes_opened: usize = 1;
-    let mut scopes_closed: usize = 0;
+    // One entry per still-open scope, outermost first. The function body's own colon is the base
+    // entry, so the body closes exactly when the stack empties. Keeping spans here is what lets
+    // the end-of-file report name the block that never closed.
+    let mut open_scopes = vec![body_opening_span];
+    // The most recent top-level `;` that closed a nested block. When only the function body is
+    // left open at end of file, that `;` is the one a reader would expect to have closed the
+    // function, so the report can point at it rather than only at the following column.
+    let mut last_inner_closer: Option<SourceSpan> = None;
     let mut body_end = None;
     let mut nesting = NestingDepth::default();
     // A block opener is the colon that ends an `if`, `catch` or `loop` header. Colons in
@@ -916,7 +956,7 @@ pub(super) fn capture_function_body_range_from_cursor(
 
     // `parse_function_signature_syntax` stops on the first body token, so inspect the current
     // canonical token before moving the cursor. EOF is handled from its exact TokenRef span.
-    while scopes_opened > scopes_closed {
+    while !open_scopes.is_empty() {
         let current = cursor.advance().ok_or_else(|| {
             HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
                 "Function body capture reached the source end before its closing delimiter.",
@@ -933,19 +973,14 @@ pub(super) fn capture_function_body_range_from_cursor(
             }
             TokenTag::END => {
                 block_header_pending = false;
-                scopes_closed = scopes_closed.checked_add(1).ok_or_else(|| {
-                    HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-                        "Function body closing-delimiter depth overflowed.",
-                        Some(current.source_span()),
-                    ))
-                })?;
-                if match_body_floor
-                    .is_some_and(|floor| scopes_opened.saturating_sub(scopes_closed) < floor)
-                {
+                open_scopes.pop();
+                if match_body_floor.is_some_and(|floor| open_scopes.len() < floor) {
                     match_body_floor = None;
                 }
-                if scopes_opened == scopes_closed {
+                if open_scopes.is_empty() {
                     body_end = Some(current.index());
+                } else {
+                    last_inner_closer = Some(current.source_span());
                 }
             }
             // A block header only opens a source scope when the header itself sits at top-level
@@ -965,14 +1000,9 @@ pub(super) fn capture_function_body_range_from_cursor(
                 // Only a top-level colon opens a block. A colon inside a group belongs to
                 // malformed header syntax and must not unbalance the captured function body.
                 if nesting.is_top_level() {
-                    scopes_opened = scopes_opened.checked_add(1).ok_or_else(|| {
-                        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-                            "Function body opening-delimiter depth overflowed.",
-                            Some(current.source_span()),
-                        ))
-                    })?;
+                    open_scopes.push(current.source_span());
                     if previous_meaningful_tag == Some(TokenTag::IS) {
-                        let depth = scopes_opened.saturating_sub(scopes_closed);
+                        let depth = open_scopes.len();
                         match_body_floor =
                             Some(match_body_floor.map_or(depth, |floor| floor.min(depth)));
                     }
@@ -988,26 +1018,30 @@ pub(super) fn capture_function_body_range_from_cursor(
                         .peek()
                         .is_some_and(|token| token.tag() == TokenTag::COLON) =>
             {
-                scopes_opened = scopes_opened.checked_add(1).ok_or_else(|| {
-                    HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-                        "Function body opening-delimiter depth overflowed.",
-                        Some(current.source_span()),
-                    ))
-                })?;
+                let region_opening_span = cursor
+                    .peek()
+                    .map_or_else(|| current.source_span(), |token| token.source_span());
+                open_scopes.push(region_opening_span);
             }
             // An arm-header colon or `else:` inside a match block stays part of that block.
             TokenTag::COLON => {}
             TokenTag::DOUBLE_COLON => {}
             TokenTag::EOF => {
-                return Err(unclosed_delimiter_eof_diagnostic(
-                    source,
-                    body_start,
-                    current.index(),
+                let unclosed = innermost_unclosed_delimiter(source, body_start, current.index());
+                let diagnostic = unclosed_delimiter_eof_diagnostic(
+                    unclosed,
                     Some(current.source_span()),
                     Some(";"),
                     string_table,
-                )
-                .into());
+                );
+                // A still-open `(`/`{`/template already names its own opener. Otherwise the block
+                // that never closed owns the report.
+                let diagnostic = if unclosed.is_some() {
+                    diagnostic
+                } else {
+                    add_function_body_eof_labels(&open_scopes, last_inner_closer, diagnostic)
+                };
+                return Err(diagnostic.into());
             }
             _ => {}
         }
@@ -1030,6 +1064,34 @@ pub(super) fn capture_function_body_range_from_cursor(
             format!("function body token range was invalid: {error:?}"),
         ))
     })
+}
+
+/// Attach the block that never closed, and any stolen closer, to a function-body EOF report.
+///
+/// WHAT: labels the innermost still-open block's opening colon. When only the function body
+/// remains open, also labels the last top-level `;` that closed a nested block.
+/// WHY: "expected ';'" at the end of file does not say which block is open. A reader who wrote a
+/// `;` needs to see that it closed an inner block, leaving the function unclosed.
+fn add_function_body_eof_labels(
+    open_scopes: &[SourceSpan],
+    last_inner_closer: Option<SourceSpan>,
+    diagnostic: DiagnosticDraft,
+) -> DiagnosticDraft {
+    let mut diagnostic = diagnostic;
+    if let Some(innermost_open) = open_scopes.last() {
+        diagnostic = diagnostic.with_label(
+            Some(*innermost_open),
+            Some(LabelDraftMessage::UnclosedBlockStartsHere),
+        );
+    }
+    // The stolen-closer explanation is only exact when the function body itself is the single
+    // remaining open scope: every consumed `;` then closed a nested block.
+    if open_scopes.len() == 1
+        && let Some(closer) = last_inner_closer
+    {
+        diagnostic = diagnostic.with_label(Some(closer), Some(LabelDraftMessage::InnerBlockCloser));
+    }
+    diagnostic
 }
 #[allow(
     clippy::too_many_arguments,

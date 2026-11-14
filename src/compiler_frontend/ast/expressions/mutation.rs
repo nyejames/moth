@@ -208,6 +208,8 @@ pub(crate) fn evaluate_compound_assignment_with_ready_rhs(
     let operator_item = ExpressionRpnItem::Operator {
         operator,
         span: target_span,
+        // `target op rhs` authors the compound assignment target before its operator.
+        preceded_by_operand: true,
     };
     let mut inferred = ExpectedType::Infer;
     let value = evaluate_expression(

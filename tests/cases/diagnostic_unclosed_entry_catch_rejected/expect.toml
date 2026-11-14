@@ -1,0 +1,22 @@
+entry = "."
+
+# A statement `catch` handler in the entry start closes with `;` like any other block. Reaching end
+# of file inside the handler must not be accepted; the report names the handler on its colon.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0017"]
+message_contains = ["expected ';'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0017"
+path = "input/@entry.moth"
+line = 2
+column = 25
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 2
+column = 24

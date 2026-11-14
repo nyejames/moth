@@ -1096,6 +1096,7 @@ fn complete_folded_body(binding_count: usize, conflicting: bool) {
     let parsed = function_body_to_ast(
         &mut cursor,
         root.clone(),
+        None,
         &mut interner,
         &mut expressions,
         &mut constants,

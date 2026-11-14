@@ -1,0 +1,6 @@
+ready ~= true
+compute || -> I32:
+    if ready:
+        return 1
+    return 0
+;
