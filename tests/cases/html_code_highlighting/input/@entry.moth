@@ -33,7 +33,7 @@
 
         -- directives and paths
         @core/io print, line
-        @web/canvas Canvas, draw_rect
+        @builder/web/canvas Canvas, draw_rect
         page #= [$slot title]
 
         -- operators and numbers

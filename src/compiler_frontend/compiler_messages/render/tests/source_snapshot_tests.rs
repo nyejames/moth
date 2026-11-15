@@ -176,7 +176,7 @@ fn materialised_diagnostic_renders_owned_requester_and_donor_snapshots_after_ser
     fs::create_dir_all(&source_root).expect("the requester source root should exist");
     let requester_path = source_root.join("@entry.moth");
     let donor_path = donor_directory.path().join("@package.moth");
-    const REQUESTER: &str = "@pkg outer\nvalue I32 = outer(1)\n";
+    const REQUESTER: &str = "@builder/test/pkg outer\nvalue I32 = outer(1)\n";
     const DONOR: &str = "inner type U |text String, result U| -> U:\n    return result\n;\n$export\nouter type T |value T| -> I32:\n    return inner(value, 1)\n;\n";
     fs::write(&requester_path, REQUESTER).expect("the requester should be written");
     fs::write(&donor_path, DONOR).expect("the donor should be written");
@@ -198,7 +198,7 @@ fn materialised_diagnostic_renders_owned_requester_and_donor_snapshots_after_ser
         surface
             .source_packages
             .register_filesystem_root(
-                "pkg",
+                "builder/test/pkg",
                 donor_directory.path().to_path_buf(),
                 PackageOrigin::Builder,
             )

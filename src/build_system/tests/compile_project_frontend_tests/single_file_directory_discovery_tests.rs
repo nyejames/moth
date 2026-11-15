@@ -194,7 +194,7 @@ fn single_file_without_source_package_dependencies_skips_registered_package_mate
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
-    let package_root = dir.join("packages/unused");
+    let package_root = dir.join("packages/builder/test/unused");
     fs::create_dir_all(&package_root).expect("should create registered package root");
     fs::write(
         package_root.join("@package.moth"),
@@ -211,7 +211,7 @@ fn single_file_without_source_package_dependencies_skips_registered_package_mate
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
-        .register_filesystem_root("unused", package_root, PackageOrigin::Builder)
+        .register_filesystem_root("builder/test/unused", package_root, PackageOrigin::Builder)
         .expect("test source root should register");
 
     let frontend = successful_compilation_value(compile_project_frontend(
@@ -431,7 +431,7 @@ fn single_file_project_cutoff_after_package_work_refuses_module_admission() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
-    let package_root = dir.join("packages/shared");
+    let package_root = dir.join("packages/builder/test/shared");
     fs::create_dir_all(&package_root).expect("should create registered package root");
     fs::write(
         package_root.join("@package.moth"),
@@ -441,7 +441,7 @@ fn single_file_project_cutoff_after_package_work_refuses_module_admission() {
     let moth_path = dir.join("main.moth");
     fs::write(
         &moth_path,
-        "@shared render\nvalue = render() catch:\n    then 0\n;\n",
+        "@builder/test/shared render\nvalue = render() catch:\n    then 0\n;\n",
     )
     .expect("should write package consumer");
 
@@ -452,7 +452,7 @@ fn single_file_project_cutoff_after_package_work_refuses_module_admission() {
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
-        .register_filesystem_root("shared", package_root, PackageOrigin::Builder)
+        .register_filesystem_root("builder/test/shared", package_root, PackageOrigin::Builder)
         .expect("test source root should register");
     crate::compiler_frontend::pipeline_test_support::reset_file_frontend_prepare_count_for_test(
         &dir,

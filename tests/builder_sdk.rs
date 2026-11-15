@@ -33,26 +33,27 @@ if value is:
 ~[:pattern_unreachable_after_duplicate_literal_warning result=[result]]
 "#;
 
-/// Imports `greet` from the `@ui` package that only one test builder registers.
-const UI_IMPORT_PAGE_SOURCE: &str = "@ui greet\nvalue = greet()\n";
+/// Imports `greet` from the `@builder/game/ui` package that only one test builder registers.
+const UI_IMPORT_PAGE_SOURCE: &str = "@builder/game/ui greet\nvalue = greet()\n";
 
-/// Imports a shared helper constant and a shared nominal with a receiver method from `@ui`.
-const UI_SUPPORT_HELPER_IMPORT_PAGE_SOURCE: &str =
-    "@ui value, Message\nmessage = Message(\"hello\")\nio.line([: [value] [message.label()]])\n";
+/// Imports a shared helper constant and a shared nominal with a receiver method from `@builder/game/ui`.
+const UI_SUPPORT_HELPER_IMPORT_PAGE_SOURCE: &str = "@builder/game/ui value, Message\nmessage = Message(\"hello\")\nio.line([: [value] [message.label()]])\n";
 
 /// A `Byte` value passed to a host function that takes `Byte`.
-const HOST_BYTE_PAGE_SOURCE: &str = "@platform takes_byte\noctet Byte = 42\ntakes_byte(octet)\n";
+const HOST_BYTE_PAGE_SOURCE: &str =
+    "@builder/game/platform takes_byte\noctet Byte = 42\ntakes_byte(octet)\n";
 
 /// A `U8` value passed where the host function takes `Byte`.
-const HOST_U8_PAGE_SOURCE: &str = "@platform takes_byte\noctet U8 = 42\ntakes_byte(octet)\n";
+const HOST_U8_PAGE_SOURCE: &str =
+    "@builder/game/platform takes_byte\noctet U8 = 42\ntakes_byte(octet)\n";
 
 #[test]
 fn external_crate_defines_source_and_host_packages() {
     let ui_dir = tempfile::tempdir().expect("should create package directory");
     let definition = BuilderDefinition::new("game")
-        .source_package(SourcePackage::new("@ui").from_dir(ui_dir.path()))
+        .source_package(SourcePackage::new("@builder/game/ui").from_dir(ui_dir.path()))
         .host_package(
-            HostPackage::new("@platform").function(
+            HostPackage::new("@builder/game/platform").function(
                 HostFunction::new("has_prefix")
                     .parameter(HostType::String)
                     .parameter(HostType::String)
@@ -102,6 +103,51 @@ fn external_crate_receives_typed_definition_errors() {
 
     assert_eq!(error.kind(), ErrorKind::InvalidDefinition);
     assert!(error.to_string().contains("@core/game"), "{error}");
+}
+
+#[test]
+fn external_crate_must_register_packages_below_the_builder_namespace_root() {
+    let package_dir = tempfile::tempdir().expect("should create package directory");
+
+    // A flat builder name, the bare reserved root and the Core namespace are rejected, so a
+    // custom builder group such as `game` is the only place its packages can live.
+    for (path, expected) in [
+        ("@ui", "below the 'builder' namespace root"),
+        ("@builder", "reserved namespace root"),
+        ("@core/extra", "reserved for official Core packages"),
+    ] {
+        let error = BuilderDefinition::new("game")
+            .source_package(SourcePackage::new(path).from_dir(package_dir.path()))
+            .finish()
+            .expect_err(&format!("source package {path} must be rejected"));
+        assert_eq!(error.kind(), ErrorKind::InvalidDefinition, "{path}");
+        let message = error.to_string();
+        assert!(message.contains(expected), "{path}: {message}");
+    }
+
+    BuilderDefinition::new("game")
+        .source_package(SourcePackage::new("@builder/game/ui").from_dir(package_dir.path()))
+        .finish()
+        .expect("an explicit custom builder group is a valid source package location");
+
+    for (path, expected) in [
+        ("@platform", "below the 'builder' namespace root"),
+        ("@builder", "reserved namespace root"),
+        ("@Core/extra", "reserved for official Core packages"),
+    ] {
+        let error = BuilderDefinition::new("game")
+            .host_package(HostPackage::new(path))
+            .finish()
+            .expect_err(&format!("host package {path} must be rejected"));
+        assert_eq!(error.kind(), ErrorKind::InvalidDefinition, "{path}");
+        let message = error.to_string();
+        assert!(message.contains(expected), "{path}: {message}");
+    }
+
+    BuilderDefinition::new("game")
+        .host_package(HostPackage::new("@builder/game/platform"))
+        .finish()
+        .expect("an explicit custom builder group is a valid host package location");
 }
 
 /// Accepts any project, records that `build` ran and requires the package facade.
@@ -335,7 +381,7 @@ impl ProjectBuilder for RecordingBuildBuilder {
     }
 }
 
-/// Registers the `@ui` source package installed in `ui_root`.
+/// Registers the `@builder/game/ui` source package installed in `ui_root`.
 struct UiPackageBuilder {
     ui_root: PathBuf,
 }
@@ -343,7 +389,7 @@ struct UiPackageBuilder {
 impl ProjectBuilder for UiPackageBuilder {
     fn definition(&self) -> Result<BuilderDefinition, Error> {
         BuilderDefinition::new("game")
-            .source_package(SourcePackage::new("@ui").from_dir(&self.ui_root))
+            .source_package(SourcePackage::new("@builder/game/ui").from_dir(&self.ui_root))
             .finish()
     }
 
@@ -356,7 +402,7 @@ impl ProjectBuilder for UiPackageBuilder {
     }
 }
 
-/// Registers no packages, so a project importing `@ui` cannot resolve it.
+/// Registers no packages, so a project importing `@builder/game/ui` cannot resolve it.
 struct NoPackageBuilder;
 
 impl ProjectBuilder for NoPackageBuilder {
@@ -386,7 +432,7 @@ fn minimal_sdk_builder_imports_official_core_html_and_css_without_web_packages()
     };
 
     build_project(&builder, BuildRequest::new(project_dir.path()))
-        .expect("official @core/html and @core/css must import without @web/canvas");
+        .expect("official @core/html and @core/css must import without @builder/web/canvas");
     assert!(
         builder.build_ran.get(),
         "compilation of the official Core imports must reach the builder"
@@ -474,7 +520,7 @@ impl ProjectBuilder for ByteParameterBuilder {
     fn definition(&self) -> Result<BuilderDefinition, Error> {
         BuilderDefinition::new("game")
             .host_package(
-                HostPackage::new("@platform")
+                HostPackage::new("@builder/game/platform")
                     .function(HostFunction::new("takes_byte").parameter(HostType::Byte)),
             )
             .finish()
@@ -489,7 +535,7 @@ impl ProjectBuilder for ByteParameterBuilder {
     }
 }
 
-/// Writes a paired `@ui` source package whose external surface is its support root.
+/// Writes a paired `@builder/game/ui` source package whose external surface is its support root.
 fn write_ui_paired_package(package_root: &Path) {
     fs::write(
         package_root.join("@mod.moth"),
@@ -505,7 +551,7 @@ fn write_ui_paired_package(package_root: &Path) {
         .expect("should write shared package helper");
 }
 
-/// Writes a support-only `@ui` package root that re-exports shared helper declarations.
+/// Writes a support-only `@builder/game/ui` package root that re-exports shared helper declarations.
 fn write_ui_support_package(package_root: &Path) {
     fs::write(
         package_root.join("@package.moth"),
@@ -519,7 +565,7 @@ fn write_ui_support_package(package_root: &Path) {
     .expect("should write shared package helpers");
 }
 
-/// Writes a `@ui` package root whose only module publishes `greet` through its support facade.
+/// Writes a `@builder/game/ui` package root whose only module publishes `greet` through its support facade.
 fn write_ui_package(package_root: &Path) {
     fs::write(
         package_root.join("@package.moth"),
@@ -528,7 +574,7 @@ fn write_ui_package(package_root: &Path) {
     .expect("should write package module");
 }
 
-/// Writes a `@ui` package root that publishes only a normal `@mod.moth` facade.
+/// Writes a `@builder/game/ui` package root that publishes only a normal `@mod.moth` facade.
 ///
 /// A registered Moth-source package must publish its external API through `@package.moth`, so the
 /// normal root alone is insufficient even though ordinary modules may use it.
@@ -572,12 +618,12 @@ fn independent_definitions_do_not_share_source_packages() {
     let no_package_builder = NoPackageBuilder;
 
     build_project(&ui_builder, BuildRequest::new(project_dir.path()))
-        .expect("the registered @ui package should satisfy the import");
+        .expect("the registered @builder/game/ui package should satisfy the import");
     let error = build_project(&no_package_builder, BuildRequest::new(project_dir.path()))
-        .expect_err("a builder without @ui must not resolve the import");
+        .expect_err("a builder without @builder/game/ui must not resolve the import");
     assert_eq!(error.kind(), ErrorKind::Compilation);
     build_project(&ui_builder, BuildRequest::new(project_dir.path()))
-        .expect("the first builder should still resolve @ui after the failing build");
+        .expect("the first builder should still resolve @builder/game/ui after the failing build");
 }
 
 #[test]
@@ -604,7 +650,7 @@ fn builder_registered_paired_source_package_publishes_its_support_interface() {
     let project_dir = tempfile::tempdir().expect("should create project directory");
     write_project(
         project_dir.path(),
-        "@ui greeting\nio.line([: [greeting]])\n",
+        "@builder/game/ui greeting\nio.line([: [greeting]])\n",
         false,
     );
     let ui_dir = tempfile::tempdir().expect("should create package directory");
@@ -643,7 +689,7 @@ fn builder_registered_paired_source_package_does_not_expose_its_normal_root() {
     let project_dir = tempfile::tempdir().expect("should create project directory");
     write_project(
         project_dir.path(),
-        "@ui normal_value\nvalue = normal_value\n",
+        "@builder/game/ui normal_value\nvalue = normal_value\n",
         false,
     );
     let ui_dir = tempfile::tempdir().expect("should create package directory");
@@ -744,7 +790,11 @@ fn project_local_html_styles_and_css_folders_coexist_with_core_packages() {
 #[test]
 fn registered_package_private_helper_stays_private() {
     let project_dir = tempfile::tempdir().expect("should create project directory");
-    write_project(project_dir.path(), "@ui hidden\nvalue = hidden\n", false);
+    write_project(
+        project_dir.path(),
+        "@builder/game/ui hidden\nvalue = hidden\n",
+        false,
+    );
     let ui_dir = tempfile::tempdir().expect("should create package directory");
     fs::write(
         ui_dir.path().join("@package.moth"),

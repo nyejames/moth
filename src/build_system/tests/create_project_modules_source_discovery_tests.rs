@@ -1389,8 +1389,19 @@ fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() 
     assert_primary_span_text(&failure, &src.join("@entry.moth"), "@HELPER");
 }
 
+fn reserved_claim_resolver(config: &Config) -> ProjectPathResolver {
+    let root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
+    ProjectPathResolver::new_with_module_roots(
+        root.clone(),
+        root,
+        PreparedSourcePackageRoots::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
+    )
+}
+
 #[test]
-fn binding_package_and_local_module_prefix_collision_is_ambiguous() {
+fn reserved_core_module_claim_is_rejected_before_binding_collision() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
@@ -1416,17 +1427,20 @@ fn binding_package_and_local_module_prefix_collision_is_ambiguous() {
         &style_directives,
     )
     .expect("config should parse");
-    let resolver = configured_resolver(&config);
+    let resolver = reserved_claim_resolver(&config);
 
     let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-CONFIG-0001");
     assert_eq!(
-        first_error_diagnostic(&failure).descriptor().code,
-        "MOTH-IMPORT-0006"
+        diagnostic.reason_key(),
+        Some("invalid_config.reserved_package_namespace_root_claim"),
+        "a local `core` module claims the reserved Core namespace root"
     );
 }
 
 #[test]
-fn binding_package_case_variant_import_with_local_file_is_ambiguous() {
+fn reserved_core_case_variant_claim_is_rejected_before_binding_collision() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
@@ -1451,14 +1465,263 @@ fn binding_package_case_variant_import_with_local_file_is_ambiguous() {
         &style_directives,
     )
     .expect("config should parse");
-    let resolver = configured_resolver(&config);
+    let resolver = reserved_claim_resolver(&config);
 
     let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-CONFIG-0001");
     assert_eq!(
-        first_error_diagnostic(&failure).descriptor().code,
-        "MOTH-IMPORT-0006"
+        diagnostic.reason_key(),
+        Some("invalid_config.reserved_package_namespace_root_claim"),
+        "a local `core` claim is reserved regardless of the import's case"
     );
-    assert_primary_span_text(&failure, &src.join("@entry.moth"), "@core/IO");
+}
+
+#[test]
+fn reserved_package_root_claims_follow_importable_namespace_entries() {
+    // Every rejection is an importable namespace claim below `@core` or `@builder`; a directory
+    // name alone is not a claim.
+    for (case, files, expected_root, claim_suffix) in [
+        (
+            "normal facade",
+            vec![("core/@mod.moth", "$export\nvalue #= 1\n")],
+            "core",
+            "core",
+        ),
+        (
+            "support facade",
+            vec![("builder/@package.moth", "$export\nroot #String = @/\n")],
+            "builder",
+            "builder",
+        ),
+        (
+            "helper source",
+            vec![("core.moth", "value #= 1\n")],
+            "core",
+            "core.moth",
+        ),
+        (
+            "template helper source",
+            vec![("builder.mtf", "[:local builder]\n")],
+            "builder",
+            "builder.mtf",
+        ),
+        (
+            "helper below reserved folder",
+            vec![("builder/helper.moth", "value #= 1\n")],
+            "builder",
+            "builder/helper.moth",
+        ),
+        (
+            "case-variant normal facade",
+            vec![("Core/@mod.moth", "$export\nvalue #= 1\n")],
+            "Core",
+            "Core",
+        ),
+        (
+            "case-variant support facade",
+            vec![("BUILDER/@package.moth", "$export\nroot #String = @/\n")],
+            "BUILDER",
+            "BUILDER",
+        ),
+        (
+            "case-variant helper",
+            vec![("Builder.moth", "value #= 1\n")],
+            "Builder",
+            "Builder.moth",
+        ),
+        (
+            "entry-only module child facade",
+            vec![
+                ("pages/@entry.moth", "[:entry]\n"),
+                ("pages/core/@mod.moth", "$export\nvalue #= 1\n"),
+            ],
+            "core",
+            "core",
+        ),
+        (
+            "entry-only module case-variant child facade",
+            vec![
+                ("pages/@entry.moth", "[:entry]\n"),
+                ("pages/Core/@mod.moth", "$export\nvalue #= 1\n"),
+            ],
+            "Core",
+            "Core",
+        ),
+        (
+            "support module child facade",
+            vec![
+                ("tools/@package.moth", "$export\nroot #String = @/\n"),
+                ("tools/core/@mod.moth", "$export\nvalue #= 1\n"),
+            ],
+            "core",
+            "core",
+        ),
+        (
+            "support module helper source",
+            vec![
+                ("tools/@package.moth", "$export\nroot #String = @/\n"),
+                ("tools/core.moth", "value #= 1\n"),
+            ],
+            "core",
+            "core.moth",
+        ),
+        (
+            "nested helper below an unrooted reserved directory",
+            vec![("core/nested/helper.moth", "value #= 1\n")],
+            "core",
+            "core/nested/helper.moth",
+        ),
+    ] {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(&src).expect("should create source root");
+        fs::write(
+            root.join(settings::CONFIG_FILE_NAME),
+            "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+        )
+        .expect("should write config");
+        fs::write(src.join("@entry.moth"), "[:entry]\n").expect("should write entry root");
+        for (relative, contents) in files {
+            let path = src.join(relative);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("should create fixture directory");
+            }
+            fs::write(path, contents).expect("should write fixture file");
+        }
+
+        let mut config = Config::new(root.clone());
+        let style_directives = test_style_directives();
+        parse_project_config_for_test(
+            &mut config,
+            &root.join(settings::CONFIG_FILE_NAME),
+            &style_directives,
+        )
+        .expect("config should parse");
+        let resolver = reserved_claim_resolver(&config);
+
+        let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+        let (report, diagnostic) = diagnosed_reports(&failure)
+            .iter_severity(DiagnosticSeverity::Error)
+            .next()
+            .expect("reserved claim should produce one diagnostic");
+        assert_eq!(diagnostic.descriptor().code, "MOTH-CONFIG-0001", "{case}");
+        assert_eq!(
+            diagnostic.reason_key(),
+            Some("invalid_config.reserved_package_namespace_root_claim"),
+            "{case}"
+        );
+        let strings = report.context().strings();
+        assert_eq!(
+            strings.resolve(diagnostic.string_ids()[0]),
+            expected_root,
+            "{case}: the diagnostic must name the reserved root as authored"
+        );
+        assert!(
+            strings
+                .resolve(diagnostic.string_ids()[1])
+                .ends_with(claim_suffix),
+            "{case}: the diagnostic must name the local claim"
+        );
+    }
+}
+
+#[test]
+fn reserved_package_root_directories_without_importable_claims_stay_legal() {
+    for (_case, files, entry) in [
+        (
+            "entry-only core module",
+            vec![("core/@entry.moth", "[:entry]\n")],
+            "[:entry]\n",
+        ),
+        (
+            "entry-only module private helper",
+            vec![
+                ("core/@entry.moth", "[:entry]\n"),
+                ("core/helper.moth", "value #= 1\n"),
+            ],
+            "[:entry]\n",
+        ),
+        (
+            "normal module below an entry-only module",
+            vec![
+                ("core/@entry.moth", "[:entry]\n"),
+                ("core/nested/@mod.moth", "$export\nvalue #= 1\n"),
+            ],
+            "[:entry]\n",
+        ),
+        (
+            "support facade below a reserved directory",
+            vec![
+                ("core/@entry.moth", "[:entry]\n"),
+                ("core/tools/@package.moth", "$export\nroot #String = @/\n"),
+            ],
+            "[:entry]\n",
+        ),
+        (
+            "support module private helper",
+            vec![
+                ("tools/@package.moth", "$export\nroot #String = @/\n"),
+                ("tools/helper.moth", "value #= 1\n"),
+            ],
+            "[:entry]\n",
+        ),
+        (
+            "plain asset directory",
+            vec![("core/logo.png", "not source")],
+            "[:entry]\n",
+        ),
+        (
+            "plain builder asset directory",
+            vec![("builder/theme.css", "body { color: red; }")],
+            "[:entry]\n",
+        ),
+        (
+            "nested ordinary module claims its unprefixed path",
+            vec![("src/core/@mod.moth", "$export\nvalue #= 1\n")],
+            "[:entry]\n",
+        ),
+        (
+            "case-variant entry-only module",
+            vec![("Core/@entry.moth", "[:entry]\n")],
+            "[:entry]\n",
+        ),
+    ] {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(&src).expect("should create source root");
+        fs::write(
+            root.join(settings::CONFIG_FILE_NAME),
+            "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+        )
+        .expect("should write config");
+        fs::write(src.join("@entry.moth"), entry).expect("should write entry root");
+        for (relative, contents) in files {
+            let path = src.join(relative);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("should create fixture directory");
+            }
+            fs::write(path, contents).expect("should write fixture file");
+        }
+
+        let mut config = Config::new(root.clone());
+        let style_directives = test_style_directives();
+        parse_project_config_for_test(
+            &mut config,
+            &root.join(settings::CONFIG_FILE_NAME),
+            &style_directives,
+        )
+        .expect("config should parse");
+        let resolver = reserved_claim_resolver(&config);
+
+        successful_compilation_value(discover_modules_for_test(
+            &config,
+            &resolver,
+            &style_directives,
+        ));
+    }
 }
 
 #[test]

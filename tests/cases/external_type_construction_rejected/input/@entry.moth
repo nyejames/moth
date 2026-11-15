@@ -1,3 +1,3 @@
-@test/pkg-a PkgError
+@builder/test/pkg-a PkgError
 
 x = PkgError()

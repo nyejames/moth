@@ -708,8 +708,8 @@ impl BackendBuilder for RegisteredJsPackageBuilder {
     fn frontend_surface(&self) -> BuilderSurface {
         let mut surface = HtmlProjectBuilder::new().frontend_surface();
         let mut packages = [
-            ("campaign", self.package_root.clone()),
-            ("x/y", self.marker_root.clone()),
+            ("builder/test/campaign", self.package_root.clone()),
+            ("builder/test/x/y", self.marker_root.clone()),
         ];
         if self.reverse_registration {
             packages.reverse();
@@ -882,7 +882,7 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
                 ),
                 (
                     project_root.join("@entry.moth"),
-                    "@binding.js provider_value as project_value\n@campaign package_value\n@x/y\n~[:project=[project_value()]|package=[package_value()]|[y.marker]]\n",
+                    "@binding.js provider_value as project_value\n@builder/test/campaign package_value\n@builder/test/x/y\n~[:project=[project_value()]|package=[package_value()]|[y.marker]]\n",
                 ),
                 (
                     project_root.join("binding.js"),
@@ -1638,7 +1638,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "@web/canvas\nrun |id String| -> String, Error!:\n    canvas_ref = canvas.get_canvas(id)!\n    ctx ~= canvas.context_2d(canvas_ref)!\n    canvas.set_line_width(~ctx, 2.0)\n    gradient ~= canvas.create_linear_gradient(ctx, 0.0, 0.0, 10.0, 0.0)!\n    canvas.add_color_stop(~gradient, 0.0, \"red\")!\n    canvas.set_fill_gradient(~ctx, gradient)\n    canvas.fill_rect(~ctx, 0.0, 0.0, 10.0, 10.0)\n    return \"ok\"\n;\nresult = run(\"game\") catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
+        "@builder/web/canvas\nrun |id String| -> String, Error!:\n    canvas_ref = canvas.get_canvas(id)!\n    ctx ~= canvas.context_2d(canvas_ref)!\n    canvas.set_line_width(~ctx, 2.0)\n    gradient ~= canvas.create_linear_gradient(ctx, 0.0, 0.0, 10.0, 0.0)!\n    canvas.add_color_stop(~gradient, 0.0, \"red\")!\n    canvas.set_fill_gradient(~ctx, gradient)\n    canvas.fill_rect(~ctx, 0.0, 0.0, 10.0, 10.0)\n    return \"ok\"\n;\nresult = run(\"game\") catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
     )
     .expect("should write page");
 
@@ -1688,15 +1688,15 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     let html = html_text(outputs.at("index.html"));
     assert!(
         html.contains("<script type=\"module\">"),
-        "reachable @web/canvas glue should make the inline bundle a module script"
+        "reachable @builder/web/canvas glue should make the inline bundle a module script"
     );
     assert!(
         html.contains("import { __moth_glue_"),
-        "reachable @web/canvas calls should add a glue import preamble"
+        "reachable @builder/web/canvas calls should add a glue import preamble"
     );
     assert!(
         html.contains("<script type=\"importmap\">"),
-        "@web/canvas imports runtime helpers, so HTML should include an import map"
+        "@builder/web/canvas imports runtime helpers, so HTML should include an import map"
     );
 
     outputs.at(RUNTIME_MODULE_PATH);
@@ -1717,7 +1717,7 @@ fn build_html_project_web_canvas_free_function_import_emits_builtin_js_asset_and
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "@web/canvas get_canvas, context_2d\ndraw || -> String, Error!:\n    element = get_canvas(\"game_canvas\")!\n    context = context_2d(element)!\n    return \"ok\"\n;\nresult = draw() catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
+        "@builder/web/canvas get_canvas, context_2d\ndraw || -> String, Error!:\n    element = get_canvas(\"game_canvas\")!\n    context = context_2d(element)!\n    return \"ok\"\n;\nresult = draw() catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
     )
     .expect("should write page");
 

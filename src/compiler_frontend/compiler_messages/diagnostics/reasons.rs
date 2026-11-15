@@ -475,6 +475,15 @@ pub enum InvalidConfigReason {
         prefix: StringId,
         entry_folder: StringId,
     },
+    /// A local project source claim used a reserved package namespace root.
+    ///
+    /// `@core` and `@builder` group compiler-shipped and builder-owned packages, so no local
+    /// folder, helper or support package may publish a name below either root. The diagnostic
+    /// names the claimed root as authored and the claiming source path.
+    ReservedPackageNamespaceRootClaim {
+        root: StringId,
+        source: StringId,
+    },
     /// A registered Moth-source package root lacks its required `@package.moth` support facade.
     ///
     /// A co-located `@mod.moth` stays an internal normal-position scope and `@entry.moth` alone

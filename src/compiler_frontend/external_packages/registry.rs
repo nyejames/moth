@@ -19,7 +19,6 @@ use super::ids::{
 };
 use super::{ExternalSymbolPath, ExternalSymbolPathError};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -194,21 +193,6 @@ impl ExternalPackageRegistry {
                 "External package '{path}' must start with '@'."
             )));
         };
-        if path_without_introducer
-            .split('/')
-            .next()
-            .is_some_and(|component| component == PROJECT_GLOBALS_DEPENDENCY_NAME)
-        {
-            return Err(ExternalRegistrationError::Infrastructure(
-                InfrastructureFailure::internal(
-                    CompilerStage::DependencyResolution,
-                    format!(
-                        "External package path '{}' is reserved for the @project project-globals interface",
-                        path
-                    ),
-                ),
-            ));
-        }
         if let Err(reason) = crate::builder_surface::package_metadata::validate_package_path(
             path_without_introducer,
             origin,
@@ -217,15 +201,16 @@ impl ExternalPackageRegistry {
                 "External package '{path}' {reason}."
             )));
         }
-        if self
-            .package_id_by_path
-            .keys()
-            .any(|registered| registered.eq_ignore_ascii_case(&path))
-        {
+        if self.package_id_by_path.keys().any(|registered| {
+            crate::builder_surface::package_metadata::package_paths_overlap(registered, &path)
+        }) {
             return Err(ExternalRegistrationError::Infrastructure(
                 InfrastructureFailure::internal(
                     CompilerStage::DependencyResolution,
-                    format!("External package '{}' is already registered.", path),
+                    format!(
+                        "External package '{}' overlaps an already registered package.",
+                        path
+                    ),
                 ),
             ));
         }
@@ -816,7 +801,7 @@ impl ExternalPackageRegistry {
         &mut self,
         function: ExternalFunctionDef,
     ) -> Result<ExternalFunctionId, ExternalRegistrationError> {
-        let test_package_path = "@test/default";
+        let test_package_path = "@builder/test/default";
         let package_id = match self.package_id_by_path.get(test_package_path).copied() {
             Some(id) => id,
             None => self.register_package(

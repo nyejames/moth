@@ -1,4 +1,4 @@
-@test/pkg-a open
-@test/pkg-b open
+@builder/test/pkg-a open
+@builder/test/pkg-b open
 
 open("hello")

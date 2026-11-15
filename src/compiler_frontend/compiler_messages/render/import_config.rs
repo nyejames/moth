@@ -246,6 +246,11 @@ pub(crate) fn invalid_config_message(
             string_table.resolve(*entry_folder),
             string_table.resolve(*prefix),
         ),
+        InvalidConfigReason::ReservedPackageNamespaceRootClaim { root, source } => format!(
+            "Project source '{}' claims the reserved package namespace root '@{}'. Compiler-shipped Core packages and builder-registered packages own those roots, so a local folder, helper source or support package must not publish a name below either. Rename the claiming folder or source file; an entry-only module keeps its directory name because it publishes nothing.",
+            string_table.resolve(*source),
+            string_table.resolve(*root),
+        ),
         InvalidConfigReason::SourcePackageMissingRoot { prefix, root } => format!(
             "Source-backed package '@{}' at '{}' is missing its required '@package.moth' support facade. Every registered source-backed package publishes its external API through a directly contained '@package.moth'; '@mod.moth' alone is an internal normal-position scope and '@entry.moth' alone publishes no importable surface.",
             string_table.resolve(*prefix),

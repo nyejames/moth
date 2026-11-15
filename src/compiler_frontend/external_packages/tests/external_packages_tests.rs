@@ -186,98 +186,98 @@ fn const_eval_registration_requires_trusted_core_origin_and_exact_signature() {
     let scenarios = [
         Scenario {
             name: "Builder origin",
-            package_path: "@test/constant-eval",
+            package_path: "@builder/test/constant-eval",
             origin: PackageOrigin::Builder,
             signature_change: SignatureChange::None,
             accepted: false,
         },
         Scenario {
             name: "Dependency origin",
-            package_path: "@test/constant-eval",
+            package_path: "@dependency/test/constant-eval",
             origin: PackageOrigin::Dependency,
             signature_change: SignatureChange::None,
             accepted: false,
         },
         Scenario {
             name: "ProjectLocal origin",
-            package_path: "@test/constant-eval",
+            package_path: "@local/test/constant-eval",
             origin: PackageOrigin::ProjectLocal,
             signature_change: SignatureChange::None,
             accepted: false,
         },
         Scenario {
             name: "Mutable parameter",
-            package_path: "@test/constant-eval",
+            package_path: "@core/test/constant-eval",
             origin: PackageOrigin::Core,
             signature_change: SignatureChange::MutableParameter,
             accepted: false,
         },
         Scenario {
             name: "AliasArgs success slot",
-            package_path: "@test/constant-eval",
+            package_path: "@core/test/constant-eval",
             origin: PackageOrigin::Core,
             signature_change: SignatureChange::AliasArgsSlot,
             accepted: false,
         },
         Scenario {
             name: "error slot",
-            package_path: "@test/constant-eval",
+            package_path: "@core/test/constant-eval",
             origin: PackageOrigin::Core,
             signature_change: SignatureChange::ErrorSlot,
             accepted: false,
         },
         Scenario {
             name: "wrong return type",
-            package_path: "@test/constant-eval",
+            package_path: "@core/test/constant-eval",
             origin: PackageOrigin::Core,
             signature_change: SignatureChange::WrongReturnType,
             accepted: false,
         },
         Scenario {
             name: "wrong parameter count",
-            package_path: "@test/constant-eval",
+            package_path: "@core/test/constant-eval",
             origin: PackageOrigin::Core,
             signature_change: SignatureChange::WrongParameterCount,
             accepted: false,
         },
         Scenario {
             name: "optional parameter",
-            package_path: "@test/constant-eval",
+            package_path: "@core/test/constant-eval",
             origin: PackageOrigin::Core,
             signature_change: SignatureChange::OptionalParameter,
             accepted: false,
         },
         Scenario {
             name: "optional return",
-            package_path: "@test/constant-eval",
+            package_path: "@core/test/constant-eval",
             origin: PackageOrigin::Core,
             signature_change: SignatureChange::OptionalReturn,
             accepted: false,
         },
         Scenario {
             name: "nested optional return",
-            package_path: "@test/constant-eval",
+            package_path: "@core/test/constant-eval",
             origin: PackageOrigin::Core,
             signature_change: SignatureChange::NestedOptionalReturn,
             accepted: false,
         },
         Scenario {
             name: "extra return slot",
-            package_path: "@test/constant-eval",
+            package_path: "@core/test/constant-eval",
             origin: PackageOrigin::Core,
             signature_change: SignatureChange::ExtraReturnSlot,
             accepted: false,
         },
         Scenario {
             name: "missing return slot",
-            package_path: "@test/constant-eval",
+            package_path: "@core/test/constant-eval",
             origin: PackageOrigin::Core,
             signature_change: SignatureChange::MissingReturnSlot,
             accepted: false,
         },
         Scenario {
             name: "valid Core registration",
-            package_path: "@test/constant-eval",
+            package_path: "@core/test/constant-eval",
             origin: PackageOrigin::Core,
             signature_change: SignatureChange::None,
             accepted: true,
@@ -417,27 +417,18 @@ fn infrastructure_message(error: ExternalRegistrationError) -> String {
 #[test]
 fn register_package_rejects_reserved_project_namespace() {
     let mut registry = ExternalPackageRegistry::new();
-    for path in ["@project", "@project/details"] {
+    // Exact and case-folded spellings share the shared package-path validator, so both keep the
+    // user-facing invalid definition lane instead of reporting an internal collision.
+    for path in ["@project", "@project/details", "@Project"] {
         let error = registry
             .register_package(path, crate::builder_surface::PackageOrigin::Builder)
             .expect_err("binding packages must not claim the @project namespace");
-        let message = infrastructure_message(error);
+        let message = invalid_definition_message(error);
         assert!(
             message.contains("reserved for the @project project-globals interface"),
-            "{message}"
+            "{path}: {message}"
         );
     }
-
-    // Case-folded spellings fail Lappet's package path validation rather than the exact
-    // reservation, so they keep the user-facing invalid definition lane.
-    let error = registry
-        .register_package("@Project", crate::builder_surface::PackageOrigin::Builder)
-        .expect_err("case-folded @project must not claim the reserved namespace");
-    let message = invalid_definition_message(error);
-    assert!(
-        message.contains("reserved for the @project project-globals interface"),
-        "{message}"
-    );
 }
 
 #[test]
@@ -471,9 +462,9 @@ fn register_package_rejects_malformed_paths() {
 fn register_package_rejects_duplicate_without_consuming_package_id() {
     let mut registry = ExternalPackageRegistry::new();
     let first = registry
-        .register_package("@test/atomic", PackageOrigin::Builder)
+        .register_package("@builder/test/atomic", PackageOrigin::Builder)
         .expect("first package should register");
-    for path in ["@test/atomic", "@TEST/ATOMIC"] {
+    for path in ["@builder/test/atomic", "@builder/test/ATOMIC"] {
         let duplicate = registry
             .register_package(path, PackageOrigin::Builder)
             .expect_err("an exact or case-only duplicate package path must be rejected");
@@ -482,11 +473,14 @@ fn register_package_rejects_duplicate_without_consuming_package_id() {
             ExternalRegistrationError::Infrastructure(_)
         ));
     }
-    assert_eq!(registry.resolve_package_id("@test/atomic"), Some(first));
-    assert_eq!(registry.resolve_package_id("@TEST/ATOMIC"), None);
+    assert_eq!(
+        registry.resolve_package_id("@builder/test/atomic"),
+        Some(first)
+    );
+    assert_eq!(registry.resolve_package_id("@builder/test/ATOMIC"), None);
 
     let next = registry
-        .register_package("@test/after", PackageOrigin::Builder)
+        .register_package("@builder/test/after", PackageOrigin::Builder)
         .expect("a valid package after a rejected duplicate should register");
     assert_eq!(next.0, first.0 + 1);
 }
@@ -538,7 +532,7 @@ fn register_function_rejects_slots_without_a_moth_value() {
     for function in invalid_signatures {
         let mut registry = ExternalPackageRegistry::new();
         let package_id = registry
-            .register_package("@test/signature", PackageOrigin::Builder)
+            .register_package("@builder/test/signature", PackageOrigin::Builder)
             .expect("test package should register");
         let error = registry
             .register_function_at_path(
@@ -550,12 +544,12 @@ fn register_function_rejects_slots_without_a_moth_value() {
             .expect_err(&format!("signature should be rejected: {function:?}"));
         let message = invalid_definition_message(error);
         assert!(
-            message.contains("in package '@test/signature'"),
+            message.contains("in package '@builder/test/signature'"),
             "{message}"
         );
         assert!(
             registry
-                .resolve_package_function("@test/signature", "invalid")
+                .resolve_package_function("@builder/test/signature", "invalid")
                 .is_none(),
             "a rejected registration must not publish a function"
         );
@@ -621,12 +615,18 @@ fn collection_helpers_keep_receiver_parameter_access_modes() {
 fn same_symbol_name_across_packages_is_allowed() {
     let registry = ExternalPackageRegistry::new().with_test_packages_for_integration();
 
-    // Both @test/pkg-a and @test/pkg-b expose a function named "open".
-    let a_result = registry.resolve_package_function("@test/pkg-a", "open");
-    assert!(a_result.is_some(), "@test/pkg-a/open should resolve");
+    // Both @builder/test/pkg-a and @builder/test/pkg-b expose a function named "open".
+    let a_result = registry.resolve_package_function("@builder/test/pkg-a", "open");
+    assert!(
+        a_result.is_some(),
+        "@builder/test/pkg-a/open should resolve"
+    );
 
-    let b_result = registry.resolve_package_function("@test/pkg-b", "open");
-    assert!(b_result.is_some(), "@test/pkg-b/open should resolve");
+    let b_result = registry.resolve_package_function("@builder/test/pkg-b", "open");
+    assert!(
+        b_result.is_some(),
+        "@builder/test/pkg-b/open should resolve"
+    );
 
     // They must map to distinct IDs.
     let (a_id, _) = a_result.unwrap();
@@ -642,10 +642,10 @@ fn resolve_package_function_selects_correct_package() {
     let registry = ExternalPackageRegistry::new().with_test_packages_for_integration();
 
     let (a_id, a_def) = registry
-        .resolve_package_function("@test/pkg-a", "open")
+        .resolve_package_function("@builder/test/pkg-a", "open")
         .unwrap();
     let (b_id, b_def) = registry
-        .resolve_package_function("@test/pkg-b", "open")
+        .resolve_package_function("@builder/test/pkg-b", "open")
         .unwrap();
 
     assert_eq!(a_def.name, "open");
@@ -714,7 +714,7 @@ fn package_origin_recorded_for_builtins() {
 fn package_origin_recorded_for_integration_test_packages() {
     let registry = ExternalPackageRegistry::new().with_test_packages_for_integration();
 
-    let pkg_a = registry.get_package("@test/pkg-a").unwrap();
+    let pkg_a = registry.get_package("@builder/test/pkg-a").unwrap();
     assert_eq!(
         pkg_a.metadata,
         crate::builder_surface::PackageMetadata::binding(
@@ -722,7 +722,7 @@ fn package_origin_recorded_for_integration_test_packages() {
         )
     );
 
-    let pkg_b = registry.get_package("@test/pkg-b").unwrap();
+    let pkg_b = registry.get_package("@builder/test/pkg-b").unwrap();
     assert_eq!(
         pkg_b.metadata,
         crate::builder_surface::PackageMetadata::binding(
@@ -752,25 +752,36 @@ fn package_path_to_id_index_is_consistent() {
 }
 
 #[test]
-fn package_prefix_lookup_returns_longest_registered_package() {
+fn package_prefix_lookup_matches_registered_package_at_path_boundary() {
+    // External registrations reject nested package paths, so a dependency matches exactly one
+    // complete registered prefix. A sibling sharing only a textual prefix must not match.
     let mut registry = ExternalPackageRegistry::new();
     registry
-        .register_package("@test", crate::builder_surface::PackageOrigin::Builder)
-        .expect("parent test package should register");
-    let child_id = registry
-        .register_package("@test/pkg", crate::builder_surface::PackageOrigin::Builder)
-        .expect("child test package should register");
+        .register_package(
+            "@builder/test/pkg",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
+        .expect("test package should register");
+    registry
+        .register_package(
+            "@builder/test_extra",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
+        .expect("sibling package should register");
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let path = import_path(&["test", "pkg", "open"], &mut path_fork, &mut string_table);
+    let path = import_path(
+        &["builder", "test", "pkg", "open"],
+        &mut path_fork,
+        &mut string_table,
+    );
     let matched = registry
         .longest_package_prefix_for_dependency(path, &path_fork, &string_table)
         .expect("package prefix should match");
 
-    assert_eq!(matched.package_path, "@test/pkg");
-    assert_eq!(matched.package_id, child_id);
-    assert_eq!(matched.matched_component_count, 2);
+    assert_eq!(matched.package_path, "@builder/test/pkg");
+    assert_eq!(matched.matched_component_count, 3);
 }
 
 #[test]
@@ -844,7 +855,7 @@ fn constant_registration_rejects_mismatched_numeric_payload_types_without_publis
     let mut registry = ExternalPackageRegistry::default();
     let package_id = registry
         .register_package(
-            "@test/constant_types",
+            "@builder/test/constant_types",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test package should register");
@@ -931,7 +942,7 @@ fn constant_registration_rejects_mismatched_numeric_payload_types_without_publis
 
         assert!(
             registry
-                .resolve_package_constant_by_path("@test/constant_types", &path)
+                .resolve_package_constant_by_path("@builder/test/constant_types", &path)
                 .is_none(),
             "a mismatched constant must not be published"
         );
@@ -964,7 +975,7 @@ fn constant_registration_rejects_mismatched_numeric_payload_types_without_publis
             )
             .expect("matching fixed constant registers");
         let (_, valid_constant) = registry
-            .resolve_package_constant_by_path("@test/constant_types", &valid_path)
+            .resolve_package_constant_by_path("@builder/test/constant_types", &valid_path)
             .expect("matching fixed constant resolves");
         assert_eq!(valid_constant.data_type, signature);
         assert_eq!(valid_constant.value, valid_value);
@@ -987,7 +998,7 @@ fn constant_registration_rejects_mismatched_numeric_payload_types_without_publis
         )
         .expect("a raw U32 payload should register before source-level range checking");
     let (_, uint_constant) = registry
-        .resolve_package_constant_by_path("@test/constant_types", &uint_path)
+        .resolve_package_constant_by_path("@builder/test/constant_types", &uint_path)
         .expect("the matching U32 constant should resolve");
     assert_eq!(
         uint_constant.data_type,
@@ -1007,7 +1018,7 @@ fn duplicate_explicit_function_id_is_rejected_without_mutation() {
     let mut registry = ExternalPackageRegistry::default();
     let package_id = registry
         .register_package(
-            "@test/functions",
+            "@builder/test/functions",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test package should register");
@@ -1034,7 +1045,7 @@ fn duplicate_explicit_function_id_is_rejected_without_mutation() {
     assert!(result.is_err(), "an explicit function ID must be injective");
     assert!(
         registry
-            .resolve_package_function_by_path("@test/functions", &duplicate_path)
+            .resolve_package_function_by_path("@builder/test/functions", &duplicate_path)
             .is_none(),
         "the rejected path must not mutate the package surface"
     );
@@ -1049,7 +1060,7 @@ fn duplicate_explicit_constant_id_is_rejected_without_mutation() {
     let mut registry = ExternalPackageRegistry::default();
     let package_id = registry
         .register_package(
-            "@test/constants",
+            "@core/test/constants",
             crate::builder_surface::PackageOrigin::Core,
         )
         .expect("test package should register");
@@ -1076,7 +1087,7 @@ fn duplicate_explicit_constant_id_is_rejected_without_mutation() {
     assert!(result.is_err(), "an explicit constant ID must be injective");
     assert!(
         registry
-            .resolve_package_constant_by_path("@test/constants", &duplicate_path)
+            .resolve_package_constant_by_path("@core/test/constants", &duplicate_path)
             .is_none(),
         "the rejected path must not mutate the package surface"
     );
@@ -1097,7 +1108,7 @@ fn canonical_binding_identity_resolves_across_independent_registries() {
     let mut provider = ExternalPackageRegistry::default();
     let provider_package = provider
         .register_package(
-            "@test/shared",
+            "@builder/test/shared",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("provider package should register");
@@ -1145,13 +1156,13 @@ fn canonical_binding_identity_resolves_across_independent_registries() {
     let mut consumer = ExternalPackageRegistry::default();
     consumer
         .register_package(
-            "@test/unrelated",
+            "@core/test/unrelated",
             crate::builder_surface::PackageOrigin::Core,
         )
         .expect("unrelated package should shift the local package ID");
     let consumer_package = consumer
         .register_package(
-            "@test/shared",
+            "@builder/test/shared",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("consumer package should register independently");
@@ -1232,7 +1243,7 @@ fn canonical_binding_identity_resolves_across_independent_registries() {
         consumer
             .resolve_canonical_symbol(&mismatched_origin)
             .is_none(),
-        "the same package path from another origin must not resolve"
+        "the same symbol path from another origin must not resolve"
     );
 }
 
@@ -1240,7 +1251,10 @@ fn canonical_binding_identity_resolves_across_independent_registries() {
 fn register_function_at_path_rejects_duplicate_path() {
     let mut registry = ExternalPackageRegistry::new();
     let package_id = registry
-        .register_package("@test/path", crate::builder_surface::PackageOrigin::Builder)
+        .register_package(
+            "@builder/test/path",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
         .expect("test package registration should not collide");
 
     registry
@@ -1269,7 +1283,10 @@ fn register_function_at_path_rejects_duplicate_path() {
 fn same_function_leaf_under_different_namespaces_allowed() {
     let mut registry = ExternalPackageRegistry::new();
     let package_id = registry
-        .register_package("@test/path", crate::builder_surface::PackageOrigin::Builder)
+        .register_package(
+            "@builder/test/path",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
         .expect("test package registration should not collide");
 
     registry
@@ -1292,13 +1309,13 @@ fn same_function_leaf_under_different_namespaces_allowed() {
 
     let a_foo = registry
         .resolve_package_function_by_path(
-            "@test/path",
+            "@builder/test/path",
             &ExternalSymbolPath::from_components(vec!["a".to_owned(), "foo".to_owned()]),
         )
         .map(|(id, _)| id);
     let b_foo = registry
         .resolve_package_function_by_path(
-            "@test/path",
+            "@builder/test/path",
             &ExternalSymbolPath::from_components(vec!["b".to_owned(), "foo".to_owned()]),
         )
         .map(|(id, _)| id);
@@ -1315,7 +1332,10 @@ fn same_function_leaf_under_different_namespaces_allowed() {
 fn function_type_collision_at_same_path_rejected() {
     let mut registry = ExternalPackageRegistry::new();
     let package_id = registry
-        .register_package("@test/path", crate::builder_surface::PackageOrigin::Builder)
+        .register_package(
+            "@builder/test/path",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
         .expect("test package registration should not collide");
 
     registry
@@ -1348,7 +1368,10 @@ fn function_type_collision_at_same_path_rejected() {
 fn function_constant_collision_at_same_path_rejected() {
     let mut registry = ExternalPackageRegistry::new();
     let package_id = registry
-        .register_package("@test/path", crate::builder_surface::PackageOrigin::Builder)
+        .register_package(
+            "@builder/test/path",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
         .expect("test package registration should not collide");
 
     registry
@@ -1381,7 +1404,10 @@ fn function_constant_collision_at_same_path_rejected() {
 fn nested_function_path_registers_and_resolves() {
     let mut registry = ExternalPackageRegistry::new();
     let package_id = registry
-        .register_package("@test/path", crate::builder_surface::PackageOrigin::Builder)
+        .register_package(
+            "@builder/test/path",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
         .expect("test package registration should not collide");
 
     let path = ExternalSymbolPath::from_components(vec![
@@ -1400,12 +1426,12 @@ fn nested_function_path_registers_and_resolves() {
         .expect("nested path registration should succeed");
 
     let resolved = registry
-        .resolve_package_function_by_path("@test/path", &path)
+        .resolve_package_function_by_path("@builder/test/path", &path)
         .map(|(id, _)| id);
     assert_eq!(resolved, Some(ExternalFunctionId::Synthetic(50)));
 
     // One-component lookup for the same leaf should not find the nested symbol.
-    let flat = registry.resolve_package_function("@test/path", "new");
+    let flat = registry.resolve_package_function("@builder/test/path", "new");
     assert!(
         flat.is_none(),
         "nested symbol must not resolve through flat leaf lookup"
@@ -1429,7 +1455,10 @@ fn one_component_external_imports_still_resolve_by_path() {
 fn package_surface_iteration_exposes_one_component_paths_only() {
     let mut registry = ExternalPackageRegistry::new();
     let package_id = registry
-        .register_package("@test/path", crate::builder_surface::PackageOrigin::Builder)
+        .register_package(
+            "@builder/test/path",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
         .expect("test package registration should not collide");
 
     registry
@@ -1449,7 +1478,7 @@ fn package_surface_iteration_exposes_one_component_paths_only() {
         )
         .unwrap();
 
-    let package = registry.get_package("@test/path").unwrap();
+    let package = registry.get_package("@builder/test/path").unwrap();
     let flat_names: Vec<&str> = package
         .function_symbol_ids()
         .filter(|(path, _)| path.is_single())
@@ -2005,12 +2034,203 @@ fn zero_success_external_contract_remains_ordinary_completion() {
 /// WHY: protects the boundary between source-backed packages (owned by
 ///      `SourcePackageRegistry`) and binding-backed packages (owned here).
 #[test]
+fn register_host_package_uses_shared_origin_path_contract() {
+    // Native host packages flow through the same `validate_package_path` owner as both other
+    // backings: Builder packages need an explicit builder group, Core packages stay below
+    // `core/`, and flat, exact-root, case-variant and cross-origin claims are rejected.
+    let mut registry = ExternalPackageRegistry::new();
+
+    for (path, origin) in [
+        ("@core/test/toolkit", PackageOrigin::Core),
+        ("@builder/game/input", PackageOrigin::Builder),
+    ] {
+        let id = registry
+            .register_host_package(path, origin)
+            .expect("valid host package path should register");
+        let package = registry
+            .get_package_by_id(id)
+            .expect("registered host package should be retrievable");
+        assert_eq!(package.metadata.origin, origin, "{path}");
+        assert_eq!(
+            package.metadata.backing,
+            crate::builder_surface::package_metadata::PackageBacking::HostBinding,
+            "{path}: host packages must retain HostBinding backing"
+        );
+    }
+
+    for (path, origin, expected) in [
+        (
+            "@input",
+            PackageOrigin::Builder,
+            "must register below the 'builder' namespace root",
+        ),
+        (
+            "@builder",
+            PackageOrigin::Builder,
+            "is a reserved namespace root, not an importable package",
+        ),
+        (
+            "@core",
+            PackageOrigin::Core,
+            "is a reserved namespace root, not an importable package",
+        ),
+        (
+            "@core/game",
+            PackageOrigin::Builder,
+            "is reserved for official Core packages",
+        ),
+        (
+            "@builder/game/input",
+            PackageOrigin::Core,
+            "must register below the 'core' namespace root",
+        ),
+        (
+            "@core/Game",
+            PackageOrigin::Builder,
+            "is reserved for official Core packages",
+        ),
+    ] {
+        let message = invalid_definition_message(
+            registry
+                .register_host_package(path, origin)
+                .expect_err(&format!("{path} must be rejected for {origin:?}")),
+        );
+        assert!(
+            message.contains(expected),
+            "{path} ({origin:?}): expected '{expected}' in {message}"
+        );
+    }
+}
+
+#[test]
+fn external_registration_rejects_overlapping_binding_and_host_packages() {
+    #[derive(Clone, Copy)]
+    enum Kind {
+        Binding,
+        Host,
+    }
+
+    fn register(
+        registry: &mut ExternalPackageRegistry,
+        kind: Kind,
+        path: &str,
+    ) -> Result<(), ExternalRegistrationError> {
+        match kind {
+            Kind::Binding => registry
+                .register_package(path, PackageOrigin::Builder)
+                .map(|_| ()),
+            Kind::Host => registry
+                .register_host_package(path, PackageOrigin::Builder)
+                .map(|_| ()),
+        }
+    }
+
+    for (case, first_kind, first_path, second_kind, second_path) in [
+        (
+            "host parent then host child",
+            Kind::Host,
+            "@builder/game/input",
+            Kind::Host,
+            "@builder/game/input/keyboard",
+        ),
+        (
+            "host child then host parent",
+            Kind::Host,
+            "@builder/game/input/keyboard",
+            Kind::Host,
+            "@builder/game/input",
+        ),
+        (
+            "binding parent then binding child",
+            Kind::Binding,
+            "@builder/game/input",
+            Kind::Binding,
+            "@builder/game/input/keyboard",
+        ),
+        (
+            "binding child then binding parent",
+            Kind::Binding,
+            "@builder/game/input/keyboard",
+            Kind::Binding,
+            "@builder/game/input",
+        ),
+        (
+            "binding parent then host child",
+            Kind::Binding,
+            "@builder/game/input",
+            Kind::Host,
+            "@builder/game/input/keyboard",
+        ),
+        (
+            "host child then binding parent",
+            Kind::Host,
+            "@builder/game/input/keyboard",
+            Kind::Binding,
+            "@builder/game/input",
+        ),
+        (
+            "host parent then binding child",
+            Kind::Host,
+            "@builder/game/input",
+            Kind::Binding,
+            "@builder/game/input/keyboard",
+        ),
+        (
+            "binding then host at one path",
+            Kind::Binding,
+            "@builder/game/input",
+            Kind::Host,
+            "@builder/game/input",
+        ),
+        (
+            "host then binding at one path",
+            Kind::Host,
+            "@builder/game/input",
+            Kind::Binding,
+            "@builder/game/input",
+        ),
+        (
+            "case-variant host parent then binding child",
+            Kind::Host,
+            "@builder/game/Input",
+            Kind::Binding,
+            "@builder/game/input/keyboard",
+        ),
+        (
+            "case-variant binding child then host parent",
+            Kind::Binding,
+            "@builder/game/input/keyboard",
+            Kind::Host,
+            "@builder/game/Input",
+        ),
+    ] {
+        let mut registry = ExternalPackageRegistry::new();
+        register(&mut registry, first_kind, first_path)
+            .unwrap_or_else(|error| panic!("{case}: first registration failed: {error:?}"));
+        let error = register(&mut registry, second_kind, second_path).expect_err(&format!(
+            "{case}: overlapping registration must be rejected"
+        ));
+        assert!(
+            matches!(error, ExternalRegistrationError::Infrastructure(_)),
+            "{case}: overlap should keep the registry collision lane: {error:?}"
+        );
+    }
+
+    // Siblings sharing a prefix without a path boundary remain legal in either order.
+    let mut registry = ExternalPackageRegistry::new();
+    register(&mut registry, Kind::Host, "@builder/game/input")
+        .expect("host sibling should register");
+    register(&mut registry, Kind::Binding, "@builder/game/input_extra")
+        .expect("a sibling that only shares a textual prefix must register");
+}
+
+#[test]
 fn register_package_always_produces_binding_backed_metadata() {
     let mut registry = ExternalPackageRegistry::new();
 
     let id = registry
         .register_package(
-            "@test/binding-only",
+            "@builder/test/binding-only",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test package should register");
@@ -2070,7 +2290,7 @@ fn reverse_lookup_resolves_dynamically_registered_external_type() {
     let mut registry = ExternalPackageRegistry::default();
     let package_id = registry
         .register_package(
-            "@test/canvas",
+            "@builder/test/canvas",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test package should register");
@@ -2093,7 +2313,7 @@ fn reverse_lookup_resolves_dynamically_registered_external_type() {
         .resolve_type_package_and_symbol_path(ExternalTypeId(42))
         .expect("dynamically registered type must resolve through the reverse lookup");
 
-    assert_eq!(package.name(), "@test/canvas");
+    assert_eq!(package.name(), "@builder/test/canvas");
     assert_eq!(
         package.origin(),
         crate::builder_surface::PackageOrigin::Builder
@@ -2121,7 +2341,7 @@ fn clone_preserves_type_reverse_lookup() {
     let mut registry = ExternalPackageRegistry::default();
     let package_id = registry
         .register_package(
-            "@test/clone",
+            "@builder/test/clone",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test package should register");
@@ -2142,7 +2362,7 @@ fn clone_preserves_type_reverse_lookup() {
         .resolve_type_package_and_symbol_path(ExternalTypeId(7))
         .expect("cloned registry must preserve the type reverse lookup");
 
-    assert_eq!(package.name(), "@test/clone");
+    assert_eq!(package.name(), "@builder/test/clone");
     assert_eq!(symbol_path.display_text(), "Handle");
 }
 
@@ -2152,7 +2372,10 @@ fn clone_preserves_type_reverse_lookup() {
 fn duplicate_type_registration_remains_infrastructure_failure() {
     let mut registry = ExternalPackageRegistry::default();
     let package_id = registry
-        .register_package("@test/dup", crate::builder_surface::PackageOrigin::Builder)
+        .register_package(
+            "@builder/test/dup",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
         .expect("test package should register");
 
     let first = registry.register_type_in_package(
@@ -2189,7 +2412,7 @@ fn duplicate_external_type_id_at_distinct_path_is_rejected_and_preserves_origina
     let mut registry = ExternalPackageRegistry::default();
     let package_id = registry
         .register_package(
-            "@test/reuse",
+            "@builder/test/reuse",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test package should register");
@@ -2231,7 +2454,7 @@ fn duplicate_external_type_id_at_distinct_path_is_rejected_and_preserves_origina
     let (package, symbol_path) = registry
         .resolve_type_package_and_symbol_path(ExternalTypeId(11))
         .expect("the original reverse identity must survive the failed duplicate");
-    assert_eq!(package.name(), "@test/reuse");
+    assert_eq!(package.name(), "@builder/test/reuse");
     assert_eq!(
         symbol_path.display_text(),
         "shapes.Origin",
@@ -2254,12 +2477,15 @@ fn duplicate_external_type_id_across_distinct_packages_is_rejected() {
     let mut registry = ExternalPackageRegistry::default();
     let alpha_id = registry
         .register_package(
-            "@test/alpha",
+            "@builder/test/alpha",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("alpha package should register");
     let beta_id = registry
-        .register_package("@test/beta", crate::builder_surface::PackageOrigin::Builder)
+        .register_package(
+            "@builder/test/beta",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
         .expect("beta package should register");
 
     registry
@@ -2291,6 +2517,6 @@ fn duplicate_external_type_id_across_distinct_packages_is_rejected() {
     let (package, symbol_path) = registry
         .resolve_type_package_and_symbol_path(ExternalTypeId(5))
         .expect("the original alpha reverse identity must survive the failed duplicate");
-    assert_eq!(package.name(), "@test/alpha");
+    assert_eq!(package.name(), "@builder/test/alpha");
     assert_eq!(symbol_path.display_text(), "Handle");
 }

@@ -1,4 +1,4 @@
-@web/canvas fill_rect as io
+@builder/web/canvas fill_rect as io
 
 run || -> String:
     return "should_fail"

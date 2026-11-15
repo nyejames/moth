@@ -5,7 +5,7 @@ import {
     MOTH_ERROR_HOST_RESOURCE_NOT_FOUND,
 } from "@moth/runtime";
 
-// This file is the Moth-facing `@web/page` facade over live browser state.
+// This file is the Moth-facing `@builder/web/page` facade over live browser state.
 // Every getter reads the browser on each call. Nothing caches import-time values or subscribes
 // to changes. The external binding glue checks I32 results and the HIR float boundary checks F64
 // finiteness, so getters return the browser values unchanged. `sync_navigation` is an opt-in

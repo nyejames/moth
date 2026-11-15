@@ -1,0 +1,4 @@
+@web root as local_root
+@builder/web/site root as shipped_root
+
+[:local=[local_root] shipped=[shipped_root]]

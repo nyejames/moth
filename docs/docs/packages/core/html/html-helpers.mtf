@@ -138,7 +138,7 @@ All helpers are compile-time `#String` constants that produce HTML strings. They
 
 #### Utility style inserts from `@styles`
 
-The `style` slots exposed by the helpers above accept the six inline fragments from the separate `@styles` Core package, including `center` and `larger`. See @../styles/ (@styles) for the export table and prelude rules.
+The `style` slots exposed by the helpers above accept the six inline fragments from the separate `@styles` Core package, including `center` and `larger`. See @../css/ (@styles) for the export table and prelude rules.
 
 ### The `$code` directive
 

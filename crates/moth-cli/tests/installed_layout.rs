@@ -1,6 +1,6 @@
 //! WHAT: runs a relocated `moth` executable laid out like the release archive.
-//! WHY: compiler-shipped package files (the `@core/html`, `@core/css` and `@web/site` sources
-//!      and the `@web/*` binding assets) must come from the `packages/` directory beside an
+//! WHY: compiler-shipped package files (the `@core/html`, `@core/css` and `@builder/web/site` sources
+//!      and the `@builder/web/*` binding assets) must come from the `packages/` directory beside an
 //!      installed executable, not from the checkout that built it, and a damaged installation
 //!      must say what is missing.
 
@@ -48,7 +48,7 @@ fn install_executable(root: &Path) -> PathBuf {
 }
 
 /// A directory project using an ordinary entry, explicit `@core/html`/`@core/css` imports, a
-/// reachable `@web/canvas` call and a `.mtf` that reads both implicit prelude providers plus
+/// reachable `@builder/web/canvas` call and a `.mtf` that reads both implicit prelude providers plus
 /// the installed-only marker.
 fn write_project(root: &Path) -> PathBuf {
     let project = root.join("site");
@@ -62,7 +62,7 @@ fn write_project(root: &Path) -> PathBuf {
         project.join("@entry.moth"),
         r#"@core/html p
 @core/css right
-@web/canvas as drawing_api
+@builder/web/canvas as drawing_api
 @intro content as intro
 
 ~[:[intro]]
@@ -112,7 +112,7 @@ fn install_marked_packages(root: &Path) -> PathBuf {
     copy_tree(Path::new(REPOSITORY_PACKAGES), &packages);
     for (relative, marker) in [
         ("core/css/@package.moth", INSTALLED_MARKER),
-        ("web/canvas/canvas.js", INSTALLED_CANVAS_MARKER),
+        ("builder/web/canvas/canvas.js", INSTALLED_CANVAS_MARKER),
     ] {
         let path = packages.join(relative);
         let mut source = fs::read_to_string(&path).expect("installed file should be readable");
@@ -180,11 +180,10 @@ fn incomplete_installation_never_borrows_a_core_package_from_the_checkout() {
     ] {
         let root = tempdir().expect("temporary directory should be created");
         let executable = install_executable(root.path());
-        let packages = root.path().join("install/packages");
-        copy_tree(
-            &Path::new(REPOSITORY_PACKAGES).join("core/css"),
-            &packages.join("core/css"),
-        );
+        let packages = install_marked_packages(root.path());
+        // Start from the complete shipped set so only `core/html` is damaged; the builder web
+        // packages are part of the same selected set and must not decide this report.
+        fs::remove_dir_all(packages.join("core/html")).expect("html directory should be removable");
         match state {
             InstalledHtmlState::Absent => {}
             InstalledHtmlState::EmptyDirectory => {
@@ -233,10 +232,8 @@ fn symlinked_installed_package_set_reports_its_own_normal_only_package_as_damage
     // registered root, so the damaged-set comparison must use the same physical spelling.
     let packages = root.path().join("shipped-packages");
     fs::create_dir_all(&packages).expect("shipped package directory should be created");
-    copy_tree(
-        &Path::new(REPOSITORY_PACKAGES).join("core/css"),
-        &packages.join("core/css"),
-    );
+    copy_tree(Path::new(REPOSITORY_PACKAGES), &packages);
+    fs::remove_dir_all(packages.join("core/html")).expect("html directory should be removable");
     fs::create_dir_all(packages.join("core/html")).expect("html directory should be created");
     // A normal-only root is an internal scope, never the package facade.
     fs::write(packages.join("core/html/@mod.moth"), "")
@@ -274,7 +271,8 @@ fn incomplete_installation_never_borrows_a_web_asset_from_the_checkout() {
     let root = tempdir().expect("temporary directory should be created");
     let executable = install_executable(root.path());
     let packages = install_marked_packages(root.path());
-    fs::remove_file(packages.join("web/canvas/canvas.js")).expect("canvas asset should be removed");
+    fs::remove_file(packages.join("builder/web/canvas/canvas.js"))
+        .expect("canvas asset should be removed");
     let project = write_project(root.path());
 
     let (output, report) = run(

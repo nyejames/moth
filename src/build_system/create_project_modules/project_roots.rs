@@ -123,7 +123,8 @@ pub(super) fn build_project_path_resolver_with_index(
         &project_module_graph,
         source_package_boundary_indexes,
         binding_packages,
-    );
+        string_table,
+    )?;
 
     Ok(ProjectPathResolverSetup {
         resolver,

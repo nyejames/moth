@@ -18994,6 +18994,13 @@ contract = "language.dependencies.source_package_dependency_cycle_rejected"
 role = "adversarial"
 
 [[case]]
+id = "web_site_copied_local_facade"
+path = "web_site_copied_local_facade"
+tags = ["integration", "source-packages", "dependencies", "templates", "html", "html-wasm"]
+contract = "language.dependencies.copied_package_folder_keeps_local_support_identity"
+role = "adversarial"
+
+[[case]]
 id = "web_site_static_urls"
 path = "web_site_static_urls"
 tags = ["integration", "source-packages", "dependencies", "templates", "html", "html-wasm"]

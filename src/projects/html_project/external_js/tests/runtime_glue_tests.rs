@@ -207,7 +207,7 @@ fn generate_module_glue_rejects_missing_js_lowering_but_accepts_nonmodule_loweri
                 "validated runtime metadata is inconsistent",
                 "@entry.moth",
                 "get_value",
-                "@test/default",
+                "@builder/test/default",
                 "no applicable JavaScript lowering",
             ] {
                 assert!(

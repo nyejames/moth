@@ -349,6 +349,8 @@ mod tests {
             source_package_indexes,
             &surface.binding_packages,
             &resolver,
+            None,
+            string_table,
         )
         .expect("synthetic namespace set should build");
         (

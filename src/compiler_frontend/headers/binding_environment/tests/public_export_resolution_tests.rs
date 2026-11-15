@@ -350,7 +350,7 @@ fn consumer_without_module_membership_uses_empty_prefix() {
     );
 }
 
-/// A multi-component builder prefix such as `web/site` owns exactly its public symbols. A
+/// A multi-component builder prefix such as `builder/web/site` owns exactly its public symbols. A
 /// first-component-only lookup would miss the package or treat `site` as the symbol.
 #[test]
 fn nested_source_package_prefix_resolves_only_direct_public_symbols() {
@@ -360,13 +360,13 @@ fn nested_source_package_prefix_resolves_only_direct_public_symbols() {
     let page_file = intern_path(&["page.moth"], &mut string_table, &mut path_fork);
     let root_name = string_table.intern("root");
     let root_source = intern_path(
-        &["web", "site", "@mod.moth"],
+        &["builder", "web", "site", "@mod.moth"],
         &mut string_table,
         &mut path_fork,
     );
     let mut package_exports = FxHashMap::default();
     package_exports.insert(
-        "web/site".to_owned(),
+        "builder/web/site".to_owned(),
         FxHashSet::from_iter([PublicExportEntry {
             export_name: root_name,
             target: PublicExportTarget::SourceDeclaration { path: root_source },
@@ -374,8 +374,8 @@ fn nested_source_package_prefix_resolves_only_direct_public_symbols() {
     );
 
     for (components, exported) in [
-        (&["web", "site", "root"][..], true),
-        (&["web", "site", "private", "root"][..], false),
+        (&["builder", "web", "site", "root"][..], true),
+        (&["builder", "web", "site", "private", "root"][..], false),
     ] {
         let header_path = intern_path(components, &mut string_table, &mut path_fork);
         let mut input = PublicExportResolutionInput {

@@ -84,7 +84,7 @@ fn runtime_candidates_merge_semantic_contracts_and_preserve_provider_provenance(
     let mut table = ExternalImportResolutionTable::new();
     table.insert("provider.moth", "runtime.js", provider);
     let other_package_id = registry
-        .register_package("@test/other", PackageOrigin::Builder)
+        .register_package("@builder/test/other", PackageOrigin::Builder)
         .expect("second fixture package registers");
     let other_builder = BuilderRuntimePackageMetadata {
         package_id: other_package_id,
@@ -166,7 +166,7 @@ fn runtime_candidates_reject_conflicting_provider_builder_facts() {
                         "conflicting-provider",
                         StablePackageIdentity::binding(
                             PackageOrigin::ProjectLocal,
-                            "@test/runtime",
+                            "@test/conflicting-runtime",
                         ),
                     )),
                     PortableResourcePath::from_portable_spelling("_moth/js/runtime.js".to_owned())

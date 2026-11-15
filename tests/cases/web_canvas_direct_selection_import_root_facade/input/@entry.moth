@@ -1,4 +1,4 @@
-@web/canvas get_canvas, context_2d, Canvas2d
+@builder/web/canvas get_canvas, context_2d, Canvas2d
 
 uses_grouped_canvas_imports || -> String, Error!:
     canvas = get_canvas("game_canvas")!

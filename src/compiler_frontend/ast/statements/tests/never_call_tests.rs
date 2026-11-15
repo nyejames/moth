@@ -286,7 +286,7 @@ fn generic_never_call_is_accepted_as_a_standalone_statement() {
 
 #[test]
 fn external_never_call_is_accepted_as_a_standalone_statement() {
-    let source = "@test/default die\nstop || -> !:\n    die()\n;\n";
+    let source = "@builder/test/default die\nstop || -> !:\n    die()\n;\n";
     let (ast, paths, strings) = parse_external_never_ast(source);
     let body = function_body_by_name(&ast, &paths, &strings, "stop");
     assert!(
@@ -303,7 +303,7 @@ fn external_never_call_is_accepted_as_a_standalone_statement() {
 
 #[test]
 fn external_never_call_cannot_be_a_value() {
-    let source = "@test/default die\nvalue || -> I32:\n    return die()\n;\n";
+    let source = "@builder/test/default die\nvalue || -> I32:\n    return die()\n;\n";
     let failure = parse_external_never_ast_diagnostic(source);
     let diagnostic = first_ast_error_view(&failure);
     assert_eq!(
@@ -317,7 +317,7 @@ fn external_never_call_cannot_be_a_value() {
 #[test]
 fn deferred_external_never_call_rejects_unhandled_fallible_argument() {
     let source = format!(
-        "@test/default halt\n{CAN_ERROR}run || -> I32, Error!:\n    count = 1\n    halt(count, can_error())\n;\n"
+        "@builder/test/default halt\n{CAN_ERROR}run || -> I32, Error!:\n    count = 1\n    halt(count, can_error())\n;\n"
     );
     let failure = parse_external_never_ast_diagnostic(&source);
     assert_unhandled_error_points_at_argument(

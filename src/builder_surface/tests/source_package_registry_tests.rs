@@ -11,6 +11,14 @@ fn register(registry: &mut SourcePackageRegistry, prefix: &str, root: &str, orig
         .expect("test source root should register");
 }
 
+fn rejection(prefix: &str, origin: PackageOrigin) -> String {
+    let mut registry = SourcePackageRegistry::new();
+    registry
+        .register_filesystem_root(prefix, std::path::PathBuf::from("/builder/x"), origin)
+        .expect_err(&format!("source prefix {prefix:?} must be rejected"))
+        .to_string()
+}
+
 #[test]
 fn iter_returns_roots_in_canonical_prefix_order() {
     let mut registry = SourcePackageRegistry::new();
@@ -43,17 +51,24 @@ fn iter_returns_roots_in_canonical_prefix_order() {
 #[test]
 fn register_filesystem_root_rejects_duplicate_prefix_without_replacing_root() {
     let mut registry = SourcePackageRegistry::new();
-    register(&mut registry, "ui", "/builder/ui", PackageOrigin::Builder);
+    register(
+        &mut registry,
+        "builder/ui",
+        "/builder/ui",
+        PackageOrigin::Builder,
+    );
 
     registry
         .register_filesystem_root(
-            "ui",
+            "builder/ui",
             std::path::PathBuf::from("/other/ui"),
             PackageOrigin::Builder,
         )
         .expect_err("a second root for one prefix must not replace the first");
 
-    let root = registry.get_root("ui").expect("first root should remain");
+    let root = registry
+        .get_root("builder/ui")
+        .expect("first root should remain");
     assert!(
         matches!(&root.root, ProvidedSourceRoot::Filesystem(path) if path == std::path::Path::new("/builder/ui"))
     );
@@ -62,16 +77,21 @@ fn register_filesystem_root_rejects_duplicate_prefix_without_replacing_root() {
 #[test]
 fn register_filesystem_root_rejects_case_only_duplicate_prefix() {
     let mut registry = SourcePackageRegistry::new();
-    register(&mut registry, "ui", "/builder/ui", PackageOrigin::Builder);
+    register(
+        &mut registry,
+        "builder/ui",
+        "/builder/ui",
+        PackageOrigin::Builder,
+    );
 
     registry
         .register_filesystem_root(
-            "UI",
+            "BUILDER/UI",
             std::path::PathBuf::from("/other/ui"),
             PackageOrigin::Builder,
         )
         .expect_err("case-only variants of a registered prefix must be rejected");
-    assert!(registry.get_root("UI").is_none());
+    assert!(registry.get_root("BUILDER/UI").is_none());
 }
 
 #[test]
@@ -79,11 +99,16 @@ fn register_filesystem_root_accepts_nested_prefix_and_rejects_overlaps() {
     let mut registry = SourcePackageRegistry::new();
     register(
         &mut registry,
-        "web/site",
+        "builder/web/site",
         "/builder/site",
         PackageOrigin::Builder,
     );
-    for overlapping in ["Web/SITE", "web", "WEB", "web/site/extra"] {
+    for overlapping in [
+        "Builder/WEB/SITE",
+        "builder/web",
+        "BUILDER/WEB",
+        "builder/web/site/extra",
+    ] {
         registry
             .register_filesystem_root(
                 overlapping,
@@ -91,12 +116,12 @@ fn register_filesystem_root_accepts_nested_prefix_and_rejects_overlaps() {
                 PackageOrigin::Builder,
             )
             .expect_err(&format!(
-                "{overlapping:?} overlaps registered web/site and must be rejected"
+                "{overlapping:?} overlaps registered builder/web/site and must be rejected"
             ));
     }
     register(
         &mut registry,
-        "web/sites",
+        "builder/web/sites",
         "/builder/sites",
         PackageOrigin::Builder,
     );
@@ -105,41 +130,95 @@ fn register_filesystem_root_accepts_nested_prefix_and_rejects_overlaps() {
         .iter()
         .map(|root| root.package_prefix.as_str())
         .collect();
-    assert_eq!(prefixes, vec!["web/site", "web/sites"]);
+    assert_eq!(prefixes, vec!["builder/web/site", "builder/web/sites"]);
 }
 
 #[test]
-fn register_filesystem_root_rejects_reserved_and_malformed_prefixes() {
-    let mut registry = SourcePackageRegistry::new();
-    for prefix in [
-        "project",
-        "Project",
-        "project/x",
-        "core",
-        "CORE",
-        "core/ui",
-        "",
-        "ui//x",
-        "ui#x",
-    ] {
-        registry
-            .register_filesystem_root(
-                prefix,
-                std::path::PathBuf::from("/builder/x"),
-                PackageOrigin::Builder,
-            )
-            .expect_err(&format!(
-                "reserved or malformed source prefix {prefix:?} must be rejected"
-            ));
+fn register_filesystem_root_enforces_origin_namespace_ownership() {
+    // Core packages register only below `core/`; Builder packages only below `builder/`. The
+    // other origins may use any other root, so a local support package keeps its flat name.
+    let rejected = [
+        ("ui", PackageOrigin::Builder),
+        ("Builder/ui", PackageOrigin::Builder),
+        ("builder", PackageOrigin::Builder),
+        ("core/ui", PackageOrigin::Builder),
+        ("Core/ui", PackageOrigin::Builder),
+        ("ui", PackageOrigin::Core),
+        ("builder/ui", PackageOrigin::Core),
+        ("Core/ui", PackageOrigin::Core),
+        ("core", PackageOrigin::Core),
+        ("core/ui", PackageOrigin::ProjectLocal),
+        ("Core/ui", PackageOrigin::ProjectLocal),
+        ("builder/ui", PackageOrigin::ProjectLocal),
+        ("BUILDER/ui", PackageOrigin::Dependency),
+        ("builder", PackageOrigin::Dependency),
+    ];
+    for (prefix, origin) in rejected {
+        let message = rejection(prefix, origin);
+        assert!(
+            message.contains(prefix),
+            "{prefix:?} as {origin:?} must be named in its rejection: {message}"
+        );
     }
-    registry
-        .register_filesystem_root(
-            "project",
-            std::path::PathBuf::from("/project/package"),
-            PackageOrigin::ProjectLocal,
-        )
-        .expect_err("project-local source packages cannot claim project globals");
-    assert_eq!(registry.iter().count(), 0);
+
+    for (prefix, origin) in [
+        ("core/ui", PackageOrigin::Core),
+        ("core/io/nested", PackageOrigin::Core),
+        ("builder/ui", PackageOrigin::Builder),
+        ("builder/game/widgets", PackageOrigin::Builder),
+        ("ui", PackageOrigin::ProjectLocal),
+        ("acme/widgets", PackageOrigin::Dependency),
+        ("builders/ui", PackageOrigin::ProjectLocal),
+        ("corelike/ui", PackageOrigin::Dependency),
+    ] {
+        let mut registry = SourcePackageRegistry::new();
+        register(&mut registry, prefix, "/installed/package", origin);
+        let root = registry
+            .get_root(prefix)
+            .expect("accepted prefix should register");
+        assert_eq!(root.metadata, PackageMetadata::source(origin));
+    }
+}
+
+#[test]
+fn register_filesystem_root_rejects_reserved_roots_and_malformed_prefixes() {
+    for prefix in ["", "/ui", "ui//x", "ui#x", "builder/"] {
+        let message = rejection(prefix, PackageOrigin::Builder);
+        assert!(!message.is_empty(), "{prefix:?} must be rejected");
+    }
+
+    // `@project` stays separately reserved for every origin, including the privileged ones.
+    for origin in [
+        PackageOrigin::Core,
+        PackageOrigin::Builder,
+        PackageOrigin::ProjectLocal,
+        PackageOrigin::Dependency,
+    ] {
+        let message = rejection("project", origin);
+        assert!(
+            message.contains("@project"),
+            "{origin:?} must not claim the project globals name: {message}"
+        );
+        let message = rejection("Project/x", origin);
+        assert!(
+            message.contains("@project"),
+            "{origin:?} must not claim a case variant of the project globals name: {message}"
+        );
+    }
+
+    // The exact reserved roots are never importable package surfaces.
+    for (prefix, origin) in [
+        ("core", PackageOrigin::Core),
+        ("CORE", PackageOrigin::Core),
+        ("builder", PackageOrigin::Builder),
+        ("BUILDER", PackageOrigin::Builder),
+    ] {
+        let message = rejection(prefix, origin);
+        assert!(
+            message.contains("reserved namespace root"),
+            "{prefix:?} must be rejected as a reserved root: {message}"
+        );
+    }
 }
 
 #[test]
@@ -147,14 +226,16 @@ fn get_root_locates_registered_root() {
     let mut registry = SourcePackageRegistry::new();
     register(
         &mut registry,
-        "html",
+        "builder/html",
         "/builder/html",
         PackageOrigin::Builder,
     );
 
     assert!(registry.get_root("missing").is_none());
 
-    let root = registry.get_root("html").expect("html root should exist");
+    let root = registry
+        .get_root("builder/html")
+        .expect("html root should exist");
     assert!(
         matches!(&root.root, ProvidedSourceRoot::Filesystem(path) if path == std::path::Path::new("/builder/html"))
     );
@@ -165,7 +246,7 @@ fn source_registry_always_constructs_moth_source_metadata() {
     let mut registry = SourcePackageRegistry::new();
     register(
         &mut registry,
-        "html",
+        "builder/html",
         "/builder/html",
         PackageOrigin::Builder,
     );
@@ -252,6 +333,12 @@ fn mandatory_core_registers_official_source_package_roots() {
         assert!(
             surface.source_packages.get_root(removed).is_none(),
             "the removed flat @{removed} package must not stay registered"
+        );
+    }
+    for reserved in ["core", "builder"] {
+        assert!(
+            surface.source_packages.get_root(reserved).is_none(),
+            "the reserved @{reserved} namespace root must never resolve as a package"
         );
     }
     surface.validate().expect("Core surface has official roots");

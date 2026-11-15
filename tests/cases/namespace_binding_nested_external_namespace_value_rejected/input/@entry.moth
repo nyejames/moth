@@ -1,4 +1,4 @@
-@test/nested
+@builder/test/nested
 
 value = nested.tools
 io.line([: [value]])

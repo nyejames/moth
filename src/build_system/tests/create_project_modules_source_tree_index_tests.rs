@@ -16,6 +16,34 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+use std::collections::BTreeSet;
+
+fn single_file_dependency_keys(root: &Path) -> Result<BTreeSet<String>, PreparedFailure> {
+    // Keys are independent of module topology; the moduleless scope also exercises the reserved-root
+    // path walk that an ordinary selected file uses.
+    super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(root, false)
+        .map(|inventory| inventory.keys)
+}
+
+fn bounded_roots_for_single_file(
+    entry_file: &Path,
+    config: &Config,
+    string_table: &mut StringTable,
+) -> Result<crate::compiler_frontend::paths::module_roots::ModuleRootTable, PreparedFailure> {
+    super::source_tree_index::SourceTreeIndex::bounded_single_file_index(
+        entry_file,
+        config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
+        string_table,
+    )
+    .map(|index| {
+        index
+            .map(|index| index.module_identities().derive_compilation_root_table())
+            .unwrap_or_default()
+    })
+}
 
 fn diagnosed_reports(
     failure: PreparedFailure,
@@ -245,9 +273,9 @@ fn source_tree_index_ignores_package_prefix_collision_in_skipped_directory() {
     let entry_root = root.join("src");
     fs::create_dir_all(&entry_root).expect("should create entry root");
 
-    // Fixed-skipped directory whose name matches a source-backed package prefix.
+    // Fixed-skipped directory whose name matches the leaf of a source-backed package prefix.
     // Under the skip policy this folder is not dependency-bindable, so no prefix collision.
-    fs::create_dir_all(entry_root.join("target")).expect("should create target folder");
+    fs::create_dir_all(entry_root.join("builder/target")).expect("should create target folder");
     fs::write(entry_root.join("@entry.moth"), "").expect("should write entry root");
 
     let config = Config::new(root.clone());
@@ -258,8 +286,8 @@ fn source_tree_index_ignores_package_prefix_collision_in_skipped_directory() {
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
     source_packages
         .register_filesystem_root(
-            "target",
-            fs::canonicalize(entry_root.join("target")).unwrap(),
+            "builder/target",
+            fs::canonicalize(entry_root.join("builder/target")).unwrap(),
             PackageOrigin::Builder,
         )
         .expect("test source root should register");
@@ -285,12 +313,16 @@ fn source_tree_index_rejects_exact_nested_package_path_but_allows_ancestor() {
     let temp = tempfile::tempdir().expect("should create temp dir");
     let root = fs::canonicalize(temp.path()).expect("should canonicalize temp dir");
     let entry = root.join("src");
-    fs::create_dir_all(entry.join("web")).expect("should create ancestor folder");
+    fs::create_dir_all(entry.join("builder")).expect("should create ancestor folder");
     fs::write(entry.join("@entry.moth"), "").expect("should write entry root");
     let config = Config::new(root.clone());
     let mut packages = crate::builder_surface::SourcePackageRegistry::default();
     packages
-        .register_filesystem_root("web/site", root.join("package"), PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/web/site",
+            root.join("package"),
+            PackageOrigin::Builder,
+        )
         .expect("should register nested package prefix");
     let discover = || {
         super::source_tree_index::SourceTreeIndex::discover(
@@ -333,30 +365,34 @@ fn source_tree_index_rejects_exact_nested_package_path_but_allows_ancestor() {
     };
 
     discover().expect("ancestor folder alone must be allowed");
-    fs::create_dir(entry.join("web/site")).expect("should create exact nested folder");
-    assert_collision("web/site", "exact nested path must collide");
+    fs::create_dir_all(entry.join("builder/web/site")).expect("should create exact nested folder");
+    assert_collision("builder/web/site", "exact nested path must collide");
 
     // Module ownership of the folder doesn't change its entry-root-relative identity.
-    fs::write(entry.join("web/@mod.moth"), "").expect("should write nested module root");
+    fs::write(entry.join("builder/web/@mod.moth"), "").expect("should write nested module root");
     assert_collision(
-        "web/site",
+        "builder/web/site",
         "exact nested path inside a nested module must still collide",
     );
 
     // Package identities reject ASCII case-only overlaps, so case variants claim the same path
     // on case-sensitive and case-insensitive hosts alike.
-    fs::remove_dir(entry.join("web/site")).expect("should remove exact nested folder");
-    fs::create_dir(entry.join("web/Site")).expect("should create case-variant leaf folder");
+    fs::remove_dir(entry.join("builder/web/site")).expect("should remove exact nested folder");
+    fs::create_dir(entry.join("builder/web/Site")).expect("should create case-variant leaf folder");
     assert_collision(
-        "web/Site",
+        "builder/web/Site",
         "case-variant leaf inside a nested module must collide",
     );
 
-    fs::remove_dir_all(entry.join("web")).expect("should remove lowercase ancestor");
-    fs::create_dir(entry.join("Web")).expect("should create case-variant ancestor");
+    fs::remove_dir_all(entry.join("builder")).expect("should remove lowercase ancestor");
+    fs::create_dir(entry.join("BUILDER")).expect("should create case-variant ancestor");
     discover().expect("case-variant ancestor alone must be allowed");
-    fs::create_dir(entry.join("Web/site")).expect("should create case-variant nested folder");
-    assert_collision("Web/site", "case-variant ancestor path must collide");
+    fs::create_dir_all(entry.join("BUILDER/web/site"))
+        .expect("should create case-variant nested folder");
+    assert_collision(
+        "BUILDER/web/site",
+        "case-variant ancestor path must collide",
+    );
 }
 
 #[test]
@@ -464,6 +500,100 @@ fn source_tree_index_rejects_project_folders_that_claim_official_core_package_pr
     discover().expect("a folder outside the official prefix must not collide");
 }
 
+/// Discover one project tree whose only root is an empty `@entry.moth`.
+///
+/// WHY: reserved-root ownership is decision-point specific, so cases that mix legal directory
+/// paths with source claims need a complete traversal rather than a single-directory probe.
+fn discover_project_with(files: &[(&str, &str)]) -> Result<(), PreparedFailure> {
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = fs::canonicalize(temp.path()).expect("temp dir should canonicalize");
+    let entry = root.join("src");
+    fs::create_dir_all(&entry).expect("should create entry root");
+    fs::write(entry.join("@entry.moth"), "").expect("should write entry root");
+    for (relative, contents) in files {
+        let path = entry.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("should create fixture directory");
+        }
+        fs::write(&path, contents).expect("should write fixture file");
+    }
+    let config = Config::new(root.clone());
+    let packages = crate::builder_surface::BuilderSurface::with_mandatory_core().source_packages;
+    super::source_tree_index::SourceTreeIndex::discover(
+        entry,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &root,
+            validated_output_settings: None,
+        },
+        &config,
+        &packages,
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
+        &mut StringTable::new(),
+    )
+    .map(|_| ())
+}
+
+#[test]
+fn source_tree_index_does_not_reserve_reserved_root_directory_names() {
+    // `@core` and `@builder` reserve importable package namespace roots, not directory names.
+    // Stage 0 owns the filesystem traversal and collision facts; namespace ownership is checked
+    // where the importable namespaces exist. These cases must therefore index without a
+    // reserved-root diagnostic even though their paths pass through `core` or `builder`.
+    for (case, files) in [
+        (
+            "entry-only core module",
+            vec![("core/@entry.moth", "[:entry]\n")],
+        ),
+        (
+            "core directory containing only entry modules",
+            vec![
+                ("core/@entry.moth", "[:entry]\n"),
+                ("core/nested/@entry.moth", "[:nested]\n"),
+            ],
+        ),
+        (
+            "entry-only module with a private helper",
+            vec![
+                ("core/@entry.moth", "[:entry]\n"),
+                ("core/helper.moth", "value #= 1\n"),
+            ],
+        ),
+        // Only source claims are reserved. An ordinary asset below `core/` remains a resource.
+        (
+            "asset-only core folder",
+            vec![("core/logo.png", "not source")],
+        ),
+        (
+            "asset-only builder folder",
+            vec![("builder/theme.css", "body { color: red; }")],
+        ),
+        // A module below `src/` is addressed as `src/core`, so it claims no reserved root.
+        ("nested ordinary module", vec![("src/core/@mod.moth", "")]),
+        // A support facade below a reserved directory is imported by its leaf name.
+        (
+            "support facade below a reserved directory",
+            vec![("core/tools/@package.moth", "")],
+        ),
+        // Unrelated local names stay legal, including names used by registered prefixes.
+        (
+            "local web support facade",
+            vec![(
+                "web/@package.moth",
+                "-- local copy of the shipped site facade\n$export\nroot #String = @/\n",
+            )],
+        ),
+        ("local html module", vec![("html/@mod.moth", "")]),
+        ("local css module", vec![("css/@mod.moth", "")]),
+        (
+            "local styles support package",
+            vec![("styles/@package.moth", "")],
+        ),
+    ] {
+        discover_project_with(&files).expect(case);
+    }
+}
+
 #[test]
 fn source_tree_index_detects_collision_in_non_skipped_directory() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -496,7 +626,7 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
 }
 
 #[test]
-fn bounded_module_roots_for_single_file_indexes_nested_roots_with_ignored_directories() {
+fn bounded_single_file_index_indexes_nested_roots_with_ignored_directories() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let module_dir = root.join("module");
@@ -517,15 +647,7 @@ fn bounded_module_roots_for_single_file_indexes_nested_roots_with_ignored_direct
     let entry_file = fs::canonicalize(module_dir.join("@entry.moth")).unwrap();
     let mut string_table = StringTable::new();
 
-    let module_roots =
-        super::source_tree_index::SourceTreeIndex::bounded_module_roots_for_single_file(
-            &entry_file,
-            &config,
-            &crate::builder_surface::SourcePackageRegistry::default(),
-            &crate::builder_surface::SourceFileKindRegistry::default(),
-            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
-            &mut string_table,
-        )
+    let module_roots = bounded_roots_for_single_file(&entry_file, &config, &mut string_table)
         .expect("single-file normal module root should index its tree without collision errors");
 
     let root_directories = module_roots
@@ -538,7 +660,7 @@ fn bounded_module_roots_for_single_file_indexes_nested_roots_with_ignored_direct
 }
 
 #[test]
-fn bounded_module_roots_for_single_file_accepts_each_fixed_root_role() {
+fn bounded_single_file_index_accepts_each_fixed_root_role() {
     use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 
     for (root_file_name, expected_role) in [
@@ -559,15 +681,7 @@ fn bounded_module_roots_for_single_file_accepts_each_fixed_root_role() {
         let entry_file = canonical_module_dir.join(root_file_name);
         let mut string_table = StringTable::new();
 
-        let module_roots =
-            super::source_tree_index::SourceTreeIndex::bounded_module_roots_for_single_file(
-                &entry_file,
-                &config,
-                &crate::builder_surface::SourcePackageRegistry::default(),
-                &crate::builder_surface::SourceFileKindRegistry::default(),
-                &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
-                &mut string_table,
-            )
+        let module_roots = bounded_roots_for_single_file(&entry_file, &config, &mut string_table)
             .unwrap_or_else(|failure| {
                 panic!("{root_file_name} selection should index its bounded tree: {failure:?}")
             });
@@ -582,10 +696,8 @@ fn bounded_module_roots_for_single_file_accepts_each_fixed_root_role() {
 
         // The synthetic namespace owner reads local keys for every prepared root directory, so
         // the same selection must not disappear from that inventory.
-        let local_keys = super::source_tree_index::SourceTreeIndex::single_file_dependency_keys(
-            &canonical_module_dir,
-        )
-        .expect("synthetic dependency keys should index the selected root directory");
+        let local_keys = single_file_dependency_keys(&canonical_module_dir)
+            .expect("synthetic dependency keys should index the selected root directory");
         assert!(
             local_keys.contains("helper"),
             "{root_file_name}: {local_keys:?}"
@@ -594,7 +706,7 @@ fn bounded_module_roots_for_single_file_accepts_each_fixed_root_role() {
 }
 
 #[test]
-fn bounded_module_roots_for_single_file_keeps_every_triple_root_role() {
+fn bounded_single_file_index_keeps_every_triple_root_role() {
     use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -615,15 +727,7 @@ fn bounded_module_roots_for_single_file_keeps_every_triple_root_role() {
     // An explicitly selected entry root must not collapse its bounded directory's sibling API
     // facades. Preparation consumes this role table for every reached root file, so dropping a
     // sibling here would silently lose its facade role.
-    let module_roots =
-        super::source_tree_index::SourceTreeIndex::bounded_module_roots_for_single_file(
-            &entry_file,
-            &config,
-            &crate::builder_surface::SourcePackageRegistry::default(),
-            &crate::builder_surface::SourceFileKindRegistry::default(),
-            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
-            &mut string_table,
-        )
+    let module_roots = bounded_roots_for_single_file(&entry_file, &config, &mut string_table)
         .expect("triple-root single-file selection should index its bounded tree");
 
     let roles = module_roots.root_file_roles().collect::<Vec<_>>();
@@ -648,7 +752,7 @@ fn bounded_module_roots_for_single_file_keeps_every_triple_root_role() {
 }
 
 #[test]
-fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
+fn bounded_single_file_index_rejects_dependency_name_collisions() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let module_dir = root.join("module");
@@ -661,15 +765,10 @@ fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
     let entry_file = fs::canonicalize(module_dir.join("@entry.moth")).unwrap();
     let mut string_table = StringTable::new();
 
-    let failure = super::source_tree_index::SourceTreeIndex::bounded_module_roots_for_single_file(
-        &entry_file,
-        &config,
-        &crate::builder_surface::SourcePackageRegistry::default(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-        &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
-        &mut string_table,
-    )
-    .expect_err("single-file normal module roots should reject real dependency-name collisions");
+    let failure = bounded_roots_for_single_file(&entry_file, &config, &mut string_table)
+        .expect_err(
+            "single-file normal module roots should reject real dependency-name collisions",
+        );
     assert_source_file_folder_collision(failure);
 }
 
@@ -963,9 +1062,8 @@ fn single_file_dependency_keys_include_ordinary_plus_sources_and_reject_invalid_
     fs::write(root.join("@bad.moth"), "").expect("should write invalid at root marker");
 
     let canonical_root = fs::canonicalize(&root).expect("source root should canonicalize");
-    let keys =
-        super::source_tree_index::SourceTreeIndex::single_file_dependency_keys(&canonical_root)
-            .expect("synthetic dependency keys should classify ordinary and invalid names");
+    let keys = single_file_dependency_keys(&canonical_root)
+        .expect("synthetic dependency keys should classify ordinary and invalid names");
 
     assert!(keys.contains("+notes"), "{keys:?}");
     assert!(keys.contains("ordinary"), "{keys:?}");
@@ -989,9 +1087,8 @@ fn single_file_dependency_keys_exclude_hidden_and_fixed_directories() {
     fs::create_dir_all(root.join("visible")).expect("should create visible directory");
 
     let canonical_root = fs::canonicalize(&root).expect("source root should canonicalize");
-    let keys =
-        super::source_tree_index::SourceTreeIndex::single_file_dependency_keys(&canonical_root)
-            .expect("synthetic dependency keys should respect the directory skip policy");
+    let keys = single_file_dependency_keys(&canonical_root)
+        .expect("synthetic dependency keys should respect the directory skip policy");
 
     assert!(keys.contains("helper"));
     assert!(keys.contains("_helper"));
@@ -1050,9 +1147,8 @@ fn single_file_dependency_keys_exclude_alias_targets_by_physical_ancestry() {
     .expect("should create external file alias");
 
     let canonical_root = fs::canonicalize(&source_root).expect("source root should canonicalize");
-    let keys =
-        super::source_tree_index::SourceTreeIndex::single_file_dependency_keys(&canonical_root)
-            .expect("synthetic dependency keys should resolve alias destinations");
+    let keys = single_file_dependency_keys(&canonical_root)
+        .expect("synthetic dependency keys should resolve alias destinations");
 
     assert_eq!(
         keys,
@@ -1060,6 +1156,123 @@ fn single_file_dependency_keys_exclude_alias_targets_by_physical_ancestry() {
             .into_iter()
             .map(String::from)
             .collect()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn single_file_inventory_claims_eligible_sources_below_reserved_directory_aliases() {
+    use std::os::unix::fs::symlink;
+
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let core = root.join("core");
+    fs::create_dir(&core).expect("should create core directory");
+    symlink(&core, core.join("loop")).expect("should create a reserved subtree loop alias");
+    fs::write(root.join("linked.moth"), "value #= 1\n").expect("should write linked source");
+    symlink(root.join("linked.moth"), core.join("alias.moth"))
+        .expect("should create eligible file alias below core");
+    let real_directory = root.join("real");
+    fs::create_dir(&real_directory).expect("should create real directory");
+    fs::write(real_directory.join("helper.moth"), "value #= 1\n")
+        .expect("should write aliased helper");
+    symlink(&real_directory, core.join("alias_directory"))
+        .expect("should create eligible directory alias below core");
+
+    let canonical_root = fs::canonicalize(&root).expect("source root should canonicalize");
+    let inventory = super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(
+        &canonical_root,
+        false,
+    )
+    .expect("reserved directory inventory should resolve aliases");
+    let (claimed_root, claim_path) = inventory
+        .reserved_root_claim
+        .expect("an eligible source below core should claim the reserved root");
+    assert_eq!(claimed_root, "core");
+    assert!(
+        claim_path.ends_with("core/alias.moth")
+            || claim_path.ends_with("core/alias_directory/helper.moth"),
+        "claim must name an eligible alias target: {claim_path:?}"
+    );
+
+    // A reserved directory whose only source aliases leave the boundary contributes no claim.
+    let _outside_tmp = tempfile::tempdir().expect("should create outside temp dir");
+    let outside = _outside_tmp.path().join("outside.moth");
+    fs::write(&outside, "value #= 1\n").expect("should write outside source");
+    let isolated = _tmp_root.path().join("isolated");
+    fs::create_dir(&isolated).expect("should create isolated root");
+    let isolated_core = isolated.join("core");
+    fs::create_dir(&isolated_core).expect("should create isolated core directory");
+    symlink(&outside, isolated_core.join("outside_alias.moth"))
+        .expect("should create external source alias");
+    let canonical_isolated =
+        fs::canonicalize(&isolated).expect("isolated source root should canonicalize");
+    let inventory = super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(
+        &canonical_isolated,
+        false,
+    )
+    .expect("external aliases should be skipped");
+    assert_eq!(
+        inventory.reserved_root_claim, None,
+        "an alias leaving the boundary must not claim the reserved root"
+    );
+}
+
+#[test]
+fn moduleless_single_file_scope_treats_entry_only_reserved_subtree_as_private() {
+    // An ordinary selected file owns no module identities, so the inventory approximates
+    // module privacy structurally: an entry-only reserved subtree publishes no name to its owner
+    // and its helpers stay legal. Directory compilation validates the same shape through module
+    // namespaces instead.
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    fs::create_dir_all(root.join("core/nested")).expect("should create nested directory");
+    fs::write(root.join("@entry.moth"), "").expect("should write entry root");
+    fs::write(root.join("core/@entry.moth"), "[:core]\n").expect("should write entry marker");
+    fs::write(root.join("core/helper.moth"), "value #= 1\n").expect("should write helper");
+    fs::write(root.join("core/nested/@mod.moth"), "$export\nvalue #= 1\n")
+        .expect("should write child facade");
+
+    let canonical_root = fs::canonicalize(&root).expect("source root should canonicalize");
+    let inventory = super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(
+        &canonical_root,
+        false,
+    )
+    .expect("flat inventory should resolve");
+    assert_eq!(
+        inventory.reserved_root_claim, None,
+        "an entry-only reserved subtree is private content, not an importable claim"
+    );
+    assert!(
+        !inventory.keys.contains("core"),
+        "a reserved directory is not a package-collision key"
+    );
+}
+
+#[test]
+fn moduleless_single_file_scope_ignores_root_markers_and_asset_directories() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    fs::create_dir_all(root.join("core")).expect("should create core directory");
+    fs::create_dir_all(root.join("builder/tools")).expect("should create nested support directory");
+    fs::write(root.join("@entry.moth"), "").expect("should write entry root");
+    fs::write(root.join("core/@entry.moth"), "[:core]\n").expect("should write entry marker");
+    fs::write(
+        root.join("builder/tools/@package.moth"),
+        "$export\nroot #String = @/\n",
+    )
+    .expect("should write nested support marker");
+    fs::write(root.join("core/logo.png"), "not source").expect("should write asset");
+
+    let canonical_root = fs::canonicalize(&root).expect("source root should canonicalize");
+    let inventory = super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(
+        &canonical_root,
+        false,
+    )
+    .expect("asset-only reserved directories should resolve");
+    assert_eq!(
+        inventory.reserved_root_claim, None,
+        "root markers and provider assets are not importable dependency names"
     );
 }
 

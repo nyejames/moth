@@ -307,7 +307,11 @@ impl BackendBuilder for LateFailureBuilder {
         let mut surface = BuilderSurface::with_mandatory_core();
         surface
             .source_packages
-            .register_filesystem_root("warnpkg", self.package_root.clone(), PackageOrigin::Builder)
+            .register_filesystem_root(
+                "builder/test/warnpkg",
+                self.package_root.clone(),
+                PackageOrigin::Builder,
+            )
             .expect("test source root should register");
         surface
     }

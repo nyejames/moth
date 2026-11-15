@@ -1292,7 +1292,7 @@ fn registry_with_prelude_function_symbol(name: &'static str) -> ExternalPackageR
     let mut registry = ExternalPackageRegistry::new();
     let package_id = registry
         .register_package(
-            "@test/prelude_symbol",
+            "@builder/test/prelude_symbol",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test package registration should not collide");
@@ -1315,7 +1315,7 @@ fn registry_with_prelude_type_symbol(name: &'static str) -> ExternalPackageRegis
     let mut registry = ExternalPackageRegistry::new();
     let package_id = registry
         .register_package(
-            "@test/prelude_type",
+            "@builder/test/prelude_type",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test package registration should not collide");

@@ -61,7 +61,7 @@ const CONFIG_SOURCE: &str = concat!(
 
 /// Infallible lane: the raw boundary carries no declared error slot, so its finite guard must trap.
 const FINITE_SOURCE: &str = concat!(
-    "@test/default raw_f64_finite\n",
+    "@builder/test/default raw_f64_finite\n",
     "\n",
     "finite_width || -> F64:\n",
     "    return raw_f64_finite()\n",
@@ -71,7 +71,7 @@ const FINITE_SOURCE: &str = concat!(
 /// Fallible lane: the raw boundary declares the builtin `Error!` slot and the source forwards the
 /// raw success value with a direct postfix return, so its finite guard must stay recoverable.
 const FORWARD_SOURCE: &str = concat!(
-    "@test/default raw_f64_forward\n",
+    "@builder/test/default raw_f64_forward\n",
     "\n",
     "forward || -> F64, Error!:\n",
     "    return raw_f64_forward()!\n",
@@ -80,7 +80,7 @@ const FORWARD_SOURCE: &str = concat!(
 
 /// One directly registered raw fixed F64 external function for a fixture.
 struct RawFixedF64Function {
-    /// Leaf name in `@test/default`, which is also the name the source imports.
+    /// Leaf name in `@builder/test/default`, which is also the name the source imports.
     name: &'static str,
     /// JS runtime helper the registered lowering must call.
     js_helper: &'static str,

@@ -20,6 +20,7 @@
 
 use super::module_identity::{ModuleId, ModuleIdentityTable};
 use super::project_module_graph::{ProjectModuleGraph, is_support_visible_in_identity_table};
+use super::project_structure_diagnostics::reserved_package_namespace_root_claim_error;
 use super::source_package_discovery::SourcePackageBoundaryIndexes;
 use super::source_tree_index::{
     SourceClassification, SourceLogicalIdentity, SourceOwnership, SourceRecordIndex,
@@ -27,7 +28,9 @@ use super::source_tree_index::{
 };
 
 use crate::builder_surface::SourceFileKind;
-use crate::builder_surface::package_metadata::package_paths_overlap;
+use crate::builder_surface::package_metadata::{
+    package_paths_overlap, reserved_package_namespace_claim_root,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
@@ -326,28 +329,65 @@ impl ModuleNamespaceSet {
         project_module_graph: &ProjectModuleGraph,
         package_boundary_indexes: SourcePackageBoundaryIndexes,
         binding_packages: &ExternalPackageRegistry,
-    ) -> Self {
+        string_table: &mut StringTable,
+    ) -> Result<Self, PreparedFailure> {
         let mut namespaces = Self::for_source_packages(package_boundary_indexes, binding_packages);
         namespaces.project_namespaces =
             build_project_namespaces(source_tree_index, project_module_graph);
-        namespaces
+        validate_reserved_package_namespace_claims(
+            &namespaces.project_namespaces,
+            source_tree_index,
+            string_table,
+        )?;
+        Ok(namespaces)
     }
 
     /// Synthetic consumers keep local namespace claims separate from reachable source membership.
-    /// Only immediate names below prepared owning roots are read; unrelated source bodies and
-    /// arbitrary descendant directories never enter this inventory.
+    /// Only immediate names below prepared owning roots become collision keys, and a reserved-named
+    /// directory is inspected for importable claims; unrelated source bodies and arbitrary
+    /// descendant directories never enter the key inventory.
+    ///
+    /// `bounded_index` is the Stage 0 index that a selected module-root entry already owns. That
+    /// index is the reserved-root authority for those selections, so the directory walk never
+    /// applies to a synthetic unit that has module namespaces.
     pub(crate) fn for_single_file(
         package_boundary_indexes: SourcePackageBoundaryIndexes,
         binding_packages: &ExternalPackageRegistry,
         project_path_resolver: &ProjectPathResolver,
+        bounded_index: Option<&SourceTreeIndex>,
+        string_table: &mut StringTable,
     ) -> Result<Self, PreparedFailure> {
         let mut namespaces = Self::for_source_packages(package_boundary_indexes, binding_packages);
+        let has_module_topology = bounded_index.is_some();
+
+        // A selected module-root entry carries the bounded Stage 0 module topology, so its
+        // reserved-root claims come from module namespaces exactly as directory compilation does.
+        // An ordinary selected file owns no module roots; its importable directory names are
+        // checked by the inventory below.
+        if let Some(index) = bounded_index {
+            let project_module_graph = ProjectModuleGraph::from_source_tree_index(index);
+            let project_namespaces = build_project_namespaces(index, &project_module_graph);
+            validate_reserved_package_namespace_claims(&project_namespaces, index, string_table)?;
+        }
+
         let roots = std::iter::once(project_path_resolver.entry_root().to_path_buf())
             .chain(project_path_resolver.module_roots().cloned())
             .collect::<BTreeSet<_>>();
         for root in roots {
-            let keys = SourceTreeIndex::single_file_dependency_keys(&root)?;
-            namespaces.single_file_dependency_keys.insert(root, keys);
+            let inventory =
+                SourceTreeIndex::single_file_namespace_inventory(&root, has_module_topology)?;
+            if !has_module_topology
+                && let Some((root_component, source)) = inventory.reserved_root_claim
+            {
+                return Err(reserved_package_namespace_root_claim_error(
+                    &root_component,
+                    &source,
+                    string_table,
+                ));
+            }
+            namespaces
+                .single_file_dependency_keys
+                .insert(root, inventory.keys);
         }
         Ok(namespaces)
     }
@@ -730,6 +770,48 @@ impl ModuleNamespaceSet {
 // ---------------------------------------------------------------------------
 // Namespace construction
 // ---------------------------------------------------------------------------
+
+/// Validate reserved-root claims in one already-built project namespace set.
+///
+/// WHAT: checks every module namespace, regardless of module role, because each module's own
+/// sources can resolve that namespace's entries.
+/// WHY: a namespace entry under `core`/`builder` is an importable local claim even when the
+/// module itself is entry-only or support-only; only the module's own reserved directory name
+/// (which never appears in its own namespace) stays legal. The namespace entries are the single
+/// Stage 0 record of what can be imported, so this check reuses them instead of re-walking the
+/// filesystem or recomputing module ownership.
+fn validate_reserved_package_namespace_claims(
+    project_namespaces: &[ModuleNamespace],
+    source_tree_index: &SourceTreeIndex,
+    string_table: &mut StringTable,
+) -> Result<(), PreparedFailure> {
+    let identities = source_tree_index.module_identities();
+    for module_id in identities.module_ids() {
+        let namespace = &project_namespaces[module_id.index()];
+        for (key, entry) in &namespace.entries {
+            let Some(root) = reserved_package_namespace_claim_root(key) else {
+                continue;
+            };
+            let source = match entry {
+                NamespaceEntry::SameModuleSource { source_index, .. } => {
+                    source_tree_index.source(*source_index).canonical_path()
+                }
+                NamespaceEntry::CrossModule {
+                    target_module_id, ..
+                } => identities.record(*target_module_id).root_directory(),
+                // Provider-owned files are ordinary resources, not compiler-semantic source
+                // claims on the package namespace.
+                NamespaceEntry::SameModuleProvider { .. } => continue,
+            };
+            return Err(reserved_package_namespace_root_claim_error(
+                root,
+                source,
+                string_table,
+            ));
+        }
+    }
+    Ok(())
+}
 
 /// Build one `ModuleNamespace` per project module from the project index and graph.
 fn build_project_namespaces(

@@ -267,7 +267,7 @@ pub struct SourcePackage {
 }
 
 impl SourcePackage {
-    /// Assigns the public package root, such as `@ui`.
+    /// Assigns the public package root, such as `@builder/game/ui`.
     pub fn new(path: impl Into<String>) -> Self {
         Self {
             path: path.into(),
@@ -290,7 +290,7 @@ pub struct HostPackage {
 }
 
 impl HostPackage {
-    /// Assigns the public package root, such as `@platform`.
+    /// Assigns the public package root, such as `@builder/game/platform`.
     pub fn new(path: impl Into<String>) -> Self {
         Self {
             path: path.into(),

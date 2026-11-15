@@ -88,7 +88,7 @@ fn external_float_constant_rejects_non_finite_host_value() {
         let mut registry = ExternalPackageRegistry::new();
         let package = registry
             .register_package(
-                "@test/non_finite",
+                "@builder/test/non_finite",
                 crate::builder_surface::PackageOrigin::Builder,
             )
             .expect("registered package");
@@ -106,7 +106,7 @@ fn external_float_constant_rejects_non_finite_host_value() {
             )
             .expect("raw host bits remain available until source validation");
         let (_, definition) = registry
-            .resolve_package_constant("@test/non_finite", "HOST_HUGE")
+            .resolve_package_constant("@builder/test/non_finite", "HOST_HUGE")
             .expect("registered constant");
         let error = project_external_constant(
             definition,

@@ -4,7 +4,7 @@
 //!       metadata into a structured, parser-owned data model, tracks builder-owned core JS
 //!       runtime modules such as `@moth/runtime`, and exposes the scanner's first-party
 //!       module-loading policy.
-//! WHY: project-local `.js` imports and built-in JS-backed packages such as `@web/canvas`
+//! WHY: project-local `.js` imports and built-in JS-backed packages such as `@builder/web/canvas`
 //!      need a typed surface before they can be fed into the compiler frontend, while
 //!      first-party validation must reuse the parser's scanner policy.
 //!

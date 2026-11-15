@@ -500,7 +500,7 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
         }
         fs::write(
             fixture.directory.path().join("src/wrappers.moth"),
-            "@web/canvas get_canvas, context_2d, Canvas2d, set_fill_style, fill_rect\n\
+            "@builder/web/canvas get_canvas, context_2d, Canvas2d, set_fill_style, fill_rect\n\
              @labels marker\n\
              paint |drawing ~Canvas2d|:\n\
                  set_fill_style(~drawing, \"#202020\")\n\
@@ -678,10 +678,10 @@ fn synthetic_single_file_moth_template_uses_implicit_html_package() {
     }
 }
 
-fn assert_ambiguous_package_diagnostic(
+fn assert_reserved_package_root_claim(
     fixture: &EntryFixture,
-    dependency_clause: &str,
-    dependency_path: &str,
+    local_file: &str,
+    expected_root: &str,
     scenario: &str,
 ) {
     let messages = expect_diagnosed(fixture.build_result(&[]));
@@ -692,34 +692,30 @@ fn assert_ambiguous_package_diagnostic(
     let (report, view) = diagnostics[0];
     assert_eq!(
         view.descriptor().code,
-        "MOTH-IMPORT-0006",
+        "MOTH-CONFIG-0001",
         "{scenario}: {messages:?}"
     );
-
-    let position = DiagnosticRenderContext::for_report(report)
-        .site_position(view.primary_site())
-        .expect("ambiguous package diagnostic should retain its authored span");
-    assert_eq!(position.line, dependency_clause, "{scenario}");
     assert_eq!(
-        position.start,
-        LinePosition { line: 0, column: 0 },
-        "{scenario}"
+        view.reason_key(),
+        Some("invalid_config.reserved_package_namespace_root_claim"),
+        "{scenario}: {messages:?}"
     );
+    let strings = report.context().strings();
     assert_eq!(
-        position.end,
-        LinePosition {
-            line: 0,
-            column: dependency_path.chars().count() as u32,
-        },
-        "{scenario}"
+        strings.resolve(view.string_ids()[0]),
+        expected_root,
+        "{scenario}: the diagnostic must name the claimed reserved root as authored"
+    );
+    assert!(
+        strings.resolve(view.string_ids()[1]).ends_with(local_file),
+        "{scenario}: the diagnostic must name the local source claim"
     );
 }
 
 #[test]
-fn synthetic_entry_modes_reject_registered_package_namespace_collisions() {
+fn synthetic_entry_modes_reject_local_claims_below_reserved_package_roots() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let html_clause = "@core/html p";
-    let html_dependency_path = "@core/html";
     let html_collisions = [
         ("core.moth", "p #String = \"local core\"\n"),
         ("core.mtf", "[:local core content]\n"),
@@ -748,17 +744,20 @@ fn synthetic_entry_modes_reject_registered_package_namespace_collisions() {
             )
             .expect("should write local Core HTML namespace collision");
 
-            assert_ambiguous_package_diagnostic(
+            assert_reserved_package_root_claim(
                 &fixture,
-                html_clause,
-                html_dependency_path,
+                local_file,
+                local_file
+                    .strip_suffix(".mtf")
+                    .or_else(|| local_file.strip_suffix(".moth"))
+                    .or_else(|| local_file.strip_suffix(".md"))
+                    .expect("collision fixture should carry a recognized source extension"),
                 &format!("{entry_mode} with {local_file}"),
             );
         }
     }
 
     let binding_clause = "@core/math PI";
-    let binding_dependency_path = "@core/math";
     for (entry_mode, directory_entry, ordinary_page_entry) in [
         ("selected @entry.moth", false, false),
         ("selected page.moth", false, true),
@@ -777,17 +776,145 @@ fn synthetic_entry_modes_reject_registered_package_namespace_collisions() {
         )
         .expect("should write local Core namespace collision");
 
-        assert_ambiguous_package_diagnostic(
+        assert_reserved_package_root_claim(
             &fixture,
-            binding_clause,
-            binding_dependency_path,
+            "core.moth",
+            "core",
             &format!("{entry_mode} with core.moth"),
         );
     }
 }
 
 #[test]
-fn synthetic_entry_modes_reject_child_local_package_namespace_collisions() {
+fn synthetic_selected_entries_reject_importable_reserved_directory_claims() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+
+    // A selected @entry.moth owns the bounded module topology, so a child normal facade at
+    // `core/@mod.moth` is importable as `@core`.
+    let fixture = EntryFixture::new("@core value\n[:[value]]\n", false);
+    let core = fixture.directory.path().join("src/core");
+    fs::create_dir(&core).expect("should create core directory");
+    fs::write(core.join("@mod.moth"), "$export\nvalue #= 1\n")
+        .expect("should write local core facade");
+    assert_reserved_package_root_claim(&fixture, "core", "core", "selected @entry.moth facade");
+
+    // Ordinary selected files resolve local sources by path, so a helper below `core/` is
+    // importable even without a module facade.
+    for (case, local_source, claim_path) in [
+        (
+            "ordinary page helper",
+            "core/helper.moth",
+            "core/helper.moth",
+        ),
+        (
+            "ordinary page nested helper",
+            "core/nested/helper.moth",
+            "core/nested/helper.moth",
+        ),
+        (
+            "ordinary page case-variant helper",
+            "Core/helper.moth",
+            "Core/helper.moth",
+        ),
+    ] {
+        let mut fixture = EntryFixture::new("@core/helper value\n[:[value]]\n", false);
+        fixture.select_ordinary_page_file();
+        let source_root = fixture.directory.path().join("src");
+        let path = source_root.join(local_source);
+        fs::create_dir_all(path.parent().expect("claim source has a parent"))
+            .expect("should create claim directory");
+        fs::write(path, "value #= 1\n").expect("should write claim helper");
+        let expected_root = if claim_path.starts_with("Core/") {
+            "Core"
+        } else {
+            "core"
+        };
+        assert_reserved_package_root_claim(&fixture, claim_path, expected_root, case);
+    }
+
+    // Legal shapes: an entry-only `core/` publishes no importable `@core`, and a plain asset
+    // directory owns no namespace entry.
+    let fixture = EntryFixture::new("[:entry]\n", false);
+    let core = fixture.directory.path().join("src/core");
+    fs::create_dir(&core).expect("should create core directory");
+    fs::write(core.join("@entry.moth"), "[:core entry]\n").expect("should write core entry");
+    fs::write(core.join("helper.moth"), "value #= 1\n").expect("should write private helper");
+    fixture.build(&[]);
+
+    let mut fixture = EntryFixture::new("[:page]\n", false);
+    fixture.select_ordinary_page_file();
+    let source_root = fixture.directory.path().join("src");
+    fs::create_dir(source_root.join("core")).expect("should create core directory");
+    fs::write(source_root.join("core/@entry.moth"), "[:core entry]\n")
+        .expect("should write entry-only core root");
+    fs::write(source_root.join("core/helper.moth"), "value #= 1\n")
+        .expect("should write private entry-only helper");
+    fs::write(source_root.join("core/logo.png"), "not source").expect("should write core asset");
+    fixture.build(&[]);
+}
+
+#[test]
+fn synthetic_ordinary_page_rejects_support_facade_below_reserved_root() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let mut fixture = EntryFixture::new("@core value\n[:[value]]\n", false);
+    fixture.select_ordinary_page_file();
+    let core = fixture.directory.path().join("src/core");
+    fs::create_dir(&core).expect("should create core directory");
+    fs::write(core.join("@package.moth"), "$export\nvalue #= 1\n")
+        .expect("should write local core support facade");
+    assert_reserved_package_root_claim(&fixture, "core", "core", "ordinary page support facade");
+}
+
+#[test]
+fn synthetic_ordinary_page_keeps_asset_only_reserved_directory_inert_for_package_imports() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let mut fixture = EntryFixture::new("@core/html p\n~[:asset-only core]\n", false);
+    fixture.select_ordinary_page_file();
+    let core = fixture.directory.path().join("src/core");
+    fs::create_dir(&core).expect("should create core directory");
+    fs::write(core.join("logo.png"), "not source").expect("should write core asset");
+    fixture.build(&[]);
+}
+
+#[cfg(unix)]
+#[test]
+fn directory_symlinked_reserved_root_is_not_an_importable_namespace_alias() {
+    use std::os::unix::fs::symlink;
+
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let fixture = EntryFixture::new("@core value\n[:[value]]\n", true);
+    let source_root = fixture.directory.path().join("src");
+    let tools = source_root.join("tools");
+    fs::create_dir(&tools).expect("should create alias target module");
+    fs::write(
+        tools.join("@mod.moth"),
+        "$export\nvalue #= registered_core_is_not_this_alias\n",
+    )
+    .expect("should write alias target facade");
+    symlink(&tools, source_root.join("core")).expect("should create reserved root alias");
+
+    let diagnostics = expect_diagnosed(fixture.build_result(&[]));
+    assert!(
+        diagnostics
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, diagnostic)| diagnostic.descriptor().code == "MOTH-IMPORT-0005"),
+        "the canonical tools module must not be importable through its reserved-name alias: \
+         {diagnostics:?}"
+    );
+
+    // The registered Core package remains resolvable; the alias is only a filesystem name.
+    let fixture = EntryFixture::new("@core/html p\n~[:alias core]\n", true);
+    let source_root = fixture.directory.path().join("src");
+    let tools = source_root.join("tools");
+    fs::create_dir(&tools).expect("should create alias target module");
+    fs::write(tools.join("@mod.moth"), "$export\nvalue #= 1\n")
+        .expect("should write alias target facade");
+    symlink(&tools, source_root.join("core")).expect("should create reserved root alias");
+    fixture.build(&[]);
+}
+
+#[test]
+fn synthetic_entry_modes_reject_child_local_claims_below_reserved_package_roots() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let child_clause = "@core/html p";
     for (entry_mode, directory_entry) in [("selected @entry.moth", false), ("directory", true)] {
@@ -805,10 +932,10 @@ fn synthetic_entry_modes_reject_child_local_package_namespace_collisions() {
         )
         .expect("should write child-local Core namespace collision");
 
-        assert_ambiguous_package_diagnostic(
+        assert_reserved_package_root_claim(
             &fixture,
-            child_clause,
-            "@core/html",
+            "core.moth",
+            "core",
             &format!("{entry_mode} child module with core.moth"),
         );
     }

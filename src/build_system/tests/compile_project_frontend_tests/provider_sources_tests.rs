@@ -766,8 +766,8 @@ fn entry_runtime_metadata_ignores_unused_web_canvas_binding() {
     let mut frontend_surface = builder.frontend_surface();
     let canvas_package_id = frontend_surface
         .binding_packages
-        .resolve_package_id("@web/canvas")
-        .expect("@web/canvas should be registered for HTML projects");
+        .resolve_package_id("@builder/web/canvas")
+        .expect("@builder/web/canvas should be registered for HTML projects");
     let mut warning_owner = fresh_warning_owner();
 
     let modules = successful_compilation_value(compile_project_frontend(
@@ -797,7 +797,7 @@ fn entry_runtime_metadata_ignores_unused_web_canvas_binding() {
             .external_import_candidates
             .iter()
             .any(|import| import.package_id == canvas_package_id),
-        "module link facts should retain the available @web/canvas runtime candidate"
+        "module link facts should retain the available @builder/web/canvas runtime candidate"
     );
     let project_compilation = ProjectCompilation::from_frontend(modules)
         .expect("compiled module should assemble an entry");
@@ -812,7 +812,7 @@ fn entry_runtime_metadata_ignores_unused_web_canvas_binding() {
             .external_imports
             .iter()
             .all(|import| import.package_id != canvas_package_id),
-        "entry runtime metadata should exclude the unused @web/canvas binding for pure @core/html markup"
+        "entry runtime metadata should exclude the unused @builder/web/canvas binding for pure @core/html markup"
     );
 }
 
@@ -885,7 +885,7 @@ fn linked_module_js_lowering_is_observed_separately() {
     .expect("should write config");
     fs::write(
         dir.join("@entry.moth"),
-        "@phase6helper helper\nvalue = helper()\n",
+        "@builder/test/phase6helper helper\nvalue = helper()\n",
     )
     .expect("should write page");
     fs::write(
@@ -900,7 +900,11 @@ fn linked_module_js_lowering_is_observed_separately() {
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
-        .register_filesystem_root("phase6helper", package_root.clone(), PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/test/phase6helper",
+            package_root.clone(),
+            PackageOrigin::Builder,
+        )
         .expect("test source root should register");
 
     let timing_session =

@@ -667,7 +667,10 @@ mod source_package_boundary_indexes_tests {
         for (prefix, origin) in [
             ("core/html", crate::builder_surface::PackageOrigin::Core),
             ("core/css", crate::builder_surface::PackageOrigin::Core),
-            ("web/site", crate::builder_surface::PackageOrigin::Builder),
+            (
+                "builder/web/site",
+                crate::builder_surface::PackageOrigin::Builder,
+            ),
         ] {
             let package_root =
                 crate::builder_surface::BuilderSurface::builtin_source_package_root(prefix);

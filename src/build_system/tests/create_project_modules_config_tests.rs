@@ -385,7 +385,7 @@ fn loads_canonical_config_file_from_project_root() {
         .collect::<Vec<_>>();
     assert_eq!(
         alpha_provider_package_paths,
-        vec!["@test/resolving".to_owned()],
+        vec!["@builder/test/resolving".to_owned()],
         "alpha should retain the provider candidate resolved for its own source",
     );
 
@@ -875,7 +875,7 @@ fn rejects_project_local_config_dependency_even_when_module_root_exists() {
 fn rejects_builder_config_dependency_without_discovering_the_package_root() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let package_root = root.join("builder/defaults");
+    let package_root = root.join("builder/test/defaults");
     fs::create_dir_all(&package_root).expect("should create Builder package folder");
     fs::write(package_root.join("@mod.moth"), "value #= 1\n")
         .expect("should write first package facade root");
@@ -883,12 +883,17 @@ fn rejects_builder_config_dependency_without_discovering_the_package_root() {
         .expect("should write second package facade root");
 
     let config_path = root.join(settings::CONFIG_FILE_NAME);
-    fs::write(&config_path, "@defaults value\n").expect("should write config dependency");
+    fs::write(&config_path, "@builder/test/defaults value\n")
+        .expect("should write config dependency");
 
     let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
-        .register_filesystem_root("defaults", package_root, PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/test/defaults",
+            package_root,
+            PackageOrigin::Builder,
+        )
         .expect("test source root should register");
 
     let mut config = Config::new(root.clone());
@@ -1481,12 +1486,16 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
     let root = _temp.path().to_path_buf();
 
     fs::create_dir_all(root.join("lib/html")).expect("should create lib/html");
-    fs::create_dir_all(root.join("builder/html")).expect("should create builder/html");
+    fs::create_dir_all(root.join("packages/builder/test/html"))
+        .expect("should create packages/builder/test/html");
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("src/@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("lib/html/@mod.moth"), "foo #= 1\n").expect("should write root");
-    fs::write(root.join("builder/html/@package.moth"), "foo #= 1\n")
-        .expect("should write builder package root");
+    fs::write(
+        root.join("packages/builder/test/html/@package.moth"),
+        "foo #= 1\n",
+    )
+    .expect("should write builder package root");
     fs::write(
         root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
@@ -1499,7 +1508,11 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
 
     let mut builder_frontend_surface = crate::builder_surface::SourcePackageRegistry::new();
     builder_frontend_surface
-        .register_filesystem_root("html", root.join("builder/html"), PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/test/html",
+            root.join("packages/builder/test/html"),
+            PackageOrigin::Builder,
+        )
         .expect("test source root should register");
 
     let result = super::project_roots::build_project_path_resolver(
@@ -1511,8 +1524,8 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
 
     let resolver = result.expect("builder package should remain independently registered");
     assert_eq!(
-        resolver.source_package_roots().get("html"),
-        Some(&fs::canonicalize(root.join("builder/html")).unwrap())
+        resolver.source_package_roots().get("builder/test/html"),
+        Some(&fs::canonicalize(root.join("packages/builder/test/html")).unwrap())
     );
 }
 

@@ -490,7 +490,7 @@ fn directory_frontend_registers_package_and_project_boundaries() {
     let package_root = _temp.path().to_path_buf();
     // Unique names keep this test's records identifiable when unrelated parallel build tests
     // register their own boundaries into the shared process-global collection scope.
-    const PACKAGE_NAME: &str = "phase4_helper";
+    const PACKAGE_NAME: &str = "builder/test/phase4_helper";
     const PROJECT_NAME: &str = "phase4_demo_project";
     fs::create_dir_all(&dir).expect("should create project directory");
     fs::create_dir_all(&package_root).expect("should create package directory");

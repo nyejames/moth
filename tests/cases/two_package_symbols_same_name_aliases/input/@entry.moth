@@ -1,5 +1,5 @@
-@test/pkg-a open as aOpen
-@test/pkg-b open as bOpen
+@builder/test/pkg-a open as aOpen
+@builder/test/pkg-b open as bOpen
 
 aOpen("hello")
 bOpen("world")

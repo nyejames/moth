@@ -1,4 +1,4 @@
-@test/nested
+@builder/test/nested
 
 identity |value nested.tools.Opaque| -> nested.tools.Opaque:
     return value

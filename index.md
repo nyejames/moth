@@ -314,7 +314,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 - [memory management design](docs/developer-docs/memory-management/overview.mtf)
 - [codebase style guide](docs/developer-docs/style-guide/style-guide.mtf)
 - [language cheatsheet](docs/docs/cheatsheet/moth-language-cheatsheet.mtf)
-- [Core package pages](docs/docs/packages/core/@entry.moth): [@html](docs/docs/packages/core/html/@entry.moth) and [@styles](docs/docs/packages/core/styles/@entry.moth), plus the binding-backed Core packages. [Builder package pages](docs/docs/packages/builder/@entry.moth) hold the opt-in builder packages.
+- [Core package pages](docs/docs/packages/core/@entry.moth): [@html](docs/docs/packages/core/html/@entry.moth) and [@styles](docs/docs/packages/core/css/@entry.moth), plus the binding-backed Core packages. [Builder package pages](docs/docs/packages/builder/@entry.moth) hold the opt-in builder packages.
 - [docs website source](docs/docs/); [developer docs source](docs/developer-docs/); [generated output](docs/_release/)
 - [docs site support package](docs/docs_styles/@package.moth): project-local `@docs_styles` helpers and assets for the docs pages.
 - [language support progress matrix](docs/docs/progress/@entry.moth)

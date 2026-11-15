@@ -179,7 +179,7 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
     let src = root.join("src");
-    let package_root = root.join("builder/helper");
+    let package_root = root.join("packages/builder/helper");
     fs::create_dir_all(&src).expect("should create src");
     fs::create_dir_all(&package_root).expect("should create helper package");
     fs::write(
@@ -193,7 +193,7 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
     source_packages
-        .register_filesystem_root("helper", package_root, PackageOrigin::Builder)
+        .register_filesystem_root("builder/helper", package_root, PackageOrigin::Builder)
         .expect("test source root should register");
 
     let mut config = Config::new(root.clone());
@@ -205,14 +205,14 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
     )
     .expect("config should parse");
     let resolver = configured_resolver(&config);
-    let declaring_source = fs::canonicalize(root.join("builder/helper/@package.moth"))
+    let declaring_source = fs::canonicalize(root.join("packages/builder/helper/@package.moth"))
         .expect("package source should canonicalize");
 
     with_namespace_resolution(
         &config,
         &resolver,
         &source_packages,
-        Some("helper"),
+        Some("builder/helper"),
         |namespace_set,
          _source_tree_index,
          package_prefix,

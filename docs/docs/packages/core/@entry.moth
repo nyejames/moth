@@ -37,7 +37,7 @@ init_docs_sidebar()!
     ## Package pages
 
     - @./html/ (@html)
-    - @./styles/ (@styles)
+    - @./css/ (@styles)
     - @./prelude (Prelude policy)
     - @./io (Core IO)
     - @./collections (Core collections)

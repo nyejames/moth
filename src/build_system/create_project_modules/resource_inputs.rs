@@ -253,7 +253,7 @@ impl ResourceInputRegistry {
                         "Failed to read resource source '{}': {error}",
                         canonical_source_path.display()
                     );
-                    // A shipped `@web/*` asset lives in the one selected package set.
+                    // A shipped `@builder/web/*` asset lives in the one selected package set.
                     if let Some(report) = damaged_package_set_report(canonical_source_path) {
                         reason.push_str(". ");
                         reason.push_str(&report);

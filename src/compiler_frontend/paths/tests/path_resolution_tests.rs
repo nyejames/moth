@@ -168,7 +168,11 @@ fn source_package_dependency_resolves_to_package_root() {
 
     let mut source_packages = SourcePackageRegistry::new();
     source_packages
-        .register_filesystem_root("helper", package_root.clone(), PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/test/helper",
+            package_root.clone(),
+            PackageOrigin::Builder,
+        )
         .expect("test source root should register");
 
     let resolver = ProjectPathResolver::new_with_module_roots(
@@ -182,7 +186,7 @@ fn source_package_dependency_resolves_to_package_root() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let path = path_fork
-        .try_intern_portable_path("helper/utils", &mut string_table)
+        .try_intern_portable_path("builder/test/helper/utils", &mut string_table)
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
@@ -215,7 +219,7 @@ fn nested_source_package_prefix_matches_whole_components_and_strips_them() {
         temp.path().to_path_buf(),
         entry.clone(),
         PreparedSourcePackageRoots::from_entries(vec![(
-            "web/site".into(),
+            "builder/web/site".into(),
             nested.clone(),
             nested.join("@package.moth"),
         )]),
@@ -227,13 +231,13 @@ fn nested_source_package_prefix_matches_whole_components_and_strips_them() {
     let nested_base = DependencyPathBase {
         kind: CompileTimePathBase::SourcePackageRoot,
         root: nested.clone(),
-        matched_components: 2,
+        matched_components: 3,
     };
     for (name, expected) in [
-        ("web/site", Some(&nested_base)),
-        ("web/site/assets/logo", Some(&nested_base)),
-        ("web/sites", None),
-        ("web", None),
+        ("builder/web/site", Some(&nested_base)),
+        ("builder/web/site/assets/logo", Some(&nested_base)),
+        ("builder/web/sites", None),
+        ("builder", None),
     ] {
         let path = paths.try_intern_portable_path(name, &mut strings).unwrap();
         let mut components = Vec::new();
@@ -247,7 +251,7 @@ fn nested_source_package_prefix_matches_whole_components_and_strips_them() {
         );
     }
     let path = paths
-        .try_intern_portable_path("web/site/assets/logo", &mut strings)
+        .try_intern_portable_path("builder/web/site/assets/logo", &mut strings)
         .unwrap();
     let (base, resolved) = resolver
         .resolve_dependency_as_compile_time_path(
@@ -265,7 +269,7 @@ fn nested_source_package_prefix_matches_whole_components_and_strips_them() {
 
     // Case validation must skip every matched prefix component, not only the first.
     let path = paths
-        .try_intern_portable_path("web/site/Assets/logo", &mut strings)
+        .try_intern_portable_path("builder/web/site/Assets/logo", &mut strings)
         .unwrap();
     let result = resolver.resolve_dependency_as_compile_time_path(
         path,
@@ -302,13 +306,17 @@ fn source_package_prefix_takes_priority_over_entry_root() {
     fs::write(package_root.join("@package.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     // Also create a conflicting file under entry root.
-    fs::create_dir_all(entry_root.join("helper")).unwrap();
-    fs::write(entry_root.join("helper/utils.moth"), b"").unwrap();
+    fs::create_dir_all(entry_root.join("builder/test/helper")).unwrap();
+    fs::write(entry_root.join("builder/test/helper/utils.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = SourcePackageRegistry::new();
     source_packages
-        .register_filesystem_root("helper", package_root.clone(), PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/test/helper",
+            package_root.clone(),
+            PackageOrigin::Builder,
+        )
         .expect("test source root should register");
 
     let resolver = ProjectPathResolver::new_with_module_roots(
@@ -322,7 +330,7 @@ fn source_package_prefix_takes_priority_over_entry_root() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let path = path_fork
-        .try_intern_portable_path("helper/utils", &mut string_table)
+        .try_intern_portable_path("builder/test/helper/utils", &mut string_table)
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
@@ -511,7 +519,11 @@ fn canonicalized_source_package_file_resolves_to_package_prefixed_logical_path()
 
     let mut source_packages = SourcePackageRegistry::new();
     source_packages
-        .register_filesystem_root("html", package_root.clone(), PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/test/html",
+            package_root.clone(),
+            PackageOrigin::Builder,
+        )
         .expect("test source root should register");
 
     let resolver = ProjectPathResolver::new_with_module_roots(
@@ -524,7 +536,7 @@ fn canonicalized_source_package_file_resolves_to_package_prefixed_logical_path()
 
     let canonical_root = fs::canonicalize(&package_root).expect("should canonicalize package root");
     assert_eq!(
-        resolver.source_package_roots().get("html"),
+        resolver.source_package_roots().get("builder/test/html"),
         Some(&canonical_root)
     );
 
@@ -534,7 +546,10 @@ fn canonicalized_source_package_file_resolves_to_package_prefixed_logical_path()
         .logical_path_for_canonical_file(&canonical_file)
         .expect("canonical source-backed package file should resolve");
 
-    assert_eq!(logical_path, PathBuf::from("html").join("helpers.moth"));
+    assert_eq!(
+        logical_path,
+        PathBuf::from("builder/test/html").join("helpers.moth")
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -558,7 +573,11 @@ fn package_scan_root_name_is_not_package_prefix() {
 
     let mut source_packages = SourcePackageRegistry::new();
     source_packages
-        .register_filesystem_root("helper", package_root.clone(), PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/test/helper",
+            package_root.clone(),
+            PackageOrigin::Builder,
+        )
         .expect("test source root should register");
 
     let resolver = ProjectPathResolver::new_with_module_roots(
@@ -593,7 +612,7 @@ fn package_scan_root_name_is_not_package_prefix() {
 }
 
 #[test]
-fn package_direct_child_is_package_prefix() {
+fn nested_package_prefix_resolves_below_reserved_builder_root() {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let project_root = temp_dir.path().to_path_buf();
     let entry_root = project_root.join("src");
@@ -607,7 +626,11 @@ fn package_direct_child_is_package_prefix() {
 
     let mut source_packages = SourcePackageRegistry::new();
     source_packages
-        .register_filesystem_root("helper", package_root.clone(), PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/test/helper",
+            package_root.clone(),
+            PackageOrigin::Builder,
+        )
         .expect("test source root should register");
 
     let resolver = ProjectPathResolver::new_with_module_roots(
@@ -621,7 +644,7 @@ fn package_direct_child_is_package_prefix() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let path = path_fork
-        .try_intern_portable_path("helper/utils", &mut string_table)
+        .try_intern_portable_path("builder/test/helper/utils", &mut string_table)
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
@@ -637,7 +660,7 @@ fn package_direct_child_is_package_prefix() {
     assert_eq!(
         result.0,
         CompileTimePathBase::SourcePackageRoot,
-        "direct child of scan root must be a valid package prefix"
+        "the full nested package prefix must resolve to the source package root"
     );
 }
 
@@ -696,13 +719,17 @@ fn source_package_prefix_wins_consistently() {
     fs::write(package_root.join("@package.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     // Also create a conflicting file under entry root.
-    fs::create_dir_all(entry_root.join("helper")).unwrap();
-    fs::write(entry_root.join("helper/utils.moth"), b"").unwrap();
+    fs::create_dir_all(entry_root.join("builder/test/helper")).unwrap();
+    fs::write(entry_root.join("builder/test/helper/utils.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = SourcePackageRegistry::new();
     source_packages
-        .register_filesystem_root("helper", package_root.clone(), PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/test/helper",
+            package_root.clone(),
+            PackageOrigin::Builder,
+        )
         .expect("test source root should register");
 
     let resolver = ProjectPathResolver::new_with_module_roots(
@@ -716,7 +743,7 @@ fn source_package_prefix_wins_consistently() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let path = path_fork
-        .try_intern_portable_path("helper/utils", &mut string_table)
+        .try_intern_portable_path("builder/test/helper/utils", &mut string_table)
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
@@ -893,7 +920,11 @@ fn dependency_escape_package_root_rejected() {
 
     let mut source_packages = SourcePackageRegistry::new();
     source_packages
-        .register_filesystem_root("helper", package_root.clone(), PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/test/helper",
+            package_root.clone(),
+            PackageOrigin::Builder,
+        )
         .expect("test source root should register");
 
     let resolver = ProjectPathResolver::new_with_module_roots(
@@ -907,7 +938,7 @@ fn dependency_escape_package_root_rejected() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let path = path_fork
-        .try_intern_portable_path("helper/../escape", &mut string_table)
+        .try_intern_portable_path("builder/test/helper/../escape", &mut string_table)
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");

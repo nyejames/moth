@@ -66,8 +66,8 @@ pub(crate) enum BuilderSurfaceValidationError {
 const BUILTIN_PACKAGES_DIR: &str = "packages";
 
 /// Directory holding every compiler-shipped package file for this process: the source packages
-/// (`@core/html`, `@core/css`, `@web/site`) and the `@web/*` binding assets the HTML builder
-/// emits.
+/// (`@core/html`, `@core/css`, `@builder/web/site`) and the `@builder/web/*` binding assets the
+/// HTML builder emits.
 ///
 /// WHAT: `packages/` beside the canonical executable when that directory exists, which is the
 ///       release archive layout; otherwise the `packages/` directory of the source checkout that
@@ -130,7 +130,7 @@ impl BuilderSurface {
                     Self::builtin_source_package_root(prefix),
                     PackageOrigin::Core,
                 )
-                .expect("the official Core source packages have distinct reserved roots");
+                .expect("the mandatory Core source package paths are distinct and valid");
         }
         Self {
             binding_packages: ExternalPackageRegistry::new(),
@@ -263,7 +263,7 @@ impl BuilderSurface {
     }
 
     /// Root of one compiler-shipped source package, such as `@core/html`, `@core/css` or
-    /// `@web/site`.
+    /// `@builder/web/site`.
     ///
     /// The registered prefix's `/`-separated components become nested directories below the
     /// selected package set, so a grouped Core name keeps one directory per namespace level.

@@ -1,4 +1,4 @@
-@web/page
+@builder/web/page
 @nav sync_nav
 
 location = page.path()

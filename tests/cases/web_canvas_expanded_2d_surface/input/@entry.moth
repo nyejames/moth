@@ -1,4 +1,4 @@
-@web/canvas
+@builder/web/canvas
 
 run |id String| -> String, Error!:
     canvas_ref ~= canvas.get_canvas(id)!

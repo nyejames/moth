@@ -39,7 +39,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_config_file, file_name_is_invalid_module_root_marker,
-    file_name_is_module_root_file, module_root_role_for_file_name,
+    module_root_role_for_file_name,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathInternError, PathInternerFork};
@@ -374,19 +374,21 @@ fn compile_single_file_frontend_with_target(
         }
     }
 
-    // Only the three fixed root spellings own a bounded Stage 0 inventory.
-    let module_roots = if file_name_is_module_root_file(entry_file_name) {
-        SourceTreeIndex::bounded_module_roots_for_single_file(
-            &entry_path,
-            config,
-            &builder_surface.source_packages,
-            &builder_surface.source_file_kinds,
-            &builder_surface.external_import_providers,
-            string_table,
-        )?
-    } else {
-        ModuleRootTable::empty()
-    };
+    let bounded_index = SourceTreeIndex::bounded_single_file_index(
+        &entry_path,
+        config,
+        &builder_surface.source_packages,
+        &builder_surface.source_file_kinds,
+        &builder_surface.external_import_providers,
+        string_table,
+    )?;
+    // Synthetic single-file selection may name a support or entry root directly, and its reached
+    // root roles need every present root surface. Deriving the normal-only table would silently
+    // drop the selected file's own module.
+    let module_roots = bounded_index
+        .as_ref()
+        .map(|index| index.module_identities().derive_compilation_root_table())
+        .unwrap_or_else(ModuleRootTable::empty);
     // Preparation needs the same bounded root inventory to classify every module root this
     // synthetic unit reaches. The resolver owns that table, so borrow it back instead of
     // keeping a second snapshot.
@@ -401,6 +403,8 @@ fn compile_single_file_frontend_with_target(
         source_package_indexes,
         &builder_surface.binding_packages,
         &project_path_resolver,
+        bounded_index.as_ref(),
+        string_table,
     )?;
     // 4. Discover all transitively reachable files.
     // Register the synthetic main-project boundary before its inventory so the human summary can

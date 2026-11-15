@@ -452,6 +452,7 @@ unit_code! {
         ModuleRootFileOutsideClaimingModule = 91,
         ModuleRootFileNotRegularFile = 92,
         ConfigFileSelectedAsEntry = 93,
+        ReservedPackageNamespaceRootClaim = 94,
     }
 }
 
@@ -516,6 +517,9 @@ impl InvalidConfigCode {
             }
             InvalidConfigReason::EntryRootPackagePrefixCollision { .. } => {
                 Self::EntryRootPackagePrefixCollision
+            }
+            InvalidConfigReason::ReservedPackageNamespaceRootClaim { .. } => {
+                Self::ReservedPackageNamespaceRootClaim
             }
             InvalidConfigReason::SourcePackageMissingRoot { .. } => Self::SourcePackageMissingRoot,
             InvalidConfigReason::NoRootModuleEntries { .. } => Self::NoRootModuleEntries,
@@ -939,6 +943,9 @@ fn invalid_config_string_ids(
             prefix,
             entry_folder,
         } => strings.extend([*prefix, *entry_folder]),
+        InvalidConfigReason::ReservedPackageNamespaceRootClaim { root, source } => {
+            strings.extend([*root, *source]);
+        }
         InvalidConfigReason::SourcePackageMissingRoot { prefix, root } => {
             strings.extend([*prefix, *root]);
         }
@@ -1223,6 +1230,12 @@ pub(crate) fn decode_invalid_config(
             InvalidConfigReason::EntryRootPackagePrefixCollision {
                 prefix: strings.take()?,
                 entry_folder: strings.take()?,
+            }
+        }
+        InvalidConfigCode::ReservedPackageNamespaceRootClaim => {
+            InvalidConfigReason::ReservedPackageNamespaceRootClaim {
+                root: strings.take()?,
+                source: strings.take()?,
             }
         }
         InvalidConfigCode::SourcePackageMissingRoot => {

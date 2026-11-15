@@ -1,9 +1,9 @@
-//! Built-in `@web/*` binding package registration.
+//! Built-in `@builder/web/*` binding package registration.
 //!
-//! WHAT: each `@web/*` package is one annotated JavaScript asset in its own directory under the
-//!       compiler-shipped `packages/web/`. This module parses every asset, registers it as a
-//!       Builder-origin binding package and returns runtime asset metadata so reachable calls emit
-//!       the asset and generated glue.
+//! WHAT: each `@builder/web/*` package is one annotated JavaScript asset in its own directory
+//!       under the compiler-shipped `packages/builder/web/`. This module parses every asset,
+//!       registers it as a Builder-origin binding package and returns runtime asset metadata so
+//!       reachable calls emit the asset and generated glue.
 //! WHY: builder-owned packages share the parser, registry and emission path used by project-local
 //!      `.js` imports. Only their package paths and asset locations are fixed here. The binary
 //!      embeds each asset to register its bindings without filesystem access, while emitted output
@@ -29,7 +29,7 @@ use crate::projects::html_project::external_js::runtime_assets::js_runtime_asset
 use crate::projects::html_project::external_js::runtime_module_registry::RuntimeModuleRegistry;
 use std::path::{Path, PathBuf};
 
-/// One built-in `@web/*` package and its embedded JavaScript asset.
+/// One built-in `@builder/web/*` package and its embedded JavaScript asset.
 struct WebBindingPackage {
     package_path: &'static str,
     source: &'static str,
@@ -40,33 +40,33 @@ struct WebBindingPackage {
 
 const WEB_BINDING_PACKAGES: [WebBindingPackage; 3] = [
     WebBindingPackage {
-        package_path: "@web/canvas",
+        package_path: "@builder/web/canvas",
         source: include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/packages/web/canvas/canvas.js"
+            "/packages/builder/web/canvas/canvas.js"
         )),
-        asset_path: "web/canvas/canvas.js",
+        asset_path: "builder/web/canvas/canvas.js",
     },
     // WebGL2. Registered with no public symbols. See its README for the binding prerequisites.
     WebBindingPackage {
-        package_path: "@web/graphics",
+        package_path: "@builder/web/graphics",
         source: include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/packages/web/graphics/graphics.js"
+            "/packages/builder/web/graphics/graphics.js"
         )),
-        asset_path: "web/graphics/graphics.js",
+        asset_path: "builder/web/graphics/graphics.js",
     },
     WebBindingPackage {
-        package_path: "@web/page",
+        package_path: "@builder/web/page",
         source: include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/packages/web/page/page.js"
+            "/packages/builder/web/page/page.js"
         )),
-        asset_path: "web/page/page.js",
+        asset_path: "builder/web/page/page.js",
     },
 ];
 
-/// Registers every built-in `@web/*` package and returns their runtime asset metadata.
+/// Registers every built-in `@builder/web/*` package and returns their runtime asset metadata.
 pub(crate) fn register_web_binding_packages(
     registry: &mut ExternalPackageRegistry,
 ) -> Vec<BuilderRuntimePackageMetadata> {
@@ -92,10 +92,10 @@ fn register_web_binding_package(
 
     let package_id = registry
         .register_package(package.package_path, PackageOrigin::Builder)
-        .expect("built-in @web package paths are distinct");
+        .expect("built-in @builder/web package paths are distinct");
 
     register_parsed_js_module(package_id, &parsed, registry)
-        .expect("built-in @web package registration should not fail");
+        .expect("built-in @builder/web package registration should not fail");
 
     let required_runtime_imports = required_runtime_imports_from_parsed(&parsed);
     let runtime_asset = js_runtime_asset_identity(
@@ -104,7 +104,7 @@ fn register_web_binding_package(
         canonical_source_path(package),
         None,
     )
-    .expect("built-in @web asset identity is a proven internal invariant");
+    .expect("built-in @builder/web asset identity is a proven internal invariant");
 
     BuilderRuntimePackageMetadata {
         package_id,
@@ -120,10 +120,10 @@ fn canonical_source_path(package: &WebBindingPackage) -> PathBuf {
 fn logical_source_path(package: &WebBindingPackage) -> PortableResourcePath {
     let file_name = Path::new(package.asset_path)
         .file_name()
-        .expect("built-in @web asset paths end in a file name");
+        .expect("built-in @builder/web asset paths end in a file name");
 
     PortableResourcePath::from_relative_logical_path(Path::new(file_name))
-        .expect("built-in @web logical source path is a proven internal invariant")
+        .expect("built-in @builder/web logical source path is a proven internal invariant")
 }
 
 #[cfg(test)]

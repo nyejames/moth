@@ -513,7 +513,7 @@ fn build_project_late_backend_infrastructure_discards_frontend_warnings() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temporary project");
     let root = _temp.path().to_path_buf();
-    let package = root.join("packages/warnpkg");
+    let package = root.join("packages/builder/test/warnpkg");
     let src = root.join("src");
     fs::create_dir_all(&package).expect("should create package root");
     fs::create_dir_all(&src).expect("should create project source root");

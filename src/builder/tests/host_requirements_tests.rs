@@ -25,7 +25,7 @@ const CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n)\n";
 
 /// The facade a native host import test compiles. `log` and `has_prefix` are both host bindings.
 const IMPORTING_FACADE_SOURCE: &str = "\
-@platform has_prefix, log
+@builder/test/platform has_prefix, log
 
 $export
 update |text String| -> Bool:
@@ -36,7 +36,7 @@ update |text String| -> Bool:
 
 /// The facade a preflight test compiles. `load` declares the builtin `Error!` channel.
 const FALLIBLE_IMPORT_FACADE_SOURCE: &str = "\
-@platform has_prefix, load
+@builder/test/platform has_prefix, load
 
 $export
 update |text String| -> I32, Error!:
@@ -106,7 +106,7 @@ make_point || -> Point:
 /// The facade a Core-binding test compiles. `io.line` is a compiler Core binding, not a native
 /// host binding, so only `has_prefix` may become a required host import.
 const CORE_BINDING_FACADE_SOURCE: &str = "\
-@platform has_prefix
+@builder/test/platform has_prefix
 
 $export
 update |text String| -> Bool:
@@ -147,7 +147,7 @@ update |value ~String| -> I32:
 
 /// The child module whose exported function the project package facade re-exports.
 const REEXPORTED_IMPORT_MODULE_SOURCE: &str = "\
-@platform has_prefix
+@builder/test/platform has_prefix
 
 $export
 update |text String| -> Bool:
@@ -239,7 +239,7 @@ impl ProjectBuilder for RequirementBuilder {
 
 /// The host package the import fixtures register.
 fn platform_package() -> HostPackage {
-    HostPackage::new("@platform")
+    HostPackage::new("@builder/test/platform")
         .function(
             HostFunction::new("has_prefix")
                 .parameter(HostType::String)
@@ -256,7 +256,7 @@ fn fallible_platform_package() -> HostPackage {
 
 fn has_prefix_implementation() -> HostImplementation {
     HostImplementation::new(
-        HostBindingIdentity::new("@platform", ["has_prefix"]),
+        HostBindingIdentity::new("@builder/test/platform", ["has_prefix"]),
         HostSignature::new()
             .parameter(HostType::String)
             .parameter(HostType::String)
@@ -266,14 +266,14 @@ fn has_prefix_implementation() -> HostImplementation {
 
 fn log_implementation() -> HostImplementation {
     HostImplementation::new(
-        HostBindingIdentity::new("@platform", ["log"]),
+        HostBindingIdentity::new("@builder/test/platform", ["log"]),
         HostSignature::new().parameter(HostType::String),
     )
 }
 
 fn load_implementation() -> HostImplementation {
     HostImplementation::new(
-        HostBindingIdentity::new("@platform", ["load"]),
+        HostBindingIdentity::new("@builder/test/platform", ["load"]),
         HostSignature::new().returns(HostType::I32).fallible(),
     )
 }
@@ -305,7 +305,10 @@ fn accepted_host_import_appears_with_canonical_identity_and_signature() {
 
     assert_eq!(
         import_identities(&requirements),
-        ["@platform#has_prefix", "@platform#log"],
+        [
+            "@builder/test/platform#has_prefix",
+            "@builder/test/platform#log"
+        ],
         "reachable host bindings appear once each in canonical order"
     );
     assert_eq!(
@@ -321,7 +324,10 @@ fn accepted_host_import_appears_with_canonical_identity_and_signature() {
     );
 
     let has_prefix = &requirements.imports()[0];
-    assert_eq!(has_prefix.identity().package_path(), "@platform");
+    assert_eq!(
+        has_prefix.identity().package_path(),
+        "@builder/test/platform"
+    );
     assert_eq!(
         has_prefix.identity().symbol_path(),
         ["has_prefix".to_owned()].as_slice(),
@@ -364,7 +370,7 @@ fn preflight_rejects_a_missing_implementation() {
     assert_eq!(
         errors.errors(),
         [PreflightError::MissingImplementation {
-            import: HostBindingIdentity::new("@platform", ["log"]),
+            import: HostBindingIdentity::new("@builder/test/platform", ["log"]),
         }]
     );
 }
@@ -380,7 +386,7 @@ fn preflight_rejects_a_wrong_parameter_type() {
         .expect("registered host imports should produce requirements");
 
     let wrong_parameter = HostImplementation::new(
-        HostBindingIdentity::new("@platform", ["has_prefix"]),
+        HostBindingIdentity::new("@builder/test/platform", ["has_prefix"]),
         HostSignature::new()
             .parameter(HostType::U8)
             .parameter(HostType::String)
@@ -392,7 +398,7 @@ fn preflight_rejects_a_wrong_parameter_type() {
     assert_eq!(
         errors.errors(),
         [PreflightError::ParameterTypeMismatch {
-            import: HostBindingIdentity::new("@platform", ["has_prefix"]),
+            import: HostBindingIdentity::new("@builder/test/platform", ["has_prefix"]),
             index: 0,
             required: HostType::String,
             declared: HostType::U8,
@@ -411,7 +417,7 @@ fn preflight_rejects_a_wrong_parameter_count() {
         .expect("registered host imports should produce requirements");
 
     let wrong_arity = HostImplementation::new(
-        HostBindingIdentity::new("@platform", ["has_prefix"]),
+        HostBindingIdentity::new("@builder/test/platform", ["has_prefix"]),
         HostSignature::new()
             .parameter(HostType::String)
             .returns(HostType::Bool),
@@ -422,7 +428,7 @@ fn preflight_rejects_a_wrong_parameter_count() {
     assert_eq!(
         errors.errors(),
         [PreflightError::ParameterCountMismatch {
-            import: HostBindingIdentity::new("@platform", ["has_prefix"]),
+            import: HostBindingIdentity::new("@builder/test/platform", ["has_prefix"]),
             required: 2,
             declared: 1,
         }]
@@ -452,7 +458,7 @@ fn preflight_rejects_a_wrong_return_channel() {
     );
 
     let infallible_load = HostImplementation::new(
-        HostBindingIdentity::new("@platform", ["load"]),
+        HostBindingIdentity::new("@builder/test/platform", ["load"]),
         HostSignature::new().returns(HostType::I32),
     );
     let errors = preflight(
@@ -464,7 +470,7 @@ fn preflight_rejects_a_wrong_return_channel() {
     assert_eq!(
         errors.errors(),
         [PreflightError::ErrorChannelMismatch {
-            import: HostBindingIdentity::new("@platform", ["load"]),
+            import: HostBindingIdentity::new("@builder/test/platform", ["load"]),
             required: true,
             declared: false,
         }]
@@ -653,8 +659,8 @@ fn an_export_with_a_mutable_parameter_is_a_build_error() {
 
 #[test]
 fn canonical_identity_and_order_do_not_depend_on_declaration_order() {
-    let alpha_package = HostPackage::new("@alpha").function(HostFunction::new("ping"));
-    let shuffled_package = HostPackage::new("@platform")
+    let alpha_package = HostPackage::new("@builder/test/alpha").function(HostFunction::new("ping"));
+    let shuffled_package = HostPackage::new("@builder/test/platform")
         .function(HostFunction::new("log").parameter(HostType::String))
         .function(
             HostFunction::new("has_prefix")
@@ -672,8 +678,8 @@ fn canonical_identity_and_order_do_not_depend_on_declaration_order() {
     );
 
     const FIRST_FACADE: &str = "\
-@platform has_prefix, log
-@alpha ping
+@builder/test/platform has_prefix, log
+@builder/test/alpha ping
 
 $export
 update |text String| -> Bool:
@@ -683,8 +689,8 @@ update |text String| -> Bool:
 ;
 ";
     const SECOND_FACADE: &str = "\
-@alpha ping
-@platform log, has_prefix
+@builder/test/alpha ping
+@builder/test/platform log, has_prefix
 
 $export
 update |text String| -> Bool:
@@ -705,7 +711,11 @@ update |text String| -> Bool:
     assert_eq!(first, second);
     assert_eq!(
         import_identities(&first),
-        ["@alpha#ping", "@platform#has_prefix", "@platform#log"],
+        [
+            "@builder/test/alpha#ping",
+            "@builder/test/platform#has_prefix",
+            "@builder/test/platform#log"
+        ],
         "canonical identity orders imports across host packages whatever their registration order"
     );
 }
@@ -728,14 +738,19 @@ fn an_unreachable_registered_host_function_is_absent() {
 
     assert_eq!(
         import_identities(&requirements),
-        ["@platform#has_prefix", "@platform#log"]
+        [
+            "@builder/test/platform#has_prefix",
+            "@builder/test/platform#log"
+        ]
     );
 }
 
 #[test]
 fn capability_isolation_names_only_the_definitions_own_host_packages() {
-    let alpha_package = HostPackage::new("@alpha").function(HostFunction::new("alpha_only"));
-    let beta_package = HostPackage::new("@beta").function(HostFunction::new("beta_only"));
+    let alpha_package =
+        HostPackage::new("@builder/test/alpha").function(HostFunction::new("alpha_only"));
+    let beta_package =
+        HostPackage::new("@builder/test/beta").function(HostFunction::new("beta_only"));
     let alpha_builder = RequirementBuilder::new(
         definition(&[alpha_package]),
         selection(&[("update", "update_export")]),
@@ -748,26 +763,29 @@ fn capability_isolation_names_only_the_definitions_own_host_packages() {
     let alpha_requirements = alpha_builder
         .requirements(&[(
             "@package.moth",
-            "@alpha alpha_only\n\n$export\nupdate ||:\n    alpha_only()\n;\n",
+            "@builder/test/alpha alpha_only\n\n$export\nupdate ||:\n    alpha_only()\n;\n",
         )])
         .expect("the alpha project should compile against its own definition");
     let beta_requirements = beta_builder
         .requirements(&[(
             "@package.moth",
-            "@beta beta_only\n\n$export\nupdate ||:\n    beta_only()\n;\n",
+            "@builder/test/beta beta_only\n\n$export\nupdate ||:\n    beta_only()\n;\n",
         )])
         .expect("the beta project should compile against its own definition");
 
     assert_eq!(
         import_identities(&alpha_requirements),
-        ["@alpha#alpha_only"]
+        ["@builder/test/alpha#alpha_only"]
     );
-    assert_eq!(import_identities(&beta_requirements), ["@beta#beta_only"]);
+    assert_eq!(
+        import_identities(&beta_requirements),
+        ["@builder/test/beta#beta_only"]
+    );
 }
 
 #[test]
 fn an_optional_host_type_crosses_both_conversion_directions() {
-    let package = HostPackage::new("@platform").function(
+    let package = HostPackage::new("@builder/test/platform").function(
         HostFunction::new("find")
             .parameter(HostType::optional(HostType::String))
             .returns(HostType::optional(HostType::U32)),
@@ -780,7 +798,7 @@ fn an_optional_host_type_crosses_both_conversion_directions() {
     let requirements = builder
         .requirements(&[(
             "@package.moth",
-            "@platform find\n\n$export\nlookup |name String| -> U32?:\n    return find(name)\n;\n",
+            "@builder/test/platform find\n\n$export\nlookup |name String| -> U32?:\n    return find(name)\n;\n",
         )])
         .expect("the registered and public optional types should both convert");
 
@@ -803,12 +821,12 @@ fn a_host_import_reached_through_a_linked_source_package_module_is_included() {
     let package_dir = tempfile::tempdir().expect("should create package directory");
     fs::write(
         package_dir.path().join("@package.moth"),
-        "@platform has_prefix\n\n$export\nscore || -> Bool:\n    return has_prefix(\"pre\", \"prefix\")\n;\n",
+        "@builder/test/platform has_prefix\n\n$export\nscore || -> Bool:\n    return has_prefix(\"pre\", \"prefix\")\n;\n",
     )
     .expect("should write the source package module");
     let builder = RequirementBuilder::new(
         BuilderDefinition::new("game")
-            .source_package(SourcePackage::new("@game").from_dir(package_dir.path()))
+            .source_package(SourcePackage::new("@builder/test/game").from_dir(package_dir.path()))
             .host_package(platform_package())
             .finish()
             .expect("the source and host package definition should finish"),
@@ -818,13 +836,13 @@ fn a_host_import_reached_through_a_linked_source_package_module_is_included() {
     let requirements = builder
         .requirements(&[(
             "@package.moth",
-            "@game score\n\n$export\nupdate || -> Bool:\n    return score()\n;\n",
+            "@builder/test/game score\n\n$export\nupdate || -> Bool:\n    return score()\n;\n",
         )])
         .expect("a linked source-package module may reach a host binding");
 
     assert_eq!(
         import_identities(&requirements),
-        ["@platform#has_prefix"],
+        ["@builder/test/platform#has_prefix"],
         "reachable external calls of every linked module are resolved through that module's registry"
     );
 }
@@ -842,7 +860,7 @@ fn a_reachable_core_binding_is_not_a_native_host_import() {
 
     assert_eq!(
         import_identities(&requirements),
-        ["@platform#has_prefix"],
+        ["@builder/test/platform#has_prefix"],
         "a Core binding is compiler-owned and is not a registered native host import"
     );
 }
@@ -865,7 +883,7 @@ fn an_empty_selection_requires_no_host_imports() {
 #[test]
 fn a_host_binding_is_required_only_once_a_calling_export_is_selected() {
     const TWO_EXPORTS: &str = "\
-@platform has_prefix, log
+@builder/test/platform has_prefix, log
 
 $export
 selected |text String| -> Bool:
@@ -885,7 +903,7 @@ unselected |text String|:
     .expect("the selected export reaches its own host binding");
     assert_eq!(
         import_identities(&only_selected),
-        ["@platform#has_prefix"],
+        ["@builder/test/platform#has_prefix"],
         "a binding only an unselected public function reaches is not required"
     );
 
@@ -900,7 +918,10 @@ unselected |text String|:
     .expect("both selected exports reach their host bindings");
     assert_eq!(
         import_identities(&both_selected),
-        ["@platform#has_prefix", "@platform#log"],
+        [
+            "@builder/test/platform#has_prefix",
+            "@builder/test/platform#log"
+        ],
         "selecting the second export adds exactly the binding it reaches"
     );
 }
@@ -908,7 +929,7 @@ unselected |text String|:
 #[test]
 fn a_binding_reached_from_two_selected_exports_appears_once() {
     const SHARED_BINDING: &str = "\
-@platform has_prefix
+@builder/test/platform has_prefix
 
 $export
 first |text String| -> Bool:
@@ -927,7 +948,10 @@ second |text String| -> Bool:
     .requirements(&[("@package.moth", SHARED_BINDING)])
     .expect("both selected exports reach the same binding");
 
-    assert_eq!(import_identities(&requirements), ["@platform#has_prefix"]);
+    assert_eq!(
+        import_identities(&requirements),
+        ["@builder/test/platform#has_prefix"]
+    );
     assert_eq!(
         requirements.imports()[0].signature(),
         &HostSignature::new()
@@ -942,12 +966,12 @@ fn a_binding_reached_from_the_facade_and_a_linked_module_appears_once() {
     let package_dir = tempfile::tempdir().expect("should create package directory");
     fs::write(
         package_dir.path().join("@package.moth"),
-        "@platform has_prefix\n\n$export\nscore || -> Bool:\n    return has_prefix(\"pre\", \"prefix\")\n;\n",
+        "@builder/test/platform has_prefix\n\n$export\nscore || -> Bool:\n    return has_prefix(\"pre\", \"prefix\")\n;\n",
     )
     .expect("should write the source package module");
     let builder = RequirementBuilder::new(
         BuilderDefinition::new("game")
-            .source_package(SourcePackage::new("@game").from_dir(package_dir.path()))
+            .source_package(SourcePackage::new("@builder/test/game").from_dir(package_dir.path()))
             .host_package(platform_package())
             .finish()
             .expect("the source and host package definition should finish"),
@@ -957,13 +981,13 @@ fn a_binding_reached_from_the_facade_and_a_linked_module_appears_once() {
     let requirements = builder
         .requirements(&[(
             "@package.moth",
-            "@game score\n@platform has_prefix\n\n$export\nupdate |text String| -> Bool:\n    if has_prefix(text, \"pre\"):\n        return score()\n    ;\n    return false\n;\n",
+            "@builder/test/game score\n@builder/test/platform has_prefix\n\n$export\nupdate |text String| -> Bool:\n    if has_prefix(text, \"pre\"):\n        return score()\n    ;\n    return false\n;\n",
         )])
         .expect("the facade and a linked module may reach the same binding");
 
     assert_eq!(
         import_identities(&requirements),
-        ["@platform#has_prefix"],
+        ["@builder/test/platform#has_prefix"],
         "the same canonical binding reached from two modules names one import"
     );
     assert_eq!(
@@ -991,7 +1015,7 @@ fn a_reexported_facade_function_roots_the_declaration_origin_host_calls() {
 
     assert_eq!(
         import_identities(&requirements),
-        ["@platform#has_prefix"],
+        ["@builder/test/platform#has_prefix"],
         "the declaration origin under the facade re-export roots the module's host calls"
     );
     assert_eq!(
@@ -1020,12 +1044,12 @@ fn a_linked_module_call_joins_the_facades_host_imports() {
     let package_dir = tempfile::tempdir().expect("should create package directory");
     fs::write(
         package_dir.path().join("@package.moth"),
-        "@platform has_prefix\n\n$export\nscore || -> Bool:\n    return has_prefix(\"pre\", \"prefix\")\n;\n",
+        "@builder/test/platform has_prefix\n\n$export\nscore || -> Bool:\n    return has_prefix(\"pre\", \"prefix\")\n;\n",
     )
     .expect("should write the source package module");
     let builder = RequirementBuilder::new(
         BuilderDefinition::new("game")
-            .source_package(SourcePackage::new("@game").from_dir(package_dir.path()))
+            .source_package(SourcePackage::new("@builder/test/game").from_dir(package_dir.path()))
             .host_package(platform_package())
             .finish()
             .expect("the source and host package definition should finish"),
@@ -1038,20 +1062,23 @@ fn a_linked_module_call_joins_the_facades_host_imports() {
     let requirements = builder
         .requirements(&[(
             "@package.moth",
-            "@game score\n@platform log\n\n$export\nupdate |text String|:\n    log(text)\n    score()\n;\n",
+            "@builder/test/game score\n@builder/test/platform log\n\n$export\nupdate |text String|:\n    log(text)\n    score()\n;\n",
         )])
         .expect("a linked module's host call should join the facade's imports");
 
     assert_eq!(
         import_identities(&requirements),
-        ["@platform#has_prefix", "@platform#log"],
+        [
+            "@builder/test/platform#has_prefix",
+            "@builder/test/platform#log"
+        ],
         "both the facade's and the linked module's host calls are required"
     );
 }
 
 #[test]
 fn a_byte_host_binding_and_export_keep_their_identity() {
-    let package = HostPackage::new("@platform").function(
+    let package = HostPackage::new("@builder/test/platform").function(
         HostFunction::new("octet")
             .parameter(HostType::Byte)
             .returns(HostType::Byte),
@@ -1064,7 +1091,7 @@ fn a_byte_host_binding_and_export_keep_their_identity() {
     let requirements = builder
         .requirements(&[(
             "@package.moth",
-            "@platform octet\n\n$export\ntake_byte |value Byte| -> Byte:\n    return octet(value)\n;\n",
+            "@builder/test/platform octet\n\n$export\ntake_byte |value Byte| -> Byte:\n    return octet(value)\n;\n",
         )])
         .expect("Byte stays Byte through registration, requirement production and export");
 

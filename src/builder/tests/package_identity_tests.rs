@@ -1,6 +1,6 @@
 //! Compiled package identity tests for SDK builds.
 //!
-//! WHAT: builds one project twice with the same `@ui` package installed in two different
+//! WHAT: builds one project twice with the same `@builder/test/ui` package installed in two different
 //! directories, then compares the compiler-owned package identities observed by `build`.
 //! WHY: observing compiler identities ensures the comparison detects identities that incorrectly
 //! depend on the package's install directory.
@@ -17,10 +17,10 @@ use std::path::{Path, PathBuf};
 /// Declares only the mandatory `project` section because the test builder adds no config sections.
 const CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n)\n";
 
-/// The project's only page, importing `greet` from the `@ui` package.
-const PAGE_SOURCE: &str = "@ui greet\nmessage = greet()\n";
+/// The project's only page, importing `greet` from the `@builder/test/ui` package.
+const PAGE_SOURCE: &str = "@builder/test/ui greet\nmessage = greet()\n";
 
-/// The `@ui` package's only module, exporting `greet`.
+/// The `@builder/test/ui` package's only module, exporting `greet`.
 const UI_MODULE_SOURCE: &str = "$export\ngreet || -> I32:\n    return 1\n;\n";
 
 /// Records the compiler-owned package identities that `build` observes.
@@ -32,7 +32,7 @@ struct IdentityRecordingBuilder {
 impl ProjectBuilder for IdentityRecordingBuilder {
     fn definition(&self) -> Result<BuilderDefinition, Error> {
         BuilderDefinition::new("game")
-            .source_package(SourcePackage::new("@ui").from_dir(&self.ui_root))
+            .source_package(SourcePackage::new("@builder/test/ui").from_dir(&self.ui_root))
             .finish()
     }
 
@@ -66,15 +66,15 @@ fn compiled_package_identities_do_not_depend_on_package_install_directory() {
     let second = observe_package_identities(project_dir.path(), second_install.path());
 
     assert!(
-        first
-            .iter()
-            .any(|identity| { matches!(identity, Some(identity) if identity.name() == "ui") }),
-        "the compiler-owned @ui package identity should be observed: {first:?}"
+        first.iter().any(|identity| {
+            matches!(identity, Some(identity) if identity.name() == "builder/test/ui")
+        }),
+        "the compiler-owned @builder/test/ui package identity should be observed: {first:?}"
     );
     assert_eq!(first, second);
 }
 
-/// Builds `project_root` with `ui_root` installed as `@ui` and returns compiler-owned identities
+/// Builds `project_root` with `ui_root` installed as `@builder/test/ui` and returns compiler-owned identities
 /// in entry order, with each entry preceding its linked modules.
 fn observe_package_identities(
     project_root: &Path,
@@ -88,7 +88,7 @@ fn observe_package_identities(
     builder.observed_identities.into_inner()
 }
 
-/// Writes a project whose only page imports `greet` from `@ui`.
+/// Writes a project whose only page imports `greet` from `@builder/test/ui`.
 fn write_project(project_root: &Path) {
     let src_dir = project_root.to_path_buf();
     fs::create_dir_all(&src_dir).expect("should create source directory");
@@ -96,7 +96,7 @@ fn write_project(project_root: &Path) {
     fs::write(src_dir.join("@entry.moth"), PAGE_SOURCE).expect("should write page");
 }
 
-/// Writes a `@ui` package root whose only module publishes `greet` through its support facade.
+/// Writes a `@builder/test/ui` package root whose only module publishes `greet` through its support facade.
 fn write_ui_package(package_root: &Path) {
     fs::write(package_root.join("@package.moth"), UI_MODULE_SOURCE)
         .expect("should write package module");

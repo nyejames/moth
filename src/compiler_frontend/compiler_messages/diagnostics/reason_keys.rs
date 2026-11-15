@@ -165,6 +165,7 @@ define_stable_reason_keys! {
         &InvalidConfigCode::ResourceOutputPathCollision => "invalid_config.resource_output_path_collision",
         &InvalidConfigCode::ResourceOutputPathReserved => "invalid_config.resource_output_path_reserved",
         &InvalidConfigCode::EntryRootPackagePrefixCollision => "invalid_config.entry_root_package_prefix_collision",
+        &InvalidConfigCode::ReservedPackageNamespaceRootClaim => "invalid_config.reserved_package_namespace_root_claim",
         &InvalidConfigCode::SourcePackageMissingRoot => "invalid_config.source_package_missing_root",
         &InvalidConfigCode::NoRootModuleEntries => "invalid_config.no_root_module_entries",
         &InvalidConfigCode::AliasedModuleRootFiles => "invalid_config.aliased_module_root_files",

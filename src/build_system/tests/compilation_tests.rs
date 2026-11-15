@@ -1396,7 +1396,7 @@ fn canonical_tail_retains_donor_only_package_identity() {
     fs::create_dir_all(&source_root).expect("the requester source root should exist");
     let requester_path = source_root.join("@entry.moth");
     let donor_path = donor_directory.path().join("@package.moth");
-    const REQUESTER: &str = "@pkg outer\nvalue I32 = outer(1)\n";
+    const REQUESTER: &str = "@builder/test/pkg outer\nvalue I32 = outer(1)\n";
     const DONOR: &str = "inner type U |text String, result U| -> U:\n    return result\n;\n$export\nouter type T |value T| -> I32:\n    return inner(value, 1)\n;\n";
     fs::write(&requester_path, REQUESTER).expect("the requester should be written");
     fs::write(&donor_path, DONOR).expect("the donor should be written");
@@ -1412,7 +1412,7 @@ fn canonical_tail_retains_donor_only_package_identity() {
     surface
         .source_packages
         .register_filesystem_root(
-            "pkg",
+            "builder/test/pkg",
             donor_directory.path().to_path_buf(),
             PackageOrigin::Builder,
         )
@@ -1860,7 +1860,8 @@ fn generated_sidecar_warning_frontend(
         "generated_project.moth",
     );
 
-    let package_identity = StablePackageIdentity::source_package(PackageOrigin::Builder, "warnpkg");
+    let package_identity =
+        StablePackageIdentity::source_package(PackageOrigin::Builder, "builder/test/warnpkg");
     let package_origin = StableModuleOriginIdentity::from_portable_path(
         package_identity.clone(),
         "@package.moth".to_owned(),
@@ -1880,7 +1881,7 @@ fn generated_sidecar_warning_frontend(
     let _temp = tempfile::tempdir().expect("generated-warning project should be created");
     let project_root = _temp.path().to_path_buf();
     let source_root = project_root.join("src");
-    let package_root = project_root.join("packages/warnpkg");
+    let package_root = project_root.join("packages/builder/test/warnpkg");
     std::fs::create_dir_all(&source_root).expect("project source root should be created");
     std::fs::create_dir_all(&package_root).expect("source-package root should be created");
     std::fs::write(
@@ -1913,7 +1914,7 @@ run || -> String:
     let mut builder_surface = BuilderSurface::with_mandatory_core();
     builder_surface
         .source_packages
-        .register_filesystem_root("warnpkg", package_root, PackageOrigin::Builder)
+        .register_filesystem_root("builder/test/warnpkg", package_root, PackageOrigin::Builder)
         .expect("warning source root should register");
     let compiled_frontend = successful_compilation_value(
         crate::build_system::create_project_modules::compile_project_frontend(

@@ -1,4 +1,4 @@
-@test/pkg-a PkgError as Handle
+@builder/test/pkg-a PkgError as Handle
 Alias as Handle
 foo |x Alias|:
     return
