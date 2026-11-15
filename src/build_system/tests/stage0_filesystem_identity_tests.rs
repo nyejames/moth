@@ -163,9 +163,7 @@ fn single_file_selection_checks_the_authored_name_of_a_config_symlink() {
         .map(|id| strings.resolve(*id))
         .collect::<Vec<_>>();
     assert!(
-        rendered
-            .iter()
-            .any(|candidate| *candidate == "@config.moth"),
+        rendered.contains(&"@config.moth"),
         "the diagnostic must name the authored reserved filename: {rendered:?}"
     );
 }
@@ -665,9 +663,15 @@ mod source_package_boundary_indexes_tests {
     fn repository_builder_packages_publish_support_facades() {
         // Every registered Moth-source package publishes its external API through a directly
         // contained `@package.moth`. The shipped package roots must follow that rule themselves.
-        for prefix in ["html", "styles", "web/site"] {
+        let mut package_roots = Vec::new();
+        for (prefix, origin) in [
+            ("core/html", crate::builder_surface::PackageOrigin::Core),
+            ("core/css", crate::builder_surface::PackageOrigin::Core),
+            ("web/site", crate::builder_surface::PackageOrigin::Builder),
+        ] {
             let package_root =
                 crate::builder_surface::BuilderSurface::builtin_source_package_root(prefix);
+            package_roots.push(package_root.clone());
             let support_root = package_root.join("@package.moth");
             assert!(
                 support_root.is_file(),
@@ -680,11 +684,7 @@ mod source_package_boundary_indexes_tests {
 
             let mut source_packages = SourcePackageRegistry::new();
             source_packages
-                .register_filesystem_root(
-                    prefix,
-                    package_root.clone(),
-                    crate::builder_surface::PackageOrigin::Builder,
-                )
+                .register_filesystem_root(prefix, package_root.clone(), origin)
                 .expect("the repository package root should register");
 
             let mut string_table = StringTable::new();
@@ -723,6 +723,18 @@ mod source_package_boundary_indexes_tests {
                 "the resolver must consume the support facade root"
             );
         }
+        assert_ne!(
+            package_roots[0], package_roots[1],
+            "Core HTML and CSS keep independent package roots"
+        );
+        assert_ne!(
+            package_roots[0], package_roots[2],
+            "the Core and Builder package sets stay physically distinct"
+        );
+        assert_ne!(
+            package_roots[1], package_roots[2],
+            "the Core and Builder package sets stay physically distinct"
+        );
     }
 
     #[test]

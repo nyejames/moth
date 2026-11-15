@@ -71,10 +71,12 @@ fn external_crate_cannot_replace_official_core_source_packages() {
     let package_dir = tempfile::tempdir().expect("should create package directory");
 
     for (case, path) in [
-        ("html", "@html"),
-        ("html nested", "@html/docs"),
-        ("styles", "@styles"),
-        ("styles nested", "@styles/docs"),
+        ("html", "@core/html"),
+        ("html nested", "@core/html/docs"),
+        ("css", "@core/css"),
+        ("css nested", "@core/css/docs"),
+        ("html case variant", "@Core/HTML"),
+        ("css case variant", "@Core/CSS"),
     ] {
         let error = BuilderDefinition::new("game")
             .source_package(SourcePackage::new(path).from_dir(package_dir.path()))
@@ -84,7 +86,7 @@ fn external_crate_cannot_replace_official_core_source_packages() {
         assert!(
             error
                 .to_string()
-                .contains("overlaps registered source package"),
+                .contains("reserved for official Core packages"),
             "{case}: {error}"
         );
     }
@@ -372,10 +374,11 @@ impl ProjectBuilder for NoPackageBuilder {
 }
 
 /// Imports official Core source packages without any builder-selected web package.
-const CORE_SOURCE_IMPORT_PAGE: &str = "@html p\n@styles center\nvalue = [p, center: Hello]\n";
+const CORE_SOURCE_IMPORT_PAGE: &str =
+    "@core/html p\n@core/css center\nvalue = [p, center: Hello]\n";
 
 #[test]
-fn minimal_sdk_builder_imports_official_html_and_styles_without_web_packages() {
+fn minimal_sdk_builder_imports_official_core_html_and_css_without_web_packages() {
     let project_dir = tempfile::tempdir().expect("should create project directory");
     write_project(project_dir.path(), CORE_SOURCE_IMPORT_PAGE, false);
     let builder = RecordingBuildBuilder {
@@ -383,19 +386,47 @@ fn minimal_sdk_builder_imports_official_html_and_styles_without_web_packages() {
     };
 
     build_project(&builder, BuildRequest::new(project_dir.path()))
-        .expect("official @html and @styles must import without @web/canvas");
+        .expect("official @core/html and @core/css must import without @web/canvas");
     assert!(
         builder.build_ran.get(),
         "compilation of the official Core imports must reach the builder"
     );
 }
 
+#[test]
+fn minimal_sdk_builder_rejects_removed_flat_core_package_names() {
+    for (case, page_source, removed_name) in [
+        ("html", "@html p\nvalue = p\n", "html"),
+        ("styles", "@styles center\nvalue = center\n", "styles"),
+    ] {
+        let project_dir = tempfile::tempdir().expect("should create project directory");
+        write_project(project_dir.path(), page_source, false);
+        let builder = RecordingBuildBuilder {
+            build_ran: Cell::new(false),
+        };
+
+        let error = build_project(&builder, BuildRequest::new(project_dir.path()))
+            .expect_err("the removed flat Core package name must not resolve");
+        assert_eq!(error.kind(), ErrorKind::Compilation, "{case}");
+        let messages = error.messages().join("\n");
+        assert!(
+            messages.contains(&format!("dependency '{removed_name}'")),
+            "the missing-import diagnostic must name the removed @{removed_name} package: {messages}"
+        );
+        assert!(
+            !builder.build_ran.get(),
+            "{case}: a rejected import must not reach the builder"
+        );
+    }
+}
+
 /// A page holding an explicit `.mtf` file value and a qualified `content` constant reference.
 const MTF_FILE_VALUE_PAGE: &str =
     "intro #= @intro.mtf\nbody = @intro content\n~[: [intro] [body] ]\n";
 
-/// A template body that imports a nested `.mtf` and uses a bare `@html` prelude name.
-const INTRO_TEMPLATE_SOURCE: &str = "[: intro [p: nested [@nested.mtf] ] ]\n";
+/// A template body that imports a nested `.mtf` and uses bare `@core/html` and `@core/css`
+/// prelude names.
+const INTRO_TEMPLATE_SOURCE: &str = "[: intro [p, center: nested [@nested.mtf] ] ]\n";
 
 /// The nested template body reached from `intro.mtf`.
 const NESTED_TEMPLATE_SOURCE: &str = "nested template body\n";
@@ -663,6 +694,50 @@ fn project_local_support_folder_is_visible_without_registration() {
     assert!(
         builder.build_ran.get(),
         "a project-local support import must not prevent the build step"
+    );
+}
+
+#[test]
+fn project_local_html_styles_and_css_folders_coexist_with_core_packages() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(
+        project_dir.path(),
+        "@core/html p\n\
+         @core/css center\n\
+         @html local_html\n\
+         @styles local_style\n\
+         @css local_css\n\
+         combined #= [: [local_html] [local_style] [local_css]]\n\
+         value = [p, center: [combined]]\n\
+         ~[:[value]]\n",
+        false,
+    );
+
+    // Ordinary project-local folders keep their own ordinary support identity. They neither
+    // replace the mandatory Core packages nor inherit Core registration from a copied layout.
+    for (folder, export_name, value) in [
+        ("html", "local_html", "local html"),
+        ("styles", "local_style", "local style"),
+        ("css", "local_css", "local css"),
+    ] {
+        let package_root = project_dir.path().join(folder);
+        fs::create_dir_all(&package_root).expect("should create copied support folder");
+        fs::write(
+            package_root.join("@package.moth"),
+            format!("$export\n{export_name} #= \"{value}\"\n"),
+        )
+        .expect("should write copied support facade");
+    }
+
+    let builder = RecordingBuildBuilder {
+        build_ran: Cell::new(false),
+    };
+    build_project(&builder, BuildRequest::new(project_dir.path())).expect(
+        "project-local html, styles and css support facades must coexist with Core packages",
+    );
+    assert!(
+        builder.build_ran.get(),
+        "a successful mixed local/Core import must reach the builder"
     );
 }
 

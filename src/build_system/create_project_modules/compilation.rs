@@ -810,8 +810,8 @@ fn inventory_contains_moth_template(inventory: &SourcePackageModuleInventory) ->
 /// WHAT: a source package that contains at least one `.mtf` source depends on every official Core
 ///       prelude package before its module boundary can bind the flat helper prelude.
 /// WHY: authored package edges alone do not order the prelude packages; without these edges a
-///      package such as `@docs` can publish before `@html` or `@styles`, and prelude interface
-///      lookup then fails even though the builder registered the official packages.
+///      package such as `@docs` can publish before `@core/html` or `@core/css`, and prelude
+///      interface lookup then fails even though the builder registered the official packages.
 ///
 /// A prelude package is never given a self edge, and the prelude packages never depend on each
 /// other: one fixed set of compiler-owned roots has no ordering relation of its own. A `.mtf`

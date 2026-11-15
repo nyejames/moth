@@ -756,7 +756,7 @@ fn entry_runtime_metadata_ignores_unused_web_canvas_binding() {
     .expect("should write config");
     fs::write(
         dir.join("@entry.moth"),
-        "@html canvas\ncanvas_markup #= canvas\nvalue = 1\n",
+        "@core/html canvas\ncanvas_markup #= canvas\nvalue = 1\n",
     )
     .expect("should write page");
 
@@ -812,7 +812,7 @@ fn entry_runtime_metadata_ignores_unused_web_canvas_binding() {
             .external_imports
             .iter()
             .all(|import| import.package_id != canvas_package_id),
-        "entry runtime metadata should exclude the unused @web/canvas binding for pure @html markup"
+        "entry runtime metadata should exclude the unused @web/canvas binding for pure @core/html markup"
     );
 }
 

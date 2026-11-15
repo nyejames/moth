@@ -361,10 +361,10 @@ fn source_tree_index_rejects_exact_nested_package_path_but_allows_ancestor() {
 
 #[test]
 fn source_tree_index_rejects_project_folders_that_claim_official_core_package_prefixes() {
-    // `@html` and `@styles` are registered Core roots on every builder, so a project folder at
-    // the same entry-root-relative path would claim an official package namespace. Discovery
-    // reports that collision instead of giving the local folder precedence over the Core package,
-    // and folder identity compares ASCII-case-insensitively like every package path.
+    // `@core/html` and `@core/css` are registered Core roots on every builder, so a project path
+    // at the same entry-root-relative location would claim an official package namespace.
+    // Discovery reports that collision instead of giving the local path precedence over the Core
+    // package, and identity compares ASCII-case-insensitively like every package path.
     let temp = tempfile::tempdir().expect("should create temp dir");
     let root = fs::canonicalize(temp.path()).expect("temp dir should canonicalize");
     let entry = root.join("src");
@@ -386,7 +386,7 @@ fn source_tree_index_rejects_project_folders_that_claim_official_core_package_pr
             &mut StringTable::new(),
         )
     };
-    let assert_collision = |folder: &str, reason: &str| {
+    let assert_collision = |folder: &str, expected_prefix: &str, reason: &str| {
         let reports = diagnosed_reports(discover().expect_err(reason));
         let (report, diagnostic) = first_invalid_config(&reports);
         let facts = diagnostic
@@ -402,7 +402,7 @@ fn source_tree_index_rejects_project_folders_that_claim_official_core_package_pr
                 .context()
                 .strings()
                 .resolve(diagnostic.string_ids()[0]),
-            "styles",
+            expected_prefix,
             "{reason}: the collision must name the registered Core prefix"
         );
         assert_eq!(
@@ -415,17 +415,52 @@ fn source_tree_index_rejects_project_folders_that_claim_official_core_package_pr
         );
     };
 
-    for folder in ["styles", "Styles"] {
-        fs::create_dir(entry.join(folder)).expect("should create project folder");
-        assert_collision(
-            folder,
-            "a project folder claiming the Core @styles prefix must collide",
-        );
-        fs::remove_dir(entry.join(folder)).expect("should remove colliding folder");
+    // Ordinary local style-related names stay legal beside the grouped Core registrations.
+    for folder in ["html", "styles", "css"] {
+        fs::create_dir(entry.join(folder)).expect("should create ordinary project folder");
+        discover().expect("an ordinary local folder must not claim a Core package");
+        fs::remove_dir(entry.join(folder)).expect("should remove ordinary project folder");
     }
 
-    // Only the registered prefix is reserved; a folder that merely starts with it stays available.
-    fs::create_dir(entry.join("styles_local")).expect("should create unrelated project folder");
+    // An ancestor folder alone does not claim a complete registered prefix.
+    fs::create_dir(entry.join("core")).expect("should create namespace ancestor folder");
+    discover().expect("the Core namespace ancestor alone must not collide");
+
+    for (folder, expected_prefix, reason) in [
+        (
+            "core/html",
+            "core/html",
+            "a project path claiming the Core @core/html prefix must collide",
+        ),
+        (
+            "core/HTML",
+            "core/html",
+            "a case-only leaf variant of the Core @core/html prefix must collide",
+        ),
+        (
+            "core/css",
+            "core/css",
+            "a project path claiming the Core @core/css prefix must collide",
+        ),
+        (
+            "Core/HTML",
+            "core/html",
+            "a case-only ancestor and leaf variant must collide",
+        ),
+    ] {
+        if folder.starts_with("Core/") {
+            // Remove the lowercase ancestor so a case-insensitive host preserves the authored
+            // casing this case asserts in the diagnostic path.
+            fs::remove_dir(entry.join("core")).expect("should remove previous ancestor folder");
+        }
+        fs::create_dir_all(entry.join(folder)).expect("should create colliding project path");
+        assert_collision(folder, expected_prefix, reason);
+        fs::remove_dir_all(entry.join(folder)).expect("should remove colliding project path");
+    }
+
+    // Only the complete registered prefix is reserved; a folder that merely starts with it stays.
+    fs::create_dir_all(entry.join("core/html_local"))
+        .expect("should create unrelated project folder");
     discover().expect("a folder outside the official prefix must not collide");
 }
 

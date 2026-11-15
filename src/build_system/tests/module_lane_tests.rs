@@ -477,7 +477,8 @@ fn source_package_artefacts_are_retained_but_never_project_entries() {
     // WHY: package `root_activity` is never cleared to suppress entries; the separate graph
     //      boundaries keep package modules out of project entry selection.
     let active_project = minimal_lane_module(PathBuf::from("src/@entry.moth"), true);
-    let package_root = minimal_lane_module(PathBuf::from("packages/html/@mod.moth"), false);
+    let package_root =
+        minimal_lane_module(PathBuf::from("packages/core/html/@package.moth"), false);
 
     let frontend = test_frontend_with_source_package(active_project, package_root);
     assert_eq!(frontend.source_packages.len(), 1);

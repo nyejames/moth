@@ -1,4 +1,4 @@
-@html canvas
+@core/html canvas
 @web/canvas as drawing_api
 
 [canvas:

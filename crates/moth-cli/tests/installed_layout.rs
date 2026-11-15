@@ -1,8 +1,8 @@
 //! WHAT: runs a relocated `moth` executable laid out like the release archive.
-//! WHY: compiler-shipped package files (the `@html`, `@styles` and `@web/site` sources and the
-//!      `@web/*` binding assets) must come from the `packages/` directory beside an installed
-//!      executable, not from the checkout that built it, and a damaged installation must say what
-//!      is missing.
+//! WHY: compiler-shipped package files (the `@core/html`, `@core/css` and `@web/site` sources
+//!      and the `@web/*` binding assets) must come from the `packages/` directory beside an
+//!      installed executable, not from the checkout that built it, and a damaged installation
+//!      must say what is missing.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,7 +13,7 @@ use tempfile::tempdir;
 
 const REPOSITORY_PACKAGES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages");
 
-/// Only the installed copy of `@styles` exports this name, so reading it proves which root won.
+/// Only the installed copy of `@core/css` exports this name, so reading it proves which root won.
 const INSTALLED_MARKER: &str = "\n$export\ninstalled_marker #= \"from installed packages\"\n";
 
 /// Only the installed copy of `canvas.js` carries this comment, so emitting it proves the HTML
@@ -47,9 +47,9 @@ fn install_executable(root: &Path) -> PathBuf {
     executable
 }
 
-/// A directory project using an ordinary entry, explicit `@html`/`@styles` imports, a reachable
-/// `@web/canvas` call and a `.mtf` that reads both implicit prelude providers plus the
-/// installed-only marker.
+/// A directory project using an ordinary entry, explicit `@core/html`/`@core/css` imports, a
+/// reachable `@web/canvas` call and a `.mtf` that reads both implicit prelude providers plus
+/// the installed-only marker.
 fn write_project(root: &Path) -> PathBuf {
     let project = root.join("site");
     fs::create_dir_all(&project).expect("project directory should be created");
@@ -60,8 +60,8 @@ fn write_project(root: &Path) -> PathBuf {
     .expect("config should be written");
     fs::write(
         project.join("@entry.moth"),
-        r#"@html p
-@styles right
+        r#"@core/html p
+@core/css right
 @web/canvas as drawing_api
 @intro content as intro
 
@@ -106,12 +106,12 @@ fn run(executable: &Path, arguments: &[&str]) -> (Output, String) {
 }
 
 /// Copies the repository's packages to `<root>/install/packages`, marking the installed copies of
-/// `@styles` and `canvas.js` so outputs can only come from this installation.
+/// `@core/css` and `canvas.js` so outputs can only come from this installation.
 fn install_marked_packages(root: &Path) -> PathBuf {
     let packages = root.join("install/packages");
     copy_tree(Path::new(REPOSITORY_PACKAGES), &packages);
     for (relative, marker) in [
-        ("styles/@package.moth", INSTALLED_MARKER),
+        ("core/css/@package.moth", INSTALLED_MARKER),
         ("web/canvas/canvas.js", INSTALLED_CANVAS_MARKER),
     ] {
         let path = packages.join(relative);
@@ -163,9 +163,9 @@ fn assert_damaged_package_set(report: &str, missing: &str) {
 
 #[test]
 fn incomplete_installation_never_borrows_a_core_package_from_the_checkout() {
-    // `packages/` exists, so it is the whole package set, but `@html` is missing from it: first
-    // as a directory, then as its `@package.moth` facade. The checkout still has `packages/html`;
-    // using it would mix two versions.
+    // `packages/` exists, so it is the whole package set, but `@core/html` is missing from it:
+    // first as a directory, then as its `@package.moth` facade. The checkout still has
+    // `packages/core/html`; using it would mix two versions.
     #[derive(Clone, Copy)]
     enum InstalledHtmlState {
         Absent,
@@ -182,20 +182,20 @@ fn incomplete_installation_never_borrows_a_core_package_from_the_checkout() {
         let executable = install_executable(root.path());
         let packages = root.path().join("install/packages");
         copy_tree(
-            &Path::new(REPOSITORY_PACKAGES).join("styles"),
-            &packages.join("styles"),
+            &Path::new(REPOSITORY_PACKAGES).join("core/css"),
+            &packages.join("core/css"),
         );
         match state {
             InstalledHtmlState::Absent => {}
             InstalledHtmlState::EmptyDirectory => {
-                fs::create_dir_all(packages.join("html"))
+                fs::create_dir_all(packages.join("core/html"))
                     .expect("html directory should be created");
             }
             InstalledHtmlState::NormalRootOnly => {
-                fs::create_dir_all(packages.join("html"))
+                fs::create_dir_all(packages.join("core/html"))
                     .expect("html directory should be created");
                 // A normal `@mod.moth` is an internal scope, never the package facade.
-                fs::write(packages.join("html/@mod.moth"), "")
+                fs::write(packages.join("core/html/@mod.moth"), "")
                     .expect("html normal root should be written");
             }
         }
@@ -210,6 +210,8 @@ fn incomplete_installation_never_borrows_a_core_package_from_the_checkout() {
         );
 
         assert_eq!(output.status.code(), Some(1), "report: {report}");
+        // The filesystem spelling may use native separators; the leaf still identifies the
+        // missing Core package on every host.
         assert_damaged_package_set(&report, "html");
         if matches!(state, InstalledHtmlState::NormalRootOnly) {
             assert!(
@@ -232,12 +234,13 @@ fn symlinked_installed_package_set_reports_its_own_normal_only_package_as_damage
     let packages = root.path().join("shipped-packages");
     fs::create_dir_all(&packages).expect("shipped package directory should be created");
     copy_tree(
-        &Path::new(REPOSITORY_PACKAGES).join("styles"),
-        &packages.join("styles"),
+        &Path::new(REPOSITORY_PACKAGES).join("core/css"),
+        &packages.join("core/css"),
     );
-    fs::create_dir_all(packages.join("html")).expect("html directory should be created");
+    fs::create_dir_all(packages.join("core/html")).expect("html directory should be created");
     // A normal-only root is an internal scope, never the package facade.
-    fs::write(packages.join("html/@mod.moth"), "").expect("html normal root should be written");
+    fs::write(packages.join("core/html/@mod.moth"), "")
+        .expect("html normal root should be written");
     symlink(&packages, root.path().join("install/packages"))
         .expect("installed package set symlink should be created");
 

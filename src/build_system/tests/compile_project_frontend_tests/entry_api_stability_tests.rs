@@ -386,7 +386,7 @@ fn qualified_private_helper_edit_changes_only_the_dependent_folded_content() {
 
 /// WHAT: under a builder that selects no optional source kinds, a `.mtf` file value and the
 ///       qualified `content` reference publish the same exact folded text, including a nested
-///       `.mtf` body and markup from a bare `@html` prelude name.
+///       `.mtf` body and markup from a bare `@core/html` prelude name.
 /// WHY:  `.mtf` support is compiler-owned, and both reference forms must select the one synthetic
 ///       constant. A compile-only assertion would accept a value that folded to empty or wrong
 ///       text.
@@ -417,7 +417,7 @@ fn compiler_supported_mtf_file_value_and_qualified_content_fold_identically() {
     );
     assert_eq!(
         file_value, "<p>intro body <p style=\"\"><p> nested <p>nested body</p> </p></p> </p>",
-        "the folded content must retain the outer body, the nested template body and `@html` markup"
+        "the folded content must retain the outer body, the nested template body and `@core/html` markup"
     );
 }
 

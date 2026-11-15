@@ -1509,7 +1509,7 @@ fn build_html_project_unused_html_canvas_markup_does_not_emit_runtime_artifacts(
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        r#"@html canvas
+        r#"@core/html canvas
 [canvas:
   [$in id:unused_canvas]
   [$in style:
@@ -1575,7 +1575,7 @@ fn build_html_project_pure_core_source_package_imports_emit_no_javascript_artifa
     .expect("should write config");
     fs::write(
         root.join("@entry.moth"),
-        "@html p\n@styles center\n\n[p, center: official constants only]\n",
+        "@core/html p\n@core/css center\n\n[p, center: official constants only]\n",
     )
     .expect("should write page");
 
@@ -1595,7 +1595,7 @@ fn build_html_project_pure_core_source_package_imports_emit_no_javascript_artifa
     let html = html_text(outputs.at("index.html"));
     assert!(
         html.contains("<p style=\"text-align: center;\">"),
-        "the official @styles constant should render: {html}"
+        "the official @core/css constant should render: {html}"
     );
 
     let javascript_outputs = result
@@ -1607,7 +1607,7 @@ fn build_html_project_pure_core_source_package_imports_emit_no_javascript_artifa
         .collect::<Vec<_>>();
     assert!(
         javascript_outputs.is_empty(),
-        "importing pure @html and @styles must emit no JavaScript artifact, found {javascript_outputs:?}"
+        "importing pure @core/html and @core/css must emit no JavaScript artifact, found {javascript_outputs:?}"
     );
 
     let deferred_javascript = result
@@ -1619,7 +1619,7 @@ fn build_html_project_pure_core_source_package_imports_emit_no_javascript_artifa
         .collect::<Vec<_>>();
     assert!(
         deferred_javascript.is_empty(),
-        "importing pure @html and @styles must defer no JavaScript resource, found {deferred_javascript:?}"
+        "importing pure @core/html and @core/css must defer no JavaScript resource, found {deferred_javascript:?}"
     );
 }
 

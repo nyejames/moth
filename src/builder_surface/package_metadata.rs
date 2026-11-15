@@ -13,7 +13,7 @@
 /// project-local and dependency packages without inspecting dependency paths.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PackageOrigin {
-    /// Compiler-owned core packages (e.g. `@core/io`, `@html`, `@styles`).
+    /// Compiler-owned core packages (e.g. `@core/io`, `@core/html`, `@core/css`).
     Core,
     /// Builder-owned packages (e.g. `@web/site`, `@web/canvas`).
     Builder,

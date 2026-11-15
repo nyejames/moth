@@ -347,22 +347,24 @@ fn finish_rejects_source_packages_without_an_installed_directory() {
 
 #[test]
 fn core_source_package_paths_reject_builder_source_and_host_packages() {
-    let custom_html_dir = package_dir();
+    let custom_package_dir = package_dir();
 
     for (case, path) in [
-        ("html", "@html"),
-        ("html nested", "@html/docs"),
-        ("styles", "@styles"),
-        ("styles nested", "@styles/docs"),
+        ("html", "@core/html"),
+        ("html nested", "@core/html/docs"),
+        ("css", "@core/css"),
+        ("css nested", "@core/css/docs"),
+        ("html case variant", "@Core/HTML"),
+        ("css case variant", "@Core/CSS"),
     ] {
         let message = invalid_definition_message(
             case,
             BuilderDefinition::new("game")
-                .source_package(SourcePackage::new(path).from_dir(custom_html_dir.path()))
+                .source_package(SourcePackage::new(path).from_dir(custom_package_dir.path()))
                 .finish(),
         );
         assert!(
-            message.contains("overlaps registered source package"),
+            message.contains("reserved for official Core packages"),
             "{case}: {message}"
         );
         let message = invalid_definition_message(
@@ -372,7 +374,7 @@ fn core_source_package_paths_reject_builder_source_and_host_packages() {
                 .finish(),
         );
         assert!(
-            message.contains("overlaps host package"),
+            message.contains("reserved for official Core packages"),
             "host {case}: {message}"
         );
     }
@@ -385,6 +387,11 @@ fn minimal_sdk_builder_preserves_official_core_source_roots() {
     use crate::builder_surface::definition::CORE_SOURCE_PACKAGE_PREFIXES;
     use crate::builder_surface::source_package_registry::ProvidedSourceRoot;
 
+    assert_eq!(
+        CORE_SOURCE_PACKAGE_PREFIXES,
+        ["core/html", "core/css"],
+        "every builder receives exactly the Core HTML and CSS source packages"
+    );
     let definition = BuilderDefinition::new("game")
         .finish()
         .expect("a minimal SDK builder should finish");
@@ -400,6 +407,17 @@ fn minimal_sdk_builder_preserves_official_core_source_roots() {
             ProvidedSourceRoot::Filesystem(path)
                 if path == &BuilderSurface::builtin_source_package_root(prefix)
         ));
+    }
+    assert_eq!(
+        surface.source_packages.iter().count(),
+        CORE_SOURCE_PACKAGE_PREFIXES.len(),
+        "a minimal SDK builder registers no other source package"
+    );
+    for removed in ["html", "styles"] {
+        assert!(
+            surface.source_packages.get_root(removed).is_none(),
+            "the removed flat @{removed} package must not stay registered"
+        );
     }
     assert!(
         surface

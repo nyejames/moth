@@ -1,4 +1,4 @@
-@html p
-@styles center
+@core/html p
+@core/css center
 
 [p, center: Hello from builder html!]

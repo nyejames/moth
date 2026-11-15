@@ -12,6 +12,7 @@ use super::super::{
     ProviderDependencyKind, ProviderInterfaceId, PublicSemanticInterface, SourceProviderDependency,
     SourceProviderDependencySet,
 };
+use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
@@ -24,6 +25,23 @@ fn provider_interface(name: &str) -> PublicSemanticInterface {
             StablePackageIdentity::project_local(name),
             format!("{name}/@mod.moth"),
             ModuleRootRole::Normal,
+        ),
+        export_bindings: Vec::new(),
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: Vec::new(),
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    }
+}
+
+/// One official Core package supplying the fixed `.mtf` constant prelude.
+fn core_prelude_interface(package_prefix: &str) -> PublicSemanticInterface {
+    PublicSemanticInterface {
+        module_origin: StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::source_package(PackageOrigin::Core, package_prefix),
+            format!("{package_prefix}/@package.moth"),
+            ModuleRootRole::Support,
         ),
         export_bindings: Vec::new(),
         export_diagnostic_provenance: Vec::new(),
@@ -135,15 +153,15 @@ fn one_shell_resolves_one_provider_surface() {
 
 #[test]
 fn duplicate_template_prelude_package_fails() {
-    let provider = provider_interface("html");
+    let provider = core_prelude_interface("core/html");
 
     let error = SourceProviderDependencySet::new(vec![
-        template_prelude("html", &provider),
-        template_prelude("html", &provider),
+        template_prelude("core/html", &provider),
+        template_prelude("core/html", &provider),
     ])
     .expect_err("one template prelude package must not register twice");
 
-    assert!(error.message.contains("template prelude @html"));
+    assert!(error.message.contains("template prelude @core/html"));
 }
 
 #[test]
@@ -151,13 +169,13 @@ fn template_prelude_packages_must_resolve_distinct_interfaces() {
     let provider = provider_interface("shared");
 
     let error = SourceProviderDependencySet::new(vec![
-        template_prelude("html", &provider),
-        template_prelude("styles", &provider),
+        template_prelude("core/html", &provider),
+        template_prelude("core/css", &provider),
     ])
     .expect_err("two prelude packages must not share one completed interface");
 
     assert!(error.message.contains(
-        "template prelude packages @html and @styles resolved to the same provider interface"
+        "template prelude packages @core/html and @core/css resolved to the same provider interface"
     ));
 }
 
@@ -303,12 +321,12 @@ fn unbound_shell_stays_outside_the_provider_map() {
 }
 
 #[test]
-fn template_prelude_has_no_shell_and_keeps_its_prefixes() {
-    let html = provider_interface("html");
-    let styles = provider_interface("styles");
+fn template_prelude_has_no_shell_and_keeps_its_grouped_prefixes() {
+    let html = core_prelude_interface("core/html");
+    let css = core_prelude_interface("core/css");
     let set = SourceProviderDependencySet::new(vec![
-        template_prelude("html", &html),
-        template_prelude("styles", &styles),
+        template_prelude("core/html", &html),
+        template_prelude("core/css", &css),
     ])
     .expect("both fixed template prelude packages should register");
 
@@ -318,18 +336,18 @@ fn template_prelude_has_no_shell_and_keeps_its_prefixes() {
             .iter()
             .map(|provider| provider.package_prefix)
             .collect::<Vec<_>>(),
-        vec!["html", "styles"],
+        vec!["core/html", "core/css"],
         "canonical prelude input order must be preserved"
     );
     assert!(std::ptr::eq(
         set.interface(providers[0].provider)
-            .expect("html prelude provider resolves"),
+            .expect("Core HTML prelude provider resolves"),
         &html,
     ));
     assert!(std::ptr::eq(
         set.interface(providers[1].provider)
-            .expect("styles prelude provider resolves"),
-        &styles,
+            .expect("Core CSS prelude provider resolves"),
+        &css,
     ));
     assert!(
         set.resolve_clause(DependencyShellId::new(SourceId::from_index(0), 0))

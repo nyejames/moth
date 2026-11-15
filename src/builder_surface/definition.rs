@@ -66,7 +66,8 @@ pub(crate) enum BuilderSurfaceValidationError {
 const BUILTIN_PACKAGES_DIR: &str = "packages";
 
 /// Directory holding every compiler-shipped package file for this process: the source packages
-/// (`@html`, `@styles`, `@web/site`) and the `@web/*` binding assets the HTML builder emits.
+/// (`@core/html`, `@core/css`, `@web/site`) and the `@web/*` binding assets the HTML builder
+/// emits.
 ///
 /// WHAT: `packages/` beside the canonical executable when that directory exists, which is the
 ///       release archive layout; otherwise the `packages/` directory of the source checkout that
@@ -111,12 +112,13 @@ pub(crate) fn damaged_package_set_report(path: &Path) -> Option<String> {
 ///       merges public compile-time constants from the same roots into the flat `.mtf` prelude.
 /// WHY: one owner keeps the roots a builder cannot replace identical to the packages whose
 ///      exported constants a template may name without an import.
-pub const CORE_SOURCE_PACKAGE_PREFIXES: [&str; 2] = ["html", "styles"];
+pub const CORE_SOURCE_PACKAGE_PREFIXES: [&str; 2] = ["core/html", "core/css"];
 
 impl BuilderSurface {
     /// Builds a builder surface with mandatory compiler core packages.
     ///
-    /// WHAT: the minimal default every builder starts from, including source-only HTML and styles.
+    /// WHAT: the minimal default every builder starts from, including the source-only
+    ///       `@core/html` and `@core/css` packages.
     /// WHY: user-facing optional core packages such as `@core/math` and `@core/text`
     /// must be explicit builder opt-ins.
     pub fn with_mandatory_core() -> Self {
@@ -260,9 +262,17 @@ impl BuilderSurface {
         self.config_globals.insert(name, value)
     }
 
-    /// Root of one compiler-shipped source package, such as `@html`, `@styles` or `@web/site`.
+    /// Root of one compiler-shipped source package, such as `@core/html`, `@core/css` or
+    /// `@web/site`.
+    ///
+    /// The registered prefix's `/`-separated components become nested directories below the
+    /// selected package set, so a grouped Core name keeps one directory per namespace level.
     pub fn builtin_source_package_root(prefix: &str) -> PathBuf {
-        BUILTIN_PACKAGES_ROOT.join(prefix)
+        let mut root = BUILTIN_PACKAGES_ROOT.clone();
+        for component in prefix.split('/') {
+            root.push(component);
+        }
+        root
     }
 }
 

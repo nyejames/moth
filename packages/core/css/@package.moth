@@ -1,4 +1,4 @@
--- Inline style fragments for the standard style slots in @html.
+-- Inline style fragments for the standard style slots in @core/html.
 $export
 center #String = [$in style:text-align: center;]
 $export

@@ -115,7 +115,7 @@ fn paths_used_by_docs_tests_and_benchmarks_are_outside_scope() {
 #[test]
 fn rejects_package_json_under_a_first_party_root() {
     let workspace = fixture_workspace();
-    write_fixture_file(workspace.path(), "packages/html/package.json", "{}\n");
+    write_fixture_file(workspace.path(), "packages/core/html/package.json", "{}\n");
 
     assert_has_rule(
         &findings_for(&workspace),
@@ -141,7 +141,7 @@ fn rejects_a_lockfile_under_a_first_party_root() {
 #[test]
 fn rejects_deno_package_metadata_under_a_first_party_root() {
     let workspace = fixture_workspace();
-    write_fixture_file(workspace.path(), "packages/html/deno.json", "{}\n");
+    write_fixture_file(workspace.path(), "packages/core/html/deno.json", "{}\n");
 
     assert_has_rule(
         &findings_for(&workspace),
@@ -152,7 +152,7 @@ fn rejects_deno_package_metadata_under_a_first_party_root() {
 #[test]
 fn rejects_a_node_modules_directory() {
     let workspace = fixture_workspace();
-    fs::create_dir_all(workspace.path().join("packages/html/node_modules"))
+    fs::create_dir_all(workspace.path().join("packages/core/html/node_modules"))
         .expect("node_modules directory");
 
     assert_has_rule(
@@ -164,7 +164,8 @@ fn rejects_a_node_modules_directory() {
 #[test]
 fn rejects_a_vendor_directory() {
     let workspace = fixture_workspace();
-    fs::create_dir_all(workspace.path().join("packages/html/vendor")).expect("vendor directory");
+    fs::create_dir_all(workspace.path().join("packages/core/html/vendor"))
+        .expect("vendor directory");
 
     assert_has_rule(
         &findings_for(&workspace),

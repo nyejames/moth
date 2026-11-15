@@ -484,8 +484,8 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
         ("selected page.moth", false, true),
     ] {
         let mut fixture = EntryFixture::new(
-            "@html p, canvas\n\
-             @styles center\n\
+            "@core/html p, canvas\n\
+             @core/css center\n\
              @wrappers draw\n\
              [p, center: source-package-wrapper]\n\
              [canvas:\n\
@@ -535,12 +535,12 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
         assert_eq!(
             frontend.project.successful_module_views().count(),
             1,
-            "the consumer graph must not absorb the source-backed @html package"
+            "the consumer graph must not absorb the source-backed @core/html package"
         );
         let html_package = frontend
             .source_packages
             .iter()
-            .find(|package| package.package_prefix() == "html")
+            .find(|package| package.package_prefix() == "core/html")
             .expect("the registered HTML source package should publish separately");
         assert!(
             html_package
@@ -654,7 +654,7 @@ fn synthetic_single_file_moth_template_uses_implicit_html_package() {
             frontend
                 .source_packages
                 .iter()
-                .any(|package| package.package_prefix() == "html"),
+                .any(|package| package.package_prefix() == "core/html"),
             "{entry_mode}: the Moth template's helper provider publishes as a separate package"
         );
 
@@ -718,13 +718,13 @@ fn assert_ambiguous_package_diagnostic(
 #[test]
 fn synthetic_entry_modes_reject_registered_package_namespace_collisions() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let html_clause = "@html p";
-    let html_dependency_path = "@html";
+    let html_clause = "@core/html p";
+    let html_dependency_path = "@core/html";
     let html_collisions = [
-        ("html.moth", "p #String = \"local html\"\n"),
-        ("html.mtf", "[:local html content]\n"),
-        ("html.md", "Local html content\n"),
-        ("Html.moth", "p #String = \"case-only local html\"\n"),
+        ("core.moth", "p #String = \"local core\"\n"),
+        ("core.mtf", "[:local core content]\n"),
+        ("core.md", "Local core content\n"),
+        ("Core.moth", "p #String = \"case-only local core\"\n"),
     ];
 
     // A direct @entry.moth selection and an ordinary selected filename both use bounded
@@ -746,7 +746,7 @@ fn synthetic_entry_modes_reject_registered_package_namespace_collisions() {
                 fixture.directory.path().join("src").join(local_file),
                 local_source,
             )
-            .expect("should write local HTML namespace collision");
+            .expect("should write local Core HTML namespace collision");
 
             assert_ambiguous_package_diagnostic(
                 &fixture,
@@ -789,7 +789,7 @@ fn synthetic_entry_modes_reject_registered_package_namespace_collisions() {
 #[test]
 fn synthetic_entry_modes_reject_child_local_package_namespace_collisions() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let child_clause = "@html p";
+    let child_clause = "@core/html p";
     for (entry_mode, directory_entry) in [("selected @entry.moth", false), ("directory", true)] {
         let fixture = EntryFixture::new("@child label\n~[:[label]]\n", directory_entry);
         let child_directory = fixture.directory.path().join("src/child");
@@ -800,16 +800,16 @@ fn synthetic_entry_modes_reject_child_local_package_namespace_collisions() {
         )
         .expect("should write child module dependency");
         fs::write(
-            child_directory.join("html.moth"),
-            "p #String = \"child-local html\"\n",
+            child_directory.join("core.moth"),
+            "p #String = \"child-local core\"\n",
         )
-        .expect("should write child-local HTML namespace collision");
+        .expect("should write child-local Core namespace collision");
 
         assert_ambiguous_package_diagnostic(
             &fixture,
             child_clause,
-            "@html",
-            &format!("{entry_mode} child module with html.moth"),
+            "@core/html",
+            &format!("{entry_mode} child module with core.moth"),
         );
     }
 }

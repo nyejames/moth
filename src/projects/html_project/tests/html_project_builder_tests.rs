@@ -253,7 +253,7 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
         );
     }
 
-    for prefix in ["html", "styles"] {
+    for prefix in ["core/html", "core/css"] {
         let core_source = frontend_surface
             .source_packages
             .get_root(prefix)
@@ -271,6 +271,12 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
                     if path == &crate::builder_surface::BuilderSurface::builtin_source_package_root(prefix)
             ),
             "@{prefix} must stay on its official source root"
+        );
+    }
+    for removed in ["html", "styles"] {
+        assert!(
+            frontend_surface.source_packages.get_root(removed).is_none(),
+            "the removed flat @{removed} package must not stay registered"
         );
     }
 

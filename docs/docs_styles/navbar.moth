@@ -1,4 +1,4 @@
-@html table, div, p, span
+@core/html table, div, p, span
 
 nav_style #= [$css "inline":
     display: flex;

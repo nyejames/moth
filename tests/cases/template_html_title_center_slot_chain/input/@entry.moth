@@ -1,3 +1,3 @@
-@styles center
+@core/css center
 @title_styles/docs title
 [title, center: LANGUAGE BASICS]

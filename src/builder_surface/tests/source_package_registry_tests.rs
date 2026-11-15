@@ -209,18 +209,50 @@ fn mandatory_core_registers_official_source_package_roots() {
     use crate::builder_surface::BuilderSurface;
     use crate::builder_surface::definition::CORE_SOURCE_PACKAGE_PREFIXES;
 
+    assert_eq!(
+        CORE_SOURCE_PACKAGE_PREFIXES,
+        ["core/html", "core/css"],
+        "the mandatory source namespace is exactly the Core HTML and CSS packages"
+    );
+
     let surface = BuilderSurface::with_mandatory_core();
+    let mut roots = Vec::new();
     for prefix in CORE_SOURCE_PACKAGE_PREFIXES {
         let root = surface
             .source_packages
             .get_root(prefix)
             .expect("mandatory Core root");
-        assert_eq!(root.metadata, PackageMetadata::source(PackageOrigin::Core));
-        assert!(matches!(
-            &root.root,
-            ProvidedSourceRoot::Filesystem(path)
-                if path == &BuilderSurface::builtin_source_package_root(prefix)
-        ));
+        assert_eq!(
+            root.metadata,
+            PackageMetadata {
+                origin: PackageOrigin::Core,
+                backing: PackageBacking::MothSource,
+            },
+            "@{prefix} must stay Core/MothSource"
+        );
+        let ProvidedSourceRoot::Filesystem(path) = &root.root;
+        assert_eq!(
+            path,
+            &BuilderSurface::builtin_source_package_root(prefix),
+            "@{prefix} must stay on its official source root"
+        );
+        assert!(path.join("@package.moth").is_file());
+        roots.push(path.clone());
+    }
+    assert_ne!(
+        roots[0], roots[1],
+        "the two mandatory Core packages keep independent filesystem roots"
+    );
+    assert_eq!(
+        surface.source_packages.iter().count(),
+        CORE_SOURCE_PACKAGE_PREFIXES.len(),
+        "the mandatory surface exposes exactly the two Core source packages"
+    );
+    for removed in ["html", "styles"] {
+        assert!(
+            surface.source_packages.get_root(removed).is_none(),
+            "the removed flat @{removed} package must not stay registered"
+        );
     }
     surface.validate().expect("Core surface has official roots");
 }
@@ -231,12 +263,12 @@ fn mandatory_core_roots_reject_replacement_and_nested_overlaps() {
 
     let mut surface = BuilderSurface::with_mandatory_core();
     for prefix in [
-        "html",
-        "HTML",
-        "html/docs",
-        "styles",
-        "Styles",
-        "styles/docs",
+        "core/html",
+        "Core/HTML",
+        "core/html/docs",
+        "core/css",
+        "Core/CSS",
+        "core/css/docs",
     ] {
         let error = surface.source_packages.register_filesystem_root(
             prefix,
@@ -245,7 +277,18 @@ fn mandatory_core_roots_reject_replacement_and_nested_overlaps() {
         );
         assert!(
             error.is_err(),
-            "@{prefix} cannot replace a Core source package"
+            "@{prefix} cannot replace a Core source package as a Builder package"
+        );
+
+        // An attempted Core-origin replacement is rejected by the existing overlap rule.
+        let error = surface.source_packages.register_filesystem_root(
+            prefix,
+            std::path::PathBuf::from("/tmp/custom-package"),
+            PackageOrigin::Core,
+        );
+        assert!(
+            error.is_err(),
+            "@{prefix} cannot replace an official Core root even with Core origin"
         );
     }
     surface

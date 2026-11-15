@@ -1,5 +1,5 @@
-@html span
-@styles center
+@core/html span
+@core/css center
 @docs_styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
 
 [$in title:["Packages and Builders Progress Matrix"]]

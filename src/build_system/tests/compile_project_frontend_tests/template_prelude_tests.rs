@@ -11,8 +11,8 @@ use super::*;
 
 /// One `.mtf` body that names both prelude packages and ordinary project data.
 ///
-/// WHAT: `p` comes from `@html`, the `center` slot contribution from `@styles`, and `site_name`
-///       from a sibling project module.
+/// WHAT: `p` comes from `@core/html`, the `center` slot contribution from `@core/css`, and
+///       `site_name` from a sibling project module.
 /// WHY: one fixture then proves the merged prelude and project-data binding fold together under
 ///      two different builder surfaces.
 const PARITY_FILES: &[(&str, &str)] = &[
@@ -105,7 +105,7 @@ fn moth_template_binding_and_folded_output_match_across_html_and_minimal_surface
     );
     assert!(
         html_output.contains("text-align: center;"),
-        "the folded template should retain the @styles slot contribution: {html_output:?}"
+        "the folded template should retain the @core/css slot contribution: {html_output:?}"
     );
 }
 
@@ -122,6 +122,49 @@ fn moth_template_errors_match_across_html_and_minimal_surfaces() {
     assert_eq!(
         html_errors, minimal_errors,
         "both surfaces must diagnose the same rejected template input"
+    );
+}
+
+#[test]
+fn project_local_html_support_package_does_not_replace_the_core_package() {
+    // A project copying a package-shaped `html/` folder keeps ordinary project-local support
+    // visibility. It neither becomes a registered source package nor changes the official
+    // `@core/html` prelude that the template body reads.
+    let files = &[
+        (
+            "src/@entry.moth",
+            "@html local_markup\nbody #= @page.mtf\n[:[local_markup] [body]]\n",
+        ),
+        (
+            "src/html/@package.moth",
+            "$export\nlocal_markup #= \"local markup\"\n",
+        ),
+        ("src/page.mtf", "[p: official]"),
+    ];
+    let mut minimal_surface = BuilderSurface::with_mandatory_core();
+    let compiled = successful_compilation_value(compile_fixture_result_with_surface(
+        files,
+        BuildProfile::Dev,
+        &mut minimal_surface,
+    ));
+
+    assert!(
+        compiled.source_packages.by_prefix("core/html").is_some(),
+        "the mandatory Core HTML package stays registered"
+    );
+    assert!(
+        compiled.source_packages.by_prefix("html").is_none(),
+        "a copied local html folder must not become a registered package"
+    );
+
+    let folded = entry_folded_output(&compiled);
+    assert!(
+        folded.contains("local markup"),
+        "the project-local support facade must stay reachable: {folded:?}"
+    );
+    assert!(
+        folded.contains("official</p>"),
+        "the .mtf body must keep the official Core HTML helper: {folded:?}"
     );
 }
 
@@ -149,12 +192,12 @@ fn single_file_template_input_materialises_both_prelude_packages() {
     ));
 
     assert!(
-        frontend.source_packages.by_prefix("html").is_some(),
-        "the single-file template input must materialise @html before its consumer"
+        frontend.source_packages.by_prefix("core/html").is_some(),
+        "the single-file template input must materialise @core/html before its consumer"
     );
     assert!(
-        frontend.source_packages.by_prefix("styles").is_some(),
-        "the single-file template input must materialise @styles before its consumer"
+        frontend.source_packages.by_prefix("core/css").is_some(),
+        "the single-file template input must materialise @core/css before its consumer"
     );
 }
 
@@ -198,11 +241,11 @@ fn check_only_template_input_binds_both_prelude_packages() {
         "the check-only template consumer should not retain diagnostics"
     );
     assert!(
-        frontend.source_packages.by_prefix("html").is_some(),
-        "check-only template consumers must order after @html"
+        frontend.source_packages.by_prefix("core/html").is_some(),
+        "check-only template consumers must order after @core/html"
     );
     assert!(
-        frontend.source_packages.by_prefix("styles").is_some(),
-        "check-only template consumers must order after @styles"
+        frontend.source_packages.by_prefix("core/css").is_some(),
+        "check-only template consumers must order after @core/css"
     );
 }

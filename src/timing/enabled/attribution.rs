@@ -129,7 +129,7 @@ impl TimingBoundaryId {
 /// Which compilation boundary kind a record represents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TimingBoundaryKind {
-    /// A source-backed package boundary, for example `@html`.
+    /// A source-backed package boundary, for example `@core/html`.
     SourcePackage,
     /// The main project boundary, named from `Config.project_name`.
     MainProject,
@@ -140,7 +140,7 @@ pub(crate) enum TimingBoundaryKind {
 pub(crate) struct TimingBoundaryRecord {
     pub(crate) id: TimingBoundaryId,
     pub(crate) kind: TimingBoundaryKind,
-    /// Display name such as `@html` or `moth_docs`.
+    /// Display name such as `@core/html` or `moth_docs`.
     pub(crate) display_name: String,
     /// Number of modules registered in this boundary.
     pub(crate) module_count: u64,

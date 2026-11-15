@@ -1,4 +1,4 @@
-@html canvas
+@core/html canvas
 
 [canvas:
   [$in id:unused_canvas]

@@ -332,7 +332,7 @@ fn registered_support_only_package_compiles_its_external_surface() {
     assert_eq!(
         frontend.source_packages.len(),
         3,
-        "directory compilation publishes the imported package plus official @html and @styles"
+        "directory compilation publishes the imported package plus official @core/html and @core/css"
     );
     let package = frontend
         .source_packages
@@ -781,7 +781,8 @@ independent_result I32 = independent(42)
                 .unwrap_or(-1.0)
         };
         // One initial pass per compiled module: the project module plus the single-module
-        // mandatory Core packages `@html` and `@styles`, which every builder surface compiles.
+        // mandatory Core packages `@core/html` and `@core/css`, which every builder surface
+        // compiles.
         assert_eq!(counter_value("convergence_initial_base_borrow_passes"), 3.0);
         assert_eq!(counter_value("convergence_base_borrow_passes"), 2.0);
         // Four materialisation passes, then rechecks only for `mutating_helper` and `caller`,
