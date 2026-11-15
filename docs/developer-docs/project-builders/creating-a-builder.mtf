@@ -19,15 +19,24 @@ It retains the resulting immutable definition for the build. It calls `build`
 only after the required semantic compilation succeeds. A builder doesn't
 sequence parsing, type checking or borrow analysis itself.
 
-**Current SDK status throughout this guide and its linked sections:** The
-prototype registers source and host packages, selects a profile and exposes
-an opaque project-facade handle. It discards its empty artefact set and
-publishes no files. The `.config(...)` helper, settings and entry accessors,
-Wasm compilation, artefact/output APIs, macros and executable Rust host
-adapters describe accepted target design, not current SDK APIs. See
+**Current SDK status throughout this guide and its linked sections:** A
+separate crate can register source and host packages, declare one project
+configuration section and read the project's values through
+`CompiledProject::settings`, select a profile, and publish byte artefacts
+through `BuildArtifacts::add` and `BuiltProject::write_outputs`, which share
+the compiler's central output writer, output roots and build manifest.
+Destination and ownership failures are detected before any output mutation,
+and stale cleanup runs only after every artefact was emitted.
+`BuildContext::compile_wasm` takes the package handle and returns the opaque
+`WasmModule`, but native Wasm compilation of a project package needs the
+accepted native host ABI lowering, so it returns
+`ErrorKind::UnsupportedCapability` until that lands and never a placeholder
+module. Entry accessors, resource-relative output strings, macros and
+executable Rust host adapters describe accepted target design, not current SDK
+APIs. See
 @../../docs/progress/packages-and-builders (Packages and Builders Progress)
 and
-@https://github.com/nyejames/moth/blob/main/docs/roadmap/plans/lappet-native-binding-handoff-plan.md (native-binding handoff plan).
+@https://github.com/nyejames/moth/blob/main/crates/lappet/roadmap.md (Lappet roadmap).
 
 ### A Wasm package builder
 

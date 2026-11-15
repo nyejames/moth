@@ -5,7 +5,7 @@
 //! [`classify_guest_failure`] recovers the typed value or reads Wasmtime's trap code. Nothing
 //! here reads message text.
 
-use super::error::{ErrorSource, HostFault, LimitFault, RuntimeError};
+use super::error::{BoundaryFault, ErrorSource, HostFault, LimitFault, RuntimeError};
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use wasmtime::Trap;
@@ -32,13 +32,19 @@ pub(super) fn run_host_import(
 
     let host_fault = match outcome {
         Ok(Ok(())) => return Ok(()),
-        Ok(Err(source)) => match source.downcast::<super::error::BoundaryFault>() {
-            Ok(fault) => return Err(wasmtime::Error::new(*fault)),
-            Err(source) => match source.downcast::<HostFault>() {
-                Ok(fault) => return Err(wasmtime::Error::new(*fault)),
+
+        // A typed fault keeps its own category. Anything else is the host's operational failure.
+        Ok(Err(source)) => {
+            let source = match source.downcast::<BoundaryFault>() {
+                Ok(boundary_fault) => return Err(wasmtime::Error::new(*boundary_fault)),
+                Err(source) => source,
+            };
+            match source.downcast::<HostFault>() {
+                Ok(host_fault) => *host_fault,
                 Err(source) => HostFault::Failed { source },
-            },
-        },
+            }
+        }
+
         Err(panic_payload) => {
             let message = panic_message(panic_payload.as_ref());
             // A payload's own destructor can panic. Drop it under a second guard and leak
@@ -60,7 +66,7 @@ pub(super) fn classify_guest_failure(error: wasmtime::Error, entry: GuestEntry) 
         Ok(host_fault) => return RuntimeError::HostFault(host_fault),
         Err(error) => error,
     };
-    let error = match error.downcast::<super::error::BoundaryFault>() {
+    let error = match error.downcast::<BoundaryFault>() {
         Ok(boundary_fault) => return RuntimeError::BoundaryFault(boundary_fault),
         Err(error) => error,
     };

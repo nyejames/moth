@@ -87,8 +87,22 @@ pub struct CleanupPolicy {
     pub(crate) managed_extensions: BTreeSet<String>,
 }
 
+/// Manifest token for a builder that declares no extension-managed output paths.
+///
+/// WHAT: an explicit encoding for the empty set, because a blank manifest field is damaged
+///       metadata rather than a policy.
+/// WHY: custom builders emit kinds the writer always manages, such as `FileKind::Bytes`, so
+///      their policy carries no extensions and still needs a stable manifest identity.
+pub(crate) const NO_MANAGED_EXTENSIONS: &str = "(none)";
+
 impl CleanupPolicy {
-    /// Constructs a cleanup policy for a test or non-HTML output record owner.
+    /// Constructs a cleanup policy for a custom builder or non-HTML output record owner.
+    ///
+    /// WHAT: records the extensions a builder's cleanup may remove. An empty set leaves stale
+    ///       removal to the file kinds the central writer always manages, such as
+    ///       `FileKind::Bytes`.
+    /// WHY: a custom builder declares no extension-based output routes, so its manifest still
+    ///      needs one stable policy identity across builds.
     pub fn generic<I, S>(managed_extensions: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -118,6 +132,9 @@ impl CleanupPolicy {
     }
 
     pub(crate) fn manifest_extensions_csv(&self) -> String {
+        if self.managed_extensions.is_empty() {
+            return NO_MANAGED_EXTENSIONS.to_owned();
+        }
         join_extensions_csv(&self.managed_extensions)
     }
 }

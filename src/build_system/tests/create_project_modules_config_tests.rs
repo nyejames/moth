@@ -1,11 +1,10 @@
 use super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
 use super::*;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
-use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
 use crate::compiler_frontend::compiler_messages::ValueReceiverContext;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
-    InvalidConfigCode, InvalidConfigView, decode_invalid_config,
+    InvalidConfigCode, InvalidConfigView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidPathView;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
@@ -1503,47 +1502,6 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
         resolver.source_package_roots().get("html"),
         Some(&fs::canonicalize(root.join("builder/html")).unwrap())
     );
-}
-
-#[test]
-fn selected_root_requires_at_least_one_root_entry_file() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-    fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::write(
-        root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
-    )
-    .expect("should write config");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-
-    let resolver = configured_resolver(&config);
-    let result = discover_modules_for_test(&config, &resolver, &style_directives);
-    let (_, diagnostic) = diagnosed_reports(&result)
-        .iter_severity(DiagnosticSeverity::Error)
-        .next()
-        .expect("a project with no entry should diagnose");
-    let view = diagnostic
-        .family_view::<InvalidConfigView>()
-        .expect("expected typed invalid-config facts");
-    let (key, reason) = decode_invalid_config(&view, diagnostic.string_ids())
-        .expect("no-entry facts should decode");
-    assert!(
-        key.is_none(),
-        "a missing entry is a project-structure fact, not an authored config key"
-    );
-    assert!(matches!(
-        reason,
-        InvalidConfigReason::NoRootModuleEntries { .. }
-    ));
 }
 
 #[cfg(unix)]

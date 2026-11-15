@@ -38,7 +38,7 @@ pub struct InstanceLimits {
 }
 
 impl Default for InstanceLimits {
-    /// The provisional V1 defaults: 256 MiB of linear memory, 65,536 table elements, 16 MiB
+    /// The V1 instance limits: 256 MiB of linear memory, 65,536 table elements, 16 MiB
     /// per staged entry, 64 MiB of staged text live and 1,048,576 resource entries.
     fn default() -> Self {
         Self {

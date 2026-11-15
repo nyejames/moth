@@ -1733,7 +1733,6 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
                 &mut external_imports,
                 directory_dependency_resolution,
                 &mut resource_inputs,
-                mode.requires_entry(),
                 mode.includes_check_only(),
                 &mut selected_source_texts,
                 string_table,
@@ -2025,6 +2024,7 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
             completed_source_packages,
             resource_inputs,
             transient_batches,
+            project_path_resolver.entry_root().to_path_buf(),
         )?)
     })();
     let finish_outcome = project_sources

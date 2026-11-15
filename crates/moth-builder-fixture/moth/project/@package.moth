@@ -1,0 +1,14 @@
+@game score
+@platform has_prefix
+
+project_name #= "native handoff"
+
+$export
+matches_project |text String| -> Bool:
+    return has_prefix(text, project_name)
+;
+
+$export
+package_score || -> I32:
+    return score()
+;

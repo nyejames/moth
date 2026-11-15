@@ -355,16 +355,20 @@ fn frontend_benchmark_converts_failed_directory_compilation() {
     std::fs::create_dir_all(&source_root).expect("should create the configured entry root");
     std::fs::write(
         temp_dir.path().join("config.moth"),
-        "project #= (name = \"empty\")\nhtml #= ()\n",
+        "project #= (name = \"diagnosed\")\nhtml #= ()\n",
     )
     .expect("should write the project config");
+    // An undeclared name is a genuine source diagnostic, so the directory compilation reaches
+    // the diagnosed outcome the benchmark report must preserve.
+    std::fs::write(source_root.join("@entry.moth"), "value = missing_name\n")
+        .expect("should write the failing project entry");
 
     let report = run_frontend_benchmark(FrontendBenchmarkOptions {
         entry_path: temp_dir.path().to_path_buf(),
         build_profile: FrontendBenchmarkBuildProfile::Dev,
         build_config_inputs: Vec::new(),
     })
-    .expect("a diagnosed empty directory should produce a benchmark report");
+    .expect("a diagnosed directory should produce a benchmark report");
 
     assert_eq!(report.outcome, FrontendBenchmarkOutcome::Diagnosed);
     assert!(report.error_count > 0);

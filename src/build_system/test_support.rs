@@ -23,6 +23,11 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use std::path::PathBuf;
 
+/// Deterministic source-root stand-in for synthetic test compilations that own no source tree.
+pub(crate) fn synthetic_source_root() -> PathBuf {
+    PathBuf::from("synthetic-project-root")
+}
+
 /// Assemble one success-only project compilation from bare test modules.
 pub(crate) fn project_compilation_from_test_modules(
     modules: Vec<Module>,
@@ -88,6 +93,7 @@ pub(crate) fn project_compilation_from_test_modules_with_resources(
         project,
         CompletedSourcePackageRegistry::new(),
         resource_inputs,
+        synthetic_source_root(),
     )
 }
 

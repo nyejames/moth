@@ -1,0 +1,4 @@
+$export
+score || -> I32:
+    return 42
+;

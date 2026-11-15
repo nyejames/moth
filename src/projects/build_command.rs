@@ -5,10 +5,10 @@
 //! WHY: build pipeline ownership stays in the compiler/build crate while the CLI supplies only
 //!      terminal presentation at the report boundary.
 
-use crate::build_system::build::{BuildResult, BuilderSelection, build_project};
-use crate::build_system::output::{
-    OutputPlan, SingleFileOutputPlan, WriteMode, WriteOptions, write_project_outputs,
+use crate::build_system::build::{
+    BuildResult, BuilderSelection, PublishedBuildOutput, build_project, publish_build_outputs,
 };
+use crate::build_system::output::{OutputPlan, SingleFileOutputPlan};
 use crate::capture_command_duration;
 use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
@@ -16,10 +16,7 @@ use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
     CompilationOutcome, CompilationResult, InfrastructureFailure,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerStage, DiagnosticDiscoveryStops, PreparedFailure,
-};
+use crate::compiler_frontend::compiler_messages::{CompilerStage, DiagnosticDiscoveryStops};
 use crate::finish_command_timing;
 use crate::projects::{ProjectCommandCompletion, ProjectCommandStatus, ProjectDiagnosticCounts};
 use std::path::{Path, PathBuf};
@@ -61,9 +58,25 @@ impl BuildCommandReport {
     }
 }
 
-enum BuildOutputFailure {
-    Plan(InfrastructureFailure),
-    Write(PreparedFailure),
+fn write_build_outputs_with_plan(
+    build_result: BuildResult,
+    output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, InfrastructureFailure>,
+) -> CompilationResult<BuildCommandSuccess> {
+    let publication = publish_build_outputs(build_result, output_plan_builder)?;
+
+    Ok(match publication {
+        PublishedBuildOutput::Written { outputs, warnings } => CompilationOutcome::Success {
+            value: BuildCommandSuccess {
+                output_file_count: outputs.written_paths.len(),
+                output_warnings: outputs.output_warnings,
+            },
+            warnings,
+        },
+        PublishedBuildOutput::Failed { reports, .. }
+        | PublishedBuildOutput::FinalisationFailed { reports } => {
+            CompilationOutcome::Diagnosed(reports)
+        }
+    })
 }
 
 /// Execute, classify and write one build before presenting its outcome to the caller.
@@ -157,63 +170,6 @@ fn build_command_outcome(
         write_build_outputs_with_plan(build_result, output_plan_builder),
         discovery_stops,
     )
-}
-
-fn write_build_outputs_with_plan(
-    build_result: BuildResult,
-    output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, InfrastructureFailure>,
-) -> CompilationResult<BuildCommandSuccess> {
-    let mut build_result = build_result;
-    let output_result = crate::timed_stage!(
-        crate::timing::TimingMetric::BuildOutputTotal,
-        (|| {
-            let output_plan =
-                output_plan_builder(&mut build_result).map_err(BuildOutputFailure::Plan)?;
-            let mut diagnostic_strings =
-                DiagnosticStringBuilder::new(build_result.warning_accumulator.string_table_mut());
-            write_project_outputs(
-                &mut build_result.project,
-                &WriteOptions {
-                    output_plan,
-                    write_mode: WriteMode::AlwaysWrite,
-                },
-                &mut diagnostic_strings,
-            )
-            .map_err(BuildOutputFailure::Write)
-        })()
-    );
-
-    match output_result {
-        Ok(write_summary) => {
-            let output_file_count = write_summary.emitted_count();
-            let output_warnings = write_summary.into_warning_messages();
-            let warnings = match build_result.finish_output(Ok(()))? {
-                CompilationOutcome::Success { warnings, .. } => warnings,
-                CompilationOutcome::Diagnosed(reports) => {
-                    return Ok(CompilationOutcome::Diagnosed(reports));
-                }
-            };
-            Ok(CompilationOutcome::Success {
-                value: BuildCommandSuccess {
-                    output_file_count,
-                    output_warnings,
-                },
-                warnings,
-            })
-        }
-        Err(BuildOutputFailure::Write(failure)) => {
-            match build_result.finish_output(Err(failure))? {
-                CompilationOutcome::Diagnosed(reports) => {
-                    Ok(CompilationOutcome::Diagnosed(reports))
-                }
-                CompilationOutcome::Success { .. } => crate::compiler_bug!(
-                    crate::compiler_frontend::compiler_messages::CompilerStage::Output,
-                    "a failed output write unexpectedly finalized a successful build"
-                ),
-            }
-        }
-        Err(BuildOutputFailure::Plan(error)) => Err(error.into()),
-    }
 }
 
 fn create_build_output_plan(

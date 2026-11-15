@@ -26,7 +26,7 @@ fn facade_and_standalone_share_host_descriptors() {
         .parameter(standalone::HostType::optional(standalone::HostType::Byte));
     let facade_descriptor: facade::HostFunction = standalone_descriptor;
     assert_eq!(
-        facade_descriptor.parameters(),
+        facade_descriptor.signature().parameters(),
         [facade::HostType::optional(facade::HostType::Byte)],
     );
 

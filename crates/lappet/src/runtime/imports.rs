@@ -13,10 +13,11 @@ use super::context::CallContext;
 use super::engine::RuntimeEngine;
 use super::error::{BoundaryFault, ErrorSource, LinkError, RuntimeError};
 use super::fault::run_host_import;
-use super::instance::{PreparedModule, StoreData};
+use super::instance::{GUEST_MEMORY_EXPORT, PreparedModule, StoreData, guest_offset};
+use super::kind::{InstanceKind, Sendable};
 use super::limits::InstanceLimits;
 use super::module::CompiledModule;
-use super::resource::{InstanceKind, ResourceTable};
+use super::resource::ResourceTable;
 use super::staging::{StagingError, StagingTable};
 use wasmtime::{Caller, Engine, Extern, FuncType, Linker, UnknownImportError, Val, ValType};
 
@@ -24,7 +25,7 @@ use wasmtime::{Caller, Engine, Extern, FuncType, Linker, UnknownImportError, Val
 ///
 /// Registration is store-independent, so one set of imports serves every instance prepared
 /// from it. Mutable state lives in each instance's `HostState`, never in the import closures.
-pub(crate) struct HostImports<HostState: 'static, Kind: InstanceKind = super::resource::Sendable> {
+pub(crate) struct HostImports<HostState: 'static, Kind: InstanceKind = Sendable> {
     linker: Linker<StoreData<HostState, Kind>>,
 }
 
@@ -89,14 +90,13 @@ impl<HostState: 'static, Kind: InstanceKind> HostImports<HostState, Kind> {
             },
         );
 
-        match registration {
-            Ok(_) => Ok(()),
-            Err(error) => Err(RuntimeError::Link(LinkError::ImportDefinition {
+        registration.map(|_| ()).map_err(|error| {
+            RuntimeError::Link(LinkError::ImportDefinition {
                 module: module.to_string(),
                 name: name.to_string(),
                 source: error.into_boxed_dyn_error(),
-            })),
-        }
+            })
+        })
     }
 
     /// Checks every import of `module` against these definitions, once.
@@ -111,10 +111,10 @@ impl<HostState: 'static, Kind: InstanceKind> HostImports<HostState, Kind> {
             return Err(RuntimeError::EngineMismatch);
         }
 
-        match self.linker.instantiate_pre(module.wasmtime()) {
-            Ok(instance_pre) => Ok(PreparedModule::new(instance_pre)),
-            Err(error) => Err(RuntimeError::Link(classify_import_failure(error))),
-        }
+        self.linker
+            .instantiate_pre(module.wasmtime())
+            .map(PreparedModule::new)
+            .map_err(|error| RuntimeError::Link(classify_import_failure(error)))
     }
 }
 
@@ -184,17 +184,16 @@ fn copy_staged_text<HostState, Kind: InstanceKind>(
     if staged_len != length {
         return Err(wasmtime::Error::new(BoundaryFault::WrongLength));
     }
-    // The i32 carrier's bits are a Wasm32 address, including addresses at or above 2 GiB.
-    let destination = destination as u32 as usize;
-    let Some(Extern::Memory(memory)) = caller.get_export(super::instance::GUEST_MEMORY_EXPORT)
-    else {
+
+    let destination = guest_offset(destination);
+    let Some(Extern::Memory(memory)) = caller.get_export(GUEST_MEMORY_EXPORT) else {
         return Err(wasmtime::Error::new(BoundaryFault::DestinationOutOfBounds));
     };
     let memory_size = memory.data_size(&*caller);
-    let Some(end) = destination.checked_add(length) else {
-        return Err(wasmtime::Error::new(BoundaryFault::DestinationOutOfBounds));
-    };
-    if end > memory_size {
+    let is_in_bounds = destination
+        .checked_add(length)
+        .is_some_and(|end| end <= memory_size);
+    if !is_in_bounds {
         return Err(wasmtime::Error::new(BoundaryFault::DestinationOutOfBounds));
     }
 

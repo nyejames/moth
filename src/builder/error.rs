@@ -24,12 +24,17 @@ pub enum ErrorKind {
     /// The project failed to compile. The error's messages hold the rendered diagnostics, and
     /// the builder's `build` step did not run.
     Compilation,
-    /// The builder's `build` step failed, or the project has no package facade.
+    /// The builder's `build` step failed, the request root is not a project directory, the
+    /// project has no package facade, an artefact path was rejected, or output publication
+    /// reported a user diagnostic.
     Build,
     /// The build could not read or write a file, or could not use a project path.
     Infrastructure,
     /// The compiler hit an internal error. This is a toolchain defect, not a source error.
     CompilerBug,
+    /// The compiler does not provide the requested capability yet. The request produced no
+    /// output, so a builder can match this gap separately from its own `Build` failures.
+    UnsupportedCapability,
 }
 
 /// A builder SDK failure: its category, a summary, and any rendered compiler lines.
@@ -41,7 +46,11 @@ pub struct Error {
     kind: ErrorKind,
     message: String,
     messages: Vec<String>,
-    discovery_stops: DiagnosticDiscoveryStops,
+    /// Why optional diagnostic discovery stopped.
+    ///
+    /// The compiler-frontend flag type stays crate-private: an SDK caller reads the same truthful
+    /// sentence from `Display`, so no public signature names an internal compiler type.
+    pub(super) discovery_stops: DiagnosticDiscoveryStops,
 }
 
 impl Error {
@@ -58,6 +67,14 @@ impl Error {
         Self::without_messages(ErrorKind::Infrastructure, message)
     }
 
+    /// Reports a capability this compiler does not provide, before any output exists.
+    ///
+    /// Only the SDK raises this: a builder reports its own failures through [`Self::build`] and
+    /// matches the gap through [`ErrorKind::UnsupportedCapability`].
+    pub(crate) fn unsupported_capability(message: impl Into<String>) -> Self {
+        Self::without_messages(ErrorKind::UnsupportedCapability, message)
+    }
+
     /// Converts diagnosed compiler reports without discarding their retained render contexts.
     pub(crate) fn from_diagnostic_reports(
         reports: &DiagnosticReportSet,
@@ -68,6 +85,20 @@ impl Error {
             message: "The project failed to compile.".to_owned(),
             messages: format_terse_diagnostic_reports(reports),
             discovery_stops,
+        }
+    }
+
+    /// Converts frozen output-publication reports with the category the writer failure implies.
+    pub(crate) fn from_output_reports(
+        kind: ErrorKind,
+        message: &str,
+        reports: &DiagnosticReportSet,
+    ) -> Self {
+        Self {
+            kind,
+            message: message.to_owned(),
+            messages: format_terse_diagnostic_reports(reports),
+            discovery_stops: DiagnosticDiscoveryStops::NONE,
         }
     }
 
@@ -114,13 +145,6 @@ impl Error {
     /// within each severity group. Empty when no compiler messages produced this failure.
     pub fn messages(&self) -> &[String] {
         &self.messages
-    }
-
-    /// Why optional diagnostic discovery stopped when this compilation failure was produced.
-    ///
-    /// Empty for complete checking and for failures that are not compiler diagnostics.
-    pub fn discovery_stops(&self) -> DiagnosticDiscoveryStops {
-        self.discovery_stops
     }
 }
 

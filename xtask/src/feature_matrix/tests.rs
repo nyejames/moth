@@ -126,6 +126,8 @@ fn extracted_source_and_test_owners_report_exact_undeclared_cfg_features() {
             "crates/moth-mon/src",
             "crates/moth-mon/tests",
             "crates/moth-host/src",
+            "crates/moth-builder-fixture/src",
+            "crates/moth-builder-fixture/tests",
             "crates/moth-cli/src",
             "crates/moth-cli/tests",
             "crates/lappet/src",

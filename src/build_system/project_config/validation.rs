@@ -892,7 +892,7 @@ fn validate_record_fields(
     );
 
     let node = view.schema.node(node_id);
-    let record_name = diagnostics.string_table.intern(node.name);
+    let record_name = diagnostics.string_table.intern(node.name.as_ref());
     let mut validated_fields = Vec::with_capacity(authored_fields.len());
     let mut failed = false;
 

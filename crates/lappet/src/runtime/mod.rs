@@ -14,9 +14,12 @@
 //! 3. `HostImports` (`imports.rs`) registers host functions by physical Wasm signature and
 //!    checks a module's imports once, producing a `PreparedModule`.
 //! 4. `Instance` (`instance.rs`) owns one store, one guest and one host state under
-//!    [`InstanceLimits`] (`limits.rs`). Its `call` is the guest entry and owns quarantine.
-//!    Context moves into that store for the call and back out before it returns. A scoped
-//!    export call drives the native host ABI's scope helpers and skips close after a fault.
+//!    [`InstanceLimits`] (`limits.rs`), with its staging table (`staging.rs`) and resource
+//!    table (`resource.rs`). Its kind (`kind.rs`) decides at compile time whether it may move
+//!    between threads. Its `call` is the guest entry and owns quarantine. Context
+//!    (`context.rs`) moves into that store for the call and back out before it returns. A
+//!    scoped export call drives the native host ABI's scope helpers and skips close after a
+//!    fault.
 //! 5. `fault.rs` classifies a failed host import or guest entry into a [`RuntimeError`]
 //!    (`error.rs`).
 //!
@@ -44,6 +47,7 @@ mod error;
 mod fault;
 mod imports;
 mod instance;
+mod kind;
 mod limits;
 mod module;
 mod resource;

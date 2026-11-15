@@ -27,7 +27,9 @@ use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnos
 use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::instrumentation::MemoryLedgerSnapshot;
-use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
+#[cfg(test)]
+use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
+use crate::compiler_frontend::module_compilation::Module;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, StablePackageIdentity,
@@ -39,6 +41,7 @@ use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::num::NonZeroU32;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::projects::settings::Config;
@@ -516,6 +519,7 @@ impl CompiledGraphBoundary {
     }
 
     /// Iterate every successful artefact in deterministic `ModuleId` order.
+    #[cfg(test)]
     pub(crate) fn successful_artefacts_in_module_id_order(
         &self,
     ) -> impl Iterator<Item = &CompiledModuleArtifact> + '_ {
@@ -524,6 +528,7 @@ impl CompiledGraphBoundary {
 
     /// Base artefacts come first in `ModuleId` order, then generated sidecars in deterministic
     /// publication order. Their warning batches are retained separately from executable views.
+    #[cfg(test)]
     pub(crate) fn successful_module_views(&self) -> impl Iterator<Item = &Module> + '_ {
         self.successful_artefacts_in_module_id_order()
             .map(|artifact| &artifact.module)
@@ -1506,6 +1511,13 @@ pub(crate) struct ProjectFrontendCompilation {
     /// Command-owned callers provide this owner directly; retaining it here only keeps the
     /// config-free seam move-only until its caller invokes the canonical frozen renderer.
     pub(crate) project_source_database: Option<Arc<SourceDatabase>>,
+    /// Canonical root for the source tree this frontend actually compiled.
+    ///
+    /// Directory compilation records the canonical selected project root. Single-file compilation
+    /// records the selected file's canonical containing directory, including when a symlink
+    /// target lives elsewhere. Builders report project-level failures against this root instead
+    /// of re-resolving the selected spelling.
+    pub(crate) source_root: PathBuf,
 }
 
 impl ProjectFrontendCompilation {
@@ -1514,6 +1526,7 @@ impl ProjectFrontendCompilation {
         source_packages: CompletedSourcePackageRegistry,
         resource_inputs: ResourceInputRegistry,
         transient_batches: Vec<TransientPreparedBatch>,
+        source_root: PathBuf,
     ) -> Result<Self, InfrastructureFailure> {
         project.validate_invariants()?;
         source_packages.validate_dependency_edges()?;
@@ -1549,6 +1562,7 @@ impl ProjectFrontendCompilation {
             resource_inputs,
             transient_batches,
             project_source_database: None,
+            source_root,
         })
     }
 

@@ -151,7 +151,12 @@ fn successful_build_returns_project_without_warnings() {
     let built = build_project(&builder, BuildRequest::new(temp_dir.path()))
         .expect("valid project should build");
 
-    assert!(built.warnings().is_empty());
+    assert!(
+        built
+            .into_warnings()
+            .expect("warning finalisation")
+            .is_empty()
+    );
     assert_eq!(builder.definition_calls.get(), 1);
     assert_eq!(builder.build_calls.get(), 1);
 }
@@ -187,7 +192,7 @@ fn source_diagnostics_return_compilation_error_without_building() {
         "diagnosed source must retain its authored path"
     );
     assert!(
-        error.discovery_stops().is_empty(),
+        error.discovery_stops.is_empty(),
         "an ordinary fail-fast diagnostic must not claim shortened discovery"
     );
     assert_eq!(
@@ -227,12 +232,12 @@ fn diagnosed_build_exposes_module_allowance_stop_through_public_sdk() {
     assert_eq!(error.messages()[0].split('|').nth(2), Some("@entry.moth"));
     assert!(
         error
-            .discovery_stops()
+            .discovery_stops
             .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
         "SDK callers must receive the module allowance stop from the public driver"
     );
     let stop_line = error
-        .discovery_stops()
+        .discovery_stops
         .stop_line()
         .expect("module allowance must provide a stop line");
     assert_eq!(
@@ -279,13 +284,17 @@ fn warnings_are_returned_as_rendered_lines() {
     let built = build_project(&builder, BuildRequest::new(temp_dir.path()))
         .expect("warning-only project should build");
 
+    let warnings = built
+        .into_warnings()
+        .expect("warning finalisation should succeed");
+
     assert_eq!(
-        built.warnings().len(),
+        warnings.len(),
         3,
-        "each warning should render as one terse line"
+        "each warning should render as one terse line at finalisation"
     );
     assert!(
-        built.warnings().iter().all(|warning| {
+        warnings.iter().all(|warning| {
             warning.starts_with("W|MOTH-RULE-0022|")
                 && warning.split('|').nth(2) == Some("@entry.moth")
         }),

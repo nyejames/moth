@@ -21,10 +21,10 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 ## Lappet runtime and package infrastructure
 
 - [Lappet crate](crates/lappet/README.md) and [library entry](crates/lappet/src/lib.rs): feature-split workspace library, dependency-free with no feature enabled.
-    - [runtime](crates/lappet/src/runtime/mod.rs): the `runtime` feature's Wasmtime mechanics, with no host ABI. Public: the Cranelift [engine](crates/lappet/src/runtime/engine.rs) policy, compiled modules, [instance limits](crates/lappet/src/runtime/limits.rs) and classified [runtime errors](crates/lappet/src/runtime/error.rs). Crate-private: [host import](crates/lappet/src/runtime/imports.rs) registration and preflight, [instances](crates/lappet/src/runtime/instance.rs) with export calls, deadlines and quarantine, and [fault classification](crates/lappet/src/runtime/fault.rs). [tests](crates/lappet/src/runtime/tests/) use authored core Wasm fixtures.
+    - [runtime](crates/lappet/src/runtime/mod.rs): the `runtime` feature's Wasmtime mechanics, with no host ABI. Public: the Cranelift [engine](crates/lappet/src/runtime/engine.rs) policy and native optimisation choice, [compiled modules](crates/lappet/src/runtime/module.rs), [instance limits](crates/lappet/src/runtime/limits.rs) and classified [runtime errors](crates/lappet/src/runtime/error.rs). Crate-private: [host import](crates/lappet/src/runtime/imports.rs) registration and preflight, [instances](crates/lappet/src/runtime/instance.rs) with export calls, deadlines and quarantine, the sendable and thread-bound [instance kinds](crates/lappet/src/runtime/kind.rs), [fault classification](crates/lappet/src/runtime/fault.rs), the [staging table](crates/lappet/src/runtime/staging.rs), the [resource table](crates/lappet/src/runtime/resource.rs) with its process-wide token generator and the per-call [context holder and slot](crates/lappet/src/runtime/context.rs). [tests](crates/lappet/src/runtime/tests/) run authored core Wasm fixtures under both optimisation levels.
 - [Runtime design](crates/lappet/docs/design.md), [package-manager design](crates/lappet/docs/package-manager.md) and [independent roadmap](crates/lappet/roadmap.md): accepted contracts, milestone order, waits on `main` and isolated-worktree implementation checkpoints.
-- Lappet plans: [Wasmtime runtime foundation](docs/roadmap/plans/lappet-wasmtime-runtime-foundation-plan.md), [host boundary tables](docs/roadmap/plans/lappet-host-boundary-tables-plan.md) and [native binding handoff](docs/roadmap/plans/lappet-native-binding-handoff-plan.md). The Lappet roadmap owns their order. The host contract crate plan is delivered and deleted.
-- [Wasmtime integration reference](crates/lappet/docs/wasmtime-integration.md): the pinned Wasmtime release, the API surface Lappet uses and the excluded features.
+- Lappet plans: none is active. The Lappet roadmap owns the order and records each delivered milestone.
+- [Wasmtime integration reference](crates/lappet/docs/wasmtime-integration.md): the pinned Wasmtime release, the API surface Lappet uses, the findings that changed implementation choices and the excluded features.
 - [Host resource and context API](crates/lappet/docs/host-resources.md): accepted Rust API for resource ownership, access, per-call context and the sendable and thread-bound instance kinds.
 - [Host ABI adapter responsibilities](crates/lappet/docs/host-abi.md): Lappet's installation, conversion, staging-table and resource-table duties over the compiler-owned [native host ABI](docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf).
 - [Wasm optimisation reference](docs/developer-docs/wasm-optimisation/overview.mtf) and [detailed authority](docs/developer-docs/wasm-optimisation/wasm-optimisation.mtf): shared compiler/native-code policy. Its [page](docs/developer-docs/wasm-optimisation/@entry.moth) composes the site.
@@ -43,13 +43,18 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
     - [numeric.rs](crates/moth-mon/src/numeric.rs), [map_keys.rs](crates/moth-mon/src/map_keys.rs): codec-specific scalar conversion and typed map-key validation.
     - [budget.rs](crates/moth-mon/src/budget.rs), [error.rs](crates/moth-mon/src/error.rs): resource accounting, exact input byte spans and public `MonError` projection.
     - [public API tests](crates/moth-mon/tests/public_api.rs), [numeric cases](crates/moth-mon/tests/public_api/numeric.rs) and [resource cases](crates/moth-mon/tests/public_api/resources.rs): external Rust API coverage. Focused reader, schema and writer tests live in [src/tests/](crates/moth-mon/src/tests/).
-- [moth-host entry](crates/moth-host/src/lib.rs): dependency-free host descriptor vocabulary. The compiler re-exports it as `moth::host`.
+- [moth-host entry](crates/moth-host/src/lib.rs): dependency-free host contract vocabulary. The compiler re-exports it as `moth::host`.
+    - [descriptor.rs](crates/moth-host/src/descriptor.rs): the closed `HostType`/`HostSignature`/`HostFunction` vocabulary and the Moth type each variant names.
+    - [identity.rs](crates/moth-host/src/identity.rs): `HostBindingIdentity`, the canonical package path plus structured symbol path a runtime matches implementations by.
+    - [requirements.rs](crates/moth-host/src/requirements.rs): `HostImportRequirement`, `HostExportRequirement` and the canonical, duplicate-free `HostRequirements` list a compiler produces and a runtime consumes.
+    - [selection.rs](crates/moth-host/src/selection.rs): the builder's fluent `HostExports` selection, its name rules and the validated `HostExportSelection`.
+    - [preflight.rs](crates/moth-host/src/preflight.rs): the pure-Rust comparison of required imports against declared Rust implementations, with typed mismatch reasons.
     - [descriptor tests](crates/moth-host/src/tests/descriptor_tests.rs): the read surface the compiler conversion uses.
 
 ## Project/build shell
 
 - [compiler-backed project services](src/projects/): kw — check, build, dev, routing.
-    - [build_command.rs](src/projects/build_command.rs): owns build execution, output planning/writing and timing around the CLI's completed-outcome presentation.
+    - [build_command.rs](src/projects/build_command.rs): owns build execution, output planning, the CLI report over the shared output-publication sequence and timing around the CLI's completed-outcome presentation.
     - [check.rs](src/projects/check.rs): frontend-only diagnostics.
     - [routing.rs](src/projects/routing.rs): path/origin rules.
     - [settings.rs](src/projects/settings.rs): Config/defaults/known paths and the builder section settings store.
@@ -57,7 +62,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
         - [runtime_report_tests.rs](src/projects/dev_server/tests/runtime_report_tests.rs), [dev_client_tests.rs](src/projects/dev_server/tests/dev_client_tests.rs): socket-level runtime-report validation and served dev-client observable behaviour.
     - [html_project](src/projects/html_project/): HTML builder and HTML-Wasm integration. kw: shell, assets, wasm.
 - [builder boundary above frontend](src/build_system/): kw — config, modules, artifacts, cleanup.
-    - [build.rs](src/build_system/build.rs): build_project, BuildResult, success-only `ProjectCompilation` over retained graph boundaries, entry/linked-module assembly and compiler/backend orchestration. Compiler module artefact lanes live in [module_compilation](src/compiler_frontend/module_compilation/).
+    - [build.rs](src/build_system/build.rs): build_project, BuildResult, success-only `ProjectCompilation` over retained graph boundaries, entry/linked-module assembly, compiler/backend orchestration and the shared output-publication sequence. Compiler module artefact lanes live in [module_compilation](src/compiler_frontend/module_compilation/).
     - [project_config.rs](src/build_system/project_config.rs) + [project_config/](src/build_system/project_config/): locates and reads config.moth, calls the compiler's [config compilation service](src/compiler_frontend/single_source_compilation/config.rs), then validates and applies folded values to `Config` before finalizing its retained source spans.
     - [path_validation.rs](src/build_system/path_validation.rs): project path policy checks.
     - [utils.rs](src/build_system/utils.rs): shared builder helpers.
@@ -73,13 +78,17 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
         - [project_roots.rs](src/build_system/create_project_modules/project_roots.rs): project/entry roots.
         - [source_discovery_error.rs](src/build_system/create_project_modules/source_discovery_error.rs): diagnostic boundary.
     - [output](src/build_system/output/): validated output plans, portable path policy, prepared artifact writing, write orchestration, stale manifest cleanup and the output-root fields every builder section registers.
-- [builder SDK](src/builder/): public `moth::builder` definitions and build driver for custom Rust builders. `BuilderDefinition` registers source packages, native host packages and optional source kinds through the builder surface and validates them in one `finish`.
+- [builder SDK](src/builder/): public `moth::builder` definitions and build driver for custom Rust builders. `BuilderDefinition` registers source packages, native host packages, optional source kinds and the builder's configuration section through the builder surface and validates them in one `finish`.
     - [definition.rs](src/builder/definition.rs): the public definition draft and the registered builder surface.
-    - [project.rs](src/builder/project.rs): the public `ProjectBuilder` trait and the `build_project` driver over the shared build orchestration.
-    - [compiled_project.rs](src/builder/compiled_project.rs): the compiled project handle, the owner-bound package facade handle, the build context and the artifact set.
+    - [config_section.rs](src/builder/config_section.rs): the builder-owned configuration section description with string and bool setting descriptions, required and default rules and the shared output-root fields.
+    - [project.rs](src/builder/project.rs): the public `ProjectBuilder` trait, the `build_project` driver over the shared build orchestration and `BuiltProject::write_outputs` over the shared output-publication sequence.
+    - [compiled_project.rs](src/builder/compiled_project.rs): the compiled project handle with its typed builder-settings view, the owner-bound package facade handle, the build context with the native Wasm request and its opaque module result, and the validated artefact set.
     - [error.rs](src/builder/error.rs): the public error kinds and the rendered compiler messages.
-- [host conversion](src/builder/host_conversion.rs): maps a `moth-host` descriptor onto the external-package registry specification. The vocabulary itself lives in [moth-host](crates/moth-host/src/lib.rs).
+- [host conversion](src/builder/host_conversion.rs): one leaf table maps the `moth-host` descriptor, external-package ABI and canonical public type spellings in both directions, so registration and requirement production cannot drift. The vocabulary itself lives in [moth-host](crates/moth-host/src/lib.rs).
+- [host requirements](src/builder/host_requirements.rs): the compiler-owned production of import and export requirements for a project package assembly. The selected facade exports are the artefact's executable roots, so it walks reachability from them through the assembly's one cross-module walk and resolves each reached module's own registry.
+- [builder SDK fixture crate](crates/moth-builder-fixture/src/lib.rs): external-crate consumer of `moth::builder` and `moth::host` only. Its [workflow test](crates/moth-builder-fixture/tests/whole_workflow.rs) registers a source package, manual host descriptors and a configuration section, compiles the facade-only [project fixture](crates/moth-builder-fixture/moth/project/@package.moth), publishes one artefact and observes the native-Wasm capability error.
 - [builder surface](src/builder_surface/): core packages, external import providers and package metadata.
+    - [package_metadata.rs](src/builder_surface/package_metadata.rs): the origin and backing axes, including the `HostBinding` backing that marks an SDK host package a native runtime implements.
     - [definition.rs](src/builder_surface/definition.rs): the common surface, including the mandatory `@html` and `@styles` Core/MothSource roots and the one compiler-shipped package directory resolution.
     - [source_file_kind_registry.rs](src/builder_surface/source_file_kind_registry.rs): compiler-owned `.moth`/`.mtf` classification plus optional builder registrations such as plain Markdown.
     - [core_packages/](src/builder_surface/core_packages/): prelude, io, math, collections, text, random and time.

@@ -1,0 +1,8 @@
+project #= (
+    name = "native_handoff",
+)
+
+game #= (
+    title = "native handoff",
+    debug_overlay = true,
+)

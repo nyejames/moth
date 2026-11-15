@@ -26,7 +26,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{imports, token_lexical};
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, InvalidConfigReason, PreparedFailure, SourceSpanCapacityResource,
+    DiagnosticBag, PreparedFailure, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
@@ -71,8 +71,7 @@ use super::super::module_preparation::{
 use super::super::prepared_module::PreparedModule;
 use super::super::project_module_graph::ProjectModuleGraph;
 use super::super::project_structure_diagnostics::{
-    invalid_module_root_file_name_error, non_utf8_filesystem_name_error, path_id,
-    project_structure_diagnostic,
+    invalid_module_root_file_name_error, non_utf8_filesystem_name_error,
 };
 use super::super::resource_inputs::ResourceInputRegistry;
 use super::super::source_discovery;
@@ -543,10 +542,10 @@ fn compile_single_file_frontend_with_target(
         // Single-file compilation is a separate synthetic-module mode. An ordinary selected file
         // is explicitly selected as that unit's executable output, so it takes the `Entry` role.
         // A selected canonical root keeps its authored API-facade role instead: exports remain
-        // legal, root runtime is rejected, and a build command with no entry reports its normal
-        // no-entry outcome. The empty logical path is the selected-root spelling and is always
-        // valid, so construction failure is a proven internal invariant surfaced as a typed
-        // `InfrastructureFailure` rather than a panic.
+        // legal, root runtime is rejected, and no executable entry is synthesised. The empty
+        // logical path is the selected-root spelling and is always valid, so construction failure
+        // is a proven internal invariant surfaced as a typed `InfrastructureFailure` rather than a
+        // panic.
         let origin_role =
             module_root_role_for_file_name(entry_file_name).unwrap_or(ModuleRootRole::Entry);
         let stable_origin = StableModuleOriginIdentity::from_relative_logical_path(
@@ -562,28 +561,6 @@ fn compile_single_file_frontend_with_target(
             entry_path.clone(),
         )]);
         let module_id = ModuleId::from_index(0);
-        // Build and dev need an executable entry anywhere in the selected unit. A selected API
-        // facade compiles declaration-only under `check`, but a runtime command reports the same
-        // no-entry outcome directory discovery uses. Boracle analysis remains declaration-only.
-        if target == SingleFileFrontendTarget::Normal
-            && mode.requires_entry()
-            && graph.entry_modules().is_empty()
-        {
-            let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-            let diagnostic =
-                project_structure_diagnostic(InvalidConfigReason::NoRootModuleEntries {
-                    entry_root: path_id(&source_root, &mut diagnostic_strings),
-                });
-            let table = string_table.take_for_handoff();
-            return Err(BoundaryPremergeFailure::from(PreparedFailure::Diagnosed(
-                PreparedDiagnosticBatch::capture_from_bag(
-                    DiagnosticBag::from(diagnostic),
-                    table,
-                    None,
-                    None,
-                ),
-            )));
-        }
         if project_budget.is_exhausted() {
             // The package diagnostics upstream stay retained. The unvisited slot is proven by the
             // cutoff record and the command's stop flag; it never reports success or diagnosis.
@@ -604,6 +581,7 @@ fn compile_single_file_frontend_with_target(
                 completed_source_packages,
                 resource_inputs,
                 transient_batches,
+                source_root.clone(),
             )
             .map(|compilation| SingleFileFrontendResult::Project(Box::new(compilation)))
             .map_err(BoundaryPremergeFailure::from);
@@ -775,6 +753,7 @@ fn compile_single_file_frontend_with_target(
             completed_source_packages,
             resource_inputs,
             transient_batches,
+            source_root.clone(),
         )
         .map(|compilation| SingleFileFrontendResult::Project(Box::new(compilation)))
         .map_err(BoundaryPremergeFailure::from)

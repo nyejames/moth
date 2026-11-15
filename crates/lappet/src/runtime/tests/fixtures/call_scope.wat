@@ -39,6 +39,8 @@
 
   (func (export "moth_abi_v1_scope_close")
     (call $step (i32.const 3))
+    (if (i32.eq (global.get $trap) (i32.const 3))
+      (then (unreachable)))
     (if (i32.eqz (global.get $open))
       (then (unreachable)))
     (global.set $open (i32.const 0))

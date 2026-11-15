@@ -131,6 +131,19 @@ fn html_config_diagnostic(
     project_config::invalid_config_reason(None, reason(string_table), None)
 }
 
+/// Build the no-entry diagnostic the HTML builder enforces for its executable output.
+pub(crate) fn no_entry_root_diagnostic(
+    entry_root: &Path,
+    string_table: &mut DiagnosticStringBuilder,
+) -> DiagnosticDraft {
+    html_config_diagnostic(
+        |string_table| InvalidConfigReason::NoRootModuleEntries {
+            entry_root: path_id(entry_root, string_table),
+        },
+        string_table,
+    )
+}
+
 pub(crate) fn capture_html_diagnostic(
     diagnostic: DiagnosticDraft,
     root_string_table: &StringTable,
