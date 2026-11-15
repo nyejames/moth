@@ -188,7 +188,7 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
     )
     .expect("should write config");
     fs::write(src.join("@entry.moth"), "[:entry]\n").expect("should write project entry");
-    fs::write(package_root.join("@mod.moth"), "value #= 1\n")
+    fs::write(package_root.join("@package.moth"), "value #= 1\n")
         .expect("should write helper package root");
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
@@ -205,7 +205,7 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
     )
     .expect("config should parse");
     let resolver = configured_resolver(&config);
-    let declaring_source = fs::canonicalize(root.join("builder/helper/@mod.moth"))
+    let declaring_source = fs::canonicalize(root.join("builder/helper/@package.moth"))
         .expect("package source should canonicalize");
 
     with_namespace_resolution(

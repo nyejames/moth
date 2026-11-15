@@ -2067,7 +2067,7 @@ fn direct_selection_resolves_source_package_facade() {
     .expect("should write config");
     fs::write(src.join("@entry.moth"), "@helper add\n[:entry]\n").expect("should write entry");
     fs::write(
-        package_root.join("@mod.moth"),
+        package_root.join("@package.moth"),
         "$export\nadd |a I32, b I32| -> I32:\n    return a + b\n;\n",
     )
     .expect("should write helper package root");
@@ -2109,7 +2109,7 @@ fn direct_selection_resolves_source_package_facade() {
             match resolved {
                 ResolvedDependency::SourcePackageSurface { root_file, .. } => {
                     assert!(
-                        root_file.ends_with("helper/@mod.moth"),
+                        root_file.ends_with("helper/@package.moth"),
                         "expected the helper package facade root file, got {:?}",
                         root_file
                     );
@@ -2136,7 +2136,7 @@ fn underscore_prefixed_source_package_prefix_precedes_hidden_directory_rejection
     fs::write(src.join("@entry.moth"), "@_vendor/toolkit add\n[:entry]\n")
         .expect("should write entry");
     fs::write(
-        package_root.join("@mod.moth"),
+        package_root.join("@package.moth"),
         "$export\nadd |a I32, b I32| -> I32:\n    return a + b\n;\n",
     )
     .expect("should write toolkit package root");
@@ -2184,7 +2184,7 @@ fn underscore_prefixed_source_package_prefix_precedes_hidden_directory_rejection
             match resolved {
                 ResolvedDependency::SourcePackageSurface { root_file, .. } => {
                     assert!(
-                        root_file.ends_with("toolkit/@mod.moth"),
+                        root_file.ends_with("toolkit/@package.moth"),
                         "expected the toolkit package facade root file, got {:?}",
                         root_file
                     );

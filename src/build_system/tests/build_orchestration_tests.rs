@@ -524,7 +524,7 @@ fn build_project_late_backend_infrastructure_discards_frontend_warnings() {
     .expect("should write project config");
     fs::write(src.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
-        package.join("@mod.moth"),
+        package.join("@package.moth"),
         "$export\nwarn || -> String:\n    value ~= \"hello\"\n    result ~= \"unset\"\n    if value is:\n        \"one\" => ~result = \"one\"\n        \"one\" => ~result = \"one\"\n        else => ~result = \"other\"\n    ;\n    return result\n;\n",
     )
     .expect("should write warning package root");

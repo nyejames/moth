@@ -74,14 +74,19 @@ const BUILTIN_PACKAGES_DIR: &str = "packages";
 /// WHY: released binaries run without the checkout, so the installed copy must win. The choice
 ///      is made once for the whole set, never per package or file, so an installation can't mix
 ///      its files with another version's from the checkout. Every registration, the
-///      official-root check and asset reads join onto this one path.
+///      official-root check and asset reads join onto this one path. The selected directory is
+///      canonicalized once because package discovery canonicalizes each registered root before
+///      classifying it; an installed `packages/` symlink would otherwise make its own shipped
+///      package roots look like third-party roots.
 pub(crate) static BUILTIN_PACKAGES_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
-    std::env::current_exe()
+    let installed = std::env::current_exe()
         .and_then(fs::canonicalize)
         .ok()
         .and_then(|executable| Some(executable.parent()?.join(BUILTIN_PACKAGES_DIR)))
-        .filter(|installed| installed.is_dir())
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(BUILTIN_PACKAGES_DIR))
+        .filter(|installed| installed.is_dir());
+    let selected = installed
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(BUILTIN_PACKAGES_DIR));
+    fs::canonicalize(&selected).unwrap_or(selected)
 });
 
 /// Explains a failed read below [`BUILTIN_PACKAGES_ROOT`] as a damaged package set.

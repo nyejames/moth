@@ -301,9 +301,13 @@ impl<T> ModuleRootFiles<T> {
         }
     }
 
-    /// The role of the package-facing public surface: support when present, otherwise normal.
+    /// The structural role of a module's package-facing public surface: support when present,
+    /// otherwise normal.
     ///
-    /// An entry-only inventory reports `None` because an entry root publishes no facade.
+    /// This fallback describes ordinary structural modules and project package surfaces. A
+    /// registered Moth-source package always requires its support facade, so normal-only package
+    /// roots never reach this selection. An entry-only inventory reports `None` because an entry
+    /// root publishes no facade.
     pub(crate) fn public_surface_role(&self) -> Option<ModuleRootRole> {
         if self.support.is_some() {
             Some(ModuleRootRole::Support)

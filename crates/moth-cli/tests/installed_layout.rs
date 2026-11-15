@@ -111,7 +111,7 @@ fn install_marked_packages(root: &Path) -> PathBuf {
     let packages = root.join("install/packages");
     copy_tree(Path::new(REPOSITORY_PACKAGES), &packages);
     for (relative, marker) in [
-        ("styles/@mod.moth", INSTALLED_MARKER),
+        ("styles/@package.moth", INSTALLED_MARKER),
         ("web/canvas/canvas.js", INSTALLED_CANVAS_MARKER),
     ] {
         let path = packages.join(relative);
@@ -164,9 +164,20 @@ fn assert_damaged_package_set(report: &str, missing: &str) {
 #[test]
 fn incomplete_installation_never_borrows_a_core_package_from_the_checkout() {
     // `packages/` exists, so it is the whole package set, but `@html` is missing from it: first
-    // as a directory, then as its facade. The checkout still has `packages/html`; using it would
-    // mix two versions.
-    for keep_empty_html_directory in [false, true] {
+    // as a directory, then as its `@package.moth` facade. The checkout still has `packages/html`;
+    // using it would mix two versions.
+    #[derive(Clone, Copy)]
+    enum InstalledHtmlState {
+        Absent,
+        EmptyDirectory,
+        NormalRootOnly,
+    }
+
+    for state in [
+        InstalledHtmlState::Absent,
+        InstalledHtmlState::EmptyDirectory,
+        InstalledHtmlState::NormalRootOnly,
+    ] {
         let root = tempdir().expect("temporary directory should be created");
         let executable = install_executable(root.path());
         let packages = root.path().join("install/packages");
@@ -174,8 +185,19 @@ fn incomplete_installation_never_borrows_a_core_package_from_the_checkout() {
             &Path::new(REPOSITORY_PACKAGES).join("styles"),
             &packages.join("styles"),
         );
-        if keep_empty_html_directory {
-            fs::create_dir_all(packages.join("html")).expect("html directory should be created");
+        match state {
+            InstalledHtmlState::Absent => {}
+            InstalledHtmlState::EmptyDirectory => {
+                fs::create_dir_all(packages.join("html"))
+                    .expect("html directory should be created");
+            }
+            InstalledHtmlState::NormalRootOnly => {
+                fs::create_dir_all(packages.join("html"))
+                    .expect("html directory should be created");
+                // A normal `@mod.moth` is an internal scope, never the package facade.
+                fs::write(packages.join("html/@mod.moth"), "")
+                    .expect("html normal root should be written");
+            }
         }
         let project = write_project(root.path());
 
@@ -189,7 +211,59 @@ fn incomplete_installation_never_borrows_a_core_package_from_the_checkout() {
 
         assert_eq!(output.status.code(), Some(1), "report: {report}");
         assert_damaged_package_set(&report, "html");
+        if matches!(state, InstalledHtmlState::NormalRootOnly) {
+            assert!(
+                report.contains("@package.moth"),
+                "a shipped package without a support facade must name @package.moth: {report}"
+            );
+        }
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_installed_package_set_reports_its_own_normal_only_package_as_damaged() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempdir().expect("temporary directory should be created");
+    let executable = install_executable(root.path());
+    // The installed set is addressed through a symlink. Package discovery canonicalizes each
+    // registered root, so the damaged-set comparison must use the same physical spelling.
+    let packages = root.path().join("shipped-packages");
+    fs::create_dir_all(&packages).expect("shipped package directory should be created");
+    copy_tree(
+        &Path::new(REPOSITORY_PACKAGES).join("styles"),
+        &packages.join("styles"),
+    );
+    fs::create_dir_all(packages.join("html")).expect("html directory should be created");
+    // A normal-only root is an internal scope, never the package facade.
+    fs::write(packages.join("html/@mod.moth"), "").expect("html normal root should be written");
+    symlink(&packages, root.path().join("install/packages"))
+        .expect("installed package set symlink should be created");
+
+    let project = root.path().join("site");
+    fs::create_dir_all(&project).expect("project directory should be created");
+    fs::write(
+        project.join("@config.moth"),
+        "project #= (\n    name = \"symlinked\",\n)\nhtml #= ()\n",
+    )
+    .expect("config should be written");
+    fs::write(project.join("@entry.moth"), "[:page]\n").expect("entry should be written");
+
+    let (output, report) = run(
+        &executable,
+        &[
+            "check",
+            project.to_str().expect("project path should be UTF-8"),
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(1), "report: {report}");
+    assert_damaged_package_set(&report, "html");
+    assert!(
+        report.contains("@package.moth"),
+        "a shipped package without a support facade must name @package.moth: {report}"
+    );
 }
 
 #[test]

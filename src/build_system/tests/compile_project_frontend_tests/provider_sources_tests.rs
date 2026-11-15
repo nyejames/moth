@@ -889,7 +889,7 @@ fn linked_module_js_lowering_is_observed_separately() {
     )
     .expect("should write page");
     fs::write(
-        package_root.join("@mod.moth"),
+        package_root.join("@package.moth"),
         "$export\nhelper || -> I32:\n    return 7\n;\n",
     )
     .expect("should write package module");

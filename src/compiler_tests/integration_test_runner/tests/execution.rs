@@ -547,7 +547,7 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
                 .boundary
                 .successful_artefacts_in_module_id_order()
                 .any(|artefact| {
-                    artefact.module.metadata.entry.is_none() && artefact.normal_interface.is_some()
+                    artefact.module.metadata.entry.is_none() && artefact.support_interface.is_some()
                 }),
             "the HTML package facade must remain in its own compilation boundary"
         );

@@ -197,7 +197,7 @@ fn single_file_without_source_package_dependencies_skips_registered_package_mate
     let package_root = dir.join("packages/unused");
     fs::create_dir_all(&package_root).expect("should create registered package root");
     fs::write(
-        package_root.join("@mod.moth"),
+        package_root.join("@package.moth"),
         "$export\nunused || -> I32:\n    return missing_package_value\n;\n",
     )
     .expect("should write semantically invalid unused package");
@@ -383,13 +383,13 @@ fn single_file_rejects_source_package_moth_folder_collision() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    // Source-backed package with one valid normal module root plus a .moth/folder collision.
+    // Source-backed package with one valid support facade plus a .moth/folder collision.
     let widget_lib = dir.join("lib").join("widgets");
     fs::create_dir_all(widget_lib.join("widget")).expect("should create widget folder sibling");
     fs::write(widget_lib.join("widget.moth"), "value #= 1\n")
         .expect("should write colliding widget.moth");
-    fs::write(widget_lib.join("@mod.moth"), "value #= 2\n")
-        .expect("should write valid normal module root");
+    fs::write(widget_lib.join("@package.moth"), "value #= 2\n")
+        .expect("should write valid support facade root");
 
     // Main single file that does NOT import the ambiguous source-backed package path.
     let main_path = dir.join("main.moth");
@@ -434,7 +434,7 @@ fn single_file_project_cutoff_after_package_work_refuses_module_admission() {
     let package_root = dir.join("packages/shared");
     fs::create_dir_all(&package_root).expect("should create registered package root");
     fs::write(
-        package_root.join("@mod.moth"),
+        package_root.join("@package.moth"),
         "$export\nrender || -> I32:\n    return shared_missing\n;\n",
     )
     .expect("should write diagnostically invalid package");

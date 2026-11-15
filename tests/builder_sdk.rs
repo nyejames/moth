@@ -462,7 +462,7 @@ impl ProjectBuilder for ByteParameterBuilder {
 fn write_ui_paired_package(package_root: &Path) {
     fs::write(
         package_root.join("@mod.moth"),
-        "normal_value #= \"normal\"\n",
+        "$export\nnormal_value #= \"normal\"\n",
     )
     .expect("should write normal package root");
     fs::write(
@@ -488,13 +488,25 @@ fn write_ui_support_package(package_root: &Path) {
     .expect("should write shared package helpers");
 }
 
-/// Writes a `@ui` package root whose only module exports `greet`.
+/// Writes a `@ui` package root whose only module publishes `greet` through its support facade.
 fn write_ui_package(package_root: &Path) {
+    fs::write(
+        package_root.join("@package.moth"),
+        "$export\ngreet || -> I32:\n    return 1\n;\n",
+    )
+    .expect("should write package module");
+}
+
+/// Writes a `@ui` package root that publishes only a normal `@mod.moth` facade.
+///
+/// A registered Moth-source package must publish its external API through `@package.moth`, so the
+/// normal root alone is insufficient even though ordinary modules may use it.
+fn write_ui_normal_only_package(package_root: &Path) {
     fs::write(
         package_root.join("@mod.moth"),
         "$export\ngreet || -> I32:\n    return 1\n;\n",
     )
-    .expect("should write package module");
+    .expect("should write normal-only package root");
 }
 
 #[test]
@@ -572,6 +584,148 @@ fn builder_registered_paired_source_package_publishes_its_support_interface() {
 
     build_project(&builder, BuildRequest::new(project_dir.path())).expect(
         "external consumers must receive the paired package support interface, not its normal root",
+    );
+}
+
+#[test]
+fn builder_registered_normal_only_source_package_is_rejected() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(project_dir.path(), UI_IMPORT_PAGE_SOURCE, false);
+    let ui_dir = tempfile::tempdir().expect("should create package directory");
+    write_ui_normal_only_package(ui_dir.path());
+    let builder = UiPackageBuilder {
+        ui_root: ui_dir.path().to_path_buf(),
+    };
+
+    let error = build_project(&builder, BuildRequest::new(project_dir.path()))
+        .expect_err("a registered package with only @mod.moth must not publish a package surface");
+    assert_eq!(error.kind(), ErrorKind::Compilation);
+    let messages = error.messages().join("\n");
+    assert!(
+        messages.contains("@package.moth"),
+        "the missing-facade diagnostic must name @package.moth: {messages}"
+    );
+}
+
+#[test]
+fn builder_registered_paired_source_package_does_not_expose_its_normal_root() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(
+        project_dir.path(),
+        "@ui normal_value\nvalue = normal_value\n",
+        false,
+    );
+    let ui_dir = tempfile::tempdir().expect("should create package directory");
+    write_ui_paired_package(ui_dir.path());
+    let builder = UiPackageBuilder {
+        ui_root: ui_dir.path().to_path_buf(),
+    };
+
+    let error = build_project(&builder, BuildRequest::new(project_dir.path()))
+        .expect_err("external consumers must never observe a paired package's normal root");
+    assert_eq!(error.kind(), ErrorKind::Compilation);
+    let messages = error.messages().join("\n");
+    assert!(
+        messages.contains("normal_value"),
+        "the diagnostic must name the unexposed declaration: {messages}"
+    );
+}
+
+#[test]
+fn project_local_support_folder_is_visible_without_registration() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(
+        project_dir.path(),
+        "@markup greeting\nvalue = greeting()\n",
+        false,
+    );
+    // A project copying a package folder gains ordinary project-local support visibility. It is
+    // not registered as a Builder or Core package and needs no builder definition entry.
+    let markup_root = project_dir.path().join("markup");
+    fs::create_dir_all(&markup_root).expect("should create copied support folder");
+    fs::write(
+        markup_root.join("@package.moth"),
+        "$export\n@impl greeting\n",
+    )
+    .expect("should write copied support facade");
+    fs::write(
+        markup_root.join("impl.moth"),
+        "greeting || -> String:\n    return \"local\"\n;\n",
+    )
+    .expect("should write copied support helper");
+
+    let builder = RecordingBuildBuilder {
+        build_ran: Cell::new(false),
+    };
+    build_project(&builder, BuildRequest::new(project_dir.path())).expect(
+        "a copied project-local support folder must resolve as an ordinary support package",
+    );
+    assert!(
+        builder.build_ran.get(),
+        "a project-local support import must not prevent the build step"
+    );
+}
+
+#[test]
+fn registered_package_private_helper_stays_private() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(project_dir.path(), "@ui hidden\nvalue = hidden\n", false);
+    let ui_dir = tempfile::tempdir().expect("should create package directory");
+    fs::write(
+        ui_dir.path().join("@package.moth"),
+        "$export\n@impl greeting\n",
+    )
+    .expect("should write support facade");
+    fs::write(
+        ui_dir.path().join("impl.moth"),
+        "hidden #= \"private\"\n\ngreeting #= hidden\n",
+    )
+    .expect("should write referenced private helper");
+    let builder = UiPackageBuilder {
+        ui_root: ui_dir.path().to_path_buf(),
+    };
+
+    let error = build_project(&builder, BuildRequest::new(project_dir.path()))
+        .expect_err("a package's private helper must not join its public facade");
+    assert_eq!(error.kind(), ErrorKind::Compilation);
+    let messages = error.messages().join("\n");
+    assert!(
+        messages.contains("hidden"),
+        "the unexported-helper diagnostic must name the private declaration: {messages}"
+    );
+}
+
+#[test]
+fn project_local_support_folder_private_helper_stays_private() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(
+        project_dir.path(),
+        "@markup hidden\nvalue = hidden\n",
+        false,
+    );
+    let markup_root = project_dir.path().join("markup");
+    fs::create_dir_all(&markup_root).expect("should create copied support folder");
+    fs::write(
+        markup_root.join("@package.moth"),
+        "$export\n@impl greeting\n",
+    )
+    .expect("should write copied support facade");
+    fs::write(
+        markup_root.join("impl.moth"),
+        "hidden #= \"private\"\n\ngreeting #= hidden\n",
+    )
+    .expect("should write referenced copied private helper");
+    let builder = RecordingBuildBuilder {
+        build_ran: Cell::new(false),
+    };
+
+    let error = build_project(&builder, BuildRequest::new(project_dir.path()))
+        .expect_err("a copied support folder must not expose private helpers");
+    assert_eq!(error.kind(), ErrorKind::Compilation);
+    let messages = error.messages().join("\n");
+    assert!(
+        messages.contains("hidden"),
+        "the unexported-helper diagnostic must name the private declaration: {messages}"
     );
 }
 

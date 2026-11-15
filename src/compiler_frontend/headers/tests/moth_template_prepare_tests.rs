@@ -493,8 +493,8 @@ impl MothTemplateScopeFixture {
         let entry_root = fs::canonicalize(entry_root).expect("entry root should canonicalize");
         let html_root = fs::canonicalize(html_root).expect("HTML root should canonicalize");
         let styles_root = fs::canonicalize(styles_root).expect("Styles root should canonicalize");
-        let html_root_file = html_root.join("@mod.moth");
-        let styles_root_file = styles_root.join("@mod.moth");
+        let html_root_file = html_root.join("@package.moth");
+        let styles_root_file = styles_root.join("@package.moth");
 
         // The miniature `@html` root deliberately includes non-constant exports so the
         // Moth template implicit scope proves it is filtering by source declaration kind.

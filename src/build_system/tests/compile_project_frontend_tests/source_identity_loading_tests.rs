@@ -501,7 +501,7 @@ fn directory_frontend_registers_package_and_project_boundaries() {
     .expect("should write config");
     fs::write(dir.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
-        package_root.join("@mod.moth"),
+        package_root.join("@package.moth"),
         "$export\nhelper || -> I32:\n    return 7\n;\n",
     )
     .expect("should write package module");

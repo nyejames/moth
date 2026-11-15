@@ -888,13 +888,13 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
                     project_root.join("binding.js"),
                     "/** @moth.sig provider_value || -> String */\nexport function projectValue() { return \"project:17\"; }\n",
                 ),
-                (package_root.join("@mod.moth"), package_root_source),
+                (package_root.join("@package.moth"), package_root_source),
                 (
                     package_root.join("providers/binding.js"),
                     "/** @moth.sig provider_value || -> String */\nexport function packageValue() { return \"package:29\"; }\n",
                 ),
                 (
-                    marker_root.join("@mod.moth"),
+                    marker_root.join("@package.moth"),
                     "$export\nmarker #= \"marker:43\"\n",
                 ),
             ];

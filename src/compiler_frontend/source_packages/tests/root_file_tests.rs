@@ -188,17 +188,17 @@ fn prepared_roots_preserve_canonical_prefix_order() {
         (
             "zeta".to_string(),
             PathBuf::from("/lib/zeta"),
-            PathBuf::from("/lib/zeta/@mod.moth"),
+            PathBuf::from("/lib/zeta/@package.moth"),
         ),
         (
             "alpha".to_string(),
             PathBuf::from("/lib/alpha"),
-            PathBuf::from("/lib/alpha/@mod.moth"),
+            PathBuf::from("/lib/alpha/@package.moth"),
         ),
         (
             "middle".to_string(),
             PathBuf::from("/lib/middle"),
-            PathBuf::from("/lib/middle/@mod.moth"),
+            PathBuf::from("/lib/middle/@package.moth"),
         ),
     ];
 

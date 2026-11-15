@@ -162,7 +162,7 @@ fn source_package_dependency_resolves_to_package_root() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("@mod.moth"), b"").unwrap();
+    fs::write(package_root.join("@package.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
@@ -217,7 +217,7 @@ fn nested_source_package_prefix_matches_whole_components_and_strips_them() {
         PreparedSourcePackageRoots::from_entries(vec![(
             "web/site".into(),
             nested.clone(),
-            nested.join("@mod.moth"),
+            nested.join("@package.moth"),
         )]),
         &SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
@@ -299,7 +299,7 @@ fn source_package_prefix_takes_priority_over_entry_root() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("@mod.moth"), b"").unwrap();
+    fs::write(package_root.join("@package.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     // Also create a conflicting file under entry root.
     fs::create_dir_all(entry_root.join("helper")).unwrap();
@@ -505,7 +505,7 @@ fn canonicalized_source_package_file_resolves_to_package_prefixed_logical_path()
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("@mod.moth"), b"").unwrap();
+    fs::write(package_root.join("@package.moth"), b"").unwrap();
     fs::write(package_root.join("helpers.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
@@ -550,7 +550,7 @@ fn package_scan_root_name_is_not_package_prefix() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("@mod.moth"), b"").unwrap();
+    fs::write(package_root.join("@package.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     fs::create_dir_all(entry_root.join("lib")).unwrap();
     fs::write(entry_root.join("lib/thing.moth"), b"").unwrap();
@@ -601,7 +601,7 @@ fn package_direct_child_is_package_prefix() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("@mod.moth"), b"").unwrap();
+    fs::write(package_root.join("@package.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
@@ -693,7 +693,7 @@ fn source_package_prefix_wins_consistently() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("@mod.moth"), b"").unwrap();
+    fs::write(package_root.join("@package.moth"), b"").unwrap();
     fs::write(package_root.join("utils.moth"), b"").unwrap();
     // Also create a conflicting file under entry root.
     fs::create_dir_all(entry_root.join("helper")).unwrap();
@@ -888,7 +888,7 @@ fn dependency_escape_package_root_rejected() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(&package_root).unwrap();
-    fs::write(package_root.join("@mod.moth"), b"").unwrap();
+    fs::write(package_root.join("@package.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let mut source_packages = SourcePackageRegistry::new();
@@ -1229,7 +1229,7 @@ fn resolver_with_prepared_source_package_roots(roots: &[(&str, &str)]) -> Projec
         (
             (*prefix).to_owned(),
             PathBuf::from(root),
-            PathBuf::from(root).join("@mod.moth"),
+            PathBuf::from(root).join("@package.moth"),
         )
     });
 

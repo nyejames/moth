@@ -708,7 +708,7 @@ impl ModuleNamespaceSet {
         for (dependency_prefix, package_index) in self.package_boundary_indexes.iter() {
             if dependency_prefix == provider_path {
                 return package_index
-                    .root_file_for_entry_root()
+                    .package_public_root_file()
                     .map(|root_file| (dependency_prefix, root_file));
             }
         }

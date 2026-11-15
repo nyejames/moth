@@ -802,7 +802,7 @@ fn an_optional_host_type_crosses_both_conversion_directions() {
 fn a_host_import_reached_through_a_linked_source_package_module_is_included() {
     let package_dir = tempfile::tempdir().expect("should create package directory");
     fs::write(
-        package_dir.path().join("@mod.moth"),
+        package_dir.path().join("@package.moth"),
         "@platform has_prefix\n\n$export\nscore || -> Bool:\n    return has_prefix(\"pre\", \"prefix\")\n;\n",
     )
     .expect("should write the source package module");
@@ -941,7 +941,7 @@ second |text String| -> Bool:
 fn a_binding_reached_from_the_facade_and_a_linked_module_appears_once() {
     let package_dir = tempfile::tempdir().expect("should create package directory");
     fs::write(
-        package_dir.path().join("@mod.moth"),
+        package_dir.path().join("@package.moth"),
         "@platform has_prefix\n\n$export\nscore || -> Bool:\n    return has_prefix(\"pre\", \"prefix\")\n;\n",
     )
     .expect("should write the source package module");
@@ -1019,7 +1019,7 @@ fn a_reexported_facade_function_roots_the_declaration_origin_host_calls() {
 fn a_linked_module_call_joins_the_facades_host_imports() {
     let package_dir = tempfile::tempdir().expect("should create package directory");
     fs::write(
-        package_dir.path().join("@mod.moth"),
+        package_dir.path().join("@package.moth"),
         "@platform has_prefix\n\n$export\nscore || -> Bool:\n    return has_prefix(\"pre\", \"prefix\")\n;\n",
     )
     .expect("should write the source package module");

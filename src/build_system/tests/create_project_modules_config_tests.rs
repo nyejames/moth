@@ -1485,7 +1485,7 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("src/@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("lib/html/@mod.moth"), "foo #= 1\n").expect("should write root");
-    fs::write(root.join("builder/html/@mod.moth"), "foo #= 1\n")
+    fs::write(root.join("builder/html/@package.moth"), "foo #= 1\n")
         .expect("should write builder package root");
     fs::write(
         root.join("@config.moth"),

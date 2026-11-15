@@ -1223,19 +1223,21 @@ impl SourceTreeIndex {
         &self.package_identity
     }
 
-    /// The canonical root file of the module rooted at this boundary's entry root.
+    /// The canonical `@package.moth` support facade of the module rooted at this package
+    /// boundary's entry root.
     ///
-    /// WHAT: for a package boundary index, the package's selected public-surface root file.
-    /// A support root is the external surface when present; otherwise the normal root is the
-    /// public surface. Returns `None` when no module is rooted at the entry root.
+    /// WHAT: the registered package's selected public-surface root file. Stage 0 package-root
+    /// classification requires a directly contained support facade, so a co-located `@mod.moth`
+    /// is only an internal normal-position scope and never the package interface. Returns `None`
+    /// when no module is rooted at the entry root.
     /// WHY: the package-boundary index owner derives the resolver's narrow package-root view
     /// from this indexed fact instead of a separate `read_dir` or root-file discovery pass.
-    pub(crate) fn root_file_for_entry_root(&self) -> Option<&Path> {
+    pub(crate) fn package_public_root_file(&self) -> Option<&Path> {
         let module_id = self
             .module_identities
             .module_id_for_directory(&self.entry_root)?;
         let record = self.module_identities.record(module_id);
-        record.public_root_file()
+        record.support_root_file()
     }
 
     /// The role-keyed root lookup derived from the durable identity table.
@@ -1579,28 +1581,28 @@ fn aliased_root_files_error(
 
 /// Classify the roots at one source-package root directory.
 ///
-/// A package may carry any combination of normal, support and entry roots, but it needs at
-/// least one API facade root. A support root beside a normal root is the external package
-/// surface; the normal root remains the internal interface. Missing roots and aliased roots keep
-/// package-specific typed diagnostics, except in a compiler-shipped package, where a missing
-/// facade means the installed package set is incomplete.
+/// Every registered Moth-source package publishes its external API through a directly contained
+/// `@package.moth`. A co-located `@mod.moth` keeps a distinct internal normal-position scope, while
+/// `@entry.moth` only contributes a dormant entry and never a package surface. Missing or aliased
+/// roots keep package-specific typed diagnostics, except in a compiler-shipped package, where a
+/// missing support facade means the installed package set is incomplete.
 fn classify_package_root_directory(
     directory: &Path,
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
     package_prefix: &str,
     string_table: &mut StringTable,
 ) -> Result<ClassifiedDirectoryRoots, PreparedFailure> {
-    // A registered source package is importable, so it needs at least one API facade root.
-    // An entry-only package root has no public surface and cannot satisfy the package contract.
-    let has_facade = directory_roots
+    // The support facade is the only package-facing surface. A normal root alone is an internal
+    // module scope, and an entry-only root publishes no importable API at all.
+    let has_support_facade = directory_roots
         .iter()
-        .any(|root| matches!(root.role, ModuleRootRole::Normal | ModuleRootRole::Support));
-    if !has_facade {
+        .any(|root| root.role == ModuleRootRole::Support);
+    if !has_support_facade {
         if let Some(report) = damaged_package_set_report(directory) {
             return Err(InfrastructureFailure::filesystem(
                 CompilerStage::ProjectBuildAssembly,
                 directory,
-                format!("Source package @{package_prefix} has no API facade root. {report}"),
+                format!("Source package @{package_prefix} has no '@package.moth' support facade root. {report}"),
             )
             .into());
         }

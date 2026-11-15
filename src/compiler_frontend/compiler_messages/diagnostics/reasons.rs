@@ -475,6 +475,10 @@ pub enum InvalidConfigReason {
         prefix: StringId,
         entry_folder: StringId,
     },
+    /// A registered Moth-source package root lacks its required `@package.moth` support facade.
+    ///
+    /// A co-located `@mod.moth` stays an internal normal-position scope and `@entry.moth` alone
+    /// publishes no package surface, so neither can satisfy the package contract.
     SourcePackageMissingRoot {
         prefix: StringId,
         root: StringId,

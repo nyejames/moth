@@ -14,17 +14,19 @@ use crate::projects::settings::{CONFIG_FILE_NAME, LANGUAGE_SOURCE_SUFFIX};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-/// Immutable source-backed package roots and their prepared public-surface files.
+/// Immutable source-backed package roots and their prepared package surfaces.
 ///
-/// WHAT: carries canonical filesystem roots and their validated direct-child public-surface root
-/// files from Stage 0 into path resolution and header preparation. Missing, multiple and
-/// unreadable roots never enter this successful view.
+/// WHAT: carries canonical filesystem roots and their validated direct-child `@package.moth`
+/// support facades from Stage 0 into path resolution and header preparation. Every registered
+/// Moth-source package publishes its external API through that facade; a co-located `@mod.moth`
+/// remains an internal scope. Missing, multiple and unreadable roots never enter this successful
+/// view.
 ///
 /// Both maps use `BTreeMap` so that every public iteration surface preserves one canonical
 /// dependency-prefix order. Callers never observe `HashMap` iteration order from roots or root-file
 /// records.
 /// WHY: resolver construction must consume filesystem preparation rather than rediscovering
-///     source-backed package roots or public surfaces.
+///     source-backed package roots or support facades.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PreparedSourcePackageRoots {
     roots: BTreeMap<String, PathBuf>,

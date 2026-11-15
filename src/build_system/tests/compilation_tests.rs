@@ -1395,7 +1395,7 @@ fn canonical_tail_retains_donor_only_package_identity() {
     let source_root = project_directory.path().join("src");
     fs::create_dir_all(&source_root).expect("the requester source root should exist");
     let requester_path = source_root.join("@entry.moth");
-    let donor_path = donor_directory.path().join("@mod.moth");
+    let donor_path = donor_directory.path().join("@package.moth");
     const REQUESTER: &str = "@pkg outer\nvalue I32 = outer(1)\n";
     const DONOR: &str = "inner type U |text String, result U| -> U:\n    return result\n;\n$export\nouter type T |value T| -> I32:\n    return inner(value, 1)\n;\n";
     fs::write(&requester_path, REQUESTER).expect("the requester should be written");
@@ -1863,15 +1863,15 @@ fn generated_sidecar_warning_frontend(
     let package_identity = StablePackageIdentity::source_package(PackageOrigin::Builder, "warnpkg");
     let package_origin = StableModuleOriginIdentity::from_portable_path(
         package_identity.clone(),
-        "@mod.moth".to_owned(),
-        ModuleRootRole::Normal,
+        "@package.moth".to_owned(),
+        ModuleRootRole::Support,
     );
     let mut package_path_interner = PathInternerBuilder::new();
     let _staged_package_boundary = publish_generated_sidecar_boundary(
         warning_owner,
         &mut package_path_interner,
         package_origin,
-        "@mod.moth",
+        "@package.moth",
         SuccessfulWarningBoundary::SourcePackage(0),
         Some(package_identity),
         "generated_package.moth",
@@ -1891,7 +1891,7 @@ fn generated_sidecar_warning_frontend(
     std::fs::write(source_root.join("@entry.moth"), "value = 1\n")
         .expect("project page should be written");
     std::fs::write(
-        package_root.join("@mod.moth"),
+        package_root.join("@package.moth"),
         r#"shell #= [:<span>[$slot]</span>]
 unused_insert #= [$in unused: unused]
 
@@ -1993,11 +1993,32 @@ fn publish_generated_sidecar_boundary(
                 root_activity: ModuleRootActivity::default(),
             },
         );
-        compiled
-            .normal_interface
-            .as_mut()
-            .expect("the fixture result carries a normal facade")
-            .module_origin = origin.clone();
+        // The fixture builder publishes a package facade through its support surface. Generated
+        // boundaries for ordinary project roots keep the normal surface.
+        let fixture_surface = origin.role();
+        let expected_normal_origin = (fixture_surface
+            == crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal)
+            .then_some(&origin);
+        let expected_support_origin = (fixture_surface
+            == crate::compiler_frontend::semantic_identity::ModuleRootRole::Support)
+            .then_some(&origin);
+        match fixture_surface {
+            crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal => {
+                compiled
+                    .normal_interface
+                    .as_mut()
+                    .expect("the fixture result carries a normal facade")
+                    .module_origin = origin.clone();
+            }
+            crate::compiler_frontend::semantic_identity::ModuleRootRole::Support => {
+                let mut interface = compiled.normal_interface.take().expect(
+                    "the fixture result carries an interface to move to the support surface",
+                );
+                interface.module_origin = origin.clone();
+                compiled.support_interface = Some(interface);
+            }
+            role => panic!("generated-boundary fixtures do not model the {role:?} role"),
+        }
         let mut generated_records = Vec::new();
         let mut generated_warning_bags = Vec::new();
         let sidecar_name = format!("{warning_name}_sidecar");
@@ -2025,8 +2046,8 @@ fn publish_generated_sidecar_boundary(
             &mut materialisations,
             &mut resource_inputs,
             ModuleId::from_index(0),
-            Some(&origin),
-            None,
+            expected_normal_origin,
+            expected_support_origin,
             compiled,
             DiagnosticBag::new(),
             generated_warning_bags,

@@ -247,7 +247,7 @@ pub(crate) fn invalid_config_message(
             string_table.resolve(*prefix),
         ),
         InvalidConfigReason::SourcePackageMissingRoot { prefix, root } => format!(
-            "Source-backed package '@{}' at '{}' is missing an API facade root file. Every source-backed package must contain '@mod.moth' or '@package.moth'; '@entry.moth' alone publishes no importable surface.",
+            "Source-backed package '@{}' at '{}' is missing its required '@package.moth' support facade. Every registered source-backed package publishes its external API through a directly contained '@package.moth'; '@mod.moth' alone is an internal normal-position scope and '@entry.moth' alone publishes no importable surface.",
             string_table.resolve(*prefix),
             string_table.resolve(*root),
         ),

@@ -606,8 +606,8 @@ impl CompiledSourcePackage {
 
         match self.boundary.modules.slot(self.root_module_id)? {
             ProviderSlot::Successful(_) => {
-                // Discovery rejects a registered package root without an API facade, so a
-                // successful slot always publishes the selected public-surface interface.
+                // Discovery rejects a registered package root without a `@package.moth` support
+                // facade, so a successful slot always publishes that package interface.
                 let interface = self.root_interface()?;
                 if Some(&interface.module_origin) != node.public_surface_origin() {
                     return Err(InfrastructureFailure::internal(
@@ -673,7 +673,7 @@ impl CompiledSourcePackage {
             InfrastructureFailure::internal(
                 CompilerStage::ProjectBuildAssembly,
                 format!(
-                    "Source package @{} root ModuleId {} has no public facade root",
+                    "Source package @{} root ModuleId {} has no support facade root",
                     self.package_prefix(),
                     self.root_module_id.index()
                 ),

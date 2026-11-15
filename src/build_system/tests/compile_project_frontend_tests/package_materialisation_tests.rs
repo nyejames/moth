@@ -49,7 +49,7 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
         fs::create_dir_all(&warning_package_root)
             .expect("should create earlier warning source package root");
         fs::write(
-            warning_package_root.join("@mod.moth"),
+            warning_package_root.join("@package.moth"),
             warning_package_source,
         )
         .expect("should write earlier warning source package");
@@ -59,7 +59,7 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
             "project #= (name = \"docs\")\nhtml #= ()\n",
         )
         .expect("should write project config");
-        fs::write(package_root.join("@mod.moth"), &package_source)
+        fs::write(package_root.join("@package.moth"), &package_source)
             .expect("should write invalid source-package config default");
 
         let entry = if direct_file {
@@ -120,7 +120,7 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
             .expect("invalid package default should retain its authored source position");
         assert_eq!(
             portable_path_text(&position.path),
-            "@mod.moth",
+            "@package.moth",
             "{entry_mode}: diagnostic paths are relative to their owning package boundary"
         );
         assert_eq!(position.line, default_line, "{entry_mode}");
@@ -151,7 +151,7 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     )
     .expect("should write project source contract");
     fs::write(
-        package.join("@mod.moth"),
+        package.join("@package.moth"),
         "$config\nenabled #Bool\n$export\nhelper || -> I32:\n    return 2\n;\n",
     )
     .expect("should write source-package contract");
@@ -445,12 +445,12 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     .expect("should write config");
     fs::write(dir.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
-        first_package.join("@mod.moth"),
+        first_package.join("@package.moth"),
         "$export\nfirst || -> I32:\n    return missing_first_package_value\n;\n",
     )
     .expect("should write first diagnosed package");
     fs::write(
-        second_package.join("@mod.moth"),
+        second_package.join("@package.moth"),
         "$export\nsecond || -> I32:\n    return missing_second_package_value\n;\n",
     )
     .expect("should write second diagnosed package");
@@ -497,13 +497,13 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     assert!(
         diagnosed_paths
             .iter()
-            .any(|path| path.ends_with("packages/first/@mod.moth")),
+            .any(|path| path.ends_with("packages/first/@package.moth")),
         "first package diagnostic should be retained: {diagnosed_paths:?}"
     );
     assert!(
         diagnosed_paths
             .iter()
-            .any(|path| path.ends_with("packages/second/@mod.moth")),
+            .any(|path| path.ends_with("packages/second/@package.moth")),
         "later independent package should still compile: {diagnosed_paths:?}"
     );
 }
@@ -527,12 +527,12 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
     fs::write(src.join("@entry.moth"), "@broken run\nvalue = run()\n")
         .expect("should write blocked project consumer");
     fs::write(
-        package.join("@mod.moth"),
+        package.join("@package.moth"),
         "$export\nrun || -> I32:\n    return missing_package_value\n;\n",
     )
     .expect("should write diagnosed source package");
     fs::write(
-        warning_package.join("@mod.moth"),
+        warning_package.join("@package.moth"),
         "$export\nwarn || -> String:\n    value ~= \"hello\"\n    result ~= \"unset\"\n    if value is:\n        \"one\" => ~result = \"one\"\n        \"one\" => ~result = \"one\"\n        else => ~result = \"other\"\n    ;\n    return result\n;\n",
     )
     .expect("should write successful warning package");
@@ -577,7 +577,7 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         let position = DiagnosticRenderContext::for_report(report)
             .site_position(view.primary_site())
             .expect("package diagnostic should retain its authored source position");
-        assert!(position.path.ends_with("@mod.moth"));
+        assert!(position.path.ends_with("@package.moth"));
         assert!(position.line.contains("return missing_package_value"));
         let rendered = render_compilation_result_html(&result, &dir);
         assert!(
@@ -1597,7 +1597,7 @@ fn imported_generic_materialisation_preserves_donor_identity_with_colliding_sour
     let inner_name = String::from("inner");
     let parameter_name = "p".repeat(1024);
     let project_path = dir.join("src/@entry.moth");
-    let package_path = package_root.join("@mod.moth");
+    let package_path = package_root.join("@package.moth");
     fs::create_dir_all(dir.join("src")).expect("should create project source root");
 
     fs::write(
@@ -1698,7 +1698,7 @@ html #= ()\n",
             .expect("donor label should resolve through its frozen identity handle");
         assert_eq!(position.host_path, Some(package_path.as_path()));
         assert!(
-            position.path.ends_with("@mod.moth"),
+            position.path.ends_with("@package.moth"),
             "donor label should use the package snapshot: {}",
             position.path.display()
         );
@@ -1763,7 +1763,7 @@ fn imported_nested_generic_materialisation_preserves_call_site_identity_with_col
     let package_temp = tempfile::tempdir().expect("should create package temp dir");
     let package_root = package_temp.path().to_path_buf();
     let project_path = dir.join("src/@entry.moth");
-    let package_path = package_root.join("@mod.moth");
+    let package_path = package_root.join("@package.moth");
     fs::create_dir_all(dir.join("src")).expect("should create project source root");
 
     fs::write(
@@ -1840,7 +1840,7 @@ outer type T |value T| -> T:
         .expect("nested generic call-site span should resolve");
     assert_eq!(primary.host_path, Some(package_path.as_path()));
     assert!(
-        primary.path.ends_with("@mod.moth"),
+        primary.path.ends_with("@package.moth"),
         "nested generic call site should use package source identity: {}",
         primary.path.display()
     );
@@ -3127,7 +3127,7 @@ fn source_package_warning_staged_by_frontend_outcome() {
     .expect("should write config");
     fs::write(src.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
-        package.join("@mod.moth"),
+        package.join("@package.moth"),
         "$export\nwarn || -> String:\n    value ~= \"hello\"\n    result ~= \"unset\"\n    if value is:\n        \"one\" => ~result = \"one\"\n        \"one\" => ~result = \"one\"\n        else => ~result = \"other\"\n    ;\n    return result\n;\n",
     )
     .expect("should write warning package facade");
@@ -3252,7 +3252,8 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
     let package_text = "$export\nwarn || -> String:\n    value ~= \"hello\"\n    result ~= \"unset\"\n    if value is:\n        \"one\" => ~result = \"one\"\n        \"one\" => ~result = \"one\"\n        else => ~result = \"other\"\n    ;\n    return result\n;\n";
     fs::write(project_source_root.join("@entry.moth"), project_text)
         .expect("should write project entry module");
-    fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
+    fs::write(package_root.join("@package.moth"), package_text)
+        .expect("should write package module");
 
     let builder = SuccessfulPackageWarningBuilder { package_root };
     let result = build_project(
@@ -3329,7 +3330,8 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
     let package_text = "package_snapshot I32 = undefined_thing\n";
     fs::write(project_source_root.join("@mod.moth"), project_text)
         .expect("should write project module");
-    fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
+    fs::write(package_root.join("@package.moth"), package_text)
+        .expect("should write package module");
 
     let mut config = Config::new(project_source_root.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();

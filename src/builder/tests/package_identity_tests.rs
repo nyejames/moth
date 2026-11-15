@@ -96,8 +96,8 @@ fn write_project(project_root: &Path) {
     fs::write(src_dir.join("@entry.moth"), PAGE_SOURCE).expect("should write page");
 }
 
-/// Writes a `@ui` package root whose only module exports `greet`.
+/// Writes a `@ui` package root whose only module publishes `greet` through its support facade.
 fn write_ui_package(package_root: &Path) {
-    fs::write(package_root.join("@mod.moth"), UI_MODULE_SOURCE)
+    fs::write(package_root.join("@package.moth"), UI_MODULE_SOURCE)
         .expect("should write package module");
 }
