@@ -18,6 +18,7 @@ use crate::build_system::create_project_modules::module_identity::{
 };
 use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
+use crate::build_system::test_support::synthetic_source_root;
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
@@ -455,6 +456,7 @@ fn package_facade_rejects_project_context_declaration_provenance() {
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
         Vec::new(),
+        synthetic_source_root(),
     )
     .expect("synthetic frontend should satisfy retained-boundary invariants");
     let check_error = validate_frontend_facade_boundaries(&frontend)
@@ -615,6 +617,7 @@ fn source_package_facade_rejects_project_context_reachable_private_helper() {
         ),
         source_packages,
         ResourceInputRegistry::new(),
+        synthetic_source_root(),
     );
     let error = match result {
         Ok(_) => panic!("source-package facade should reject ProjectContext helper provenance"),
@@ -689,6 +692,7 @@ fn source_package_facade_rejects_project_context_public_declaration() {
         ),
         source_packages,
         ResourceInputRegistry::new(),
+        synthetic_source_root(),
     );
     let error = match result {
         Ok(_) => {
@@ -768,6 +772,7 @@ fn entry_union_keeps_entry_fragment_and_excludes_linked_module_fragment() {
         project_boundary,
         source_packages,
         ResourceInputRegistry::new(),
+        synthetic_source_root(),
     )
     .expect("synthetic entry boundaries should assemble");
     let entry = compilation
@@ -945,6 +950,7 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
         project_boundary,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
+        synthetic_source_root(),
     );
     let error = match result {
         Ok(_) => panic!("project facade should reject ProjectContext helper provenance"),
@@ -1045,6 +1051,7 @@ fn package_union_follows_facade_export_and_excludes_hidden_child_export() {
         project_boundary,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
+        synthetic_source_root(),
     )
     .expect("synthetic package boundary should assemble");
     let assembly = compilation
@@ -1197,6 +1204,7 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
         project_boundary,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
+        synthetic_source_root(),
     )
     .expect("synthetic nominal package should assemble");
     let assembly = compilation
@@ -1226,5 +1234,117 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
     assert!(
         paths.iter().any(|path| path == "assets/card.svg"),
         "receiver method reachable from the facade's closed nominal should be rooted: {paths:?}"
+    );
+}
+
+/// Regression: a compile-time facade export owns no runtime work.
+///
+/// WHAT: compiles a real project whose package facade exports `tally #|| -> I32` and records the
+///       facade's backend function roots during the real assembly path.
+/// WHY: facade root planning used to root every exported function, so a compile-time declaration
+///      was selected as executable and package assembly failed with a compiler bug.
+#[test]
+fn a_compile_time_facade_export_assembles_without_an_executable_root() {
+    use crate::build_system::BuildProfile;
+    use crate::build_system::backend_build_context::BackendBuildContext;
+    use crate::build_system::build::{
+        BackendBuilder, BackendInvocationFailure, Project, build_project,
+    };
+    use crate::builder_surface::BuilderSurface;
+    use crate::compiler_frontend::Flag;
+    use crate::compiler_frontend::build_config::BuildConfigInputSet;
+    use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
+    use crate::compiler_frontend::compiler_messages::compiler_errors::CompilationOutcome;
+    use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
+    use crate::projects::settings::{Config, ProjectConfigError};
+    use std::cell::Cell;
+    use std::convert::Infallible;
+    use std::fs;
+
+    struct RecordingBuilder {
+        facade_function_roots: Cell<Option<usize>>,
+    }
+
+    impl BackendBuilder for RecordingBuilder {
+        type Error = Infallible;
+
+        fn frontend_surface(&self) -> BuilderSurface {
+            HtmlProjectBuilder::new().frontend_surface()
+        }
+
+        fn validate_project_config(
+            &self,
+            config: &Config,
+            strings: &mut DiagnosticStringBuilder<'_>,
+        ) -> Result<(), ProjectConfigError> {
+            HtmlProjectBuilder::new().validate_project_config(config, strings)
+        }
+
+        fn build_backend(
+            &self,
+            compilation: ProjectCompilation,
+            config: &Config,
+            build_profile: BuildProfile,
+            flags: &[Flag],
+            context: &mut BackendBuildContext<'_>,
+        ) -> Result<Project, BackendInvocationFailure<Infallible>> {
+            let assembly = compilation
+                .package_assembly()
+                .expect("a package facade with a compile-time export should assemble");
+            self.facade_function_roots.set(Some(
+                assembly
+                    .facade_reachability()
+                    .backend_selection()
+                    .function_count(),
+            ));
+            HtmlProjectBuilder::new().build_backend(
+                compilation,
+                config,
+                build_profile,
+                flags,
+                context,
+            )
+        }
+    }
+
+    let temp = tempfile::tempdir().expect("should create project directory");
+    let root = temp.path();
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"const_export\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(root.join("@entry.moth"), "value #= \"page\"\n~[:[value]]\n")
+        .expect("should write the page");
+    fs::write(
+        root.join("@package.moth"),
+        "$export\ntally #|| -> I32:\n    return 7\n;\n",
+    )
+    .expect("should write the package facade");
+
+    let builder = RecordingBuilder {
+        facade_function_roots: Cell::new(None),
+    };
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
+    let build = build_project(
+        &builder,
+        root.to_str().expect("temporary path should be UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+        &mut discovery_stops,
+    )
+    .expect("the test builder cannot fail its own build step");
+
+    match build {
+        Ok(CompilationOutcome::Success { .. }) => {}
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            panic!("a compile-time facade export must compile, got diagnostics: {reports:?}")
+        }
+        Err(errors) => panic!("a compile-time facade export must compile: {errors:?}"),
+    }
+    assert_eq!(
+        builder.facade_function_roots.get(),
+        Some(0),
+        "a compile-time facade export must not become an executable root"
     );
 }

@@ -8,11 +8,14 @@ use super::{assemble, engine, under_both_optimisations};
 use crate::runtime::context::HostContext;
 use crate::runtime::imports::HostImports;
 use crate::runtime::instance::{Deadline, Instance};
-use crate::runtime::{BoundaryFault, InstanceLimits, RuntimeError};
+use crate::runtime::{BoundaryFault, InstanceLimits, LimitFault, RuntimeEngine, RuntimeError};
+use std::sync::Arc;
 use wasmtime::ValType;
 
 struct ScopeHost {
     steps: Vec<i32>,
+    engine: Arc<RuntimeEngine>,
+    advance_epoch_at: Option<i32>,
 }
 
 fn instance(optimisation: crate::runtime::NativeOptimisation) -> Instance<ScopeHost> {
@@ -25,8 +28,11 @@ fn instance(optimisation: crate::runtime::NativeOptimisation) -> Instance<ScopeH
             [ValType::I32],
             [],
             |host: &mut ScopeHost, _, _, _, _, arguments, _| {
-                host.steps
-                    .push(arguments[0].i32().expect("the import takes one i32"));
+                let step = arguments[0].i32().expect("the import takes one i32");
+                host.steps.push(step);
+                if host.advance_epoch_at == Some(step) {
+                    host.engine.advance_epoch();
+                }
                 Ok(())
             },
         )
@@ -38,7 +44,11 @@ fn instance(optimisation: crate::runtime::NativeOptimisation) -> Instance<ScopeH
         .prepare(&module)
         .expect("the fixture imports are provided")
         .instantiate(
-            ScopeHost { steps: Vec::new() },
+            ScopeHost {
+                steps: Vec::new(),
+                engine,
+                advance_epoch_at: None,
+            },
             InstanceLimits::default(),
             Deadline::Unbounded,
         )
@@ -95,6 +105,27 @@ fn a_trapping_scope_step_skips_close_and_makes_no_further_guest_call() {
             );
             assert_eq!(instance.host_state().steps, expected_steps, "{which}");
         }
+    });
+}
+
+#[test]
+fn a_trapping_scope_close_fails_the_call_and_discards_the_copied_result() {
+    under_both_optimisations(|optimisation| {
+        let mut instance = instance(optimisation);
+        arm(&mut instance, 3);
+        let trapped = instance.call_scoped(
+            "work",
+            b"hi",
+            Deadline::Unbounded,
+            &mut HostContext::empty(),
+        );
+        assert!(matches!(trapped, Err(RuntimeError::GuestTrap { .. })));
+        assert_eq!(instance.host_state().steps, [1, 2, 2, 4, 3]);
+        assert!(!instance.has_context());
+
+        let refused = instance.call::<i32, ()>("arm", 0, Deadline::Unbounded);
+        assert!(matches!(refused, Err(RuntimeError::InstanceFaulted)));
+        assert_eq!(instance.host_state().steps, [1, 2, 2, 4, 3]);
     });
 }
 
@@ -161,6 +192,29 @@ fn a_scoped_call_installs_its_deadline_once() {
             )
             .expect("the helpers and the export share one deadline");
         assert_eq!(instance.deadline_installs(), 1);
+    });
+}
+
+#[test]
+fn scope_helpers_and_the_export_share_one_deadline_budget() {
+    under_both_optimisations(|optimisation| {
+        let mut instance = instance(optimisation);
+        // The export consumes the single tick of its budget. A fresh deadline for the close
+        // entry would let it run instead of trapping.
+        instance.host_state_mut().advance_epoch_at = Some(4);
+        let interrupted = instance.call_scoped(
+            "work",
+            b"hi",
+            Deadline::AfterTicks(1),
+            &mut HostContext::empty(),
+        );
+
+        let Err(RuntimeError::LimitExceeded { limit, .. }) = interrupted else {
+            panic!("expected the close entry to exceed the shared deadline");
+        };
+        assert_eq!(limit, LimitFault::DeadlineReached);
+        assert_eq!(instance.host_state().steps, [1, 2, 2, 4]);
+        assert!(!instance.has_context());
     });
 }
 

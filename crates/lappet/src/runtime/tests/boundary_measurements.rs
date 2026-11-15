@@ -14,7 +14,7 @@
 use super::{assemble, engine};
 use crate::runtime::imports::HostImports;
 use crate::runtime::instance::{Deadline, Instance};
-use crate::runtime::resource::AccessRequest;
+use crate::runtime::resource::{AccessMode, AccessRequest};
 use crate::runtime::staging::StagingTable;
 use crate::runtime::{InstanceLimits, NativeOptimisation};
 use std::time::{Duration, Instant};
@@ -168,7 +168,7 @@ fn guard_instance(optimisation: NativeOptimisation) -> Instance<GuardHost> {
                     .with_access(
                         &[AccessRequest {
                             raw,
-                            exclusive: false,
+                            mode: AccessMode::Shared,
                             type_id: std::any::TypeId::of::<u32>(),
                         }],
                         |access| {

@@ -1189,25 +1189,30 @@ fn single_file_ordinary_page_stem_names_the_output_file() {
 }
 
 #[test]
-fn single_file_api_only_build_can_emit_no_artifacts() {
+fn single_file_api_only_build_reports_no_entry() {
     let builder = HtmlProjectBuilder::new();
     let entry_path = PathBuf::from("api.moth");
     let mut string_table = StringTable::new();
     let mut api_only = create_test_module(entry_path.clone(), &mut string_table);
     api_only.metadata.entry = None;
 
-    let project = builder
-        .build_backend_with_test_context(
-            project_compilation(vec![api_only]),
-            &Config::new(entry_path),
-            BuildProfile::Dev,
-            &[],
-            &mut string_table,
-        )
-        .expect("single-file API-only build should not require an entry page");
+    let failure = match builder.build_backend_with_test_context(
+        project_compilation(vec![api_only]),
+        &Config::new(entry_path),
+        BuildProfile::Dev,
+        &[],
+        &mut string_table,
+    ) {
+        Ok(_) => panic!("an API-only single-file build must report the missing entry"),
+        Err(BackendInvocationFailure::Prepared(failure)) => failure,
+        Err(BackendInvocationFailure::Builder(error)) => match error {},
+    };
 
-    assert!(project.output_files.is_empty());
-    assert_eq!(project.entry_page_rel, None);
+    let reason = prepared_invalid_config_reason(failure, &string_table);
+    assert!(matches!(
+        reason,
+        InvalidConfigReason::NoRootModuleEntries { .. }
+    ));
 }
 
 #[test]

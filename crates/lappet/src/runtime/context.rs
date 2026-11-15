@@ -14,7 +14,7 @@
 //! a graphics context.
 
 use super::error::{ContextFault, HostFault};
-use super::resource::{InstanceKind, Sendable, ThreadBound};
+use super::kind::{InstanceKind, Sendable, ThreadBound};
 use std::any::Any;
 
 /// A value that may be stored as context for one instance kind.
@@ -49,14 +49,9 @@ impl<Kind: InstanceKind> HostContext<Kind> {
     pub(crate) fn empty() -> Self {
         Self { value: None }
     }
-}
 
-impl<Kind: InstanceKind> HostContext<Kind> {
     pub(crate) fn get_mut<T: Any>(&mut self) -> Result<&mut T, ContextFault> {
-        match self.value.as_mut() {
-            None => Err(ContextFault::Missing),
-            Some(value) => Kind::downcast_context(value).ok_or(ContextFault::WrongType),
-        }
+        downcast_slot::<Kind, T>(&mut self.value)
     }
 
     pub(super) fn take(&mut self) -> Option<Box<Kind::Context>> {
@@ -80,11 +75,14 @@ impl<'a, Kind: InstanceKind> CallContext<'a, Kind> {
 
     /// Borrows the context as `T`. Failure means the host function must not run.
     pub(crate) fn require<T: Any>(&mut self) -> Result<&mut T, HostFault> {
-        match self.slot.as_mut() {
-            None => Err(HostFault::Context(ContextFault::Missing)),
-            Some(value) => {
-                Kind::downcast_context(value).ok_or(HostFault::Context(ContextFault::WrongType))
-            }
-        }
+        downcast_slot::<Kind, T>(self.slot).map_err(HostFault::Context)
     }
+}
+
+/// Borrows the value in a holder or a slot as `T`. Both report the same two failures.
+fn downcast_slot<Kind: InstanceKind, T: Any>(
+    slot: &mut Option<Box<Kind::Context>>,
+) -> Result<&mut T, ContextFault> {
+    let value = slot.as_deref_mut().ok_or(ContextFault::Missing)?;
+    Kind::downcast_context(value).ok_or(ContextFault::WrongType)
 }

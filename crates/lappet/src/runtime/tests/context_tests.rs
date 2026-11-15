@@ -277,7 +277,7 @@ fn a_bad_token_argument_leaves_the_instance_usable() {
 
 #[test]
 fn a_thread_bound_instance_accepts_context_that_is_not_send() {
-    use crate::runtime::resource::ThreadBound;
+    use crate::runtime::kind::ThreadBound;
     use std::rc::Rc;
 
     under_both_optimisations(|optimisation| {
@@ -323,7 +323,7 @@ fn a_thread_bound_instance_accepts_context_that_is_not_send() {
 #[test]
 fn a_sendable_context_rejects_a_value_that_is_not_send() {
     use crate::runtime::context::ContextValue;
-    use crate::runtime::resource::Sendable;
+    use crate::runtime::kind::Sendable;
     use std::rc::Rc;
 
     // Compiles only while `Rc<u8>` cannot be sendable context. Removing the `Send` bound makes

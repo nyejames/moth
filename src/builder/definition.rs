@@ -1,11 +1,12 @@
 //! Builder definitions and the package descriptions they register.
 //!
-//! WHAT: a fluent draft collects source packages, host packages and source kinds, then `finish`
-//! registers them into one `BuilderSurface` and validates it.
+//! WHAT: a fluent draft collects source packages, host packages, source kinds and an optional
+//! configuration section, then `finish` registers them into one `BuilderSurface` and validates it.
 //! WHY: registration has one validated path. The draft records descriptions only, so a failed
 //! `finish` leaves no partially registered definition behind.
 
 use super::Error;
+use super::config_section::ConfigSection;
 use super::host_conversion;
 use crate::build_system::output::BuilderIdentity;
 use crate::builder_surface::definition::BuilderSurfaceValidationError;
@@ -36,15 +37,33 @@ impl BuilderDefinition {
             source_packages: Vec::new(),
             host_packages: Vec::new(),
             source_kinds: Vec::new(),
+            config_sections: Vec::new(),
         }
     }
 
+    /// Returns the stable identity this builder declares, as `finish` validated it.
+    ///
+    /// The identity owns the builder's output manifests, so a later build only cleans artefacts
+    /// its own builder identity wrote and a foreign manifest is never adopted. It is not the Rust
+    /// type name. It does not name the configuration section, which `.config` names separately.
     pub fn identity(&self) -> &str {
         self.identity.as_str()
     }
 
     pub(crate) fn surface(&self) -> &BuilderSurface {
         &self.surface
+    }
+
+    /// The configuration section this definition registered, if any.
+    ///
+    /// The registered schema owns the section name, and `finish` accepts at most one section, so
+    /// the surface is the single source of that fact.
+    pub(crate) fn config_section_name(&self) -> Option<&str> {
+        self.surface
+            .config_schemas
+            .project_sections()
+            .first()
+            .map(|section| section.name.as_ref())
     }
 
     /// The stable identity the compiler uses to name this builder's outputs.
@@ -86,6 +105,7 @@ pub struct BuilderDefinitionDraft {
     source_packages: Vec<SourcePackage>,
     host_packages: Vec<HostPackage>,
     source_kinds: Vec<OptionalSourceKind>,
+    config_sections: Vec<ConfigSection>,
 }
 
 impl BuilderDefinitionDraft {
@@ -107,12 +127,51 @@ impl BuilderDefinitionDraft {
         self
     }
 
+    /// Describes the project configuration section this builder reads.
+    ///
+    /// `name` is the record name a project authors in `config.moth`, so it must be a Moth
+    /// identifier that is not `project`, not a first-party builder identity and not a reserved
+    /// Moth name. The closure declares string and bool fields with [`ConfigSection::string`] and
+    /// [`ConfigSection::bool`]. Field names follow the same rules and must stay unique. A
+    /// definition has at most one section, and `finish` also adds the automatic `dev_output`
+    /// and `release_output` fields.
+    ///
+    /// A section whose fields are all optional may be omitted by the project, which then reads
+    /// the declared defaults. `finish` rejects the definition when a section declares a required
+    /// field and a default on the same field.
+    pub fn config(
+        mut self,
+        name: impl Into<String>,
+        describe: impl FnOnce(&mut ConfigSection),
+    ) -> Self {
+        let mut section = ConfigSection::new(name);
+        describe(&mut section);
+        self.config_sections.push(section);
+        self
+    }
+
     /// Validates the complete registration and returns the immutable definition.
     pub fn finish(self) -> Result<BuilderDefinition, Error> {
         let identity = BuilderIdentity::custom(&self.identity).map_err(|reason| {
             Error::invalid_definition(format!("Builder identity '{}' {reason}.", self.identity))
         })?;
         let mut surface = BuilderSurface::with_mandatory_core();
+
+        // The config section is a definition-level contract, so it is validated and registered
+        // before any package description reaches its registry.
+        if self.config_sections.len() > 1 {
+            return Err(Error::invalid_definition(format!(
+                "A builder definition declares at most one config section, but this definition \
+                 declares '{}' and '{}'.",
+                self.config_sections[0].name(),
+                self.config_sections[1].name()
+            )));
+        }
+        if let Some(section) = self.config_sections.first() {
+            surface
+                .config_schemas
+                .register_project_section(section.build_schema()?);
+        }
 
         for package in &self.source_packages {
             let prefix = package_path_without_introducer(&package.path)?;
@@ -154,9 +213,11 @@ impl BuilderDefinitionDraft {
         };
 
         for package in &self.host_packages {
+            // The host backing travels with the package, so requirement production can name
+            // exactly the bindings a native Rust host implements.
             let package_id = surface
                 .binding_packages
-                .register_package(&package.path, PackageOrigin::Builder)
+                .register_host_package(&package.path, PackageOrigin::Builder)
                 .map_err(registration_error_to_builder_error)?;
             for function in &package.functions {
                 let spec = host_conversion::external_function_spec(function).map_err(|reason| {

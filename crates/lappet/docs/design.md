@@ -1,9 +1,10 @@
 # Lappet runtime and embedding design
 
-> Accepted direction, not delivered runtime support. The initial crate contains
-> documentation only. [The roadmap](../roadmap.md) owns implementation status and
-> explicit design checkpoints. An open checkpoint is not permission to invent
-> its contract during implementation.
+> Accepted runtime direction. The `runtime` feature delivers engine, instance,
+> limit, fault, staging, resource and context mechanics through roadmap
+> milestones 2 and 3. [The roadmap](../roadmap.md) owns implementation status
+> and the remaining design checkpoints. An open checkpoint is not permission to
+> invent its contract during implementation.
 
 Lappet is Moth's official native WebAssembly execution library, Rust host bridge
 and future package infrastructure. It belongs to the Moth workspace. Every
@@ -54,8 +55,9 @@ The repository-root `moth` Cargo package owns the compiler library.
 moth-lexical  <- moth-mon
 moth-host     (no workspace dependencies)
 moth          -> moth-lexical, moth-mon, moth-host
-lappet        -> moth-host and wasmtime   with the `runtime` feature
-              -> moth                     with the future `packages` feature
+lappet        -> wasmtime           with the `runtime` feature
+              -> moth-host          with the host adapters
+              -> moth               with the future `packages` feature
 moth-cli      -> moth, lappet
 ```
 
@@ -66,8 +68,10 @@ as each gains a real consumer. It holds no Wasmtime type and no
 compiler-internal type. The compiler keeps everything semantic, including the
 registry conversion and manifest production, and re-exports the crate as
 `moth::host`. Lappet's runtime never depends on the compiler. Only its future
-package feature does, and that feature never pulls in Wasmtime. The crate isn't
-extracted yet. [The roadmap](../roadmap.md) owns that delivery.
+package feature does, and that feature never pulls in Wasmtime. `moth-host` is
+extracted at `crates/moth-host`. Lappet does not depend on it yet because the
+runtime has no consumer for its descriptors. That edge arrives with the host
+adapters.
 
 The workspace defaults to `moth-cli` for root Cargo commands. Its features
 forward to the compiler's matching features. Explicit compiler and workspace
@@ -92,25 +96,37 @@ make a custom builder an official Moth environment.
 
 ## Runtime strategy
 
-V1 uses Wasmtime with Cranelift as its only native compiler. Development
-defaults to `OptLevel::None` for faster native compilation and release to
-`OptLevel::Speed` for optimised native code. Confirm both settings with
-benchmarks. Moth's compilation profile is independent of the native
-optimisation level. Use supported configuration APIs, not a custom native
-backend or patched engine. V1 does not expose a Winch strategy selector or
-arbitrary Cranelift tuning.
+V1 uses Wasmtime with Cranelift as its only native compiler. The confirmed
+engine policy below comes from milestone 2's evidence over authored core Wasm
+fixtures. The engine sets every option it relies on explicitly in
+`crates/lappet/src/runtime/engine.rs`, so a Wasmtime upgrade can't change the
+profile through a changed default.
+
+| Policy | Confirmed value |
+|---|---|
+| Wasmtime | `=50.0.1` with `default-features = false` and the `std`, `runtime` and `cranelift` features |
+| Compiler strategy | `Strategy::Cranelift`, set explicitly. `Strategy::Auto` isn't a policy |
+| Native optimisation | `OptLevel::None` for development, `OptLevel::Speed` for release |
+| Register allocator | Backtracking. Wasmtime 50.0.1 marks the faster single-pass allocator not production-ready |
+| Inlining | Disabled |
+| Parallel compilation | Not compiled in |
+| Wasm proposals | Multi-value on. Memory64, custom page sizes and relaxed SIMD off. Threads and GC aren't compiled in. The other toggles follow the pinned Cranelift profile until compiled Moth output shows what it needs |
+| Wasm stack | 512 KiB per guest entry |
+| Epoch interruption | Enabled on every engine. Each guest entry takes an optional deadline in ticks. With no deadline Lappet sets the furthest deadline explicitly. The embedder advances the epoch and Lappet starts no timer thread. One deadline covers every scope helper and the export in a scoped call |
+| Fuel | Disabled |
+| Wasm backtraces | Capture on, bounded to the release default of 20 frames. The `backtrace` Cargo feature stays off |
+| Native host calls | No Lappet timeout. The builder owns host IO policy |
+
+The native optimisation level is independent of Moth's compilation profile. Use
+supported configuration APIs, not a custom native backend or patched engine. V1
+does not expose a Winch strategy selector or arbitrary Cranelift tuning.
+Reopening `SpeedAndSize` or parallel compilation needs recorded evidence and a
+policy change.
 
 Lappet performs no Wasm post-processing optimisation. The shared optimisation
 authority owns work done before Wasm emission and work delegated to native
 code generation. Native optimisation settings cannot change source types,
 safety validation, error contracts or memory-model legality.
-
-Retain Cranelift's default backtracking register allocator. Wasmtime 50.0.1
-marks its faster single-pass allocator not production-ready and outside normal
-security-advisory support. Keep inlining disabled by default. Benchmark
-`SpeedAndSize` and parallel module compilation before enabling either.
-Verify debugger requirements against the selected Wasmtime release. Select
-Cargo features explicitly and inspect their actual linked size.
 
 V1 defers persistent compiled-code caches, AOT cache reuse and compiler-free
 deployments. Reusing an already compiled module inside a running application is
@@ -131,7 +147,7 @@ Rust is the sole native host-binding interface in V1. The current `moth::host`
 surface uses manual descriptors. The accepted `#[moth::host_function]` and
 `#[moth::host_type]` conveniences will feed the same checked registration path
 when delivered, but they aren't available APIs today. Lappet has no executable
-adapters or native runtime yet. It does not introduce another signature
+host adapters yet. It does not introduce another signature
 language, global plugin scan or general reflection system.
 
 
@@ -266,9 +282,24 @@ host-signature convention or background callback delivery.
 ## Capabilities and failures
 
 Install only the imports the builder explicitly provides. No ambient filesystem,
-network or WASI capability is granted by default. Keep resource limits, execution
-interruption and native host-call limits explicit. Select concrete defaults and
-fault handling at the runtime policy checkpoint.
+network or WASI capability is granted by default. The limits and fault
+disposition below are confirmed V1 policy. A caller passes `InstanceLimits` when
+it instantiates, and the defaults below apply unless it sets another value. The
+runtime installs the instance's limits before any guest code runs, including
+the start function.
+
+| Limit | Confirmed value |
+|---|---|
+| Linear memory per instance | 256 MiB default, configurable through `InstanceLimits::max_memory_bytes` |
+| Instances, memories and tables per store | One of each, fixed |
+| Table elements per instance | 65,536 default, configurable through `InstanceLimits::max_table_elements` |
+| `memory.grow` past the ceiling | Returns `-1` without a trap. The real-application gate confirms this against Moth's memory contract |
+| Fault disposition | Any trap, limit or deadline exhaustion or host fault quarantines the instance, which is then dropped |
+
+A module whose declared memory or table exceeds the instance's configured limit
+is rejected before instantiation. Denied guest growth reaches the guest as `-1`
+and isn't a fault. Lappet never retries a faulted instance and never rolls back
+host IO already performed.
 
 Preserve normal Moth errors, guest traps, adapter violations, operational host
 failures and compiler diagnostics as distinct outcomes. A failed native contract
@@ -300,7 +331,8 @@ End-to-end delivery waits for validated compiler export/import, layout and memor
 handoffs, then uses real Moth projects in both priority environments.
 
 The roadmap requires separate approval of workspace integration, host ABI,
-instance/failure policy, platform features, official Core conformance and
-package-manager contracts. Freeze each at its owning checkpoint. Keep current
-status and validation evidence there instead of treating design prose as a
-passing implementation test.
+platform features, official Core conformance and package-manager contracts. The
+runtime policy and the boundary limits are confirmed and live in this page and
+[host ABI adapter responsibilities](host-abi.md). Freeze each remaining gate at
+its owning checkpoint. Keep current status and validation evidence in the
+roadmap instead of treating design prose as a passing implementation test.

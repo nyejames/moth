@@ -683,6 +683,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "moth-builder-fixture"
+version = "0.1.0"
+dependencies = [
+ "moth",
+]
+
+[[package]]
 name = "moth-cli"
 version = "0.1.12"
 dependencies = [

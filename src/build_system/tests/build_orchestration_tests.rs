@@ -21,14 +21,14 @@ use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
-    InvalidConfigCode, InvalidConfigView,
+    InvalidConfigCode, InvalidConfigView, decode_invalid_config,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, DiagnosticCategory, DiagnosticSeverity,
+    DiagnosticBag, DiagnosticCategory, DiagnosticSeverity, InvalidConfigReason,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
@@ -56,6 +56,44 @@ fn assert_has_config_error<T>(messages: &CompilationResult<T>) {
             .iter_severity(DiagnosticSeverity::Error)
             .any(|(_, view)| view.category() == DiagnosticCategory::Config),
         "expected config-classified diagnostic"
+    );
+}
+
+/// Asserts the shared no-entry diagnostic names the source root the frontend compiled.
+///
+/// The typed reason and its root payload are the contract, so a backend that re-resolves the
+/// command spelling cannot pass by reporting the same code with a different tree.
+fn assert_no_entry_diagnostic<T>(result: CompilationResult<T>, expected_root: &Path) {
+    let Ok(CompilationOutcome::Diagnosed(reports)) = result else {
+        panic!("the build should report the user no-entry diagnostic");
+    };
+    assert_eq!(
+        reports.counts().errors,
+        1,
+        "exactly one no-entry diagnostic"
+    );
+    let (report, diagnostic) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("the no-entry diagnostic should be an error");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-CONFIG-0001");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("the no-entry diagnostic carries invalid-config facts");
+    let (key, reason) =
+        decode_invalid_config(&facts, diagnostic.string_ids()).expect("the no-entry facts decode");
+    assert!(
+        key.is_none(),
+        "a missing entry is a project-structure fact, not an authored config key"
+    );
+    let InvalidConfigReason::NoRootModuleEntries { entry_root } = reason else {
+        panic!("expected the no-entry config reason, got {reason:?}");
+    };
+    let context = DiagnosticRenderContext::for_report(report);
+    assert_eq!(
+        Path::new(context.string_table.resolve(entry_root)),
+        expected_root,
+        "the diagnostic must name the source root the frontend compiled"
     );
 }
 
@@ -188,6 +226,67 @@ fn build_output_owner_preserves_frontend_warnings_in_success_outcome() {
         .map(|(_, view)| view.descriptor().code.to_owned())
         .collect::<Vec<_>>();
     assert_eq!(warning_codes, vec!["MOTH-RULE-0022".to_owned()]);
+}
+
+#[test]
+fn html_build_reports_no_entry_for_an_empty_project_directory() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::write(
+        root.join("config.moth"),
+        "project #= (name = \"empty\")\nhtml #= ()\n",
+    )
+    .expect("should write project config");
+    let expected_root = fs::canonicalize(&root).expect("project root should resolve");
+
+    let builder = HtmlProjectBuilder::new();
+    let result = build_project(
+        &builder,
+        root.to_str()
+            .expect("temp directory path should be valid UTF-8 for this test"),
+        &[],
+        &BuildConfigInputSet::new(),
+        &mut discovery_stops,
+    )
+    .unwrap_or_else(|never| match never {});
+
+    assert_no_entry_diagnostic(result, &expected_root);
+}
+
+#[cfg(unix)]
+#[test]
+fn html_build_no_entry_diagnostic_names_a_symlinked_facade_target_root() {
+    use std::os::unix::fs::symlink;
+
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let selected_dir = _temp.path().join("selected");
+    let target_dir = _temp.path().join("target");
+    fs::create_dir_all(&selected_dir).expect("should create selected directory");
+    fs::create_dir_all(&target_dir).expect("should create target directory");
+    fs::write(
+        target_dir.join("@package.moth"),
+        "$export\nlabel #= \"facade\"\n",
+    )
+    .expect("should write package facade");
+    let selected = selected_dir.join("@package.moth");
+    symlink(target_dir.join("@package.moth"), &selected).expect("should create facade symlink");
+    let expected_root = fs::canonicalize(&target_dir).expect("symlink target should resolve");
+
+    let builder = HtmlProjectBuilder::new();
+    let result = build_project(
+        &builder,
+        selected
+            .to_str()
+            .expect("temp file path should be valid UTF-8 for this test"),
+        &[],
+        &BuildConfigInputSet::new(),
+        &mut discovery_stops,
+    )
+    .unwrap_or_else(|never| match never {});
+
+    assert_no_entry_diagnostic(result, &expected_root);
 }
 
 #[test]
@@ -711,6 +810,32 @@ fn write_project_outputs_writes_all_supported_artifacts_and_skips_not_built() {
     assert_eq!(
         fs::read(root.join("bin/app.wasm")).expect("should read wasm file"),
         vec![0, 1, 2]
+    );
+}
+
+#[test]
+fn write_project_outputs_accepts_an_empty_project() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let project = Project {
+        output_files: Vec::new(),
+        entry_page_rel: None,
+        cleanup_policy: generic_cleanup_policy(),
+        deferred_resources: Vec::new(),
+        resource_inputs: ResourceInputRegistry::new(),
+    };
+
+    let summary = successful_compilation_value(write_project_outputs(
+        &project,
+        &always_write_options(root.clone(), Some(root.join("project"))),
+    ));
+
+    assert_eq!(summary.destinations(), &[]);
+    assert_eq!(summary.emitted_count(), 0);
+    assert_directory(&root);
+    assert!(
+        root.join(BUILD_MANIFEST_FILENAME).is_file(),
+        "an empty successful build still owns its output root and manifest"
     );
 }
 

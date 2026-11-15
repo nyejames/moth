@@ -277,6 +277,13 @@ pub const FEATURE_LANES: &[FeatureLane] = &[
         owns: "the descriptor vocabulary's unit tests",
     },
     FeatureLane {
+        name: "moth-builder-fixture",
+        package: "moth-builder-fixture",
+        features: &[],
+        kind: FeatureLaneKind::Standard,
+        owns: "the external-crate acceptance workflow over the public builder SDK",
+    },
+    FeatureLane {
         name: "lappet",
         package: "lappet",
         features: &[],
@@ -374,6 +381,14 @@ const PACKAGE_SOURCES: &[(&str, &str, &[&str])] = &[
         "crates/moth-host/Cargo.toml",
         // The descriptor tests live under `src/tests`, so this crate owns no separate test root.
         &["crates/moth-host/src"],
+    ),
+    (
+        "moth-builder-fixture",
+        "crates/moth-builder-fixture/Cargo.toml",
+        &[
+            "crates/moth-builder-fixture/src",
+            "crates/moth-builder-fixture/tests",
+        ],
     ),
     (
         "moth-cli",

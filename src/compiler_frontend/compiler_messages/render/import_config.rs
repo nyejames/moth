@@ -35,9 +35,10 @@ pub(crate) fn invalid_config_message(
     match reason {
         InvalidConfigReason::MissingKey => "Config constant is missing a key name.".to_owned(),
         InvalidConfigReason::MissingActiveBuilderSection { section } => {
+            let section_name = string_table.resolve(*section);
             format!(
-                "`config.moth` requires the active builder section '{}', even when it is empty.",
-                string_table.resolve(*section)
+                "`config.moth` requires the active builder section '{section_name}'. Add a \
+                 '{section_name}' record to `config.moth`."
             )
         }
         InvalidConfigReason::DuplicateKey => {

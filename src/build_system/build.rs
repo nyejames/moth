@@ -22,8 +22,8 @@ use crate::build_system::create_project_modules::{
     FrontendCompilationMode, compile_project_frontend_with_inputs,
 };
 use crate::build_system::output::{
-    BuilderIdentity, CleanupPolicy, OutputOwner, ValidatedDirectoryOutputSettings,
-    ValidatedOutputPlan,
+    BuilderIdentity, CleanupPolicy, OutputOwner, OutputPlan, ValidatedDirectoryOutputSettings,
+    ValidatedOutputPlan, WriteMode, WriteOptions, write_project_outputs,
 };
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::build_system::project_config::{
@@ -38,7 +38,8 @@ use crate::build_system::backend_build_context::BackendBuildContext;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
-    CompilationOutcome, CompilationResult, InfrastructureErrors, InfrastructureFailure,
+    CompilationOutcome, CompilationResult, InfrastructureClass, InfrastructureErrors,
+    InfrastructureFailure,
 };
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::{
@@ -60,7 +61,8 @@ use crate::compiler_frontend::hir::reachability::{
 use crate::compiler_frontend::module_compilation::{Module, ModuleExternalImport};
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::public_interface::{
-    PublicDeclarationSemantics, PublicFunctionCategory, PublicSemanticInterface,
+    PublicDeclarationRecord, PublicDeclarationSemantics, PublicFunctionCategory,
+    PublicSemanticInterface,
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, ModuleRootRole,
@@ -168,6 +170,11 @@ pub struct ProjectCompilation {
     entries: Vec<EntryAssembly>,
     /// Optional project package-facade assembly selected from the public package surface.
     package_assembly: Option<PackageAssembly>,
+    /// Canonical source root the frontend compiled.
+    ///
+    /// Builders report project-level failures against this exact root. They never re-resolve the
+    /// command spelling, which may be a symlink to a different tree.
+    source_root: PathBuf,
     source_function_names: Arc<std::collections::HashMap<OriginFunctionId, String>>,
     module_private_function_names:
         Arc<std::collections::HashMap<ModulePrivateExecutableIdentity, String>>,
@@ -262,14 +269,22 @@ impl ProjectCompilation {
             resource_inputs,
             transient_batches: _,
             project_source_database: _,
+            source_root,
         } = frontend;
-        Self::from_successful_boundaries(project, source_packages, resource_inputs)
+        let compilation = Self::from_successful_boundaries(
+            project,
+            source_packages,
+            resource_inputs,
+            source_root,
+        )?;
+        Ok(compilation)
     }
 
     pub(crate) fn from_successful_boundaries(
         project: CompiledGraphBoundary,
         source_packages: CompletedSourcePackageRegistry,
         resource_inputs: ResourceInputRegistry,
+        source_root: PathBuf,
     ) -> Result<Self, ProjectAssemblyError> {
         project.require_all_successful()?;
         resource_inputs.validate()?;
@@ -561,6 +576,7 @@ impl ProjectCompilation {
             source_packages,
             entries,
             package_assembly,
+            source_root,
             source_function_names,
             module_private_function_names,
             generated_function_names,
@@ -575,6 +591,7 @@ impl ProjectCompilation {
     /// Project modules (base artefacts then generated sidecars) come first, then each source
     /// package boundary in package order. Builders read only the executable/link/metadata lanes;
     /// the retained boundaries own the immutable interfaces and dense identity mapping.
+    #[cfg(test)]
     pub(crate) fn modules(&self) -> impl Iterator<Item = &Module> + '_ {
         self.project.successful_module_views().chain(
             self.source_packages
@@ -584,8 +601,17 @@ impl ProjectCompilation {
     }
 
     /// Number of successful module views (base artefacts plus generated sidecars).
+    #[cfg(test)]
     pub(crate) fn module_count(&self) -> usize {
         self.modules().count()
+    }
+
+    /// Number of selected executable entry assemblies.
+    ///
+    /// A project with only a package surface has no entry, so builders that produce
+    /// executable output enforce their own entry requirement.
+    pub(crate) fn entry_count(&self) -> usize {
+        self.entries.len()
     }
 
     fn module_at(&self, module_ref: CompiledModuleRef) -> &Module {
@@ -662,6 +688,14 @@ impl ProjectCompilation {
 
     pub(crate) fn package_assembly(&self) -> Option<&PackageAssembly> {
         self.package_assembly.as_ref()
+    }
+
+    /// Canonical source root the frontend compiled.
+    ///
+    /// Builders report project-level failures against this root instead of resolving the command
+    /// spelling again.
+    pub(crate) fn source_root(&self) -> &Path {
+        &self.source_root
     }
 
     /// The generated symbol lookup map for one module's owning boundary.
@@ -1008,6 +1042,7 @@ fn assemble_project_package(
 
     Ok(Some(PackageAssembly {
         facade_module_ref,
+        facade_surface,
         facade_reachability,
         selected_modules,
         linked_modules,
@@ -1104,15 +1139,25 @@ fn plan_facade_roots(
         let declaration = facade_interface.declaration(binding.origin());
         match binding.origin() {
             OriginDeclarationId::Function(origin) => {
-                let generic = matches!(
-                    declaration.map(|declaration| &declaration.semantics),
-                    Some(PublicDeclarationSemantics::Function(function))
-                        if matches!(
-                            &function.category,
-                            PublicFunctionCategory::GenericTemplate(_)
-                        )
-                );
-                if !generic {
+                let Some(PublicDeclarationRecord {
+                    semantics: PublicDeclarationSemantics::Function(function),
+                    ..
+                }) = declaration
+                else {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "{label} export {:?} has no published function declaration",
+                            binding.origin()
+                        ),
+                    ));
+                };
+                // Only a concrete runtime function owns executable work. A generic template is
+                // materialised per consumer and a compile-time function has no runtime body, so
+                // neither seeds facade reachability.
+                if matches!(function.category, PublicFunctionCategory::ConcreteLocal)
+                    && function.evaluation.has_runtime_body()
+                {
                     add_package_function_root(
                         &mut roots_by_module,
                         function_owner_by_origin,
@@ -1454,8 +1499,12 @@ pub(crate) fn validate_frontend_facade_boundaries(
 
 /// Build-owned link plan for the optional project package facade.
 ///
-/// The facade has no implicit `start`. Its exported function origins seed reachability, while
-/// exported folded values and selected descendant interfaces contribute metadata-only resources.
+/// The facade has no implicit `start`. Its exported concrete runtime function origins and
+/// exported-type receiver methods seed reachability, while exported folded values and selected
+/// descendant interfaces contribute metadata-only resources.
+/// The assembly owns the facade's role and the selected module roots, and resolves the facade's
+/// interface and each module's external package registry through the owning compilation. Those
+/// are published compiler facts, so the assembly stores no copy of them.
 #[cfg_attr(
     not(test),
     allow(
@@ -1465,6 +1514,8 @@ pub(crate) fn validate_frontend_facade_boundaries(
 )]
 pub(crate) struct PackageAssembly {
     facade_module_ref: CompiledModuleRef,
+    /// The structural role the facade root published, which resolves its public interface.
+    facade_surface: ModuleRootRole,
     facade_reachability: HirReachability,
     selected_modules: Vec<CompiledModuleRef>,
     linked_modules: Vec<LinkedModuleAssembly>,
@@ -1496,6 +1547,92 @@ impl PackageAssembly {
 
     pub(crate) fn facade_reachability(&self) -> &HirReachability {
         &self.facade_reachability
+    }
+
+    /// The facade's published public semantic interface.
+    ///
+    /// WHAT: resolves the interface through the owning compilation so the assembly carries the
+    ///       facade reference rather than a copy of its declarations.
+    /// WHY: selected host exports resolve against exactly the interface the assembly published.
+    pub(crate) fn facade_interface<'a>(
+        &self,
+        compilation: &'a ProjectCompilation,
+    ) -> &'a PublicSemanticInterface {
+        // Assembly resolved this interface while selecting the facade roots, so a missing
+        // interface would mean the compilation changed between construction and this read.
+        boundary_interface_at(
+            &compilation.project,
+            &compilation.source_packages,
+            self.facade_module_ref,
+            self.facade_surface,
+        )
+        .expect("package assembly resolved the facade interface during construction")
+    }
+
+    /// The external package registry and reachable external calls of the native requirement set.
+    ///
+    /// WHAT: roots the assembly's cross-module reachability walk at the selected facade functions
+    ///       and yields each reached module with the registry snapshot its own frontend
+    ///       compilation retained, in deterministic module order.
+    /// WHY: the facade-wide assembly reachability roots every exported function, because the
+    ///      package surface is closed over all of them. A native artefact executes only the
+    ///      builder's selected exports, so its requirements cover exactly what those reach.
+    ///      `collect_facade_reachability` is the one cross-module walk; this call only changes its
+    ///      roots. The selection was resolved against this facade, whose assembly already walked a
+    ///      superset of these roots and rejected every project-context escape, so the walk cannot
+    ///      diagnose a new one. Each module keeps the registry that issued its external IDs; today
+    ///      one builder definition's registry is cloned once per compilation, so those snapshots
+    ///      assign the same IDs, but the ID space stays with the module that recorded the facts.
+    pub(crate) fn selected_export_call_sources<'a>(
+        &self,
+        compilation: &'a ProjectCompilation,
+        roots: &[OriginFunctionId],
+    ) -> Result<Vec<(&'a ExternalPackageRegistry, HirReachability)>, InfrastructureFailure> {
+        if roots.is_empty() {
+            return Ok(Vec::new());
+        }
+        let project = &compilation.project;
+        let source_packages = &compilation.source_packages;
+        let execution_owners = build_execution_owner_maps(project, source_packages)?;
+        let mut roots_by_module = FxHashMap::default();
+        for origin in roots {
+            add_package_function_root(
+                &mut roots_by_module,
+                &execution_owners.function_owner_by_origin,
+                origin,
+                "Native host requirements",
+            )?;
+        }
+        let reachability_by_module = collect_facade_reachability(
+            roots_by_module,
+            project,
+            source_packages,
+            &execution_owners,
+            "Native host requirements",
+        )
+        .map_err(|error| match error {
+            ProjectAssemblyError::Infrastructure(error) => error,
+            ProjectAssemblyError::Diagnostic(_) => InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                "a selected export reached project-context code that facade assembly accepted",
+            ),
+        })?;
+
+        let mut reachability_by_module: Vec<_> = reachability_by_module.into_iter().collect();
+        reachability_by_module.sort_by_key(|(module_ref, _)| *module_ref);
+        Ok(reachability_by_module
+            .into_iter()
+            .map(|(module_ref, reachability)| {
+                (
+                    compilation
+                        .module_at(module_ref)
+                        .link_facts
+                        .external_package_registry
+                        .as_ref(),
+                    reachability,
+                )
+            })
+            .collect())
     }
 }
 
@@ -1801,6 +1938,134 @@ impl BuildResult {
                 self.warning_accumulator
                     .finish(InstallMode::Frozen)
                     .map(CompilationOutcome::Diagnosed)
+            }
+        }
+    }
+}
+
+// -------------------------
+//  Output Publication
+// -------------------------
+
+/// What the canonical output-publication sequence produced for one successful build.
+pub(crate) enum PublishedBuildOutput {
+    /// The writer emitted the batch and the warning lane froze successfully.
+    Written {
+        outputs: WrittenBuildOutputs,
+        warnings: Option<DiagnosticReportSet>,
+    },
+    /// Output publication failed, so the warning lane froze the failure instead.
+    Failed {
+        class: OutputFailureClass,
+        reports: DiagnosticReportSet,
+    },
+    /// The writer emitted the batch but freezing its successful warnings failed.
+    FinalisationFailed { reports: DiagnosticReportSet },
+}
+
+/// How an output-publication failure should be presented to the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputFailureClass {
+    /// The writer reported a user-facing output diagnostic, such as an ownership conflict.
+    Diagnosed,
+    /// The host could not perform a required filesystem operation.
+    Infrastructure,
+    /// The output system hit an internal invariant, so this is a toolchain defect.
+    CompilerBug,
+}
+
+/// The destinations one build published through the central output writer.
+pub(crate) struct WrittenBuildOutputs {
+    pub(crate) output_root: PathBuf,
+    pub(crate) written_paths: Vec<PathBuf>,
+    /// Non-fatal output cleanup messages, one rendered line each.
+    pub(crate) output_warnings: Vec<String>,
+}
+
+/// One step of the output-publication sequence, kept separate because planning failures are
+/// infrastructure results while write failures are compiler-prepared reports.
+enum OutputWriteStep {
+    Plan(InfrastructureFailure),
+    Write(PreparedFailure),
+}
+
+/// Plan and write one successful build's outputs, then finalise its warning lane.
+///
+/// WHAT: selects the output plan through `output_plan_builder`, writes the complete batch once
+/// through the central writer and freezes compiler warnings with the output outcome.
+/// WHY: the CLI and the builder SDK must share one write sequence so output ownership, cleanup
+/// and late-write failures cannot drift between them. Command presentation stays with the caller.
+pub(crate) fn publish_build_outputs(
+    build_result: BuildResult,
+    output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, InfrastructureFailure>,
+) -> Result<PublishedBuildOutput, InfrastructureErrors> {
+    let mut build_result = build_result;
+    let output_result = crate::timed_stage!(
+        crate::timing::TimingMetric::BuildOutputTotal,
+        (|| {
+            let output_plan =
+                output_plan_builder(&mut build_result).map_err(OutputWriteStep::Plan)?;
+            let output_root = output_plan.output_root().to_path_buf();
+            let mut diagnostic_strings =
+                DiagnosticStringBuilder::new(build_result.warning_accumulator.string_table_mut());
+            let write_summary = write_project_outputs(
+                &mut build_result.project,
+                &WriteOptions {
+                    output_plan,
+                    write_mode: WriteMode::AlwaysWrite,
+                },
+                &mut diagnostic_strings,
+            )
+            .map_err(OutputWriteStep::Write)?;
+            Ok((output_root, write_summary))
+        })()
+    );
+
+    let (output_root, write_summary) = match output_result {
+        Ok(written) => written,
+        Err(OutputWriteStep::Plan(failure)) => return Err(failure.into()),
+        Err(OutputWriteStep::Write(failure)) => {
+            let class = classify_output_failure(&failure);
+            return match build_result.finish_output(Err(failure))? {
+                CompilationOutcome::Diagnosed(reports) => {
+                    Ok(PublishedBuildOutput::Failed { class, reports })
+                }
+                CompilationOutcome::Success { .. } => crate::compiler_bug!(
+                    crate::compiler_frontend::compiler_messages::CompilerStage::Output,
+                    "a failed output write unexpectedly finalized a successful build"
+                ),
+            };
+        }
+    };
+
+    let outputs = WrittenBuildOutputs {
+        output_root,
+        written_paths: write_summary.emitted_paths(),
+        output_warnings: write_summary.into_warning_messages(),
+    };
+    match build_result.finish_output(Ok(()))? {
+        CompilationOutcome::Success { warnings, .. } => {
+            Ok(PublishedBuildOutput::Written { outputs, warnings })
+        }
+        CompilationOutcome::Diagnosed(reports) => {
+            Ok(PublishedBuildOutput::FinalisationFailed { reports })
+        }
+    }
+}
+
+/// Classify a writer failure before its reports are frozen, so callers do not present a
+/// filesystem failure as a user output diagnostic.
+fn classify_output_failure(failure: &PreparedFailure) -> OutputFailureClass {
+    match failure {
+        PreparedFailure::Diagnosed(_) => OutputFailureClass::Diagnosed,
+        PreparedFailure::Infrastructure(errors) => {
+            if errors
+                .iter()
+                .any(|error| error.kind.class() == InfrastructureClass::CompilerBug)
+            {
+                OutputFailureClass::CompilerBug
+            } else {
+                OutputFailureClass::Infrastructure
             }
         }
     }

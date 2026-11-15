@@ -25,16 +25,21 @@ pub enum PackageOrigin {
 
 /// How the compiler obtains a package's implementation.
 ///
-/// WHAT: distinguishes Moth-source packages from binding-backed packages.
+/// WHAT: distinguishes Moth-source packages from binding-backed packages, and separates a
+/// package implemented by native Rust host functions from one a backend implements itself.
 /// WHY: source-backed packages contain Moth modules resolved through
 /// `SourcePackageRegistry`; binding-backed packages expose typed external
-/// symbols resolved through `ExternalPackageRegistry`.
+/// symbols resolved through `ExternalPackageRegistry`. Host requirement production names only
+/// `HostBinding` packages as native host imports, because a backend lowers or provides every
+/// other binding itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PackageBacking {
     /// Package backed by Moth source files.
     MothSource,
-    /// Package backed by external bindings (JS, Wasm, host operations).
+    /// Package backed by backend-provided external bindings (JS, Wasm or a provider).
     ExternalBinding,
+    /// Package backed by native Rust host functions registered through the builder SDK.
+    HostBinding,
 }
 
 /// Origin and backing metadata for one package.
@@ -63,6 +68,14 @@ impl PackageMetadata {
         Self {
             origin,
             backing: PackageBacking::ExternalBinding,
+        }
+    }
+
+    /// Metadata for a binding-backed package implemented by native Rust host functions.
+    pub const fn host_binding(origin: PackageOrigin) -> Self {
+        Self {
+            origin,
+            backing: PackageBacking::HostBinding,
         }
     }
 }

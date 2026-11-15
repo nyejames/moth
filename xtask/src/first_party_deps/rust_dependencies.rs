@@ -3,7 +3,8 @@
 //! All dependency kinds and targets are inspected, including optional and renamed dependencies.
 //! Workspace membership defines first-party packages, but the compiler and `xtask` are forbidden
 //! regardless of membership. Cargo's canonical dependency name, not its import alias, controls the
-//! policy.
+//! policy. Packages that prove a public SDK from outside the compiler have one permitted
+//! dependency set instead, so no other package can enter that proof.
 //! This does not resolve Moth packages.
 
 use super::{FirstPartyDepsFinding, FirstPartyDepsRule, ScanState};
@@ -30,6 +31,13 @@ const FORBIDDEN_PACKAGE_DEPENDENCIES: &[(&str, &[&str])] = &[
     ("moth", &["lappet", "wasmtime"]),
     ("lappet", &["moth-cli", "xtask"]),
 ];
+
+/// Packages that prove a public SDK from outside the compiler.
+///
+/// Each entry names a package and the only Cargo dependencies it may have. The builder fixture
+/// stands in for a third-party builder author, so any other dependency, whether first-party or
+/// external, would let a compiler-internal path or a native engine into its proof.
+const PUBLIC_SDK_CONSUMER_PACKAGES: &[(&str, &[&str])] = &[("moth-builder-fixture", &["moth"])];
 
 /// Canonical package identities and the authored alias of a forbidden Cargo edge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -176,6 +184,42 @@ pub(super) fn audit_rust_dependencies(
                 rule: FirstPartyDepsRule::RustDependencyDirection,
                 message: format!(
                     "'{package_name}' has a forbidden {kind} dependency on package '{}'",
+                    dependency.name
+                ),
+                rust_dependency: Some(RustDependencyEdge {
+                    package: package.name.clone(),
+                    dependency: dependency.name.clone(),
+                    kind,
+                    rename: dependency.rename.clone(),
+                }),
+            });
+        }
+    }
+
+    // A public-surface proof cannot use a package outside its permitted set, because that set is
+    // exactly what makes the consumer external to the compiler.
+    for (package_name, permitted_dependencies) in PUBLIC_SDK_CONSUMER_PACKAGES {
+        let package = packages
+            .iter()
+            .find(|package| package.name == *package_name)
+            .ok_or_else(|| {
+                format!("cargo metadata is missing configured workspace package '{package_name}'")
+            })?;
+        let manifest = relative_display_path(&workspace_root, &package.manifest_path)?;
+
+        for dependency in &package.dependencies {
+            if permitted_dependencies.contains(&dependency.name.as_str()) {
+                continue;
+            }
+
+            let kind = dependency.kind.unwrap_or(RustDependencyKind::Normal);
+            state.findings.push(FirstPartyDepsFinding {
+                file: manifest.clone(),
+                rule: FirstPartyDepsRule::RustDependencyDirection,
+                message: format!(
+                    "'{package_name}' proves a public SDK from outside, so it may depend only on \
+                     [{}], but has a {kind} dependency on '{}'",
+                    permitted_dependencies.join(", "),
                     dependency.name
                 ),
                 rust_dependency: Some(RustDependencyEdge {

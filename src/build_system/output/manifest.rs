@@ -892,8 +892,12 @@ fn manifest_owner_metadata_result(
 }
 
 fn parse_manifest_managed_extensions(raw_value: &str) -> Option<BTreeSet<String>> {
-    if raw_value.trim().is_empty() {
+    let trimmed_value = raw_value.trim();
+    if trimmed_value.is_empty() {
         return None;
+    }
+    if trimmed_value == super::policy::NO_MANAGED_EXTENSIONS {
+        return Some(BTreeSet::new());
     }
 
     let mut managed_extensions = BTreeSet::new();
@@ -911,7 +915,7 @@ fn parse_manifest_managed_extensions(raw_value: &str) -> Option<BTreeSet<String>
 /// Render a managed-extension set for a diagnostic description, using `(none)` for the empty set.
 fn describe_extension_set(extensions: &BTreeSet<String>) -> String {
     if extensions.is_empty() {
-        String::from("(none)")
+        String::from(super::policy::NO_MANAGED_EXTENSIONS)
     } else {
         join_extensions_csv(extensions)
     }

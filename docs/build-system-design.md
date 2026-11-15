@@ -363,7 +363,7 @@ A `@package.moth` at the selected build root is an ordinary support surface over
 
 The project package surface never bypasses public boundaries, is invisible to internal modules, cannot import `@project` and cannot expose prohibited project-dependent facts. Provider edges ensure its dependencies compile first. It has no root runtime activation or route.
 
-`ProjectPackageAssembly` is a separate link plan over the selected project package surface, selected descendant interfaces, reachable generated functions and permitted runtime requirements. It never recompiles or mutates the facade. A project may be both application and package. Without this facade it has no external Moth package surface. Its package identity uses the `project` config record's `name`.
+`ProjectPackageAssembly` is a separate link plan over the selected project package surface, selected descendant interfaces, reachable generated functions and permitted runtime requirements. It never recompiles or mutates the facade. A project may be both application and package. Without this facade it has no external Moth package surface. A selected project package surface does not create or require an executable entry. Its package identity uses the `project` config record's `name`.
 
 ### Namespace and collision policy
 
@@ -513,13 +513,13 @@ A linkable `ProjectCompilation` contains the canonical structure, project global
 
 ### `build`
 
-Build compiles the union required by selected artefact entries, any selected project package surface, transitive source providers, required Core/Builder/dependency packages and generated work. After successful compilation it performs link/target/memory validation, lowering and owned output emission.
+Build compiles the union required by selected artefact entries, any selected project package surface, transitive source providers, required Core/Builder/dependency packages and generated work. It compiles the selected graph whether or not it has an executable entry. A project with a valid project package surface and no executable entry is a valid build target for a package-capable builder. It compiles normally and exposes its `ProjectPackageAssembly`. Build neither synthesises nor activates an executable entry. After successful compilation it performs link/target/memory validation, lowering and owned output emission.
 
-HTML application `build` requires at least one `@entry.moth` anywhere below the selected project directory and needs no homepage. A package surface is not an implicit page. A command that explicitly selects a single ordinary `.moth` file or `@entry.moth` compiles it as a synthetic entry. A selected `@mod.moth` or `@package.moth` keeps its facade role for checking, while an application build reports the no-entry outcome.
+The selected builder decides whether to publish a package artefact or return successfully without outputs. A builder that requires executable entries enforces that requirement itself. HTML application `build` requires at least one `@entry.moth` anywhere below the selected project directory and reports a no-entry diagnostic otherwise. HTML needs no homepage, and a package surface is not an implicit page. A command that explicitly selects a single ordinary `.moth` file or `@entry.moth` compiles it as a synthetic entry. A selected `@mod.moth` or `@package.moth` keeps its facade role, so the project has no executable entry.
 
 ### `dev`
 
-The first build compiles the complete selected graph under build's entry policy. Subsequent requests reuse immutable successes under `Incremental and persistent artefacts`. Changed inputs invalidate the appropriate semantic, physical or output facts.
+The first build compiles the complete selected graph under build's entry policy. HTML `dev` inherits the HTML builder's entry requirement, so a facade-only project reports the same no-entry diagnostic as `build`. Subsequent requests reuse immutable successes under `Incremental and persistent artefacts`. Changed inputs invalidate the appropriate semantic, physical or output facts.
 
 Development tooling launches the real homepage when present, otherwise the lexicographically first normalised entry route. It invents no homepage, redirect or route alias. Requests to an absent root retain normal missing-route behaviour.
 
@@ -558,6 +558,8 @@ Nested requests converge within the compiler transaction. They create no extra s
 ### Entry candidates and selection
 
 Entry candidates are exactly the project-local modules with an `@entry.moth` root. Presence is the only selection fact. Empty, static-only and metadata-only entry roots are eligible, and ordinary files, `@mod.moth`, `@package.moth` and private dependency-package roots never become application entries. Entry selection and route derivation consume Stage 0 structural facts and completed artefacts, never authored activity, non-empty HIR or rendered length.
+
+Entry selection may be empty. An empty selection creates no `EntryAssembly`, and the selected builder decides whether the project is a valid output target.
 
 An entry module may support multiple entry assemblies under a builder's contract. HTML V1 defines at most one directory-derived route entry per `@entry` directory. A root-level entry maps to `index.html` and a nested entry maps to `<directory>/index.html`. No filename-derived page identity or arbitrary route override exists.
 

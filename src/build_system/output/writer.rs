@@ -7,8 +7,9 @@
 
 use super::manifest::{BUILD_MANIFEST_FILENAME, validate_relative_output_path};
 use super::output_path::{
-    OutputPathIdentity, canonicalize_output_path, is_lossless_portable_relative_path,
-    output_path_component_identities, output_path_identity, path_starts_with_component_identity,
+    OutputPathIdentity, canonicalize_output_path, component_identity_prefixes,
+    is_lossless_portable_relative_path, output_path_component_identities, output_path_identity,
+    path_starts_with_component_identity,
 };
 use crate::build_system::build::{FileKind, Project};
 use crate::build_system::output::{OutputPlan, WriteMode};
@@ -407,10 +408,8 @@ fn reject_canonical_destination_conflicts(
     for destination in destinations {
         let identity = output_path_component_identities(&destination.canonical_relative_path)
             .expect("preflight already validated canonical relative output path");
-        let mut ancestor_identity = Vec::with_capacity(identity.len().saturating_sub(1));
-        for component in identity.iter().take(identity.len().saturating_sub(1)) {
-            ancestor_identity.push(component.clone());
-            let Some(&ancestor_index) = destinations_by_identity.get(&ancestor_identity) else {
+        for ancestor_identity in component_identity_prefixes(&identity) {
+            let Some(&ancestor_index) = destinations_by_identity.get(ancestor_identity) else {
                 continue;
             };
             let ancestor = &destinations[ancestor_index];
@@ -557,7 +556,7 @@ pub(crate) enum OutputWriteOutcome {
 /// What one authored output path did on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OutputDestinationOutcome {
-    /// The project-relative path the build authored for this artifact.
+    /// The output-root-relative path the build authored for this artifact.
     pub(crate) relative_path: PathBuf,
     pub(crate) outcome: OutputWriteOutcome,
 }
@@ -576,7 +575,7 @@ pub(crate) struct OutputWriteSummary {
 }
 
 impl OutputWriteSummary {
-    /// The outcome recorded for one project-relative output path.
+    /// The outcome recorded for one output-root-relative output path.
     ///
     /// Lookup uses the canonical output-path identity, so a caller finds the destination the
     /// writer would have collided with, not a different spelling of the same path.
@@ -596,16 +595,27 @@ impl OutputWriteSummary {
     ///
     /// Skipped-unchanged destinations are already correct on disk but were not emitted by this
     /// write, so they are not counted.
+    #[cfg(test)]
     pub(crate) fn emitted_count(&self) -> usize {
-        self.destinations
-            .iter()
-            .filter(|destination| {
-                matches!(
-                    destination.outcome,
-                    OutputWriteOutcome::Written | OutputWriteOutcome::DirectoryCreated
-                )
-            })
-            .count()
+        self.emitted().count()
+    }
+
+    /// The authored output-root-relative paths this write created on disk, in preparation order.
+    ///
+    /// Skipped-unchanged destinations are omitted for the same reason they are not counted.
+    pub(crate) fn emitted_paths(&self) -> Vec<PathBuf> {
+        self.emitted()
+            .map(|destination| destination.relative_path.clone())
+            .collect()
+    }
+
+    fn emitted(&self) -> impl Iterator<Item = &OutputDestinationOutcome> {
+        self.destinations.iter().filter(|destination| {
+            matches!(
+                destination.outcome,
+                OutputWriteOutcome::Written | OutputWriteOutcome::DirectoryCreated
+            )
+        })
     }
 
     /// Append non-fatal output cleanup messages produced after artifact emission.

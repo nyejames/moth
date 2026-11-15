@@ -14,7 +14,7 @@ pub mod source_file_kind_registry;
 pub mod source_package_registry;
 
 pub use definition::BuilderSurface;
-pub use package_metadata::{PackageMetadata, PackageOrigin};
+pub use package_metadata::{PackageBacking, PackageMetadata, PackageOrigin};
 pub use source_file_kind_registry::{OptionalSourceKind, SourceFileKind, SourceFileKindRegistry};
 pub use source_package_registry::{ProvidedSourceRoot, SourcePackageRegistry};
 

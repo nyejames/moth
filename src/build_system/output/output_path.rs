@@ -45,7 +45,12 @@ impl PortableRelativePath {
         self.identity_components().join("/")
     }
 
-    fn to_path_buf(&self) -> PathBuf {
+    /// Build the deterministic identity of this validated path without reparsing it.
+    pub(crate) fn identity(&self) -> OutputPathIdentity {
+        OutputPathIdentity(self.identity_string())
+    }
+
+    pub(crate) fn to_path_buf(&self) -> PathBuf {
         let mut path = PathBuf::new();
         for component in &self.components {
             path.push(component);
@@ -195,7 +200,7 @@ pub(crate) fn output_path_identity(
     let raw = relative
         .to_str()
         .ok_or(InvalidOutputFolderReason::NonUtf8)?;
-    parse_relative_path(raw).map(|portable| OutputPathIdentity(portable.identity_string()))
+    parse_relative_path(raw).map(|portable| portable.identity())
 }
 
 /// Build the deterministic identity of every component in a project-relative path.
@@ -206,6 +211,16 @@ pub(crate) fn output_path_component_identities(
         .to_str()
         .ok_or(InvalidOutputFolderReason::NonUtf8)?;
     parse_relative_path(raw).map(|portable| portable.identity_components())
+}
+
+/// Yield every strict prefix of a portable output-path component identity.
+///
+/// WHAT: returns the leading component slices of `identity`, shortest first, excluding the full
+/// identity.
+/// WHY: file/descendant conflicts are decided from the same case-folded prefixes whether the
+/// caller compares two recorded artefacts or indexes prepared writer destinations.
+pub(crate) fn component_identity_prefixes(identity: &[String]) -> impl Iterator<Item = &[String]> {
+    (1..identity.len()).map(move |length| &identity[..length])
 }
 
 /// Check whether a normalized relative path begins with a case-folded reserved component.

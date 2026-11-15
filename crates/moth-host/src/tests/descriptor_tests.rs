@@ -11,15 +11,16 @@ fn descriptors_expose_the_declared_signature() {
         .fallible();
 
     assert_eq!(function.name(), "parse_count");
-    assert_eq!(function.parameters(), [HostType::String, HostType::U8]);
+    let signature = function.signature();
+    assert_eq!(signature.parameters(), [HostType::String, HostType::U8]);
     assert_eq!(
-        function.success_values(),
+        signature.success_values(),
         [HostType::optional(HostType::U32)]
     );
-    assert!(function.is_fallible());
+    assert!(signature.is_fallible());
 
     let plain = HostFunction::new("ping");
-    assert!(plain.parameters().is_empty());
-    assert!(plain.success_values().is_empty());
-    assert!(!plain.is_fallible());
+    assert!(plain.signature().parameters().is_empty());
+    assert!(plain.signature().success_values().is_empty());
+    assert!(!plain.signature().is_fallible());
 }

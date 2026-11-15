@@ -296,6 +296,32 @@ fn compile_registered_package_project(
 }
 
 #[test]
+fn canonical_mode_compiles_facade_only_project_as_package_assembly() {
+    let frontend = compile_fixture(&[("@package.moth", "$export\nlabel #= \"facade\"\n")]);
+    assert!(
+        frontend.project.structure.entry_modules().is_empty(),
+        "a project with no @entry.moth must select no entries"
+    );
+    assert!(
+        frontend
+            .project
+            .successful_artefacts_in_module_id_order()
+            .next()
+            .is_some(),
+        "the project package facade must still compile"
+    );
+
+    let compilation = crate::build_system::build::ProjectCompilation::from_frontend(frontend)
+        .expect("an entryless facade project should assemble without an entry");
+
+    assert_eq!(compilation.entry_count(), 0);
+    assert!(
+        compilation.package_assembly().is_some(),
+        "the project package surface should be exposed as ProjectPackageAssembly"
+    );
+}
+
+#[test]
 fn registered_support_only_package_compiles_its_external_surface() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let frontend = successful_compilation_value(compile_registered_package_project(

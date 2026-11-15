@@ -29,6 +29,11 @@ fn fixture_workspace() -> TempDir {
         "[dependencies]\nmoth-lexical = { path = \"../moth-lexical\" }\n",
     );
     write_rust_package(workspace.path(), "moth-host", "");
+    write_rust_package(
+        workspace.path(),
+        "moth-builder-fixture",
+        "[dependencies]\nmoth = { path = \"../..\" }\n",
+    );
     write_rust_package(workspace.path(), "lappet", "");
     write_rust_package(workspace.path(), "moth-cli", "");
     write_fixture_file(
@@ -330,6 +335,7 @@ fn rust_libraries_allow_only_the_forward_workspace_direction() {
         [
             "Cargo.toml",
             "crates/lappet/Cargo.toml",
+            "crates/moth-builder-fixture/Cargo.toml",
             "crates/moth-cli/Cargo.toml",
             "crates/moth-host/Cargo.toml",
             "crates/moth-lexical/Cargo.toml",
@@ -588,5 +594,43 @@ fn compiler_and_lappet_keep_their_one_way_dependency_boundaries() {
         assert_eq!(edge.package, owner);
         assert_eq!(edge.dependency, dependency);
         assert_eq!(edge.kind, expected_kind);
+    }
+}
+
+#[test]
+fn public_sdk_fixture_rejects_every_dependency_except_the_compiler() {
+    for (dependency, definition) in [
+        ("moth-host", "moth-host = { path = \"../moth-host\" }"),
+        (
+            "moth-lexical",
+            "moth-lexical = { path = \"../moth-lexical\" }",
+        ),
+        ("moth-mon", "moth-mon = { path = \"../moth-mon\" }"),
+        ("lappet", "lappet = { path = \"../lappet\" }"),
+        ("xtask", "xtask = { path = \"../../xtask\" }"),
+        ("wasmtime", "wasmtime = \"0.1\""),
+    ] {
+        let workspace = fixture_workspace();
+        write_rust_package(
+            workspace.path(),
+            "moth-builder-fixture",
+            &format!(
+                "[dependencies]\nmoth = {{ path = \"../..\" }}\n\n[dev-dependencies]\n{definition}\n"
+            ),
+        );
+
+        let findings = findings_for(&workspace);
+        assert_eq!(findings.len(), 1, "{dependency}: {findings:?}");
+        let finding = &findings[0];
+        assert_eq!(finding.rule, FirstPartyDepsRule::RustDependencyDirection);
+        assert_eq!(finding.file, "crates/moth-builder-fixture/Cargo.toml");
+        let edge = finding.rust_dependency.as_ref().expect("typed Cargo edge");
+        assert_eq!(edge.package, "moth-builder-fixture");
+        assert_eq!(edge.dependency, dependency);
+        assert_eq!(edge.kind, RustDependencyKind::Dev);
+        assert!(
+            finding.message.contains("may depend only on [moth]"),
+            "{finding}"
+        );
     }
 }

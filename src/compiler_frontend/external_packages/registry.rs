@@ -159,7 +159,36 @@ impl ExternalPackageRegistry {
         path: impl Into<String>,
         origin: crate::builder_surface::PackageOrigin,
     ) -> Result<ExternalPackageId, ExternalRegistrationError> {
+        self.register_package_with_metadata(
+            path,
+            crate::builder_surface::PackageMetadata::binding(origin),
+        )
+    }
+
+    /// Registers a package whose implementation the native host provides.
+    ///
+    /// WHAT: the registration path for the builder SDK's host packages.
+    /// WHY: host requirement production must name exactly the bindings a native Rust host
+    /// implements. The backing keeps those packages distinguishable from backend-provided binding
+    /// packages that share the `Builder` origin, such as a first-party JavaScript package.
+    pub(crate) fn register_host_package(
+        &mut self,
+        path: impl Into<String>,
+        origin: crate::builder_surface::PackageOrigin,
+    ) -> Result<ExternalPackageId, ExternalRegistrationError> {
+        self.register_package_with_metadata(
+            path,
+            crate::builder_surface::PackageMetadata::host_binding(origin),
+        )
+    }
+
+    fn register_package_with_metadata(
+        &mut self,
+        path: impl Into<String>,
+        metadata: crate::builder_surface::PackageMetadata,
+    ) -> Result<ExternalPackageId, ExternalRegistrationError> {
         let path = path.into();
+        let origin = metadata.origin;
         let Some(path_without_introducer) = path.strip_prefix('@') else {
             return Err(ExternalRegistrationError::InvalidDefinition(format!(
                 "External package '{path}' must start with '@'."
@@ -202,7 +231,6 @@ impl ExternalPackageRegistry {
         }
         let id = ExternalPackageId(self.next_package_id);
         self.next_package_id += 1;
-        let metadata = crate::builder_surface::PackageMetadata::binding(origin);
         let package = ExternalPackage::new(id, path.clone(), metadata);
         self.packages.insert(id, package);
         self.package_id_by_path.insert(path, id);

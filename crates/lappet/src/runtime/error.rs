@@ -52,12 +52,15 @@ pub enum RuntimeError {
 
     /// A ticket, token, span or frame broke the host ABI. The instance is quarantined.
     BoundaryFault(BoundaryFault),
+
     /// An export argument failed a check before guest entry. The guest was not entered and
     /// the instance stays usable.
     ExportArgument(BoundaryFault),
+
     /// The export returned status `1`, the declared-error edge. The instance is not
     /// quarantined. This driver does not decode the error record.
     DeclaredError,
+
     // After a fault.
     /// The instance faulted earlier and is quarantined. Guest code was not entered.
     InstanceFaulted,

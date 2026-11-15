@@ -6,9 +6,8 @@
 use super::{assemble, engine, under_both_optimisations};
 use crate::runtime::imports::HostImports;
 use crate::runtime::instance::{Deadline, Instance};
-use crate::runtime::resource::{
-    HostStateBound, ResourceError, ResourceToken, Sendable, ThreadBound,
-};
+use crate::runtime::kind::{HostStateBound, InstanceKind, Sendable, ThreadBound};
+use crate::runtime::resource::{ResourceError, ResourceToken};
 use crate::runtime::{InstanceLimits, RuntimeError};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -16,7 +15,7 @@ use std::sync::{Arc, Mutex};
 fn instance<Kind>(optimisation: crate::runtime::NativeOptimisation) -> Instance<(), Kind>
 where
     (): HostStateBound<Kind>,
-    Kind: crate::runtime::resource::InstanceKind,
+    Kind: InstanceKind,
 {
     let engine = engine(optimisation);
     let imports = HostImports::<(), Kind>::new(&engine);
@@ -241,16 +240,16 @@ fn a_sendable_instance_rejects_a_resource_that_is_not_send() {
 
 #[test]
 fn issued_tokens_are_nonzero_unique_and_then_exhausted() {
-    use crate::runtime::resource::{LAST_ISSUED_TOKEN, issue_from_counter};
+    use crate::runtime::resource::{LAST_TOKEN, issue_from};
     use std::sync::atomic::AtomicU64;
 
-    let counter = AtomicU64::new(LAST_ISSUED_TOKEN - 1);
-    let first = issue_from_counter(&counter).expect("one token remains before the last");
-    let last = issue_from_counter(&counter).expect("the last carrier token can be issued");
+    let counter = AtomicU64::new(LAST_TOKEN - 1);
+    let first = issue_from(&counter).expect("one token remains before the last");
+    let last = issue_from(&counter).expect("the last carrier token can be issued");
     assert_ne!(first, last);
-    assert!(first.get() > 0);
-    assert_eq!(issue_from_counter(&counter), Err(ResourceError::Exhausted));
-    assert_eq!(issue_from_counter(&counter), Err(ResourceError::Exhausted));
+    assert_eq!(last.get(), LAST_TOKEN);
+    assert_eq!(issue_from(&counter), Err(ResourceError::Exhausted));
+    assert_eq!(issue_from(&counter), Err(ResourceError::Exhausted));
 }
 
 struct DropProbe {

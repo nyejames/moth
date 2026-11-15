@@ -128,14 +128,6 @@ impl FrontendCompilationMode {
     fn includes_check_only(self) -> bool {
         matches!(self, Self::Check)
     }
-
-    /// Whether discovery must find at least one executable `@entry.moth` root.
-    ///
-    /// `check` validates API-only and entryless trees; `build`/`dev` need an artefact or
-    /// runtime entry anywhere in the selected project tree.
-    fn requires_entry(self) -> bool {
-        matches!(self, Self::Canonical)
-    }
 }
 pub(crate) use compiled_boundary::ProjectFrontendCompilation;
 

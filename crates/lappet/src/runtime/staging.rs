@@ -1,12 +1,13 @@
 //! Per-instance staging table for Rust-produced text.
 //!
 //! A ticket is a nonzero integer, unique for the life of the instance, and it encodes no host
-//! address. The empty string is ticket zero and has no entry. A failed take leaves the table
-//! unchanged. Limits are read from [`InstanceLimits`] on each stage, so this table doesn't keep
-//! a second copy.
+//! address. The empty string is ticket zero and has no entry, so zero is never a key and every
+//! lookup of it misses. A failed take leaves the table unchanged. Limits are read from
+//! [`InstanceLimits`] on each stage, so this table doesn't keep a second copy.
 
 use super::limits::InstanceLimits;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 /// Why a stage or a take was refused. The caller classifies it. This table never quarantines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,9 +74,6 @@ impl StagingTable {
 
     /// The length of a live entry, without copying or consuming it.
     pub(crate) fn len(&self, ticket: u64) -> Result<usize, StagingError> {
-        if ticket == 0 {
-            return Err(StagingError::UnknownTicket);
-        }
         self.entries
             .get(&ticket)
             .map(Vec::len)
@@ -90,17 +88,14 @@ impl StagingTable {
         ticket: u64,
         expected_length: usize,
     ) -> Result<Vec<u8>, StagingError> {
-        if ticket == 0 || !self.entries.contains_key(&ticket) {
+        let Entry::Occupied(entry) = self.entries.entry(ticket) else {
             return Err(StagingError::UnknownTicket);
-        }
-        if self.entries[&ticket].len() != expected_length {
+        };
+        if entry.get().len() != expected_length {
             return Err(StagingError::WrongLength);
         }
 
-        let bytes = self
-            .entries
-            .remove(&ticket)
-            .expect("the ticket was just found");
+        let bytes = entry.remove();
         self.live_bytes -= bytes.len();
         Ok(bytes)
     }

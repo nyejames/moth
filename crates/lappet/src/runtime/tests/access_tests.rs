@@ -6,7 +6,7 @@
 use super::{assemble, engine, under_both_optimisations};
 use crate::runtime::imports::HostImports;
 use crate::runtime::instance::{Deadline, Instance};
-use crate::runtime::resource::AccessRequest;
+use crate::runtime::resource::{AccessMode, AccessRequest};
 use crate::runtime::{BoundaryFault, InstanceLimits, RuntimeError};
 use wasmtime::{Val, ValType};
 
@@ -39,7 +39,7 @@ fn define(imports: &mut HostImports<AccessHost>) -> Result<(), RuntimeError> {
         [ValType::I64],
         [],
         |host, _, _, resources, _context, arguments, _| {
-            resources.with_access(&[request(token(arguments), false)], |_| {
+            resources.with_access(&[request(token(arguments), AccessMode::Shared)], |_| {
                 host.ran = true;
             })?;
             Ok(())
@@ -51,10 +51,13 @@ fn define(imports: &mut HostImports<AccessHost>) -> Result<(), RuntimeError> {
         [ValType::I64],
         [],
         |host, _, _, resources, _context, arguments, _| {
-            resources.with_access(&[request(token(arguments), true)], |access| {
-                let _ = access.exclusive::<u32>(0);
-                host.ran = true;
-            })?;
+            resources.with_access(
+                &[request(token(arguments), AccessMode::Exclusive)],
+                |access| {
+                    let _ = access.exclusive::<u32>(0);
+                    host.ran = true;
+                },
+            )?;
             Ok(())
         },
     )?;
@@ -66,7 +69,10 @@ fn define(imports: &mut HostImports<AccessHost>) -> Result<(), RuntimeError> {
         |host, _, _, resources, _context, arguments, _| {
             let second = arguments[1].i64().expect("the import takes two i64 tokens");
             resources.with_access(
-                &[request(token(arguments), false), request(second, false)],
+                &[
+                    request(token(arguments), AccessMode::Shared),
+                    request(second, AccessMode::Shared),
+                ],
                 |access| {
                     let _ = access.shared::<u32>(0);
                     let _ = access.shared::<u32>(1);
@@ -83,7 +89,11 @@ fn define(imports: &mut HostImports<AccessHost>) -> Result<(), RuntimeError> {
         [],
         |host, _, _, resources, _context, arguments, _| {
             let raw = token(arguments);
-            resources.with_access(&[request(raw, true), request(raw, false)], |_| {
+            let requests = [
+                request(raw, AccessMode::Exclusive),
+                request(raw, AccessMode::Shared),
+            ];
+            resources.with_access(&requests, |_| {
                 host.ran = true;
             })?;
             Ok(())
@@ -95,7 +105,7 @@ fn define(imports: &mut HostImports<AccessHost>) -> Result<(), RuntimeError> {
         [ValType::I64],
         [],
         |_host, _, _, resources, _context, arguments, _| {
-            resources.with_access(&[request(token(arguments), true)], |_| {
+            resources.with_access(&[request(token(arguments), AccessMode::Exclusive)], |_| {
                 panic!("host import bug while holding a resource");
             })?;
             Ok(())
@@ -104,10 +114,10 @@ fn define(imports: &mut HostImports<AccessHost>) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-fn request(raw: i64, exclusive: bool) -> AccessRequest {
+fn request(raw: i64, mode: AccessMode) -> AccessRequest {
     AccessRequest {
         raw,
-        exclusive,
+        mode,
         type_id: std::any::TypeId::of::<u32>(),
     }
 }

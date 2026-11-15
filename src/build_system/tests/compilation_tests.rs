@@ -16,6 +16,7 @@ use crate::build_system::create_project_modules::module_artifact_store::{
 };
 use crate::build_system::create_project_modules::module_identity::ModuleId;
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
+use crate::build_system::test_support::synthetic_source_root;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
@@ -1166,6 +1167,7 @@ fn check_only_success_batches_render_local_paths_through_production_construction
             TransientPreparedBatch::package(package_id, package_batch),
             TransientPreparedBatch::project(batch),
         ],
+        synthetic_source_root(),
     )
     .expect("transient check-only warning frontend should validate");
 
@@ -1322,6 +1324,7 @@ fn canonical_tail_success_retains_warning_source_context() {
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
         vec![TransientPreparedBatch::project(batch)],
+        synthetic_source_root(),
     )
     .expect("empty frontend should validate");
     let mut frontend_value =
@@ -1928,6 +1931,7 @@ run || -> String:
         resource_inputs,
         transient_batches,
         project_source_database,
+        source_root: compiled_source_root,
     } = compiled_frontend;
     drop(compiled_project);
 
@@ -1944,6 +1948,7 @@ run || -> String:
         source_packages,
         resource_inputs,
         transient_batches,
+        compiled_source_root,
     )
     .expect("published generated-warning frontend should validate");
     frontend.project_source_database = project_source_database;

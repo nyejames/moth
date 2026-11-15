@@ -57,6 +57,20 @@ fn finish_registers_source_and_host_packages_with_builder_provenance() {
         .get_package("@platform")
         .expect("host package should register");
     assert_eq!(package.metadata.origin, PackageOrigin::Builder);
+    assert_eq!(
+        package.metadata.backing,
+        crate::builder_surface::PackageBacking::HostBinding,
+        "an SDK host package is implemented by the native host, not a backend"
+    );
+    let core_package = surface
+        .binding_packages
+        .get_package("@core/io")
+        .expect("the mandatory Core bindings should register");
+    assert_eq!(
+        core_package.metadata.backing,
+        crate::builder_surface::PackageBacking::ExternalBinding,
+        "a Core binding stays backend-provided rather than a native host import"
+    );
 
     let (_, function) = surface
         .binding_packages
@@ -452,4 +466,191 @@ fn source_kinds_are_opt_in_for_markdown_and_fixed_for_templates() {
             .kind_for_extension("md"),
         Some(crate::builder_surface::SourceFileKind::PlainMarkdown)
     );
+}
+
+#[test]
+fn finish_registers_the_builder_config_section_with_output_roots() {
+    let definition = BuilderDefinition::new("game")
+        .config("game", |config| {
+            config.string("asset_root").default("assets");
+            config.bool("debug_overlay").default(false);
+            config.string("level").required();
+        })
+        .finish()
+        .expect("a valid config section should finish");
+
+    let sections = definition.surface().config_schemas.project_sections();
+    assert_eq!(sections.len(), 1, "one definition registers one section");
+    let section = &sections[0];
+    assert_eq!(section.name.as_ref(), "game");
+    assert!(
+        section.required,
+        "a required field makes the whole section required"
+    );
+    let mut field_names = section_field_names(section);
+    field_names.sort_unstable();
+    assert_eq!(
+        field_names,
+        [
+            "asset_root",
+            "debug_overlay",
+            "dev_output",
+            "level",
+            "release_output"
+        ]
+    );
+
+    let root = section.schema.node(section.schema.root());
+    let field = |name: &str| {
+        root.field_ids()
+            .iter()
+            .map(|field_id| section.schema.field(*field_id))
+            .find(|field| field.name.as_ref() == name)
+            .unwrap_or_else(|| panic!("declared field '{name}' should register"))
+    };
+    assert!(field("level").required);
+    assert!(!field("asset_root").required);
+    assert!(field("asset_root").default.is_some());
+    assert!(field("debug_overlay").default.is_some());
+    assert!(field("dev_output").default.is_some());
+    assert!(field("release_output").default.is_some());
+}
+
+#[test]
+fn finish_rejects_invalid_builder_config_sections() {
+    let cases = [
+        (
+            "second section",
+            "site",
+            BuilderDefinition::new("game")
+                .config("game", |_config| {})
+                .config("site", |_config| {}),
+        ),
+        (
+            "section name that is not a Moth identifier",
+            "game site",
+            BuilderDefinition::new("game").config("game site", |_config| {}),
+        ),
+        (
+            "reserved section name",
+            "_if",
+            BuilderDefinition::new("game").config("_if", |_config| {}),
+        ),
+        (
+            "reserved field name",
+            "_if",
+            BuilderDefinition::new("game").config("game", |config| {
+                config.string("_if");
+            }),
+        ),
+        (
+            "compiler-owned project section",
+            "project",
+            BuilderDefinition::new("game").config("project", |_config| {}),
+        ),
+        (
+            "first-party builder section",
+            "html",
+            BuilderDefinition::new("game").config("html", |_config| {}),
+        ),
+        (
+            "case-only first-party builder section",
+            "HTML",
+            BuilderDefinition::new("game").config("HTML", |_config| {}),
+        ),
+        (
+            "duplicate string field",
+            "asset_root",
+            BuilderDefinition::new("game").config("game", |config| {
+                config.string("asset_root");
+                config.string("asset_root");
+            }),
+        ),
+        (
+            "field name shared by a string and a bool",
+            "asset_root",
+            BuilderDefinition::new("game").config("game", |config| {
+                config.string("asset_root");
+                config.bool("asset_root");
+            }),
+        ),
+        (
+            "field name that is not a Moth identifier",
+            "asset root",
+            BuilderDefinition::new("game").config("game", |config| {
+                config.string("asset root");
+            }),
+        ),
+        (
+            "reserved development output root",
+            "dev_output",
+            BuilderDefinition::new("game").config("game", |config| {
+                config.string("dev_output").default("site");
+            }),
+        ),
+        (
+            "reserved release output root declared as a bool",
+            "release_output",
+            BuilderDefinition::new("game").config("game", |config| {
+                config.bool("release_output");
+            }),
+        ),
+        (
+            "required string field with a default",
+            "asset_root",
+            BuilderDefinition::new("game").config("game", |config| {
+                config.string("asset_root").required().default("assets");
+            }),
+        ),
+        (
+            "required bool field with a default",
+            "debug_overlay",
+            BuilderDefinition::new("game").config("game", |config| {
+                config.bool("debug_overlay").default(false).required();
+            }),
+        ),
+    ];
+
+    for (case, offender, draft) in cases {
+        let message = invalid_definition_message(case, draft.finish());
+        assert!(message.contains(offender), "{case}: {message}");
+    }
+}
+
+#[test]
+fn independent_definitions_do_not_share_config_sections() {
+    let first = BuilderDefinition::new("game")
+        .config("game", |config| {
+            config.string("asset_root").default("assets");
+        })
+        .finish()
+        .expect("the first definition should finish");
+    let second = BuilderDefinition::new("game")
+        .config("site", |_config| {})
+        .finish()
+        .expect("the second definition should finish");
+
+    let first_sections = first.surface().config_schemas.project_sections();
+    let second_sections = second.surface().config_schemas.project_sections();
+    assert_eq!(first_sections[0].name.as_ref(), "game");
+    assert_eq!(second_sections[0].name.as_ref(), "site");
+
+    let mut first_fields = section_field_names(&first_sections[0]);
+    first_fields.sort_unstable();
+    assert_eq!(first_fields, ["asset_root", "dev_output", "release_output"]);
+
+    let mut second_fields = section_field_names(&second_sections[0]);
+    second_fields.sort_unstable();
+    assert_eq!(second_fields, ["dev_output", "release_output"]);
+}
+
+/// Field names of one registered builder section, in registration order.
+fn section_field_names(
+    section: &crate::builder_surface::config_schema::NamedConfigSectionSchema,
+) -> Vec<&str> {
+    let root = section.schema.node(section.schema.root());
+    root.field_ids()
+        .iter()
+        .map(|field_id| section.schema.field(*field_id).name.as_ref())
+        .collect()
 }

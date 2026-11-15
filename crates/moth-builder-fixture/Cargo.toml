@@ -1,0 +1,14 @@
+[package]
+name = "moth-builder-fixture"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The fixture stands in for a third-party builder author, so the compiler's public library is its
+# only dependency. A second crate would let an internal path into the acceptance proof.
+moth = { path = "../.." }

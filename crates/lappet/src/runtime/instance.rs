@@ -14,12 +14,10 @@
 use super::context::HostContext;
 use super::error::{BoundaryFault, HostFault, LinkError, RuntimeError};
 use super::fault::{GuestEntry, classify_guest_failure};
+use super::kind::{HostStateBound, InstanceKind, Sendable, ThreadBound};
 use super::limits::InstanceLimits;
-use super::resource::{
-    DrainedResources, InstanceKind, ResourceError, ResourceTable, ResourceToken, Sendable,
-    ThreadBound,
-};
-use super::staging::StagingTable;
+use super::resource::{DrainedResources, ResourceError, ResourceTable, ResourceToken, Shared};
+use super::staging::{StagingError, StagingTable};
 use std::any::TypeId;
 use wasmtime::{InstancePre, Store, StoreLimits, WasmParams, WasmResults};
 
@@ -73,7 +71,7 @@ impl<HostState: 'static, Kind: InstanceKind> PreparedModule<HostState, Kind> {
 
 impl<HostState, Kind> PreparedModule<HostState, Kind>
 where
-    HostState: super::resource::HostStateBound<Kind>,
+    HostState: HostStateBound<Kind>,
     Kind: InstanceKind,
 {
     /// Creates an isolated instance and runs its Wasm start function, if it has one.
@@ -247,9 +245,11 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
     where
         Results: WasmResults,
     {
-        if let Err(fault) = self.store.data().resources.check_argument(raw, type_id) {
-            return Err(RuntimeError::ExportArgument(fault));
-        }
+        self.store
+            .data()
+            .resources
+            .check_argument(raw, type_id)
+            .map_err(RuntimeError::ExportArgument)?;
         self.call_with_context(export_name, raw, deadline, context)
     }
 
@@ -304,16 +304,19 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
         // entry would multiply the deadline by the number of guest entries.
         self.install_deadline(deadline);
         self.invoke::<(), ()>(SCOPE_OPEN, ())?;
-        match self.drive_open_scope(export_name, argument, argument_size) {
-            Ok(ScopeBody::Copied(copied)) => match self.invoke::<(), ()>(SCOPE_CLOSE, ()) {
-                Ok(()) => Ok(ScopedResult { copied }),
-                Err(error) => Err(self.fault_open_scope(error)),
-            },
-            Ok(ScopeBody::DeclaredError) => match self.invoke::<(), ()>(SCOPE_CLOSE, ()) {
-                Ok(()) => Err(RuntimeError::DeclaredError),
-                Err(error) => Err(self.fault_open_scope(error)),
-            },
-            Err(error) => Err(self.fault_open_scope(error)),
+
+        // A fault inside the open scope skips close. A declared error is not a fault, so the
+        // scope still closes before either outcome is reported.
+        let body = match self.drive_open_scope(export_name, argument, argument_size) {
+            Ok(body) => body,
+            Err(error) => return Err(self.fault_open_scope(error)),
+        };
+        if let Err(error) = self.invoke::<(), ()>(SCOPE_CLOSE, ()) {
+            return Err(self.fault_open_scope(error));
+        }
+        match body {
+            ScopeBody::Copied(copied) => Ok(ScopedResult { copied }),
+            ScopeBody::DeclaredError => Err(RuntimeError::DeclaredError),
         }
     }
 
@@ -349,10 +352,10 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
         }
     }
 
+    /// Any failure while a scope is open is a fault, including a link error that left the
+    /// guest unentered, because the open scope can no longer be closed.
     fn fault_open_scope(&mut self, error: RuntimeError) -> RuntimeError {
-        if !self.is_quarantined {
-            self.quarantine();
-        }
+        self.quarantine();
         error
     }
 
@@ -389,42 +392,39 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
     fn read_span(&mut self, frame: i32) -> Result<String, RuntimeError> {
         let mut header = [0u8; FRAME_SIZE as usize];
         self.read_memory(guest_offset(frame), &mut header)?;
-        let address = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
-        let length = u32::from_le_bytes([header[4], header[5], header[6], header[7]]);
+        let [a0, a1, a2, a3, l0, l1, l2, l3] = header;
+        let address = u32::from_le_bytes([a0, a1, a2, a3]);
+        let length = u32::from_le_bytes([l0, l1, l2, l3]);
+
+        let noncanonical = || RuntimeError::BoundaryFault(BoundaryFault::NoncanonicalStatus);
+        let out_of_bounds = || RuntimeError::BoundaryFault(BoundaryFault::DestinationOutOfBounds);
+
+        // The empty string is the zero span, and a length never exceeds the `i32` carrier.
         if length == 0 {
-            if address != 0 {
-                return Err(RuntimeError::BoundaryFault(
-                    BoundaryFault::NoncanonicalStatus,
-                ));
-            }
-            return Ok(String::new());
+            return if address == 0 {
+                Ok(String::new())
+            } else {
+                Err(noncanonical())
+            };
         }
-        if length > 2_147_483_647 {
-            return Err(RuntimeError::BoundaryFault(
-                BoundaryFault::NoncanonicalStatus,
-            ));
+        if length > i32::MAX.cast_unsigned() {
+            return Err(noncanonical());
         }
-        let start = usize::try_from(address)
-            .map_err(|_| RuntimeError::BoundaryFault(BoundaryFault::DestinationOutOfBounds))?;
-        let Some(end) = start.checked_add(length as usize) else {
-            return Err(RuntimeError::BoundaryFault(
-                BoundaryFault::DestinationOutOfBounds,
-            ));
-        };
+
+        // Check the range before allocating, so a wild length can't size the buffer.
+        let start = usize::try_from(address).map_err(|_| out_of_bounds())?;
+        let length = usize::try_from(length).map_err(|_| out_of_bounds())?;
         let memory_size = self.scope_memory()?.data_size(&self.store);
-        if end > memory_size {
-            return Err(RuntimeError::BoundaryFault(
-                BoundaryFault::DestinationOutOfBounds,
-            ));
+        let is_in_bounds = start
+            .checked_add(length)
+            .is_some_and(|end| end <= memory_size);
+        if !is_in_bounds {
+            return Err(out_of_bounds());
         }
-        let mut bytes = vec![0u8; length as usize];
+
+        let mut bytes = vec![0u8; length];
         self.read_memory(start, &mut bytes)?;
-        match std::str::from_utf8(&bytes) {
-            Ok(text) => Ok(text.to_string()),
-            Err(_) => Err(RuntimeError::BoundaryFault(
-                BoundaryFault::NoncanonicalStatus,
-            )),
-        }
+        String::from_utf8(bytes).map_err(|_| noncanonical())
     }
 
     /// The instance's host state. It stays readable after a fault, so the embedder can inspect
@@ -438,9 +438,9 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
     }
 
     /// Stages text for the guest. The empty slice returns ticket zero and stores nothing.
-    pub(crate) fn stage_text(&mut self, bytes: &[u8]) -> Result<u64, super::staging::StagingError> {
-        let limits = self.store.data().limits;
-        self.store.data_mut().staging.stage(bytes, &limits)
+    pub(crate) fn stage_text(&mut self, bytes: &[u8]) -> Result<u64, StagingError> {
+        let store_data = self.store.data_mut();
+        store_data.staging.stage(bytes, &store_data.limits)
     }
 
     pub(crate) fn has_live_staged_text(&self) -> bool {
@@ -458,14 +458,15 @@ impl<HostState: 'static, Kind: InstanceKind> Instance<HostState, Kind> {
     pub(crate) fn resource<T: 'static>(
         &self,
         token: ResourceToken<T>,
-    ) -> Result<super::resource::Shared<'_, T>, ResourceError> {
+    ) -> Result<Shared<'_, T>, ResourceError> {
         self.store.data().resources.get(token)
     }
 
+    /// Resolves a token to its value for writing. `&mut self` proves no guest call is running.
     pub(crate) fn resource_mut<T: 'static>(
         &mut self,
         token: ResourceToken<T>,
-    ) -> Result<super::resource::Exclusive<'_, T>, ResourceError> {
+    ) -> Result<&mut T, ResourceError> {
         self.store.data_mut().resources.get_mut(token)
     }
 
@@ -519,8 +520,8 @@ impl<HostState: 'static> Instance<HostState, Sendable> {
         &mut self,
         value: T,
     ) -> Result<ResourceToken<T>, ResourceError> {
-        let limits = self.store.data().limits;
-        self.store.data_mut().resources.insert(value, &limits)
+        let store_data = self.store.data_mut();
+        store_data.resources.insert(value, &store_data.limits)
     }
 }
 
@@ -530,7 +531,7 @@ impl<HostState: 'static> Instance<HostState, ThreadBound> {
         &mut self,
         value: T,
     ) -> Result<ResourceToken<T>, ResourceError> {
-        let limits = self.store.data().limits;
-        self.store.data_mut().resources.insert(value, &limits)
+        let store_data = self.store.data_mut();
+        store_data.resources.insert(value, &store_data.limits)
     }
 }

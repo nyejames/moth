@@ -117,8 +117,9 @@ pub struct ConfigSchemaField {
 /// One schema node: a record surface with its declared fields and unknown-field policy.
 #[derive(Clone, Debug)]
 pub struct ConfigSchemaNode {
-    /// Diagnostic identity of the record surface, e.g. `"project record"`.
-    pub name: &'static str,
+    /// Diagnostic identity of the record surface, e.g. `"project record"`. Builder sections
+    /// choose their name at build time, so the label may be owned.
+    pub name: Cow<'static, str>,
     pub unknown_fields: UnknownFieldPolicy,
     fields: Vec<ConfigSchemaFieldId>,
 }
@@ -253,7 +254,10 @@ fn validate_section_registry(
 
 impl ConfigSchema {
     /// Creates a schema whose root is the first registered node.
-    pub fn new(root_name: &'static str, unknown_fields: UnknownFieldPolicy) -> Self {
+    pub fn new(
+        root_name: impl Into<Cow<'static, str>>,
+        unknown_fields: UnknownFieldPolicy,
+    ) -> Self {
         let mut schema = Self {
             nodes: Vec::new(),
             fields: Vec::new(),
@@ -289,13 +293,13 @@ impl ConfigSchema {
     /// Registers a new record node and returns its dense identifier.
     pub fn add_node(
         &mut self,
-        name: &'static str,
+        name: impl Into<Cow<'static, str>>,
         unknown_fields: UnknownFieldPolicy,
     ) -> Result<ConfigSchemaNodeId, InfrastructureFailure> {
         self.ensure_mutable()?;
         let node_id = ConfigSchemaNodeId(self.nodes.len());
         self.nodes.push(ConfigSchemaNode {
-            name,
+            name: name.into(),
             unknown_fields,
             fields: Vec::new(),
         });

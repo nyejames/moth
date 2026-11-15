@@ -12,6 +12,7 @@ use crate::build_system::create_project_modules::module_artifact_store::{
 use crate::build_system::create_project_modules::module_identity::ModuleId;
 use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
+use crate::build_system::test_support::synthetic_source_root;
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
@@ -533,6 +534,7 @@ fn test_frontend_from_project_modules(modules: Vec<Module>) -> ProjectFrontendCo
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
         Vec::new(),
+        synthetic_source_root(),
     )
     .expect("test project boundary should validate")
 }
@@ -554,6 +556,7 @@ fn test_frontend_with_source_package(
         }]),
         ResourceInputRegistry::new(),
         Vec::new(),
+        synthetic_source_root(),
     )
     .expect("test frontend should validate")
 }
@@ -835,7 +838,13 @@ fn same_generated_declaration_across_project_and_package_boundaries_fails() {
     }]);
 
     let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        ProjectFrontendCompilation::new(project, registry, ResourceInputRegistry::new(), Vec::new())
+        ProjectFrontendCompilation::new(
+            project,
+            registry,
+            ResourceInputRegistry::new(),
+            Vec::new(),
+            synthetic_source_root(),
+        )
     }));
     let report = match payload {
         Err(payload) => payload
@@ -892,6 +901,7 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
         ]),
         ResourceInputRegistry::new(),
         Vec::new(),
+        synthetic_source_root(),
     )
     .expect("overlapping package module ids should stay isolated");
 
@@ -1235,6 +1245,7 @@ fn project_and_package_boundaries_may_contain_equal_generated_identities() {
         }]),
         ResourceInputRegistry::new(),
         Vec::new(),
+        synthetic_source_root(),
     )
     .expect("equal generated identities across boundaries should validate");
 
@@ -1344,6 +1355,7 @@ fn package_cannot_resolve_an_unrelated_package_sidecar() {
         ]),
         ResourceInputRegistry::new(),
         Vec::new(),
+        synthetic_source_root(),
     )
     .expect("frontend boundaries should validate");
 
@@ -1439,6 +1451,7 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
             test_package_registry(packages),
             ResourceInputRegistry::new(),
             Vec::new(),
+            synthetic_source_root(),
         )
         .expect("frontend should validate")
     };
@@ -1526,6 +1539,7 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
             }]),
             ResourceInputRegistry::new(),
             Vec::new(),
+            synthetic_source_root(),
         )
         .expect("single-package frontend should validate");
         let compilation = ProjectCompilation::from_frontend(frontend)
@@ -1660,6 +1674,7 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
         Vec::new(),
+        synthetic_source_root(),
     ) {
         Ok(_) => panic!("an unfinished module slot must reject the frontend boundary"),
         Err(error) => error,
@@ -1738,6 +1753,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
         Vec::new(),
+        synthetic_source_root(),
     )
     .expect("mixed outcomes are a valid retained frontend result for check");
     assert!(frontend.has_diagnosed_or_blocked());
@@ -2323,6 +2339,7 @@ fn generated_names_stay_stable_under_sidecar_publication_reordering() {
                 CompletedSourcePackageRegistry::new(),
                 ResourceInputRegistry::new(),
                 Vec::new(),
+                synthetic_source_root(),
             )
             .expect("frontend should validate"),
         )
@@ -2408,6 +2425,7 @@ fn diagnostic_recovery_incomplete_graph_is_not_success() {
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
         Vec::new(),
+        synthetic_source_root(),
     )
     .expect("an intentionally incomplete graph is a valid check result");
     assert!(frontend.has_diagnosed_or_blocked());

@@ -39,7 +39,7 @@ use crate::projects::html_project::compile_input::{
     HtmlModuleCompileContext, HtmlModuleCompileInput,
 };
 use crate::projects::html_project::diagnostics::{
-    capture_html_diagnostic, duplicate_html_output_path_diagnostic,
+    capture_html_diagnostic, duplicate_html_output_path_diagnostic, no_entry_root_diagnostic,
     resource_output_path_reserved_diagnostic,
 };
 use crate::projects::html_project::document_config::parse_html_document_config;
@@ -173,10 +173,22 @@ impl BackendBuilder for HtmlProjectBuilder {
             (site_config, document_config)
         };
 
-        if project_compilation.module_count() == 0 {
-            return Err(InfrastructureFailure::internal(
-                CompilerStage::ProjectBuildAssembly,
-                "HTML builder expected at least one compiled module but got 0.",
+        if project_compilation.entry_count() == 0 {
+            // HTML build/dev produce executable pages. The shared frontend compiles facade-only
+            // projects for package-capable builders, so this builder enforces its own entry
+            // requirement after compilation and reports the shared no-entry diagnostic against
+            // the source root the frontend compiled. An empty project tree also has no entries,
+            // so it reports the same user diagnostic rather than an internal failure.
+            let mut diagnostic_strings = backend_context.diagnostic_strings();
+            let diagnostic = no_entry_root_diagnostic(
+                project_compilation.source_root(),
+                &mut diagnostic_strings,
+            );
+            return Err(capture_html_diagnostic(
+                diagnostic,
+                diagnostic_strings.strings(),
+                None,
+                || None,
             )
             .into());
         }

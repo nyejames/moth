@@ -14,11 +14,10 @@
 use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DependencyClauseKind, DiagnosticBag, DiagnosticDraft, InvalidConfigReason, PreparedFailure,
+    DependencyClauseKind, DiagnosticBag, DiagnosticDraft, PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
@@ -54,7 +53,6 @@ use super::module_preparation::{
 };
 use super::prepared_module::PreparedModule;
 use super::project_module_graph::ProjectModuleGraph;
-use super::project_structure_diagnostics::{path_id, project_structure_diagnostic};
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery::{
     BoundaryProviderSources, ExternalImportDiscoveryState, ResolvedDependencyEdge,
@@ -625,7 +623,6 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
-    require_entry: bool,
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
@@ -642,7 +639,6 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
         external_imports,
         directory_dependency_resolution,
         resource_inputs,
-        require_entry,
         include_check_only,
         selected_source_texts,
         string_table,
@@ -684,7 +680,6 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
         external_imports,
         directory_dependency_resolution,
         resource_inputs,
-        false,
         include_check_only,
         selected_source_texts,
         string_table,
@@ -708,7 +703,6 @@ fn discover_all_modules_in_boundary(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
-    require_entry: bool,
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
@@ -725,24 +719,6 @@ fn discover_all_modules_in_boundary(
         &source_origin_lookup,
     ));
     drop(source_origin_lookup);
-
-    if require_entry && project_module_graph.entry_modules().is_empty() {
-        // Diagnostic identities intern through the narrow builder; the table then moves to the
-        // diagnosed batch for the final boundary handoff.
-        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-        let diagnostic = project_structure_diagnostic(InvalidConfigReason::NoRootModuleEntries {
-            entry_root: path_id(project_path_resolver.entry_root(), &mut diagnostic_strings),
-        });
-        let table = string_table.take_for_handoff();
-        return Err(PreparedFailure::Diagnosed(
-            PreparedDiagnosticBatch::capture_from_bag(
-                DiagnosticBag::from(diagnostic),
-                table,
-                None,
-                None,
-            ),
-        ));
-    }
 
     let module_error_allowance = config.frontend_options().max_errors_per_module;
     let ModuleCompilationJobBatch {

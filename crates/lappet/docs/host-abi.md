@@ -1,7 +1,8 @@
 # Lappet host ABI adapter responsibilities
 
-> The runtime foundation is in the tree. The adapter is not. This page is still
-> the accepted design, and [the roadmap](../roadmap.md) owns delivery status.
+> The runtime and host boundary tables are in the tree. The adapter is not.
+> This page remains the accepted design, and [the roadmap](../roadmap.md)
+> owns delivery status.
 
 This document owns Lappet's side of the V1 native host boundary: installing
 Rust implementations, checking and converting boundary values, the staging and
@@ -70,11 +71,13 @@ adapter copies into call-owned storage. Callers can't observe the difference.
 Each instance owns one staging table for Rust-produced text. The ticket
 protocol itself is defined by the native host ABI.
 
-- Ticket values are nonzero, unique within the instance and never reused while
-  it lives. They encode no host address.
-- Entries have per-entry and per-instance byte limits, chosen with the runtime
-  runtime policy checkpoint. Exceeding a limit is a host fault, not a Moth
-  error.
+- Ticket values come from one per-instance `u64` counter starting at 1. They
+  are nonzero, unique within the instance and never reused while it lives.
+  They encode no host address.
+- By default an entry holds at most 16 MiB and one instance holds at most 64 MiB
+  of live staged text. `InstanceLimits::max_staged_entry_bytes` and
+  `InstanceLimits::max_staged_live_bytes` set these limits for an instance.
+  Exceeding a limit is a host fault, not a Moth error.
 - A take removes its entry. A failed take is a boundary fault.
 - Lappet tracks live tickets so it can fault when the guest enters another
   import, or the outermost entry returns, with a ticket outstanding.
@@ -87,11 +90,14 @@ closes resources through the
 [host resource and context API](host-resources.md), which owns the Rust shape,
 ownership and failure reporting.
 
-- Tokens come from one process-wide generator, so they are nonzero, unique
-  across every runtime and instance in the process and never reused. A token
-  from another runtime is therefore never live in this table. Exhausting the
-  generator is an error returned from insertion, because no guest call is
-  running.
+- Tokens come from one process-wide `u64` counter starting at 1, so they are
+  nonzero, unique across every runtime and instance in the process and never
+  reused. A token from another runtime is therefore never live in this table.
+  Exhausting the generator is an error returned from insertion, not a host
+  fault, because no guest call is running.
+- By default an instance holds at most 1,048,576 live entries, set by
+  `InstanceLimits::max_live_resources`. The next insert returns a
+  `ResourceError` and leaves the table unchanged.
 - V1 mints one token per entry. Every use from the guest checks the instance's
   table, the registered canonical resource type and that the entry is live
   before a Rust reference exists. Stale, closed, wrong-type and other-instance
@@ -101,8 +107,8 @@ ownership and failure reporting.
   shared with exclusive, including two tokens for one object. Host calls never
   nest in V1, so a conflict can arise only within one host call's own
   parameters.
-- Closing a resource removes its entry and returns its value to the embedder.
-  The table keeps no closed marker, because a token is never reused.
+- Closing a resource removes its entry at once and returns its value to the
+  embedder. The table keeps no closed marker, because a token is never reused.
 - The table changes only between guest calls. A host function can't create or
   close a resource.
 - Quarantine blocks guest calls only. The embedder can still close, inspect
@@ -168,33 +174,58 @@ compiler freezes its signature. It reports a guest trap.
 
 ## Deferred tests
 
-Each test needs a Wasmtime store. The marker after each test says what else it
-waits for:
+Each test needs a Wasmtime store. Every fixture-level test now has coverage.
+Its marker names the test that covers it, or what it still waits for.
 
-- **Fixture:** a hand-authored core Wasm fixture that follows the V1 protocol
-  can exercise Lappet's table and fault mechanics once the runtime foundation
-  exists. A fixture never proves that compiled Moth follows the ABI.
-- **Descriptor:** needs the shared host descriptor contract and the adapter
-  conversions built on it.
+- **Covered:** the named test under `crates/lappet/src/runtime/tests/`
+  exercises the fixture-level part under both optimisation levels.
+- **Adapter:** needs the value conversions of the host adapters, which read
+  the shared descriptors in `moth-host`. The adapters arrive with the
+  real-application gate because nothing calls them until compiled Moth imports
+  a host function.
 - **Compiler:** needs Wasm emitted by the Moth backend, so it waits for the
   compiler prerequisites on the ABI page and the real-application gate.
 
-Every fixture-level test is repeated against compiled Moth when that gate
-opens.
+Every covered test is repeated against compiled Moth when that gate opens.
 
 1. `U8` and `Byte` descriptors with identical carriers reject each other's
-   implementations and out-of-range values. **Descriptor.**
+   implementations and out-of-range values. The descriptor half is **covered
+   by** `crates/moth-host/src/tests/preflight_tests.rs::byte_and_u8_are_distinct_identities`.
+   Rejecting an out-of-range value is **Adapter.**
 2. `none`, `Some("")`, status `1` with code `0` and a boundary fault stay
-   distinguishable from Rust. **Compiler.**
+   distinguishable from Rust. **Compiler.** Waits for host-import lowering to
+   `moth-host-v1` names, fallible-call lowering through `out_frame` and
+   `status`, builtin `Error` lowering and the `ValidatedMemoryPlan` producer
+   for boundary string, frame and scope allocations.
 3. A two-slot export result keeps slot order, and the error edge never reads
-   success fields. **Compiler.**
+   success fields. **Compiler.** Waits for compiled Moth output and the
+   builder-selected export wrappers recorded under
+   [Waiting on main](../roadmap.md#waiting-on-main).
 4. A Rust `String` result is copied into guest storage. A failed take, or a live
    ticket at another import or at entry return, faults without leaking the entry.
-   **Fixture** for the ticket lifetime and take checks.
+   **Covered by** `staged_text_tests.rs::staged_text_is_copied_and_the_ticket_is_consumed`,
+   `staged_text_tests.rs::a_bad_take_quarantines_and_clears_the_table`,
+   `staged_text_tests.rs::taking_one_ticket_twice_is_a_boundary_fault`,
+   `staged_text_tests.rs::a_live_ticket_at_another_import_is_a_boundary_fault`
+   and `staged_text_tests.rs::a_live_ticket_at_entry_return_is_a_boundary_fault`.
+   The `String` conversion is **Adapter.**
 5. Stale, closed, other-instance, wrong-type and conflicting tokens are rejected
-   before the Rust function runs. **Fixture.**
+   before the Rust function runs. **Covered by**
+   `access_tests.rs::a_token_that_is_not_live_is_rejected_before_the_host_body`,
+   `access_tests.rs::a_token_from_another_instance_is_not_live`,
+   `access_tests.rs::a_wrong_type_is_rejected_before_the_host_body`,
+   `access_tests.rs::two_shared_borrows_coexist_and_an_exclusive_borrow_conflicts`,
+   `access_tests.rs::a_guard_is_released_after_the_call_and_after_a_panic` and
+   `resource_tests.rs::zero_is_not_a_token_and_a_closed_token_is_not_live`.
 6. Missing, extra and mismatched imports fail before guest start under both
-   `OptLevel::None` and `OptLevel::Speed`. **Fixture** for the module's
-   physical imports. Matching against the manifest is **Compiler.**
+   `OptLevel::None` and `OptLevel::Speed`. **Covered by**
+   `instance_tests.rs::import_the_host_does_not_provide_is_a_missing_import`,
+   `instance_tests.rs::an_extra_physical_import_fails_before_guest_start` and
+   `instance_tests.rs::import_with_another_physical_signature_is_a_mismatch`.
+   Matching against the manifest is **Compiler** and waits for the host
+   manifest and builder-selected export wrappers.
 7. A trapping scope helper fails the whole export call and no further guest call
-   runs. **Fixture.**
+   runs. **Covered by**
+   `scope_tests.rs::a_trapping_scope_step_skips_close_and_makes_no_further_guest_call`
+   and
+   `scope_tests.rs::a_trapping_scope_close_fails_the_call_and_discards_the_copied_result`.
