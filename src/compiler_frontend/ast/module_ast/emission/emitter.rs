@@ -1731,17 +1731,26 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         )
         .map_err(|error| self.error_messages(error, string_table))?;
 
+        let root_kind = &view
+            .root_template()
+            .map_err(|error| self.error_messages(error, string_table))?
+            .kind;
+
+        // A `$note` is a discarded child of a template body. A direct source fragment is not a
+        // body, so it has to be rejected before folding can publish or drop anything.
+        if matches!(root_kind, TemplateType::Comment) {
+            let diagnostic = templates::note_outside_template_body(
+                string_table.intern("note"),
+                template.comment_directive_span.or(template.span),
+            );
+            return Err(self.diagnostic_messages(diagnostic, string_table));
+        }
+
         // A direct active-root `[$in name: ...]` is a builder contribution, not an escaped
         // template-composition helper. Recognise only this exact shallow shape before the
         // ordinary helper rejection below; nested and stored helpers keep their existing paths.
-        // The template-kind lookup is skipped entirely when no builder schema is present, so the
-        // ordinary const-fragment fast path keeps its existing work.
         if let Some(schema) = self.context.builder_root_slots {
-            let direct_root_name = match &view
-                .root_template()
-                .map_err(|error| self.error_messages(error, string_table))?
-                .kind
-            {
+            let direct_root_name = match root_kind {
                 TemplateType::SlotInsert(SlotKey::Named(name)) => Some(*name),
                 _ => None,
             };
@@ -1789,7 +1798,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     &mut self.context.expression_builder,
                     &mut self.context.const_values,
                 );
-                let is_comment = Self::is_comment_template(&view)?;
                 let mut result =
                     match fold_prepared_root_slot(&preparation, view, &mut fold_context) {
                         Ok(result) => result,
@@ -1804,17 +1812,14 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 }
                 let value = match result.emission {
                     TemplateEmission::Output(value) => value,
-                    TemplateEmission::NoOutput if is_comment => {
-                        return Ok(FoldedConstTemplateResult::NoOutput);
-                    }
                     TemplateEmission::NoOutput => {
                         ConstStringValue::Text(fold_context.string_table.intern(""))
                     }
                 };
-                return Ok(FoldedConstTemplateResult::new(
+                return Ok(FoldedConstTemplateResult {
                     value,
-                    ConstFragmentDestination::Named(slot_name),
-                ));
+                    destination: ConstFragmentDestination::Named(slot_name),
+                });
             }
         }
 
@@ -1847,7 +1852,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut self.context.expression_builder,
             &mut self.context.const_values,
         );
-        let is_comment = Self::is_comment_template(&view)?;
         // Top-level const fragments are builder-facing rendered text metadata; no semantic or
         // fingerprint consumer owns provenance at this boundary in the current milestone.
         let mut result = match fold_prepared_template(&prepared, view, &mut fold_context) {
@@ -1866,24 +1870,15 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let TemplateFoldResult { emission, .. } = result;
         let value = match emission {
             TemplateEmission::Output(value) => value,
-            TemplateEmission::NoOutput if is_comment => {
-                return Ok(FoldedConstTemplateResult::NoOutput);
-            }
             TemplateEmission::NoOutput => {
                 ConstStringValue::Text(fold_context.string_table.intern(""))
             }
         };
 
-        let result = FoldedConstTemplateResult::new(value, ConstFragmentDestination::Body);
-
-        Ok(result)
-    }
-
-    /// Reports whether the prepared root is a template-local comment (`$note`) that emits nothing.
-    fn is_comment_template(view: &TirView<'_>) -> Result<bool, PreparedFailure> {
-        view.root_template()
-            .map(|template| matches!(template.kind, TemplateType::Comment))
-            .map_err(|error| PreparedFailure::Infrastructure(error.into()))
+        Ok(FoldedConstTemplateResult {
+            value,
+            destination: ConstFragmentDestination::Body,
+        })
     }
 
     /// Routes infrastructure failures through their typed lane.

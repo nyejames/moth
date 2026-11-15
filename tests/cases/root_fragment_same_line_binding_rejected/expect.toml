@@ -1,0 +1,17 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0030"]
+message_contains = ["A top-level template must end its line. Move the code after it to the next line."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0030"
+reason = "invalid_statement_position.content_after_root_fragment"
+path = "input/@entry.moth"
+line = 1
+column = 10
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0030"]

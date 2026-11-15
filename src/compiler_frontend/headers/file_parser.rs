@@ -8,6 +8,7 @@
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
@@ -18,7 +19,8 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
 };
 use crate::compiler_frontend::compiler_messages::{CapacityResource, CompilerStage};
 use crate::compiler_frontend::compiler_messages::{
-    InvalidDeclarationReason, InvalidReceiverDeclarationReason, InvalidTemplateDirectiveReason,
+    InvalidDeclarationReason, InvalidReceiverDeclarationReason, InvalidStatementPositionReason,
+    InvalidTemplateDirectiveReason,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::headers::file_dependency_clauses::parse_and_record_dependency;
@@ -590,6 +592,7 @@ fn parse_headers_in_file_inner(
                     context,
                     current_span,
                 )?;
+                require_root_fragment_line_end(cursor, context.file_role)?;
             }
 
             HeaderFileItem::ReservedTraitSyntax => {
@@ -624,6 +627,7 @@ fn parse_headers_in_file_inner(
                     opening_index,
                     current_index,
                 )?;
+                require_root_fragment_line_end(cursor, context.file_role)?;
             }
 
             HeaderFileItem::StyleDirective(name_id) => {
@@ -897,6 +901,41 @@ fn handle_trait_keyword_header_item(
     }
 
     Ok(())
+}
+
+/// Rejects authored code after a root fragment on the same physical line.
+///
+/// WHAT: in the entry root, the token after a captured fragment must end its line or the file. A
+///       `;` passes to the top-level closer check, which names the stray closer itself.
+/// WHY: each top-level construct starts its own line. Header capture consumes only the fragment,
+///      so without this check the code after it would silently enter the start body on its own.
+///      Every other role rejects the fragment itself through its own owner, which names the real
+///      problem instead of a layout repair.
+fn require_root_fragment_line_end(
+    cursor: &TokenCursor<'_>,
+    file_role: FileRole,
+) -> FileParserResult<()> {
+    if file_role != FileRole::ActiveEntryRoot {
+        return Ok(());
+    }
+    let next = cursor.current().ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            "root fragment capture exceeded its source token owner",
+        ))
+    })?;
+    if matches!(
+        next.tag(),
+        TokenTag::NEWLINE | TokenTag::EOF | TokenTag::END
+    ) {
+        return Ok(());
+    }
+    Err(diagnostic_failure(
+        choices_control_flow::invalid_statement_position(
+            InvalidStatementPositionReason::ContentAfterRootFragment,
+            Some(next.source_span()),
+        ),
+    ))
 }
 
 /// Parses one bare direct top-level template as compile-time output.

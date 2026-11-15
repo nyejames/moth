@@ -87,6 +87,9 @@ pub enum TemplateType {
     SlotInsert(SlotKey),
 
     /// A `$note` comment whose balanced body is discarded without output.
+    ///
+    /// Only a direct child of a template body accepts one; expression, template-head value and
+    /// direct source-fragment positions reject it at the directive.
     Comment,
 }
 
@@ -298,8 +301,10 @@ pub struct Template {
     /// Authored `$note` token span when this template is a discarded comment.
     ///
     /// WHAT: keeps the directive location beside the durable template handle.
-    /// WHY: wrong-context diagnostics for explicit runtime comment templates must point at the
-    ///      authored directive, not at the template opener.
+    /// WHY: every diagnostic that rejects a note outside a template body reports at the authored
+    ///      directive, not at the template opener. Its consumers are the expression-position
+    ///      rejection, the direct source-fragment root rejection and the statement-position
+    ///      rejection used by both standalone templates and `~[...]` runtime fragments.
     pub(crate) comment_directive_span: Option<SourceSpan>,
 }
 

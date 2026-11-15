@@ -67,7 +67,7 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
 use crate::compiler_frontend::compiler_messages::{
     AstCapacityResource, DeferredFeatureReason, DiagnosticToken, InvalidBuiltinCallReason,
     InvalidCastReason, InvalidControlFlowStatementReason, InvalidExpressionReason,
-    InvalidFallibleHandlingReason, TypeMismatchContext,
+    InvalidFallibleHandlingReason, OperatorOperandPosition, TypeMismatchContext,
 };
 use crate::compiler_frontend::declaration_syntax::type_syntax::builtin_scalar_type_name_for_tag;
 use crate::compiler_frontend::source::SourceSpan;
@@ -231,8 +231,13 @@ fn unexpected_token_at_current(
     })
 }
 
-/// Skips value-less comment templates before checking what follows a value template.
-fn reject_second_operand_after_value_template(
+/// Rejects an operand that follows a completed value template.
+///
+/// WHAT: a template operand ends the expression, so an adjacent operand or template is a second
+///       value with a missing operator, unless that adjacent template is itself malformed.
+/// WHY: the adjacent template is parsed once so its own diagnostic wins; a successful parse
+///      proves a second value operand and reports the missing operator at its opener.
+fn reject_operand_after_value_template(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -240,12 +245,17 @@ fn reject_second_operand_after_value_template(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    while token_stream.current_tag() == TokenTag::TEMPLATE_HEAD {
-        if state.stop_at_adjacent_operand {
-            return Ok(());
-        }
-        let next_template_start = Some(token_stream.current_span());
-        let next_template = parse_template_expression(
+    // A directive operand owns one value. Its boundary names the extra operand itself, so this
+    // shared check stays silent and leaves the token for that parser.
+    if state.stop_at_adjacent_operand {
+        return Ok(());
+    }
+
+    let second_operand_start = Some(token_stream.current_span());
+
+    let starts_template = token_stream.current_tag() == TokenTag::TEMPLATE_HEAD;
+    if starts_template {
+        parse_template_expression(
             token_stream,
             context,
             type_interner,
@@ -256,23 +266,12 @@ fn reject_second_operand_after_value_template(
             string_table,
             path_fork,
         )?;
-
-        if next_template.is_some() {
-            return Err(token_lexical::invalid_expression(
-                InvalidExpressionReason::ExpectedOperatorBeforeExpression,
-                next_template_start,
-            )
-            .into());
-        }
     }
 
-    if token_stream.current_tag().is_operand_start() {
-        if state.stop_at_adjacent_operand {
-            return Ok(());
-        }
+    if starts_template || token_stream.current_tag().is_operand_start() {
         return Err(token_lexical::invalid_expression(
             InvalidExpressionReason::ExpectedOperatorBeforeExpression,
-            Some(token_stream.current_span()),
+            second_operand_start,
         )
         .into());
     }
@@ -849,6 +848,9 @@ fn dispatch_non_group_expression_token(
         }
 
         TokenTag::TEMPLATE_HEAD => {
+            // Capture the opener first: parsing consumes the template, and the adjacency check
+            // below must still report a missing operator at it rather than at whatever follows.
+            let template_start = Some(token_stream.current_span());
             let template_expression = parse_template_expression(
                 token_stream,
                 context,
@@ -861,12 +863,8 @@ fn dispatch_non_group_expression_token(
                 path_fork,
             )?;
 
-            let Some(template_expression) = template_expression else {
-                return Ok(ExpressionTokenStep::Continue);
-            };
-
-            reject_adjacent_operand(state.expression, Some(token_stream.current_span()))?;
-            reject_second_operand_after_value_template(
+            reject_adjacent_operand(state.expression, template_start)?;
+            reject_operand_after_value_template(
                 token_stream,
                 context,
                 type_interner,
@@ -953,6 +951,21 @@ fn dispatch_non_group_expression_token(
             string_table,
             path_fork,
         ),
+
+        // `not` is prefix-only. Accepting it after an operand would let postfix ordering negate
+        // the value before it, and header capture relies on `not` always needing an operand.
+        TokenTag::NOT
+            if state
+                .expression
+                .last()
+                .is_some_and(ExpressionRpnItem::is_operand_shape) =>
+        {
+            Err(token_lexical::invalid_expression(
+                InvalidExpressionReason::NotAfterOperand,
+                Some(token_stream.current_span()),
+            )
+            .into())
+        }
 
         TokenTag::NEGATIVE | TokenTag::NOT => {
             let _ = parse_unary_operator(
@@ -1840,6 +1853,7 @@ fn parse_cast_operand_expression(
     let resume = token_stream.position();
     let mut depth = ExpressionBoundaryDepth::default();
     let mut catch_is_cast_suffix = false;
+    let mut has_operand_token = false;
     while !token_stream.is_at_end() {
         let tag = token_stream.current_tag();
         if depth.is_top_level() {
@@ -1886,11 +1900,23 @@ fn parse_cast_operand_expression(
         if tag == TokenTag::EOF {
             break;
         }
+        has_operand_token = true;
         token_stream.advance();
     }
     token_stream
         .set_position(resume)
         .expect("catch pre-scan resume stays inside the active parser view");
+
+    // `cast` with nothing before its boundary has no source to convert. The fragment would reach
+    // evaluation empty, so the missing operand is reported here at the `cast` keyword.
+    if !has_operand_token {
+        return Err(token_lexical::missing_operator_operand(
+            string_table.intern("cast"),
+            OperatorOperandPosition::Unary,
+            token_stream.previous_span(),
+        )
+        .into());
+    }
 
     let mut cast_target_context = CastTargetContext::None;
 

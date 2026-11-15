@@ -21,15 +21,17 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidNumberLiteralView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     CommonSyntaxMistakeView, ExpectedSymbolStatementView, InvalidExpressionView,
-    InvalidStringEscapeView, MissingCollectionItemView, MissingOperatorOperandView,
+    InvalidScopeLayoutView, InvalidStringEscapeView, MissingCollectionItemView,
+    MissingOperatorOperandView, UnclosedSourceScopeView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
     ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, CompilerStage, InvalidLoopHeaderReason,
-    InvalidMatchArmReason, InvalidParameterContractReason, InvalidStandaloneStatementReason,
-    InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidThisUsageReason,
-    InvalidTypeAnnotationReason, MissingWhitespace, OperatorOperandPosition, ParameterContractKind,
-    SymbolicSpacingConstruct, SymbolicSpacingError,
+    InvalidMatchArmReason, InvalidParameterContractReason, InvalidScopeLayoutReason,
+    InvalidStandaloneStatementReason, InvalidStatementPositionReason, InvalidStringEscapeReason,
+    InvalidThisUsageReason, InvalidTypeAnnotationReason, MissingWhitespace,
+    OperatorOperandPosition, ParameterContractKind, SourceScopeConstruct, SymbolicSpacingConstruct,
+    SymbolicSpacingError,
 };
 use crate::compiler_frontend::style_directives::DirectiveOccurrence;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
@@ -652,6 +654,91 @@ pub(crate) fn expected_symbol_statement_message() -> String {
     "Expected a symbol-led statement.".to_string()
 }
 
+/// The user-facing explanation for one invalid scope layout reason.
+///
+/// WHAT: says which layout rule the authored token broke and what to move or remove.
+/// WHY: a `;` that was meant as a statement terminator is the most common cause, so the message
+///      names that misunderstanding first instead of blaming a later token.
+pub(crate) fn invalid_scope_layout_message(reason: InvalidScopeLayoutReason) -> String {
+    match reason {
+        InvalidScopeLayoutReason::NestedScopeOpenerOnLine => {
+            "Move the nested scope opener to a new line. Each scope that a `;` closes opens on its own physical line.".to_string()
+        }
+        InvalidScopeLayoutReason::MultilineCloserAfterCode => {
+            "`;` closes a scope, not a statement. Place this closer on its own line, after the scope's body.".to_string()
+        }
+        // An `else` after a premature `;` is the common beginner case, so the inside-the-scope
+        // repair comes first.
+        InvalidScopeLayoutReason::ContentAfterCloser => {
+            "No code may follow a scope closer on the same line. If this code belongs inside the scope, move the `;` after it. Otherwise move the code to the next line.".to_string()
+        }
+        InvalidScopeLayoutReason::AdditionalCloserOnLine => {
+            "Only one scope closer may end a line. Remove this `;` if it is extra, or move it to its own line if it closes an outer scope.".to_string()
+        }
+    }
+}
+
+/// WHAT: renders an invalid scope layout from its typed reason.
+/// WHY: the compact row stores the reason code that `invalid_scope_layout_message` consumes.
+pub(crate) fn render_invalid_scope_layout(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &InvalidScopeLayoutView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: invalid_scope_layout_message(facts.reason),
+        guidance: Vec::new(),
+    }
+}
+
+/// The user-facing explanation for one source construct that the file ended without closing.
+///
+/// WHAT: names the still-open construct and the `;` that must close it.
+/// WHY: end-of-file without a known construct is a token failure. Once the parser names the open
+///      scope, the reader needs to know which construct to close rather than where the file ended.
+pub(crate) fn unclosed_source_scope_message(construct: SourceScopeConstruct) -> String {
+    match construct {
+        SourceScopeConstruct::FunctionBody => {
+            "This function body is never closed. Add `;` on its own line after its body."
+        }
+        SourceScopeConstruct::IfBlock => {
+            "This `if` block is never closed. Add `;` on its own line after its body."
+        }
+        SourceScopeConstruct::LoopBlock => {
+            "This `loop` block is never closed. Add `;` on its own line after its body."
+        }
+        SourceScopeConstruct::CatchHandler => {
+            "This `catch` block is never closed. Add `;` on its own line after its body."
+        }
+        SourceScopeConstruct::MatchBlock => {
+            "This match block is never closed. Add `;` on its own line after its body."
+        }
+        SourceScopeConstruct::ChoiceDeclaration => {
+            "This choice declaration is never closed. Add `;` on its own line after its variants."
+        }
+        SourceScopeConstruct::TraitDeclaration => {
+            "This trait declaration is never closed. Add `;` on its own line after its requirements."
+        }
+        SourceScopeConstruct::DeclaredRegion => {
+            "This declared region is never closed. Add `;` on its own line after its body."
+        }
+    }
+    .to_string()
+}
+
+/// WHAT: renders an unclosed source scope from its typed construct.
+/// WHY: the compact row stores the construct that `unclosed_source_scope_message` consumes.
+pub(crate) fn render_unclosed_source_scope(
+    _diagnostic: &DiagnosticView<'_>,
+    facts: &UnclosedSourceScopeView,
+    _context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: unclosed_source_scope_message(facts.reason),
+        guidance: Vec::new(),
+    }
+}
+
 /// WHAT: renders the fixed symbol-led-statement message.
 /// WHY: the family has no payload facts, and its fixed message is not empty.
 pub(crate) fn render_expected_symbol_statement(
@@ -887,6 +974,9 @@ pub(crate) fn invalid_statement_position_message(reason: InvalidStatementPositio
         }
         InvalidStatementPositionReason::UnexpectedScopeCloseAtTopLevel => {
             "Unexpected ';' at the top level. It does not close any open block.".to_string()
+        }
+        InvalidStatementPositionReason::ContentAfterRootFragment => {
+            "A top-level template must end its line. Move the code after it to the next line.".to_string()
         }
     }
 }

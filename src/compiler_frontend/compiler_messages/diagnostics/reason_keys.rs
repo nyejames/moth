@@ -563,6 +563,24 @@ define_stable_reason_keys! {
     &InvalidChoiceVariantReason::PayloadVariantMissingArguments => "invalid_choice_variant.payload_variant_missing_arguments",
     },
 
+    InvalidScopeLayoutReason => {
+        &InvalidScopeLayoutReason::NestedScopeOpenerOnLine => "invalid_scope_layout.nested_scope_opener_on_line",
+        &InvalidScopeLayoutReason::MultilineCloserAfterCode => "invalid_scope_layout.multiline_closer_after_code",
+        &InvalidScopeLayoutReason::ContentAfterCloser => "invalid_scope_layout.content_after_closer",
+        &InvalidScopeLayoutReason::AdditionalCloserOnLine => "invalid_scope_layout.additional_closer_on_line",
+    },
+
+    SourceScopeConstruct => {
+        &SourceScopeConstruct::FunctionBody => "unclosed_source_scope.function_body",
+        &SourceScopeConstruct::IfBlock => "unclosed_source_scope.if_block",
+        &SourceScopeConstruct::LoopBlock => "unclosed_source_scope.loop_block",
+        &SourceScopeConstruct::CatchHandler => "unclosed_source_scope.catch_handler",
+        &SourceScopeConstruct::MatchBlock => "unclosed_source_scope.match_block",
+        &SourceScopeConstruct::ChoiceDeclaration => "unclosed_source_scope.choice_declaration",
+        &SourceScopeConstruct::TraitDeclaration => "unclosed_source_scope.trait_declaration",
+        &SourceScopeConstruct::DeclaredRegion => "unclosed_source_scope.declared_region",
+    },
+
     InvalidThisUsageReason => {
         @delegate(reason => InvalidThisUsageCode::of(reason).stable_reason_key());
     },
@@ -608,7 +626,6 @@ define_stable_reason_keys! {
     &InvalidControlFlowStatementReason::ReturnBangOutsideErrorFunction => "invalid_control_flow_statement.return_bang_outside_error_function",
     &InvalidControlFlowStatementReason::ExpectedColonAfterCondition => "invalid_control_flow_statement.expected_colon_after_condition",
     &InvalidControlFlowStatementReason::ExpectedConditionAfterIf => "invalid_control_flow_statement.expected_condition_after_if",
-    &InvalidControlFlowStatementReason::UnexpectedEndOfFileInMatch => "invalid_control_flow_statement.unexpected_end_of_file_in_match",
     &InvalidControlFlowStatementReason::CaseRequiredBeforeElse => "invalid_control_flow_statement.case_required_before_else",
     &InvalidControlFlowStatementReason::DuplicateElseArm => "invalid_control_flow_statement.duplicate_else_arm",
     &InvalidControlFlowStatementReason::ExpectedFatArrow => "invalid_control_flow_statement.expected_fat_arrow",
@@ -1004,6 +1021,7 @@ define_stable_reason_keys! {
     &InvalidExpressionReason::ExtensionlessFileValue => "invalid_expression.extensionless_file_value",
     &InvalidExpressionReason::EmptyRuntimeAnonymousRecord => "invalid_expression.empty_runtime_anonymous_record",
     &InvalidExpressionReason::AnonymousRecordFieldNotNamed => "invalid_expression.anonymous_record_field_not_named",
+    &InvalidExpressionReason::NotAfterOperand => "invalid_expression.not_after_operand",
     },
 
     InvalidStandaloneStatementReason => {
@@ -1070,6 +1088,7 @@ define_stable_reason_keys! {
     &InvalidStatementPositionReason::UnexpectedScopeCloseInExpression => "invalid_statement_position.unexpected_scope_close_in_expression",
     &InvalidStatementPositionReason::UnexpectedScopeCloseInTemplate => "invalid_statement_position.unexpected_scope_close_in_template",
     &InvalidStatementPositionReason::UnexpectedScopeCloseAtTopLevel => "invalid_statement_position.unexpected_scope_close_at_top_level",
+    &InvalidStatementPositionReason::ContentAfterRootFragment => "invalid_statement_position.content_after_root_fragment",
     },
 
     CommonSyntaxMistakeReason => {

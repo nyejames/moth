@@ -523,6 +523,9 @@ pub(crate) fn invalid_template_directive_message(
             "doc" | "todo" => {
                 format!("`${name}` is a source directive and cannot appear in a template head.")
             }
+            "note" => {
+                "`$note` is only allowed as a child template in a template body. Use `--` for comments in Moth code.".to_owned()
+            }
             _ => format!(
                 "Template directive '{name}' can only appear in a template head, not in source code."
             ),
@@ -1288,6 +1291,9 @@ pub(crate) fn invalid_expression_message(reason: InvalidExpressionReason) -> Str
         }
         InvalidExpressionReason::AnonymousRecordFieldNotNamed => {
             "Each const-record parameter needs a value. Write `name = value`.".to_owned()
+        }
+        InvalidExpressionReason::NotAfterOperand => {
+            "`not` negates the value after it, so it cannot follow a value. Write `not value`, or `left is not right` to compare.".to_owned()
         }
     }
 }

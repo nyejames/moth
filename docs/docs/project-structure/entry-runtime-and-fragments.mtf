@@ -19,10 +19,12 @@ Only a direct top-level const `$in` on the entry reaches the builder. A nested o
 `$doc value` attaches a compile-time String to a following declaration as
 documentation metadata. `$todo value` annotates a following declaration or
 executable statement and is validated without generating runtime work. Both are
-source directives, not template fragments. Only `$note` is a template-comment
-directive. A direct [$html:<code>&#91;$note: ...&#93;</code>] discards its balanced body and contributes
-no output or runtime slot, unlike an ordinary template that emits an empty
-String. [$html:<code>~&#91;$note: ...&#93;</code>] is invalid because a note cannot publish runtime output.
+source directives, not template fragments. `$note` is the sole template comment
+directive and is valid only as a child of a template body. A
+[$html:<code>&#91;$note: ...&#93;</code>] child discards its balanced body and
+contributes no output or runtime slot, unlike an ordinary template that emits
+an empty String. Source-root [$html:<code>&#91;$note: ...&#93;</code>] and runtime
+[$html:<code>~&#91;$note: ...&#93;</code>] fragments are rejected.
 
 Assigned or returned template values remain ordinary values, not direct output.
 Their containing runtime code follows normal entry placement rules. See
@@ -43,6 +45,11 @@ Two forms of direct top-level template in `@entry.moth` become page fragments:
 its marker from [$html:<code>&#91;</code>]. The old direct [$html:<code>#&#91;...&#93;</code>] syntax is removed. These fragment
 rules apply only to direct top-level entry templates, not ordinary expression
 or nested templates. Runtime named `$in` destinations are unsupported.
+
+Each direct fragment ends its physical line. A comment may follow it, but any
+other code on that line, including a second fragment, a binding or a call, is
+rejected with guidance to move that code to the next line. Fragments on
+separate lines still join in source order.
 
 The builder preserves source order between static and runtime fragments. Static fragments remain in the document even when startup fails. Runtime fragments use generated slots, and the entry boundary fills those slots only after successful startup. Failure publishes none of that invocation's runtime fragments. This is not rewind: other side effects do not roll back.
 

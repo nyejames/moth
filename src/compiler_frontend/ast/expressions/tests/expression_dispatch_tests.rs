@@ -29,11 +29,10 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
-use crate::compiler_frontend::compiler_errors::CompilationResult;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -546,42 +545,44 @@ fn constant_identifier_uses_module_store_tir() {
 //  Adjacent operand spans
 // ----------------------------------
 
-fn assert_adjacent_operand_reason(failure: &CompilationResult<()>) {
+/// Asserts the missing-operator diagnosis starts at the authored second operand.
+fn assert_missing_operator_at(source: &str, second_operand: &str) {
+    let failure = parse_single_file_ast_diagnostic(source);
     let diagnostic = assert_ast_diagnostic(
-        failure,
+        &failure,
         "MOTH-SYNTAX-0023",
         Some("invalid_expression.expected_operator_before_expression"),
     );
-    assert!(ast_error_primary_span(diagnostic).is_some());
+    let span = ast_error_primary_span(diagnostic).expect("the second operand keeps its span");
+    let spans = ExtendedSpanBuilder::new();
+    let range = span.resolve_with(spans.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!(
+        range.start(),
+        source
+            .rfind(second_operand)
+            .expect("fixture contains the second operand") as u32,
+        "the diagnosis should start at `{second_operand}` in {source:?}"
+    );
 }
 
 #[test]
 fn adjacent_numeric_literals_report_missing_operator_at_second_expression() {
-    let diagnostic = parse_single_file_ast_diagnostic("value = 1 2");
-    assert_adjacent_operand_reason(&diagnostic);
+    assert_missing_operator_at("value = 1 2", "2");
 }
 
 #[test]
 fn adjacent_grouped_expression_reports_missing_operator_at_second_group() {
-    let diagnostic = parse_single_file_ast_diagnostic("value = (1) (2)");
-    assert_adjacent_operand_reason(&diagnostic);
+    assert_missing_operator_at("value = (1) (2)", "(2)");
 }
 
 #[test]
 fn operand_before_template_reports_missing_operator_at_template_start() {
-    let diagnostic = parse_single_file_ast_diagnostic("value = 1 [: two]");
-    assert_adjacent_operand_reason(&diagnostic);
+    assert_missing_operator_at("value = 1 [: two]", "[: two]");
 }
 
 #[test]
 fn template_before_operand_reports_missing_operator_at_second_expression() {
-    let diagnostic = parse_single_file_ast_diagnostic("value = [: one] 2");
-    assert_adjacent_operand_reason(&diagnostic);
-}
-
-#[test]
-fn comment_template_after_operand_stays_valid() {
-    let _ = parse_single_file_ast("value = 1 [$note:ignored]");
+    assert_missing_operator_at("value = [: one] 2", "2");
 }
 
 #[test]
@@ -596,36 +597,176 @@ fn binary_expression_with_operator_between_operands_stays_valid() {
 
 #[test]
 fn adjacent_identifier_reports_missing_operator_before_unknown_name_lookup() {
-    let diagnostic = parse_single_file_ast_diagnostic("value = 1 missing_name");
-    assert_adjacent_operand_reason(&diagnostic);
+    assert_missing_operator_at("value = 1 missing_name", "missing_name");
 }
 
 #[test]
 fn adjacent_symbol_led_call_reports_missing_operator_at_identifier_start() {
-    let diagnostic = parse_single_file_ast_diagnostic("value = 1 identity(2)");
-    assert_adjacent_operand_reason(&diagnostic);
+    assert_missing_operator_at("value = 1 identity(2)", "identity(2)");
 }
 
 #[test]
 fn adjacent_value_templates_report_missing_operator_at_second_template() {
-    let diagnostic = parse_single_file_ast_diagnostic("value = [: one] [: two]");
-    assert_adjacent_operand_reason(&diagnostic);
+    assert_missing_operator_at("value = [: one] [: two]", "[: two]");
 }
 
 #[test]
 fn adjacent_curly_literal_reports_missing_operator_at_second_operand() {
-    let diagnostic = parse_single_file_ast_diagnostic("value = 1 {1}");
-    assert_adjacent_operand_reason(&diagnostic);
+    assert_missing_operator_at("value = 1 {1}", "{1}");
 }
 
 #[test]
 fn adjacent_copy_reports_missing_operator_at_copy_keyword() {
-    let diagnostic = parse_single_file_ast_diagnostic("value = 1 copy place");
-    assert_adjacent_operand_reason(&diagnostic);
+    assert_missing_operator_at("value = 1 copy place", "copy place");
 }
+
+// ----------------------------------
+//  `$note` placement
+// ----------------------------------
+
+/// Asserts the source is rejected at the authored `$note` directive.
+///
+/// WHAT: pins the placement diagnostic to the five-byte directive token the author wrote.
+/// WHY: the note rule owns the directive location, so a multiline head or a following operand
+///      must not move the primary span to a bracket or a later token.
+fn assert_note_rejected_at_directive(source: &str) {
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.wrong_context"),
+    );
+    let mut spans = ExtendedSpanBuilder::new();
+    let note_offset = source
+        .find("$note")
+        .expect("fixture contains the note directive") as u32;
+    let note = LocalSpan::exact(note_offset, "$note".len() as u32, &mut spans)
+        .expect("directive span fits");
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, note)),
+        "the diagnosis should point at the `$note` directive in {source:?}"
+    );
+}
+
 #[test]
-fn value_template_followed_by_comment_template_stays_valid() {
-    let _ = parse_single_file_ast("value = [: one] [$note:ignored]");
+fn note_only_binding_is_rejected() {
+    assert_note_rejected_at_directive("value = [$note: hi]\n");
+}
+
+#[test]
+fn note_typed_binding_is_rejected() {
+    assert_note_rejected_at_directive("value String = [$note: hi]\n");
+}
+
+#[test]
+fn note_constant_binding_is_rejected() {
+    assert_note_rejected_at_directive("value #= [$note: hi]\n");
+}
+
+#[test]
+fn note_mutable_reassignment_is_rejected() {
+    assert_note_rejected_at_directive("value ~= \"a\"\n~value = [$note: hi]\n");
+}
+
+#[test]
+fn note_return_value_is_rejected() {
+    assert_note_rejected_at_directive("produce || -> String:\n    return [$note: hi]\n;\n");
+}
+
+#[test]
+fn note_second_return_value_is_rejected() {
+    assert_note_rejected_at_directive(
+        "pair || -> String, String:\n    return \"first\", [$note: hi]\n;\n",
+    );
+}
+
+#[test]
+fn note_if_condition_is_rejected() {
+    assert_note_rejected_at_directive("if [$note: hi]:\n    value = 1\n;\n");
+}
+
+#[test]
+fn note_match_subject_is_rejected() {
+    assert_note_rejected_at_directive(
+        "value = 1\nif [$note: hi] is:\n    1 => io.line(\"one\")\n    else => io.line(\"other\")\n;\n",
+    );
+}
+
+#[test]
+fn note_loop_condition_is_rejected() {
+    assert_note_rejected_at_directive(
+        "run ||:\n    flag = true\n    loop [$note: hi]:\n        io.line(\"x\")\n    ;\n;\n",
+    );
+}
+
+#[test]
+fn note_template_control_flow_conditions_are_rejected() {
+    assert_note_rejected_at_directive("flag = true\nvalue = [if [$note: hi]: shown]\n");
+    assert_note_rejected_at_directive("items = {1, 2}\nvalue = [loop [$note: hi] |item|: shown]\n");
+}
+
+#[test]
+fn note_call_argument_is_rejected() {
+    assert_note_rejected_at_directive(
+        "identity |value String| -> String:\n    return value\n;\nresult = identity([$note: hi])\n",
+    );
+}
+
+#[test]
+fn note_parenthesised_value_is_rejected() {
+    assert_note_rejected_at_directive("value = ([$note: hi])\n");
+}
+
+#[test]
+fn note_collection_items_are_rejected() {
+    assert_note_rejected_at_directive("value = {1, [$note: hi]}\n");
+    assert_note_rejected_at_directive("value = {[$note: hi]}\n");
+}
+
+#[test]
+fn note_struct_field_default_is_rejected() {
+    assert_note_rejected_at_directive("Person = | name String = [$note: hi] |\n");
+}
+
+#[test]
+fn note_after_a_value_is_rejected_as_a_misplaced_note() {
+    assert_note_rejected_at_directive("value = 1 [$note: hi]\n");
+}
+
+#[test]
+fn note_before_a_value_is_rejected_as_a_misplaced_note() {
+    assert_note_rejected_at_directive("value = [$note: hi] 1\n");
+}
+
+#[test]
+fn first_of_two_adjacent_notes_is_reported() {
+    assert_note_rejected_at_directive("value = [$note: a] [$note: b]\n");
+}
+
+#[test]
+fn note_after_a_value_template_is_rejected_as_a_misplaced_note() {
+    assert_note_rejected_at_directive("value = [:one] [$note: hi]\n");
+}
+
+#[test]
+fn multiline_note_expression_is_rejected_at_the_directive() {
+    assert_note_rejected_at_directive("value = [\n    $note: hi\n]\n");
+}
+
+#[test]
+fn crlf_multiline_note_expression_is_rejected_at_the_directive() {
+    assert_note_rejected_at_directive("value = [\r\n    $note: hi\r\n]\r\n");
+}
+
+#[test]
+fn wrapper_head_operand_note_is_rejected_in_source() {
+    assert_note_rejected_at_directive("[$before [$note: hi]: body]\n");
+}
+
+#[test]
+fn note_as_a_slot_default_operand_is_rejected() {
+    assert_note_rejected_at_directive("content = [:[$slot title = [$note: hi]]]\n");
 }
 
 // ----------------------------------

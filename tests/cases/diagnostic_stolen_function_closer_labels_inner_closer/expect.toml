@@ -6,11 +6,12 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-SYNTAX-0017"]
-message_contains = ["expected ';'"]
+diagnostic_codes = ["MOTH-SYNTAX-0042"]
+message_contains = ["This function body is never closed. Add `;` on its own line after its body."]
 
 [[backends.html.diagnostic_assertions]]
-code = "MOTH-SYNTAX-0017"
+code = "MOTH-SYNTAX-0042"
+reason = "unclosed_source_scope.function_body"
 path = "input/@entry.moth"
 line = 6
 column = 2

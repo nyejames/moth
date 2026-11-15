@@ -1312,12 +1312,44 @@ fn runtime_marker_rejects_a_multiline_note_at_the_authored_directive() {
 }
 
 #[test]
-fn direct_note_produces_no_fragment() {
-    let (ast, _path_fork, _string_table) = parse_single_file_ast("[$note: hidden]\n");
-    assert!(
-        ast.const_top_level_fragments.is_empty(),
-        "a direct note must not become an empty const body fragment"
+fn direct_note_root_fragment_is_rejected_at_the_directive() {
+    let source = "[$note: hidden]\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.wrong_context"),
     );
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(note_span(source)),
+        "a direct root note must be reported at its own directive"
+    );
+}
+
+#[test]
+fn direct_multiline_note_root_fragment_is_rejected_at_the_directive() {
+    let source = "[\n    $note: hidden\n]\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.wrong_context"),
+    );
+    assert_eq!(ast_error_primary_span(diagnostic), Some(note_span(source)));
+}
+
+/// The five-byte `$note` directive span inside `source`.
+///
+/// WHY: every note placement reports the authored directive, never the enclosing bracket.
+fn note_span(source: &str) -> SourceSpan {
+    let mut spans = ExtendedSpanBuilder::new();
+    let offset = source
+        .find("$note")
+        .expect("fixture contains the directive") as u32;
+    let note =
+        LocalSpan::exact(offset, "$note".len() as u32, &mut spans).expect("directive span fits");
+    SourceSpan::new(SourceId::COMPILATION_ROOT, note)
 }
 
 #[test]
@@ -1329,6 +1361,65 @@ fn template_inside_an_executable_block_is_not_direct_metadata() {
         "MOTH-SYNTAX-0025",
         Some("invalid_standalone_statement.standalone_template"),
     );
+}
+
+#[test]
+fn note_in_statement_position_is_rejected_at_the_directive() {
+    // The statement owner parses the template first, so the note placement rule names the
+    // misunderstanding instead of the generic standalone-template rule.
+    for source in [
+        "run ||:\n    [$note: hidden]\n;\n",
+        "if false:\n    [$note: hidden]\n;\n",
+    ] {
+        let failure = parse_single_file_ast_diagnostic(source);
+        let diagnostic = assert_ast_diagnostic(
+            &failure,
+            "MOTH-SYNTAX-0021",
+            Some("invalid_template_directive.wrong_context"),
+        );
+        assert_eq!(ast_error_primary_span(diagnostic), Some(note_span(source)));
+    }
+}
+
+#[test]
+fn note_after_a_root_fragment_reports_the_line_boundary_first() {
+    // The line rule owns any code after a root fragment, so a same-line note gets the layout
+    // repair before its own placement error.
+    let source = "[:x] [$note: hi]\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0030",
+        Some("invalid_statement_position.content_after_root_fragment"),
+    );
+    let span = ast_error_primary_span(diagnostic).expect("the follow-on template keeps its span");
+    assert_eq!(span.source(), SourceId::COMPILATION_ROOT);
+    let spans = ExtendedSpanBuilder::new();
+    let range = span.resolve_with(spans.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!(
+        range.start(),
+        source.rfind('[').expect("fixture has a second opener") as u32,
+        "the diagnosis should point at the second template opener"
+    );
+}
+
+#[test]
+fn stray_closer_after_a_root_fragment_keeps_its_own_diagnostic() {
+    // The line rule passes a `;` on, so the top-level closer check names the stray closer.
+    let failure = parse_single_file_ast_diagnostic("[:x];\n");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0030",
+        Some("invalid_statement_position.unexpected_scope_close_at_top_level"),
+    );
+}
+
+#[test]
+fn malformed_statement_template_reports_its_own_error_first() {
+    // Statement dispatch parses a template before calling it standalone, so the authored
+    // template error is the first one the user needs to fix.
+    let failure = parse_single_file_ast_diagnostic("run ||:\n    [1 + ]\n;\n");
+    assert_ast_diagnostic(&failure, "MOTH-SYNTAX-0024", None);
 }
 
 #[test]
@@ -1427,16 +1518,6 @@ fn generic_body_local_docs_publish_one_authored_fragment() {
     assert_eq!(
         string_table.resolve(ast.doc_fragments[0].value),
         "Local docs."
-    );
-}
-
-#[test]
-fn same_line_runtime_fragments_fall_back_to_ordinary_grammar() {
-    let failure = parse_single_file_ast_diagnostic("~[:one] ~[:two]\n");
-    assert_ast_diagnostic(
-        &failure,
-        "MOTH-RULE-0047",
-        Some("invalid_receiver_call.mutable_marker_on_non_receiver_call"),
     );
 }
 

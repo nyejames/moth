@@ -710,6 +710,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
     let template_directive = string_table.intern("insert");
     let export_directive = string_table.intern("export");
     let config_directive = string_table.intern("config");
+    let note_directive = string_table.intern("note");
     let namespace_name = string_table.intern("card");
     let cases = [
         (
@@ -780,6 +781,15 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
                 None,
             ),
             "`$export` is a source modifier and cannot appear in a template head.",
+            "WrongContext",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(note_directive),
+                InvalidTemplateDirectiveReason::WrongContext,
+                None,
+            ),
+            "`$note` is only allowed as a child template in a template body. Use `--` for comments in Moth code.",
             "WrongContext",
         ),
         (
@@ -1110,6 +1120,11 @@ fn invalid_expression_renderers_keep_structured_reason_prose() {
             InvalidExpressionReason::AnonymousRecordFieldNotNamed,
             "Each const-record parameter needs a value. Write `name = value`.",
             "AnonymousRecordFieldNotNamed",
+        ),
+        (
+            InvalidExpressionReason::NotAfterOperand,
+            "`not` negates the value after it, so it cannot follow a value. Write `not value`, or `left is not right` to compare.",
+            "NotAfterOperand",
         ),
     ];
     for (reason, expected_message, debug_name) in cases {

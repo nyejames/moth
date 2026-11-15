@@ -145,7 +145,8 @@ fn schema_has_all_explicit_tags_once() {
     );
     // Flag bits stay confined to tags whose meaning depends on authored spelling: numeric
     // literal kind, double-colon attachment, directive-call attachment of `(`, source-directive
-    // adjacency, and whether a line-break run contains a blank physical line.
+    // adjacency, whether a line-break run contains a blank physical line, and whether a literal
+    // or discarded template body spans a physical line.
     assert_eq!(
         tags.iter()
             .filter(|tag| {
@@ -156,6 +157,9 @@ fn schema_has_all_explicit_tags_once() {
                         | TokenTag::OPEN_PARENTHESIS
                         | TokenTag::STYLE_DIRECTIVE
                         | TokenTag::NEWLINE
+                        | TokenTag::STRING_SLICE_LITERAL
+                        | TokenTag::RAW_STRING_LITERAL
+                        | TokenTag::TEMPLATE_CLOSE
                 )
             })
             .filter(|tag| tag.allowed_flags() != 0)
@@ -209,6 +213,14 @@ fn unknown_tags_and_reserved_flags_are_rejected() {
     assert_eq!(TokenTag::DOUBLE_COLON.allowed_flags(), 0b11);
     assert!(TokenTag::DOUBLE_COLON.flags_are_valid(0b11));
     assert!(!TokenTag::DOUBLE_COLON.flags_are_valid(0b100));
+    assert_eq!(TokenTag::STRING_SLICE_LITERAL.allowed_flags(), 1);
+    assert_eq!(TokenTag::RAW_STRING_LITERAL.allowed_flags(), 1);
+    assert!(TokenTag::STRING_SLICE_LITERAL.flags_are_valid(1));
+    assert!(!TokenTag::STRING_SLICE_LITERAL.flags_are_valid(0b10));
+    assert_eq!(
+        TokenShape::from_raw_parts(TokenTag::STRING_SLICE_LITERAL.raw(), 0b10, 0),
+        None
+    );
     assert_eq!(TokenTag::SYMBOL.allowed_flags(), 0);
     assert!(!TokenTag::SYMBOL.flags_are_valid(1));
     assert_eq!(
@@ -330,6 +342,44 @@ fn schema_classifications_match_frontend_semantics() {
         assert!(tag.continues_expression());
     }
     assert!(!TokenTag::SYMBOL.continues_expression());
+    // Operators, member access, `copy`, `not` and `cast` need input after them even when they
+    // are not newline continuations. Scope-closer layout uses this to leave a missing operand to
+    // the expression parser instead of reporting the closer first.
+    for tag in [
+        TokenTag::ASSIGN,
+        TokenTag::ADD,
+        TokenTag::SUBTRACT,
+        TokenTag::MULTIPLY,
+        TokenTag::DIVIDE,
+        TokenTag::MODULUS,
+        TokenTag::INT_DIVIDE,
+        TokenTag::EXPONENT,
+        TokenTag::IS,
+        TokenTag::LESS_THAN,
+        TokenTag::LESS_THAN_OR_EQUAL,
+        TokenTag::GREATER_THAN,
+        TokenTag::GREATER_THAN_OR_EQUAL,
+        TokenTag::AND,
+        TokenTag::OR,
+        TokenTag::NEGATIVE,
+        TokenTag::DOT,
+        TokenTag::COPY,
+        TokenTag::NOT,
+        TokenTag::CAST,
+    ] {
+        assert!(tag.requires_following_operand());
+    }
+    for tag in [
+        TokenTag::SYMBOL,
+        TokenTag::END,
+        TokenTag::COLON,
+        TokenTag::COMMA,
+        TokenTag::OPEN_PARENTHESIS,
+        TokenTag::TYPE_PARAMETER_BRACKET,
+        TokenTag::ARROW,
+    ] {
+        assert!(!tag.requires_following_operand());
+    }
     for tag in [
         TokenTag::SYMBOL,
         TokenTag::THIS,

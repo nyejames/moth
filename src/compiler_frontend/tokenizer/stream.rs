@@ -313,12 +313,40 @@ impl<'a> TokenStream<'a> {
     pub(crate) fn emit_string_literal(
         &mut self,
         value: StringId,
+        contains_line_break: bool,
     ) -> Result<TokenTag, TokenEmitError> {
-        self.emit_payload(TokenTag::STRING_SLICE_LITERAL, 0, value.index())
+        self.emit_payload(
+            TokenTag::STRING_SLICE_LITERAL,
+            TokenShape::line_break_flags(contains_line_break),
+            value.index(),
+        )
     }
 
-    pub(crate) fn emit_raw_string(&mut self, value: StringId) -> Result<TokenTag, TokenEmitError> {
-        self.emit_payload(TokenTag::RAW_STRING_LITERAL, 0, value.index())
+    pub(crate) fn emit_raw_string(
+        &mut self,
+        value: StringId,
+        contains_line_break: bool,
+    ) -> Result<TokenTag, TokenEmitError> {
+        self.emit_payload(
+            TokenTag::RAW_STRING_LITERAL,
+            TokenShape::line_break_flags(contains_line_break),
+            value.index(),
+        )
+    }
+
+    /// Emit the `]` that closes a discarded template body.
+    ///
+    /// The body text is skipped, so this token owns the physical line breaks the lexer consumed
+    /// while discarding it; scope layout must not treat the skipped body as inline.
+    pub(crate) fn emit_template_close(
+        &mut self,
+        contains_line_break: bool,
+    ) -> Result<TokenTag, TokenEmitError> {
+        self.emit_payload(
+            TokenTag::TEMPLATE_CLOSE,
+            TokenShape::line_break_flags(contains_line_break),
+            0,
+        )
     }
 
     pub(crate) fn emit_char(&mut self, value: char) -> Result<TokenTag, TokenEmitError> {

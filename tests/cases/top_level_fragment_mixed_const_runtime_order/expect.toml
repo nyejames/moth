@@ -1,9 +1,10 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains_exactly_once = ["ORDER_RUNTIME ORDER_RUNTIME_VALUE"]
+rendered_output_contains_exactly_once = ["ORDER_RUNTIME ORDER_RUNTIME_VALUE", "ORDER_RUNTIME_TWO"]
+rendered_output_contains_in_order = ["ORDER_RUNTIME ORDER_RUNTIME_VALUE", "ORDER_RUNTIME_TWO"]
 
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain_in_order = ["ORDER_CONST_A", "moth-slot-0", "ORDER_CONST_B"]
+must_contain_in_order = ["ORDER_CONST_A", "moth-slot-0", "ORDER_CONST_B", "moth-slot-1"]

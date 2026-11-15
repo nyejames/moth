@@ -4,8 +4,10 @@
 //!       function-body statement dispatch.
 //! WHY: keeps `body_dispatch.rs` focused on parsing logic rather than diagnostic construction.
 
+use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     choices_control_flow, token_lexical,
@@ -14,10 +16,15 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticToken, InvalidStatementPositionReason,
+    DiagnosticToken, InvalidStatementPositionReason, SourceScopeConstruct,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::tokenizer::line_scanning::{
+    ScopeOpening, closer_follows_incomplete_expression, closer_layout_diagnostic,
+    closer_trailing_diagnostic, nested_scope_opening_diagnostic,
+};
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenRef, TokenTag};
 
 /// Attach the exact authored range of the current token when this stream has a source identity.
 fn with_current_token_span(
@@ -157,6 +164,112 @@ pub(crate) fn unexpected_scope_close(
     with_current_token_span(
         token_stream,
         choices_control_flow::invalid_statement_position(reason, Some(token_stream.current_span())),
+    )
+}
+
+/// The canonical index of the token the cursor is on.
+///
+/// WHAT: translates the parser coordinate into the canonical source index that layout checks,
+///       spans and the token store share.
+/// WHY: segmented views report dense parser positions, so only the token reference itself knows
+///      where the authored token lives.
+pub(crate) fn current_token_index(
+    token_stream: &AstCursor,
+) -> Result<TokenIndex, InfrastructureFailure> {
+    token_stream.current().map(TokenRef::index).ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "a statement-layout check ran past the end of its token view",
+        )
+    })
+}
+
+/// Read the opener colon at a parser coordinate as one scope opening site.
+///
+/// WHAT: pairs the colon's canonical index with its authored span and the construct it began.
+/// WHY: every opener owner has already validated the colon tag, so this only converts the token
+///      into the layout vocabulary rather than repeating the lookup.
+pub(crate) fn scope_opening_at(
+    token_stream: &AstCursor,
+    index: usize,
+    construct: SourceScopeConstruct,
+) -> Result<ScopeOpening, InfrastructureFailure> {
+    let token = token_stream.token_ref_at(index).ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "a scope opener was read outside its token view",
+        )
+    })?;
+    Ok(ScopeOpening {
+        site: token.index(),
+        opener: token.index(),
+        label_span: token.source_span(),
+        construct,
+    })
+}
+
+/// The span of the last `END` token between an opener colon and the current `EOF`.
+///
+/// WHAT: walks the canonical token store backward from the cursor's `EOF` token exclusive to
+///       `opener` inclusive and returns the first `END` it finds.
+/// WHY: at a 0042 EOF site the reported scope is the innermost open scope. Any deeper closed
+///      scope's parent must also have closed later, or the reported scope would not be
+///      innermost. Grouped `;` is rejected before EOF, so this last `END` closed the direct
+///      child that explains why the outer scope remains open.
+pub(crate) fn last_child_closer_span(
+    token_stream: &AstCursor,
+    opener: TokenIndex,
+) -> Option<SourceSpan> {
+    let eof = token_stream.current()?.index().index();
+    let opener = opener.index();
+    let mut index = eof.checked_sub(1)?;
+    while index >= opener {
+        let token = token_stream.canonical_token_ref_at(TokenIndex::from_raw(index as u32))?;
+        if token.tag() == TokenTag::END {
+            return Some(token.source_span());
+        }
+        index = index.checked_sub(1)?;
+    }
+    None
+}
+
+/// Report a nested opener that shares its physical line with the enclosing scope's opener.
+///
+/// WHAT: compares `opener` with the enclosing opener carried by `context`.
+/// WHY: one call site per opener keeps the rule identical for statement, value, loop and handler
+///      bodies, while the entry start (no enclosing opener) opts out by carrying `None`.
+pub(crate) fn nested_scope_opener_error(
+    token_stream: &AstCursor,
+    context: &ScopeContext,
+    opener: ScopeOpening,
+) -> Option<DiagnosticDraft> {
+    let enclosing = context.enclosing_opener?;
+    nested_scope_opening_diagnostic(token_stream.source_tokens(), enclosing, opener)
+}
+
+/// Report a misplaced or duplicated scope closer at the `;` the cursor is on.
+///
+/// WHAT: classifies the closer against `opening` and the token that follows it.
+/// WHY: every AST body that consumes a `;` as a closer must issue the same MOTH-SYNTAX-0041
+///      reason exactly once, from the one classification the lexer's retained line breaks support.
+pub(crate) fn scope_closer_layout_error(
+    token_stream: &AstCursor,
+    opening: ScopeOpening,
+) -> Option<DiagnosticDraft> {
+    let closer = token_stream.current()?;
+    let tokens = token_stream.source_tokens();
+    // An incomplete expression before the closer is earlier in source and belongs to the
+    // expression parser, so the placement reason must stay silent. Trailing tokens still change
+    // how the rest of the line parses, so their owner keeps reporting them.
+    if closer_follows_incomplete_expression(tokens, closer.index()) {
+        return closer_trailing_diagnostic(tokens, closer.index(), closer.source_span());
+    }
+    closer_layout_diagnostic(
+        tokens,
+        opening.site,
+        opening.label_span,
+        closer.index(),
+        closer.source_span(),
     )
 }
 

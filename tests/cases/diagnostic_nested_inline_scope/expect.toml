@@ -1,0 +1,24 @@
+entry = "."
+
+# One `;`-terminated scope opens per physical line. The nested `if` opens on the function's line,
+# so the report points at the `if` colon and labels the function's signature colon.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0041"]
+message_contains = ["Move the nested scope opener to a new line"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0041"
+reason = "invalid_scope_layout.nested_scope_opener_on_line"
+path = "input/@entry.moth"
+line = 2
+column = 16
+count = 1
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 2
+column = 7

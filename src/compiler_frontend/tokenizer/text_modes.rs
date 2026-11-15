@@ -28,20 +28,32 @@ fn emit_static(stream: &mut TokenStream<'_>, tag: TokenTag) -> TokenizeResult<To
 fn emit_string(
     stream: &mut TokenStream<'_>,
     value: crate::compiler_frontend::symbols::string_interning::StringId,
+    contains_line_break: bool,
 ) -> TokenizeResult<TokenTag> {
     let source = stream.file_id;
     stream
-        .emit_string_literal(value)
+        .emit_string_literal(value, contains_line_break)
         .map_err(|error| map_token_emit_error(error, source))
 }
 
 fn emit_raw(
     stream: &mut TokenStream<'_>,
     value: crate::compiler_frontend::symbols::string_interning::StringId,
+    contains_line_break: bool,
 ) -> TokenizeResult<TokenTag> {
     let source = stream.file_id;
     stream
-        .emit_raw_string(value)
+        .emit_raw_string(value, contains_line_break)
+        .map_err(|error| map_token_emit_error(error, source))
+}
+
+fn emit_template_close(
+    stream: &mut TokenStream<'_>,
+    contains_line_break: bool,
+) -> TokenizeResult<TokenTag> {
+    let source = stream.file_id;
+    stream
+        .emit_template_close(contains_line_break)
         .map_err(|error| map_token_emit_error(error, source))
 }
 
@@ -50,12 +62,15 @@ pub(super) fn tokenize_raw_string(
     string_table: &mut StringTable,
 ) -> TokenizeResult<TokenTag> {
     let mut token_value = String::new();
+    let mut contains_line_break = false;
 
     while let Some(ch) = stream.next() {
         if ch == '`' {
             let interned_string = string_table.intern(&token_value);
-            return emit_raw(stream, interned_string);
+            return emit_raw(stream, interned_string, contains_line_break);
         }
+
+        contains_line_break |= is_line_break(ch);
 
         if ch == '\r' {
             let normalized_char = normalize_consumed_carriage_return_newline(stream);
@@ -78,6 +93,7 @@ pub(super) fn tokenize_string(
     string_table: &mut StringTable,
 ) -> TokenizeResult<TokenTag> {
     let mut token_value = String::new();
+    let mut contains_line_break = false;
     loop {
         // Capture the byte offset of the next source character before consuming it so escape
         // diagnostics can span the backslash and its escape body precisely.
@@ -89,6 +105,8 @@ pub(super) fn tokenize_string(
                     .into(),
             );
         };
+
+        contains_line_break |= is_line_break(ch);
 
         if ch == '\\' {
             // The backslash has been consumed, so the stream now points at the escaped character.
@@ -140,7 +158,7 @@ pub(super) fn tokenize_string(
 
         if ch == '"' {
             let interned_string = string_table.intern(&token_value);
-            return emit_string(stream, interned_string);
+            return emit_string(stream, interned_string, contains_line_break);
         }
 
         if ch == '\r' {
@@ -168,17 +186,24 @@ pub(super) fn tokenize_template_body(
     string_table: &mut StringTable,
 ) -> TokenizeResult<TokenTag> {
     let mut token_value = String::new();
-    append_template_body_char(current_char, &mut token_value, stream);
+    let mut contains_line_break = false;
+    append_template_body_char(
+        current_char,
+        &mut token_value,
+        stream,
+        &mut contains_line_break,
+    );
 
     while let Some(ch) = stream.peek() {
         match ch {
             '[' | ']' => {
                 let interned_string = string_table.intern(&token_value);
-                return emit_string(stream, interned_string);
+                return emit_string(stream, interned_string, contains_line_break);
             }
 
             '\r' => {
                 let normalized_char = consume_pending_carriage_return_newline(stream);
+                contains_line_break = true;
                 token_value.push_str(normalized_char);
             }
 
@@ -186,20 +211,23 @@ pub(super) fn tokenize_template_body(
                 let next_char = stream.advance_after_peek(
                     "Tokenizer peeked a template-body character but could not advance the stream.",
                 );
+                contains_line_break |= is_line_break(next_char);
                 token_value.push(next_char);
             }
         }
     }
 
     let interned_string = string_table.intern(&token_value);
-    emit_string(stream, interned_string)
+    emit_string(stream, interned_string, contains_line_break)
 }
 
 fn append_template_body_char(
     current_char: char,
     token_value: &mut String,
     stream: &mut TokenStream<'_>,
+    contains_line_break: &mut bool,
 ) {
+    *contains_line_break |= is_line_break(current_char);
     match current_char {
         '\r' => token_value.push_str(normalize_consumed_carriage_return_newline(stream)),
         _ => token_value.push(current_char),
@@ -220,7 +248,13 @@ pub(super) fn tokenize_code_template_body(
     }
 
     let mut token_value = String::new();
-    append_code_template_body_char(current_char, &mut token_value, stream);
+    let mut contains_line_break = false;
+    append_code_template_body_char(
+        current_char,
+        &mut token_value,
+        stream,
+        &mut contains_line_break,
+    );
 
     while let Some(&ch) = stream.peek() {
         if ch == ']' && stream.template_body_next_close_balances_brackets() {
@@ -231,11 +265,16 @@ pub(super) fn tokenize_code_template_body(
             "Tokenizer peeked a code-template body character but could not advance the stream.",
         );
 
-        append_code_template_body_char(next_char, &mut token_value, stream);
+        append_code_template_body_char(
+            next_char,
+            &mut token_value,
+            stream,
+            &mut contains_line_break,
+        );
     }
 
     let interned_string = string_table.intern(&token_value);
-    emit_string(stream, interned_string)
+    emit_string(stream, interned_string, contains_line_break)
 }
 
 /// Consume a discarded template body, emitting only its closing bracket.
@@ -247,13 +286,16 @@ pub(super) fn tokenize_discard_template_body(
     current_char: char,
     stream: &mut TokenStream<'_>,
 ) -> TokenizeResult<TokenTag> {
+    // The body text is skipped, so the emitted `]` owns every physical line break the lexer
+    // consumed here. Scope layout must not treat a discarded multiline body as inline code.
+    let mut contains_line_break = is_line_break(current_char);
     match current_char {
         '[' => stream.register_template_body_open_square_bracket(),
         ']' => {
             if stream.template_body_next_close_balances_brackets() {
                 stream.register_template_body_close_square_bracket();
                 stream.pop_template_mode();
-                return emit_static(stream, TokenTag::TEMPLATE_CLOSE);
+                return emit_template_close(stream, contains_line_break);
             }
             stream.register_template_body_close_square_bracket();
         }
@@ -261,6 +303,7 @@ pub(super) fn tokenize_discard_template_body(
     }
 
     while let Some(&ch) = stream.peek() {
+        contains_line_break |= is_line_break(ch);
         match ch {
             '[' => {
                 stream.next();
@@ -272,7 +315,7 @@ pub(super) fn tokenize_discard_template_body(
                     stream.begin_token_bytes_at_consumed_char();
                     stream.register_template_body_close_square_bracket();
                     stream.pop_template_mode();
-                    return emit_static(stream, TokenTag::TEMPLATE_CLOSE);
+                    return emit_template_close(stream, contains_line_break);
                 }
                 stream.next();
                 stream.register_template_body_close_square_bracket();
@@ -291,7 +334,9 @@ fn append_code_template_body_char(
     ch: char,
     token_value: &mut String,
     stream: &mut TokenStream<'_>,
+    contains_line_break: &mut bool,
 ) {
+    *contains_line_break |= is_line_break(ch);
     match ch {
         '[' => stream.register_template_body_open_square_bracket(),
         ']' => stream.register_template_body_close_square_bracket(),

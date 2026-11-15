@@ -24,12 +24,13 @@ use crate::compiler_frontend::ast::statements::body_symbol::{
 use crate::compiler_frontend::ast::statements::branching::create_branch;
 use crate::compiler_frontend::ast::statements::declared_regions::classify_deferred_declared_region_header;
 use crate::compiler_frontend::ast::statements::diagnostics::{
-    UnexpectedScopeCloseContext, unexpected_scope_close, unexpected_statement_token,
+    UnexpectedScopeCloseContext, last_child_closer_span, scope_closer_layout_error,
+    unexpected_scope_close, unexpected_statement_token,
 };
 use crate::compiler_frontend::ast::statements::loops::create_loop;
 use crate::compiler_frontend::ast::statements::match_arm_boundaries::{
-    current_line_contains_top_level_fat_arrow, current_token_starts_colon_separated_arm_header,
-    current_token_starts_match_arm_header,
+    current_token_starts_colon_separated_arm_header, current_token_starts_match_arm_header,
+    same_line_match_arm_anchor,
 };
 use crate::compiler_frontend::ast::statements::multi_bind::{
     MultiBindStatement, parse_multi_bind_statement,
@@ -49,18 +50,19 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     choices_control_flow, names_declarations, templates, token_lexical,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
     DeferredFeatureReason, DiagnosticBag, InvalidAssignmentTargetReason,
     InvalidControlFlowStatementReason, InvalidFallibleHandlingReason, InvalidMatchArmReason,
     InvalidStandaloneStatementReason, InvalidTemplateDirectiveReason, ReservedNameOwner,
+    SourceScopeConstruct,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_statement_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::tokenizer::line_scanning::ScopeOpening;
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag};
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -113,6 +115,97 @@ impl ParsedBody {
 
 fn statement_dispatch_error(diagnostic: DiagnosticDraft) -> ExpressionParseError {
     diagnostic.into()
+}
+
+/// Parses one template that statement dispatch owns and rejects a root `$note`.
+///
+/// WHAT: a `$note` belongs inside a template body, so a root note reports its placement error at
+///       the directive. Every other parsed template returns to the caller.
+/// WHY: the parsed root kind is authoritative. A literal or identifier merely spelled `note` is
+///      ordinary content, and only the template parser knows which directive the head holds.
+fn parse_statement_template(
+    token_stream: &mut AstCursor,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> StatementDispatchResult<Template> {
+    let template_span = Some(token_stream.current_span());
+    let template = Template::new_with_type_interner(
+        token_stream,
+        context.scope,
+        context,
+        type_interner,
+        expression_builder,
+        const_values,
+        vec![],
+        string_table,
+        path_fork,
+    )?;
+    let is_comment = {
+        let store = context.template_ir_store.borrow();
+        store
+            .get_template(template.tir_reference.root)
+            .map(|template_ir| matches!(template_ir.kind, TemplateType::Comment))
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "parsed statement template kind was missing from its module-local TIR store.",
+                )
+            })?
+    };
+    if !is_comment {
+        return Ok(template);
+    }
+    Err(statement_dispatch_error(
+        templates::note_outside_template_body(
+            string_table.intern("note"),
+            template.comment_directive_span.or(template_span),
+        ),
+    ))
+}
+
+/// The signature colon that encloses a captured function body's statements.
+///
+/// WHAT: reads the canonical token immediately before the body's first token.
+/// WHY: header capture returns the body as a half-open range that begins after the signature `:`,
+///      so that colon is the still-open opener for the body's first nested opener. Entry start is
+///      segmented and owns no enclosing scope, so only `Function` bodies resolve one. An empty body
+///      holds no opener to compare. A body that begins its own token store is re-parsed from
+///      generated or synthetic body text, so it has no authored enclosing opener either.
+fn function_signature_opening(
+    token_stream: &AstCursor,
+) -> Result<Option<ScopeOpening>, ExpressionParseError> {
+    let Some(opener_index) = token_stream
+        .current()
+        .and_then(|first| first.index().index().checked_sub(1))
+        .and_then(TokenIndex::try_from_index)
+    else {
+        return Ok(None);
+    };
+    let opener = token_stream
+        .canonical_token_ref_at(opener_index)
+        .ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "a captured function body could not read its signature colon",
+            )
+        })?;
+    if opener.tag() != TokenTag::COLON {
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "a captured function body did not begin after its signature colon",
+        )
+        .into());
+    }
+    Ok(Some(ScopeOpening {
+        site: opener.index(),
+        opener: opener.index(),
+        label_span: opener.source_span(),
+        construct: SourceScopeConstruct::FunctionBody,
+    }))
 }
 
 /// Builds the typed wrong-target diagnostic for a source directive in a nested position.
@@ -272,11 +365,12 @@ fn prefixed_nonplace_write(cursor: &AstCursor) -> bool {
 
 /// Parse the statements of one function, entry or nested block body.
 ///
-/// `body_opening_span` is the `:` that opened an authored block body. End of file inside such a
-/// body is a missing `;` and is rejected with a label on that colon. `None` marks a body whose
-/// end of file is not a missing closer: the compiler-owned entry start, function bodies whose
-/// token range is already balanced by header capture, and match arms whose range ends with the
-/// enclosing match's own report.
+/// `body_opening` is the effective opening site of an authored block body: the colon that opened
+/// it, or the `else`/`=>` token that introduces a terminal branch. End of file inside such a body
+/// is a missing `;` and is rejected with a label on that opener. `None` marks a body whose end of
+/// file is not a missing closer: the compiler-owned entry start, function bodies whose token range
+/// is already balanced by header capture, and match arms whose range ends with the enclosing
+/// match's own report.
 #[allow(
     clippy::too_many_arguments,
     reason = "function body keeps stream, scope, warnings and mutable parse resources apart"
@@ -284,7 +378,7 @@ fn prefixed_nonplace_write(cursor: &AstCursor) -> bool {
 pub(crate) fn parse_function_body_statements(
     token_stream: &mut AstCursor,
     mut context: ScopeContext,
-    body_opening_span: Option<SourceSpan>,
+    body_opening: Option<ScopeOpening>,
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
@@ -292,6 +386,13 @@ pub(crate) fn parse_function_body_statements(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> StatementDispatchResult<ParsedBody> {
+    // Header capture already balanced a function body at its own closer, so that `;` never reaches
+    // this loop. The signature colon still encloses every opener the body contains, and it is the
+    // canonical token immediately before the captured range.
+    if body_opening.is_none() && context.kind == ContextKind::Function {
+        context.enclosing_opener = function_signature_opening(token_stream)?;
+    }
+
     // Authored statement order for this body, including every position whose statement could not
     // finish until the body root had selected each numeric origin's single static type.
     let mut draft = BodyDraft::new();
@@ -337,41 +438,15 @@ pub(crate) fn parse_function_body_statements(
         {
             token_stream.advance();
             let fragment_span = Some(token_stream.current_span());
-            let template = Template::new_with_type_interner(
+            let template = parse_statement_template(
                 token_stream,
-                context.scope,
                 &context,
                 type_interner,
                 expression_builder,
                 const_values,
-                vec![],
                 string_table,
                 path_fork,
             )?;
-            // The root kind is authoritative after parsing: a direct comment cannot publish a
-            // runtime fragment, while a literal or identifier merely spelled `note` can.
-            let is_comment = {
-                let store = context.template_ir_store.borrow();
-                store
-                    .get_template(template.tir_reference.root)
-                    .map(|template_ir| matches!(template_ir.kind, TemplateType::Comment))
-                    .ok_or_else(|| {
-                        InfrastructureFailure::internal(
-                            CompilerStage::AstConstruction,
-                            "parsed runtime template kind was missing from its module-local TIR store.",
-                        )
-                    })?
-            };
-            if is_comment {
-                let note_name = string_table.intern("note");
-                return Err(statement_dispatch_error(
-                    templates::invalid_template_directive(
-                        Some(note_name),
-                        InvalidTemplateDirectiveReason::WrongContext,
-                        template.comment_directive_span.or(fragment_span),
-                    ),
-                ));
-            }
             let expression = expression_builder.template(template, ValueMode::MutableOwned)?;
 
             draft.push_node(AstNode {
@@ -398,12 +473,12 @@ pub(crate) fn parse_function_body_statements(
             }
 
             if token_stream.current_tag() != TokenTag::ELSE
-                && current_line_contains_top_level_fat_arrow(token_stream)
+                && let Some(arm_anchor) = same_line_match_arm_anchor(token_stream)
             {
                 return Err(statement_dispatch_error(
                     choices_control_flow::invalid_match_arm(
                         InvalidMatchArmReason::ArmMustStartNewLine,
-                        Some(token_stream.current_span()),
+                        Some(arm_anchor),
                     ),
                 ));
             }
@@ -758,30 +833,41 @@ pub(crate) fn parse_function_body_statements(
 
                 ContextKind::MatchArm => break,
 
+                // Every other body kind consumes its own `;`, so this is the one owner of that
+                // closer's placement and trailing content.
                 _ => {
+                    if let Some(opening) = body_opening
+                        && let Some(diagnostic) = scope_closer_layout_error(token_stream, opening)
+                    {
+                        return Err(statement_dispatch_error(diagnostic));
+                    }
                     token_stream.advance();
                     break;
                 }
             },
 
-            // Direct `[...]` templates are compile-time page or builder-slot metadata owned by
-            // header parsing, so they must never reach statement dispatch. Runtime fragments are
-            // marked with `~` and handled above.
+            // Header parsing owns each line-start direct `[...]` fragment as page or builder-slot
+            // metadata, and runtime fragments are marked with `~` and handled above. Any template
+            // that still reaches statement dispatch is authored input in statement position, such
+            // as a template inside a function body or an executable block. It is parsed first so
+            // its own diagnostic wins, as for an operand after a value template.
             TokenTag::TEMPLATE_HEAD => {
-                if context.kind != ContextKind::Module {
-                    return Err(statement_dispatch_error(
-                        choices_control_flow::invalid_standalone_statement(
-                            InvalidStandaloneStatementReason::StandaloneTemplate,
-                            Some(token_stream.current_span()),
-                        ),
-                    ));
-                }
-
-                return Err(InfrastructureFailure::internal(
-                    CompilerStage::AstConstruction,
-                    "an unmarked direct template reached the executable body; header parsing must own it",
-                )
-                .into());
+                let template_span = Some(token_stream.current_span());
+                parse_statement_template(
+                    token_stream,
+                    &context,
+                    type_interner,
+                    expression_builder,
+                    const_values,
+                    string_table,
+                    path_fork,
+                )?;
+                return Err(statement_dispatch_error(
+                    choices_control_flow::invalid_standalone_statement(
+                        InvalidStandaloneStatementReason::StandaloneTemplate,
+                        template_span,
+                    ),
+                ));
             }
 
             // End of file
@@ -789,15 +875,16 @@ pub(crate) fn parse_function_body_statements(
                 // An authored block body closes with `;`. Reaching the file end inside one means
                 // that block was never closed, so the statements before it must not publish as if
                 // the body had ended normally.
-                if let Some(body_opening_span) = body_opening_span {
+                if let Some(opening) = body_opening {
+                    // The last `;` after this opener closed the innermost child scope. It is
+                    // exact here because this body is the innermost open scope at end of file.
+                    let inner_closer = last_child_closer_span(token_stream, opening.opener);
                     return Err(statement_dispatch_error(
-                        token_lexical::unexpected_end_of_file(
-                            Some(string_table.intern(";")),
+                        token_lexical::unclosed_source_scope(
+                            opening.construct,
                             Some(token_stream.current_span()),
-                        )
-                        .with_label(
-                            Some(body_opening_span),
-                            Some(LabelDraftMessage::UnclosedBlockStartsHere),
+                            opening.label_span,
+                            inner_closer,
                         ),
                     ));
                 }

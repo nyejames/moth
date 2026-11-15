@@ -8,7 +8,8 @@ add |this ~Accumulator, amount I32|:
 
 same_line_boundary |enabled Bool| -> I32:
     item ~= Accumulator(0)
-    if enabled: ~item.add(1) else ~item.add(2); ~item.total += 3
+    if enabled: ~item.add(1) else ~item.add(2);
+    ~item.total += 3
     return item.total
 ;
 

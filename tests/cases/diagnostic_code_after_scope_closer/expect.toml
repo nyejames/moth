@@ -1,0 +1,24 @@
+entry = "."
+
+# The `if` body closes inline, so nothing may follow that `;` on its line. The report points at the
+# first trailing token and labels the closer that ended the scope.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0041"]
+message_contains = ["No code may follow a scope closer on the same line"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0041"
+reason = "invalid_scope_layout.content_after_closer"
+path = "input/@entry.moth"
+line = 3
+column = 32
+count = 1
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 3
+column = 30

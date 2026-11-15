@@ -44,7 +44,7 @@ builder extension point, so availability never depends on the selected builder:
 `$note`:
 
 - discards its balanced body without evaluating it or producing output
-- is the sole template comment directive, including for direct entry templates
+- is the sole template comment directive, valid only as a child of a template body
 
 `$doc` and `$todo` annotate following source declarations or statements instead of template heads. They are invalid here. See @../directives (Directives).
 

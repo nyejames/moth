@@ -72,6 +72,9 @@ const TOKEN_CLASS_WORD_OPERATOR: u16 = 1 << 5;
 const TOKEN_CLASS_LITERAL: u16 = 1 << 6;
 const TOKEN_CLASS_BUILTIN_TYPE: u16 = 1 << 7;
 const TOKEN_CLASS_DELIMITER: u16 = 1 << 8;
+/// A token whose grammar requires expression input after it: operators, assignments and member
+/// access. This is narrower than `CONTINUES_EXPRESSION`, which owns newline continuation only.
+const TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND: u16 = 1 << 9;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct TokenSchema {
@@ -194,6 +197,14 @@ macro_rules! token_schema {
             pub(crate) fn continues_expression(self) -> bool {
                 self.schema().is_some_and(|schema| {
                     schema.has_class(TOKEN_CLASS_CONTINUES_EXPRESSION)
+                })
+            }
+
+            /// Whether this token cannot end an expression because its grammar requires input
+            /// after it.
+            pub(crate) fn requires_following_operand(self) -> bool {
+                self.schema().is_some_and(|schema| {
+                    schema.has_class(TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND)
                 })
             }
 
@@ -361,6 +372,14 @@ const TOKEN_STYLE_DIRECTIVE_ATTACHED: u16 = 1 << 0;
 /// line. Comments produce no token, and a whitespace run is one NEWLINE token, so the run's
 /// authored shape is the only token-level blank-line fact.
 const TOKEN_NEWLINE_BLANK_LINE: u16 = 1 << 0;
+/// This token's authored span, or the authored text it owns, crosses a physical line break.
+///
+/// WHY: quoted strings, raw strings and template-body text may span physical lines inside one
+/// token. A discarded template body is skipped entirely, so its closing `]` token owns the line
+/// breaks the lexer consumed while discarding it. Scope layout asks whether two tokens share a
+/// physical line; hiding either shape would make a multiline construct look inline. The lexer is
+/// the only owner of both facts.
+const TOKEN_CONTAINS_LINE_BREAK: u16 = 1 << 0;
 const TOKEN_DOUBLE_COLON_ADJACENCY_FLAGS: u16 =
     TOKEN_DOUBLE_COLON_LEFT_ATTACHED | TOKEN_DOUBLE_COLON_RIGHT_ATTACHED;
 
@@ -395,7 +414,7 @@ token_schema! {
         9,
         "string literal",
         StringLiteral,
-        0,
+        TOKEN_CONTAINS_LINE_BREAK,
         TOKEN_CLASS_LITERAL | TOKEN_CLASS_CAN_END_EXPRESSION | TOKEN_CLASS_OPERAND_START,
         None
     ),
@@ -426,7 +445,7 @@ token_schema! {
         13,
         "raw string literal",
         RawStringLiteral,
-        0,
+        TOKEN_CONTAINS_LINE_BREAK,
         TOKEN_CLASS_LITERAL | TOKEN_CLASS_CAN_END_EXPRESSION,
         None
     ),
@@ -510,7 +529,7 @@ token_schema! {
         TOKEN_CLASS_DELIMITER | TOKEN_CLASS_CONTINUES_EXPRESSION,
         None
     ),
-    (Dot, DOT, 22, "`.`", Static, 0, TOKEN_CLASS_DELIMITER, None),
+    (Dot, DOT, 22, "`.`", Static, 0, TOKEN_CLASS_DELIMITER | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND, None),
     (
         Colon,
         COLON,
@@ -538,7 +557,9 @@ token_schema! {
         "`=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -695,12 +716,20 @@ token_schema! {
         TOKEN_CLASS_CAN_END_EXPRESSION,
         None
     ),
-    (Negative, NEGATIVE, 47, "unary `-`", Static, 0, 0, Some(6)),
-    (Exponent, EXPONENT, 48, "`^`", Static, 0, 0, Some(5)),
-    (Multiply, MULTIPLY, 49, "`*`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
-    (Divide, DIVIDE, 50, "`/`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
-    (Modulus, MODULUS, 51, "`%`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
-    (IntDivide, INT_DIVIDE, 52, "`//`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION, Some(4)),
+    (Negative, NEGATIVE, 47, "unary `-`", Static, 0, TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND, Some(6)),
+    (Exponent, EXPONENT, 48, "`^`", Static, 0, TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND, Some(5)),
+    (Multiply, MULTIPLY, 49, "`*`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
+        Some(4)),
+    (Divide, DIVIDE, 50, "`/`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
+        Some(4)),
+    (Modulus, MODULUS, 51, "`%`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
+        Some(4)),
+    (IntDivide, INT_DIVIDE, 52, "`//`", Static, 0, TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
+        Some(4)),
     (
         ExponentAssign,
         EXPONENT_ASSIGN,
@@ -708,7 +737,9 @@ token_schema! {
         "`^=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -718,7 +749,9 @@ token_schema! {
         "`*=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -728,7 +761,9 @@ token_schema! {
         "`/=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -738,7 +773,9 @@ token_schema! {
         "`%=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -748,7 +785,9 @@ token_schema! {
         "`//=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -758,7 +797,7 @@ token_schema! {
         "`+`",
         Static,
         0,
-        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_CONTINUES_EXPRESSION | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(3)
     ),
     (
@@ -768,7 +807,7 @@ token_schema! {
         "`-`",
         Static,
         0,
-        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_CONTINUES_EXPRESSION | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(3)
     ),
     (
@@ -778,7 +817,9 @@ token_schema! {
         "`+=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -788,7 +829,9 @@ token_schema! {
         "`-=`",
         Static,
         0,
-        TOKEN_CLASS_ASSIGNMENT | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_ASSIGNMENT
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -798,7 +841,7 @@ token_schema! {
         "`not`",
         Static,
         0,
-        TOKEN_CLASS_WORD_OPERATOR,
+        TOKEN_CLASS_WORD_OPERATOR | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(6)
     ),
     (
@@ -808,7 +851,9 @@ token_schema! {
         "`is`",
         Static,
         0,
-        TOKEN_CLASS_WORD_OPERATOR | TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_WORD_OPERATOR
+            | TOKEN_CLASS_CONTINUES_EXPRESSION
+            | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(2)
     ),
     (
@@ -818,7 +863,7 @@ token_schema! {
         "`<`",
         Static,
         0,
-        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_CONTINUES_EXPRESSION | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(2)
     ),
     (
@@ -828,7 +873,7 @@ token_schema! {
         "`<=`",
         Static,
         0,
-        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_CONTINUES_EXPRESSION | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(2)
     ),
     (
@@ -838,7 +883,7 @@ token_schema! {
         "`>`",
         Static,
         0,
-        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_CONTINUES_EXPRESSION | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(2)
     ),
     (
@@ -848,7 +893,7 @@ token_schema! {
         "`>=`",
         Static,
         0,
-        TOKEN_CLASS_CONTINUES_EXPRESSION,
+        TOKEN_CLASS_CONTINUES_EXPRESSION | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(2)
     ),
     (
@@ -858,10 +903,10 @@ token_schema! {
         "`and`",
         Static,
         0,
-        TOKEN_CLASS_WORD_OPERATOR,
+        TOKEN_CLASS_WORD_OPERATOR | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         Some(1)
     ),
-    (Or, OR, 69, "`or`", Static, 0, TOKEN_CLASS_WORD_OPERATOR, Some(0)),
+    (Or, OR, 69, "`or`", Static, 0, TOKEN_CLASS_WORD_OPERATOR | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND, Some(0)),
     (If, IF, 70, "`if`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (Else, ELSE, 71, "`else`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (Return, RETURN, 72, "`return`", Static, 0, TOKEN_CLASS_KEYWORD, None),
@@ -879,7 +924,16 @@ token_schema! {
     (Then, THEN, 75, "`then`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (Checked, CHECKED, 76, "`checked`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (Async, ASYNC, 77, "`async`", Static, 0, TOKEN_CLASS_KEYWORD, None),
-    (Cast, CAST, 78, "`cast`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (
+        Cast,
+        CAST,
+        78,
+        "`cast`",
+        Static,
+        0,
+        TOKEN_CLASS_KEYWORD | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
+        None
+    ),
     (Assert, ASSERT, 80, "`assert`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (Loop, LOOP, 81, "`loop`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (By, BY, 82, "`by`", Static, 0, TOKEN_CLASS_KEYWORD, None),
@@ -923,7 +977,7 @@ token_schema! {
         "`copy`",
         Static,
         0,
-        TOKEN_CLASS_KEYWORD | TOKEN_CLASS_OPERAND_START,
+        TOKEN_CLASS_KEYWORD | TOKEN_CLASS_OPERAND_START | TOKEN_CLASS_REQUIRES_FOLLOWING_OPERAND,
         None
     ),
     (
@@ -932,7 +986,7 @@ token_schema! {
         90,
         "`]`",
         Static,
-        0,
+        TOKEN_CONTAINS_LINE_BREAK,
         TOKEN_CLASS_DELIMITER | TOKEN_CLASS_CAN_END_EXPRESSION,
         None
     ),
@@ -1127,7 +1181,7 @@ impl TokenShape {
             TokenDescriptorPayload::StyleDirective => flags & !TOKEN_STYLE_DIRECTIVE_ATTACHED == 0,
             TokenDescriptorPayload::Symbol
             | TokenDescriptorPayload::StringLiteral
-            | TokenDescriptorPayload::RawStringLiteral => flags == 0,
+            | TokenDescriptorPayload::RawStringLiteral => flags & !TOKEN_CONTAINS_LINE_BREAK == 0,
         }
     }
 
@@ -1166,6 +1220,9 @@ impl TokenShape {
         let payload = self.tag.descriptor().payload();
         let allowed_flags = match payload {
             TokenDescriptorPayload::StyleDirective => TOKEN_STYLE_DIRECTIVE_ATTACHED,
+            TokenDescriptorPayload::StringLiteral | TokenDescriptorPayload::RawStringLiteral => {
+                TOKEN_CONTAINS_LINE_BREAK
+            }
             _ => 0,
         };
         if matches!(
@@ -1269,6 +1326,29 @@ impl TokenShape {
     /// Whether this line-break token's whitespace run contains a blank physical line.
     pub(crate) fn newline_has_blank_line(self) -> bool {
         self.tag == TokenTag::NEWLINE && self.flags & TOKEN_NEWLINE_BLANK_LINE != 0
+    }
+
+    pub(crate) const fn line_break_flags(contains_line_break: bool) -> u16 {
+        if contains_line_break {
+            TOKEN_CONTAINS_LINE_BREAK
+        } else {
+            0
+        }
+    }
+
+    /// Whether this token's authored span, or the text it owns, contains a physical line break.
+    ///
+    /// Quoted strings, raw strings and template-body text carry it on their own literal token.
+    /// A discarded template body carries it on the closing `]` that the lexer emits in its place.
+    /// Only those tags reserve the flag bit for this meaning; other tags use the same bit for
+    /// their own per-tag flags.
+    pub(crate) fn contains_line_break(self) -> bool {
+        matches!(
+            self.tag,
+            TokenTag::STRING_SLICE_LITERAL
+                | TokenTag::RAW_STRING_LITERAL
+                | TokenTag::TEMPLATE_CLOSE
+        ) && self.flags & TOKEN_CONTAINS_LINE_BREAK != 0
     }
 
     pub(crate) const fn data(self) -> u32 {

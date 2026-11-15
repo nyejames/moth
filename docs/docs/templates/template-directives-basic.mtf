@@ -22,7 +22,7 @@ Common directives include:
 - `$fresh` to skip one parent wrapper
 - `$md` for Moth Markdown
 - `$raw` for unformatted text
-- `$note` for discarded comment templates
+- `$note` for discarded comment templates in a template body
 - `$html`, `$css`, `$escape_html` and `$code` under every builder
 
 Template heads separate expressions and directives with commas, and a directive

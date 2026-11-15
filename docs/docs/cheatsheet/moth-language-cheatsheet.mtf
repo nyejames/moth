@@ -4,7 +4,7 @@ Follow the linked references for ambiguous or detailed rules.
 
 ## Syntax and names
 
-`:` opens a block and `;` closes it. Semicolons don't end statements. Indentation aids reading but doesn't define scope.
+`:` opens a block and `;` closes it. Semicolons don't end statements. An inline block closes on its opening line, and a multiline block closes with `;` alone on its own line. Indentation aids reading but doesn't define scope.
 Statements run in source order.
 
 [codeblock, $code "moth":
@@ -15,7 +15,7 @@ Statements run in source order.
     ;
 ]
 
-- `--` starts a line comment in code. In template bodies it is text. Use `$note` for discarded template content.
+- `--` starts a line comment in code. In template bodies it is text. To discard template content, use `$note` as a child of a template body.
 - Names never shadow visible values, types, aliases, dependencies or builtins, including in parameters and child scopes.
   Separate scopes may reuse names when neither sees the other.
 - Variables and functions use `snake_case`, types and generic parameters use `PascalCase` and traits use `ALL_CAPS`.
@@ -482,6 +482,7 @@ Handle failing message expressions first. Assertion messages can't propagate err
 ## Branching and value-producing blocks
 
 Conditions use `Bool`. A statement `else` is optional. Nest an `if` or use matching instead of `else if`.
+The terminal `else` body may close on the `else` line, and a match's terminal arm may close on its `=>` line.
 
 [codeblock, $code "moth":
     label = if ready then "ready" else "waiting"
@@ -863,7 +864,7 @@ Directives are compiler-defined operations written `$name`, `$name value` or one
 Builders add no directives. The parenthesised call spelling `$name(...)` is rejected.
 Some format templates, while others mark declarations or declare build inputs (see @../directives (Directives)).
 
-`$md` formats Markdown. `$raw` preserves text and whitespace. `$note` alone discards template comments. `$doc` and `$todo` annotate source declarations or statements.
+`$md` formats Markdown. `$raw` preserves text and whitespace. `$note` discards template comments only as a child of a template body. `$doc` and `$todo` annotate source declarations or statements.
 The compiler provides `$html`, `$css`, `$escape_html` and `$code` (optionally `$code "language"`) under every builder. `$code` highlights literal code.
 Formatters apply to their own templates, and incompatible formatters can't share a head.
 

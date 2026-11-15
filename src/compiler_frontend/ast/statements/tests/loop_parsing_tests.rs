@@ -31,9 +31,9 @@ use crate::compiler_frontend::datatypes::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::parse_support::{
-    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span,
-    ast_first_error_type_display, first_ast_error_view, parse_single_file_ast,
-    parse_single_file_ast_diagnostic,
+    LayoutSite, assert_ast_diagnostic, assert_ast_scope_layout, ast_error_label_spans,
+    ast_error_primary_span, ast_first_error_type_display, first_ast_error_view,
+    parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, TokenTag};
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
@@ -2144,4 +2144,39 @@ fn rejects_then_crossing_an_ordinary_loop_from_a_value_block() {
         "MOTH-RULE-0051",
         Some("invalid_fallible_handling.then_crosses_blocked_construct"),
     );
+}
+
+/// Scope-layout rows for `loop:` bodies.
+///
+/// WHAT: a loop opened on the enclosing scope's line is rejected, and a closer after code or with
+///       trailing code is reported at its authored token.
+/// WHY: loops are the third `:`-opened statement block, so they must share the closer and nested
+///      opener contract rather than drifting into their own rule.
+#[test]
+fn rejects_loop_scope_layout_violations() {
+    let rows = [
+        (
+            "count |n I32|: loop 0 to n |i|: io.line(\"x\");\n;\n",
+            "invalid_scope_layout.nested_scope_opener_on_line",
+            LayoutSite::nth(":", 1),
+            LayoutSite::first(":"),
+        ),
+        (
+            "count |n I32|:\n    loop 0 to n:\n        io.line(\"x\");\n    ;\n;\n",
+            "invalid_scope_layout.multiline_closer_after_code",
+            LayoutSite::first(";"),
+            LayoutSite::nth(":", 1),
+        ),
+        (
+            "count |n I32|:\n    loop 0 to n:\n        io.line(\"x\")\n    ; io.line(\"after\")\n;\n",
+            "invalid_scope_layout.content_after_closer",
+            LayoutSite::nth("io", 1),
+            LayoutSite::first(";"),
+        ),
+    ];
+
+    for (source, reason, primary, label) in rows {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_scope_layout(&failure, source, reason, primary, label);
+    }
 }

@@ -1554,6 +1554,25 @@ fn moth_template_body_sees_flat_html_prelude_constants() {
 }
 
 #[test]
+fn moth_template_note_is_a_discarded_implicit_body_child() {
+    // A `.mtf` document is one implicit parent template body, so a top-level note is a valid
+    // child there even though the same spelling is rejected in `.moth` source.
+    let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[$note: hidden]visible")]);
+    let (ast, string_table, path_fork) = fixture
+        .compile_moth_template_ast_ok("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
+
+    let content = folded_content_value(&ast, &string_table, &path_fork);
+    assert!(
+        content.contains("visible"),
+        "the implicit body must keep the sibling text, got {content:?}"
+    );
+    assert!(
+        !content.contains("hidden"),
+        "the implicit body must discard the note text, got {content:?}"
+    );
+}
+
+#[test]
 fn moth_template_body_sees_flat_html_and_styles_prelude_constants() {
     // Both official prelude providers contribute to one `.mtf` body: `p` from `@html` and the
     // `center` slot contribution from `@styles`. The style value must travel through the same
