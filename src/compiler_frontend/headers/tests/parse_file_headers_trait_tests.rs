@@ -446,3 +446,61 @@ fn trait_this_outside_trait_declaration_is_targeted() {
             && diagnostic.reason_key() == Some("invalid_this_usage.outside_trait_declaration")
     }));
 }
+
+/// Trait declarations obey the same closer contract as functions and choices.
+///
+/// WHAT: inline and empty multiline marker traits stay legal.
+/// WHY: the trait shell consumes its own declaration `;`, so AST never sees a misplaced closer.
+#[test]
+fn trait_scope_layout_accepts_inline_and_multiline_closers() {
+    let cases = [
+        ("inline empty marker trait", "MARKER must:;\n"),
+        (
+            "inline trait requirement",
+            "MARKER must: name |This| -> String;\n",
+        ),
+        ("multiline empty marker trait", "MARKER must:\n;\n"),
+    ];
+
+    for (case, source) in cases {
+        let outcome =
+            parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+        expect_header_success(outcome, case);
+    }
+}
+
+#[test]
+fn multiline_trait_closer_after_a_requirement_reports_the_closer_and_must_colon() {
+    let source = "MARKER must:\n    name |This| -> String;\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "multiline trait closer after code",
+        "invalid_scope_layout.multiline_closer_after_code",
+        source_span_for(source, ";", 0),
+        &[(
+            ExpectedScopeLayoutLabel::OpenerStartsHere,
+            source_span_for(source, ":", 0),
+        )],
+    );
+}
+
+#[test]
+fn trait_closer_trailing_code_reports_the_first_trailing_token() {
+    let source = "MARKER must:\n; io.line(\"x\")\n";
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
+
+    assert_scope_layout_diagnostic(
+        outcome,
+        "trait closer trailing code",
+        "invalid_scope_layout.content_after_closer",
+        source_span_for(source, "io", 0),
+        &[(
+            ExpectedScopeLayoutLabel::EarlierCloser,
+            source_span_for(source, ";", 0),
+        )],
+    );
+}

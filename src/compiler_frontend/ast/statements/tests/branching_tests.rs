@@ -29,8 +29,9 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId,
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
-    assert_ast_diagnostic, ast_error_label_spans, ast_error_primary_span, first_ast_error_view,
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    LayoutSite, assert_ast_diagnostic, assert_ast_scope_layout, ast_error_count,
+    ast_error_label_spans, ast_error_primary_span, first_ast_error_view, parse_single_file_ast,
+    parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -904,14 +905,62 @@ fn parses_relational_match_patterns() {
 
 #[test]
 fn rejects_semicolon_between_match_arms() {
-    let failure = parse_single_file_ast_diagnostic(
+    let sources = [
         "value = 1\nif value is:\n    1 => io.line([: [\"one\"]]);\n    2 => io.line([: [\"two\"]])\n    else => io.line([: [\"other\"]])\n;\n",
-    );
-    assert_ast_diagnostic(
-        &failure,
-        "MOTH-SYNTAX-0028",
-        Some("invalid_match_arm.semicolon_delimiter"),
-    );
+        // A nested inline scope is legal inside an arm, so the line-initial `;` after it is still
+        // the match-arm delimiter error and not a scope-layout error.
+        "value = 1\nif value is:\n    1 => if true: io.line([: [\"one\"]]);\n    ;\n    2 => io.line([: [\"two\"]])\n    else => io.line([: [\"other\"]])\n;\n",
+        // Header capture sees the later arm outside any open match. The earlier arm delimiter
+        // still wins over the invalid function closer and the code or closer after it.
+        "f ||:\n    if true is:\n        true => return;\n        else => return\n    ;;\n",
+        "f ||:\n    if true is:\n        true => return;\n        else => return\n    ; x()\n;\n",
+    ];
+
+    for source in sources {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_diagnostic(
+            &failure,
+            "MOTH-SYNTAX-0028",
+            Some("invalid_match_arm.semicolon_delimiter"),
+        );
+    }
+}
+
+#[test]
+fn a_default_arm_must_start_its_own_line() {
+    // A same-line `else =>` is a misplaced default arm, reported at its `else`. A mid-line normal
+    // arm has no line-initial pattern to find, so its `=>` anchors the report.
+    let rejected = [
+        (
+            "value = 1\nif value is:\n    1 => io.line(\"one\") else => io.line(\"other\");\n",
+            LayoutSite::first("else"),
+        ),
+        (
+            "value = 1\nif value is:\n    1 => io.line(\"one\") 2 => io.line(\"two\")\n    else => io.line(\"other\")\n;\n",
+            LayoutSite::nth("=>", 1),
+        ),
+    ];
+    for (source, site) in rejected {
+        let failure = parse_single_file_ast_diagnostic(source);
+        let diagnostic = assert_ast_diagnostic(
+            &failure,
+            "MOTH-SYNTAX-0028",
+            Some("invalid_match_arm.arm_must_start_new_line"),
+        );
+        assert_eq!(
+            ast_error_primary_span(diagnostic),
+            Some(site.span_in(source)),
+            "{source}"
+        );
+    }
+
+    let accepted = [
+        "value = 1\nif value is:\n    1 => io.line(\"one\")\n    else => io.line(\"other\");\n",
+        "value = 1\nif value is:\n    1 => io.line(\"one\")\n    else =>\n;\n",
+    ];
+    for source in accepted {
+        let _ = parse_single_file_ast(source);
+    }
 }
 
 #[test]
@@ -1408,4 +1457,229 @@ fn capture_collisions_without_an_authored_binding_omit_the_label() {
             "{source}: a compiler-owned name has no authored binding location",
         );
     }
+}
+
+/// Valid physical-line layouts for `if`/`else` and match scopes.
+///
+/// WHAT: every row must parse without a diagnostic.
+/// WHY: the layout contract is only safe to enforce when inline closers, branch continuations,
+///      empty bodies, comments and non-LF line endings stay legal.
+#[test]
+fn accepts_valid_scope_closer_layouts() {
+    let sources = [
+        // `else` introduces the terminal body, so the final `;` may share its line.
+        "run |ready Bool| -> I32:\n    if ready: return 1 else return 2;\n;\n",
+        // A later `else` line still closes inline with its own body.
+        "run |ready Bool| -> I32:\n    if ready:\n        return 1\n    else return 2\n    ;\n;\n",
+        // An empty inline block closes on its opener's line.
+        "if true: ;\n",
+        // An empty multiline block closes on its own line.
+        "run |ready Bool|:\n    if ready:\n    ;\n;\n",
+        // Blank and comment-only lines are legal inside a block and before a standalone closer.
+        "run |ready Bool|:\n\n    -- blank and comment lines stay legal inside a block\n    if ready:\n        io.line(\"ready\")\n    -- a comment may sit between the body and its closer\n    ;\n;\n",
+        // A comment may follow a legal closer.
+        "if true: ; -- closed\n",
+        // CRLF and bare CR follow the same layout decisions as LF.
+        "run |ready Bool| -> I32:\r\n    if ready: return 1 else return 2;\r\n;\r\n",
+        "run |ready Bool| -> I32:\r    if ready: return 1 else return 2;\r;\r",
+        // The terminal `else =>` arm introduces the body whose `;` closes the match.
+        "Status :: Ready, Busy;\npick |status Status|:\n    if status is:\n        Ready => return\n        else => return;\n;\n",
+        // A value-producing block closes with one final `;` after its `else` body.
+        "choose |ready Bool| -> I32:\n    value = if ready:\n        then 1\n    else\n        then 2\n    ;\n    return value\n;\n",
+        // A loop opened on its own line may close inline.
+        "count |n I32|:\n    loop 0 to n: io.line(\"x\");\n;\n",
+    ];
+
+    for source in sources {
+        parse_single_file_ast(source);
+    }
+}
+
+/// Rejected statement-`if` layouts: nested opener, closer after code, trailing code, stacked closer
+/// and a same-line `else` after the then-body already closed the `if`.
+#[test]
+fn rejects_statement_if_scope_layout_violations() {
+    let rows = [
+        (
+            "run |ready Bool|: if ready: return 1;\n;\n",
+            "invalid_scope_layout.nested_scope_opener_on_line",
+            LayoutSite::nth(":", 1),
+            LayoutSite::first(":"),
+        ),
+        (
+            "run |ready Bool| -> I32:\n    if ready:\n        io.line(\"x\");\n    ;\n;\n",
+            "invalid_scope_layout.multiline_closer_after_code",
+            LayoutSite::first(";"),
+            LayoutSite::nth(":", 1),
+        ),
+        (
+            "run |ready Bool|:\n    if ready:\n        io.line(\"x\")\n    ; io.line(\"after\")\n;\n",
+            "invalid_scope_layout.content_after_closer",
+            LayoutSite::nth("io", 1),
+            LayoutSite::first(";"),
+        ),
+        (
+            "if true: io.line(\"x\");;\n",
+            "invalid_scope_layout.additional_closer_on_line",
+            LayoutSite::nth(";", 1),
+            LayoutSite::first(";"),
+        ),
+        (
+            "run |ready Bool| -> I32:\n    if ready: return 1; else return 2;\n;\n",
+            "invalid_scope_layout.content_after_closer",
+            LayoutSite::first("else"),
+            LayoutSite::first(";"),
+        ),
+        (
+            // The then body's `;` completes the `if`, so `else if` is trailing content rather than
+            // the separate same-line `else if` rejection that applies when no closer ended it.
+            "if true: io.line(\"x\"); else if false: io.line(\"y\");\n",
+            "invalid_scope_layout.content_after_closer",
+            LayoutSite::first("else"),
+            LayoutSite::first(";"),
+        ),
+        (
+            // The earlier incomplete expression defers only the placement report; trailing code
+            // still changes how the rest of the line parses and keeps its own error.
+            "if true:\n    x = 1 + ; other\n",
+            "invalid_scope_layout.content_after_closer",
+            LayoutSite::first("other"),
+            LayoutSite::first(";"),
+        ),
+    ];
+
+    for (source, reason, primary, label) in rows {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_scope_layout(&failure, source, reason, primary, label);
+    }
+}
+
+/// A stacked closer after one legal inline closer is one diagnostic, not a closer plus a stray
+/// top-level `;`.
+///
+/// WHY: the second `;` is both an extra closer and (after the scope completed) a token the module
+///      body could otherwise report as unmatched. Only the more specific layout reason may appear.
+#[test]
+fn an_extra_closer_after_an_inline_if_reports_once() {
+    let source = "if true: io.line(\"x\");;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_scope_layout(
+        &failure,
+        source,
+        "invalid_scope_layout.additional_closer_on_line",
+        LayoutSite::nth(";", 1),
+        LayoutSite::first(";"),
+    );
+    assert_eq!(
+        ast_error_count(&failure),
+        1,
+        "a stacked closer after a legal closer must not also report a top-level stray `;`"
+    );
+}
+
+/// A grouped `;` inside a match arm still reports the expression token at its own span.
+///
+/// WHY: the arm's closer is later and legal, so the grouped delimiter inside the call remains the
+///      first structural error and must not become a scope-layout report.
+#[test]
+fn grouped_semicolon_in_a_match_arm_keeps_its_expression_diagnostic() {
+    let source = "value = 1\nif value is:\n    1 => io.line(\"a\"; \"b\")\n    else => io.line(\"other\")\n;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(&failure, "MOTH-SYNTAX-0002", None);
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(LayoutSite::first(";").span_in(source))
+    );
+    assert!(
+        ast_error_label_spans(diagnostic).is_empty(),
+        "the grouped `;` is reported without a scope label"
+    );
+}
+
+/// Rejected statement-match layouts: a stacked closer after the match and code after it.
+#[test]
+fn rejects_match_scope_layout_violations() {
+    let rows = [
+        (
+            "Status :: Ready, Busy;\npick |status Status|:\n    if status is:\n        Ready => return\n        else => return\n    ;;\n;\n",
+            "invalid_scope_layout.additional_closer_on_line",
+            LayoutSite::nth(";", 2),
+            LayoutSite::nth(";", 1),
+        ),
+        (
+            "Status :: Ready, Busy;\npick |status Status|:\n    if status is:\n        Ready => return\n        else => return\n    ; next()\n;\n",
+            "invalid_scope_layout.content_after_closer",
+            LayoutSite::first("next"),
+            LayoutSite::nth(";", 1),
+        ),
+    ];
+
+    for (source, reason, primary, label) in rows {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_scope_layout(&failure, source, reason, primary, label);
+    }
+}
+
+/// One final `;` closes the whole `if`/`else`, so a later-line `else` cannot reopen it.
+///
+/// WHY: the then body consumed the closer, which completed the `if`; the `else` then appears in the
+///      enclosing body and keeps the existing else-outside-if diagnostic for both `if` forms.
+#[test]
+fn rejects_later_line_else_after_a_closed_then_body() {
+    let sources = [
+        "run |ready Bool| -> I32:\n    if ready:\n        return 1\n    ;\nelse\n    return 2\n;\n;\n",
+        "recover |maybe I32?|:\n    if maybe is |value|:\n        io.line(\"present\")\n    ;\nelse\n    io.line(\"absent\")\n;\n;\n",
+    ];
+
+    for source in sources {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_diagnostic(
+            &failure,
+            "MOTH-RULE-0042",
+            Some("invalid_control_flow_statement.else_outside_if_or_match"),
+        );
+    }
+}
+
+/// Rejected option-capture and value-producing block layouts.
+///
+/// WHAT: an option-capture branch closes like a statement `if`, and a value block ends with the
+///       `;` that follows its `else` body, including at a bounded declaration initializer.
+#[test]
+fn rejects_option_capture_and_value_block_scope_layout_violations() {
+    let rows = [
+        (
+            "recover |maybe I32?|:\n    if maybe is |value|: io.line(\"present\"); else io.line(\"absent\");\n;\n",
+            "invalid_scope_layout.content_after_closer",
+            LayoutSite::first("else"),
+            LayoutSite::first(";"),
+        ),
+        (
+            "choose |ready Bool| -> I32:\n    value = if ready: then 1; else then 2;\n    return value\n;\n",
+            "invalid_scope_layout.content_after_closer",
+            LayoutSite::first("else"),
+            LayoutSite::first(";"),
+        ),
+        (
+            "choose |ready Bool| -> I32:\n    value = if ready: then 1 else then 2; next()\n    return value\n;\n",
+            "invalid_scope_layout.content_after_closer",
+            LayoutSite::first("next"),
+            LayoutSite::first(";"),
+        ),
+    ];
+
+    for (source, reason, primary, label) in rows {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_scope_layout(&failure, source, reason, primary, label);
+    }
+
+    // A `;` that completes the value block's then branch leaves the written `else` outside it.
+    let failure = parse_single_file_ast_diagnostic(
+        "choose |ready Bool| -> I32:\n    value = if ready:\n        then 1\n    ;\n    else\n        then 2\n    ;\n    return value\n;\n",
+    );
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0042",
+        Some("invalid_control_flow_statement.value_if_missing_else"),
+    );
 }

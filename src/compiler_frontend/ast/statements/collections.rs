@@ -534,9 +534,9 @@ fn parse_curly_entry(
         )?);
     }
 
-    // `;` closes a statement block, never a literal entry. Name it before the expression parser
-    // runs, which would otherwise receive an empty fragment for `{; ...}` and report a compiler
-    // invariant instead of the authored token.
+    // `;` closes a scope, never a literal entry. Name it before the expression parser runs, which
+    // would otherwise receive an empty fragment for `{; ...}` and report a compiler invariant
+    // instead of the authored token.
     if token_stream.current_tag() == TokenTag::END {
         return Err(unexpected_statement_end(token_stream));
     }
@@ -1478,11 +1478,11 @@ fn validate_map_key_entry(
     record_known_map_key(known_keys, key, const_values, string_table)
 }
 
-/// Report a statement terminator where a literal entry belongs.
+/// Report a scope closer where a literal entry belongs.
 ///
 /// WHAT: names the authored `;` as the unexpected token at its own span.
-/// WHY: `;` closes a statement block, never a literal entry, so the literal owner names the token
-///      instead of falling through to missing-item wording or an empty fragment.
+/// WHY: `;` closes a scope, never a literal entry, so the literal owner names the token instead of
+///      falling through to missing-item wording or an empty fragment.
 fn unexpected_statement_end(token_stream: &AstCursor) -> ExpressionParseError {
     token_lexical::unexpected_token_from_tag(
         DiagnosticToken::from_static_tag(TokenTag::END),
@@ -1680,8 +1680,7 @@ fn parse_map_entries(
                 token_stream.advance();
             }
 
-            // A map value's expression stops at a statement terminator, which never separates
-            // entries.
+            // A map value's expression stops at a scope closer, which never separates entries.
             TokenTag::END => return Err(unexpected_statement_end(token_stream)),
 
             _ => {
@@ -1834,7 +1833,7 @@ fn parse_inferred_curly_literal(
     let literal_span = Some(token_stream.current_span());
 
     // Collection delimiters own intervening newlines; normalize them before the bounded
-    // expression parser sees the first entry as a possible statement terminator.
+    // expression parser sees the first entry as a possible scope closer.
     token_stream.advance();
     token_stream.skip_newlines();
 

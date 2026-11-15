@@ -1,0 +1,19 @@
+-- Inline closers are valid when a scope's opening site and its `;` share a physical line.
+Status :: Ready, Busy;
+
+MARKER must:
+;
+
+wrap |value I32| -> I32: return value + 1;
+
+label |ready Bool| -> String:
+    if ready: return "ready" else return "waiting";
+;
+
+pick |status Status| -> String:
+    if status is:
+        Ready => return "ready"
+        else => return "busy";
+;
+
+~[:scope_closing inline=[wrap(4)] branch=[label(true)]/[label(false)] match=[pick(Status::Ready)]/[pick(Status::Busy)]]

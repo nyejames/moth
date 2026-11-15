@@ -33,7 +33,7 @@ Trait requirements describe the method shapes a conforming type must provide. Th
 
 ### Multiple requirements
 
-Multiple method requirements may appear in one trait. The current separator between requirements is a newline. Each requirement has no body and no standalone semicolon. The trait itself closes with a final semicolon.
+Multiple method requirements may appear in one trait. The current separator between requirements is a newline. Each requirement has no body and no standalone semicolon. The trait itself closes with a final semicolon, inline on the line containing its `must:` or alone on its own line. See @../language-overview/#blocks-and-statements (Blocks and statements).
 
 [codeblock, $code "moth":
     NAMED must:

@@ -129,7 +129,8 @@ fn with_source_span(mut diagnostic: DiagnosticDraft, span: Option<SourceSpan>) -
 }
 
 /// Handles a template-typed value found in the template head.
-/// Wrapper templates preserve slot semantics while preparation owns constness.
+/// Wrapper templates preserve slot semantics while preparation owns constness. A `$note` never
+/// arrives here because expression parsing rejects a note before it can become a value.
 pub(super) fn handle_template_value_in_template_head(
     value: &Template,
     context: &ScopeContext,
@@ -162,10 +163,6 @@ pub(super) fn handle_template_value_in_template_head(
             span,
         )
         .into());
-    }
-
-    if matches!(&template_kind, TemplateType::Comment) {
-        return Ok(());
     }
 
     if matches!(&template_kind, TemplateType::SlotDefinition(_)) {

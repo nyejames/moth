@@ -3359,6 +3359,34 @@ contract = "language.syntax.top_level_stray_scope_close_rejected"
 role = "primary"
 
 [[case]]
+id = "diagnostic_code_after_scope_closer"
+path = "diagnostic_code_after_scope_closer"
+tags = ["integration", "diagnostics"]
+contract = "language.scopes.no_code_after_scope_closer"
+role = "primary"
+
+[[case]]
+id = "diagnostic_multiline_closer_after_code"
+path = "diagnostic_multiline_closer_after_code"
+tags = ["integration", "diagnostics"]
+contract = "language.scopes.multiline_closer_must_stand_alone"
+role = "primary"
+
+[[case]]
+id = "diagnostic_nested_inline_scope"
+path = "diagnostic_nested_inline_scope"
+tags = ["integration", "diagnostics"]
+contract = "language.scopes.nested_opener_requires_own_line"
+role = "primary"
+
+[[case]]
+id = "scope_closing_inline_valid"
+path = "scope_closing_inline_valid"
+tags = ["integration", "runtime"]
+contract = "language.scopes.inline_closer_shares_opening_line"
+role = "primary"
+
+[[case]]
 id = "diagnostic_recovery_independent_bodies"
 path = "diagnostic_recovery_independent_bodies"
 tags = ["integration", "diagnostics", "functions"]
@@ -7292,6 +7320,62 @@ id = "template_unclosed_note_body_rejected"
 path = "template_unclosed_note_body_rejected"
 tags = ["integration","templates","diagnostics"]
 contract = "language.templates.unclosed_delimiter_rejected"
+role = "boundary"
+
+[[case]]
+id = "template_note_child_template_only_success"
+path = "template_note_child_template_only_success"
+tags = ["integration","templates"]
+contract = "language.templates.note_is_a_discarded_child_template"
+role = "primary"
+
+[[case]]
+id = "template_note_only_expression_rejected"
+path = "template_note_only_expression_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.note_outside_a_template_body_rejected"
+role = "primary"
+
+[[case]]
+id = "template_note_source_root_fragment_rejected"
+path = "template_note_source_root_fragment_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.note_outside_a_template_body_rejected"
+role = "boundary"
+
+[[case]]
+id = "template_note_multiline_head_source_root_rejected"
+path = "template_note_multiline_head_source_root_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.note_outside_a_template_body_rejected"
+role = "boundary"
+
+[[case]]
+id = "template_note_runtime_fragment_rejected"
+path = "template_note_runtime_fragment_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.note_outside_a_template_body_rejected"
+role = "boundary"
+
+[[case]]
+id = "template_note_function_body_rejected"
+path = "template_note_function_body_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.note_outside_a_template_body_rejected"
+role = "boundary"
+
+[[case]]
+id = "root_fragment_same_line_binding_rejected"
+path = "root_fragment_same_line_binding_rejected"
+tags = ["integration","templates","entry-start","diagnostics"]
+contract = "language.templates.root_fragment_must_end_its_line"
+role = "boundary"
+
+[[case]]
+id = "root_fragment_same_line_runtime_fragments_rejected"
+path = "root_fragment_same_line_runtime_fragments_rejected"
+tags = ["integration","templates","entry-start","diagnostics"]
+contract = "language.templates.root_fragment_must_end_its_line"
 role = "boundary"
 
 [[case]]
@@ -20343,6 +20427,13 @@ id = "diagnostic_stolen_function_closer_labels_inner_closer"
 path = "diagnostic_stolen_function_closer_labels_inner_closer"
 tags = ["integration", "functions", "diagnostics", "labels"]
 contract = "language.functions.inner_block_closer_leaves_function_body_open"
+role = "primary"
+
+[[case]]
+id = "diagnostic_statement_semicolon_before_return_rejected"
+path = "diagnostic_statement_semicolon_before_return_rejected"
+tags = ["integration", "functions", "diagnostics", "control-flow"]
+contract = "language.scopes.statement_semicolon_before_return_names_the_scope"
 role = "primary"
 
 [[case]]

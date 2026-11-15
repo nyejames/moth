@@ -194,6 +194,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
+use crate::compiler_frontend::tokenizer::line_scanning::ScopeOpening;
 use crate::compiler_frontend::traits::evidence::environment::InfallibleCastEvidenceContract;
 use crate::timing_scope_attributed;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -554,10 +555,10 @@ impl AstHeaderCounterSnapshot {
 //   must never unwrap a draft into published nodes.
 /// Parse one function, entry or handler body.
 ///
-/// `body_opening_span` is the `:` that opened an authored block body, so end of file inside it is
-/// reported as a missing `;` labelled on that colon. Callers pass `None` when end of file is not a
-/// missing closer: the compiler-owned entry start, and function bodies whose token range header
-/// capture already balanced.
+/// `body_opening` is the effective opening site of an authored block body, so end of file inside
+/// it is reported as a missing `;` labelled on that opener. Callers pass `None` when end of file is
+/// not a missing closer: the compiler-owned entry start, and function bodies whose token range
+/// header capture already balanced.
 #[allow(
     clippy::too_many_arguments,
     reason = "body entry forwards the cursor, scope and mutable parser state unchanged"
@@ -565,7 +566,7 @@ impl AstHeaderCounterSnapshot {
 pub(crate) fn function_body_to_ast(
     token_stream: &mut AstCursor,
     context: ScopeContext,
-    body_opening_span: Option<SourceSpan>,
+    body_opening: Option<ScopeOpening>,
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
@@ -576,7 +577,7 @@ pub(crate) fn function_body_to_ast(
     parse_function_body_statements(
         token_stream,
         context,
-        body_opening_span,
+        body_opening,
         type_interner,
         expression_builder,
         const_values,

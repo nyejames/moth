@@ -14,8 +14,12 @@ A statement `if` runs a block when its condition is `true`.
 - `else` is optional.
 - The `if` body and optional `else` body are child scopes.
 - One final semicolon closes the complete `if` and `else` structure.
+- The terminal `else` body may close on the line that begins with `else`, as in `else io.line("waiting");`.
+- A `;` that ends an `if` body completes the `if`. A later `else` is then outside an `if` and is rejected as an unexpected `else`.
 - Statement `if` is non-exhaustive when no `else` is written.
 - A statement branch does not produce a value merely because its body contains expressions.
+
+Block and branch placement follows @../language-overview/#blocks-and-statements (Blocks and statements).
 
 ### Compile-time-known statement conditions
 

@@ -47,9 +47,16 @@ pub(crate) enum LabelDraftMessage {
     EarlierTemplateHeadItem,
     ConflictsWithEarlierHeadItem,
     TemplateStartsHere,
-    UnclosedBlockStartsHere,
+    /// The innermost source scope that the file ended without closing.
+    UnclosedScopeStartsHere,
     UnclosedDelimiterStartsHere,
     InnerBlockCloser,
+    /// The active opener of the scope that a misplaced closer tried to close.
+    ScopeOpenerStartsHere,
+    /// The opener that already occupies the physical line a nested opener shares.
+    EarlierScopeOpenerOnLine,
+    /// The legal `;` that authored content follows, or that a stacked closer duplicates.
+    ScopeCloserBeforeThis,
     MissingExportDeclaration,
     ExternalImportSite,
     RootLocalDeclarationSite,
@@ -105,9 +112,12 @@ impl LabelMessageCode {
     pub(super) const EARLIER_SECTION_MARKER: Self = Self(24);
     pub(super) const DEPENDENCY_CYCLE_PARTICIPANT: Self = Self(25);
     pub(super) const CONST_CALL_SITE: Self = Self(26);
-    pub(super) const UNCLOSED_BLOCK_STARTS_HERE: Self = Self(27);
+    pub(super) const UNCLOSED_SCOPE_STARTS_HERE: Self = Self(27);
     pub(super) const UNCLOSED_DELIMITER_STARTS_HERE: Self = Self(28);
     pub(super) const INNER_BLOCK_CLOSER: Self = Self(29);
+    pub(super) const SCOPE_OPENER_STARTS_HERE: Self = Self(30);
+    pub(super) const EARLIER_SCOPE_OPENER_ON_LINE: Self = Self(31);
+    pub(super) const SCOPE_CLOSER_BEFORE_THIS: Self = Self(32);
 
     /// Whether the label keeps a row in `label_data`. Config origin, substitutions, typed failure producers
     /// and write-back origins carry data; the rest never read the row.
@@ -153,9 +163,12 @@ impl LabelMessageCode {
             Self::RECEIVER_METHOD_SITE => "RECEIVER_METHOD_SITE",
             Self::EARLIER_TEMPLATE_HEAD_ITEM => "EARLIER_TEMPLATE_HEAD_ITEM",
             Self::TEMPLATE_STARTS_HERE => "TEMPLATE_STARTS_HERE",
-            Self::UNCLOSED_BLOCK_STARTS_HERE => "UNCLOSED_BLOCK_STARTS_HERE",
+            Self::UNCLOSED_SCOPE_STARTS_HERE => "UNCLOSED_SCOPE_STARTS_HERE",
             Self::UNCLOSED_DELIMITER_STARTS_HERE => "UNCLOSED_DELIMITER_STARTS_HERE",
             Self::INNER_BLOCK_CLOSER => "INNER_BLOCK_CLOSER",
+            Self::SCOPE_OPENER_STARTS_HERE => "SCOPE_OPENER_STARTS_HERE",
+            Self::EARLIER_SCOPE_OPENER_ON_LINE => "EARLIER_SCOPE_OPENER_ON_LINE",
+            Self::SCOPE_CLOSER_BEFORE_THIS => "SCOPE_CLOSER_BEFORE_THIS",
             Self::CONFLICTS_WITH_EARLIER_HEAD_ITEM => "CONFLICTS_WITH_EARLIER_HEAD_ITEM",
             Self::MISSING_EXPORT_DECLARATION => "MISSING_EXPORT_DECLARATION",
             Self::EXTERNAL_IMPORT_SITE => "EXTERNAL_IMPORT_SITE",
@@ -253,13 +266,22 @@ pub(super) fn encode_label(
             plain(LabelMessageCode::CONFLICTS_WITH_EARLIER_HEAD_ITEM)
         }
         LabelDraftMessage::TemplateStartsHere => plain(LabelMessageCode::TEMPLATE_STARTS_HERE),
-        LabelDraftMessage::UnclosedBlockStartsHere => {
-            plain(LabelMessageCode::UNCLOSED_BLOCK_STARTS_HERE)
+        LabelDraftMessage::UnclosedScopeStartsHere => {
+            plain(LabelMessageCode::UNCLOSED_SCOPE_STARTS_HERE)
         }
         LabelDraftMessage::UnclosedDelimiterStartsHere => {
             plain(LabelMessageCode::UNCLOSED_DELIMITER_STARTS_HERE)
         }
         LabelDraftMessage::InnerBlockCloser => plain(LabelMessageCode::INNER_BLOCK_CLOSER),
+        LabelDraftMessage::ScopeOpenerStartsHere => {
+            plain(LabelMessageCode::SCOPE_OPENER_STARTS_HERE)
+        }
+        LabelDraftMessage::EarlierScopeOpenerOnLine => {
+            plain(LabelMessageCode::EARLIER_SCOPE_OPENER_ON_LINE)
+        }
+        LabelDraftMessage::ScopeCloserBeforeThis => {
+            plain(LabelMessageCode::SCOPE_CLOSER_BEFORE_THIS)
+        }
         LabelDraftMessage::ConstCallSite => plain(LabelMessageCode::CONST_CALL_SITE),
         LabelDraftMessage::MissingExportDeclaration => {
             plain(LabelMessageCode::MISSING_EXPORT_DECLARATION)
@@ -460,13 +482,22 @@ impl LabelWord {
                 DurableLabelMessage::ConflictsWithEarlierHeadItem
             }
             LabelMessageCode::TEMPLATE_STARTS_HERE => DurableLabelMessage::TemplateStartsHere,
-            LabelMessageCode::UNCLOSED_BLOCK_STARTS_HERE => {
-                DurableLabelMessage::UnclosedBlockStartsHere
+            LabelMessageCode::UNCLOSED_SCOPE_STARTS_HERE => {
+                DurableLabelMessage::UnclosedScopeStartsHere
             }
             LabelMessageCode::UNCLOSED_DELIMITER_STARTS_HERE => {
                 DurableLabelMessage::UnclosedDelimiterStartsHere
             }
             LabelMessageCode::INNER_BLOCK_CLOSER => DurableLabelMessage::InnerBlockCloser,
+            LabelMessageCode::SCOPE_OPENER_STARTS_HERE => {
+                DurableLabelMessage::ScopeOpenerStartsHere
+            }
+            LabelMessageCode::EARLIER_SCOPE_OPENER_ON_LINE => {
+                DurableLabelMessage::EarlierScopeOpenerOnLine
+            }
+            LabelMessageCode::SCOPE_CLOSER_BEFORE_THIS => {
+                DurableLabelMessage::ScopeCloserBeforeThis
+            }
             LabelMessageCode::MISSING_EXPORT_DECLARATION => {
                 DurableLabelMessage::MissingExportDeclaration
             }
@@ -535,9 +566,16 @@ pub(crate) enum DurableLabelMessage<'a> {
     EarlierTemplateHeadItem,
     ConflictsWithEarlierHeadItem,
     TemplateStartsHere,
-    UnclosedBlockStartsHere,
+    /// The innermost source scope that the file ended without closing.
+    UnclosedScopeStartsHere,
     UnclosedDelimiterStartsHere,
     InnerBlockCloser,
+    /// The active opener of the scope that a misplaced closer tried to close.
+    ScopeOpenerStartsHere,
+    /// The opener that already occupies the physical line a nested opener shares.
+    EarlierScopeOpenerOnLine,
+    /// The legal `;` that authored content follows, or that a stacked closer duplicates.
+    ScopeCloserBeforeThis,
     MissingExportDeclaration,
     ExternalImportSite,
     RootLocalDeclarationSite,

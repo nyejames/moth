@@ -1,0 +1,11 @@
+@docs/intro content as intro_text
+
+inner = [:Alpha [$note: nested note text [missing_name] [$bogus: [1 + "a"]]] Omega]
+only_note = [:[$note: only-note text]]
+
+~[inner]
+~[only_note]
+~[intro_text]
+[:Root [$note: root note text] end]
+[:[$note: root-only text]]
+[:Last]

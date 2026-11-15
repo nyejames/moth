@@ -38,9 +38,9 @@ pub(crate) struct TemplateBuildState {
     pub(crate) child_wrappers: Vec<TemplateWrapperReference>,
     /// Authored `$note` token span when this template's kind is `Comment`.
     ///
-    /// WHAT: retained only for diagnostics that must reject the semantic kind after parsing.
-    /// WHY: the durable template span starts at the opener; the directive token is the authored
-    ///      source location for wrong-context diagnostics.
+    /// WHAT: parser-local copy of the directive location; `Template` keeps it durable.
+    /// WHY: the durable template span starts at the opener, while the diagnostics that reject a
+    ///      note outside a template body report at the directive token.
     pub(crate) comment_directive_span: Option<SourceSpan>,
 }
 

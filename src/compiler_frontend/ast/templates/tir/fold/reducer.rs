@@ -1196,12 +1196,9 @@ fn fold_tir_dynamic_expression(
     if let Some(tir_reference) = nested_template_reference(resolved, fold_context)? {
         let template_kind = nested_template_kind(&tir_reference, store)?;
 
-        // Comments are compile-time metadata and intentionally contribute no
-        // rendered output. Slot inserts remain composition helpers and must be
-        // rejected if they reach this final nested-value fold boundary.
-        if matches!(template_kind, TemplateType::Comment) {
-            return Ok(());
-        }
+        // Slot inserts remain composition helpers and must be rejected if they reach this final
+        // nested-value fold boundary. A `$note` never reaches it: expression parsing rejects a
+        // note before it can become a value, and body notes are discarded before TIR recording.
         reject_slot_insert_template(template_kind)?;
 
         let nested_result = fold_template_reference(

@@ -337,10 +337,9 @@ fn rejects_missing_collection_item_after_comma() {
     assert_ast_diagnostic(&diagnostic, "MOTH-SYNTAX-0027", None);
 }
 
-/// `;` closes a statement block, never a literal entry. Every entry position must name the
-/// authored token instead of dropping the rest of the entry window, including an entry that
-/// starts on the terminator, which must not reach the expression parser's empty-fragment
-/// invariant.
+/// `;` closes a scope, never a literal entry. Every entry position must name the authored token
+/// instead of dropping the rest of the entry window, including an entry that starts on the
+/// closer, which must not reach the expression parser's empty-fragment invariant.
 #[test]
 fn rejects_statement_terminator_in_curly_literal_entries() {
     for source in [

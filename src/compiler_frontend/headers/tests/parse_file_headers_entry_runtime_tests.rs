@@ -234,11 +234,122 @@ fn runtime_marker_requires_the_template_on_the_same_line() {
     );
 }
 
+/// Code after a root fragment on the same line is rejected at its first token.
+///
+/// WHAT: covers static, runtime and mixed fragment pairs, and a binding or call after a fragment.
+///       Each row names the follower's first token and its occurrence in the source.
+/// WHY: header capture consumes only the fragment. Every follower used to reach the start body on
+///      its own, where a binding or a runtime fragment after a static one was accepted.
 #[test]
-fn same_line_second_runtime_marker_is_not_counted_as_a_header_fragment() {
-    let headers = parse_single_file_headers("~[1] ~[2]\n");
-    assert_eq!(
-        headers.entry_runtime_fragment_count, 1,
-        "only a statement-boundary marker owns a runtime header; ordinary parsing rejects the same-line continuation"
+fn code_after_a_root_fragment_on_its_line_is_rejected() {
+    for (source, follower, occurrence) in [
+        ("[1] [2]\n", "[", 1),
+        ("~[1] ~[2]\n", "~", 1),
+        ("[1] ~[2]\n", "~", 0),
+        ("~[1] [2]\n", "[", 1),
+        ("[1] value = 1\n", "value", 0),
+        ("~[1] io.line(\"after\")\n", "io", 0),
+    ] {
+        let errors = expect_header_error(
+            parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
+            "code after a root fragment on the same line must be rejected",
+        );
+        let diagnostic = errors
+            .diagnostics
+            .views()
+            .next()
+            .expect("the header walk reports one diagnostic");
+        let facts = diagnostic
+            .family_view::<choices_control_flow::InvalidStatementPositionView>()
+            .unwrap_or_else(|| panic!("{source:?} should report an invalid statement position"));
+        assert_eq!(
+            facts.reason,
+            crate::compiler_frontend::compiler_messages::InvalidStatementPositionReason::ContentAfterRootFragment
+        );
+        assert_eq!(
+            diagnostic_primary_span(diagnostic),
+            Some(source_span_for(source, follower, occurrence)),
+            "{source:?} should point at the follower {follower:?}"
+        );
+    }
+}
+
+/// Line endings of every shape, comments, trailing space and the file end all close a fragment.
+#[test]
+fn root_fragment_line_end_accepts_every_line_ending() {
+    for (source, const_fragments, runtime_fragments) in [
+        ("[1] -- static\n~[2]   \n~[3] -- runtime\n", 1, 2),
+        ("[1]\r\n~[2]\r\n", 1, 1),
+        ("[1]\r~[2]\r", 1, 1),
+        ("[:one\n]\n~[2]", 1, 1),
+        ("~[1]", 0, 1),
+    ] {
+        let headers = parse_single_file_headers(source);
+        assert_eq!(headers.const_fragment_count, const_fragments, "{source:?}");
+        assert_eq!(
+            headers.entry_runtime_fragment_count, runtime_fragments,
+            "{source:?}"
+        );
+    }
+}
+
+/// A file that cannot own fragments keeps its role diagnostic for a same-line runtime pair.
+///
+/// WHY: the fragment itself is the error there, so a layout repair would mislead.
+#[test]
+fn non_entry_runtime_fragment_pair_reports_the_role_restriction() {
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry("~[1] ~[2]\n", "src/lib.moth", "src/@entry.moth"),
+        "an ordinary file cannot own runtime fragments",
+    );
+    let diagnostic = errors
+        .diagnostics
+        .views()
+        .next()
+        .expect("the header walk reports one diagnostic");
+    assert!(
+        diagnostic
+            .family_view::<names_declarations::InvalidTopLevelRuntimeStatementView>()
+            .is_some(),
+        "expected the top-level runtime restriction, found {}",
+        diagnostic.descriptor().code
+    );
+}
+
+/// A declaration-shaped token after a closer on the same line stays entry-body syntax.
+///
+/// WHAT: `if x: a(); Status :: A;` must not register `Status` as a top-level choice header.
+/// WHY: the closer ends a scope, not a statement boundary. Treating `END` as a declaration
+///      boundary would hide the authored trailing content from AST and accept two constructs on
+///      one physical line.
+#[test]
+fn declaration_shaped_tokens_after_a_closer_stay_in_the_entry_body() {
+    let source = "if x: a(); Status :: A;\n";
+    let (headers, string_table) = parse_single_file_headers_with_table(source);
+
+    assert!(
+        !headers
+            .headers
+            .iter()
+            .any(|header| matches!(header.kind, HeaderKind::Choice { .. })),
+        "`Status` after a scope closer must not become a module declaration header"
+    );
+
+    let start_header = start_function_header(&headers);
+    let mut body = header_body_tokens(&headers, start_header);
+    let mut body_symbols = Vec::new();
+    while let Some(token) = body.advance() {
+        if token.tag() == TokenTag::SYMBOL
+            && let Some(symbol) = token.string_id()
+        {
+            body_symbols.push(string_table.resolve(symbol).to_owned());
+        }
+        if token.is_eof() {
+            break;
+        }
+    }
+    assert!(
+        body_symbols.iter().any(|symbol| symbol == "Status"),
+        "the authored declaration-shaped token must remain in the entry body, found {body_symbols:?}"
     );
 }

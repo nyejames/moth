@@ -301,11 +301,16 @@ pub(crate) fn compact_label_message_text(
             "conflicts with the earlier head item".to_owned()
         }
         DurableLabelMessage::TemplateStartsHere => "Template starts here".to_owned(),
-        DurableLabelMessage::UnclosedBlockStartsHere => "unclosed block starts here".to_owned(),
+        DurableLabelMessage::UnclosedScopeStartsHere => "the unclosed scope starts here".to_owned(),
         DurableLabelMessage::UnclosedDelimiterStartsHere => {
             "unclosed delimiter starts here".to_owned()
         }
         DurableLabelMessage::InnerBlockCloser => "this `;` closed the inner block".to_owned(),
+        DurableLabelMessage::ScopeOpenerStartsHere => "the scope opened here".to_owned(),
+        DurableLabelMessage::EarlierScopeOpenerOnLine => {
+            "a scope already opened on this line".to_owned()
+        }
+        DurableLabelMessage::ScopeCloserBeforeThis => "this `;` closed the scope".to_owned(),
         DurableLabelMessage::MissingExportDeclaration => {
             "declaration has no `export` here".to_owned()
         }

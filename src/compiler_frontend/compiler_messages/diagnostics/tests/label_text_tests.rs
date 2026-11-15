@@ -64,7 +64,7 @@ static ALL_LABEL_ROLES_FAMILY: FamilyRow = FamilyRow {
         LabelMessageCode::EARLIER_TEMPLATE_HEAD_ITEM,
         LabelMessageCode::CONFLICTS_WITH_EARLIER_HEAD_ITEM,
         LabelMessageCode::TEMPLATE_STARTS_HERE,
-        LabelMessageCode::UNCLOSED_BLOCK_STARTS_HERE,
+        LabelMessageCode::UNCLOSED_SCOPE_STARTS_HERE,
         LabelMessageCode::UNCLOSED_DELIMITER_STARTS_HERE,
         LabelMessageCode::INNER_BLOCK_CLOSER,
         LabelMessageCode::GENERIC_INFERENCE_PREVIOUS_EVIDENCE,
@@ -76,6 +76,9 @@ static ALL_LABEL_ROLES_FAMILY: FamilyRow = FamilyRow {
         LabelMessageCode::BUILTIN_WRITE_BACK_ORIGIN,
         LabelMessageCode::MISSING_EXPORT_DECLARATION,
         LabelMessageCode::EXTERNAL_IMPORT_SITE,
+        LabelMessageCode::SCOPE_OPENER_STARTS_HERE,
+        LabelMessageCode::EARLIER_SCOPE_OPENER_ON_LINE,
+        LabelMessageCode::SCOPE_CLOSER_BEFORE_THIS,
     ],
     render: None,
     reason_key: |_| None,
@@ -133,8 +136,8 @@ fn label_cases(
             "Template starts here".to_owned(),
         ),
         (
-            LabelDraftMessage::UnclosedBlockStartsHere,
-            "unclosed block starts here".to_owned(),
+            LabelDraftMessage::UnclosedScopeStartsHere,
+            "the unclosed scope starts here".to_owned(),
         ),
         (
             LabelDraftMessage::UnclosedDelimiterStartsHere,
@@ -206,6 +209,18 @@ fn label_cases(
         (
             LabelDraftMessage::ExternalImportSite,
             "imported here".to_owned(),
+        ),
+        (
+            LabelDraftMessage::ScopeOpenerStartsHere,
+            "the scope opened here".to_owned(),
+        ),
+        (
+            LabelDraftMessage::EarlierScopeOpenerOnLine,
+            "a scope already opened on this line".to_owned(),
+        ),
+        (
+            LabelDraftMessage::ScopeCloserBeforeThis,
+            "this `;` closed the scope".to_owned(),
         ),
     ]
 }

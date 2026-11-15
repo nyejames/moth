@@ -1151,6 +1151,50 @@ pub enum InvalidChoiceVariantReason {
     PayloadVariantMissingArguments,
 }
 
+/// Why an authored scope opener or closer violates the physical-line layout contract.
+///
+/// WHAT: names the one structural mistake the diagnostic reports, at its authored token.
+/// WHY: `;` layout failures share one family but need different advice: a nested opener must move
+///      to its own line, a multiline closer must stand alone, trailing code must move down, and a
+///      stacked closer must be removed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum InvalidScopeLayoutReason {
+    /// A second semicolon-terminated scope opened on the same physical line as an active one.
+    NestedScopeOpenerOnLine,
+    /// A multiline scope's closer shares its line with authored code other than its opener.
+    MultilineCloserAfterCode,
+    /// Authored code follows a scope closer on the same physical line.
+    ContentAfterCloser,
+    /// More than one scope closer occupies one physical line.
+    AdditionalCloserOnLine,
+}
+
+/// The authored source construct whose closing `;` the file ended without.
+///
+/// WHAT: names the still-open construct that an end-of-file report must describe.
+/// WHY: the parser that recognises the opener already knows which construct it began. Carrying
+///      that typed value beside the opening site stops the end-of-file path from guessing the
+///      construct from the surrounding tokens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SourceScopeConstruct {
+    /// A function body opened by the signature `:`.
+    FunctionBody,
+    /// An `if` body opened by its header `:`.
+    IfBlock,
+    /// A `loop` body opened by its header `:`.
+    LoopBlock,
+    /// A `catch` handler opened by its header `:`.
+    CatchHandler,
+    /// A match body opened by the `is:` of its header.
+    MatchBlock,
+    /// A choice declaration opened by `::`.
+    ChoiceDeclaration,
+    /// A trait declaration opened by its `must:` colon.
+    TraitDeclaration,
+    /// A declared region opened by the line-initial `name:`.
+    DeclaredRegion,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ReservedNameOwner {
     BuiltinType,
@@ -1210,7 +1254,6 @@ pub enum InvalidControlFlowStatementReason {
     ReturnBangOutsideErrorFunction,
     ExpectedColonAfterCondition,
     ExpectedConditionAfterIf,
-    UnexpectedEndOfFileInMatch,
     CaseRequiredBeforeElse,
     DuplicateElseArm,
     ExpectedFatArrow,
@@ -2108,6 +2151,8 @@ pub enum InvalidExpressionReason {
     EmptyRuntimeAnonymousRecord,
     /// A record literal field was not written as `name = value`.
     AnonymousRecordFieldNotNamed,
+    /// Prefix `not` was written directly after a complete operand.
+    NotAfterOperand,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -2183,6 +2228,8 @@ pub enum InvalidStatementPositionReason {
     UnexpectedScopeCloseInExpression,
     UnexpectedScopeCloseInTemplate,
     UnexpectedScopeCloseAtTopLevel,
+    /// Authored code follows a root page fragment on the same physical line.
+    ContentAfterRootFragment,
 }
 
 /// WHAT: the exact symbolic construct whose whitespace is wrong.

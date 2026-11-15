@@ -11,9 +11,8 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
-use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
-    CapacityResource, InvalidDeclarationReason, InvalidSignatureMemberReason,
+    CapacityResource, InvalidDeclarationReason, InvalidSignatureMemberReason, SourceScopeConstruct,
 };
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::signature_members::parse_trait_requirement_signature_syntax;
@@ -21,7 +20,8 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenRef, TokenTag};
+use crate::compiler_frontend::tokenizer::line_scanning::closer_layout_diagnostic;
+use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenIndex, TokenRef, TokenTag};
 use crate::compiler_frontend::traits::syntax::{
     ConformanceTargetKind, ConformanceTargetSyntax, TraitConformanceSyntax, TraitDeclarationSyntax,
     TraitIncompatibilitySyntax, TraitReferenceSyntax, TraitRequirementSyntax,
@@ -94,6 +94,37 @@ pub(super) fn parse_trait_declaration(
 ) -> TraitHeaderResult<TraitDeclarationSyntax> {
     let mut requirements = Vec::new();
     let name_span = declaration_span;
+    // The caller has already advanced past `must` and its `:`, so the opening site is the token
+    // immediately before the first requirement token. Its index serves the closer's physical-line
+    // check; its span labels a misplaced closer.
+    let body_opening_index = cursor
+        .position()
+        .index()
+        .checked_sub(1)
+        .and_then(TokenIndex::try_from_index)
+        .ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "trait declaration body started before its `must:` colon",
+            ))
+        })?;
+    let opening_token = cursor
+        .source_tokens()
+        .token(body_opening_index)
+        .map_err(|_| {
+            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "trait declaration could not read its `must:` colon",
+            ))
+        })?;
+    if opening_token.tag() != TokenTag::COLON {
+        return Err(HeaderParseFailure::Infrastructure(
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "trait declaration did not start after its `must:` colon",
+            ),
+        ));
+    }
     let trait_path = context
         .path_fork
         .try_intern_child(context.source_file, declaration_name)
@@ -109,21 +140,43 @@ pub(super) fn parse_trait_declaration(
     loop {
         match cursor.current().map(TokenRef::tag).unwrap_or(TokenTag::EOF) {
             TokenTag::END => {
+                let closer_index = TokenIndex::try_from_index(cursor.position().index())
+                    .ok_or_else(|| {
+                        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                            CompilerStage::HeaderParsing,
+                            "trait declaration closer exceeded the source token index space",
+                        ))
+                    })?;
+                let closer_span = cursor_span(cursor).ok_or_else(|| {
+                    HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
+                        "trait declaration closer is missing its authored span",
+                    ))
+                })?;
                 let _ = cursor.advance();
+                // The trait shell ends at this token, so AST never receives it. This owner
+                // reports a misplaced or duplicated closer at the authored `;`.
+                if let Some(diagnostic) = closer_layout_diagnostic(
+                    cursor.source_tokens(),
+                    body_opening_index,
+                    body_opening_span,
+                    closer_index,
+                    closer_span,
+                ) {
+                    return Err(HeaderParseFailure::Diagnostic(diagnostic));
+                }
                 break;
             }
 
             TokenTag::EOF => {
                 // The trait body's `must:` colon is the only authored site that can explain which
-                // block is still open when the file ends.
+                // declaration is still open when the file ends.
                 return Err(HeaderParseFailure::Diagnostic(
-                    token_lexical::unexpected_end_of_file(
-                        Some(context.string_table.intern(";")),
+                    token_lexical::unclosed_source_scope(
+                        SourceScopeConstruct::TraitDeclaration,
                         cursor_span(cursor),
-                    )
-                    .with_label(
-                        Some(body_opening_span),
-                        Some(LabelDraftMessage::UnclosedBlockStartsHere),
+                        body_opening_span,
+                        None,
                     ),
                 ));
             }

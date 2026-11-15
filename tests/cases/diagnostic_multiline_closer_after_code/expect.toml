@@ -1,0 +1,25 @@
+entry = "."
+
+# This is AUD-0017-F03's shape under the accepted layout contract: the `;` after `1 + 2` closes the
+# function body, not the assignment. The report points at that closer and labels the signature
+# colon instead of blaming the later `;` or a consequence of the early close.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0041"]
+message_contains = ["`;` closes a scope, not a statement"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0041"
+reason = "invalid_scope_layout.multiline_closer_after_code"
+path = "input/@entry.moth"
+line = 3
+column = 18
+count = 1
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 2
+column = 11

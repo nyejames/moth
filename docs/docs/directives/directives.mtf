@@ -62,8 +62,9 @@ builder output or automatic diagnostic. A future consumer can add a use without
 changing its source syntax.
 
 `$doc` and `$todo` are source directives, not template-head directives.
-`$note` is the template-only comment directive. Neither source annotations nor
-a discarded note contribute an entry page fragment.
+`$note` is the template-only comment directive and works only as a child of a
+template body. Neither source annotations nor a discarded note contribute an
+entry page fragment.
 
 ### Attachment and stacking
 

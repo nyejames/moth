@@ -16,8 +16,9 @@ A nested or aliased insert remains ordinary template composition.
 
 `$doc` attaches documentation to a following declaration, and `$todo`
 annotates a declaration or executable statement. Both take compile-time
-String operands and are source directives. Inside templates, `$note` discards
-comment content without producing output.
+String operands and are source directives. As a child of a template body,
+`$note` discards comment content without producing output. A note outside a
+template body is rejected.
 
 ### Page fragments
 

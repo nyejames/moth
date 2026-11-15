@@ -898,7 +898,8 @@ fn capacity_references_across_header_type_surfaces_create_dependency_edges() {
                  |\n\
                  Status :: Pending |\n\
                      items {limit I32},\n\
-                 |;\n\
+                 |\n\
+                 ;\n\
                  make|| -> {limit I32}:\n\
                      return {}\n\
                  ;\n",

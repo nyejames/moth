@@ -38,25 +38,15 @@ pub struct AstConstTopLevelFragment {
     pub value: ConstStringValue,
 }
 
-/// Folded value for a top-level const template.
+/// What a top-level const template folded into.
 ///
-/// WHAT: carries the already-folded string value and validated destination, or records that the
-///       template produced no output at all.
-/// WHY: `[$note: ...]` must disappear rather than become an empty String fragment. The explicit
-///      no-output variant lets fragment collection skip it without inventing a value.
-#[derive(Clone, Debug)]
-pub(crate) enum FoldedConstTemplateResult {
-    Output {
-        value: ConstStringValue,
-        destination: ConstFragmentDestination,
-    },
-    NoOutput,
-}
-
-impl FoldedConstTemplateResult {
-    pub(crate) fn new(value: ConstStringValue, destination: ConstFragmentDestination) -> Self {
-        Self::Output { value, destination }
-    }
+/// WHAT: carries the already-folded string value and its validated builder destination.
+/// WHY: fragment collection pairs these two facts with the header's authored span and runtime
+///      insertion index; folding produces nothing else a const fragment needs. A root `$note`
+///      never reaches this record because placement validation rejects it before folding.
+pub(crate) struct FoldedConstTemplateResult {
+    pub(crate) value: ConstStringValue,
+    pub(crate) destination: ConstFragmentDestination,
 }
 
 // -------------------------
@@ -87,16 +77,11 @@ pub(crate) fn collect_const_top_level_fragments(
                 )
             })?;
 
-        let (value, destination) = match folded {
-            FoldedConstTemplateResult::Output { value, destination } => (value, destination),
-            FoldedConstTemplateResult::NoOutput => continue,
-        };
-
         result.push(AstConstTopLevelFragment {
             runtime_insertion_index: fragment.runtime_insertion_index,
             span: fragment.span,
-            destination,
-            value,
+            destination: folded.destination,
+            value: folded.value,
         });
     }
 

@@ -1,0 +1,17 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0021"]
+message_contains = ["`$note` is only allowed as a child template in a template body. Use `--` for comments in Moth code."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+reason = "invalid_template_directive.wrong_context"
+path = "input/@entry.moth"
+line = 1
+column = 10
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0021"]

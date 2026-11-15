@@ -1053,8 +1053,8 @@ fn second_operand_is_rejected() {
 
 #[test]
 fn second_operand_after_a_template_operand_is_rejected() {
-    // A template operand ends the directive's one operand just like a literal does, including
-    // past discarded comment templates, so the boundary still reports the extra value.
+    // A template operand ends the directive's one operand just like a literal does, so the
+    // directive boundary still reports the extra value.
     let diagnostic = parse_optional_expression_source("[$code [:prefix] \"moth\"]")
         .expect_err("a value after a template operand must be rejected");
 
@@ -1085,6 +1085,17 @@ fn note_template_does_not_render_content() {
     let note_rendered = folded_template_output("[:before[$note:ignored]after]");
 
     assert_eq!(note_rendered, "beforeafter");
+}
+
+#[test]
+fn note_only_template_folds_to_empty_text() {
+    // The outer template is an ordinary String value; the discarded note child leaves no text.
+    assert_eq!(folded_template_output("[:[$note: hi]]"), "");
+}
+
+#[test]
+fn deeply_nested_body_note_does_not_render_content() {
+    assert_eq!(folded_template_output("[:a[:b[$note: c]d]e]"), "abde");
 }
 
 #[test]

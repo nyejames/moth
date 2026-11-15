@@ -52,9 +52,6 @@ pub(crate) fn invalid_control_flow_statement_message(
         InvalidControlFlowStatementReason::ExpectedConditionAfterIf => {
             "Expected a condition after 'if'.".to_string()
         }
-        InvalidControlFlowStatementReason::UnexpectedEndOfFileInMatch => {
-            "Unexpected end of file in match statement.".to_string()
-        }
         InvalidControlFlowStatementReason::CaseRequiredBeforeElse => {
             "Match statements require at least one pattern arm before 'else =>'.".to_string()
         }

@@ -11,27 +11,29 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_da
     InvalidMultiBindCode, InvalidMultiBindView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
-    InvalidControlFlowStatementView, InvalidMatchPatternView, InvalidStatementPositionView,
+    InvalidMatchPatternView, InvalidStatementPositionView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
     InvalidFunctionSignatureCode, InvalidFunctionSignatureView, InvalidThisUsageCode,
     InvalidThisUsageView, InvalidTraitKeywordUsageView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
-    UnexpectedTokenShape, UnexpectedTokenView,
+    UnclosedSourceScopeView, UnexpectedTokenShape, UnexpectedTokenView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticDiscoveryStops, DiagnosticSeverity, InvalidControlFlowStatementReason,
-    InvalidMatchPatternReason, InvalidStatementPositionReason, InvalidTraitKeywordUsageReason,
+    DiagnosticDiscoveryStops, DiagnosticSeverity, InvalidMatchPatternReason,
+    InvalidStatementPositionReason, InvalidTraitKeywordUsageReason, SourceScopeConstruct,
 };
 use crate::compiler_frontend::module_compilation::AstRecoveryPolicy;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tests::parse_support::{
-    assert_ast_diagnostic, first_ast_error_view, parse_single_file_ast,
+    LayoutSite, assert_ast_diagnostic, assert_ast_unclosed_source_scope, ast_error_label_spans,
+    ast_error_primary_span, first_ast_error_view, parse_single_file_ast,
     parse_single_file_ast_diagnostic, parse_single_file_ast_diagnostic_with_policy,
+    source_end_span,
 };
 use std::num::NonZeroU32;
 
@@ -93,6 +95,27 @@ fn reports_stray_comma_in_function_body() {
 }
 
 #[test]
+fn reports_an_isolated_top_level_closer_after_an_inline_scope() {
+    // The inline `if` is closed by its own `;`, so the line-initial `;` closes nothing and keeps
+    // the top-level unmatched-closer identity rather than becoming a stacked-closer layout error.
+    let source = "if true: io.line(\"x\");\n;\n";
+    let failure = assert_failure(
+        source,
+        "MOTH-SYNTAX-0030",
+        "invalid_statement_position.unexpected_scope_close_at_top_level",
+    );
+    let diagnostic = first_ast_error_view(&failure);
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(LayoutSite::nth(";", 1).span_in(source))
+    );
+    assert!(
+        ast_error_label_spans(diagnostic).is_empty(),
+        "an isolated top-level `;` has no open scope to label"
+    );
+}
+
+#[test]
 fn reports_invalid_match_pattern_forms_as_permanent_rule_errors() {
     let cases = [
         InvalidMatchPatternCase {
@@ -123,20 +146,179 @@ fn reports_invalid_match_pattern_forms_as_permanent_rule_errors() {
     }
 }
 
+struct UnclosedSourceScopeCase {
+    name: &'static str,
+    source: &'static str,
+    construct: SourceScopeConstruct,
+    reason_key: &'static str,
+    opener: LayoutSite<'static>,
+}
+
 #[test]
-fn reports_unterminated_match_scope_at_end_of_file() {
-    let failure = assert_failure(
-        "value = 1\nif value is:\n    1 => io.line([: [\"one\"]])\n",
-        "MOTH-RULE-0042",
-        "invalid_control_flow_statement.unexpected_end_of_file_in_match",
+fn reports_unclosed_source_scopes_with_their_construct() {
+    let cases = [
+        UnclosedSourceScopeCase {
+            name: "entry if",
+            source: "ready ~= false\nif ready:\n    io.line(\"hidden\")\n",
+            construct: SourceScopeConstruct::IfBlock,
+            reason_key: "unclosed_source_scope.if_block",
+            opener: LayoutSite::first(":"),
+        },
+        UnclosedSourceScopeCase {
+            name: "entry loop",
+            source: "count ~= 0\nloop count < 3:\n    ~count += 1\n",
+            construct: SourceScopeConstruct::LoopBlock,
+            reason_key: "unclosed_source_scope.loop_block",
+            opener: LayoutSite::first(":"),
+        },
+        UnclosedSourceScopeCase {
+            name: "entry catch",
+            source: "values ~= {1, 2}\n~values.set(0, 8) catch:\n",
+            construct: SourceScopeConstruct::CatchHandler,
+            reason_key: "unclosed_source_scope.catch_handler",
+            opener: LayoutSite::first(":"),
+        },
+        UnclosedSourceScopeCase {
+            name: "match",
+            source: "value = 1\nif value is:\n    1 => io.line(\"one\")\n",
+            construct: SourceScopeConstruct::MatchBlock,
+            reason_key: "unclosed_source_scope.match_block",
+            opener: LayoutSite::first(":"),
+        },
+        UnclosedSourceScopeCase {
+            name: "value-producing if",
+            source: "ready ~= true\nvalue = if ready:\n    then 1\n",
+            construct: SourceScopeConstruct::IfBlock,
+            reason_key: "unclosed_source_scope.if_block",
+            opener: LayoutSite::first(":"),
+        },
+        UnclosedSourceScopeCase {
+            name: "value-producing match",
+            source: "value = 1\nresult = if value is:\n    1 => then \"one\"\n",
+            construct: SourceScopeConstruct::MatchBlock,
+            reason_key: "unclosed_source_scope.match_block",
+            opener: LayoutSite::first(":"),
+        },
+    ];
+
+    for case in cases {
+        let failure = parse_single_file_ast_diagnostic(case.source);
+        assert_ast_unclosed_source_scope(
+            &failure,
+            case.source,
+            case.name,
+            case.construct,
+            case.reason_key,
+            case.opener,
+        );
+    }
+}
+
+#[test]
+fn labels_the_child_closer_that_left_an_entry_scope_open() {
+    let source = "ready ~= false\nif ready:\n    if ready:\n        io.line(\"x\")\n    ;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0042",
+        Some("unclosed_source_scope.if_block"),
     );
-    let diagnostic = first_ast_error_view(&failure);
     let facts = diagnostic
-        .family_view::<InvalidControlFlowStatementView>()
-        .expect("unterminated match should retain typed facts");
+        .family_view::<UnclosedSourceScopeView>()
+        .expect("the unclosed outer if should retain its typed construct");
+    assert_eq!(facts.reason, SourceScopeConstruct::IfBlock);
     assert_eq!(
-        facts.reason,
-        InvalidControlFlowStatementReason::UnexpectedEndOfFileInMatch
+        ast_error_primary_span(diagnostic),
+        Some(source_end_span(source))
+    );
+    assert_eq!(
+        ast_error_label_spans(diagnostic),
+        vec![
+            Some(LayoutSite::first(":").span_in(source)),
+            Some(LayoutSite::first(";").span_in(source)),
+        ],
+        "the report should label the outer opener and the `;` that closed its child"
+    );
+}
+
+#[test]
+fn labels_the_child_closer_after_a_later_closerless_statement() {
+    let source = "ready ~= false\nvalues ~= {1, 2}\n~values.set(0, 8) catch:\n    if ready:\n        io.line(\"x\")\n    ;\n    io.line(\"after\")\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0042",
+        Some("unclosed_source_scope.catch_handler"),
+    );
+    let facts = diagnostic
+        .family_view::<UnclosedSourceScopeView>()
+        .expect("the unclosed catch should retain its typed construct");
+    assert_eq!(facts.reason, SourceScopeConstruct::CatchHandler);
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(source_end_span(source))
+    );
+    assert_eq!(
+        ast_error_label_spans(diagnostic),
+        vec![
+            Some(LayoutSite::first(":").span_in(source)),
+            Some(LayoutSite::first(";").span_in(source)),
+        ],
+        "a later closerless statement must not discard the recorded child closer"
+    );
+}
+
+#[test]
+fn labels_the_last_child_closer_before_match_eof() {
+    let source = "value = 1\nif value is:\n    1 =>\n        if true:\n            io.line(\"x\")\n        ;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0042",
+        Some("unclosed_source_scope.match_block"),
+    );
+    let facts = diagnostic
+        .family_view::<UnclosedSourceScopeView>()
+        .expect("the unclosed match should retain its typed construct");
+    assert_eq!(facts.reason, SourceScopeConstruct::MatchBlock);
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(source_end_span(source))
+    );
+    assert_eq!(
+        ast_error_label_spans(diagnostic),
+        vec![
+            Some(LayoutSite::first(":").span_in(source)),
+            Some(LayoutSite::first(";").span_in(source)),
+        ],
+        "the report should label the match opener and the `;` that closed its arm's child"
+    );
+}
+
+#[test]
+fn labels_the_last_child_closer_from_an_else_body() {
+    let source = "ready ~= true\nif ready:\n    if ready:\n        io.line(\"x\")\n    ;\nelse\n    io.line(\"y\")\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0042",
+        Some("unclosed_source_scope.if_block"),
+    );
+    let facts = diagnostic
+        .family_view::<UnclosedSourceScopeView>()
+        .expect("the unclosed if should retain its typed construct");
+    assert_eq!(facts.reason, SourceScopeConstruct::IfBlock);
+    assert_eq!(
+        ast_error_primary_span(diagnostic),
+        Some(source_end_span(source))
+    );
+    assert_eq!(
+        ast_error_label_spans(diagnostic),
+        vec![
+            Some(LayoutSite::first(":").span_in(source)),
+            Some(LayoutSite::first(";").span_in(source)),
+        ],
+        "the else-body report should label the `;` that closed the earlier branch's child"
     );
 }
 
@@ -532,23 +714,27 @@ later || -> String:
     );
 }
 
-/// One retained simple body: `return`, one value token and the closing `;`.
+/// One retained simple body: the newline after the signature colon, `return`, one value token and
+/// the newline before its standalone closer.
 ///
-/// The header stage captures the body range from the first token after the signature colon
-/// through the closing delimiter, so these fixture bodies charge exactly three work tokens.
-const SIMPLE_BODY_WORK_TOKENS: u32 = 3;
+/// The header stage captures the body range from the first token after the signature colon up to
+/// the closing delimiter, so these fixture bodies charge exactly four work tokens.
+const SIMPLE_BODY_WORK_TOKENS: u32 = 4;
 
 #[test]
 fn diagnostic_recovery_work_boundary_admits_an_exact_fit() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 second || -> I32:
-    return also_missing;
+    return also_missing
+;
 third || -> I32:
-    return third_missing;
+    return third_missing
+;
 ";
-    // The first failed body is uncharged, so admitting both later bodies costs 3 plus 3.
+    // The first failed body is uncharged, so admitting both later bodies costs 4 plus 4.
     let exact_fit_allowance = SIMPLE_BODY_WORK_TOKENS * 2;
     let (exact_fit, exact_stops) = parse_single_file_ast_diagnostic_with_policy(
         source,
@@ -593,17 +779,21 @@ third || -> I32:
 fn diagnostic_recovery_work_boundary_overflow_stops_before_the_next_body() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 second || -> I32:
-    return also_missing;
+    return also_missing
+;
 third || -> I32:
-    return 1 + missing_third;
+    return 1 + missing_third
+;
 ";
-    // The third body retains five tokens: `return`, `1`, `+`, `missing_third` and the closing `;`.
-    const LONG_BODY_WORK_TOKENS: u32 = 5;
+    // The third body retains six tokens: the newline after its colon, `return`, `1`, `+`,
+    // `missing_third` and the newline before its standalone closer.
+    const LONG_BODY_WORK_TOKENS: u32 = 6;
     let allowance = SIMPLE_BODY_WORK_TOKENS + LONG_BODY_WORK_TOKENS;
 
-    // After the second body, three tokens remain, which is less than the third body needs.
+    // After the second body, fewer tokens remain than the third body needs.
     let (short, short_stops) =
         parse_single_file_ast_diagnostic_with_policy(source, recovery_policy(None, allowance - 1));
     assert_eq!(
@@ -637,11 +827,14 @@ third || -> I32:
 fn diagnostic_recovery_work_boundary_successful_body_consumes_allowance() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 second || -> I32:
-    return 2;
+    return 2
+;
 third || -> I32:
-    return third_missing;
+    return third_missing
+;
 ";
     let full_allowance = SIMPLE_BODY_WORK_TOKENS * 2;
 
@@ -678,9 +871,11 @@ third || -> I32:
 fn diagnostic_recovery_scope_boundary_generic_template() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 identity type T |value T| -> T:
-    return also_missing;
+    return also_missing
+;
 ";
     let result = parse_single_file_ast_diagnostic(source);
 
@@ -696,7 +891,8 @@ identity type T |value T| -> T:
 fn diagnostic_recovery_scope_boundary_implicit_start() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 value = also_missing
 ";
     let result = parse_single_file_ast_diagnostic(source);
@@ -712,7 +908,8 @@ value = also_missing
 fn diagnostic_recovery_scope_boundary_const_template() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 [: [also_missing]]
 ";
     let result = parse_single_file_ast_diagnostic(source);
@@ -728,11 +925,14 @@ first || -> I32:
 fn diagnostic_recovery_module_allowance_one_matches_fail_fast() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 second || -> I32:
-    return also_missing;
+    return also_missing
+;
 third || -> I32:
-    return third_missing;
+    return third_missing
+;
 ";
     let (result, stops) = parse_single_file_ast_diagnostic_with_policy(
         source,
@@ -750,11 +950,14 @@ third || -> I32:
 fn diagnostic_recovery_module_allowance_two_retains_two_and_stops() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 second || -> I32:
-    return also_missing;
+    return also_missing
+;
 third || -> I32:
-    return third_missing;
+    return third_missing
+;
 ";
     let (result, stops) = parse_single_file_ast_diagnostic_with_policy(
         source,
@@ -778,9 +981,11 @@ third || -> I32:
 fn diagnostic_recovery_module_allowance_reached_on_last_body_sets_no_stop() {
     let source = "\
 first || -> I32:
-    return missing;
+    return missing
+;
 second || -> I32:
-    return also_missing;
+    return also_missing
+;
 ";
     let (result, stops) = parse_single_file_ast_diagnostic_with_policy(
         source,

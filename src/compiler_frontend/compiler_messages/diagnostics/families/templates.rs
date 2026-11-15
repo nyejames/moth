@@ -815,6 +815,22 @@ pub(crate) fn invalid_template_directive(
     })
 }
 
+/// Builds the `$note` placement diagnostic for a note outside a template body.
+///
+/// WHAT: one constructor for every owner that rejects a parsed root note at its directive.
+/// WHY: expression, statement and direct-fragment owners each reject a misplaced note, so the
+///      directive name and reason live here once instead of at every site.
+pub(crate) fn note_outside_template_body(
+    note_name: StringId,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    invalid_template_directive(
+        Some(note_name),
+        InvalidTemplateDirectiveReason::WrongContext,
+        span,
+    )
+}
+
 /// Builds the truncation diagnostic for a template that reaches end of file before its `]`.
 ///
 /// The primary span is the EOF token; the secondary label points at the opening `[` that is still

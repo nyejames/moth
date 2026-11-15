@@ -110,10 +110,13 @@ pub(super) fn classify_current_item_ref(
 
 /// Statement-boundary test for one source-owned token index.
 ///
-/// WHAT: reports whether the token before `current_index` is a file boundary
-///       (`ModuleStart`/`Newline`/`End`) or absent at the start of the source.
-/// WHY: the outer walk keeps its source-token index while reading boundary
-///      facts from canonical shapes/spans.
+/// WHAT: reports whether the token before `current_index` is a file or physical-line boundary
+///       (`ModuleStart`/`Newline`) or absent at the start of the source.
+/// WHY: the outer walk keeps its source-token index while reading boundary facts from canonical
+///      shapes/spans. A `;` alone is not a boundary: another declaration or statement on the same
+///      physical line as a closer is invalid layout, and classifying it as a header would hide
+///      the authored trailing content from AST. A closer that really ends its line has a
+///      `NEWLINE` after it in this token stream.
 pub(super) fn statement_boundary_at_source(canonical: &SourceTokens, current_index: usize) -> bool {
     let Some(previous) = current_index.checked_sub(1) else {
         return true;
@@ -125,7 +128,7 @@ pub(super) fn statement_boundary_at_source(canonical: &SourceTokens, current_ind
         return true;
     };
     let tag = previous_token.tag();
-    tag == TokenTag::MODULE_START || tag == TokenTag::NEWLINE || tag == TokenTag::END
+    tag == TokenTag::MODULE_START || tag == TokenTag::NEWLINE
 }
 
 /// Classification of the token following a top-level symbol name.

@@ -7,11 +7,12 @@ entry = "."
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-SYNTAX-0017"]
-message_contains = ["expected ';'"]
+diagnostic_codes = ["MOTH-SYNTAX-0042"]
+message_contains = ["This `catch` block is never closed. Add `;` on its own line after its body."]
 
 [[backends.html.diagnostic_assertions]]
-code = "MOTH-SYNTAX-0017"
+code = "MOTH-SYNTAX-0042"
+reason = "unclosed_source_scope.catch_handler"
 path = "input/@entry.moth"
 line = 4
 column = 21

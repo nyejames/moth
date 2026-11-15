@@ -1,34 +1,100 @@
-Moth uses explicit block delimiters.
-
-A colon opens a block. A semicolon closes that block.
+Moth uses explicit block delimiters. A colon opens a block and a semicolon closes it.
 
 [codeblock, $code "moth":
-    clamp_to_zero |value I32| -> I32:
-        if value < 0:
-            return 0
-        ;
+    Status :: Ready, Busy;
 
-        return value
+    greet |name String| -> Bool: return name is "Priya";
+
+    label |ready Bool| -> String:
+        if ready:
+            return "Rob"
+        else return "Emmy";
+    ;
+
+    pick |status Status| -> String:
+        if status is:
+            Ready => return "Emmy"
+            else => return "Huw";
     ;
 ]
 
 ### Contract
 
-- `:` opens a function body, branch, loop or another block-form construct.
+- `:` opens a function body, `if`/`else` or option-capture branch, match, loop, `catch` handler, value-producing block, trait, declared region or another block-form construct. `::` opens a choice declaration.
 - `;` closes the active block.
-- A semicolon does not terminate an ordinary statement.
+- A semicolon closes a scope. It never terminates an ordinary statement.
 - Statements inside a block are evaluated in source order unless control flow exits or redirects the block.
 - Child blocks create child scopes.
-- Indentation is for readability. Explicit delimiters define block boundaries.
+- Indentation is for readability. Explicit delimiters define block boundaries, and indentation never decides scope.
+- Blank lines and whitespace inside a block are legal. Empty inline and empty multiline blocks are also legal as source layout.
+- Opening punctuation inside expressions, types or templates is not a scope opener.
 - The language has no general authored lexical-block construct or control-flow labels.
 - Immediate `identifier:` headers in executable statement position are reserved for declared regions. Full declared-region semantics remain deferred.
 - Normal control-flow keywords remain ordinary language forms. Future compiler-owned directive blocks use `$async:` and `$checked:`; both spellings are deferred and are not declared regions.
 - Exact `_:` is invalid.
 
-### Reading the shape
+### Physical placement
 
-The final semicolon in the example closes the function. The earlier semicolon
-closes the `if` block.
+- At most one scope may open on a physical line. A scope opener cannot share a physical line with the opener of an enclosing scope that is still open.
+- A scope closes inline when its opening site and its `;` share a physical line.
+- Otherwise it is a multiline scope. Its `;` must stand alone on a later line, with only whitespace before it.
+- Only whitespace or a `--` comment may follow a closer on its line. No statement, declaration, second `;` or other code may follow it.
+- A comment cannot precede a closer on its line because `--` consumes the rest of that line.
+- Two independent block-form constructs cannot share a physical line. The first closer ends its line.
 
-Nested language features may add their own structural rules. Branching, loops,
-functions, declared regions and template control flow document those forms in detail.
+### Branch exceptions
+
+The terminal `else` body of an `if` or the terminal match arm may close on the line that introduces it.
+
+- The terminal `else` body may close on the line that begins with `else`, as in `else io.line("waiting");`.
+- The terminal match arm may close on the line that contains its `=>`, as in `else => return "busy";`.
+
+One final `;` closes the whole `if`/`else` or match. The exception covers the terminal branch only. A `;` after an intermediate `then` statement or an intermediate match arm is invalid. An intermediate match arm keeps its dedicated match-arm delimiter diagnostic.
+
+Once a valid closer ends an `if` body, the `if` is complete. If an `else` follows that closer, it is outside an `if` and is rejected as an unexpected `else`.
+
+### Missing and misplaced closers
+
+`MOTH-SYNTAX-0041` reports a misplaced opener or closer. It covers a nested opener on one line, a multiline closer after code, code after a closer and a second closer on one line. The diagnostic points at the offending token and labels the opener or closer that explains it.
+
+`MOTH-SYNTAX-0042` reports a scope that never closes. It names the construct, labels its opener, asks for the missing `;` and labels any visible `;` that closed an inner scope instead.
+
+Indentation never decides scope. Recovery follows the authored scope structure, and no suggestion can insert a closer or change which scope a line belongs to.
+
+### Coming from statement-terminating semicolons
+
+If you are used to semicolons ending statements, read `;` as a closing brace instead. Do not add one at the end of each line inside a block. Add the single `;` that finishes a scope once its body has ended. A misplaced `;` closes its scope early, so the lines that follow belong outside that scope.
+
+### Rejected shapes
+
+Each shape below is invalid on its own.
+
+[codeblock, $code "moth":
+    -- Invalid: a nested opener cannot share the enclosing opener's line.
+    run ||: if true: io.line("ready");
+    ;
+]
+
+[codeblock, $code "moth":
+    -- Invalid: this `;` closes the function, not the assignment.
+    compute ||:
+        total = 1 + 2;
+    ;
+]
+
+[codeblock, $code "moth":
+    -- Invalid: code follows the `if` closer on its line.
+    report ||:
+        if true: io.line("ready"); io.line("after")
+        ;
+    ;
+]
+
+[codeblock, $code "moth":
+    -- Invalid: a second closer follows the `if` closer.
+    finish ||:
+        if true: io.line("ready");;
+    ;
+]
+
+Nested language features may add their own structural rules. Branching, loops, functions, declared regions and template control flow document those forms in detail.

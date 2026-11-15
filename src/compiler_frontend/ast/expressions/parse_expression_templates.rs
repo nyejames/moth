@@ -31,8 +31,9 @@ use crate::compiler_frontend::value_mode::ValueMode;
 
 // WHAT: parses a template literal and optionally folds it to a string slice expression.
 // WHY: templates appear in expression positions but have their own grammar (slots, definitions,
-//      comments). This function decides whether the template stays a runtime value or can be
-//      folded at compile time.
+//      discarded-body comments). Every template in expression position yields a value, so the
+//      function decides whether it stays a runtime value or folds at compile time. A `$note`
+//      is a body child, not an expression, and is rejected at its directive.
 #[allow(
     clippy::too_many_arguments,
     reason = "template expression parsing keeps the token stream, scope, type interner, expression builder, const store, closing-parenthesis policy, value mode, string table, and path fork as separate borrows"
@@ -47,7 +48,7 @@ pub(super) fn parse_template_expression(
     value_mode: &ValueMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Option<OwnedExpr>, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let template_span = Some(token_stream.current_span());
     let template_context = context.new_template_parsing_context();
     let template = if context.kind.is_constant_context() {
@@ -101,7 +102,7 @@ pub(super) fn parse_template_expression(
             // if the template is still runtime-only here, constant-header validation emits the
             // permanent "not compile-time resolvable" error.
             maybe_consume_closing_parenthesis(token_stream, consume_closing_parenthesis);
-            Ok(Some(expression_builder.template(template, *value_mode)?))
+            Ok(expression_builder.template(template, *value_mode)?)
         }
 
         TemplateType::String => {
@@ -124,13 +125,13 @@ pub(super) fn parse_template_expression(
                 &template_context,
             )?;
             if !matches!(preparation.outcome, TemplatePreparationOutcome::Foldable) {
-                return Ok(Some(expression_builder.template(template, *value_mode)?));
+                return Ok(expression_builder.template(template, *value_mode)?);
             }
             if matches!(
                 preparation.facts.final_value_kind,
                 TemplateConstValueKind::WrapperTemplate
             ) {
-                return Ok(Some(expression_builder.template(template, *value_mode)?));
+                return Ok(expression_builder.template(template, *value_mode)?);
             }
 
             ast_log!("Template is foldable now. Folding...");
@@ -146,7 +147,7 @@ pub(super) fn parse_template_expression(
             if fold_result.refusal.is_some() {
                 // The value still exists at runtime: structural text anchored to a resource or
                 // site root has no characters until the owning output boundary supplies them.
-                return Ok(Some(expression_builder.template(template, *value_mode)?));
+                return Ok(expression_builder.template(template, *value_mode)?);
             }
             let string_value = match fold_result.emission {
                 TemplateEmission::Output(value) => value,
@@ -165,15 +166,19 @@ pub(super) fn parse_template_expression(
                 expression_builder.constant(value, type_id, template_span, *value_mode)?;
             let folded_expression = expression_builder
                 .with_synthetic_interface_provenance(folded_expression, fold_result.provenance)?;
-            Ok(Some(folded_expression))
+            Ok(folded_expression)
         }
 
-        // Comment templates do not produce an expression.
-        TemplateType::Comment => Ok(None),
+        // A `$note` is a discarded child of a template body, never a value or a skip marker.
+        TemplateType::Comment => Err(templates::note_outside_template_body(
+            string_table.intern("note"),
+            template.comment_directive_span.or(template_span),
+        )
+        .into()),
 
         TemplateType::SlotInsert(_) => {
             maybe_consume_closing_parenthesis(token_stream, consume_closing_parenthesis);
-            Ok(Some(expression_builder.template(template, *value_mode)?))
+            Ok(expression_builder.template(template, *value_mode)?)
         }
 
         TemplateType::SlotDefinition(_) => {

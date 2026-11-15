@@ -1,0 +1,12 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "Alpha  Omega\n\n<p>Before  after.</p>"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["Root  end\n\nLast"]
+must_not_contain = ["nested note text", "only-note text", "root note text", "root-only text"]

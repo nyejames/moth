@@ -100,7 +100,7 @@ Only a direct root insert reaches builder routing. A nested or stored insert sta
 ordinary template composition. Runtime top-level named builder inserts are not
 part of the contract.
 
-A direct [$html:<code>&#91;$note: ...&#93;</code>] discards a comment without creating a fragment. Ordinary
+A [$html:<code>&#91;$note: ...&#93;</code>] child in a template body discards its balanced body without creating a fragment. Ordinary
 assigned, returned and nested templates keep their own const/runtime rules.
 The old direct [$html:<code>#&#91;...&#93;</code>] entry-fragment spelling is removed.
 

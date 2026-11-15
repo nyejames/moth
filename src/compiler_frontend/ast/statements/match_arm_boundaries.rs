@@ -17,6 +17,7 @@
 //!   templates is not mistaken for an arm separator.
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 
@@ -176,23 +177,33 @@ pub(crate) fn current_token_ends_match_arm_body(token_stream: &AstCursor) -> boo
     ) || token_is_line_initial(token_stream, token_stream.position())
 }
 
-/// Returns true when the current logical line contains a top-level `=>` at any
-/// position, regardless of whether the current token is line-initial.
+/// Find a top-level `=>` later on the current logical line and return its arm's anchor.
 ///
-/// Used by `body_dispatch.rs` to detect same-line accidental second arms.
-pub(crate) fn current_line_contains_top_level_fat_arrow(token_stream: &AstCursor) -> bool {
+/// WHAT: anchors a default `else =>` at its `else` and any other arm at its `=>`, regardless of
+///       whether the current token is line-initial.
+/// WHY: used by `body_dispatch.rs` to reject same-line accidental second arms. A mid-line
+///      pattern has no line-initial start to find, while `else` names the misplaced default arm
+///      exactly.
+pub(crate) fn same_line_match_arm_anchor(token_stream: &AstCursor) -> Option<SourceSpan> {
     let mut walk = token_stream
         .subcursor_window(token_stream.position(), token_stream.length())
         .expect("match-arm line window stays inside the active parser view");
     let mut nesting_depth = NestingDepth::default();
+    let mut previous_else = None;
     while !walk.is_at_end() {
         let tag = walk.current_tag();
         match tag {
             TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => break,
-            TokenTag::FAT_ARROW if nesting_depth.is_top_level() => return true,
-            _ => nesting_depth.step_tag(walk.current_tag()),
+            TokenTag::FAT_ARROW if nesting_depth.is_top_level() => {
+                return Some(previous_else.unwrap_or_else(|| walk.current_span()));
+            }
+            _ => {
+                previous_else = (tag == TokenTag::ELSE && nesting_depth.is_top_level())
+                    .then(|| walk.current_span());
+                nesting_depth.step_tag(tag);
+            }
         }
         walk.advance();
     }
-    false
+    None
 }

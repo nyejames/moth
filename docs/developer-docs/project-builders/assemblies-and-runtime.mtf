@@ -63,8 +63,9 @@ concrete characters.
 A runtime template is executable Moth code that produces a string. It isn't a
 second build-time template evaluator. Explicit [$html:<code>~&#91;...&#93;</code>] runtime top-level templates contribute to
 the normal entry's fragment result collection. Compiler-owned `$doc` metadata
-attaches to declaration identities, while `$todo` has no output and `$note`
-discards a comment template. None becomes a body fragment or builder slot.
+attaches to declaration identities and `$todo` has no output. `$note` is a
+discarded child template inside a template body, so a note never reaches this
+collection. None of them becomes a body fragment or builder slot.
 
 Each folded fragment records how many runtime fragments precede it. For a
 constant fragment A, a runtime fragment B and another constant fragment C, the

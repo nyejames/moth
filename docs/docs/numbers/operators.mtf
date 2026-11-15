@@ -9,7 +9,7 @@ Moth uses word forms for equality and logic:
 ]
 
 - `and` and `or` require `Bool` operands and short-circuit.
-- `not` requires one `Bool`.
+- `not` requires one `Bool` after it. It is prefix-only, so write `not ready` rather than `ready not`.
 - Symbolic equality and symbolic logical-not forms are not language operators.
 
 ### Fixed integer arithmetic

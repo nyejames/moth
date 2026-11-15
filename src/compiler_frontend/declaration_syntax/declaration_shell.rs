@@ -26,7 +26,7 @@ use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::separator_equality_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{TokenRange, TokenTag};
+use crate::compiler_frontend::tokenizer::tokens::{TokenRange, TokenRef, TokenTag};
 use crate::compiler_frontend::utilities::token_scan::{
     TokenScanFailure, collect_declaration_initializer_range,
 };
@@ -135,6 +135,8 @@ pub fn parse_declaration_syntax(
             ) {
                 return Err(diagnostic.into());
             }
+            // The `=` remains the authored anchor when a bounded view ends immediately after it.
+            let assign_span = token_stream.current_token_ref().map(TokenRef::source_span);
             token_stream.advance();
             let result = {
                 let canonical_cursor = token_stream.canonical_cursor_mut();
@@ -155,7 +157,7 @@ pub fn parse_declaration_syntax(
                     names_declarations::invalid_declaration(
                         InvalidDeclarationReason::MissingInitializerExpression,
                         Some(name),
-                        current_source_span(token_stream),
+                        current_source_span(token_stream).or(assign_span),
                     ),
                 ));
             }

@@ -1,5 +1,8 @@
 entry = "."
 
+# Top-level code owns no block. A `;` written here closes nothing, so it is rejected at its own
+# position instead of silently ending the entry body and dropping the output that follows.
+
 [backends.html]
 mode = "failure"
 warnings = "forbid"
@@ -10,5 +13,6 @@ message_contains = ["at the top level"]
 code = "MOTH-SYNTAX-0030"
 reason = "invalid_statement_position.unexpected_scope_close_at_top_level"
 path = "input/@entry.moth"
-line = 8
+line = 4
+column = 1
 count = 1

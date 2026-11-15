@@ -19,6 +19,9 @@ use crate::compiler_frontend::ast::numeric_construction::{
 use crate::compiler_frontend::ast::statements::body_dispatch::{
     ParsedBody, parse_function_body_statements,
 };
+use crate::compiler_frontend::ast::statements::diagnostics::{
+    nested_scope_opener_error, scope_opening_at,
+};
 use crate::compiler_frontend::ast::statements::loop_headers::{
     ParsedLoopHeader, ParsedRangeHeader, parse_loop_header_cursor,
 };
@@ -26,7 +29,9 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
-use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidLoopHeaderReason};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, InvalidLoopHeaderReason, SourceScopeConstruct,
+};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -159,16 +164,23 @@ pub fn create_loop(
         path_fork,
     );
     warnings.append(DiagnosticBag::from_diagnostics(header_warnings));
-    let (parsed_loop_header, body_context) = header_result?;
+    let (parsed_loop_header, mut body_context) = header_result?;
 
-    let body_opening_span = token_stream.span_at(colon_index);
+    // The header parsed through this scope's own context, so the body still carries the enclosing
+    // opener. A loop opened on that opener's line is a second scope on one line.
+    let opening = scope_opening_at(token_stream, colon_index, SourceScopeConstruct::LoopBlock)?;
+    if let Some(diagnostic) = nested_scope_opener_error(token_stream, &body_context, opening) {
+        return Err(diagnostic.into());
+    }
+    body_context.enclosing_opener = Some(opening);
+
     token_stream.set_position(colon_index.saturating_add(1))?;
 
     let body_scope = body_context.scope;
     let parsed_body = parse_function_body_statements(
         token_stream,
         body_context,
-        body_opening_span,
+        Some(opening),
         type_interner,
         expression_builder,
         const_values,

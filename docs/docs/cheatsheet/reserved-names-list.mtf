@@ -37,7 +37,7 @@ The `@project` dependency root is reserved for project globals.
 - `$fresh` - bypass the parent's child wrapper.
 - `$slot` - declare a default, named or positional slot, with an optional compile-time String default.
 - `$in` - contribute to one named slot.
-- `$note` - discard a balanced comment template.
+- `$note` - discard a balanced comment template in a template body.
 - `$raw` - preserve unformatted template content.
 - `$md` - format Moth Markdown.
 - `$html` - HTML content.
