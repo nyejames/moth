@@ -1401,7 +1401,7 @@ fn canonical_tail_retains_donor_only_package_identity() {
     fs::write(&requester_path, REQUESTER).expect("the requester should be written");
     fs::write(&donor_path, DONOR).expect("the donor should be written");
     fs::write(
-        project_directory.path().join("config.moth"),
+        project_directory.path().join("@config.moth"),
         "project #= (name = \"snapshots\", entry_root = \"src\")\nhtml #= ()\n",
     )
     .expect("the project config should be written");
@@ -1884,7 +1884,7 @@ fn generated_sidecar_warning_frontend(
     std::fs::create_dir_all(&source_root).expect("project source root should be created");
     std::fs::create_dir_all(&package_root).expect("source-package root should be created");
     std::fs::write(
-        source_root.join("config.moth"),
+        source_root.join("@config.moth"),
         "project #= (name = \"docs\")\nhtml #= ()\n",
     )
     .expect("project config should be written");

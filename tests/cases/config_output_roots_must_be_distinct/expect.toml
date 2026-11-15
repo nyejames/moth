@@ -9,5 +9,5 @@ message_contains = ["Development and release output folders '_dist/release' and 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-CONFIG-0001"
 reason = "invalid_config.output_folders_not_distinct"
-path = "input/config.moth"
+path = "input/@config.moth"
 line = 2

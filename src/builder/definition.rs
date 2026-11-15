@@ -129,7 +129,7 @@ impl BuilderDefinitionDraft {
 
     /// Describes the project configuration section this builder reads.
     ///
-    /// `name` is the record name a project authors in `config.moth`, so it must be a Moth
+    /// `name` is the record name a project authors in `@config.moth`, so it must be a Moth
     /// identifier that is not `project`, not a first-party builder identity and not a reserved
     /// Moth name. The closure declares string and bool fields with [`ConfigSection::string`] and
     /// [`ConfigSection::bool`]. Field names follow the same rules and must stay unique. A

@@ -1316,7 +1316,7 @@ fn config_diagnostic(
     project_config::invalid_config_reason(key, reason, span)
 }
 
-/// Apply builder schema defaults when no `config.moth` source exists.
+/// Apply builder schema defaults when no `@config.moth` source exists.
 ///
 /// WHAT: validates and applies every optional builder section's declared defaults and diagnoses
 /// each required section that has no authored record.

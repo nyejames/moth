@@ -323,7 +323,7 @@ impl SourceDatabase {
     ///
     /// WHAT: assigns each candidate the next deterministic ID in the index's existing order.
     /// WHY: Stage 0 already sorted by logical identity. A caller may already have registered a
-    ///      bootstrap source, such as `config.moth`, before discovery supplies the remaining rows.
+    ///      bootstrap source, such as `@config.moth`, before discovery supplies the remaining rows.
     pub(crate) fn append_ordered_registration_index(
         &mut self,
         registration_index: &SourceRegistrationIndex<'_>,

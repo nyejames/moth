@@ -1,0 +1,4 @@
+project #= (
+    name = "selected_config",
+)
+html #= ()

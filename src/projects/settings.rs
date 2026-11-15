@@ -46,7 +46,12 @@ pub const MARKDOWN_EXTENSION: &str = "md";
 pub const MARKDOWN_SUFFIX: &str = ".md";
 
 pub const INDEX_PAGE_NAME: &str = "index.html";
-pub const CONFIG_FILE_NAME: &str = "config.moth";
+
+/// The reserved build-only project configuration filename.
+///
+/// It is a compiler-reserved source name with no module-root role and is inert outside the
+/// selected project root. `config.moth` without the `@` marker is an ordinary helper source.
+pub const CONFIG_FILE_NAME: &str = "@config.moth";
 
 /// Special reserved names for functions and variables created by the compiler
 pub const TOP_LEVEL_TEMPLATE_NAME: &str = "#template";
@@ -167,7 +172,7 @@ impl BuilderSettings {
     }
 }
 
-/// WHAT: project configuration loaded from config.moth that controls build behavior.
+/// WHAT: project configuration loaded from `@config.moth` that controls build behavior.
 /// WHY: config is the control plane for the build system; it must be validated early
 ///      and retain exact authored spans for source-backed settings.
 #[derive(Clone)]

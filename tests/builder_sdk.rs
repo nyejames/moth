@@ -126,7 +126,7 @@ impl ProjectBuilder for PackageFacadeBuilder {
 /// Writes the project config shared by the SDK fixtures.
 fn write_config(project_root: &Path) {
     fs::write(
-        project_root.join("config.moth"),
+        project_root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\n",
     )
     .expect("should write config");
@@ -142,7 +142,7 @@ fn write_package_facade(project_root: &Path) {
 }
 
 /// Writes a one-page project whose page holds `page_source` and, when requested, its
-/// `@package.moth` facade beside `config.moth`.
+/// `@package.moth` facade beside `@config.moth`.
 fn write_project(project_root: &Path, page_source: &str, with_facade: bool) {
     write_config(project_root);
     fs::write(project_root.join("@entry.moth"), page_source).expect("should write page");
@@ -702,7 +702,7 @@ fn write_project_with_builder_section_and_source(
     page_source: &str,
 ) {
     fs::write(
-        project_root.join("config.moth"),
+        project_root.join("@config.moth"),
         format!("project #= (\n    name = \"docs\",\n)\n{section_name} #= (\n{fields})\n"),
     )
     .expect("should write config");
@@ -1165,7 +1165,7 @@ fn located_output_diagnostics_match_with_and_without_compiler_warnings() {
         "staged compiler warnings must not change the located output diagnostic"
     );
     assert!(
-        with_warnings.contains("config.moth"),
+        with_warnings.contains("@config.moth"),
         "the late output diagnostic must retain its authored source location: {with_warnings}"
     );
     assert!(

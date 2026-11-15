@@ -296,7 +296,7 @@ fn contains_matching_requires_every_expected_occurrence() {
 fn structured_diagnostic_messages(fixture_root: &Path) -> CompilationResult<()> {
     let primary_path = fixture_root.join("input/main.moth");
     let secondary_path = fixture_root.join("input/helper.moth");
-    let entry_path = fixture_root.join("config.moth");
+    let entry_path = fixture_root.join("@config.moth");
     let source_text = "aa\nbb\ncc\ndddd\n";
 
     let mut string_table = StringTable::new();
@@ -389,7 +389,7 @@ fn relative_structured_diagnostic_messages(
         .strip_prefix("input/")
         .unwrap_or_else(|| scope.strip_suffix("/declaration.header").unwrap_or(scope));
     let source_path = fixture_root.join("input").join(source_scope);
-    let entry_path = fixture_root.join("config.moth");
+    let entry_path = fixture_root.join("@config.moth");
     let mut string_table = StringTable::new();
     let mut source_database = SourceDatabase::build(
         [source_path.as_path()],

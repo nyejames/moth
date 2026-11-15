@@ -280,7 +280,7 @@ impl EntryFixture {
         let source_root = directory.path().join("src");
         fs::create_dir(&source_root).expect("should create source directory");
         fs::write(
-            source_root.join("config.moth"),
+            source_root.join("@config.moth"),
             "project #= (name = \"entry_contract\")\nhtml #= ()\n",
         )
         .expect("should write directory config");
@@ -308,7 +308,7 @@ impl EntryFixture {
 
     fn frontend(&self) -> ProjectFrontendCompilation {
         let mut config = Config::new(self.entry.clone());
-        // This config-free compiler seam consumes settings rather than loading config.moth.
+        // This config-free compiler seam consumes settings rather than loading `@config.moth`.
         config.project_name = "entry_contract".to_owned();
 
         let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());

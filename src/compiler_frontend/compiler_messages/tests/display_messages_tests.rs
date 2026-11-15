@@ -38,14 +38,17 @@ fn guidance_lines_name_the_stage_without_details() {
 }
 
 #[test]
-fn special_file_renderer_names_only_the_build_only_config_source() {
+fn special_file_renderer_names_only_the_reserved_config_source() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let extensionless_config = path_fork
+    let ordinary_stem = path_fork
         .try_intern_portable_path("input/config", &mut string_table)
         .expect("test path fits");
-    let explicit_config = path_fork
+    let ordinary_helper_name = path_fork
         .try_intern_portable_path("input/config.moth", &mut string_table)
+        .expect("test path fits");
+    let reserved_config = path_fork
+        .try_intern_portable_path("input/@config.moth", &mut string_table)
         .expect("test path fits");
     let ordinary_plus_source = path_fork
         .try_intern_portable_path("input/+notes", &mut string_table)
@@ -53,12 +56,16 @@ fn special_file_renderer_names_only_the_build_only_config_source() {
     let context = DiagnosticRenderContext::new(&string_table).with_path_fork(&path_fork);
 
     assert_eq!(
-        special_file_name_from_path(extensionless_config, context),
-        "config.moth"
+        special_file_name_from_path(ordinary_stem, context),
+        "special file"
     );
     assert_eq!(
-        special_file_name_from_path(explicit_config, context),
-        "config.moth"
+        special_file_name_from_path(ordinary_helper_name, context),
+        "special file"
+    );
+    assert_eq!(
+        special_file_name_from_path(reserved_config, context),
+        "@config.moth"
     );
     assert_eq!(
         special_file_name_from_path(ordinary_plus_source, context),

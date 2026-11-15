@@ -21,7 +21,9 @@ use crate::compiler_frontend::paths::file_references::{
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
-use crate::compiler_frontend::source_packages::root_file::file_name_is_module_root_file;
+use crate::compiler_frontend::source_packages::root_file::{
+    dependency_path_references_config_file, file_name_is_module_root_file,
+};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -110,6 +112,18 @@ impl<'a> FileReferenceResolver<'a> {
             .try_path_for_token(reference.path_syntax, reference.span)?
             .root;
 
+        // The build-only config source is reserved even when a file value names it directly.
+        // This precedes the class-based early returns so `@config.moth` reports the reserved
+        // filename rather than a source-kind no-value reason.
+        if dependency_path_references_config_file(authored_path, path_fork, string_table) {
+            return Ok(self.diagnostic_outcome(
+                source_file,
+                reference,
+                authored_path,
+                InvalidCompileTimePathReason::ReservedConfigFile,
+            ));
+        }
+
         match reference.class {
             PreparedFileReferenceClass::SiteRoot | PreparedFileReferenceClass::Extensionless => {
                 return Ok(ResolvedFileReference {
@@ -174,17 +188,6 @@ impl<'a> FileReferenceResolver<'a> {
                 reference,
                 authored_path,
                 InvalidCompileTimePathReason::HiddenPath,
-            ));
-        }
-        if authored_components
-            .last()
-            .is_some_and(|name| name == crate::projects::settings::CONFIG_FILE_NAME)
-        {
-            return Ok(self.diagnostic_outcome(
-                source_file,
-                reference,
-                authored_path,
-                InvalidCompileTimePathReason::ReservedConfigFile,
             ));
         }
 
@@ -915,6 +918,20 @@ impl<'a> SingleFileReferenceResolver<'a> {
             class: reference.class,
             outcome: SingleFileReferenceOutcome::NoPhysicalTarget,
         };
+
+        // Match the directory resolver's reserved-file ordering so a file value naming
+        // `@config.moth` reports the reserved filename instead of a source-kind no-value reason.
+        if dependency_path_references_config_file(authored_path, path_fork, string_table) {
+            return Ok(SingleFileResolvedReference {
+                outcome: invalid_path_outcome(
+                    authored_path,
+                    InvalidCompileTimePathReason::ReservedConfigFile,
+                    reference,
+                ),
+                ..result
+            });
+        }
+
         match reference.class {
             PreparedFileReferenceClass::SiteRoot | PreparedFileReferenceClass::Extensionless => {
                 return Ok(result);
@@ -957,19 +974,6 @@ impl<'a> SingleFileReferenceResolver<'a> {
                 outcome: invalid_path_outcome(
                     authored_path,
                     InvalidCompileTimePathReason::HiddenPath,
-                    reference,
-                ),
-                ..result
-            });
-        }
-        if authored_components
-            .last()
-            .is_some_and(|name| name == crate::projects::settings::CONFIG_FILE_NAME)
-        {
-            return Ok(SingleFileResolvedReference {
-                outcome: invalid_path_outcome(
-                    authored_path,
-                    InvalidCompileTimePathReason::ReservedConfigFile,
                     reference,
                 ),
                 ..result

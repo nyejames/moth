@@ -1180,7 +1180,7 @@ fn preserves_project_shape_diagnostic_after_dependency_projection() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let compiled = compile_config_source(
         ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
+            authored_path: Path::new("project/@config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= \"docs\"\n",
             style_directives: &style_directives,
@@ -1537,7 +1537,7 @@ fn retains_compiled_project_metadata_type_and_field_location() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let compiled = compile_config_source(
         ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
+            authored_path: Path::new("project/@config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= (\n    name = \"docs\",\n    custom_note = \"open\",\n)\n",
             style_directives: &style_directives,
@@ -1622,7 +1622,7 @@ fn applies_direct_project_config_global_through_validation() {
         .expect("builder global name should be platform-neutral");
     let compiled = compile_config_source(
         ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
+            authored_path: Path::new("project/@config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "$config\nversion #String\nproject #= (\n    name = \"docs\",\n    version = version,\n)\n",
             style_directives: &style_directives,
@@ -1658,7 +1658,7 @@ fn applies_optional_direct_project_config_absence_and_retains_resolution_provena
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let compiled = compile_config_source(
         ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
+            authored_path: Path::new("project/@config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "$config\nauthor #String?\nproject #= (\n    name = \"docs\",\n    author = author,\n)\n",
             style_directives: &style_directives,
@@ -2133,7 +2133,7 @@ fn compile_authored_config_source(
     let style_directives = StyleDirectiveRegistry::built_ins();
     compile_config_source(
         ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
+            authored_path: Path::new("project/@config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code,
             style_directives: &style_directives,
@@ -2646,7 +2646,7 @@ fn several_builder_sections_with_one_output_root_owner_are_accepted() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let compiled = compile_config_source(
         ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
+            authored_path: Path::new("project/@config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: &source_code,
             style_directives: &style_directives,

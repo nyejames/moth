@@ -481,14 +481,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .get(source_file)
         {
             for dependency in dependencies {
-                self.validate_local_source_edge(&dependency.dependency)?;
-                let selections = dependency
-                    .selections(selection_table)
-                    .map_err(BindingEnvironmentError::Internal)?;
-                // Reject direct dependencies of canonical config files. Canonical `@` root
-                // references are already caught by the path parser's LeadingAtInPathComponent
-                // rejection. The config file needs this later check because `config` is a valid
-                // path component character.
+                // Reject a direct dependency on the build-only `@config.moth` before the general
+                // source-edge and extension checks, so the reserved reason wins. An unquoted `@`
+                // component cannot spell the reserved filename, but a quoted component could
+                // otherwise resolve it as an ordinary source name.
                 if dependency_path_references_config_file(
                     dependency.dependency.path,
                     &*self.path_fork,
@@ -500,7 +496,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     )
                     .into());
                 }
-
+                self.validate_local_source_edge(&dependency.dependency)?;
+                let selections = dependency
+                    .selections(selection_table)
+                    .map_err(BindingEnvironmentError::Internal)?;
                 if !selections.is_empty() {
                     // Direct selections use one provider shell, then resolve each selected name
                     // against that provider or source public surface.

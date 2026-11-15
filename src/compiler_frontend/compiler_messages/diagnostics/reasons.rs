@@ -512,11 +512,19 @@ pub enum InvalidConfigReason {
     },
     /// An authored `.moth` filename uses a special marker outside the accepted root vocabulary.
     ///
-    /// The closed vocabulary is `@mod.moth`, `@package.moth` and `@entry.moth`; `config.moth`
-    /// remains the one build-only special source name. Every other `@*.moth`, `+*.moth` and
-    /// `#*.moth` marker is a structure error that names the file and lists the three accepted
-    /// root files. The renderer never infers a replacement role from the filename.
+    /// The closed vocabulary is `@mod.moth`, `@package.moth` and `@entry.moth`; `@config.moth`
+    /// is the separate build-only reserved source name without a root role. Every other `@*.moth`,
+    /// `+*.moth` and `#*.moth` marker is a structure error that names the file and lists the three
+    /// accepted root files. The renderer never infers a replacement role from the filename.
     InvalidModuleRootFileName {
+        file_name: StringId,
+        directory: StringId,
+    },
+    /// The build-only `@config.moth` file was selected as a single-file compilation entry.
+    ///
+    /// The reserved config source configures a directory build; it has no executable entry
+    /// surface, so single-file selection rejects it instead of assigning a synthetic entry role.
+    ConfigFileSelectedAsEntry {
         file_name: StringId,
         directory: StringId,
     },
@@ -782,7 +790,7 @@ pub enum InvalidCompileTimePathReason {
     EscapesProjectRoot,
     /// The target lies inside a `_`-prefixed directory excluded from source discovery.
     HiddenPath,
-    /// The target is the reserved `config.moth` source, which is not a module helper.
+    /// The target is the reserved `@config.moth` source, which is not a module helper.
     ReservedConfigFile,
 }
 

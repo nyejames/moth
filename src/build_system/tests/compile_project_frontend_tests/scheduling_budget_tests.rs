@@ -1,6 +1,6 @@
 //! Project scheduling-cutoff and shared-allowance regression coverage.
 //!
-//! WHAT: drives the real directory frontend lane with real `config.moth` values, then inspects the
+//! WHAT: drives the real directory frontend lane with real `@config.moth` values, then inspects the
 //!       retained graph boundary before the terminal wrapper converts it into reports.
 //! WHY: the project threshold is a command-owned soft cutoff, not a result cap. These tests prove
 //!       returned module diagnostics stay intact, unadmitted modules keep `Unavailable` slots, the
@@ -312,7 +312,7 @@ fn finish_stopped_package_request(
 }
 
 fn write_project(root: &Path, config_text: &str, files: &[(&str, &str)]) {
-    fs::write(root.join("config.moth"), config_text).expect("config should be written");
+    fs::write(root.join("@config.moth"), config_text).expect("config should be written");
     for (relative_path, contents) in files {
         let relative_path = relative_path.strip_prefix("src/").unwrap_or(relative_path);
         let path = root.join(relative_path);

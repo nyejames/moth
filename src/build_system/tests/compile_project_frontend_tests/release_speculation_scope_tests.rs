@@ -100,7 +100,7 @@ fn release_speculation_leaves_unrelated_runtime_expressions_unchanged() {
     let _test_guard = lock_counter_test();
     let files = [
         ("src/@entry.moth", UNRELATED_READS_ENTRY),
-        ("config.moth", CONFIG_SOURCE),
+        ("@config.moth", CONFIG_SOURCE),
     ];
     let (debug, debug_warnings) = compile_fixture_with_warnings(&files, BuildProfile::Dev);
     let (release, release_warnings) = compile_fixture_with_warnings(&files, BuildProfile::Release);
@@ -158,7 +158,7 @@ fn release_budget_note_names_only_an_attempted_candidate_call() {
     let _test_guard = lock_counter_test();
     let files = [
         ("src/@entry.moth", TIGHT_BUDGET_ENTRY),
-        ("config.moth", TIGHT_CONFIG_SOURCE),
+        ("@config.moth", TIGHT_CONFIG_SOURCE),
     ];
     let (debug, debug_warnings) = compile_fixture_with_warnings(&files, BuildProfile::Dev);
     let (release, release_warnings) = compile_fixture_with_warnings(&files, BuildProfile::Release);

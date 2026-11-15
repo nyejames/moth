@@ -37,7 +37,7 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDepende
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::source_packages::root_file::dependency_component_is_config_file;
+use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
@@ -1033,16 +1033,17 @@ fn resolve_entry(
     }
 }
 
-/// Reject direct config paths before namespace absence can change the diagnostic.
+/// Reject a dependency that directly names the build-only `@config.moth` source.
+///
+/// WHAT: runs before namespace absence so the reserved-file reason wins over a missing import.
+/// WHY: ordinary `config` dependencies resolve the `config.moth` helper instead; only the exact
+///      reserved filename is not importable.
 fn reject_direct_special_file_dependency(
     provider: &RetainedDependencyPath,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
 ) -> Result<(), DiagnosticDraft> {
-    let source_component = path_fork
-        .component(provider.path)
-        .map(|component| string_table.resolve(component));
-    if source_component.is_some_and(dependency_component_is_config_file) {
+    if dependency_path_references_config_file(provider.path, path_fork, string_table) {
         return Err(imports::direct_special_file_import(
             provider.path,
             Some(provider.span),

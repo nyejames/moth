@@ -742,7 +742,7 @@ allocation, lookup, folding, import, and lowering pressure.
 - `data-layout/diagnosed/` and `data-layout/warning-heavy.moth`: the diagnostic data-layout suite
   (`just bench-data-layout`), an expected-error project and a warning-heavy file measured for
   diagnostic memory and timing, never correctness.
-- `docs`: the repository documentation project (`docs/config.moth`, `docs/`), measured as a
+- `docs`: the repository documentation project (`docs/@config.moth`, `docs/`), measured as a
   real multi-page site through `check` and the frontend profile.
 - `module-graph/`: small multi-file project with cross-file imports, constants and templates.
 - `import-fanout/`: multi-file project with repeated imports, aliases, wrapper declarations and cross-file constants for string-table interning and module-graph resolution.

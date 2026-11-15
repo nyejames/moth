@@ -21,7 +21,7 @@
 //! registration route and the runtime outcomes that route can lose.
 //!
 //! The fixture follows the canonical project path: `compile_project_frontend_with_inputs` loads
-//! `config.moth` against the builder surface carrying the registered function, then runs the
+//! `@config.moth` against the builder surface carrying the registered function, then runs the
 //! production Stage 0 plus module compilation sequence (AST, HIR validation, borrow validation,
 //! numeric proofs). `lower_hir_to_js` then produces the JavaScript exactly as the HTML builder's
 //! JS path calls it.
@@ -135,7 +135,7 @@ fn compile_raw_fixed_f64_fixture(
     let temporary_project = tempfile::tempdir().expect("fixture should create a temporary project");
     let root = temporary_project.path().to_path_buf();
     fs::write(root.join(CONFIG_FILE_NAME), CONFIG_SOURCE)
-        .expect("fixture should write config.moth");
+        .expect("fixture should write the project config");
     fs::write(root.join("@entry.moth"), source).expect("fixture should write the entry module");
 
     // The registered boundary lives on the builder surface's external registry, the same surface

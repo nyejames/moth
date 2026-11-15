@@ -14,7 +14,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, InvalidConfigReason, PreparedFailure,
+    CompilerStage, DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
@@ -47,7 +47,33 @@ pub(super) fn invalid_module_root_file_name_error(
         file_name: diagnostic_strings.intern(file_name),
         directory: path_id(directory, &mut diagnostic_strings),
     };
-    let diagnostic = project_structure_diagnostic(reason);
+    capture_structure_diagnostic(project_structure_diagnostic(reason), string_table)
+}
+
+/// Reject the build-only config source when it is selected as a single-file entry.
+///
+/// WHY: single-file compilation has no config consumer, so the reserved source would otherwise
+///      take the synthetic entry role and compile as page content.
+pub(super) fn config_file_selected_as_entry_error(
+    directory: &Path,
+    file_name: &str,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let reason = InvalidConfigReason::ConfigFileSelectedAsEntry {
+        file_name: diagnostic_strings.intern(file_name),
+        directory: path_id(directory, &mut diagnostic_strings),
+    };
+    capture_structure_diagnostic(project_structure_diagnostic(reason), string_table)
+}
+
+/// Freeze the diagnostic into a diagnosed failure, handing the populated table to the batch.
+///
+/// Stage 0 aborts discovery on these errors, so the caller's table is empty after the handoff.
+fn capture_structure_diagnostic(
+    diagnostic: DiagnosticDraft,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
     let table = string_table.take_for_handoff();
     PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
         DiagnosticBag::from(diagnostic),
@@ -65,7 +91,7 @@ pub(super) fn invalid_module_root_file_name_error(
 ///      infrastructure-error lane rather than authored diagnostic reporting.
 pub(super) fn non_utf8_filesystem_name_error(path: &Path, context: &str) -> InfrastructureFailure {
     InfrastructureFailure::filesystem(
-        crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+        CompilerStage::ProjectBuildAssembly,
         path,
         format!("Non-UTF-8 filesystem name cannot enter compiler identity ({context}): {path:?}"),
     )

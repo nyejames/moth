@@ -451,6 +451,7 @@ unit_code! {
         AliasedModuleRootFiles = 90,
         ModuleRootFileOutsideClaimingModule = 91,
         ModuleRootFileNotRegularFile = 92,
+        ConfigFileSelectedAsEntry = 93,
     }
 }
 
@@ -532,6 +533,9 @@ impl InvalidConfigCode {
             }
             InvalidConfigReason::InvalidModuleRootFileName { .. } => {
                 Self::InvalidModuleRootFileName
+            }
+            InvalidConfigReason::ConfigFileSelectedAsEntry { .. } => {
+                Self::ConfigFileSelectedAsEntry
             }
             InvalidConfigReason::InvalidOutputFolder { folder, reason } => {
                 Self::output_folder_variant(*reason, folder.is_some())
@@ -962,6 +966,10 @@ fn invalid_config_string_ids(
             file_name,
             directory,
         } => strings.extend([*file_name, *directory]),
+        InvalidConfigReason::ConfigFileSelectedAsEntry {
+            file_name,
+            directory,
+        } => strings.extend([*file_name, *directory]),
         InvalidConfigReason::InvalidOutputFolder { folder, .. } => {
             if matches!(code.output_folder_shape(), Some((_, true)))
                 && let Some(folder) = folder
@@ -1260,6 +1268,12 @@ pub(crate) fn decode_invalid_config(
         }
         InvalidConfigCode::InvalidModuleRootFileName => {
             InvalidConfigReason::InvalidModuleRootFileName {
+                file_name: strings.take()?,
+                directory: strings.take()?,
+            }
+        }
+        InvalidConfigCode::ConfigFileSelectedAsEntry => {
+            InvalidConfigReason::ConfigFileSelectedAsEntry {
                 file_name: strings.take()?,
                 directory: strings.take()?,
             }

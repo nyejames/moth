@@ -37,8 +37,8 @@ pub(crate) fn invalid_config_message(
         InvalidConfigReason::MissingActiveBuilderSection { section } => {
             let section_name = string_table.resolve(*section);
             format!(
-                "`config.moth` requires the active builder section '{section_name}'. Add a \
-                 '{section_name}' record to `config.moth`."
+                "`@config.moth` requires the active builder section '{section_name}'. Add a \
+                 '{section_name}' record to `@config.moth`."
             )
         }
         InvalidConfigReason::DuplicateKey => {
@@ -49,28 +49,28 @@ pub(crate) fn invalid_config_message(
             }
         }
         InvalidConfigReason::ConfigImportUnsupported => {
-            "`config.moth` is self-contained and does not support dependency clauses.".to_owned()
+            "`@config.moth` is self-contained and does not support dependency clauses.".to_owned()
         }
         InvalidConfigReason::FileValuePathUnsupported => {
-            "`config.moth` cannot use file-value paths. Config defines build inputs and has no output URL context.".to_owned()
+            "`@config.moth` cannot use file-value paths. Config defines build inputs and has no output URL context.".to_owned()
         }
         InvalidConfigReason::FunctionUnsupported => {
-            "`config.moth` does not support user-defined functions. Use earlier private helper constants for reusable folded values.".to_owned()
+            "`@config.moth` does not support user-defined functions. Use earlier private helper constants for reusable folded values.".to_owned()
         }
         InvalidConfigReason::TraitDeclarationUnsupported => {
-            "`config.moth` does not support trait declarations. Use ordinary source files for trait contracts.".to_owned()
+            "`@config.moth` does not support trait declarations. Use ordinary source files for trait contracts.".to_owned()
         }
         InvalidConfigReason::TraitConformanceUnsupported => {
-            "`config.moth` does not support trait conformance declarations. Use ordinary source files for reusable trait evidence.".to_owned()
+            "`@config.moth` does not support trait conformance declarations. Use ordinary source files for reusable trait evidence.".to_owned()
         }
         InvalidConfigReason::TraitIncompatibilityUnsupported => {
-            "`config.moth` does not support trait incompatibility declarations. Use ordinary source files for trait metadata.".to_owned()
+            "`@config.moth` does not support trait incompatibility declarations. Use ordinary source files for trait metadata.".to_owned()
         }
         InvalidConfigReason::NamedTypeUnsupported => {
-            "`config.moth` cannot project named structs, choices or type aliases as folded values. Declare record-valued helpers as anonymous const records first, then reference them by name.".to_owned()
+            "`@config.moth` cannot project named structs, choices or type aliases as folded values. Declare record-valued helpers as anonymous const records first, then reference them by name.".to_owned()
         }
         InvalidConfigReason::MutableBindingUnsupported => {
-            "`config.moth` settings must be immutable constant declarations. Use `name #= value`.".to_owned()
+            "`@config.moth` settings must be immutable constant declarations. Use `name #= value`.".to_owned()
         }
         InvalidConfigReason::PlainBindingUnsupported => {
             format!(
@@ -78,10 +78,10 @@ pub(crate) fn invalid_config_message(
             )
         }
         InvalidConfigReason::UnsupportedStatement => {
-            "`config.moth` supports grouped project and builder settings plus private compile-time helper constants only.".to_owned()
+            "`@config.moth` supports grouped project and builder settings plus private compile-time helper constants only.".to_owned()
         }
         InvalidConfigReason::StandaloneTemplateUnsupported => {
-            "`config.moth` does not support standalone templates or page fragments. Assign a folded template to a known setting instead.".to_owned()
+            "`@config.moth` does not support standalone templates or page fragments. Assign a folded template to a known setting instead.".to_owned()
         }
         InvalidConfigReason::MissingValue => {
             format!("Missing value for config constant '{key_label}'.")
@@ -299,7 +299,15 @@ pub(crate) fn invalid_config_message(
             file_name,
             directory,
         } => format!(
-            "Invalid module root filename '{}' in '{}'. A `.moth` filename that starts with '@', '+' or '#' must be one of the three accepted root files: '@mod.moth', '@package.moth' or '@entry.moth'. Root filenames are case-sensitive. 'config.moth' is the separate build-only config file.",
+            "Invalid module root filename '{}' in '{}'. A `.moth` filename that starts with '@', '+' or '#' must be one of the three accepted root files: '@mod.moth', '@package.moth' or '@entry.moth'. Root filenames are case-sensitive. '@config.moth' is the separate build-only config file, not a root.",
+            string_table.resolve(*file_name),
+            string_table.resolve(*directory),
+        ),
+        InvalidConfigReason::ConfigFileSelectedAsEntry {
+            file_name,
+            directory,
+        } => format!(
+            "The build-only config file '{}' in '{}' cannot be selected as a single-file entry. It has no executable page surface; build or check its project directory so it configures the build instead.",
             string_table.resolve(*file_name),
             string_table.resolve(*directory),
         ),
@@ -372,7 +380,7 @@ fn invalid_output_folder_message(
     match reason {
         InvalidOutputFolderReason::Empty => {
             format!(
-                "'{key_label}' cannot be empty. Configure a project-relative output folder in config.moth."
+                "'{key_label}' cannot be empty. Configure a project-relative output folder in @config.moth."
             )
         }
         InvalidOutputFolderReason::NonUtf8 => {
@@ -546,7 +554,7 @@ pub(crate) fn invalid_compile_time_path_message(
             "Compile-time path '{path_text}' enters a directory whose name starts with '_'. Such directories are excluded from the project's source tree, so they cannot be imported or used as resources."
         ),
         InvalidCompileTimePathReason::ReservedConfigFile => format!(
-            "Compile-time path '{path_text}' names 'config.moth'. That file is a build-owned configuration source, not a module helper, so it cannot be imported or used as a resource."
+            "Compile-time path '{path_text}' names '@config.moth'. That file is a build-owned configuration source, not a module helper, so it cannot be imported or used as a resource."
         ),
     }
 }

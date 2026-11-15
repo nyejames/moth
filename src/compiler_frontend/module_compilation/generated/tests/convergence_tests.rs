@@ -1847,7 +1847,7 @@ fn compile_owned_service_fixture(
     let source_path = source_root.join("@entry.moth");
     fs::write(&source_path, source).expect("the retained-fact fixture should be written");
     fs::write(
-        directory.path().join("config.moth"),
+        directory.path().join("@config.moth"),
         "project #= (name = \"release\", entry_root = \"src\")\nhtml #= ()\n",
     )
     .expect("the directory fixture config should be written");

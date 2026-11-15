@@ -3056,11 +3056,11 @@ fn partitioned_file_entry_rejected() {
 fn partitioned_disjoint_roots_accepted() {
     let directory = tempdir().expect("temporary repository should exist");
     fs::create_dir_all(directory.path().join("project")).expect("directory should be creatable");
-    create_entry(directory.path(), "project/config.moth");
+    create_entry(directory.path(), "project/@config.moth");
     create_entry(directory.path(), "project/src/main.moth");
     let path = write_manifest(
         directory.path(),
-        &partitioned_manifest("project", &["project/config.moth", "project/src"], "case"),
+        &partitioned_manifest("project", &["project/@config.moth", "project/src"], "case"),
     );
     load_manifest_at(&path, directory.path()).expect("partitioned disjoint roots should load");
 }
@@ -3113,10 +3113,10 @@ fn exclude_containing_another_root_rejected() {
     let directory = tempdir().expect("temporary repository should exist");
     fs::create_dir_all(directory.path().join("project/src"))
         .expect("directory should be creatable");
-    create_entry(directory.path(), "project/config.moth");
+    create_entry(directory.path(), "project/@config.moth");
     create_entry(directory.path(), "project/src/main.moth");
-    let contents = partitioned_manifest("project", &["project/config.moth", "project/src"], "case")
-        .replace(
+    let contents =
+        partitioned_manifest("project", &["project/@config.moth", "project/src"], "case").replace(
             "fingerprint_excludes = []",
             "fingerprint_excludes = [\"project/src\"]",
         );

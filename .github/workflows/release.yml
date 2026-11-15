@@ -169,7 +169,7 @@ jobs:
           mv packages "$RUNNER_TEMP/checkout-packages"
           SITE="$RUNNER_TEMP/smoke-site"
           mkdir -p "$SITE"
-          printf 'project #= (\n    name = "smoke",\n)\nhtml #= ()\n' > "$SITE/config.moth"
+          printf 'project #= (\n    name = "smoke",\n)\nhtml #= ()\n' > "$SITE/@config.moth"
           cat > "$SITE/@entry.moth" <<'EOF'
           @html p
           @styles right

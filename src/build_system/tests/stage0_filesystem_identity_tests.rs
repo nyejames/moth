@@ -106,6 +106,70 @@ fn assert_not_regular_file_marker_rejected(
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn single_file_selection_checks_the_authored_name_of_a_config_symlink() {
+    use crate::compiler_frontend::compiler_messages::compiler_errors::CompilationOutcome;
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+        InvalidConfigCode, InvalidConfigView,
+    };
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = temp.path();
+    let target = root.join("actual_config.moth");
+    fs::write(
+        &target,
+        "project #= (\n    name = \"linked\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write in-root config target");
+    let selected = root.join("@config.moth");
+    symlink("actual_config.moth", &selected).expect("should create config symlink");
+
+    let config = Config::new(selected.clone());
+    let mut builder_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    let mut string_table = StringTable::new();
+    let extension = selected
+        .extension()
+        .expect("selected path should have a .moth extension");
+    let result = compile_single_file_for_filesystem_test(
+        &config,
+        &mut builder_surface,
+        extension,
+        &mut string_table,
+    );
+
+    let reports = match result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("an authored @config.moth symlink must be rejected")
+        }
+        Err(_) => panic!("an authored @config.moth symlink must produce a user diagnostic"),
+    };
+    let (report, diagnostic) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("config symlink selection should retain an error");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-CONFIG-0001");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("config symlink selection should retain typed config facts");
+    assert_eq!(facts.reason, InvalidConfigCode::ConfigFileSelectedAsEntry);
+
+    let strings = report.context().strings();
+    let rendered = diagnostic
+        .string_ids()
+        .iter()
+        .map(|id| strings.resolve(*id))
+        .collect::<Vec<_>>();
+    assert!(
+        rendered
+            .iter()
+            .any(|candidate| *candidate == "@config.moth"),
+        "the diagnostic must name the authored reserved filename: {rendered:?}"
+    );
+}
+
 #[cfg(test)]
 fn compile_single_file_for_filesystem_test(
     config: &crate::projects::settings::Config,
@@ -1667,7 +1731,7 @@ mod module_identity_tests {
         let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
-        fs::write(src.join("config.moth"), "project #= (name = \"t\")\n")
+        fs::write(src.join("@config.moth"), "project #= (name = \"t\")\n")
             .expect("should write build-only config");
 
         let (index, _project_root, entry_root) = discover_index(&root, "src");
@@ -1677,7 +1741,7 @@ mod module_identity_tests {
                 .module_identities()
                 .module_id_for_directory(&entry_root)
                 .is_none(),
-            "config.moth never creates a structural module"
+            "@config.moth never creates a structural module"
         );
     }
 
@@ -2224,13 +2288,15 @@ mod module_identity_tests {
             "@home.moth",
             "@site.moth",
             "@api.moth",
+            // The reserved config filename has no root role, and the old unprefixed name is an
+            // ordinary helper source now. Neither carries a module-root role.
             "@config.moth",
+            "config.moth",
             "+pkg.moth",
             "#pkg.moth",
             "@.moth",
             "+.moth",
             "page.moth",
-            "config.moth",
         ] {
             assert_eq!(
                 module_root_role_for_file_name(invalid),

@@ -192,7 +192,7 @@ fn invalid_module_root_filename_names_the_closed_vocabulary_without_a_replacemen
     assert!(message.contains("'@mod.moth'"), "{message}");
     assert!(message.contains("'@package.moth'"), "{message}");
     assert!(message.contains("'@entry.moth'"), "{message}");
-    assert!(message.contains("'config.moth'"), "{message}");
+    assert!(message.contains("'@config.moth'"), "{message}");
     assert!(!message.contains("Rename"), "{message}");
     assert!(!message.contains("instead"), "{message}");
 }

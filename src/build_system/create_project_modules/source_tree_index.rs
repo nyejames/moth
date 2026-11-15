@@ -664,6 +664,12 @@ impl SourceTreeIndex {
                     // not a traversable module directory. An invalid marker name stays a closed
                     // vocabulary error even when it is not a regular file.
                     if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
+                        // The build-only config filename is reserved at every depth but is not a
+                        // root role. A nested directory sharing that name stays inert rather than
+                        // becoming an ordinary folder claim.
+                        if file_name_is_config_file(file_name) {
+                            continue;
+                        }
                         if file_name_is_invalid_module_root_marker(file_name) {
                             return Err(invalid_module_root_file_name_error(
                                 &directory,
@@ -754,9 +760,10 @@ impl SourceTreeIndex {
                             non_utf8_filesystem_name_error(&path, "source tree file name")
                         })?;
 
-                // `config.moth` is a reserved configuration source, not a module helper. Only the
-                // selected root's config participates in bootstrap; a nested config is inert to
-                // the enclosing build and must not enter module ownership or dependency names.
+                // `@config.moth` is a reserved build-only configuration source, not a module
+                // helper. Only the selected root's file participates in bootstrap; every nested
+                // occurrence is inert to the enclosing build and must not enter module ownership
+                // or dependency names.
                 if file_name_is_config_file(file_name) {
                     continue;
                 }

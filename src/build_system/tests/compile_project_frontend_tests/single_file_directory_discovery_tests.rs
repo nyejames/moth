@@ -244,7 +244,7 @@ fn directory_project_discovers_multiple_entry_modules() {
     fs::create_dir_all(dir.join("page")).expect("should create page dir");
     fs::create_dir_all(dir.join("layout")).expect("should create layout dir");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -291,7 +291,7 @@ fn directory_project_remaps_delta_collisions_across_modules() {
     fs::create_dir_all(dir.join("first")).expect("should create first module dir");
     fs::create_dir_all(dir.join("second")).expect("should create second module dir");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -506,7 +506,7 @@ fn check_project_with_root_entry_only_publishes_no_interface() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");

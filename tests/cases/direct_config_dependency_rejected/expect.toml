@@ -4,4 +4,4 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-IMPORT-0008"]
-message_contains = ["Cannot depend directly on 'config.moth'"]
+message_contains = ["Cannot depend directly on '@config.moth'"]

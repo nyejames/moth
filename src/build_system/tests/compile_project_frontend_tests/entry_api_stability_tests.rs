@@ -599,7 +599,7 @@ fn release_folds_only_proven_pure_ordinary_calls() {
             "src/@entry.moth",
             "double |value I32| -> I32:\n    return value * 2\n;\n\ndynamic |value I32| -> I32:\n    return double(value)\n;\n\neffect |value I32| -> I32:\n    io.line(\"effect\")\n    return value\n;\n\nmutate |value ~I32| -> I32:\n    ~value = value + 1\n    return value\n;\n\nlocal_mutate |value I32| -> I32:\n    local ~I32 = 0\n    ~local = value + 1\n    return local\n;\n\ncounter ~= 2\n\n~[: [double(2)] [dynamic(3)] [local_mutate(5)] [effect(4)] [mutate(~counter)] ]\n",
         ),
-        ("src/config.moth", CONFIG_SOURCE),
+        ("src/@config.moth", CONFIG_SOURCE),
     ];
     let debug = compile_template_fixture_with_profile(&files, BuildProfile::Dev);
     let release = compile_template_fixture_with_profile(&files, BuildProfile::Release);
@@ -632,7 +632,7 @@ fn release_rejects_recursive_ordinary_candidates() {
             "src/@entry.moth",
             "plus_one |value I32| -> I32:\n    return value + 1\n;\n\nleft |value I32| -> I32:\n    return right(value)\n;\n\nright |value I32| -> I32:\n    return left(value)\n;\n\n~[: [left(1)] [plus_one(2)] ]\n",
         ),
-        ("src/config.moth", CONFIG_SOURCE),
+        ("src/@config.moth", CONFIG_SOURCE),
     ];
     let debug = compile_template_fixture_with_profile(&files, BuildProfile::Dev);
     let release = compile_template_fixture_with_profile(&files, BuildProfile::Release);
@@ -656,7 +656,7 @@ fn release_folds_candidate_and_preserves_branch_local_project_dependency() {
             "src/@entry.moth",
             "@core/text\n@project name\n\nsubject #|| -> I32:\n    return text.length(name)\n;\n\npick |flag Bool| -> I32:\n    if flag:\n        return subject()\n    else\n        return 1\n    ;\n;\n\n~[: [pick(false)] ]\n",
         ),
-        ("src/config.moth", CONFIG_SOURCE),
+        ("src/@config.moth", CONFIG_SOURCE),
     ];
     let debug = compile_template_fixture_with_profile(&files, BuildProfile::Dev);
     let release = compile_template_fixture_with_profile(&files, BuildProfile::Release);
@@ -687,7 +687,7 @@ fn release_folds_outer_candidate_and_preserves_transitive_callee_dependency() {
             "src/@entry.moth",
             "@core/text\n@project name\n\nsubject #|| -> I32:\n    return text.length(name)\n;\n\nhelper || -> I32:\n    return subject()\n;\n\nouter |flag Bool| -> I32:\n    if flag:\n        helper()\n    else\n        helper()\n    ;\n    return 1\n;\n\n~[: [outer(false)] ]\n",
         ),
-        ("src/config.moth", CONFIG_SOURCE),
+        ("src/@config.moth", CONFIG_SOURCE),
     ];
     let debug = compile_template_fixture_with_profile(&files, BuildProfile::Dev);
     let release = compile_template_fixture_with_profile(&files, BuildProfile::Release);
@@ -718,7 +718,7 @@ fn release_folds_short_circuit_and_preserves_skipped_dependency() {
             "src/@entry.moth",
             "@core/text\n@project name\n\nsubject #|| -> I32:\n    return text.length(name)\n;\n\nprobe |flag Bool| -> Bool:\n    return flag and (subject() > 0)\n;\n\n~[: [probe(false)] ]\n",
         ),
-        ("src/config.moth", CONFIG_SOURCE),
+        ("src/@config.moth", CONFIG_SOURCE),
     ];
     let debug = compile_template_fixture_with_profile(&files, BuildProfile::Dev);
     let release = compile_template_fixture_with_profile(&files, BuildProfile::Release);
@@ -750,11 +750,11 @@ fn release_budget_note_is_deduplicated_and_larger_budget_folds_more() {
     let large_config = "project #= (\n    name = \"docs\",\n    const_work_limit = 1000,\n    const_memory_limit_mb = 1,\n)\nhtml #= ()\n";
 
     let (small_compiled, small_warnings) = compile_fixture_with_warnings(
-        &[("src/@entry.moth", entry), ("config.moth", small_config)],
+        &[("src/@entry.moth", entry), ("@config.moth", small_config)],
         BuildProfile::Release,
     );
     let (large_compiled, large_warnings) = compile_fixture_with_warnings(
-        &[("src/@entry.moth", entry), ("config.moth", large_config)],
+        &[("src/@entry.moth", entry), ("@config.moth", large_config)],
         BuildProfile::Release,
     );
     let small_warnings = small_warnings.expect("the small budget must emit a Note");
@@ -798,7 +798,7 @@ fn release_preserves_authored_borrow_diagnostics() {
             "src/@entry.moth",
             "mutate |value ~I32| -> I32:\n    ~value = value + 1\n    return value\n;\n\ncounter #I32 = 1\n\n~[: [mutate(counter)] ]\n",
         ),
-        ("src/config.moth", CONFIG_SOURCE),
+        ("src/@config.moth", CONFIG_SOURCE),
     ];
     let debug = compile_template_fixture_reports_with_profile(&files, BuildProfile::Dev);
     let release = compile_template_fixture_reports_with_profile(&files, BuildProfile::Release);

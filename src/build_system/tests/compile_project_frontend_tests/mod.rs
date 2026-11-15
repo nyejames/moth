@@ -104,16 +104,16 @@ const CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n
 
 /// Writes one directory project from `(relative path, source text)` files.
 ///
-/// The fixture supplies a default `config.moth` unless the row provides its own.
+/// The fixture supplies a default `@config.moth` unless the row provides its own.
 fn write_project_fixture(files: &[(&str, &str)]) -> tempfile::TempDir {
     let temporary_directory = tempfile::tempdir().expect("should create temporary project");
     let project_root = temporary_directory.path().to_path_buf();
     fs::create_dir_all(project_root.join("src")).expect("should create project source root");
     if !files
         .iter()
-        .any(|(relative_path, _)| *relative_path == "config.moth")
+        .any(|(relative_path, _)| *relative_path == "@config.moth")
     {
-        fs::write(project_root.join("config.moth"), CONFIG_SOURCE)
+        fs::write(project_root.join("@config.moth"), CONFIG_SOURCE)
             .expect("should write project config");
     }
     for (relative_path, source) in files {

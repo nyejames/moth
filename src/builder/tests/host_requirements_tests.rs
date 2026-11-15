@@ -162,7 +162,7 @@ $export
 ";
 
 fn write_project(project_root: &Path, files: &[(&str, &str)]) {
-    fs::write(project_root.join("config.moth"), CONFIG_SOURCE).expect("should write config");
+    fs::write(project_root.join("@config.moth"), CONFIG_SOURCE).expect("should write config");
     for (name, source) in files {
         let path = project_root.join(name);
         if let Some(parent) = path.parent() {

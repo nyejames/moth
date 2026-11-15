@@ -1503,7 +1503,7 @@ pub enum FileRole {
     /// `Normal` or `Support` and comes from Stage 0's bounded root inventory, never from the
     /// filename.
     ReachedApiFacadeRoot(ModuleRootRole),
-    /// The self-contained `config.moth` bootstrap unit.
+    /// The self-contained `@config.moth` bootstrap unit.
     ///
     /// It is deliberately not a module root: the fixed build-only file creates no structural
     /// module, publishes no export surface and never enters the module graph. Its top-level

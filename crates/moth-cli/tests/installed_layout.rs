@@ -54,7 +54,7 @@ fn write_project(root: &Path) -> PathBuf {
     let project = root.join("site");
     fs::create_dir_all(&project).expect("project directory should be created");
     fs::write(
-        project.join("config.moth"),
+        project.join("@config.moth"),
         "project #= (\n    name = \"installed\",\n)\nhtml #= ()\n",
     )
     .expect("config should be written");

@@ -73,7 +73,7 @@ fn assert_claims_reserved_project_name(claim: impl FnOnce(&Path), reason: &str) 
     let root = _temp.path().to_path_buf();
     fs::write(root.join("@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -130,7 +130,7 @@ fn rejects_nested_reserved_project_globals_dependency() {
     let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -278,7 +278,7 @@ fn rejects_moth_file_and_folder_collision_in_same_directory() {
     fs::write(root.join("src/UI/@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("src/ui.moth"), "y ~= 2\n").expect("should write colliding file");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -316,7 +316,7 @@ fn rejects_template_file_and_folder_collision_in_same_directory() {
     fs::write(root.join("src/ui/@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("src/ui.mtf"), "template\n").expect("should write colliding file");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -352,7 +352,7 @@ fn allows_same_stem_in_different_directories() {
     fs::write(root.join("src/pages/card.moth"), "y ~= 2\n").expect("should write another card");
     fs::write(root.join("src/@entry.moth"), "z ~= 3\n").expect("should write entry");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -384,7 +384,7 @@ fn rejects_collision_with_empty_folder() {
     fs::write(root.join("src/helper.moth"), "x ~= 1\n").expect("should write colliding file");
     fs::write(root.join("src/@entry.moth"), "y ~= 2\n").expect("should write entry");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -422,7 +422,7 @@ fn js_file_with_same_stem_as_folder_does_not_trigger_collision() {
     fs::write(root.join("src/helper.js"), "// js\n").expect("should write js file");
     fs::write(root.join("src/@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");

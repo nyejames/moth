@@ -92,7 +92,7 @@ fn observe_package_identities(
 fn write_project(project_root: &Path) {
     let src_dir = project_root.to_path_buf();
     fs::create_dir_all(&src_dir).expect("should create source directory");
-    fs::write(project_root.join("config.moth"), CONFIG_SOURCE).expect("should write config");
+    fs::write(project_root.join("@config.moth"), CONFIG_SOURCE).expect("should write config");
     fs::write(src_dir.join("@entry.moth"), PAGE_SOURCE).expect("should write page");
 }
 

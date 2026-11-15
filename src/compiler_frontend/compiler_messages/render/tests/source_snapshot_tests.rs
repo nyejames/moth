@@ -181,7 +181,7 @@ fn materialised_diagnostic_renders_owned_requester_and_donor_snapshots_after_ser
     fs::write(&requester_path, REQUESTER).expect("the requester should be written");
     fs::write(&donor_path, DONOR).expect("the donor should be written");
     fs::write(
-        project_directory.path().join("config.moth"),
+        project_directory.path().join("@config.moth"),
         "project #= (name = \"snapshots\", entry_root = \"src\")\nhtml #= ()\n",
     )
     .expect("the config should be written");

@@ -1,6 +1,6 @@
 //! Project config compilation service.
 //!
-//! WHAT: the compiler-owned stage sequence for one authored `config.moth` — tokenization,
+//! WHAT: the compiler-owned stage sequence for one authored `@config.moth` — tokenization,
 //!       declaration-shell preparation, interface binding for the single authored source, local
 //!       declaration ordering, AST folding and folded-value projection — stopping at owned
 //!       folded declarations.
@@ -12,7 +12,7 @@
 //!
 //! The service produces no HIR, borrow facts, link facts or public interface. It owns the config
 //! dialect surface — which declaration shapes, start-body statements and dependency clauses
-//! `config.moth` accepts — and the authored key-name spans config diagnostics underline. Config
+//! `@config.moth` accepts — and the authored key-name spans config diagnostics underline. Config
 //! key schema and the application of folded values to project settings stay build-owned.
 
 use crate::builder_surface::config_schema::{ProjectFieldConfigPolicies, ProjectFieldConfigPolicy};
@@ -133,7 +133,7 @@ pub(crate) struct FoldedConfigDeclaration {
     pub(crate) direct_field_dependencies: Vec<Vec<BuildInputName>>,
 }
 
-/// Compile one authored `config.moth` to owned folded declarations and retain its source spans.
+/// Compile one authored `@config.moth` to owned folded declarations and retain its source spans.
 ///
 /// The service returns its live source builder on every outcome; the build caller owns finalization.
 pub(crate) fn compile_config_source(
@@ -821,7 +821,7 @@ fn prepare_config_file(
         path_syntax,
         &HeaderParseOptions {
             root_file_ids: Default::default(),
-            // `config.moth` is a self-contained build input, not a module root. Select it
+            // `@config.moth` is a self-contained build input, not a module root. Select it
             // explicitly so its authored top-level statements reach the config dialect
             // validator instead of an ordinary-file runtime rejection.
             selected_file: Some((request.file_id, FileRole::ConfigBootstrap)),
@@ -918,13 +918,13 @@ fn collect_authored_config_key_name_provenance(
 //  Config Dialect Surface
 // -------------------------
 
-/// Reject unsupported surfaces in the authored `config.moth` file after header parsing has
+/// Reject unsupported surfaces in the authored `@config.moth` file after header parsing has
 /// normalized declaration shapes.
 ///
 /// WHY: config uses frontend parsing for expression semantics, but config is not a normal module.
 /// It is compile-time-only, so runtime declarations such as functions and standalone templates are
 /// rejected before AST. Named support types — structs, choices and type aliases — are equally
-/// rejected: user-authored `config.moth` is a flat surface of anonymous const records and
+/// rejected: user-authored `@config.moth` is a flat surface of anonymous const records and
 /// compiler-owned constants, and record-shaped helpers must be declared as anonymous const
 /// records and referenced by name. Trait surfaces are source-module metadata and are
 /// deliberately kept out of config.

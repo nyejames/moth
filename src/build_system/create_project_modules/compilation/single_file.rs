@@ -38,8 +38,8 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::source_packages::root_file::{
-    file_name_is_invalid_module_root_marker, file_name_is_module_root_file,
-    module_root_role_for_file_name,
+    file_name_is_config_file, file_name_is_invalid_module_root_marker,
+    file_name_is_module_root_file, module_root_role_for_file_name,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathInternError, PathInternerFork};
@@ -71,7 +71,8 @@ use super::super::module_preparation::{
 use super::super::prepared_module::PreparedModule;
 use super::super::project_module_graph::ProjectModuleGraph;
 use super::super::project_structure_diagnostics::{
-    invalid_module_root_file_name_error, non_utf8_filesystem_name_error,
+    config_file_selected_as_entry_error, invalid_module_root_file_name_error,
+    non_utf8_filesystem_name_error,
 };
 use super::super::resource_inputs::ResourceInputRegistry;
 use super::super::source_discovery;
@@ -341,23 +342,36 @@ fn compile_single_file_frontend_with_target(
         string_table,
     )?;
     let prepared_source_package_roots = source_package_indexes.prepared_source_package_roots();
-    let entry_file_name = match entry_path.file_name().and_then(|name| name.to_str()) {
-        Some(name) => name,
-        None => {
-            return Err(BoundaryPremergeFailure::from(
-                non_utf8_filesystem_name_error(&entry_path, "single-file entry name"),
-            ));
-        }
-    };
+    let entry_file_name = utf8_entry_file_name(&entry_path)?;
+
+    let authored_entry_file_name = utf8_entry_file_name(&config.entry_dir)?;
 
     // The selected file shares the closed root vocabulary with directory discovery. An invalid
     // `@*.moth`, `+*.moth` or `#*.moth` spelling is rejected here rather than routed to a page
-    // output or treated as an ordinary source file.
-    if file_name_is_invalid_module_root_marker(entry_file_name) {
-        let directory = entry_path.parent().unwrap_or_else(|| Path::new("."));
-        return Err(BoundaryPremergeFailure::from(
-            invalid_module_root_file_name_error(directory, entry_file_name, string_table),
-        ));
+    // output or treated as an ordinary source file. The build-only config source is rejected too:
+    // single-file selection has no config consumer, so it must never become a synthetic entry.
+    // Check the authored selection first, then the canonical target, so a symlink cannot hide a
+    // reserved source behind an ordinary name.
+    let selected_directory = entry_path.parent().unwrap_or_else(|| Path::new("."));
+    for selected_file_name in [authored_entry_file_name, entry_file_name] {
+        if file_name_is_invalid_module_root_marker(selected_file_name) {
+            return Err(BoundaryPremergeFailure::from(
+                invalid_module_root_file_name_error(
+                    selected_directory,
+                    selected_file_name,
+                    string_table,
+                ),
+            ));
+        }
+        if file_name_is_config_file(selected_file_name) {
+            return Err(BoundaryPremergeFailure::from(
+                config_file_selected_as_entry_error(
+                    selected_directory,
+                    selected_file_name,
+                    string_table,
+                ),
+            ));
+        }
     }
 
     // Only the three fixed root spellings own a bounded Stage 0 inventory.
@@ -802,6 +816,21 @@ fn compile_single_file_frontend_with_target(
         }
         Err(failure) => Err(failure),
     }
+}
+
+/// Return `path`'s UTF-8 final file name, or the structure diagnostic for a non-UTF-8 name.
+///
+/// Single-file selection checks both the authored name and the canonical target name, so both
+/// lookups share one failure path and the same diagnostic label.
+fn utf8_entry_file_name(path: &Path) -> Result<&str, BoundaryPremergeFailure> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            BoundaryPremergeFailure::from(non_utf8_filesystem_name_error(
+                path,
+                "single-file entry name",
+            ))
+        })
 }
 
 /// Rebind synthetic Stage 0 file-reference rows to the boundary's source identities.

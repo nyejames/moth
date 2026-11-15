@@ -1310,7 +1310,7 @@ fn a_compile_time_facade_export_assembles_without_an_executable_root() {
     let temp = tempfile::tempdir().expect("should create project directory");
     let root = temp.path();
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"const_export\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");

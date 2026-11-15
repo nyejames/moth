@@ -1,6 +1,6 @@
 //! Builder-owned project configuration sections.
 //!
-//! WHAT: a builder describes the one named record its project may author in `config.moth`:
+//! WHAT: a builder describes the one named record its project may author in `@config.moth`:
 //! string and bool fields with required or defaulted rules. `finish` turns that description into
 //! the config schema the compiler's generic builder-section validation walks.
 //! WHY: configuration stays a compiler-owned compile-time source. The builder only declares field

@@ -174,6 +174,7 @@ define_stable_reason_keys! {
         &InvalidConfigCode::FileValuePathUnsupported => "invalid_config.file_value_path_unsupported",
         &InvalidConfigCode::SourceFileFolderCollision => "invalid_config.source_file_folder_collision",
         &InvalidConfigCode::InvalidModuleRootFileName => "invalid_config.invalid_module_root_file_name",
+        &InvalidConfigCode::ConfigFileSelectedAsEntry => "invalid_config.config_file_selected_as_entry",
         &InvalidConfigCode::InvalidOutputFolderEmpty => "invalid_config.invalid_output_folder.empty",
         &InvalidConfigCode::InvalidOutputFolderNonUtf8 => "invalid_config.invalid_output_folder.non_utf8",
         &InvalidConfigCode::InvalidOutputFolderAbsolutePathWithoutFolder

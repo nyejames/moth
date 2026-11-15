@@ -21,7 +21,7 @@ const SOURCE_PACKAGE_DIR: &str = "moth/game";
 const PROJECT_FIXTURE_DIR: &str = "moth/project";
 
 /// The project fixture files the build reads. A facade-only project is a valid SDK target.
-const PROJECT_FILES: &[&str] = &["config.moth", "@package.moth"];
+const PROJECT_FILES: &[&str] = &["@config.moth", "@package.moth"];
 
 /// The exact artefact the fixture publishes while native Wasm compilation is unavailable.
 const EXPECTED_STATUS_ARTEFACT: &str = concat!(

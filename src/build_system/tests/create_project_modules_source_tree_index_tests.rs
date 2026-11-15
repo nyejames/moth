@@ -95,7 +95,18 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     fs::write(entry_root.join("@entry.moth"), "").expect("should write entry root");
     fs::write(entry_root.join("ordinary.moth"), "").expect("should write ordinary source");
     fs::write(nested.join("@entry.moth"), "").expect("should write nested root");
-    fs::write(nested.join("config.moth"), "not source").expect("should write nested config");
+    fs::write(nested.join("@config.moth"), "not source")
+        .expect("should write nested reserved config");
+    // A directory sharing the reserved config filename is inert too: it is neither traversed nor
+    // claimed as an ordinary folder. Keep it under a different parent so the file and directory
+    // cases can coexist.
+    let reserved_directory_parent = entry_root.join("reserved_directory_parent");
+    fs::create_dir_all(&reserved_directory_parent)
+        .expect("should create reserved directory parent");
+    let nested_config_directory = reserved_directory_parent.join("@config.moth");
+    fs::create_dir_all(&nested_config_directory).expect("should create reserved config directory");
+    fs::write(nested_config_directory.join("@entry.moth"), "")
+        .expect("should write unreachable root");
 
     let mut config = Config::new(root.clone());
     config.project_name = String::from("docs");
@@ -150,7 +161,7 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     assert!(entry_root_files[1].ends_with("dev/@entry.moth"));
     assert!(entry_root_files[2].ends_with("nested/@entry.moth"));
     assert!(entry_root_files[3].ends_with("release/@entry.moth"));
-    assert_eq!(index.stats().dirs_visited, 4);
+    assert_eq!(index.stats().dirs_visited, 5);
     assert_eq!(index.stats().dirs_skipped, 6);
     assert_eq!(index.stats().files_seen, 6);
     assert_eq!(index.stats().normal_root_files_seen, 0);
@@ -161,9 +172,12 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
             source
                 .canonical_path()
                 .file_name()
-                .is_some_and(|name| name != "config.moth")
+                .is_some_and(|name| name != "@config.moth")
+                && !source
+                    .canonical_path()
+                    .starts_with(&nested_config_directory)
         }),
-        "a nested config.moth is reserved and must not enter source inventory"
+        "a nested @config.moth file or directory is reserved and must not enter source inventory"
     );
 
     let module_roots = index.module_roots();
@@ -196,7 +210,8 @@ fn source_tree_index_ignores_collision_in_fixed_skipped_directory() {
     fs::create_dir_all(&nested).expect("should create nested module");
     fs::write(entry_root.join("@entry.moth"), "").expect("should write entry root");
     fs::write(nested.join("@entry.moth"), "").expect("should write nested root");
-    fs::write(nested.join("config.moth"), "not source").expect("should write nested config");
+    fs::write(nested.join("@config.moth"), "not source")
+        .expect("should write nested reserved config");
 
     let config = Config::new(root.clone());
     let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
@@ -460,7 +475,8 @@ fn bounded_module_roots_for_single_file_indexes_nested_roots_with_ignored_direct
 
     fs::write(module_dir.join("@entry.moth"), "").expect("should write entry root");
     fs::write(nested.join("@entry.moth"), "").expect("should write nested root");
-    fs::write(nested.join("config.moth"), "not source").expect("should write nested config");
+    fs::write(nested.join("@config.moth"), "not source")
+        .expect("should write nested reserved config");
 
     let config = Config::new(root.clone());
     let entry_file = fs::canonicalize(module_dir.join("@entry.moth")).unwrap();
