@@ -1,6 +1,6 @@
-`@web/canvas` provides 2D canvas drawing as a builder binding-backed runtime package. It belongs to the Builder origin family with ExternalBinding backing, so the compiler registers typed external functions and opaque types from annotated JavaScript. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+`@builder/web/canvas` provides 2D canvas drawing as a builder binding-backed runtime package. It belongs to the Builder origin family with ExternalBinding backing, so the compiler registers typed external functions and opaque types from annotated JavaScript. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
-`@web/canvas` ships as a skeleton. The current surface covers element management, context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. It will grow as the language stabilises and the first-party packages expand.
+`@builder/web/canvas` ships as a skeleton. The current surface covers element management, context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. It will grow as the language stabilises and the first-party packages expand.
 
 The numeric API uses `I32` dimensions, indices and pixel channels, and `F64`
 coordinates and measurements. These signatures preserve the existing ranges,
@@ -12,14 +12,14 @@ types. See @../../#external-binding-contracts (External binding contracts).
 Bind individual symbols or the whole namespace:
 
 [codeblock, $code "moth":
-    @web/canvas get_canvas, context_2d, fill_rect
+    @builder/web/canvas get_canvas, context_2d, fill_rect
 
-    @web/canvas
+    @builder/web/canvas
 ]
 
 ### Opaque types
 
-`@web/canvas` exposes seven opaque handle types. They have no public fields, cannot be constructed with struct syntax and must not be inspected directly. You obtain them only through `@web/canvas` functions.
+`@builder/web/canvas` exposes seven opaque handle types. They have no public fields, cannot be constructed with struct syntax and must not be inspected directly. You obtain them only through `@builder/web/canvas` functions.
 
 [table:
     [th:
@@ -63,7 +63,7 @@ Bind individual symbols or the whole namespace:
     ]
 ]
 
-All opaque types lower to object references in the JS backend. The Wasm backend does not support `@web/canvas` and rejects reachable calls before lowering.
+All opaque types lower to object references in the JS backend. The Wasm backend does not support `@builder/web/canvas` and rejects reachable calls before lowering.
 
 ### Canvas element management
 
@@ -1184,27 +1184,27 @@ These are host-operation categories, not HTTP status semantics.
 
 ### Backend behaviour
 
-The JS backend fully supports `@web/canvas`. When canvas functions are reachable, the build emits the `canvas.js` runtime asset, a generated glue module and an import map entry for `@moth/runtime`.
+The JS backend fully supports `@builder/web/canvas`. When canvas functions are reachable, the build emits the `canvas.js` runtime asset, a generated glue module and an import map entry for `@moth/runtime`.
 
-The Wasm backend rejects reachable `@web/canvas` calls before lowering. Canvas support requires a browser JS environment.
+The Wasm backend rejects reachable `@builder/web/canvas` calls before lowering. Canvas support requires a browser JS environment.
 
 ### Teardown
 
-`@web/canvas` defines no teardown, close or disposal functions. Opaque handles are managed by the host JavaScript runtime.
+`@builder/web/canvas` defines no teardown, close or disposal functions. Opaque handles are managed by the host JavaScript runtime.
 
 ### Unsupported source forms
 
-- Direct symbol-path clauses such as `@web/canvas/get_canvas` face rejection. Use direct selections or a namespace clause.
+- Direct symbol-path clauses such as `@builder/web/canvas/get_canvas` face rejection. Use direct selections or a namespace clause.
 - Named arguments are not supported. Binding-backed calls stay positional-only.
 - The package does not expose receiver methods, source-defined types or constants.
 - Opaque types cannot be constructed or inspected from Moth source.
 
 ### Deferred surfaces
 
-`@web/canvas` ships as a skeleton. Deferred surfaces include async image-loading helpers, `toBlob` and `captureStream`, raw typed-array and arbitrary line-dash array access, `Path2D`, `DOMMatrix`, `OffscreenCanvas`, `ImageBitmap` and video sources. These will arrive as the language and external package ABI mature. WebGL belongs to @../graphics (@web/graphics), not this package. See @../../../progress (progress matrix) for current status.
+`@builder/web/canvas` ships as a skeleton. Deferred surfaces include async image-loading helpers, `toBlob` and `captureStream`, raw typed-array and arbitrary line-dash array access, `Path2D`, `DOMMatrix`, `OffscreenCanvas`, `ImageBitmap` and video sources. These will arrive as the language and external package ABI mature. WebGL belongs to @../graphics (@builder/web/graphics), not this package. See @../../../progress (progress matrix) for current status.
 
 ### Related concepts
 
 - For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
 - For dependency-path rules see @../../#dependency-paths (Dependency paths).
-- For the `@html` canvas markup helper see @../../core/html/ (@html).
+- For the `@core/html` canvas markup helper see @../../core/html/ (@core/html).

@@ -8,7 +8,7 @@
     sidebar,
     init_docs_sidebar
 
-[$in title:["@web/canvas"]]
+[$in title:["@builder/web/canvas"]]
 [$in description:["2D canvas drawing as a builder binding-backed runtime package."]]
 [$in head:[language_theme_head]]
 
@@ -16,11 +16,12 @@
 [sidebar]
 init_docs_sidebar()!
 [section, $md:
-    # @web/canvas
+    # @builder/web/canvas
 
-    `@web/canvas` exposes browser canvas drawing through opaque handles and free
-    functions. A binding-backed package keeps JavaScript object identity outside
-    Moth's value model while preserving typed access and explicit mutation.
+    `@builder/web/canvas` exposes browser canvas drawing through opaque handles
+    and free functions. A binding-backed package keeps JavaScript object
+    identity outside Moth's value model while preserving typed access and
+    explicit mutation.
 ]
 
 [section:
@@ -38,6 +39,6 @@ init_docs_sidebar()!
         [$in previous_path:../]
         [$in previous_title:Builder packages]
         [$in next_path:../graphics/]
-        [$in next_title:@web/graphics]
+        [$in next_title:@builder/web/graphics]
     ]
 ]

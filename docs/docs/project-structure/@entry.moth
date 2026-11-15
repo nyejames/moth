@@ -34,14 +34,15 @@ init_docs_sidebar()!
 [section, $md:
     # Project structure
 
-    A Moth project combines directory-scoped modules, an optional root-level
-    project config and a builder that selects the final artefacts.
+    A Moth project combines directory-scoped modules, an optional build-only
+    `@config.moth` at the selected root and a builder that selects the final
+    artefacts.
 
     A module recognises three optional root files: `@mod.moth` publishes the
     normal API, `@package.moth` publishes a scoped support API and `@entry.moth`
     owns page runtime work. Any subset is valid. `$export` marks each public declaration or selected re-export in a facade.
-    The HTML builder emits one directory-derived page for each `@entry.moth`;
-    no root-purpose directive exists.
+    The HTML builder emits one directory-derived page for each `@entry.moth`.
+    No root-purpose directive exists.
 ]
 
 [section:

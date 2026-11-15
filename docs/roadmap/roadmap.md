@@ -254,7 +254,7 @@ After the first `@core/time` JavaScript slice:
 After the canvas reachability refactor:
 
 - JS-backed external package APIs
-- Wasm implementations for JS-backed packages such as `@web/canvas`
+- Wasm implementations for JS-backed packages such as `@builder/web/canvas`
 - current reachability is artefact-planning correctness, not general JS tree shaking or minification
 
 ## Source-package JavaScript provider identity

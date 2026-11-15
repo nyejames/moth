@@ -4,8 +4,8 @@ Every package has two independent classifications: where it comes from and how t
 
 Origin describes ownership and distribution:
 
-- **Core**: compiler-owned packages such as `@html`, `@styles`, `@core/io` and `@core/math`.
-- **Builder**: packages selected by a project builder, including `@web/site` and `@web/canvas`.
+- **Core**: compiler-owned packages such as `@core/html`, `@core/css`, `@core/io` and `@core/math`.
+- **Builder**: packages selected by a project builder, including `@builder/web/site` and `@builder/web/canvas`.
 - **ProjectLocal**: scoped `@package.moth` support packages, the project-root package facade and annotated project-local JavaScript files.
 - **Dependency**: reserved for future package-system support.
 
@@ -25,20 +25,28 @@ Backing is semantic, not a file-format choice. Precompiling or emitting a `MothS
         [: **Backing**]
     ]
 
-    [td: [:`@html`, `@styles`] [: Core] [: MothSource]]
-    [td: [:`@web/site`] [: Builder] [: MothSource]]
+    [td: [:`@core/html`, `@core/css`] [: Core] [: MothSource]]
+    [td: [:`@builder/web/site`] [: Builder] [: MothSource]]
     [td: [:`@core/collections`, `@core/io`, `@core/math`, `@core/text`, `@core/random`, `@core/time`] [: Core] [: ExternalBinding]]
-    [td: [:`@web/canvas`, `@web/graphics`, `@web/page`] [: Builder] [: ExternalBinding]]
+    [td: [:`@builder/web/canvas`, `@builder/web/graphics`, `@builder/web/page`] [: Builder] [: ExternalBinding]]
     [td: [: Scoped `@package.moth` support package] [: ProjectLocal] [: MothSource]]
     [td: [: Project-root `@package.moth` facade] [: ProjectLocal] [: MothSource]]
     [td: [: Annotated project-local `.js` file] [: ProjectLocal] [: ExternalBinding]]
 ]
 
-Origin and backing don't change dependency clause syntax or module visibility. Source-backed packages publish their public surface with `$export` in their API facade. Binding-backed packages expose typed external symbols registered by the builder.
+Origin and backing don't change dependency clause syntax or module visibility. Source-backed packages publish their public surface with `$export`. Binding-backed packages expose typed external symbols registered by the builder.
+
+### Package names and source facades
+
+Core and Builder names sit in reserved namespaces. Core registrations live below `@core/`. Builder registrations live below `@builder/` at an explicit path the builder chooses, such as `web/site` or `game`. The exact `@core` and `@builder` roots are not importable package surfaces. ProjectLocal and Dependency packages cannot claim either root. Registration compares names case-insensitively, so case-only variants fail along with equal or ancestor/descendant overlaps for every backing.
+
+Every registered MothSource package publishes its public surface through a directly contained `@package.moth`. `@mod.moth` alone is insufficient. A co-located `@mod.moth` may still own a separate internal normal-position scope, while the external package interface always comes from `@package.moth`. Ordinary project modules keep their optional root combinations. Binding-backed packages carry no source facade because the builder registers their typed symbols directly.
+
+Copying a package directory into a project does not grant Core or Builder identity. A copied source package becomes an ordinary ProjectLocal support package through its own `@package.moth`. A copied binding package directory registers no symbols and gains no namespace identity.
 
 ### Prelude is visibility policy
 
-The prelude is implicit dependency policy, not an origin or backing. The ordinary Moth prelude exposes `io` as an alias to `@core/io`. The separate `.mtf` prelude makes public compile-time constants from `@html` and `@styles` visible by bare name. Package metadata remains independent of these visibility policies.
+The prelude is implicit dependency policy, not an origin or backing. The ordinary Moth prelude exposes `io` as an alias to `@core/io`. The separate `.mtf` prelude makes public compile-time constants from `@core/html` and `@core/css` visible by bare name. Package metadata remains independent of these visibility policies.
 
 ### Builder-selected availability
 
@@ -50,7 +58,7 @@ and the `io` prelude keep their meaning even when an operation is unavailable.
 The progress matrix records current implementation gaps separately from this
 design contract.
 
-The mandatory Core source packages `@html` and `@styles` are an exception to
+The mandatory Core source packages `@core/html` and `@core/css` are an exception to
 builder-selected availability. The common builder surface registers both roots
 under every builder, including custom SDK builders, because they supply
 compiler-level template helpers rather than host capabilities. A builder cannot

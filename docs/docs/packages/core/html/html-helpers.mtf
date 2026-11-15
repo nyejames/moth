@@ -1,24 +1,24 @@
-`@html` provides compile-time HTML markup helpers as a universal Core package with MothSource backing. The compiler reads ordinary Moth source from `packages/html/@mod.moth`. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+`@core/html` provides compile-time HTML markup helpers as a universal Core package with MothSource backing. It publishes through a directly contained `@package.moth`, and the compiler reads ordinary Moth source from `packages/core/html/@package.moth`. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
-`@html` ships as a skeleton. Its exports cover common HTML tags, formatting helpers and table components. Basic style inserts belong to `@styles`, while browser drawing stays in the builder-specific `@web/canvas` package.
+`@core/html` ships as a skeleton. Its exports cover common HTML tags, formatting helpers and table components. Basic style inserts belong to `@core/css`, while browser drawing stays in the builder-specific `@builder/web/canvas` package.
 
 ### The fixed template prelude
 
-Compile-time constants from `@html` and `@styles` are visible flat inside `.mtf` files without an explicit dependency clause. This is the fixed template prelude.
+Compile-time constants from `@core/html` and `@core/css` are visible flat inside `.mtf` files without an explicit dependency clause. This is the fixed template prelude.
 
 [codeblock, $code "moth":
     -- docs/intro.mtf
-    [p: A paragraph built from the @html p helper.]
+    [p: A paragraph built from the @core/html p helper.]
 
     [codeblock, $code "moth": value = 42]
 ]
 
-The prelude is compiler policy, not builder configuration. Every builder receives the official `@html` and `@styles` Core roots, and `.mtf` is compiler-supported under every builder. Both packages precede every `.mtf` consumer.
+The prelude is compiler policy, not builder configuration. Every builder receives the official `@core/html` and `@core/css` Core roots, and `.mtf` is compiler-supported under every builder. Both packages precede every `.mtf` consumer.
 
-A `.moth` file that needs specific `@html` symbols binds them explicitly:
+A `.moth` file that needs specific `@core/html` symbols binds them explicitly:
 
 [codeblock, $code "moth":
-    @html table, th, td
+    @core/html table, th, td
 ]
 
 A `.mtf` file has no implicit module facade constants. Reach any helper value with a qualified reference that names the helper path and one selected symbol, or move the shared value into a helper the template can select. Root-local declarations in `@mod.moth`, `@package.moth` and `@entry.moth` stay invisible. See @../../../moth-templates/#template-scope (Template scope) for the full template scope contract.
@@ -136,9 +136,9 @@ All helpers are compile-time `#String` constants that produce HTML strings. They
     ]
 ]
 
-#### Utility style inserts from `@styles`
+#### Utility style inserts from `@core/css`
 
-The `style` slots exposed by the helpers above accept the six inline fragments from the separate `@styles` Core package, including `center` and `larger`. See @../css/ (@styles) for the export table and prelude rules.
+The `style` slots exposed by the helpers above accept the six inline fragments from the separate `@core/css` Core package, including `center` and `larger`. See @../css/ (@core/css) for the export table and prelude rules.
 
 ### The `$code` directive
 
@@ -184,10 +184,10 @@ nested templates. A body is not re-highlighted by the directive that will format
 
 ### Browser drawing
 
-The `canvas` markup helper remains in `@html`. Drawing functions and opaque canvas handles belong to `@web/canvas`, which a web-capable builder must provide.
+The `canvas` markup helper remains in `@core/html`. Drawing functions and opaque canvas handles belong to `@builder/web/canvas`, which a web-capable builder must provide.
 
 [codeblock, $code "moth":
-    @web/canvas get_canvas, context_2d, set_fill_style, fill_rect
+    @builder/web/canvas get_canvas, context_2d, set_fill_style, fill_rect
 
     element = get_canvas("my-canvas")!
     context ~= context_2d(element)!
@@ -200,21 +200,21 @@ The `canvas` markup helper remains in `@html`. Drawing functions and opaque canv
 
 The compile-time constants need no runtime assets. They fold into HTML strings during compilation.
 
-Calls to `@web/canvas` emit JavaScript runtime assets when reachable. See @../../builder/canvas/ (@web/canvas) for the runtime asset contract.
+Calls to `@builder/web/canvas` emit JavaScript runtime assets when reachable. See @../../builder/canvas/ (@builder/web/canvas) for the runtime asset contract.
 
 ### Unsupported source forms
 
-- Direct symbol-path clauses such as `@html/p` face rejection. Use direct selections or a namespace clause.
-- `@html` exposes no runtime canvas types. `Canvas2d` comes from `@web/canvas`.
+- Direct symbol-path clauses such as `@core/html/p` face rejection. Use direct selections or a namespace clause.
+- `@core/html` exposes no runtime canvas types. `Canvas2d` comes from `@builder/web/canvas`.
 - Only compile-time constants are visible inside `.mtf` files. Functions and types require an explicit dependency clause in `.moth` files.
 
 ### Deferred surfaces
 
-`@html` ships as a skeleton. Future expansions include richer semantic tag coverage and standard slots. Higher-level layouts, components and additional style systems belong in separate packages. See @../../../progress (progress matrix) for current status.
+`@core/html` ships as a skeleton. Future expansions include richer semantic tag coverage and standard slots. Higher-level layouts, components and additional style systems belong in separate packages. See @../../../progress (progress matrix) for current status.
 
 ### Related concepts
 
 - For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
 - For dependency-path rules see @../../#dependency-paths (Dependency paths).
 - For `.mtf` template scope and the fixed prelude see @../../../moth-templates/#template-scope (Template scope).
-- For the `@web/canvas` runtime package see @../../builder/canvas/ (@web/canvas).
+- For the `@builder/web/canvas` runtime package see @../../builder/canvas/ (@builder/web/canvas).

@@ -32,7 +32,7 @@ Use `index.md` and owning module entry points for code locations. Source-path in
 ## Architectural invariants
 
 - One command selects one artefact builder and any tooling overlays before config validation. Source config does not select physical targets or builders.
-- `config.moth` is one self-contained compile-time source, with no source dependencies or package resolution.
+- `@config.moth` is one self-contained compile-time source at the selected project root, with no source dependencies or package resolution.
 - Stage 0 owns source ownership, canonical project/package graphs, legal topology and deterministic scheduling. Each physical module compiles once per boundary.
 - Compiler-owned preparation retains syntax for graph construction and later binding. Build code neither parses a competing grammar nor assembles semantic stages.
 - Published modules, interfaces and generated sidecars are immutable. Diagnosed modules expose no partial interface. Builders receive success-only linkable inputs.
@@ -55,9 +55,9 @@ The selected builder does not supply or propagate a semantic numeric profile. It
 
 The capability surface contains mandatory Core source roots, builder source-backed packages, binding-backed packages, import providers, runtime requirements, optional source kinds, primitive build globals and target-affinity/capability metadata. Directives are not part of it: the compiler defines every directive and every builder sees the same set.
 
-Template constant scope is not a configurable capability. `.mtf` is a fixed compiler-supported source kind under every builder alongside `.moth`, so a builder cannot disable, reassign or substitute it. The compiler authority's Stage 2 source-kind section owns its implicit public-constant prelude. The common builder surface registers the official `@html` and `@styles` Core/MothSource roots through `SourcePackageRegistry` for every builder, including custom SDK builders. Builders cannot register a source package under either reserved prefix or add arbitrary symbols to `.mtf` scope. They may register optional source kinds; plain Markdown `.md` is the only one currently registered.
+Template constant scope is not a configurable capability. `.mtf` is a fixed compiler-supported source kind under every builder alongside `.moth`, so a builder cannot disable, reassign or substitute it. The compiler authority's Stage 2 source-kind section owns its implicit public-constant prelude. The common builder surface registers the official `@core/html` and `@core/css` Core/MothSource roots through `SourcePackageRegistry` for every builder, including custom SDK builders. Builders cannot register any package below the reserved `core/` prefix or add arbitrary symbols to `.mtf` scope, and their own source and binding registrations stay below the Builder-owned `builder/` prefix. The bare `@core` and `@builder` roots are not importable. They may register optional source kinds; plain Markdown `.md` is the only one currently registered.
 
-Compiler-shipped package files resolve once per process under one directory: the source package roots (`@html`, `@styles` and `@web/site`) and the `@web/*` binding assets the HTML builder emits. That directory is `packages/` beside the canonical executable when it exists, which is the release archive layout, and otherwise the `packages/` directory of the source checkout that compiled the binary. The choice covers the whole set, so files are never mixed between an installation and the checkout. A host built on the compiler crate, including an SDK builder, ships the same `packages/` directory beside its executable when it runs outside that checkout. A missing source root or asset below the selected directory is a typed `InfrastructureFailure` reporting the incomplete package set, never a reason to read that file from elsewhere.
+Compiler-shipped package files resolve once per process under one directory: the Core source package roots `@core/html` and `@core/css` at `packages/core/html/` and `packages/core/css/`, the Builder source package root `@builder/web/site` at `packages/builder/web/site/` and the runtime JavaScript assets for the `@builder/web/canvas`, `@builder/web/graphics` and `@builder/web/page` binding packages under `packages/builder/web/`. That directory is `packages/` beside the canonical executable when it exists, which is the release archive layout, and otherwise the `packages/` directory of the source checkout that compiled the binary. The choice covers the whole set, so files are never mixed between an installation and the checkout. A host built on the compiler crate, including an SDK builder, ships the same `packages/` directory beside its executable when it runs outside that checkout. A missing source root or asset below the selected directory is a typed `InfrastructureFailure` reporting the incomplete package set, never a reason to read that file from elsewhere.
 
 Official executable environments provide the canonical Core catalogue through
 official native or browser implementations, with documented host-capability gates
@@ -76,11 +76,11 @@ Builder globals express stable semantic configuration. They never reveal a physi
 
 ## Project bootstrap
 
-### Self-contained `config.moth`
+### Self-contained `@config.moth`
 
-When present, `config.moth` is one build-owned compile-time source, not a semantic module. It creates no entry, HIR, runtime artefact or package interface. Bootstrap creates no config dependency graph, companion source set, package resolver or second project scan. When the file is genuinely absent, bootstrap applies validated builder defaults and a directory-derived project identity without synthesizing a config source, span or input declaration. A nested `config.moth` is reserved and inert to the enclosing build. The selected config path is inspected with explicit metadata handling: a broken or inaccessible path diagnoses through the filesystem lane, and its canonical location must remain inside the selected project directory. A dangling or external symlink never silently selects defaults or another project's configuration.
+When present, `@config.moth` is one build-owned compile-time source, not a semantic module and not importable. It is a reserved compiler filename at the selected project root, not a fourth module-root role. It creates no entry, HIR, runtime artefact or package interface. Bootstrap creates no config dependency graph, companion source set, package resolver or second project scan. When the file is genuinely absent, bootstrap applies validated builder defaults and a directory-derived project identity without synthesizing a config source, span or input declaration. A nested `@config.moth` is reserved and inert to the enclosing build. Source classification accepts that exact spelling before the generic invalid-marker check, so a case variant such as `@Config.moth` stays invalid. Unmarked `config.moth` is an ordinary helper, and an `@config` dependency resolves it when present and never the build-only file. The selected config path is inspected with explicit metadata handling: a broken or inaccessible path diagnoses through the filesystem lane, and its canonical location must remain inside the selected project directory. A dangling or external symlink never silently selects defaults or another project's configuration.
 
-The build system calls the named compiler config service with the source, capability surface, retained explicit command-input spellings and exact typed programmatic/builder inputs. The compiler resolves each input against its declared exact contract, materialises directly from retained numeric spelling and returns folded record fields, input-contract results, key locations and diagnostics. The build system then applies validated project/builder settings. The compiler alone sequences preparation and folding.
+The build system owns the bootstrap file selection, read and application of folded settings. It calls the named compiler config service with the source, capability surface, retained explicit command-input spellings and exact typed programmatic/builder inputs. The compiler resolves each input against its declared exact contract, materialises directly from retained numeric spelling and returns folded record fields, input-contract results, key locations and diagnostics. The build system then applies validated project/builder settings. The compiler alone sequences preparation and folding.
 
 Completed config values use the compiler's ordinary constant projection. Applying them does not retain or reconstruct an expression graph. Source-span construction remains live for the later build validations described below, independently of the expression store's lifetime.
 
@@ -96,7 +96,7 @@ Config-local helpers do not become declarations visible to project modules. Only
 
 ### Project record
 
-One `project` record constant supplies project identity/settings. The `project` name has special meaning only inside `config.moth` and publishes no ordinary project-module symbol. `docs/docs/project-structure/project-config.mtf` > `Project record` owns the complete field set and defaults.
+One `project` record constant supplies project identity/settings. The `project` name has special meaning only inside `@config.moth` and publishes no ordinary project-module symbol. `docs/docs/project-structure/project-config.mtf` > `Project record` owns the complete field set and defaults.
 
 `name` and `version` are optional. An omitted name derives from the exact final component of the selected directory and must validly parse as a Moth project identifier; it is never silently rewritten. An explicit name is a valid Moth project identifier. An omitted version means unversioned; no implicit `0.1.0` exists. A starter's `"0.1.0"` input fallback is not a project-field default, and a same-named input contract does not satisfy an omitted record field.
 
@@ -152,7 +152,7 @@ Programmatic APIs supply already typed exact primitive values. They retain their
 
 ### `ProjectGlobalsInterface` and `@project`
 
-Folded `project` record settings produce one immutable synthetic interface at permanently reserved `@project`. It publishes only predefined fields as namespace members, not a nested `project` value or all config helpers/inputs.
+Folded `project` record settings produce one immutable synthetic interface at permanently reserved `@project`. It publishes only predefined fields as namespace members, not a nested `project` value or all config helpers/inputs. `@config.moth` publishes no namespace of its own, so `@project` stays the only build-supplied project-global interface.
 
 The compiler's synthetic-interface contract supplies stable member identities, folded values, field fingerprints and provenance without AST/HIR/runtime bodies. Classification is ProjectLocal and MothSource for provenance/capabilities, but the interface is not discovered as a source package.
 
@@ -298,7 +298,9 @@ A **module** is a directory-scoped compilation/visibility unit rooted by `@mod.m
 
 A rooted directory is one structural module with one `ModuleId`, one compilation and shared owned helper sources. It recognises exactly three optional authored root files, case-sensitively: `@mod.moth` is the normal API facade, `@package.moth` is the support API facade or external project package surface, and `@entry.moth` is the entry root. At least one present root makes the directory rooted, and a directory may contain any subset of the three, including all three. An entry-only directory is a valid module with no importable API.
 
-Any other authored `.moth` filename whose stem starts with `@`, `+` or `#`, including case-only variants such as `@Entry.moth`, is a Stage 0 `InvalidModuleRootFileName` error that names the invalid file and the three accepted root files without inferring a replacement role. Non-`.moth` files such as `@theme.css` and `+notes.mtf` remain ordinary resources resolved by ordinary dependency path and visibility rules, and `config.moth` remains the optional top-level build-only config rather than a root.
+`@config.moth` is a fourth reserved compiler filename, accepted only at the selected project root as the optional build-only config. It is not a module-root role and never roots a directory, so a directory containing only `@config.moth` is not a module. Source classification recognises that exact spelling before the generic invalid-marker check, and a case variant such as `@Config.moth` stays invalid. A nested `@config.moth` is inert to the enclosing build. Unmarked `config.moth` keeps ordinary helper rules, so an `@config` dependency resolves it when present and never the build-only file.
+
+Any other authored `.moth` filename whose stem starts with `@`, `+` or `#`, including case-only variants such as `@Entry.moth`, is a Stage 0 `InvalidModuleRootFileName` error that names the invalid file and the three accepted root files without inferring a replacement role. Non-`.moth` files such as `@theme.css` and `+notes.mtf` remain ordinary resources resolved by ordinary dependency path and visibility rules.
 
 Each root file is a root-local declaration and visibility scope. Its top-level declarations are visible only in that file. Ordinary helper `.moth` files are shared, prepared once and cannot see any root-local declaration. A root binds helper declarations through ordinary dependency clauses and cannot import another root by a direct special-file path. Same-spelling declarations in disjoint roots remain independent. Every root claim must resolve to a distinct physical file owned by its structural module. Aliases to one canonical file, including across directories, are rejected before module identity or semantics.
 
@@ -308,7 +310,7 @@ The normal and support facades have separate role-qualified semantic origins and
 
 Support visibility selects by the importing source's role. `@package` sources occupy strict support-consumer positions, while `@mod` and `@entry` sources occupy normal positions. An entry-only module can therefore be the nearest normal-position owner of a support-only module. A co-located `@entry` does not grant its `@package` facade entry privileges, and shared helpers must obey the intersection of the imports legal to every root that can consume them. Support facades cannot import their own facade, an impermissible normal sibling, their parent consumer or a same-scope support sibling.
 
-The project-root `@package.moth` is the external project package surface. Registered Core and Builder source packages keep their existing normal-or-support public-root contract and never require `@package`. A package surface never activates an imported entry.
+The project-root `@package.moth` is the external project package surface. Every registered Core and Builder source package publishes its external API through a directly contained `@package.moth`, so `@mod.moth` alone is insufficient. Ordinary project modules keep every optional root combination, including normal-only and entry-only. A package surface never activates an imported entry.
 
 ### Module-root-relative dependency clauses
 
@@ -359,7 +361,7 @@ The same name may occur in disjoint scopes. Overlapping visible scopes are rejec
 
 ### Project package surface
 
-A `@package.moth` at the selected build root is an ordinary support surface over that structural module. Package assembly may select it as the external project package surface, whether or not the same directory also has `@mod.moth`, `@entry.moth` or `config.moth`. It is not a separate graph node or root-file kind. Only an external project package requires this project-root facade. Without it, the project has no external Moth package surface even when it has `@mod.moth`.
+A `@package.moth` at the selected build root is an ordinary support surface over that structural module. Package assembly may select it as the external project package surface, whether or not the same directory also has `@mod.moth`, `@entry.moth` or `@config.moth`. It is not a separate graph node or root-file kind. Only an external project package requires this project-root facade. Without it, the project has no external Moth package surface even when it has `@mod.moth`.
 
 The project package surface never bypasses public boundaries, is invisible to internal modules, cannot import `@project` and cannot expose prohibited project-dependent facts. Provider edges ensure its dependencies compile first. It has no root runtime activation or route.
 
@@ -368,6 +370,12 @@ The project package surface never bypasses public boundaries, is invisible to in
 ### Namespace and collision policy
 
 Dependency resolution has no precedence, nearest-match shadowing or ordered fallback. Reject overlapping visible identities among project globals, support packages, child modules, extensionless files, internal directory segments, external project package name, Core/Builder roots and dependency aliases, including case-only variants.
+
+`core/` and `builder/` are reserved package namespace roots with one owning origin each. Core owns every registered path below `core/`, Builder owns every registered path below `builder/`. Builder registrations use an explicit path below the root, such as `@builder/web/site` or `@builder/game`. Neither exact root is importable, and ProjectLocal or Dependency packages cannot claim either root, including case-only variants. Registration rejects empty components, exact reserved-root registrations, case-insensitive equal overlaps, ancestor or descendant overlaps and cross-origin claims. The rule covers source-backed and binding-backed registrations alike, so the backing never changes namespace ownership.
+
+Project-local structural claims reserve only importable names. A local normal or support facade, importable helper or alias that claims `core` or `builder` under case folding is rejected. Entry-only modules, their private helpers, directories containing only entry modules and plain asset directories stay legal because they publish no importable package identity. A directory name alone never triggers that rejection.
+
+A separate exact-path rule protects registered package identities. A project folder whose full path matches a registered package path, such as `core/html/`, collides whichever module owns it, even when the folder holds no importable surface. Comparison ignores ASCII case. An ancestor folder such as `core/` alone, or an unrelated asset directory, stays legal. Unrelated local `html/`, `css/`, `styles/` and `web/` folders also stay legal, and copying a package folder to a non-reserved local path grants ordinary support-facade visibility rather than Core or Builder identity.
 
 Recognised extensionless source kinds share a namespace. `docs.moth`, `docs.mtf`, `docs.md` and `docs/` cannot coexist where each means `@docs`. An explicit-extension provider file may share a stem with a directory only when syntax stays unambiguous. Diagnostics identify every conflicting declaration and the overlapping scope.
 
@@ -380,7 +388,7 @@ Package origin and backing are independent:
 | Origin | Core, Builder, ProjectLocal or Dependency. |
 | Backing | MothSource or ExternalBinding. |
 
-For example, `@html` and `@styles` are Core/MothSource, `@web/site` is Builder/MothSource, a virtual Core IO package is Core/ExternalBinding, a support facade is ProjectLocal/MothSource and an annotated project JavaScript file is ProjectLocal/ExternalBinding.
+For example, `@core/html` and `@core/css` are Core/MothSource, `@builder/web/site` is Builder/MothSource, `@builder/web/canvas` is Builder/ExternalBinding, a virtual Core IO package is Core/ExternalBinding, a support facade is ProjectLocal/MothSource and an annotated project JavaScript file is ProjectLocal/ExternalBinding.
 
 Classification records provenance/implementation. It changes no namespace precedence, visibility, facade privacy, dependency syntax or receiver semantics. Source and binding registries remain separate because their discovery and runtime contracts differ.
 
@@ -447,7 +455,7 @@ publishing remain separately gated.
 
 ### Core and Builder source package graphs
 
-Source-backed Core/Builder packages compile as separate immutable graphs under the same fixed language numeric contract. They do not receive the project's globals. A registered source package needs at least one API facade root, `@mod.moth` or `@package.moth`, under its existing public-root contract; an entry-only package root is not importable. Only an external project package requires project-root `@package.moth`. A collocated `@entry.moth` is allowed inside a dependency but never activated. Moth-native signatures keep exact canonical types such as `I32`, `U64` and `F64`; they are never rewritten to physical foreign carrier types.
+Source-backed Core/Builder packages compile as separate immutable graphs under the same fixed language numeric contract. They do not receive the project's globals. Every registered source package publishes its external API through a `@package.moth` directly contained in its registered root, so `@mod.moth` alone is insufficient and an entry-only root is not importable. A co-located `@mod.moth` may still own a distinct internal normal-position scope. A missing facade is a structure diagnostic for a third-party package and a damaged-package-set `InfrastructureFailure` when the root belongs to the compiler-shipped set. A collocated `@entry.moth` is allowed inside a dependency but never activated. Moth-native signatures keep exact canonical types such as `I32`, `U64` and `F64`; they are never rewritten to physical foreign carrier types.
 
 A package needing project-specific compile-time input receives an explicit builder-owned synthetic interface declared in capability metadata. It is not `@project`, is never implicitly injected, carries provenance/fingerprints and makes the resulting artefact project-specific. Otherwise compatible pure package artefacts remain reusable.
 

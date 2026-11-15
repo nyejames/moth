@@ -12,7 +12,7 @@ These docs teach the concepts rather than document every behaviour the compiler 
 
 [codeblock, $code "text":
 compiler_walkthrough/
-├── config.moth
+├── @config.moth
 ├── @entry.moth
 └── greeting.moth
 ]

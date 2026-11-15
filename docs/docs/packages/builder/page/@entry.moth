@@ -8,7 +8,7 @@
     sidebar,
     init_docs_sidebar
 
-[$in title:["@web/page"]]
+[$in title:["@builder/web/page"]]
 [$in description:["Live browser state and navigation from the HTML builder."]]
 [$in head:[language_theme_head]]
 
@@ -16,10 +16,10 @@
 [sidebar]
 init_docs_sidebar()!
 [section, $md:
-    # @web/page
+    # @builder/web/page
 
-    `@web/page` reads live browser document and viewport state through a
-    binding-backed package. It also offers opt-in navigation synchronisation.
+    `@builder/web/page` reads live browser document and viewport state through
+    a binding-backed package. It also offers opt-in navigation synchronisation.
 ]
 
 [section:
@@ -35,7 +35,7 @@ init_docs_sidebar()!
 [section:
     [doc_pager:
         [$in previous_path:../site/]
-        [$in previous_title:@web/site]
+        [$in previous_title:@builder/web/site]
         [$in next_path:../../../memory/]
         [$in next_title:Memory and lifetimes]
     ]

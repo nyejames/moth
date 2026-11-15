@@ -18,7 +18,7 @@ init_docs_sidebar()!
     packages make that separation explicit, while keeping application
     logic in Moth rather than handwritten JavaScript.
 
-    The synchronous `@web/dom` package and the later event-to-Channel
+    The synchronous `@builder/web/dom` package and the later event-to-Channel
     bridge are future design. See the @../../progress (progress matrix)
     for current capabilities.
 ]

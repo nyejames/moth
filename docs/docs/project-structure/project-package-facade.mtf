@@ -4,7 +4,7 @@ The project package facade exposes a project's public API to external consumers.
 
 One optional `@package.moth` at the selected project directory is the external project package surface. Package assembly selects that support interface. It never falls back to the normal `@mod.moth` facade.
 
-The directory may also contain `@mod.moth`, `@entry.moth` and `config.moth`. The project can be an application and a package at the same time.
+The directory may also contain `@mod.moth`, `@entry.moth` and `@config.moth`. The project can be an application and a package at the same time.
 
 The support root may publish functions, structs, choices, type aliases, traits, compile-time constants and direct-selection re-exports with `$export`. Helpers are shared with the other roots, but no root can import another root's local declarations.
 
@@ -45,7 +45,9 @@ The validator does not treat implementation-only dependence as a reusable packag
 
 ### Registered package surfaces
 
-Only the external project package needs a project-root `@package.moth`. Registered Core and Builder source-backed packages keep their existing normal-or-support public-root contract. For example, `packages/html/@mod.moth` and `packages/web/site/@mod.moth` publish normal surfaces without a `@package` root.
+Every registered Moth-source package publishes its external API through a directly contained `@package.moth`. A `@mod.moth` alone never satisfies registration, though it may still own a separate internal normal-position scope. The external project package follows the same facade rule. Binding-backed packages have no source facade.
+
+For example, `packages/core/html/@package.moth`, `packages/core/css/@package.moth` and `packages/builder/web/site/@package.moth` publish their package surfaces. A compiler-shipped set that has lost a required facade is damaged and reports an infrastructure failure. A malformed third-party registered package reports a structure diagnostic naming `@package.moth`.
 
 Importing a package never activates its entry. A builder that registers a source package publishes that package's declared API surface, not a project facade.
 

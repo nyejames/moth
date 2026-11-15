@@ -286,7 +286,7 @@ The memory-strategy planner uses this order and stops at the first mechanism tha
 3. **Declared-region ownership.** Use the hard declared-region lifetime. Declared-region-owned allocations never use REC.
 4. **Complete final cleanup frontier.** If every possible runtime-many retained edge disappears at one statically proven frontier, create an inferred region or region epoch that ends there.
 5. **Field-sensitive allocation splitting.** Split an expensive parent family when a small retained field can legally become independent, then rerun selection for the new families.
-6. **Statically cheap bounded retention.** A simple, conservative compiler-owned heuristic may accept the fallback region when retained-family size, allocation-site repetition, known maximum cardinality, fallback lifecycle breadth and distance to a frontier are all bounded enough. This heuristic must not become a user-facing `config.moth` contract.
+6. **Statically cheap bounded retention.** A simple, conservative compiler-owned heuristic may accept the fallback region when retained-family size, allocation-site repetition, known maximum cardinality, fallback lifecycle breadth and distance to a frontier are all bounded enough. This heuristic must not become a user-facing `@config.moth` contract.
 7. **REC.** Select REC when runtime-many persistent edges disappear independently and region retention would be materially broader than useful lifetime.
 
 ### Static fallback-region invariant

@@ -52,20 +52,25 @@ use std::path::{Path, PathBuf};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::project_structure_diagnostics::{
-    invalid_module_root_file_name_error, non_utf8_filesystem_name_error, path_id,
-    project_structure_diagnostic,
+    entry_root_package_prefix_collision_error, invalid_module_root_file_name_error,
+    non_utf8_filesystem_name_error, path_id, project_structure_diagnostic,
 };
 
 /// Local namespace facts for one synthetic owning root.
 ///
-/// WHAT: the immediate names the synthetic resolver checks for package overlap, plus one
-/// importable claim on a reserved package namespace root when the selection owns no module
-/// topology.
-/// WHY: both facts come from one directory scan, so reserved-root ownership never requires a
-/// second traversal or content inference.
+/// WHAT: the immediate names the synthetic resolver checks for package overlap, one importable
+/// claim on a reserved package namespace root when the selection owns no module topology, and the
+/// first local directory claiming a registered source-package prefix.
+/// WHY: every fact comes from one directory scan, so neither reserved-root ownership nor the
+/// exact-prefix collision requires a second traversal or content inference.
 pub(super) struct SingleFileNamespaceInventory {
     pub(super) keys: BTreeSet<String>,
     pub(super) reserved_root_claim: Option<(String, PathBuf)>,
+    /// The first registered prefix with a matching directory, plus that directory's authored path.
+    ///
+    /// The pair retains the registered spelling and the authored directory path so the caller can
+    /// build `EntryRootPackagePrefixCollision` with the same diagnostic owner as directory mode.
+    pub(super) registered_prefix_collision: Option<(String, PathBuf)>,
 }
 
 /// Directory names that are never source regardless of configuration.
@@ -986,33 +991,20 @@ impl SourceTreeIndex {
                     .strip_prefix(&entry_root)
                     .expect("visited project directories stay inside the entry root");
                 if let Some((package, folder_name)) = source_packages.iter().find_map(|package| {
-                    let (parent, name) = package
-                        .package_prefix
-                        .rsplit_once('/')
-                        .unwrap_or(("", &package.package_prefix));
+                    let (parent, name) = split_package_prefix(&package.package_prefix);
                     if !package_parent_matches(parent, relative_directory) {
                         return None;
                     }
                     dependency_folder_names
                         .iter()
-                        .find(|folder_name| folder_name.eq_ignore_ascii_case(name))
+                        .find(|folder_name| folder_name_claims_package_component(folder_name, name))
                         .map(|folder_name| (package, folder_name))
                 }) {
                     let colliding_folder = directory.join(folder_name);
-                    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-                    let reason = InvalidConfigReason::EntryRootPackagePrefixCollision {
-                        prefix: diagnostic_strings.intern(&package.package_prefix),
-                        entry_folder: path_id(&colliding_folder, &mut diagnostic_strings),
-                    };
-                    let diagnostic = project_structure_diagnostic(reason);
-                    let table = string_table.take_for_handoff();
-                    return Err(PreparedFailure::Diagnosed(
-                        PreparedDiagnosticBatch::capture_from_bag(
-                            DiagnosticBag::from(diagnostic),
-                            table,
-                            None,
-                            None,
-                        ),
+                    return Err(entry_root_package_prefix_collision_error(
+                        &package.package_prefix,
+                        &colliding_folder,
+                        string_table,
                     ));
                 }
             }
@@ -1108,62 +1100,98 @@ impl SourceTreeIndex {
 
     /// Collect local namespace facts without loading sources.
     ///
-    /// WHAT: immediate namespace keys, plus one importable source claiming a reserved package
-    /// namespace root when this synthetic unit has no module topology.
+    /// WHAT: immediate namespace keys, one importable source claiming a reserved package
+    /// namespace root, and the first local directory claiming a registered source-package prefix
+    /// when this synthetic unit has no module topology.
     /// WHY: synthetic discovery needs these names even when their sources are not reachable, so a
     /// registered package never takes precedence over a local source or directory segment. A
-    /// selection that owns module roots validates reserved-root ownership from those Stage 0
-    /// namespaces instead; only a selection without them needs the path walk below.
+    /// selection that owns module roots validates reserved-root ownership and registered
+    /// source-package prefix collisions from its Stage 0 index instead; only a selection without
+    /// them needs the bounded path walk below.
+    ///
+    /// `registered_package_prefixes` are the `@`-stripped registered source-package paths that
+    /// directory compilation checks. Binding packages share import names but own no project-local
+    /// filesystem path, so they contribute no exact-prefix directory collision. Only each source
+    /// prefix's corresponding relative path below `source_root` is probed, so arbitrary descendant
+    /// directories never enter the collision inventory.
     pub(super) fn single_file_namespace_inventory(
         source_root: &Path,
         has_module_topology: bool,
+        registered_package_prefixes: &[&str],
     ) -> Result<SingleFileNamespaceInventory, PreparedFailure> {
         let skip_policy = SourceTreeSkipPolicy::default();
         let mut keys = BTreeSet::new();
         let mut reserved_root_claim = None;
+        let mut root_directories = Vec::new();
+        // One classified pass supplies every fact: files own helper keys and claim spellings, while
+        // directories own namespace keys, reserved-root claims and the roots registered-prefix
+        // probing descends from.
         for entry in Self::sorted_directory_entries(source_root)? {
-            let Some((path, is_directory, file_name)) =
-                eligible_single_file_entry(&skip_policy, source_root, &entry)?
-            else {
+            let Some(entry) = eligible_single_file_entry(&skip_policy, source_root, &entry)? else {
                 continue;
             };
-            if is_directory {
-                // A reserved directory is never itself a package-collision key. An importable
-                // claim below it aborts compilation, and a reserved directory without importable
-                // sources must leave `@core/...` and `@builder/...` imports to their registered
-                // packages.
-                if is_reserved_package_namespace_root(&file_name) {
-                    if !has_module_topology && reserved_root_claim.is_none() {
-                        // The selected root is the first visited destination so a symlink alias
-                        // back to it cannot re-enter the same subtree.
-                        let mut visited_directories =
-                            BTreeSet::from([canonicalize_source_path(source_root)?]);
-                        reserved_root_claim = reserved_root_directory_claim(
-                            &path,
-                            &file_name,
-                            &skip_policy,
-                            source_root,
-                            &mut visited_directories,
-                        )?;
+            let Some(directory_identity) = entry.directory_identity else {
+                if let Some(stem) = ordinary_helper_source_stem(&entry.listed_name) {
+                    // Ordinary supported sources may use a `+` stem (`+notes.mtf` contributes
+                    // `+notes`); canonical root files and invalid markers keep no helper
+                    // identity.
+                    if !has_module_topology
+                        && reserved_root_claim.is_none()
+                        && reserved_package_namespace_claim_root(stem).is_some()
+                    {
+                        reserved_root_claim = Some((stem.to_owned(), entry.listed_path));
                     }
-                    continue;
+                    keys.insert(stem.to_owned());
                 }
-                keys.insert(file_name);
-            } else if let Some(stem) = ordinary_helper_source_stem(&file_name) {
-                // Ordinary supported sources may use a `+` stem (`+notes.mtf` contributes
-                // `+notes`); canonical root files and invalid markers keep no helper identity.
-                if !has_module_topology
-                    && reserved_root_claim.is_none()
-                    && reserved_package_namespace_claim_root(stem).is_some()
-                {
-                    reserved_root_claim = Some((stem.to_owned(), path));
-                }
-                keys.insert(stem.to_owned());
+                continue;
+            };
+
+            let is_reserved_namespace_root = is_reserved_package_namespace_root(&entry.listed_name);
+            // A reserved directory is never itself a package-collision key. An importable claim
+            // below it aborts compilation, and a reserved directory without importable sources
+            // must leave `@core/...` and `@builder/...` imports to their registered packages.
+            if is_reserved_namespace_root && !has_module_topology && reserved_root_claim.is_none() {
+                // The selected root is the first visited destination so a symlink alias back to
+                // it cannot re-enter the same subtree.
+                let mut visited_directories =
+                    BTreeSet::from([canonicalize_source_path(source_root)?]);
+                reserved_root_claim = reserved_root_directory_claim(
+                    &entry.listed_path,
+                    &entry.listed_name,
+                    &skip_policy,
+                    source_root,
+                    &mut visited_directories,
+                )?;
             }
+            // The registered-prefix collision walk starts from these already-classified entries,
+            // so it never repeats the root listing this scan owns.
+            if !has_module_topology {
+                root_directories.push(EligibleDirectoryEntry {
+                    listed_path: entry.listed_path,
+                    identity: directory_identity,
+                });
+            }
+            if is_reserved_namespace_root {
+                continue;
+            }
+            keys.insert(entry.listed_name);
         }
+
+        let registered_prefix_collision = if has_module_topology {
+            None
+        } else {
+            registered_package_prefix_collision(
+                source_root,
+                &root_directories,
+                registered_package_prefixes,
+                &skip_policy,
+            )?
+        };
+
         Ok(SingleFileNamespaceInventory {
             keys,
             reserved_root_claim,
+            registered_prefix_collision,
         })
     }
 
@@ -1655,8 +1683,27 @@ fn logical_module_path_from(
         })
 }
 
-/// Whether an entry-root-relative directory is a registered package prefix's parent, comparing
-/// components ASCII-case-insensitively like package identities. An empty parent is the entry root.
+/// Split one registered package prefix into its parent path and final folder name.
+///
+/// A prefix with no `/` has an empty parent, which matches the entry root itself.
+fn split_package_prefix(package_prefix: &str) -> (&str, &str) {
+    package_prefix
+        .rsplit_once('/')
+        .unwrap_or(("", package_prefix))
+}
+
+/// Whether one folder name claims one registered package-prefix component.
+///
+/// Package identities compare components ASCII-case-insensitively on every host, so a folder's
+/// filesystem spelling never decides an exact-prefix collision on its own.
+fn folder_name_claims_package_component(folder_name: &str, component: &str) -> bool {
+    folder_name.eq_ignore_ascii_case(component)
+}
+
+/// Whether an entry-root-relative directory is a registered package prefix's parent.
+///
+/// An empty parent is the entry root. Every parent component must match one directory component,
+/// with no extra components left over.
 fn package_parent_matches(parent: &str, relative_directory: &Path) -> bool {
     let mut components = relative_directory.components();
     parent
@@ -1666,7 +1713,7 @@ fn package_parent_matches(parent: &str, relative_directory: &Path) -> bool {
             components
                 .next()
                 .and_then(|component| component.as_os_str().to_str())
-                .is_some_and(|component| component.eq_ignore_ascii_case(segment))
+                .is_some_and(|component| folder_name_claims_package_component(component, segment))
         })
         && components.next().is_none()
 }
@@ -1952,17 +1999,89 @@ fn build_source_inventory(
     })
 }
 
+/// One eligible entry classified for the synthetic namespace inventory.
+///
+/// WHAT: retains the authored path and listed file name plus the directory identity when the
+/// entry is a directory.
+/// WHY: the top-level key scan needs the authored name, while registered-prefix probing needs the
+/// canonical destination so parent identity matches the directory traversal. One classification
+/// pass supplies both.
+struct EligibleSingleFileEntry {
+    listed_path: PathBuf,
+    listed_name: String,
+    /// `None` for a file; the directory's physical identity otherwise.
+    directory_identity: Option<EligibleDirectoryIdentity>,
+}
+
+/// The physical identity of one eligible directory entry.
+enum EligibleDirectoryIdentity {
+    /// The listed path below its canonical parent is already canonical.
+    Physical,
+    /// A symlink alias, retaining its canonical destination.
+    Aliased(PathBuf),
+}
+
+/// One eligible directory below a directory being probed for an exact registered prefix.
+///
+/// `listed_path` keeps the authored spelling below its canonical parent for the leaf diagnostic,
+/// while the identity supplies the physical destination used for parent-component identity.
+///
+/// Aliases are identified by their destination because the directory traversal canonicalizes every
+/// queued directory before comparing its relative path with a registered parent prefix. They remain
+/// eligible leaf names because the traversal's leaf check reads listed folder names.
+struct EligibleDirectoryEntry {
+    listed_path: PathBuf,
+    identity: EligibleDirectoryIdentity,
+}
+
+impl EligibleDirectoryEntry {
+    /// The canonical destination used for parent-component identity and descent.
+    fn canonical_path(&self) -> &Path {
+        match &self.identity {
+            EligibleDirectoryIdentity::Physical => &self.listed_path,
+            EligibleDirectoryIdentity::Aliased(destination) => destination,
+        }
+    }
+
+    /// Whether the authored path is already the canonical destination.
+    fn is_physical(&self) -> bool {
+        matches!(self.identity, EligibleDirectoryIdentity::Physical)
+    }
+
+    /// Whether the authored folder name claims one registered leaf component.
+    fn listed_name_matches(&self, component: &str) -> bool {
+        self.listed_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| folder_name_claims_package_component(name, component))
+    }
+
+    /// Whether this directory's canonical destination names one registered parent component.
+    ///
+    /// The directory traversal compares the relative canonical path, so a symlink alias must not
+    /// claim the alias spelling as a physical parent identity.
+    fn canonical_name_matches(&self, component: &str) -> bool {
+        self.canonical_path()
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| folder_name_claims_package_component(name, component))
+    }
+}
+
 /// Classify one immediate or recursive directory entry for the synthetic namespace inventory.
 ///
 /// WHAT: applies the same listed-type, alias and skip-policy rules as the bounded single-file
-/// scan and returns the entry's path, directory flag and UTF-8 file name when eligible.
+/// scan and returns the entry's authored path, UTF-8 file name and directory identity when the
+/// entry is a directory.
 /// WHY: the top-level key scan and the reserved-directory source inspection must agree on which
-/// entries can become importable synthetic namespace claims.
+/// entries can become importable synthetic namespace claims. Registered-prefix probing also needs
+/// the canonical destination so it reaches the outcome directory compilation reaches after
+/// canonicalizing queued directories.
 fn eligible_single_file_entry(
     skip_policy: &SourceTreeSkipPolicy,
     source_root: &Path,
     entry: &fs::DirEntry,
-) -> Result<Option<(PathBuf, bool, String)>, PreparedFailure> {
+) -> Result<Option<EligibleSingleFileEntry>, PreparedFailure> {
     let path = entry.path();
     // As in the traversal, a non-symlink entry's listed type avoids a metadata probe.
     // Symlinks and unreadable entry types resolve their physical destination once.
@@ -1979,39 +2098,159 @@ fn eligible_single_file_entry(
     if !is_directory && !is_file {
         return Ok(None);
     }
-
-    if is_directory {
-        let eligible = match listed_type {
-            Some(_) => skip_policy.authored_directory_is_eligible(&path, source_root),
+    let directory_identity = if is_directory {
+        match listed_type {
+            Some(_) => {
+                if !skip_policy.authored_directory_is_eligible(&path, source_root) {
+                    return Ok(None);
+                }
+                // The parent is canonical, so a normal directory's listed path is already its
+                // physical destination.
+                Some(EligibleDirectoryIdentity::Physical)
+            }
             None => {
                 let canonical_directory = canonicalize_source_path(&path)?;
-                skip_policy.resolved_directory_is_eligible(&canonical_directory, source_root)
+                if !skip_policy.resolved_directory_is_eligible(&canonical_directory, source_root) {
+                    return Ok(None);
+                }
+                Some(EligibleDirectoryIdentity::Aliased(canonical_directory))
             }
-        };
-        if !eligible {
-            return Ok(None);
         }
-    } else if listed_type.is_none() {
-        // File names may start with `_`; only the physical directory ancestry excludes a
-        // source alias. This keeps `_helper.moth` and eligible in-boundary aliases while
-        // dropping visible aliases into hidden, fixed-skipped or external trees.
-        let canonical_file = canonicalize_source_path(&path)?;
-        let Some(canonical_parent) = canonical_file.parent() else {
-            return Ok(None);
-        };
-        if !canonical_file.starts_with(source_root)
-            || skip_policy.canonical_ancestor_is_skipped(canonical_parent, source_root)
-        {
-            return Ok(None);
+    } else {
+        if listed_type.is_none() {
+            // File names may start with `_`; only the physical directory ancestry excludes a
+            // source alias. This keeps `_helper.moth` and eligible in-boundary aliases while
+            // dropping visible aliases into hidden, fixed-skipped or external trees.
+            let canonical_file = canonicalize_source_path(&path)?;
+            let Some(canonical_parent) = canonical_file.parent() else {
+                return Ok(None);
+            };
+            if !canonical_file.starts_with(source_root)
+                || skip_policy.canonical_ancestor_is_skipped(canonical_parent, source_root)
+            {
+                return Ok(None);
+            }
         }
-    }
+        None
+    };
 
-    let file_name = path
+    let listed_name = path
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| non_utf8_filesystem_name_error(&path, "single-file namespace name"))?
         .to_owned();
-    Ok(Some((path, is_directory, file_name)))
+    Ok(Some(EligibleSingleFileEntry {
+        listed_path: path,
+        listed_name,
+        directory_identity,
+    }))
+}
+
+/// List the eligible child directories of one canonical directory.
+///
+/// WHY: registered-prefix probing descends from an already canonical parent, so every child's
+/// listed name and physical destination are both available from one listing. The destination is
+/// what the directory traversal compares when it canonicalizes queued directories.
+fn eligible_child_directories(
+    directory: &Path,
+    source_root: &Path,
+    skip_policy: &SourceTreeSkipPolicy,
+) -> Result<Vec<EligibleDirectoryEntry>, PreparedFailure> {
+    let mut directories = Vec::new();
+    for entry in SourceTreeIndex::sorted_directory_entries(directory)? {
+        let Some(entry) = eligible_single_file_entry(skip_policy, source_root, &entry)? else {
+            continue;
+        };
+        let Some(identity) = entry.directory_identity else {
+            continue;
+        };
+        directories.push(EligibleDirectoryEntry {
+            listed_path: entry.listed_path,
+            identity,
+        });
+    }
+    Ok(directories)
+}
+
+/// Find the first local directory below the synthetic source root whose relative path equals a
+/// registered package prefix.
+///
+/// WHAT: splits each registered prefix into its parent path and leaf folder name. Parent components
+/// follow physical canonical directories, mirroring the directory traversal after it canonicalizes
+/// queued directories, and every case-equivalent candidate at every component is probed. The leaf
+/// matches the authored folder name below its canonical parent, which is what the traversal's
+/// per-directory collision check names.
+/// WHY: directory compilation reports `EntryRootPackagePrefixCollision` for the same filesystem
+/// path even when the local directory publishes no interface. An ordinary selected file owns no
+/// Stage 0 traversal, so this bounded per-prefix walk is the only evidence available. Probing only
+/// registered identities keeps arbitrary descendant directories out of the scan, and the first
+/// registered prefix with a matching directory aborts compilation, so later prefixes need no probe.
+fn registered_package_prefix_collision(
+    source_root: &Path,
+    root_directories: &[EligibleDirectoryEntry],
+    registered_package_prefixes: &[&str],
+    skip_policy: &SourceTreeSkipPolicy,
+) -> Result<Option<(String, PathBuf)>, PreparedFailure> {
+    for &registered_prefix in registered_package_prefixes {
+        let (parent, leaf_component) = split_package_prefix(registered_prefix);
+        let parent_components = parent
+            .split('/')
+            .filter(|component| !component.is_empty())
+            .collect::<Vec<_>>();
+
+        let colliding_directory = matching_leaf_directory(
+            source_root,
+            root_directories,
+            &parent_components,
+            leaf_component,
+            skip_policy,
+        )?;
+        if let Some(colliding_directory) = colliding_directory {
+            return Ok(Some((registered_prefix.to_owned(), colliding_directory)));
+        }
+    }
+    Ok(None)
+}
+
+/// Resolve the parent components of one registered prefix and match its leaf directory.
+///
+/// `directories` are the eligible children of the canonical directory that already matched the
+/// preceding parent components. Parent components follow physical directories only, because the
+/// directory traversal compares canonical relative paths and a symlink alias therefore cannot add
+/// a parent identity. Every case-equivalent candidate is followed, so one spelling that lacks the
+/// deeper path cannot hide another that has it. The leaf is matched against every listed folder
+/// name, including aliases, exactly like the traversal's per-directory leaf check.
+fn matching_leaf_directory(
+    source_root: &Path,
+    directories: &[EligibleDirectoryEntry],
+    parent_components: &[&str],
+    leaf_component: &str,
+    skip_policy: &SourceTreeSkipPolicy,
+) -> Result<Option<PathBuf>, PreparedFailure> {
+    let Some((parent_component, remaining_parent_components)) = parent_components.split_first()
+    else {
+        return Ok(directories
+            .iter()
+            .find(|directory| directory.listed_name_matches(leaf_component))
+            .map(|directory| directory.listed_path.clone()));
+    };
+
+    for directory in directories.iter().filter(|directory| {
+        directory.is_physical() && directory.canonical_name_matches(parent_component)
+    }) {
+        let children =
+            eligible_child_directories(directory.canonical_path(), source_root, skip_policy)?;
+        if let Some(colliding_directory) = matching_leaf_directory(
+            source_root,
+            &children,
+            remaining_parent_components,
+            leaf_component,
+            skip_policy,
+        )? {
+            return Ok(Some(colliding_directory));
+        }
+    }
+    Ok(None)
 }
 
 /// Find the first importable claim below one reserved-root directory when the selection owns no
@@ -2057,16 +2296,14 @@ fn reserved_root_directory_claim(
     let mut subdirectories = Vec::new();
 
     for entry in SourceTreeIndex::sorted_directory_entries(directory)? {
-        let Some((path, is_directory, file_name)) =
-            eligible_single_file_entry(skip_policy, source_root, &entry)?
-        else {
+        let Some(entry) = eligible_single_file_entry(skip_policy, source_root, &entry)? else {
             continue;
         };
-        if is_directory {
-            subdirectories.push(path);
+        if entry.directory_identity.is_some() {
+            subdirectories.push(entry.listed_path);
             continue;
         }
-        if let Some(role) = module_root_role_for_file_name(&file_name) {
+        if let Some(role) = module_root_role_for_file_name(&entry.listed_name) {
             match role {
                 ModuleRootRole::Normal => has_normal_root = true,
                 ModuleRootRole::Support => has_support_root = true,
@@ -2075,8 +2312,8 @@ fn reserved_root_directory_claim(
             }
             continue;
         }
-        if ordinary_helper_source_stem(&file_name).is_some() {
-            helper_source.get_or_insert(path);
+        if ordinary_helper_source_stem(&entry.listed_name).is_some() {
+            helper_source.get_or_insert(entry.listed_path);
         }
     }
 

@@ -8,7 +8,7 @@
     sidebar,
     init_docs_sidebar
 
-[$in title:["@styles"]]
+[$in title:["@core/css"]]
 [$in description:["Inline style fragments from the universal Core source package."]]
 [$in head:[language_theme_head]]
 
@@ -16,11 +16,12 @@
 [sidebar]
 init_docs_sidebar()!
 [section, $md:
-    # @styles
+    # @core/css
 
-    `@styles` provides inline style fragments for the `style` slots exposed by
-    `@html`. It is a mandatory Core/MothSource package, so every builder gets the
-    same six constants and the same `.mtf` prelude contribution.
+    `@core/css` provides inline style fragments for the `style` slots exposed by
+    `@core/html`. It is a mandatory Core/MothSource package, so every builder
+    gets the same six constants and the same `.mtf` prelude contribution. It
+    publishes through a directly contained `@package.moth`.
 ]
 
 [section:
@@ -36,7 +37,7 @@ init_docs_sidebar()!
 [section:
     [doc_pager:
         [$in previous_path:../html/]
-        [$in previous_title:@html]
+        [$in previous_title:@core/html]
         [$in next_path:../prelude/]
         [$in next_title:Prelude policy]
     ]

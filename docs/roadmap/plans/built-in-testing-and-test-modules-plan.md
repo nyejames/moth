@@ -28,7 +28,7 @@ Before activation, require:
 
 ## 1. Accepted test source and module model
 
-A `tests/` directory immediately inside a normal production module directory is its reserved test module. A `tests/` directory alongside project `config.moth` is the project test module. Both are test-only and excluded from ordinary build, package and runtime source sets. Treat the project-level root as a test consumer, not the private-test child of every production module.
+A `tests/` directory immediately inside a normal production module directory is its reserved test module. A `tests/` directory alongside project `@config.moth` is the project test module. Both are test-only and excluded from ordinary build, package and runtime source sets. Treat the project-level root as a test consumer, not the private-test child of every production module.
 
 Only the specific directories above gain test-module meaning. Ordinary descendant folders under a `tests/` module may organise source and fixtures according to normal owned-file rules. A `tests/` directory elsewhere is not a new implicit module solely because of its basename. Reserve `tests` as a module-root/path identity so ordinary source roots, module directories and source kinds cannot claim conflicting `tests` identities in those scopes.
 
@@ -36,7 +36,7 @@ Example:
 
 ```text
 project/
-  config.moth
+  @config.moth
   @package.moth                   # Optional external package facade
   tests/
     @package.moth                 # Optional test support facade: @tests

@@ -100,7 +100,7 @@ These are diagnostics rather than file values:
 - a missing target
 - a path followed by dependency selections
 
-A file path in `config.moth` is also rejected. Config is compiled before the source graph exists, so it cannot name a build input by path.
+A file path in `@config.moth` is also rejected. Config is compiled before the source graph exists, so it cannot name a build input by path.
 
 ### Site-root URLs
 

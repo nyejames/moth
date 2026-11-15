@@ -1,6 +1,6 @@
-# `@web/page`
+# `@builder/web/page`
 
-`@web/page` is the HTML builder's ExternalBinding package for live browser document and viewport state. It shares the `@web` prefix with `@web/site`, a Builder/MothSource package for static compile-time URLs at `packages/web/site/`.
+`@builder/web/page` is the HTML builder's ExternalBinding package for live browser document and viewport state. It shares the `web` group under `@builder/` with `@builder/web/site`, a Builder/MothSource package for static compile-time URLs at `packages/builder/web/site/`.
 
 | Owner | Holds |
 |---|---|

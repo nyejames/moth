@@ -4,7 +4,7 @@ output.
 
 ### A deliberately small result type
 
-This is an illustrative source-backed `@html` design, not a committed
+This is an illustrative source-backed `@core/html` design, not a committed
 constructor or public signature:
 
 [codeblock, $code "moth":
@@ -92,4 +92,4 @@ behaviour in a separately invoked function, covered in
 @../browser-behaviour/ (Browser behaviour).
 
 See @../../constants (Constants), @../../resources (Resources) and
-@../../packages/core/html/ (@html).
+@../../packages/core/html/ (@core/html).

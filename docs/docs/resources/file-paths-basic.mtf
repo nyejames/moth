@@ -42,4 +42,4 @@ The compiler leaves strings alone. It never copies, rewrites or watches them.
 Direct root builder slots use the same module-root-relative resource paths as
 other source expressions. A tracked favicon remains a resource-bearing
 `String` and does not create a page URL, make `.moth` a file value, or remove
-the `config.moth` path prohibition.
+the `@config.moth` path prohibition.

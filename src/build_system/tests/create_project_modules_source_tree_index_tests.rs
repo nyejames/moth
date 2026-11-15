@@ -21,7 +21,7 @@ use std::collections::BTreeSet;
 fn single_file_dependency_keys(root: &Path) -> Result<BTreeSet<String>, PreparedFailure> {
     // Keys are independent of module topology; the moduleless scope also exercises the reserved-root
     // path walk that an ordinary selected file uses.
-    super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(root, false)
+    super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(root, false, &[])
         .map(|inventory| inventory.keys)
 }
 
@@ -1183,6 +1183,7 @@ fn single_file_inventory_claims_eligible_sources_below_reserved_directory_aliase
     let inventory = super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(
         &canonical_root,
         false,
+        &[],
     )
     .expect("reserved directory inventory should resolve aliases");
     let (claimed_root, claim_path) = inventory
@@ -1210,6 +1211,7 @@ fn single_file_inventory_claims_eligible_sources_below_reserved_directory_aliase
     let inventory = super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(
         &canonical_isolated,
         false,
+        &[],
     )
     .expect("external aliases should be skipped");
     assert_eq!(
@@ -1237,6 +1239,7 @@ fn moduleless_single_file_scope_treats_entry_only_reserved_subtree_as_private() 
     let inventory = super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(
         &canonical_root,
         false,
+        &[],
     )
     .expect("flat inventory should resolve");
     assert_eq!(
@@ -1268,11 +1271,184 @@ fn moduleless_single_file_scope_ignores_root_markers_and_asset_directories() {
     let inventory = super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(
         &canonical_root,
         false,
+        &[],
     )
     .expect("asset-only reserved directories should resolve");
     assert_eq!(
         inventory.reserved_root_claim, None,
         "root markers and provider assets are not importable dependency names"
+    );
+}
+
+/// Whether the test filesystem distinguishes names that differ only by ASCII case.
+fn filesystem_is_case_sensitive(root: &Path) -> bool {
+    let lower = root.join("case_probe");
+    fs::create_dir(&lower).expect("should create case probe");
+    let upper = root.join("CASE_PROBE");
+    let case_sensitive = fs::create_dir(&upper).is_ok();
+    if case_sensitive {
+        fs::remove_dir(&upper).expect("should remove upper case probe");
+    }
+    fs::remove_dir(&lower).expect("should remove case probe");
+    case_sensitive
+}
+
+#[test]
+fn moduleless_single_file_inventory_reports_exact_registered_package_prefix_collisions() {
+    // Directory compilation reports a local path that equals a registered package prefix even
+    // when the folder publishes no interface. An ordinary selected file owns no Stage 0
+    // traversal, so its inventory probes only the registered prefixes' relative paths.
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    fs::create_dir_all(root.join("core/html")).expect("should create colliding directory");
+    fs::write(root.join("core/html/logo.png"), "not source").expect("should write colliding asset");
+    fs::write(root.join("@entry.moth"), "").expect("should write entry root");
+
+    let canonical_root = fs::canonicalize(&root).expect("source root should canonicalize");
+    let inventory = super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(
+        &canonical_root,
+        false,
+        &["core/html", "core/css"],
+    )
+    .expect("registered prefix inventory should resolve");
+    assert_eq!(
+        inventory.registered_prefix_collision,
+        Some(("core/html".to_owned(), canonical_root.join("core/html"))),
+        "an exact registered prefix directory must collide even without source"
+    );
+
+    // The reserved ancestor alone stays legal, and a folder outside the complete registered path
+    // is not a claim on the package identity.
+    fs::remove_dir_all(root.join("core/html")).expect("should remove colliding directory");
+    fs::create_dir(root.join("core/html_local")).expect("should create unrelated directory");
+    let inventory = super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(
+        &canonical_root,
+        false,
+        &["core/html"],
+    )
+    .expect("unrelated directory inventory should resolve");
+    assert_eq!(
+        inventory.registered_prefix_collision, None,
+        "only the complete registered prefix collides"
+    );
+
+    // Package identities reject ASCII case-only overlaps on every host, so a case variant claims
+    // the same registered path.
+    fs::remove_dir_all(root.join("core")).expect("should remove namespace ancestor");
+    fs::create_dir_all(root.join("Core/HTML")).expect("should create case-variant directory");
+    let inventory = super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(
+        &canonical_root,
+        false,
+        &["core/html"],
+    )
+    .expect("case-variant inventory should resolve");
+    assert_eq!(
+        inventory.registered_prefix_collision,
+        Some(("core/html".to_owned(), canonical_root.join("Core/HTML"))),
+        "a case-variant registered prefix path must collide"
+    );
+}
+
+#[test]
+fn moduleless_single_file_inventory_probes_every_case_equivalent_prefix_component() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    if !filesystem_is_case_sensitive(&root) {
+        return;
+    }
+
+    // `Core` sorts before `core` but leads nowhere deeper, and `HTML` sorts before `html` beneath
+    // `core`. The inventory must probe every case-equivalent directory at each parent component
+    // instead of keeping only the first spelling.
+    fs::create_dir(root.join("Core")).expect("should create empty case variant");
+    fs::create_dir(root.join("core")).expect("should create lowercase parent");
+    fs::create_dir(root.join("core/HTML")).expect("should create empty nested variant");
+    fs::create_dir_all(root.join("core/html/deep")).expect("should create deeper path");
+    fs::write(root.join("core/html/deep/logo.png"), "not source").expect("should write asset");
+    fs::write(root.join("@entry.moth"), "").expect("should write entry root");
+
+    let canonical_root = fs::canonicalize(&root).expect("source root should canonicalize");
+    let inventory = super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(
+        &canonical_root,
+        false,
+        &["core/html/deep"],
+    )
+    .expect("case-variant prefix inventory should resolve");
+    assert_eq!(
+        inventory.registered_prefix_collision,
+        Some((
+            "core/html/deep".to_owned(),
+            canonical_root.join("core").join("html").join("deep")
+        )),
+        "every case-equivalent parent candidate must be probed"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn moduleless_single_file_inventory_uses_canonical_parent_identity_for_prefix_collisions() {
+    use std::os::unix::fs::symlink;
+
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    fs::create_dir_all(root.join("other/html")).expect("should create asset directory");
+    fs::write(root.join("other/html/logo.png"), "not source").expect("should write asset");
+    fs::write(root.join("@entry.moth"), "").expect("should write entry root");
+    symlink(root.join("other"), root.join("core")).expect("should create parent alias");
+
+    let canonical_root = fs::canonicalize(&root).expect("source root should canonicalize");
+    let inventory = super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(
+        &canonical_root,
+        false,
+        &["core/html"],
+    )
+    .expect("aliased prefix inventory should resolve");
+    assert_eq!(
+        inventory.registered_prefix_collision, None,
+        "a symlink alias must not claim its destination's parent identity"
+    );
+
+    // The same tree is still a collision under the destination's canonical registered path, as it
+    // is for directory compilation.
+    let inventory = super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(
+        &canonical_root,
+        false,
+        &["other/html"],
+    )
+    .expect("canonical prefix inventory should resolve");
+    assert_eq!(
+        inventory.registered_prefix_collision,
+        Some(("other/html".to_owned(), canonical_root.join("other/html"))),
+        "the canonical destination keeps its own registered prefix identity"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn moduleless_single_file_inventory_matches_leaf_aliases_by_authored_name() {
+    use std::os::unix::fs::symlink;
+
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    fs::create_dir_all(root.join("core/html_target")).expect("should create asset directory");
+    fs::write(root.join("core/html_target/logo.png"), "not source").expect("should write asset");
+    fs::write(root.join("@entry.moth"), "").expect("should write entry root");
+    symlink(root.join("core/html_target"), root.join("core/html"))
+        .expect("should create leaf alias");
+
+    // The traversal's leaf check reads listed folder names, so the alias claims the prefix even
+    // though its destination has a different name.
+    let canonical_root = fs::canonicalize(&root).expect("source root should canonicalize");
+    let inventory = super::source_tree_index::SourceTreeIndex::single_file_namespace_inventory(
+        &canonical_root,
+        false,
+        &["core/html"],
+    )
+    .expect("leaf alias inventory should resolve");
+    assert_eq!(
+        inventory.registered_prefix_collision,
+        Some(("core/html".to_owned(), canonical_root.join("core/html"))),
+        "the authored leaf alias must claim the registered prefix"
     );
 }
 

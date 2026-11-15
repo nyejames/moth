@@ -66,11 +66,11 @@ The example package has no output-relative resource strings.
         fn definition(&self) -> Result<BuilderDefinition, Error> {
             BuilderDefinition::new("game")
                 .source_package(
-                    SourcePackage::new("@game")
+                    SourcePackage::new("@builder/game/api")
                         .from_dir(&self.package_root),
                 )
                 .host_package(
-                    HostPackage::new("@platform")
+                    HostPackage::new("@builder/game/platform")
                         .function(moth::host_binding!(has_prefix)),
                 )
                 .markdown()
@@ -125,7 +125,7 @@ contains the builder:
     fn main() -> Result<(), moth::builder::Error> {
         let builder = GameBuilder {
             package_root: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("moth/game"),
+                .join("moth/game/api"),
         };
         let request = BuildRequest::new("game-project");
         let result = build_project(&builder, request)?;
@@ -135,12 +135,12 @@ contains the builder:
     }
 ]
 
-The Moth package directory contains its normal package facade and source files.
+The Moth package directory contains its `@package.moth` facade and source files.
 When distributing a builder, install those files at a known location and pass
 that location explicitly. An absolute installation path locates bytes. It is
 not the package's semantic identity.
 
-Every builder also compiles the compiler-shipped Core `@html` and `@styles`
+Every builder also compiles the compiler-shipped Core `@core/html` and `@core/css`
 packages. A distributed builder executable needs the compiler's `packages/`
 directory beside it, as in the `moth` release archive. When that directory is
 absent, the compiler reads the source checkout that built it, which exists only

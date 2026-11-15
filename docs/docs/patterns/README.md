@@ -42,7 +42,7 @@ page, docs index, sidebar, pager and this map together.
   ordinary component-result record such as `HtmlPart` can carry body HTML
   and explicit resource dependencies. An `html_page()`-style const function
   composes these records. The helper names and exact signatures are
-  **illustrative proposals**, not fixed shipped `@html` API.
+  **illustrative proposals**, not fixed shipped `@core/html` API.
 - Direct entry templates `[...]` are const-required by default. Only
   `~[...]` creates a runtime top-level fragment. `#[]` is removed. An
   ordinary `#=` binding still declares a compile-time value.
@@ -79,7 +79,7 @@ page, docs index, sidebar, pager and this map together.
 ### A project has explicit ownership boundaries
 
 - The selected project directory is its build and source root. Optional
-  `config.moth` is build-only.
+  `@config.moth` is build-only and never joins the module graph.
 - A directory may have `@mod.moth` for a normal public API,
   `@package.moth` for its scoped support API and `@entry.moth` for
   executable page work. These are the only authored module-root filenames.
@@ -96,12 +96,12 @@ page, docs index, sidebar, pager and this map together.
 - Constructing or rendering an HTML String does not mount a DOM object, create
   a subscription, start a listener or trigger a rerender. Ordinary runtime
   functions activate behaviour after the page's elements exist.
-- `@web/page` owns page location and navigation capabilities. The intended
-  `@web/dom` owns generic synchronous DOM operations with opaque handles,
+- `@builder/web/page` owns page location and navigation capabilities. The intended
+  `@builder/web/dom` owns generic synchronous DOM operations with opaque handles,
   expected-absence handling and checked host failures. The documentation
   sidebar's navigation algorithm should become Moth source rather than a
   permanent JS helper.
-- The intended `@web/events` requires Channel delivery, structured async,
+- The intended `@builder/web/events` requires Channel delivery, structured async,
   host-to-Moth ingress, scheduling and lifetime ownership. Browser events
   become ordinary typed messages. `Route of ...` supplies constructor
   completion, **not** a destination or callback. `Wire of T` preserves a
@@ -175,8 +175,8 @@ the relevant unsuffixed references and the current roadmap/progress matrix:
 - `docs/docs/directives/directives.mtf` for directive attachment/ownership.
 - `docs/docs/wiring/wiring.mtf` for Wire, Route and Channel constraints.
 - `docs/docs/packages/core/`, `docs/docs/packages/builder/` and
-  `docs/docs/packages/external-binding-contracts.mtf` for @html, @styles,
-  @web/page, DOM prerequisites and JS ABI limits.
+  `docs/docs/packages/external-binding-contracts.mtf` for @core/html, @core/css,
+  @builder/web/page, DOM prerequisites and JS ABI limits.
 - `docs/developer-docs/memory-management/overview.mtf` for safe sharing,
   lifetime ownership and builder/host boundaries.
 - `docs/roadmap/` for accepted work that has not reached implementation.
@@ -206,7 +206,7 @@ Before publishing changes, confirm:
 ## Planned next work
 
 This guide intentionally precedes two separate design/implementation plans:
-one for a minimal `@web/dom` synchronous package and one for deferred
-`@web/events`/Channel host ingress. Do not treat their implementation as part
+one for a minimal `@builder/web/dom` synchronous package and one for deferred
+`@builder/web/events`/Channel host ingress. Do not treat their implementation as part
 of this documentation PR. The component library API is also a future
-`@html` source-package design task.
+`@core/html` source-package design task.

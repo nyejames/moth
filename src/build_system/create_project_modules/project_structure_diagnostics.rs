@@ -67,6 +67,24 @@ pub(super) fn config_file_selected_as_entry_error(
     capture_structure_diagnostic(project_structure_diagnostic(reason), string_table)
 }
 
+/// Reject one local directory whose entry-root-relative path equals a registered package prefix.
+///
+/// WHY: directory traversal and the synthetic inventory for an ordinary selected file find the
+/// same filesystem collision through different bounded scans, so the authored failure is built
+/// once here. The diagnostic names the registered spelling and the authored folder path.
+pub(super) fn entry_root_package_prefix_collision_error(
+    registered_prefix: &str,
+    colliding_folder: &Path,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let reason = InvalidConfigReason::EntryRootPackagePrefixCollision {
+        prefix: diagnostic_strings.intern(registered_prefix),
+        entry_folder: path_id(colliding_folder, &mut diagnostic_strings),
+    };
+    capture_structure_diagnostic(project_structure_diagnostic(reason), string_table)
+}
+
 /// Reject one importable project-local claim on a reserved package namespace root.
 ///
 /// WHY: directory namespace validation and the directory walk for a selection without module

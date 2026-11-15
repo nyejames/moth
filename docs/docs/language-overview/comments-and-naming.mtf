@@ -87,8 +87,7 @@ legacy `Number` type alias.
 Source directives use the `$` marker. `$export` marks public declarations and direct-selection re-exports in `@mod.moth` and `@package.moth`. `$config` marks typed build inputs, `$doc` records declaration documentation and `$todo` annotates source statements or declarations. They can share one line or occupy consecutive lines before the same target, but duplicate names are invalid. Project and active-builder settings remain ordinary named records, so `$project`, `$builder` and `$html_builder` are not directives.
 
 Directive spellings do not reserve ordinary identifiers. Names such as `export`, `project`, `html_builder` and `entry` are available outside directive syntax.
-The file `config.moth` and the dependency root `@project` retain their separate
-path and package semantics.
+The reserved build-only filename `@config.moth` and the dependency root `@project` retain their separate path and package semantics.
 
 The shared identifier rules reserve `Config`, including case-insensitive spellings
 and leading-underscore variants. This also applies to MON names.

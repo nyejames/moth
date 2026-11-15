@@ -36,7 +36,7 @@ Declarations authored directly in `@mod.moth`, `@package.moth` or `@entry.moth` 
 
 Shared code belongs in ordinary helper files. Each root may depend on those helpers through normal dependency clauses. Same-spelling declarations in separate roots are independent unless an imported helper introduces a name collision.
 
-Direct dependency paths to root filenames or `config.moth` are invalid. Depend on the module directory or a shared source file instead. See @../project-structure/#module-roots (Module roots).
+Direct dependency paths to root filenames or `@config.moth` are invalid. Depend on the module directory or a shared source file instead. See @../project-structure/#module-roots (Module roots).
 
 ### Separate public surfaces
 

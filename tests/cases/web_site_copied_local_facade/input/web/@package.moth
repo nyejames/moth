@@ -1,5 +1,5 @@
--- Static site URL helpers for HTML project builds.
--- Provided by the HTML project builder as a source-backed Builder package.
+-- Static site URL helpers copied into a project-local support package.
+-- It keeps ordinary support visibility and gains no Builder registration.
 $export
 root #String = @/
 $export

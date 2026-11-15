@@ -1,4 +1,4 @@
-//! Shared Node runner for the built-in `@web` binding assets.
+//! Shared Node runner for the built-in `@builder/web` binding assets.
 //!
 //! WHAT: links one asset against the generated `@moth/runtime` module, imports it as `binding` and
 //! runs `body` with `assert`, `runtime` and the asset in scope.

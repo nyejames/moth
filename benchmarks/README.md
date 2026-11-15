@@ -293,7 +293,7 @@ Frontend cases call the production in-process API. The same executor checks type
 
 File-entry CLI cases run from isolated temporary directories under `target/benchmark-work/` so compiler output never writes into the tracked checkout. Directory-entry cases run from the repository root because their output folders are project-owned and excluded from workload fingerprints.
 
-Directory build workloads declare their generated output roots explicitly in the manifest, for example `generated_output_roots = ["_dev", "_release"]`. Roots are relative to the workload entry, must be strict descendants of it, must be absent when the run starts and must be covered by an explicit fingerprint exclude. They are cleanup authority only; xtask never parses `config.moth` to rediscover output settings.
+Directory build workloads declare their generated output roots explicitly in the manifest, for example `generated_output_roots = ["_dev", "_release"]`. Roots are relative to the workload entry, must be strict descendants of it, must be absent when the run starts and must be covered by an explicit fingerprint exclude. They are cleanup authority only; xtask never parses `@config.moth` to rediscover output settings.
 
 Explicit finalisation removes only run-owned roots after measurement. Cleanup completes before repository verification and before any history or summary write. A root that already exists, a tracked root, a symlink replacement or a removal failure aborts persistence. `Drop` is best-effort emergency cleanup only and never defines success.
 

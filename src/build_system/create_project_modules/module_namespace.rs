@@ -20,7 +20,9 @@
 
 use super::module_identity::{ModuleId, ModuleIdentityTable};
 use super::project_module_graph::{ProjectModuleGraph, is_support_visible_in_identity_table};
-use super::project_structure_diagnostics::reserved_package_namespace_root_claim_error;
+use super::project_structure_diagnostics::{
+    entry_root_package_prefix_collision_error, reserved_package_namespace_root_claim_error,
+};
 use super::source_package_discovery::SourcePackageBoundaryIndexes;
 use super::source_tree_index::{
     SourceClassification, SourceLogicalIdentity, SourceOwnership, SourceRecordIndex,
@@ -373,17 +375,41 @@ impl ModuleNamespaceSet {
         let roots = std::iter::once(project_path_resolver.entry_root().to_path_buf())
             .chain(project_path_resolver.module_roots().cloned())
             .collect::<BTreeSet<_>>();
+        // Directory compilation's exact-prefix rule covers registered source packages only:
+        // binding packages share import names but own no project-local filesystem path. The
+        // synthetic probe therefore uses the same source-package prefixes, so a local folder
+        // matching a binding path stays legal exactly as it does in directory compilation.
+        let registered_package_prefixes = namespaces
+            .package_boundary_indexes
+            .iter()
+            .map(|(package_prefix, _)| package_prefix)
+            .collect::<Vec<_>>();
         for root in roots {
-            let inventory =
-                SourceTreeIndex::single_file_namespace_inventory(&root, has_module_topology)?;
-            if !has_module_topology
-                && let Some((root_component, source)) = inventory.reserved_root_claim
-            {
-                return Err(reserved_package_namespace_root_claim_error(
-                    &root_component,
-                    &source,
-                    string_table,
-                ));
+            let inventory = SourceTreeIndex::single_file_namespace_inventory(
+                &root,
+                has_module_topology,
+                &registered_package_prefixes,
+            )?;
+            // A moduleless selection owns no Stage 0 index, so the bounded walk owns both authored
+            // claims. The collision is reported first, matching directory compilation, which
+            // reports it during traversal before namespace-claim validation.
+            if !has_module_topology {
+                if let Some((registered_prefix, local_directory)) =
+                    inventory.registered_prefix_collision
+                {
+                    return Err(entry_root_package_prefix_collision_error(
+                        &registered_prefix,
+                        &local_directory,
+                        string_table,
+                    ));
+                }
+                if let Some((root_component, source)) = inventory.reserved_root_claim {
+                    return Err(reserved_package_namespace_root_claim_error(
+                        &root_component,
+                        &source,
+                        string_table,
+                    ));
+                }
             }
             namespaces
                 .single_file_dependency_keys

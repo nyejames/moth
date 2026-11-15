@@ -1,8 +1,9 @@
-`@web/page` belongs to the Builder origin family with ExternalBinding backing.
-See @../../#package-origins-and-backing (Package origins and backing) for the
-package model. It requires an explicit `@web/page` dependency and isn't in the
-implicit scope of `.mtf` files. It supports HTML-JS only. HTML-Wasm rejects
-reachable calls.
+`@builder/web/page` belongs to the Builder origin family with ExternalBinding
+backing. Binding-backed packages have no source facade. See
+@../../#package-origins-and-backing (Package origins and backing) for the
+package model. It requires an explicit `@builder/web/page` dependency and isn't
+in the implicit scope of `.mtf` files. It supports HTML-JS only. HTML-Wasm
+rejects reachable calls.
 
 ### Browser snapshots
 
@@ -26,7 +27,7 @@ not cached build values or subscriptions.
 - `prefers_reduced_motion() -> Bool`: whether the browser prefers reduced motion
 
 `page.url()` reads the live browser address at runtime. For static links built
-at compile time use @../site (@web/site)'s `site.url` instead.
+at compile time use @../site (@builder/web/site)'s `site.url` instead.
 
 ### Navigation synchronisation
 

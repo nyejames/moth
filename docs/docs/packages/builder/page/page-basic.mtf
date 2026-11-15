@@ -1,8 +1,8 @@
-`@web/page` reads browser state each time you call a getter. Import it
+`@builder/web/page` reads browser state each time you call a getter. Import it
 explicitly in a `.moth` file.
 
 [codeblock, $code "moth":
-    @web/page
+    @builder/web/page
 
     address = page.url()
     listed = page.sync_navigation("nav") catch then false
@@ -10,8 +10,8 @@ explicitly in a `.moth` file.
 ]
 
 `sync_navigation` is optional. It needs a navigation root with the hooks
-described in @#page (@web/page advanced). Call it again after History API
+described in @#page (@builder/web/page advanced). Call it again after History API
 changes.
 
 `page.url()` reads the live browser address at runtime. In contrast,
-@../site (@web/site)'s `site.url` builds static links at compile time.
+@../site (@builder/web/site)'s `site.url` builds static links at compile time.

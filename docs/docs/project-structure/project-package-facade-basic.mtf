@@ -1,11 +1,11 @@
 A project publishes an external package API through `@package.moth` at the selected project root. Each public declaration or direct-selection re-export uses `$export`.
 
-The project can also contain `@mod.moth`, `@entry.moth` and `config.moth`. Roots share ordinary helpers but keep separate declaration scopes. The package facade never falls back to the normal facade.
+The project can also contain `@mod.moth`, `@entry.moth` and `@config.moth`. Roots share ordinary helpers but keep separate declaration scopes. The package facade never falls back to the normal facade.
 
 The support facade rejects runtime statements, page fragments and builder slots. Without a project-root `@package.moth`, the project has no external Moth package surface.
 
 Exported signatures and reachable implementations cannot depend on project-private `@project` values. Consumer configuration does not implicitly supply a dependency package's `$config` inputs.
 
-Registered Core and Builder source packages may use their own `@mod.moth` surface instead.
+Registered Moth-source packages publish through their own directly contained `@package.moth`. A `@mod.moth` alone does not register one.
 
 See @#project-package-facade (Project package facade) and @#module-roots (Module roots).

@@ -12,7 +12,7 @@ source directive.
 
 ## Command and capability surface
 
-Bootstrap starts with the **command**, not with `config.moth`.
+Bootstrap starts with the **command**, not with `@config.moth`.
 
 The command selects:
 
@@ -42,7 +42,7 @@ The three commands also differ in how far they run:
 - **`check`** casts the widest net, taking in every discovered module plus check-only orphans and package surfaces. It plans and validates all the way through the `ValidatedMemoryPlan`, then stops before lowering or writing anything.
 
 [@diagrams diagram:
-    [$in label: What is already decided before config.moth opens]
+    [$in label: What is already decided before @config.moth opens]
     [$in caption: Each step narrows what the project is allowed to be. By the time any page source is read, the set of legal source kinds, packages and targets is already fixed.]
 
     [@diagrams stage:
@@ -92,7 +92,7 @@ The three commands also differ in how far they run:
             [$in href: ./]
             [$in eyebrow: Third]
             [$in title: Bootstrap facts]
-            Only now does `config.moth` compile through the single config service, producing folded project and builder facts plus separate bootstrap input-contract results.
+            Only now does `@config.moth` compile through the single config service, producing folded project and builder facts plus separate bootstrap input-contract results.
         ]
     ]
 
@@ -108,7 +108,9 @@ The three commands also differ in how far they run:
 
 ## Self-contained project config
 
-`config.moth` is build-system-owned compile-time Moth source. It is **not** a module. It produces no HIR, no entry, no runtime artefact and no package interface.
+`@config.moth` is build-system-owned compile-time Moth source. It is **not** a module. It produces no HIR, no entry, no runtime artefact and no package interface.
+
+The file is a reserved compiler filename, not a fourth module root. It stays optional and build-only at the selected project root. A nested `@config.moth` is inert, and a case variant such as `@Config.moth` stays invalid. Unmarked `config.moth` is an ordinary helper, so an `@config` dependency resolves it when present and never the build-only file.
 
 Config operates on exactly one authored file identity. It rejects source dependencies before path resolution. It never builds a config package graph.
 
@@ -197,7 +199,7 @@ optional type, not numeric width conversion or String coercion. Completed input
 values carry their exact canonical type and lossless value. Semantic fingerprints
 use that type and value, not raw spelling or source location.
 
-The folded `project` record becomes a specialised immutable **`ProjectGlobalsInterface`** under the reserved **`@project`** dependency root. It carries stable field identities, folded backend-neutral values, source locations, field-level fingerprints and project-context provenance. It carries no AST, no HIR and no runtime body.
+The folded `project` record becomes a specialised immutable **`ProjectGlobalsInterface`** under the reserved **`@project`** dependency root. It carries stable field identities, folded backend-neutral values, source locations, field-level fingerprints and project-context provenance. It carries no AST, no HIR and no runtime body. `@config.moth` publishes no namespace of its own, so `@project` remains the only build-supplied project-global interface, with a fixed name and field contract.
 
 Project modules and project-owned support packages may bind `@project` explicitly. The external project package surface cannot. Nothing injects it silently. Child modules, dependency aliases and packages cannot steal the `@project` root. Direct re-export of `@project` is forbidden.
 
@@ -243,7 +245,7 @@ The compiler owns general directive syntax, `$config` contracts and `project` re
 - invalid config shape, forbidden config dependency or missing required input
 - strict `project` field, invalid optional version or configuration-dependence violation
 
-The command and config service report these as structured diagnostics. Entry eligibility is a later build-system fact validated from `@entry.moth` presence. It is not recovered by reopening `config.moth`.
+The command and config service report these as structured diagnostics. Entry eligibility is a later build-system fact validated from `@entry.moth` presence. It is not recovered by reopening `@config.moth`.
 
 ## Why Moth does it this way
 
@@ -257,8 +259,8 @@ The command and config service report these as structured diagnostics. Entry eli
 
 ## Roadmap and current status
 
-- **Accepted design:** one self-contained `config.moth` service with explicit `$config` contracts, strict `project` and active-builder records, separate bootstrap input results and a specialised `ProjectGlobalsInterface`.
-- **Current implementation:** grouped parenthesised `config.moth`, `$config` input declarations, typed `--input` for build, check and dev, ordinary static-`if` integration and immutable explicit `@project`.
+- **Accepted design:** one self-contained `@config.moth` service with explicit `$config` contracts, strict `project` and active-builder records, separate bootstrap input results and a specialised `ProjectGlobalsInterface`.
+- **Current implementation:** grouped parenthesised `@config.moth`, `$config` input declarations, typed `--input` for build, check and dev, ordinary static-`if` integration and immutable explicit `@project`.
 - **Queued work:** capability-checked runtime title mutation. Builder slots own initial document metadata and entries come from `@entry.moth` presence.
 - **Deferred or outside scope:** structural `$feature` selection, config dependencies and a general Moth build-script system.
 

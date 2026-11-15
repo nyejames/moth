@@ -1,9 +1,9 @@
-`@html` gives you compile-time HTML helpers. The constants fold into HTML
+`@core/html` gives you compile-time HTML helpers. The constants fold into HTML
 strings during compilation and produce no runtime code.
 
 ### Using helpers in `.mtf` files
 
-`.mtf` files see `@html` and `@styles` constants without a dependency clause. The compiler supplies the official `packages/html` and `packages/styles` packages. You can use the helpers directly:
+`.mtf` files see `@core/html` and `@core/css` constants without a dependency clause. The compiler supplies the official `packages/core/html` and `packages/core/css` packages through their `@package.moth` facades. You can use the helpers directly:
 
 [codeblock, $code "text":
     -- docs/intro.mtf
@@ -12,14 +12,14 @@ strings during compilation and produce no runtime code.
     [codeblock, $code "moth": value = 42]
 ]
 
-The prelude supplies `@html` and `@styles` constants only. Your own values need a qualified reference to a helper file. A template head names the helper path and one selected value, for example `@settings` then `site_name`. Root files never expose their declarations to a template.
+The prelude supplies `@core/html` and `@core/css` constants only. Your own values need a qualified reference to a helper file. A template head names the helper path and one selected value, for example `@settings` then `site_name`. Root files never expose their declarations to a template.
 
 ### Binding helpers in `.moth` files
 
-`.moth` files need an explicit dependency clause to use `@html` symbols.
+`.moth` files need an explicit dependency clause to use `@core/html` symbols.
 
 [codeblock, $code "moth":
-    @html table, th, td
+    @core/html table, th, td
 ]
 
 ### Available helpers
@@ -30,7 +30,7 @@ The prelude supplies `@html` and `@styles` constants only. Your own values need 
 - `codeblock`, `table`, `th`, `td` for code and tables
 - `img` for images with `src`, `alt` and `style` slots
 
-The six basic style inserts (`center`, `right`, `left`, `smaller`, `medium`, `larger`) belong to `@styles`. They are available bare inside `.mtf` files and need an explicit import in `.moth` files, such as `@styles center`. See @../css/ (@styles) for the fragments and the slots they fill.
+The six basic style inserts (`center`, `right`, `left`, `smaller`, `medium`, `larger`) belong to `@core/css`. They are available bare inside `.mtf` files and need an explicit import in `.moth` files, such as `@core/css center`. See @../css/ (@core/css) for the fragments and the slots they fill.
 
 ### `$code` code blocks
 
@@ -52,10 +52,10 @@ profiles share the same palette.
 
 ### Canvas
 
-`@html` provides the `<canvas>` markup helper. Browser drawing is provided by `@web/canvas` and is available only when the builder supports the browser runtime.
+`@core/html` provides the `<canvas>` markup helper. Browser drawing is provided by `@builder/web/canvas` and is available only when the builder supports the browser runtime.
 
 [codeblock, $code "moth":
-    @web/canvas get_canvas, context_2d, set_fill_style, fill_rect
+    @builder/web/canvas get_canvas, context_2d, set_fill_style, fill_rect
 
     element = get_canvas("my-canvas")!
     context ~= context_2d(element)!
@@ -64,4 +64,4 @@ profiles share the same palette.
     fill_rect(~context, 10.0, 10.0, 50.0, 50.0)
 ]
 For the full export surface and deferred additions,
-see @#html-helpers (@html advanced).
+see @#html-helpers (@core/html advanced).

@@ -1,6 +1,6 @@
-# `@web/graphics`
+# `@builder/web/graphics`
 
-`@web/graphics` is the HTML builder's WebGL2 package. It gives games, simulations and 3D applications direct control over GPU resources, render state and draw calls, and it's the low-level foundation that higher-level Moth graphics and game libraries build on.
+`@builder/web/graphics` is the HTML builder's WebGL2 package. It gives games, simulations and 3D applications direct control over GPU resources, render state and draw calls, and it's the low-level foundation that higher-level Moth graphics and game libraries build on.
 
 This README is the package's living development document. It holds design direction, binding prerequisites, the implementation plan and open questions. Labelled ideas are tentative.
 
@@ -14,9 +14,9 @@ This README is the package's living development document. It holds design direct
 
 ## Current state
 
-- `src/projects/html_project/binding_packages/web/mod.rs` registers `@web/graphics` as a Builder-origin binding package with no public symbols.
+- `src/projects/html_project/binding_packages/web/mod.rs` registers `@builder/web/graphics` as a Builder-origin binding package with no public symbols.
 - `graphics.js` exports nothing. Registration still parses it on every HTML build, so the asset can't drift out of the accepted annotation subset.
-- The package is HTML-JS only. A future Wasm path follows the same rule as `@web/canvas`: reachable calls are rejected before lowering until a lowering exists.
+- The package is HTML-JS only. A future Wasm path follows the same rule as `@builder/web/canvas`: reachable calls are rejected before lowering until a lowering exists.
 - No API slice has started. Every Phase 1 operation depends on at least one binding prerequisite below.
 - Fixed `I32`, `I64`, `U32`, `U64`, `F32` and `F64` scalar slots, flat named `U32` constants and compiler-owned error-code exports are delivered in the shared boundary. Shared opaque type references, nested annotation paths and bulk collection/data mapping remain unresolved.
 
@@ -26,12 +26,12 @@ The package stays close to WebGL2. Developers keep control of GPU resources, ren
 
 It isn't a scene graph, game engine or Three.js equivalent. Meshes, materials, cameras, transforms, render graphs, scene graphs, shader abstractions, asset management, batching and game-specific rendering belong to higher-level packages.
 
-**Design quality test:** a higher-level package can add any of those without changes to `@web/graphics`, and a user who ignores every higher-level library can still write a complete WebGL2 renderer directly against it.
+**Design quality test:** a higher-level package can add any of those without changes to `@builder/web/graphics`, and a user who ignores every higher-level library can still write a complete WebGL2 renderer directly against it.
 
 ### Package areas
 
 ```text
-@web/graphics
+@builder/web/graphics
     graphics.gl.*      WebGL2 graphics interface (initial implementation area)
     graphics.frame.*   browser animation-frame scheduling (accepted scope, async-gated)
 ```
@@ -40,11 +40,11 @@ It isn't a scene graph, game engine or Three.js equivalent. Meshes, materials, c
 
 WebGL2 is the only target. It's the baseline contract and lets the package expose one coherent modern API. WebGL1 compatibility is outside current scope. Reconsider it only for a concrete use case.
 
-### Relationship to `@web/canvas`
+### Relationship to `@builder/web/canvas`
 
-`@web/canvas` owns canvas discovery, creation, sizing and management, Canvas 2D rendering, and images and other 2D resources. `@web/graphics` owns WebGL2 rendering. WebGL never moves into `@web/canvas`.
+`@builder/web/canvas` owns canvas discovery, creation, sizing and management, Canvas 2D rendering, and images and other 2D resources. `@builder/web/graphics` owns WebGL2 rendering. WebGL never moves into `@builder/web/canvas`.
 
-An idiomatic program obtains a canvas through `@web/canvas` and passes that handle to `@web/graphics` to create a context. The package must also work without `@web/canvas` for projects that author their own canvas HTML or reach the rendering target another supported way.
+An idiomatic program obtains a canvas through `@builder/web/canvas` and passes that handle to `@builder/web/graphics` to create a context. The package must also work without `@builder/web/canvas` for projects that author their own canvas HTML or reach the rendering target another supported way.
 
 ## Design direction
 
@@ -74,7 +74,7 @@ The public API isn't built from unexplained numeric WebGL constants. Primitive m
 
 ### Numeric precision
 
-WebGL consumes 32-bit floats for vertex data, uniforms and clear values. `F32` gives an exact binary32 slot where the API needs it and `F64` keeps its binary64 width. The shared boundary requires finite values at each declared precision. `F32` parameters arrive as exact binary32 values and `F32` results round once at binary32. The [external binding contract](../../../docs/docs/packages/external-binding-contracts.mtf) owns the validation and failure rules.
+WebGL consumes 32-bit floats for vertex data, uniforms and clear values. `F32` gives an exact binary32 slot where the API needs it and `F64` keeps its binary64 width. The shared boundary requires finite values at each declared precision. `F32` parameters arrive as exact binary32 values and `F32` results round once at binary32. The [external binding contract](../../../../docs/docs/packages/external-binding-contracts.mtf) owns the validation and failure rules.
 
 ### Async and callback boundary
 
@@ -86,7 +86,7 @@ Each prerequisite below is a capability of the shared binding boundary, not a gr
 
 ### 1. Shared canvas identity
 
-Unresolved. Context creation needs the canonical `CanvasElement` owned by `@web/canvas`.
+Unresolved. Context creation needs the canonical `CanvasElement` owned by `@builder/web/canvas`.
 
 - An opaque external type's identity is its package, symbol path and origin (`CanonicalBindingSymbolIdentity` in `src/compiler_frontend/external_packages/ids.rs`). Compiler type equality uses the registered `ExternalTypeId`.
 - Annotated JavaScript resolves a signature type name only against built-in scalars and `@moth.opaque` declarations in the same file (`validate_type_name` in `src/projects/html_project/external_js/parser/binding.rs`). A second `@moth.opaque CanvasElement` in `graphics.js` would mint a different, incompatible type.
@@ -95,11 +95,11 @@ Unresolved. Context creation needs the canonical `CanvasElement` owned by `@web/
 Candidate routes, tentative:
 
 - **Cross-package type references in annotated JavaScript.** A declared reference to another registered binding package's opaque type, resolved through canonical binding identity when the builder registers packages in dependency order. This keeps one owner for `CanvasElement` and fits the request to share real identity.
-- **A shared browser-element owner.** A lower `@web/*` owner for element handles that both packages consume. It needs the same cross-package resolution, so it's a later refinement rather than an alternative.
+- **A shared browser-element owner.** A lower `@builder/web/*` owner for element handles that both packages consume. It needs the same cross-package resolution, so it's a later refinement rather than an alternative.
 
 Rejected: a duplicate handle type, conversion helpers between handle types and weakening package identity rules for this one API.
 
-Open: how a project without `@web/canvas` supplies its canvas. Element lookup by id returns the same canonical handle type, so it depends on the same resolution and doesn't need a second handle.
+Open: how a project without `@builder/web/canvas` supplies its canvas. Element lookup by id returns the same canonical handle type, so it depends on the same resolution and doesn't need a second handle.
 
 ### 2. Nested namespaces
 

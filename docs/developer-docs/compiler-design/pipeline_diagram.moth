@@ -36,7 +36,7 @@ compiler_pipeline #= [diagram:
                 ]
                 [detail:
                     [$in href: ./starting-a-build/]
-                    config.moth folding
+                    @config.moth folding
                 ]
                 ]
             ]

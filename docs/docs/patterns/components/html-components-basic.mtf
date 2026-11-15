@@ -2,7 +2,7 @@ A component can be an ordinary value holding its HTML and the stylesheets it
 needs. A const function constructs that value. Another const function combines
 several parts into one page.
 
-This is the intended `@html` component API, **not yet a shipped package
+This is the intended `@core/html` component API, **not yet a shipped package
 surface**. Const functions and combined stylesheet contributions still need
 their planned implementation.
 
@@ -10,9 +10,9 @@ their planned implementation.
 
 [codeblock, $code "moth":
     -- docs/functions/@entry.moth
-    -- Proposed @html component helpers
+    -- Proposed @core/html component helpers
 
-    @html HtmlPart, html_page
+    @core/html HtmlPart, html_page
     @components site_navbar, docs_sidebar, docs_topic
     @introduction content as introduction
 
@@ -64,9 +64,9 @@ return type says what the page receives:
 
 [codeblock, $code "moth":
     -- components/sidebar.moth
-    -- Proposed @html type and const function
+    -- Proposed @core/html type and const function
 
-    @html HtmlPart
+    @core/html HtmlPart
 
     docs_sidebar #|heading String| -> HtmlPart:
         return HtmlPart(

@@ -1,8 +1,8 @@
-`@styles` gives you six ready-made inline style fragments for the `style` slots on `@html` helpers. Each fragment folds into the surrounding HTML string during compilation and adds no runtime code.
+`@core/css` gives you six ready-made inline style fragments for the `style` slots on `@core/html` helpers. Each fragment folds into the surrounding HTML string during compilation and adds no runtime code.
 
 ### Using the fragments in `.mtf` files
 
-`.mtf` files see the constants by bare name because both `@html` and `@styles` supply the fixed template prelude:
+`.mtf` files see the constants by bare name because both `@core/html` and `@core/css` supply the fixed template prelude:
 
 [codeblock, $code "text":
     [h1, center: A centred heading.]
@@ -15,7 +15,7 @@ The fragment fills the helper's `style` slot. The same constants are available u
 A `.moth` file needs an explicit dependency clause:
 
 [codeblock, $code "moth":
-    @styles center, larger
+    @core/css center, larger
 ]
 
 ### The six exports
@@ -27,4 +27,4 @@ A `.moth` file needs an explicit dependency clause:
 - `medium` produces `font-size: medium;`
 - `larger` produces `font-size: larger;`
 
-For the full export table and prelude rules see @#styles-helpers (@styles advanced).
+For the full export table and prelude rules see @#styles-helpers (@core/css advanced).

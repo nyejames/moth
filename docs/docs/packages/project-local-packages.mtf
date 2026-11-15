@@ -4,7 +4,7 @@ Project-local source-backed packages are scoped `@package.moth` support packages
 
 [codeblock, $code "text":
     project-root/
-    ├── config.moth
+    ├── @config.moth
     ├── @entry.moth
     ├── markdown/
     │   ├── @package.moth
@@ -48,11 +48,19 @@ Consumers see only the support facade's `$export` surface. They cannot address `
 
 Support roots are API-only. They reject top-level runtime work, direct fragments and builder-slot contributions, export declarations instead and produce no HTML artefact. Only `@entry.moth` creates a page. Importing a support package never activates an entry in its directory. See @../project-structure/#html-routing-and-artifacts (HTML routing and artefacts).
 
-Support packages may hold reusable ordinary `#` constants and expose them through their public surface. They do not need custom project metadata. Project metadata remains the separate `config.moth` contract.
+Support packages may hold reusable ordinary `#` constants and expose them through their public surface. They do not need custom project metadata. Project metadata remains the separate `@config.moth` contract.
+
+### Namespace limits and copied packages
+
+Local support packages stay outside the reserved Core and Builder namespaces. An importable local facade, helper or dependency alias cannot claim `core` or `builder`, compared case-insensitively. A directory name alone never triggers that rejection: entry-only modules, their private helpers, directories containing only entry modules and plain asset directories remain legal. Unrelated `html/`, `css/`, `styles/` and `web/` folders also stay legal.
+
+A project folder whose full path matches a registered package path, such as `core/html/`, collides whichever module owns it, even when it holds no importable surface. An ancestor folder such as `core/` alone stays legal.
+
+Copying a source-backed package directory to a non-reserved local path gives an ordinary support package through its own `@package.moth`. Copying it to a registered package path, such as `core/html/`, hits the collision above. Copying a binding-backed asset tree registers nothing. Neither copy inherits the registered package's origin, namespace or capabilities.
 
 ### Origin and backing are separate
 
-Scoped `@package.moth` packages are ProjectLocal packages backed by Moth source. `@html` and `@styles` are also source-backed but have Core origin. `@core/math` and `@web/canvas` are binding-backed packages with Core and Builder origins respectively. See @#package-origins-and-backing (Package origins and backing).
+Scoped `@package.moth` packages are ProjectLocal packages backed by Moth source. Registered MothSource packages also publish through a directly contained `@package.moth`, while `@mod.moth` alone is insufficient for registration. `@core/html` and `@core/css` are source-backed with Core origin. `@core/math` and `@builder/web/canvas` are binding-backed packages with Core and Builder origins respectively. See @#package-origins-and-backing (Package origins and backing).
 
 ### Concepts related to project-local packages
 

@@ -15,4 +15,4 @@ A scoped support package is a directory containing `@package.moth`. The director
 
 Only declarations marked by `$export` in `blog/@package.moth` are public. Support roots can re-export selected helpers but do not create pages.
 
-A project-root `@package.moth` is the external project package surface. Internal project modules cannot import it. See @#project-local-packages (Project-local packages).
+A project-root `@package.moth` is the external project package surface. Internal project modules cannot import it. Registered source packages use the same `@package.moth` facade rule, but their names live below the reserved `@core` or `@builder` root rather than in project-local scope. See @#project-local-packages (Project-local packages).

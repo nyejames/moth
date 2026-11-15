@@ -2,7 +2,7 @@ A Moth project is the directory you select. That directory is both the build roo
 
 ### Starter config
 
-Config uses two ordinary named records:
+`@config.moth` uses two ordinary named records:
 
 [codeblock, $code "moth":
     project #= (
@@ -16,7 +16,7 @@ Config uses two ordinary named records:
 
 ### Where things live
 
-- `config.moth` at the selected root is optional and controls build settings.
+- `@config.moth` at the selected root is optional and controls build settings. It is not module source, and a helper named `config.moth` is ordinary source.
 - Everything below the selected root is source unless it is excluded or is generated output.
 - `_dev/` and `_release/` are generated output. Do not edit them.
 - A folder name starting with `_` is excluded from the build unless you select it directly.

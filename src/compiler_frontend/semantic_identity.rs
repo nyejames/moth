@@ -173,7 +173,7 @@ impl StablePackageIdentity {
     ///
     /// WHAT: builds the package identity from the registry's `PackageOrigin` and the package's
     /// package prefix. The package prefix is the portable `@`-stripped spelling (for example
-    /// `"html"` or a project-local `"helper"`), so two packages with the same prefix but
+    /// `"core/html"` or a project-local `"helper"`), so two packages with the same prefix but
     /// different origins remain distinct, and the same logical package resolves to the same
     /// identity across checkout roots.
     /// WHY: each source-package boundary owns its own `SourceTreeIndex` with boundary-local

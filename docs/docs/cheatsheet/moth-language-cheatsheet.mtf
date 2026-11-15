@@ -922,8 +922,8 @@ Constant loops have a configurable iteration limit.
 ### Moth Markdown
 
 `$md` supports headings, paragraphs, lists, emphasis, links and same-line paired backtick code, while escaping raw HTML.
-Use `$code` for code blocks and `@html` helpers for tables. In `.moth` files, import `@html table, th, td`.
-The `@html` and `@styles` constants are available automatically in `.mtf` files:
+Use `$code` for code blocks and `@core/html` helpers for tables. In `.moth` files, import `@core/html table, th, td`.
+The `@core/html` and `@core/css` constants are available automatically in `.mtf` files:
 
 [codeblock, $code "moth":
     [table, [th: [: Name] [: Score]]:
@@ -1025,7 +1025,7 @@ Bare `@core/math` binds `math`, used as `math.sin(1.0)`. Namespaces are not firs
 Paths resolve relative to the **module root**, not the importing file. Omit `.moth`, `.mtf` and `.md` extensions for source dependencies,
 but retain extensions for providers such as `.js`. A path may bind an owned helper, visible child module or support package.
 Module boundaries expose only exports. `@./`, `@/` and `../` are invalid dependency paths.
-Root filenames (`@mod.moth`, `@package.moth`, `@entry.moth`) can't be imported directly. Depend on the module directory.
+Root filenames (`@mod.moth`, `@package.moth`, `@entry.moth`) can't be imported directly. Depend on the module directory. The build-only `@config.moth` is not importable either. `@core` and `@builder` are reserved package namespace roots, so Core imports start below `@core/` and Builder imports below `@builder/`. Neither root alone names an importable package.
 
 An expression reads one provider symbol as `@settings site_name`. Keep the path and symbol on the same physical line. The read creates no local
 binding, so it can't shadow a local name. At the start of a statement, `@settings site_name, other` is a dependency clause instead. `@file.ext` is a
@@ -1053,14 +1053,15 @@ Resource URLs receive their final characters from the consuming output. Constant
 unresolved URL. Physical targets must exist even in inactive branches. Only resources actually used in output are emitted.
 
 Bare `@/` is a site-root string, not a file or valid dependency path. Ordinary absolute paths, `@./`, parent traversal and physical file values in
-`config.moth` are invalid.
+`@config.moth` are invalid.
 
 See @../resources (File paths and resource values).
 
 ## Modules, exports and packages
 
 A directory recognises exactly three optional root files. `@mod.moth` publishes the normal API, `@package.moth` publishes a scoped support API or
-the external project package API and `@entry.moth` owns page runtime work. Any subset works. Other `@*.moth` and `+*.moth` spellings are rejected.
+the external project package API and `@entry.moth` owns page runtime work. Any subset works. The build-only `@config.moth` is a reserved filename,
+not a root. Apart from that reserved name, other `@*.moth` and `+*.moth` spellings are rejected.
 Helpers in ordinary `.moth` files are shared by every root, while each root keeps its own declarations:
 
 [codeblock, $code "moth":
@@ -1091,11 +1092,14 @@ An optional project-root `@package.moth` exposes the project's **external** pack
 as a private back door. Neither exported signatures nor reachable exported implementations may depend on private `@project` values. Without it, the
 project has no external package API, even with `@mod.moth`.
 
+Every registered Moth-source package publishes its external API through a directly contained `@package.moth`. A `@mod.moth` alone does not register one,
+and binding-backed packages have no source facade.
+
 For example, a project might contain:
 
 [codeblock, $code "text":
     my-site/
-      config.moth
+      @config.moth
       @entry.moth
       @package.moth          -- external package API
       helpers.moth
@@ -1117,7 +1121,7 @@ From `@entry.moth`, imports can bind:
     @pages page_heading          -- child module's exported name
     @shared badge                -- support package's exported name
     @core/math PI                -- Core package
-    @html table                  -- Core HTML package
+    @core/html table             -- Core HTML package
     @charts plot                 -- registered external dependency
     @vendor/format.js emphasize  -- builder-provided JS binding
 ]
@@ -1126,7 +1130,7 @@ The nested `pages/article/@mod.moth` can import the same support package and Cor
 
 [codeblock, $code "moth":
     @shared badge
-    @html table
+    @core/html table
 ]
 
 Even an ordinary file nested under `tools/` imports `@tools/format`, because paths always start at its module root.
@@ -1145,7 +1149,7 @@ on one target is invalid. Comments may intervene, but a blank line breaks attach
 usually a template; `$doc` applies no implicit Markdown formatting. Source directives stop at the next outer source directive token, not at
 nested template-head directives. No directive uses a function-style argument list.
 
-An authored project-root `config.moth` contains compile-time values and configuration. It uses ordinary named records for the project and the selected
+An authored project-root `@config.moth` contains compile-time values and configuration. It uses ordinary named records for the project and the selected
 builder. Source imports, functions and runtime work belong in ordinary modules:
 
 [codeblock, $code "moth":
@@ -1161,7 +1165,7 @@ valid Moth project identifier. There is no `entry_root`; the selected directory 
 
 ### Build inputs
 
-`$config` marks one **explicitly typed top-level compile-time `#` binding**, in `config.moth` or a selected source module, as a build input.
+`$config` marks one **explicitly typed top-level compile-time `#` binding**, in `@config.moth` or a selected source module, as a build input.
 The binding name is the input key, its declared type is the receiving contract and the initializer supplies the fallback. Without an initializer,
 an ordinary input is required while an optional input defaults to `none`. `$config` takes no operand and only a marked binding may omit its initializer.
 Input contracts use an ordinary `#T` annotation.
@@ -1179,7 +1183,7 @@ Input contracts use an ordinary `#T` annotation.
 
 Inputs support `String`, `Bool`, `Char`, exact fixed-width integers, binary floats and one optional layer.
 `Byte`, `Dec`, mutable bindings and inferred `#=` declarations can't be inputs.
-Source-module input defaults must be primitive literals or `none`, while `config.moth` may use earlier compile-time helpers.
+Source-module input defaults must be primitive literals or `none`, while `@config.moth` may use earlier compile-time helpers.
 
 [codeblock, $code "bash":
     moth build . --input api_url=https://example.com --input analytics=true
@@ -1245,7 +1249,7 @@ For an HTML page:
 Direct top-level const `$in` inserts route to builder-registered destinations. The HTML builder registers `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and `head`.
 Ordinary const and runtime fragments render into the body. Scalar metadata contributions concatenate and never raise a cardinality error, an explicitly empty value stays present, a missing value uses the builder fallback, each stylesheet insert needs one tracked CSS resource, and the builder deduplicates stylesheet links by stable origin. `head` is raw HTML after built-in head content and deduplicates identical complete contributions.
 Only direct root inserts route. Nested, stored and aliased inserts remain template composition. Runtime top-level named builder inserts are not supported. Old `page_*` names are ordinary constants with no implicit metadata effect.
-Helpers, `@mod.moth` and `@package.moth` facades and `config.moth` cannot supply entry contributions.
+Helpers, `@mod.moth` and `@package.moth` facades and `@config.moth` cannot supply entry contributions.
 
 Bare direct [$html:<code>&#91;...&#93;</code>] is const-required and becomes static HTML; [$html:<code>~&#91;...&#93;</code>] is a runtime fragment even when foldable. Runtime-dependent bare
 entry fragments are errors, not runtime fallbacks. The former direct [$html:<code>#&#91;...&#93;</code>] spelling is removed. Ordinary assigned or nested templates keep

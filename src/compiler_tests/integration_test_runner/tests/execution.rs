@@ -712,6 +712,44 @@ fn assert_reserved_package_root_claim(
     );
 }
 
+fn assert_entry_root_package_prefix_collision(
+    fixture: &EntryFixture,
+    expected_prefix: &str,
+    local_folder: &str,
+    scenario: &str,
+) {
+    let messages = expect_diagnosed(fixture.build_result(&[]));
+    let diagnostics = messages
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
+    assert_eq!(diagnostics.len(), 1, "{scenario}: {messages:?}");
+    let (report, view) = diagnostics[0];
+    assert_eq!(
+        view.descriptor().code,
+        "MOTH-CONFIG-0001",
+        "{scenario}: {messages:?}"
+    );
+    assert_eq!(
+        view.reason_key(),
+        Some("invalid_config.entry_root_package_prefix_collision"),
+        "{scenario}: {messages:?}"
+    );
+    let strings = report.context().strings();
+    assert_eq!(
+        strings.resolve(view.string_ids()[0]),
+        expected_prefix,
+        "{scenario}: the diagnostic must name the registered package prefix"
+    );
+    let authored_folder = Path::new("src").join(local_folder);
+    assert!(
+        strings
+            .resolve(view.string_ids()[1])
+            .ends_with(&authored_folder.display().to_string()),
+        "{scenario}: the diagnostic must name the authored colliding folder: {}",
+        strings.resolve(view.string_ids()[1])
+    );
+}
+
 #[test]
 fn synthetic_entry_modes_reject_local_claims_below_reserved_package_roots() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
@@ -874,6 +912,59 @@ fn synthetic_ordinary_page_keeps_asset_only_reserved_directory_inert_for_package
     fs::create_dir(&core).expect("should create core directory");
     fs::write(core.join("logo.png"), "not source").expect("should write core asset");
     fixture.build(&[]);
+
+    // Binding packages own no project-local filesystem path, so an asset-only folder matching a
+    // binding prefix stays legal exactly as it does in directory compilation. Only registered
+    // source-package prefixes form exact-prefix collisions.
+    let mut fixture = EntryFixture::new("@core/math PI\n~[:binding beside assets]\n", false);
+    fixture.select_ordinary_page_file();
+    let math = fixture.directory.path().join("src/core/math");
+    fs::create_dir_all(&math).expect("should create asset-only binding path");
+    fs::write(math.join("logo.png"), "not source").expect("should write binding path asset");
+    fixture.build(&[]);
+}
+
+#[test]
+fn synthetic_ordinary_page_rejects_exact_registered_package_prefix_directory() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // A local path claiming a complete registered package prefix stays a collision whether or not
+    // the page imports the package, because the directory claims the same registered identity.
+    for (source, imports_package) in [
+        ("[:asset-only prefix]\n", false),
+        ("@core/html p\n~[:prefix collision]\n", true),
+    ] {
+        let mut fixture = EntryFixture::new(source, false);
+        fixture.select_ordinary_page_file();
+        let colliding_folder = fixture.directory.path().join("src/core/html");
+        fs::create_dir_all(&colliding_folder).expect("should create colliding folder");
+        fs::write(colliding_folder.join("logo.png"), "not source")
+            .expect("should write colliding asset");
+        assert_entry_root_package_prefix_collision(
+            &fixture,
+            "core/html",
+            "core/html",
+            if imports_package {
+                "ordinary page importing @core/html"
+            } else {
+                "ordinary page beside an inert core/html folder"
+            },
+        );
+    }
+
+    // Package identities reject ASCII case-only overlaps on every host, so a case-variant path
+    // claims the same registered package identity as directory compilation reports.
+    let mut fixture = EntryFixture::new("[:case-variant prefix]\n", false);
+    fixture.select_ordinary_page_file();
+    let case_variant_folder = fixture.directory.path().join("src/Core/HTML");
+    fs::create_dir_all(&case_variant_folder).expect("should create case-variant colliding folder");
+    fs::write(case_variant_folder.join("logo.png"), "not source")
+        .expect("should write case-variant asset");
+    assert_entry_root_package_prefix_collision(
+        &fixture,
+        "core/html",
+        "Core/HTML",
+        "ordinary page beside a case-variant prefix folder",
+    );
 }
 
 #[cfg(unix)]
