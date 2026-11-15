@@ -34,6 +34,7 @@ use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceSpan,
 };
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::compiler_tests::test_diagnostics::assert_output_rejection;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::settings::Config;
@@ -91,8 +92,8 @@ fn assert_no_entry_diagnostic<T>(result: CompilationResult<T>, expected_root: &P
     };
     let context = DiagnosticRenderContext::for_report(report);
     assert_eq!(
-        Path::new(context.string_table.resolve(entry_root)),
-        expected_root,
+        context.string_table.resolve(entry_root),
+        portable_path_text(expected_root),
         "the diagnostic must name the source root the frontend compiled"
     );
 }
