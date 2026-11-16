@@ -31,6 +31,8 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 - [Constraints and fast arithmetic](./plans/constraints-and-fast-math-plan.md) - Queued: Implement compiler-owned `$fast_math`, transitive `$safe_math` and `$infallible` constraints with portable fast integer and floating-point semantics. Ordinary arithmetic remains checked, Dec retains its ordinary behaviour and semantic traps follow the execution-instance fault policy.
 
+- [Template `$supplied` presence guard](./plans/template-supplied-directive-plan.md) - Queued after Constraints and fast arithmetic: Add a structural, slot-declaring presence guard that conditionally renders once using existing TIR routing. Preserve lazy runtime semantics without extending slot-value inspection or backend lowering.
+
 - [Numeric optimisation](./plans/numeric-optimisation-plan.md) - Queued after constraints and fast arithmetic: Remove redundant numeric result carriers, error branches and runtime checks through existing proof and backend-lowering systems. Preserve source semantics and measure performance improvements before extending the optimiser.
 
 - [Core Math fast counterparts](./plans/core-math-fast-counterparts-plan.md) - Queued after numeric optimisation: Evaluate and implement a small, benchmark-justified set of explicit `fast_*` Core Math helpers, including the distinct `fast_hypot` algorithm. Reuse trusted package contracts and existing lowering machinery without changing ordinary Math.
