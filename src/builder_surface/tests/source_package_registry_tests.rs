@@ -108,6 +108,10 @@ fn register_filesystem_root_accepts_nested_prefix_and_rejects_overlaps() {
         "builder/web",
         "BUILDER/WEB",
         "builder/web/site/extra",
+        // A case-only difference in a non-root component is the same package path.
+        "builder/Web/site",
+        "builder/Web/site/x",
+        "builder/web/Site/x",
     ] {
         registry
             .register_filesystem_root(

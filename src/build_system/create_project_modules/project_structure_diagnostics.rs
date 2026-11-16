@@ -85,6 +85,25 @@ pub(super) fn entry_root_package_prefix_collision_error(
     capture_structure_diagnostic(project_structure_diagnostic(reason), string_table)
 }
 
+/// Build the diagnostic for one importable project-local claim on a reserved package root.
+///
+/// WHAT: names the reserved root as authored and the local source that publishes the claim.
+/// WHY: structure validation and synthetic dependency resolution discover the same claim from
+/// different Stage 0 facts, so the authored payload has one owner while each caller keeps its
+/// own failure lane.
+pub(super) fn reserved_package_namespace_root_claim_diagnostic(
+    root: &str,
+    source: &Path,
+    string_table: &mut StringTable,
+) -> DiagnosticDraft {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let reason = InvalidConfigReason::ReservedPackageNamespaceRootClaim {
+        root: diagnostic_strings.intern(root),
+        source: path_id(source, &mut diagnostic_strings),
+    };
+    project_structure_diagnostic(reason)
+}
+
 /// Reject one importable project-local claim on a reserved package namespace root.
 ///
 /// WHY: directory namespace validation and the directory walk for a selection without module
@@ -95,12 +114,8 @@ pub(super) fn reserved_package_namespace_root_claim_error(
     source: &Path,
     string_table: &mut StringTable,
 ) -> PreparedFailure {
-    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-    let reason = InvalidConfigReason::ReservedPackageNamespaceRootClaim {
-        root: diagnostic_strings.intern(root),
-        source: path_id(source, &mut diagnostic_strings),
-    };
-    capture_structure_diagnostic(project_structure_diagnostic(reason), string_table)
+    let diagnostic = reserved_package_namespace_root_claim_diagnostic(root, source, string_table);
+    capture_structure_diagnostic(diagnostic, string_table)
 }
 
 /// Freeze the diagnostic into a diagnosed failure, handing the populated table to the batch.

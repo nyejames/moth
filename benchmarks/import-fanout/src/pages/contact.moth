@@ -1,5 +1,5 @@
 @types/models User
-@core/constants app_name, app_version
+@shared/constants app_name, app_version
 @utils/formatting format_label
 
 render_contact |user User| -> String:

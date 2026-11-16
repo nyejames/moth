@@ -25,7 +25,7 @@ use crate::build_system::build::{
 use crate::build_system::create_project_modules::{
     ProjectFrontendCompilation, compile_project_frontend,
 };
-use crate::builder_surface::BuilderSurface;
+use crate::builder_surface::{BuilderSurface, PackageOrigin};
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
@@ -307,20 +307,8 @@ impl EntryFixture {
     }
 
     fn frontend(&self) -> ProjectFrontendCompilation {
-        let mut config = Config::new(self.entry.clone());
-        // This config-free compiler seam consumes settings rather than loading `@config.moth`.
-        config.project_name = "entry_contract".to_owned();
-
-        let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
-        let result = compile_project_frontend(
-            &mut config,
-            BuildProfile::Dev,
-            None,
-            &frontend_test_style_directives(),
-            &mut BuilderSurface::with_mandatory_core(),
-            &mut warning_owner,
-        );
-        match result {
+        let mut builder_surface = BuilderSurface::with_mandatory_core();
+        match self.try_frontend_with_surface(&mut builder_surface) {
             Ok(CompilationOutcome::Success { value, .. }) => value,
             Ok(CompilationOutcome::Diagnosed(reports)) => {
                 let rendered = terse::format_terse_diagnostic_reports(&reports);
@@ -334,6 +322,25 @@ impl EntryFixture {
             }
             Err(errors) => panic!("entry frontend infrastructure failure: {errors:?}"),
         }
+    }
+
+    fn try_frontend_with_surface(
+        &self,
+        builder_surface: &mut BuilderSurface,
+    ) -> CompilationResult<ProjectFrontendCompilation> {
+        let mut config = Config::new(self.entry.clone());
+        // This config-free compiler seam consumes settings rather than loading `@config.moth`.
+        config.project_name = "entry_contract".to_owned();
+
+        let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+        compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &frontend_test_style_directives(),
+            builder_surface,
+            &mut warning_owner,
+        )
     }
 
     fn html_frontend(&self) -> ProjectFrontendCompilation {
@@ -684,7 +691,20 @@ fn assert_reserved_package_root_claim(
     expected_root: &str,
     scenario: &str,
 ) {
-    let messages = expect_diagnosed(fixture.build_result(&[]));
+    assert_reserved_package_claim_reports(
+        expect_diagnosed(fixture.build_result(&[])),
+        local_file,
+        expected_root,
+        scenario,
+    );
+}
+
+fn assert_reserved_package_claim_reports(
+    messages: DiagnosticReportSet,
+    local_file: &str,
+    expected_root: &str,
+    scenario: &str,
+) {
     let diagnostics = messages
         .iter_severity(DiagnosticSeverity::Error)
         .collect::<Vec<_>>();
@@ -889,6 +909,25 @@ fn synthetic_selected_entries_reject_importable_reserved_directory_claims() {
         .expect("should write private entry-only helper");
     fs::write(source_root.join("core/logo.png"), "not source").expect("should write core asset");
     fixture.build(&[]);
+
+    // A directory named for the reserved config source is inert at every depth. Its children
+    // must not become synthetic namespace claims or registered-prefix collisions.
+    let mut fixture = EntryFixture::new("[:page]\n", false);
+    fixture.select_ordinary_page_file();
+    let source_root = fixture.directory.path().join("src");
+    let inert_core_helper = source_root.join("core/@config.moth/helper.moth");
+    fs::create_dir_all(
+        inert_core_helper
+            .parent()
+            .expect("inert helper has a parent"),
+    )
+    .expect("should create config-named directory");
+    fs::write(&inert_core_helper, "value #= 1\n").expect("should write inert helper");
+    let inert_package_path = source_root.join("builder/@config.moth/web/site");
+    fs::create_dir_all(&inert_package_path).expect("should create config-named package path");
+    fs::write(inert_package_path.join("logo.png"), "not source")
+        .expect("should write inert package asset");
+    fixture.build(&[]);
 }
 
 #[test]
@@ -921,6 +960,125 @@ fn synthetic_ordinary_page_keeps_asset_only_reserved_directory_inert_for_package
     let math = fixture.directory.path().join("src/core/math");
     fs::create_dir_all(&math).expect("should create asset-only binding path");
     fs::write(math.join("logo.png"), "not source").expect("should write binding path asset");
+    fixture.build(&[]);
+}
+
+#[test]
+fn synthetic_ordinary_page_rejects_imports_of_private_entry_subtree_sources() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+
+    // An entry-only subtree publishes no importable surface, so its private helper stays legal on
+    // disk. Importing that helper through the reserved root must still fail: indexed namespaces
+    // never publish a local `core`/`builder` key, so only registered packages may resolve there.
+    for (case, import, reserved_directory, expected_root, expected_source) in [
+        (
+            "ordinary page entry-only core helper",
+            "@core/helper value",
+            "core",
+            "core",
+            "core/helper.moth",
+        ),
+        (
+            "ordinary page entry-only builder helper",
+            "@builder/helper value",
+            "builder",
+            "builder",
+            "builder/helper.moth",
+        ),
+        (
+            "ordinary page case-variant core subtree",
+            "@Core/helper value",
+            "Core",
+            "Core",
+            "Core/helper.moth",
+        ),
+    ] {
+        let mut fixture = EntryFixture::new(&format!("{import}\n[:[value]]\n"), false);
+        fixture.select_ordinary_page_file();
+        let reserved_directory = fixture
+            .directory
+            .path()
+            .join("src")
+            .join(reserved_directory);
+        fs::create_dir(&reserved_directory).expect("should create reserved subtree");
+        fs::write(reserved_directory.join("@entry.moth"), "[:private entry]\n")
+            .expect("should write private entry root");
+        fs::write(reserved_directory.join("helper.moth"), "value #= 1\n")
+            .expect("should write private helper");
+        assert_reserved_package_root_claim(&fixture, expected_source, expected_root, case);
+    }
+
+    // A nested support facade claims only its own basename, so the enclosing reserved root stays
+    // unclaimed during the bounded walk. The import below the reserved root is still refused.
+    let mut fixture = EntryFixture::new("@core/util/x value\n[:[value]]\n", false);
+    fixture.select_ordinary_page_file();
+    let nested_support = fixture.directory.path().join("src/core/util");
+    fs::create_dir_all(&nested_support).expect("should create nested support module");
+    fs::write(
+        nested_support.join("@package.moth"),
+        "$export\nvalue #= 1\n",
+    )
+    .expect("should write nested support facade");
+    fs::write(nested_support.join("x.moth"), "value #= 1\n")
+        .expect("should write nested private helper");
+    assert_reserved_package_root_claim(
+        &fixture,
+        "core/util/x.moth",
+        "core",
+        "ordinary page nested support facade",
+    );
+
+    // A selected @entry.moth owns the bounded module topology, but the synthetic fallback is the
+    // same one, so an entry-only child module's helper is not importable through its reserved
+    // root there either.
+    let fixture = EntryFixture::new("@core/helper value\n[:[value]]\n", false);
+    let child_entry = fixture.directory.path().join("src/core");
+    fs::create_dir(&child_entry).expect("should create child module directory");
+    fs::write(child_entry.join("@entry.moth"), "[:private child entry]\n")
+        .expect("should write child entry root");
+    fs::write(child_entry.join("helper.moth"), "value #= 1\n")
+        .expect("should write private child helper");
+    assert_reserved_package_root_claim(
+        &fixture,
+        "core/helper.moth",
+        "core",
+        "selected @entry.moth child entry module",
+    );
+
+    // The same trees publish nothing without an import, so they stay buildable, and a registered
+    // package import beside them keeps resolving to that package.
+    let mut fixture = EntryFixture::new("[:private reserved subtrees]\n", false);
+    fixture.select_ordinary_page_file();
+    let source_root = fixture.directory.path().join("src");
+    fs::create_dir(source_root.join("builder")).expect("should create builder subtree");
+    fs::write(
+        source_root.join("builder/@entry.moth"),
+        "[:private entry]\n",
+    )
+    .expect("should write builder entry root");
+    fs::write(source_root.join("builder/helper.moth"), "value #= 1\n")
+        .expect("should write builder private helper");
+    fs::create_dir_all(source_root.join("core/util")).expect("should create nested support folder");
+    fs::write(
+        source_root.join("core/util/@package.moth"),
+        "$export\nvalue #= 1\n",
+    )
+    .expect("should write nested support facade");
+    fs::write(source_root.join("core/util/x.moth"), "value #= 1\n")
+        .expect("should write nested support helper");
+    fixture.build(&[]);
+
+    let mut fixture = EntryFixture::new(
+        "@core/html p\n~[:registered package beside private core]\n",
+        false,
+    );
+    fixture.select_ordinary_page_file();
+    let source_root = fixture.directory.path().join("src");
+    fs::create_dir(source_root.join("core")).expect("should create core subtree");
+    fs::write(source_root.join("core/@entry.moth"), "[:private entry]\n")
+        .expect("should write core entry root");
+    fs::write(source_root.join("core/helper.moth"), "value #= 1\n")
+        .expect("should write core private helper");
     fixture.build(&[]);
 }
 
@@ -965,6 +1123,63 @@ fn synthetic_ordinary_page_rejects_exact_registered_package_prefix_directory() {
         "Core/HTML",
         "ordinary page beside a case-variant prefix folder",
     );
+}
+
+#[test]
+fn registered_source_package_rejects_importable_reserved_root_claims() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+
+    // A registered source package owns an independent Stage 0 boundary and its own module
+    // namespaces, so an importable helper or nested facade below a reserved root must fail there
+    // even though the project namespace is clean.
+    for (entry_mode, directory_entry) in [("directory", true), ("selected @entry.moth", false)] {
+        for (case, claim_path, claim_source, expected_root, expected_source_suffix) in [
+            (
+                "package-root helper",
+                "core.moth",
+                "value #= 1\n",
+                "core",
+                "core.moth",
+            ),
+            (
+                "nested normal facade",
+                "Builder/@mod.moth",
+                "$export\nvalue #= 1\n",
+                "Builder",
+                "Builder",
+            ),
+        ] {
+            let fixture = EntryFixture::new("[:page]\n", directory_entry);
+            let scenario = format!("{entry_mode} with {case}");
+            let package_root = fixture.directory.path().join("packages/local/widgets");
+            fs::create_dir_all(&package_root).expect("should create registered package root");
+            fs::write(package_root.join("@package.moth"), "$export\nvalue #= 1\n")
+                .expect("should write package facade");
+            let claim = package_root.join(claim_path);
+            fs::create_dir_all(claim.parent().expect("claim has a parent"))
+                .expect("should create claim parent");
+            fs::write(&claim, claim_source).expect("should write claim source");
+
+            let mut builder_surface = BuilderSurface::with_mandatory_core();
+            builder_surface
+                .source_packages
+                .register_filesystem_root("widgets", package_root, PackageOrigin::ProjectLocal)
+                .expect("test source root should register");
+
+            let messages = match fixture.try_frontend_with_surface(&mut builder_surface) {
+                Ok(outcome) => expect_diagnosed(Ok(outcome)),
+                Err(error) => {
+                    panic!("{scenario}: unexpected infrastructure failure: {error:?}")
+                }
+            };
+            assert_reserved_package_claim_reports(
+                messages,
+                expected_source_suffix,
+                expected_root,
+                &scenario,
+            );
+        }
+    }
 }
 
 #[cfg(unix)]

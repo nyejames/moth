@@ -1,5 +1,5 @@
-@core/constants app_name, app_version
-@core/constants build_timestamp as built_at
+@shared/constants app_name, app_version
+@shared/constants build_timestamp as built_at
 @types/models User, UserProfile
 @types/enums Status, Priority
 @utils/formatting format_label, format_timestamp

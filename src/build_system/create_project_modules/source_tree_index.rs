@@ -2098,6 +2098,18 @@ fn eligible_single_file_entry(
     if !is_directory && !is_file {
         return Ok(None);
     }
+    // A directory sharing the reserved build-only config filename is inert at every depth,
+    // exactly as the directory traversal treats it. Descending would let its children become
+    // importable synthetic namespace claims or registered-prefix collisions that directory
+    // compilation never sees.
+    if is_directory
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(file_name_is_config_file)
+    {
+        return Ok(None);
+    }
     let directory_identity = if is_directory {
         match listed_type {
             Some(_) => {

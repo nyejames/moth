@@ -19022,6 +19022,13 @@ contract = "language.dependencies.package_case_variant_import_rejected"
 role = "primary"
 
 [[case]]
+id = "web_site_old_namespace_import_rejected"
+path = "web_site_old_namespace_import_rejected"
+tags = ["integration", "source-packages", "dependencies", "diagnostics", "html", "html-wasm"]
+contract = "language.dependencies.removed_web_site_namespace_rejected"
+role = "primary"
+
+[[case]]
 id = "web_page_reachable"
 path = "web_page_reachable"
 tags = ["integration", "external-imports", "html", "html-wasm", "reachability"]

@@ -49,7 +49,7 @@ A configurable value uses `$config` before one explicitly typed top-level `#` bi
 
 A project-local import name whose first path component claims `core` or `builder`, in any ASCII case, is rejected. This covers normal and support facades, importable helpers and aliases. A directory name alone claims nothing, so entry-only modules, their private helpers, folders that contain only entries and plain asset directories below `core/` or `builder/` stay legal.
 
-A project folder whose full path matches a registered package path, such as `core/html/`, collides whichever module owns it, even when the folder holds no importable surface. Comparison ignores ASCII case. An ancestor folder such as `core/` alone stays legal, and so do unrelated project folders named `html/`, `css/`, `styles/` or `web/`. `@project` remains a separate reserved interface for project globals.
+A project folder whose full path matches a registered source package path, such as `core/html/` or `builder/web/site/`, collides whichever module owns it, even when the folder holds no importable surface. Comparison ignores ASCII case. A binding-backed package has no source module, so an asset folder at `builder/web/canvas/` stays legal. An ancestor folder such as `core/` alone stays legal, and so do unrelated project folders named `html/`, `css/`, `styles/` or `web/`. `@project` remains a separate reserved interface for project globals.
 
 ### Root files inside source directories
 
@@ -79,7 +79,7 @@ A project-root `@package.moth` is the external project package surface. Internal
 
 No folder gains package meaning without an `@package.moth` root. Ordinary directories do not automatically become packages.
 
-Copying a compiler-shipped package folder into a project gives an ordinary project-local support package. It never gains Core or Builder identity, capabilities or registration.
+Copying a compiler-shipped source package folder, one with `@package.moth` such as `packages/core/html`, to a non-colliding project path gives an ordinary project-local support package. It never gains Core or Builder identity, capabilities or registration. Copying a binding asset folder, such as `packages/builder/web/canvas/`, creates no package, registers none of the original symbols and gains no namespace identity.
 
 A directory may contain both an `@mod.moth` normal root and an `@package.moth` support root. They are two isolated surfaces of one structural module. Helpers are shared, roots cannot import each other and both interfaces publish only from one successful semantic transaction.
 

@@ -6,6 +6,7 @@
 //! WHY:  directory projects use indexed discovery and never run this BFS. They reuse the
 //!       provider-capable decision through `resolve_structural_provider_reference`, which maps
 //!       `DependencyPolicyAction` to `StructuralProviderAction`.
+use super::super::project_structure_diagnostics::reserved_package_namespace_root_claim_diagnostic;
 use super::discovery_finalization::finalize_reachable_files;
 use super::discovery_provider_imports::{
     ProviderBackedImportRequest, resolve_provider_backed_import, unsupported_builder_package_error,
@@ -13,6 +14,7 @@ use super::discovery_provider_imports::{
 };
 use super::*;
 use crate::builder_surface::external_import_providers::provider_sources::ProviderSourceRegistrar;
+use crate::builder_surface::package_metadata::reserved_package_namespace_claim_root;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DependencyClauseKind;
 use crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource;
@@ -558,6 +560,8 @@ pub(crate) fn discover_reachable_source_files(
 /// Resolve an ordinary source clause within the bounded synthetic consumer.
 /// Registered package clauses have already produced separate provider edges, so this lane
 /// only queues consumer-owned source through its retained module roots and filesystem resolver.
+/// A local file below a reserved package root is refused in this lane: indexed namespaces never
+/// publish that claim, so only registered packages may resolve under `@core` or `@builder`.
 /// One synthetic dependency resolution reused by every authored dependency with the same path.
 ///
 /// WHAT: records the provider-policy outcome, the package-surface record or the filesystem source
@@ -652,13 +656,33 @@ fn process_reachable_authored_dependency(
                 match action {
                     DependencyPolicyAction::Skip => SyntheticDependencyResolution::Skipped,
                     DependencyPolicyAction::QueueLocal => {
-                        SyntheticDependencyResolution::Queue(resolve_via_filesystem(
+                        let resolved = resolve_via_filesystem(
                             provider,
                             context.canonical_file,
                             path_fork,
                             context.project_path_resolver,
                             string_table,
-                        )?)
+                        )?;
+                        // Indexed namespaces reject importable local claims on `@core` and
+                        // `@builder`, so synthetic resolution cannot fall back to a local file
+                        // below either root. The claim names the resolved source because that
+                        // file is what would otherwise become importable.
+                        if matches!(provider.target, DependencyTargetKind::Source)
+                            && let Some(root) = reserved_dependency_claim_root(
+                                provider.path,
+                                path_fork,
+                                string_table,
+                            )
+                        {
+                            return Err(SourceDiscoveryError::Diagnostic(
+                                reserved_package_namespace_root_claim_diagnostic(
+                                    &root,
+                                    &resolved.path,
+                                    string_table,
+                                ),
+                            ));
+                        }
+                        SyntheticDependencyResolution::Queue(resolved)
                     }
                 }
             };
@@ -689,6 +713,26 @@ fn process_reachable_authored_dependency(
     }
 
     Ok(())
+}
+
+/// The reserved package namespace root claimed by one authored source import, if any.
+///
+/// WHAT: reads the dependency path's first component and returns its authored spelling when it
+/// names `core` or `builder`, ignoring ASCII case.
+/// WHY: synthetic discovery resolves imports against the entry root's filesystem, so it must
+/// apply the reserved-root rule that indexed namespaces already apply to their entries. Only
+/// source imports reach this predicate; provider-owned asset paths stay outside the import
+/// namespace and keep their own owner.
+fn reserved_dependency_claim_root(
+    dependency_path: PathId,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> Option<String> {
+    let mut scratch = Vec::new();
+    let first_component = *path_fork
+        .resolve_components(dependency_path, &mut scratch)
+        .first()?;
+    reserved_package_namespace_claim_root(string_table.resolve(first_component)).map(str::to_owned)
 }
 
 fn resolve_via_filesystem(

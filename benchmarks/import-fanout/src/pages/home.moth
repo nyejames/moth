@@ -1,6 +1,6 @@
 @types/models User, UserProfile
 @types/enums Status, Priority
-@core/constants max_items_per_page
+@shared/constants max_items_per_page
 @utils/formatting format_label
 @widgets/card Card
 @widgets/badge render_badge

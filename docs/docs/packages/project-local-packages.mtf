@@ -54,9 +54,9 @@ Support packages may hold reusable ordinary `#` constants and expose them throug
 
 Local support packages stay outside the reserved Core and Builder namespaces. An importable local facade, helper or dependency alias cannot claim `core` or `builder`, compared case-insensitively. A directory name alone never triggers that rejection: entry-only modules, their private helpers, directories containing only entry modules and plain asset directories remain legal. Unrelated `html/`, `css/`, `styles/` and `web/` folders also stay legal.
 
-A project folder whose full path matches a registered package path, such as `core/html/`, collides whichever module owns it, even when it holds no importable surface. An ancestor folder such as `core/` alone stays legal.
+A project folder whose full path matches a registered source package path, such as `core/html/` or `builder/web/site/`, collides whichever module owns it, even when it holds no importable surface. An ancestor folder such as `core/` alone stays legal. A binding-backed package has no source module, so an asset folder at a registered binding path such as `builder/web/canvas/` stays legal.
 
-Copying a source-backed package directory to a non-reserved local path gives an ordinary support package through its own `@package.moth`. Copying it to a registered package path, such as `core/html/`, hits the collision above. Copying a binding-backed asset tree registers nothing. Neither copy inherits the registered package's origin, namespace or capabilities.
+Copying a source-backed package directory to a non-colliding local path gives an ordinary support package through its own `@package.moth`. Copying it to a registered source package path, such as `core/html/`, hits the collision above. Copying a binding-backed asset tree creates no package and registers no symbols. Neither copy inherits the registered package's origin, namespace or capabilities.
 
 ### Origin and backing are separate
 

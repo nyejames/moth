@@ -1,4 +1,4 @@
-@core/constants max_items
+@shared/constants max_items
 
 clamp_page |page I32| -> I32:
     if page < 0:
