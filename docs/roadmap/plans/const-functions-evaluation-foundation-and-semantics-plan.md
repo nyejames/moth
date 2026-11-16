@@ -95,6 +95,7 @@ Source ownership and likely changes:
 - `src/compiler_frontend/ast/statements/value_production/expression_build.rs`: `commit_constant_result_block` for existing multi-result trusted host folds. Reuse for const-function result slots.
 - `src/compiler_frontend/ast/statements/match_patterns/`: Resolved match arms, literals, Option/choice captures and guards. Consume typed pattern facts, do not reparse.
 - `src/compiler_frontend/ast/field_access/receiver_calls/`: Source receiver resolution, ownership, visibility and call shape. Extend the existing method dispatch path.
+- `src/compiler_frontend/ast/module_ast/environment/function_signatures.rs`: Const receiver declaration refusal and source-method signature validation. Keep invalid declarations rejected early.
 - `src/compiler_frontend/ast/templates/tir/`: Authoritative template composition and constant folding. Remain sole template owner.
 - `src/compiler_frontend/ast/module_ast/finalization/finalizer.rs`: Release speculation after static selection, before freeze/HIR. Keep existing boundary and conservative refusal.
 
@@ -151,7 +152,7 @@ Each phase below is a stable stop point. Execute its tasks in order, but choose 
 
 - [ ] Build representative small cases: scalar arithmetic, repeated pure expressions in a loop, deep nested const calls, composite construction, mutable local collections, catches, templates, imports and structural strings.
 - [ ] Add a small, realistic `@core/html`/`@core/css`-style benchmark using a local fixture. Benchmark repeated helper invocation and template/string composition without modifying public package APIs.
-- [ ] Capture per-case time, expression rows appended/rebuilt, value-store allocation and work-budget consumption using existing instrumentation. Measure peak memory only if a practical profiler provides defensible evidence.
+- [ ] Capture per-case time, existing expression-storage census and fold counters, value-store allocation and work-budget consumption where already observable. Check whether dedicated const-interpreter rebuild counts actually exist. If attribution is impossible, add narrowly scoped benchmark-gated counters only where necessary, then remove temporary instrumentation unless it proves useful beyond this investigation. Measure peak memory only if a practical profiler provides defensible evidence.
 - [ ] Run the repository's non-recording benchmark checks where applicable. Record the toolchain, command, input and variance. Raw runs remain local.
 - [ ] Establish a minimal evidence-backed success criterion: fewer redundant expression rows or traversals, lower time/memory on representative cases, or a demonstrable reduction in owned machinery with no meaningful regression.
 
@@ -273,7 +274,7 @@ Check that each filter selects real tests. Do not use a passing zero-test run as
 ### Task 3.1: Discover the exact matching contract
 
 - [ ] Read the canonical match/pattern documentation and inspect `NodeKind::Match { scrutinee, arms, default, exhaustiveness }` and `MatchArm { pattern, guard, body }`.
-- [ ] Enumerate the existing resolved `MatchPattern` forms: literal, option absent/value/present capture, relational and choice variant with payload captures. Inspect `PatternValueKind::Runtime` and `Constant`, choice tag identity, typed comparison and capture placement.
+- [ ] Enumerate the existing resolved `MatchPattern` forms: literal, option absent/value/present capture, relational and choice variant with payload captures. Inspect `PatternValueKind::Runtime` and `Constant`, choice tag identity, typed comparison and capture placement. These are internal typed-AST states, not a new authored expression-pattern grammar. Ordinary source pattern syntax stays unchanged.
 - [ ] Trace HIR match lowering solely to establish the existing observable ordering. Do not call HIR helpers from Stage 4 or recompute exhaustiveness from source syntax.
 - [ ] Design one prepared match instruction that retains resolved facts and compiles each arm/default body once. Prefer shallow existing AST-owned pattern storage or compact prepared arm entries over cloning whole statements per invocation.
 
@@ -289,7 +290,7 @@ Check that each filter selects real tests. Do not use a passing zero-test run as
 ### Task 3.3: Complete coverage and diagnostics
 
 - [ ] Extend existing match/const tests for literals, relational patterns, exhaustive choices, choice payload capture, Option none/value/present capture, guards, default and nested matches.
-- [ ] Cover a runtime-valued pattern operand that becomes known through const local bindings, respecting its authored evaluation position.
+- [ ] Cover valid authored literal patterns (including contextually typed numeric literals) whose typed-AST `PatternValueKind::Runtime` may become constant only after normal resolution. Do not admit local-variable or arbitrary expression patterns through const evaluation.
 - [ ] Cover match inside a range or collection loop, early return, a nested const call, a selected failure and a failure in an inactive arm.
 - [ ] Check imported nominal choice identities and structural-text comparison refusal where the current evaluator cannot inspect final URL characters.
 - [ ] Preserve typed diagnostic codes/reasons and authored spans. Avoid generic "unsupported const expression" errors where a supported match contains a more precise failure.
@@ -323,31 +324,39 @@ Check that each filter selects real tests. Do not use a passing zero-test run as
 - [ ] Preserve per-slot provenance and the call's authored metadata. Do not merge result values into one synthetic aggregate.
 - [ ] Keep scalar-only release eligibility unchanged, including its benign refusal behaviour for non-scalar/multi-result candidates.
 
-### Task 4.3: Implement multi-bind inside const bodies
+### Task 4.3: Evaluate multi-slot producers at receiving sites
+
+- [ ] Inspect `ConstInterpreter::evaluate_expression(..) -> ConstValueId`, `evaluate_expression_inner`, `execute_return`/`evaluate_return_values` and `values.rs::fold_to_constant`. Record where one `ExprId` is wrongly assumed to yield one slot. In particular, `return pair()` contains one producer expression but can supply multiple ordered slots.
+- [ ] First add failing regressions for `return pair()`, forwarding a nested multi-result call and a multi-bind consuming a single multi-result producer. Cover valid value-producing `if`, `match` and `catch` blocks with multiple result slots where ordinary AST receiving rules permit them.
+- [ ] Introduce the smallest receiving-site operation that evaluates **one producer once** and extracts all values according to its resolved `SuccessShape`. Reuse the current prepared frames, value store and evaluation/handler behaviour. A narrowly scoped `evaluate_result_slots(..) -> Vec<ConstValueId>`-style helper is acceptable if it removes duplicate logic, but avoid a second generic evaluator.
+- [ ] Keep `evaluate_expression` and scalar operands single-valued. Route return forwarding and multi-bind through multi-slot receiving without creating tuples or flattening one slot into many accidental expressions. Preserve lazy branch selection, catch/handler behaviour and the existing effect/work budget.
+- [ ] Validate slot shape, ordering and types before target mutation or AST publication. Keep the existing `commit_constant_result_block` as the only AST multi-slot replacement path. Examine alias-sensitive updates and transactional failure for receiving sites separately.
+
+### Task 4.4: Implement multi-bind inside const bodies
 
 - [ ] Inspect the existing `NodeKind::MultiBind { targets, value }` and `MultiBindTarget` representation. Confirm declaration versus update targets, aliases and recorded `ValueMode`.
 - [ ] Add one prepared multi-bind instruction that retains the already-typed producer and target facts.
-- [ ] Evaluate the producer exactly once, obtain every result and preserve their order. Collect all RHS values before any existing target is updated.
+- [ ] Use Task 4.3's multi-slot receiving operation to evaluate the producer exactly once and preserve ordered results. Collect all RHS values before any existing target is updated.
 - [ ] Use existing `FrameBindings`, place projection and alias-write paths for declarations and assignments. Validate target shape and avoid partially installing new bindings on a failed result producer.
 - [ ] Preserve ordinary left-to-right target update semantics where aliases overlap. Do not introduce a new binding store, runtime tuple or mutable-parameter capability.
 
-### Task 4.4: Preserve returns and receivers
+### Task 4.5: Preserve returns and receivers
 
-- [ ] Inspect `ConstInstructionKind::Return(Vec<ExprId>)` and the ordinary return-production owner for any assumption that one expression equals one result slot.
+- [ ] Inspect `ConstInstructionKind::Return(Vec<ExprId>)` and the ordinary return-production owner for any assumption that one expression equals one result slot. Route each expression through Task 4.3's receiving-site operation and append its validated success slots in order, especially for `return pair()`.
 - [ ] Support returning multiple scalar/composite values, nested multi-result producers and value-producing blocks permitted by current AST receiving rules.
 - [ ] Preserve the distinction between a multi-result producer and a single-value operand. Ensure a single-target binding rejects a multi-result call with the existing arity diagnostic.
 
-### Task 4.5: Assert observable parity
+### Task 4.6: Assert observable parity
 
 Start with `const_multiple_result_slots_rejected` and `adversarial_multi_bind_in_loops`. Replace a rejection fixture only when its formerly invalid behaviour becomes supported. Keep `const_zero_result_function_rejected` as a separate current boundary.
 
 - [ ] Add a multi-result const helper with two and three distinct slots and assert exact output.
-- [ ] Cover a nested multi-result const call and cross-file import/publication.
-- [ ] Cover new declarations, existing mutable updates, mixed targets, alias-sensitive updates and evaluated-once side effects on local state.
+- [ ] Cover a nested multi-result const call, `return pair()` forwarding, a multi-result producer used in multi-bind and cross-file import/publication. Check permitted multi-result `if`/`match`/`catch` receiving sites.
+- [ ] Cover new declarations, existing mutable updates, mixed targets, alias-sensitive updates and evaluated-once effects on local state. Confirm a failing producer or invalid shape never partially commits bindings or published values.
 - [ ] Assert incorrect slot count/type diagnostics at receiving sites and no silent first-slot truncation.
 - [ ] Check that a released ordinary multi-return candidate remains a runtime call while a required const multi-return executes.
 
-**Phase 4 exit:** Required const functions support multiple ordered ordinary success slots and const bodies support multi-bind. The existing native result block remains the only multi-result replacement representation. Zero-result, fallible, Never and generic const signatures remain outside scope.
+**Phase 4 exit:** Required const functions support multiple ordered ordinary success slots, expression-to-result forwarding and const-body multi-bind. Multi-valued producers evaluate once at receiving sites, while scalar consumers remain single-valued. The existing native result block remains the only AST multi-result replacement representation. Zero-result, fallible, Never and generic const signatures remain outside scope.
 
 **Docs:** Update `function-declarations.mtf`, `returns-and-multiple-values.mtf` only where the const-specific contract warrants clarification and the progress matrix. Leave release eligibility wording accurate.
 
@@ -357,12 +366,13 @@ Start with `const_multiple_result_slots_rejected` and `adversarial_multi_bind_in
 
 **Purpose:** Allow the existing const marker on eligible immutable source receiver methods and evaluate receiver calls through the one prepared executable/frame machine.
 
-**Files:** `src/compiler_frontend/ast/field_access/receiver_calls/{mod,source_methods,shared}.rs`, `receiver_access.rs`, `src/compiler_frontend/ast/expressions/{function_calls,expression_store}.rs`, the function declaration/header and public-interface owners, and `const_execution/{mod,eligibility,rewrite,execute}.rs`.
+**Files:** `src/compiler_frontend/ast/module_ast/environment/function_signatures.rs`, `src/compiler_frontend/ast/field_access/receiver_calls/{mod,source_methods,shared}.rs`, `receiver_access.rs`, `src/compiler_frontend/ast/expressions/{function_calls,expression_store}.rs`, the function declaration/header and public-interface owners, and `const_execution/{mod,eligibility,rewrite,execute}.rs`.
 
 ### Task 5.1: Trace receiver identity before choosing an API
 
 - [ ] Inspect method declaration and call parsing. Confirm how the current `name #|...|` modifier intersects with `this T` receiver declarations, including declaration-time restrictions.
-- [ ] Trace `ExpressionOperationView::MethodCall`, resolved callable target, receiver argument position, metadata, method visibility and success shape. Locate the unconditional receiver-call refusal in `classify_const_expression`.
+- [ ] Trace `ExpressionOperationView::MethodCall`, resolved callable target, receiver argument position, metadata, method visibility and success shape. The receiver is stored separately from other arguments. Locate the unconditional `MethodCall` refusal in `const_execution/eligibility.rs::classify_const_expression` and the `Call`-only handling in `const_execution/rewrite.rs::const_call_site`.
+- [ ] Inspect the independent gates in `module_ast/environment/function_signatures.rs` (all const receiver declarations rejected) and `field_access/receiver_calls/source_methods.rs` (calls in const bodies rejected, plus a distinct runtime-method-on-const-record refusal). Determine precisely which gate should permit eligible const methods, without weakening the data-only const-record restriction.
 - [ ] Inspect how nominal type publication carries same-file methods to consumers. Identify any missing const-evaluation summary in an existing callable record before introducing a new record.
 - [ ] Decide whether the method can be prepared as an ordinary `ConstFunctionExecutable` with its receiver bound as the first parameter. Prefer this shared route.
 
@@ -371,13 +381,13 @@ Start with `const_multiple_result_slots_rejected` and `adversarial_multi_bind_in
 - [ ] Allow only a shared immutable `this T` receiver on an eligible same-file source-authored nominal struct or choice.
 - [ ] Require compile-time-known receiver and arguments. Use normal receiver-call syntax and the existing const marker. Keep ordinary receiver methods unaffected.
 - [ ] Reject `this ~T`, generic const methods, foreign/opaque/builtin receiver extension and cross-file receiver ownership.
-- [ ] Preserve nominal type identity, method visibility and the data-only const-record restriction. Do not turn anonymous compile-time records into runtime method-capable values.
+- [ ] Preserve nominal type identity, method visibility and the data-only const-record restriction. Eligible compile-time methods on supported nominal constant receivers must remain distinguishable from ordinary runtime methods called on data-only const-record values. Keep those runtime method calls rejected, including for nominal values where the established rule applies. Do not turn anonymous compile-time records into runtime method-capable values. If existing identity/eligibility facts cannot express this distinction, stop for an explicit design decision rather than broadly removing the guard.
 - [ ] Produce a source diagnostic at the authored declaration or call boundary, as appropriate. A never-called invalid const method must receive the established declaration-time eligibility check.
 
 ### Task 5.3: Execute through the existing callable path
 
-- [ ] Extend the prepared callable lookup and required rewrite to recognise a const method's resolved target.
-- [ ] Route the receiver value through the existing parameter/binding machinery, preserving receiver-before-arguments evaluation order and provenance.
+- [ ] Extend `const_execution/rewrite.rs::const_call_site` beyond `ExpressionOperationView::Call` to recognise the eligible `MethodCall` target, and update `eligibility.rs` without admitting arbitrary receiver calls. Align the declaration and source-method resolution gates identified in Task 5.1.
+- [ ] Evaluate the separately stored receiver once, before explicit arguments, then bind it as parameter zero through the existing parameter/binding machinery. Preserve provenance and normal method resolution without constructing a synthetic second receiver evaluation.
 - [ ] Reuse `ConstInterpreter::execute_body` and existing budgets. Do not build separate method frames, method registries or a method-specific value representation.
 - [ ] Reuse Phase 4 result-slot completion for a const method returning multiple values.
 - [ ] Confirm imported nominal methods execute from stable semantic interface facts without donor-local `ExprId` or `TypeId` leakage.
@@ -386,7 +396,7 @@ Start with `const_multiple_result_slots_rejected` and `adversarial_multi_bind_in
 ### Task 5.4: Validate method semantics
 
 - [ ] Add or extend cases for nominal struct and choice receivers, explicit parameters, nested const calls, composite returns and multiple returns.
-- [ ] Cover imported receiver types, method visibility, runtime receiver refusal, mutable receiver rejection, generic rejection and invalid ownership.
+- [ ] Cover imported receiver types, method visibility, runtime receiver refusal, mutable receiver rejection, generic rejection and invalid ownership. Add positive/negative regressions for every declaration, resolution, eligibility and call-rewrite gate, including ordinary runtime methods on data-only const records.
 - [ ] Cover template/string values returned by a const receiver method without making runtime templates legal.
 - [ ] Check receiver and argument evaluation order, failures and source provenance.
 
