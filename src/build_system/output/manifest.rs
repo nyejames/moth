@@ -19,16 +19,20 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, InvalidConfigReason, InvalidOutputFolderReason, PreparedFailure,
 };
 use crate::compiler_frontend::source::SourceSpan;
+#[cfg(windows)]
+use crate::compiler_frontend::utilities::basic::normalize_windows_verbatim_path;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use super::WriteMode;
 use super::output_path::{
     canonicalize_output_path, is_lossless_portable_relative_path, output_path_identity,
-    path_starts_with_component_identity, relative_path_contains_symlink_component,
+    parse_native_relative_path, path_starts_with_component_identity,
+    relative_path_contains_symlink_component,
 };
 use super::policy::{join_extensions_csv, normalize_managed_extension};
 
@@ -321,7 +325,7 @@ fn reject_dangerous_output_root(
             format!(
                 "Refusing to use '{}' as the build output root because it is a protected system path. \
                  Configure a project-relative output folder in @config.moth.",
-                output_root.display()
+                portable_path_text(output_root)
             ),
             super::writer::OutputRejectionReason::OutputRootDangerousSystemPath,
         ));
@@ -353,12 +357,12 @@ pub(crate) fn validate_directory_output_root_safety(
         let message = match reason {
             InvalidOutputFolderReason::VisibleDirectoryOutputPath => format!(
                 "Directory build output root '{}' must stay hidden from source discovery by a directory component starting with '_'.",
-                output_root.display()
+                portable_path_text(output_root)
             ),
             _ => format!(
                 "Directory build output root '{}' must resolve strictly inside the project directory '{}'.",
-                output_root.display(),
-                project_root.display()
+                portable_path_text(output_root),
+                portable_path_text(project_root)
             ),
         };
         return Err(file_error_with_rejection_reason(
@@ -411,8 +415,8 @@ pub(crate) fn validate_single_file_output_root_safety(
                 "Build output root '{}' is not inside or adjacent to the project directory '{}'. \
                  Stale artifact cleanup requires the output root to be near the project to prevent \
                  accidental file deletion.",
-                output_root.display(),
-                project_root.display()
+                portable_path_text(output_root),
+                portable_path_text(project_root)
             ),
             super::writer::OutputRejectionReason::OutputRootNotAdjacentToProject,
         ));
@@ -509,23 +513,23 @@ pub(crate) fn write_build_manifest(
     cleanup_policy: &CleanupPolicy,
     write_mode: WriteMode,
 ) -> Result<(), InfrastructureFailure> {
-    if let Some(path) = current_paths
-        .iter()
-        .find(|path| !is_lossless_portable_relative_path(path))
-    {
-        return Err(file_error(
-            path,
-            format!(
-                "Managed output path '{}' cannot be represented safely in the build manifest.",
-                path.display()
-            ),
-        ));
+    // Serialize each managed path through the same parser the reader and writer use, so the
+    // manifest always holds the validated `/`-joined spelling rather than host text.
+    let mut sorted_paths: Vec<String> = Vec::with_capacity(current_paths.len());
+    for path in current_paths {
+        let Ok(portable) = parse_native_relative_path(path) else {
+            // WHAT: name the rejected native path through its Debug spelling.
+            // WHY: portable display text would rewrite a Unix literal `\` to `/`, so the message
+            // would identify a different, valid output path instead of the rejected one.
+            return Err(file_error(
+                path,
+                format!(
+                    "Managed output path {path:?} cannot be represented safely in the build manifest."
+                ),
+            ));
+        };
+        sorted_paths.push(portable.portable_spelling());
     }
-
-    let mut sorted_paths: Vec<String> = current_paths
-        .iter()
-        .map(|path| path.to_string_lossy().into_owned())
-        .collect();
     sorted_paths.sort();
 
     let mut manifest_lines = vec![
@@ -552,7 +556,7 @@ pub(crate) fn write_build_manifest(
             manifest_destination,
             format!(
                 "Failed to write build manifest '{}': {error}",
-                manifest_destination.display()
+                portable_path_text(manifest_destination)
             ),
         )
     })
@@ -653,7 +657,7 @@ pub(crate) fn remove_manifest_tracked_stale_artifacts(
         if let Err(error) = fs::remove_file(&absolute_path) {
             report.warning_messages.push(format!(
                 "Warning: failed to remove stale artifact '{}': {error}",
-                absolute_path.display()
+                portable_path_text(&absolute_path)
             ));
             report
                 .retained_paths
@@ -930,7 +934,7 @@ fn manifest_owner_conflict_failure(
     diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
 ) -> PreparedFailure {
     let reason = InvalidConfigReason::OutputManifestOwnerConflict {
-        output_root: diagnostic_strings.intern(&output_root.to_string_lossy()),
+        output_root: diagnostic_strings.intern_path(output_root),
         existing_builder: diagnostic_strings.intern(existing_builder),
         existing_profile: diagnostic_strings.intern(existing_profile),
         active_builder: diagnostic_strings.intern(active_owner.builder.as_str()),
@@ -1000,50 +1004,136 @@ fn remove_empty_parent_dirs(
     }
 }
 
-/// Check whether a path matches a known dangerous system directory.
+/// Check whether a path names a protected system root that must never become an output root.
 ///
 /// WHY: cleanup removes files, so it must never operate on OS-critical directories like `/usr`
-/// or their platform equivalents.
-fn is_dangerous_system_path(path: &Path) -> bool {
-    let component_count = path.components().count();
+/// or their platform equivalents. Native path components are the identity here; display text,
+/// lossy spellings and string containment are never safe inputs for this boundary. Only an exact
+/// protected root is rejected, so descendants such as `/usr/local` stay the containment checks'
+/// concern. Visible to sibling output tests so Windows share-root and case-fold handling can be
+/// asserted directly, without network access or reliance on the host's stored casing.
+pub(super) fn is_dangerous_system_path(path: &Path) -> bool {
+    let mut component_count = 0;
+    let mut has_normal_component = false;
+    for component in path.components() {
+        component_count += 1;
+        has_normal_component |= matches!(component, Component::Normal(_));
+    }
 
-    if component_count < 2 {
+    // WHAT: reject a single-component path or a path with no normal component.
+    // WHY: `/`, `C:\`, `\\?\C:\` and a `\\server\share` UNC root contain only a prefix and/or a
+    // root separator. Cleanup must never treat any filesystem or share root as an output root.
+    if component_count < 2 || !has_normal_component {
         return true;
     }
 
     #[cfg(unix)]
     {
-        let path_str = path.to_string_lossy();
-        let dangerous_unix_paths: &[&str] = &[
+        const DANGEROUS_UNIX_ROOTS: &[&str] = &[
             "/usr", "/bin", "/sbin", "/etc", "/var", "/lib", "/boot", "/sys", "/proc", "/dev",
             "/home", "/tmp", "/opt", "/root", "/run", "/snap", "/srv",
         ];
-        for dangerous in dangerous_unix_paths {
-            if path_str == *dangerous || path_str.as_ref() == format!("{dangerous}/") {
-                return true;
-            }
+
+        if DANGEROUS_UNIX_ROOTS
+            .iter()
+            .any(|dangerous| unix_system_root_matches(path, dangerous))
+        {
+            return true;
         }
     }
 
     #[cfg(windows)]
     {
-        let path_str = path.to_string_lossy().to_lowercase();
-        let dangerous_windows_paths: &[&str] = &[
-            r"c:\",
-            r"c:\windows",
-            r"c:\program files",
-            r"c:\program files (x86)",
-            r"c:\users",
-            r"c:\system32",
+        // WHAT: strip the verbatim prefix that canonicalisation adds before comparing.
+        // WHY: `\\?\C:\Windows` and `C:\Windows` are one Windows identity, but `Path` equality
+        // distinguishes their prefix kinds. This normalisation is for comparison only; the native
+        // path stays authoritative for IO and containment.
+        let comparison_path = normalize_windows_verbatim_path(path);
+        // WHAT: named system directories under the system drive.
+        // WHY: drive and UNC share roots are already rejected by the root rule above, so this
+        // list owns only protected directories that contain normal components.
+        const DANGEROUS_WINDOWS_ROOTS: &[&str] = &[
+            r"C:\Windows",
+            r"C:\Program Files",
+            r"C:\Program Files (x86)",
+            r"C:\Users",
+            r"C:\System32",
         ];
-        for dangerous in dangerous_windows_paths {
-            if path_str == *dangerous || path_str == dangerous.trim_end_matches('\\') {
-                return true;
-            }
+
+        if DANGEROUS_WINDOWS_ROOTS
+            .iter()
+            .any(|dangerous| windows_paths_equal(&comparison_path, Path::new(dangerous)))
+        {
+            return true;
         }
     }
 
     false
+}
+
+/// Compare a canonical candidate against one protected Unix root in both its literal and
+/// canonical spellings.
+///
+/// WHAT: exact native component equality, never a descendant or prefix match.
+/// WHY: usr-merged Linux exposes `/bin`, `/sbin` and `/lib` as symlinks into `/usr`, so a
+/// canonical candidate arrives as `/usr/bin` and would not equal the literal root. macOS has the
+/// same relationship for `/etc`, `/tmp` and `/var` through `/private`. A literal match returns
+/// before canonicalising that entry; an unresolvable entry cannot be the canonical candidate.
+#[cfg(unix)]
+fn unix_system_root_matches(path: &Path, dangerous: &str) -> bool {
+    let dangerous = Path::new(dangerous);
+    if path.components().eq(dangerous.components()) {
+        return true;
+    }
+
+    let Ok(canonical_dangerous) = fs::canonicalize(dangerous) else {
+        return false;
+    };
+    path.components().eq(canonical_dangerous.components())
+}
+
+/// Compare two Windows paths by component identity, folding ASCII case.
+///
+/// WHAT: compares a normalised path against an ordinary drive-root spelling.
+/// WHY: Windows treats drive letters and directory names case-insensitively, while `Path`
+/// equality is case-sensitive and distinguishes verbatim from ordinary prefixes.
+#[cfg(windows)]
+fn windows_paths_equal(left: &Path, right: &Path) -> bool {
+    use std::path::Prefix;
+
+    fn prefixes_equal(left: Prefix<'_>, right: Prefix<'_>) -> bool {
+        match (left, right) {
+            (Prefix::Disk(left_drive), Prefix::Disk(right_drive)) => {
+                left_drive.eq_ignore_ascii_case(&right_drive)
+            }
+            _ => left == right,
+        }
+    }
+
+    let mut left_components = left.components();
+    let mut right_components = right.components();
+
+    loop {
+        match (left_components.next(), right_components.next()) {
+            (None, None) => return true,
+            (Some(Component::Prefix(left_prefix)), Some(Component::Prefix(right_prefix))) => {
+                if !prefixes_equal(left_prefix.kind(), right_prefix.kind()) {
+                    return false;
+                }
+            }
+            (Some(Component::Normal(left_name)), Some(Component::Normal(right_name))) => {
+                let (Some(left_name), Some(right_name)) = (left_name.to_str(), right_name.to_str())
+                else {
+                    return false;
+                };
+                if !left_name.eq_ignore_ascii_case(right_name) {
+                    return false;
+                }
+            }
+            (Some(Component::RootDir), Some(Component::RootDir)) => {}
+            _ => return false,
+        }
+    }
 }
 
 /// Attempt to remove a directory only if it is empty. Returns `Ok(())` if removed, `Err`

@@ -13,6 +13,7 @@ use crate::build_system::build::Project;
 use crate::build_system::utils::file_error;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 
 use std::fs;
 
@@ -88,7 +89,7 @@ fn write_project_outputs_inner(
             output_root,
             format!(
                 "Failed to create output root '{}': {error}",
-                output_root.display()
+                portable_path_text(output_root)
             ),
         )
     })?;

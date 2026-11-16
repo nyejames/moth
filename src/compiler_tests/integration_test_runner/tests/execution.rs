@@ -48,6 +48,7 @@ use crate::compiler_frontend::module_compilation::Module;
 use crate::compiler_frontend::source::line_index::LinePosition;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::html_project::js_path::RELEASE_ENTRY_FAILURE_NOTICE;
@@ -764,7 +765,7 @@ fn assert_entry_root_package_prefix_collision(
     assert!(
         strings
             .resolve(view.string_ids()[1])
-            .ends_with(&authored_folder.display().to_string()),
+            .ends_with(&portable_path_text(&authored_folder)),
         "{scenario}: the diagnostic must name the authored colliding folder: {}",
         strings.resolve(view.string_ids()[1])
     );

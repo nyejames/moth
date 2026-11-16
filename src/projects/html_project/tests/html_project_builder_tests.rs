@@ -44,8 +44,8 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::utilities::basic::portable_path_text;
-use crate::projects::html_project::resource_output_plan::ResourceUseKind;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
+use crate::projects::html_project::resource_output_plan::{ResourceUseKind, display_origin};
 use crate::projects::html_project::tests::test_support::{
     add_reachable_external_import, collect_output_paths, create_test_module, expect_html_output,
     js_runtime_asset_import, non_js_runtime_asset_import,
@@ -435,6 +435,7 @@ fn resource_destination_collision_preflights_before_read() {
         fs::canonicalize(&source_path).expect("resource should canonicalize");
 
     let origin = project_resource_origin("assets/logo.svg");
+    let expected_origin = display_origin(&origin);
     let mut resource_inputs = ResourceInputRegistry::new();
     let source_id = resource_inputs.register_source(canonical_source_path);
     attach_origin(&mut resource_inputs, origin.clone(), source_id)
@@ -464,10 +465,21 @@ fn resource_destination_collision_preflights_before_read() {
     );
 
     let failure = result.expect_err("an existing destination should fail emission");
-    assert!(matches!(
-        prepared_invalid_config_reason(failure, &string_table),
-        InvalidConfigReason::ResourceOutputPathReserved { .. }
-    ));
+    let InvalidConfigReason::ResourceOutputPathReserved {
+        output_path,
+        origin,
+        artefact_kind,
+    } = prepared_invalid_config_reason(failure, &string_table)
+    else {
+        panic!("expected a reserved resource output path reason");
+    };
+    assert_eq!(string_table.resolve(output_path), "assets/logo.svg");
+    assert_eq!(string_table.resolve(artefact_kind), "builder");
+    assert_eq!(
+        string_table.resolve(origin),
+        expected_origin,
+        "the diagnostic names the planned resource's stable origin"
+    );
     assert!(output_files.is_empty(), "a failed preflight emits no files");
     assert_eq!(
         resource_inputs.records()[0].content(),
@@ -655,10 +667,25 @@ fn duplicate_output_paths_are_rejected() {
 
     let reports = expect_diagnosed(result, "duplicate output paths should diagnose");
     let (reason, context) = first_invalid_config_reason(&reports);
-    let InvalidConfigReason::DuplicateHtmlOutputPath { output_path, .. } = reason else {
+    let InvalidConfigReason::DuplicateHtmlOutputPath {
+        output_path,
+        entry_point,
+        existing_entry_point,
+    } = reason
+    else {
         panic!("expected duplicate HTML output-path config reason");
     };
     assert_eq!(context.string_table.resolve(output_path), "index.html");
+    assert_eq!(
+        context.string_table.resolve(entry_point),
+        "index.moth",
+        "the diagnostic names the entry that emitted the repeated output path"
+    );
+    assert_eq!(
+        context.string_table.resolve(existing_entry_point),
+        "@entry.moth",
+        "the diagnostic names the entry that claimed the output path first"
+    );
 }
 
 #[test]

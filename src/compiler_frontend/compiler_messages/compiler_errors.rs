@@ -275,14 +275,14 @@ impl InfrastructureFailure {
     /// compiler's UTF-8 string interface.
     ///
     /// Command entry validation belongs to project assembly and retains the original host path.
+    ///
+    /// The message uses `Debug` so bytes the UTF-8 string interface cannot represent stay visible
+    /// as escapes instead of becoming replacement characters.
     pub fn non_utf8_entry_path(path: &Path, command: &str) -> Self {
         Self::filesystem(
             CompilerStage::ProjectBuildAssembly,
             path,
-            format!(
-                "Could not pass non-UTF-8 absolute {command} path '{}' to the compiler.",
-                path.display()
-            ),
+            format!("Could not pass non-UTF-8 absolute {command} path {path:?} to the compiler."),
         )
     }
 

@@ -15,7 +15,6 @@ use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMod
 use crate::compiler_frontend::compiler_messages::display_messages::format_infrastructure_errors;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compilation_result_html;
-use crate::compiler_frontend::compiler_messages::render::relative_display_path_from_root;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_compilation_result;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticSeverity, InvalidConfigReason, InvalidImportPathReason, TypeMismatchContext,
@@ -193,12 +192,6 @@ fn every_cause_type_has_truthful_introduction_in_all_views() {
             "original cause detail"
         );
     }
-}
-
-#[test]
-fn path_equal_to_display_root_is_not_empty() {
-    let path = Path::new("working-directory");
-    assert_eq!(relative_display_path_from_root(path, path), ".");
 }
 
 #[test]
@@ -438,4 +431,24 @@ fn normal_diagnostics_and_success_warnings_use_separate_result_lanes() {
     for code in expected_codes {
         assert!(!html.contains(code));
     }
+}
+
+/// `message()` is the only public failure surface for external hosts, so a filename the command
+/// cannot pass as UTF-8 must stay byte-exact instead of gaining replacement characters.
+#[cfg(unix)]
+#[test]
+fn non_utf8_entry_path_message_keeps_the_unrepresentable_name_byte_exact() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let path = Path::new(OsStr::from_bytes(b"/project/entry-\xff.moth"));
+    let failure = InfrastructureFailure::non_utf8_entry_path(path, "build");
+
+    assert_eq!(failure.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(failure.stage, CompilerStage::ProjectBuildAssembly);
+    assert_eq!(failure.host_path.as_deref(), Some(path));
+    assert_eq!(
+        failure.message(),
+        "Could not pass non-UTF-8 absolute build path \"/project/entry-\\xFF.moth\" to the compiler."
+    );
 }

@@ -5,7 +5,11 @@
 //! WHY: the browser resolves ES module imports relative to the importing module's URL, so
 //!      glue-to-asset and HTML-to-glue paths must be computed carefully.
 
+use crate::build_system::output::percent_encode_url_segment;
 use crate::build_system::utils::stable_content_hash;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 /// Shared directory for every generated glue module. Glue source imports are written relative to
@@ -68,12 +72,20 @@ pub(super) fn runtime_module_safe_name(specifier: &str) -> String {
 
 /// Compute a relative URL path from an emitted file's directory to another emitted asset.
 ///
-/// WHAT: returns a relative path string using `/` separators suitable for use in an HTML
-///       `src`, `href`, or module import specifier.
+/// WHAT: returns a percent-encoded relative path string using `/` separators suitable for use in
+///       an HTML `src`, `href`, or module import specifier. The result contains no HTML-escapable
+///       bytes, so callers embed it verbatim instead of escaping or re-encoding it.
 /// WHY: both the HTML and assets are emitted with relative paths from the project root;
 ///      browsers resolve relative URLs against the directory of the file that contains the
-///      reference.
-pub(super) fn relative_url_path(from_directory: &Path, to_asset: &Path) -> String {
+///      reference. Each asset component is percent-encoded, so reserved bytes cannot change the
+///      URL's meaning while the emitted file keeps its authored on-disk spelling.
+///
+/// Returns an error when an output path has a non-UTF-8 component or no component below the
+/// importing directory. Neither can name an emitted file, so output-path validation was bypassed.
+pub(super) fn relative_url_path(
+    from_directory: &Path,
+    to_asset: &Path,
+) -> Result<String, InfrastructureFailure> {
     let from_components: Vec<_> = from_directory.components().collect();
     let to_components: Vec<_> = to_asset.components().collect();
 
@@ -86,6 +98,21 @@ pub(super) fn relative_url_path(from_directory: &Path, to_asset: &Path) -> Strin
         common += 1;
     }
 
+    let remaining_asset_components = &to_components[common..];
+
+    // A browser import must name an emitted file. Output planning therefore always leaves at
+    // least one asset component below the importing directory.
+    if remaining_asset_components.is_empty() {
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
+                "HTML JS runtime URL rendering: output path {to_asset:?} has no component below \
+                 importing directory {from_directory:?}; a browser import must name an emitted \
+                 file."
+            ),
+        ));
+    }
+
     let mut path = String::new();
 
     // Go up one level for each remaining directory below the shared prefix.
@@ -93,25 +120,37 @@ pub(super) fn relative_url_path(from_directory: &Path, to_asset: &Path) -> Strin
         path.push_str("../");
     }
 
-    for component in to_components.iter().skip(common) {
+    for component in remaining_asset_components {
         if !path.is_empty() && !path.ends_with('/') {
             path.push('/');
         }
-        path.push_str(&component.as_os_str().to_string_lossy());
-    }
-
-    if path.is_empty() {
-        path.push_str(
-            &to_asset
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-        );
+        path.push_str(&encoded_url_component(component.as_os_str(), to_asset)?);
     }
 
     if !path.starts_with("./") && !path.starts_with("../") && !path.starts_with('/') {
         path.insert_str(0, "./");
     }
 
-    path
+    Ok(path)
+}
+
+/// Percent-encode one validated output-path component for a browser specifier.
+///
+/// The output-path planner rejects non-UTF-8 components before emission, so a lossy replacement
+/// here would silently address a different file. Report that contract breach instead.
+fn encoded_url_component(
+    component: &OsStr,
+    asset_path: &Path,
+) -> Result<String, InfrastructureFailure> {
+    let component_text = component.to_str().ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
+                "HTML JS runtime URL rendering: output path {asset_path:?} has a non-UTF-8 \
+                 component; output-path validation must reject such names before URL rendering."
+            ),
+        )
+    })?;
+
+    Ok(percent_encode_url_segment(component_text))
 }

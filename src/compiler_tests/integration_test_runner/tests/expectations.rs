@@ -1547,3 +1547,40 @@ fn rejects_empty_artifacts_must_not_exist_entry() {
         "unexpected error: {error}"
     );
 }
+
+#[test]
+fn rejects_authored_output_paths_without_a_portable_spelling() {
+    let cases = [
+        (
+            "artifact_assertions",
+            "\n[[backends.html.artifact_assertions]]\npath = \"../page.html\"\nkind = \"html\"\nmust_contain = [\"ok\"]\n",
+        ),
+        (
+            "artifacts_must_not_exist",
+            "\nartifacts_must_not_exist = [\"../page.html\"]\n",
+        ),
+    ];
+
+    for (field, extra_contract) in cases {
+        let (_root, case_root) = write_fixture(
+            &format!("non_portable_output_path_{field}"),
+            &format!(
+                "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\n{extra_contract}"
+            ),
+        );
+
+        let Err(error) = load_canonical_case_specs(&case_root, None) else {
+            panic!("a non-portable {field} output path should be rejected");
+        };
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+            "unexpected kind: {:?} ({error})",
+            error.kind
+        );
+        assert!(
+            error.message.contains("portable output path") && error.message.contains(field),
+            "the rejection must name the {field} field as a portable output path: {error}"
+        );
+    }
+}

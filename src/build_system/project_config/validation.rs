@@ -48,7 +48,7 @@ use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // -------------------------
 //  Validation Entry Point
@@ -1385,16 +1385,14 @@ pub(crate) fn validate_directory_output_settings(
     let (dev_setting, release_setting) = effective_output_settings(config);
 
     let dev = validate_one_output_folder(
-        dev_setting.key,
-        &dev_setting.folder,
+        &dev_setting,
         project_root,
         config,
         diagnostic_strings,
         &mut errors,
     );
     let release = validate_one_output_folder(
-        release_setting.key,
-        &release_setting.folder,
+        &release_setting,
         project_root,
         config,
         diagnostic_strings,
@@ -1424,10 +1422,14 @@ pub(crate) fn validate_directory_output_settings(
     }
 }
 
-/// One effective output root with the diagnostic key of the authoring shape that owns it.
-struct EffectiveOutputSetting {
+/// One effective output root with the diagnostic key and authored spelling that own it.
+struct EffectiveOutputSetting<'a> {
     key: &'static str,
-    folder: PathBuf,
+    /// The authored value, or the builder default, exactly as the config resolved it.
+    ///
+    /// WHY: diagnostics name the folder text the author configured, or the default that replaced
+    ///      it, so this stays lossless config text rather than a host-rendered path.
+    folder_spelling: &'a str,
 }
 
 /// Resolve the development and release output roots this config will actually use.
@@ -1436,27 +1438,25 @@ struct EffectiveOutputSetting {
 ///       section authored it. A builder without a section therefore resolves the same defaults.
 /// WHY: dual-mode output resolution must validate the roots that will actually be written and
 ///      point diagnostics at the authoring shape that provided each value.
-fn effective_output_settings(config: &Config) -> (EffectiveOutputSetting, EffectiveOutputSetting) {
+fn effective_output_settings(
+    config: &Config,
+) -> (EffectiveOutputSetting<'_>, EffectiveOutputSetting<'_>) {
     let dev = EffectiveOutputSetting {
         key: DEV_OUTPUT_FIELD,
-        folder: PathBuf::from(
-            config
-                .output_roots
-                .dev_output
-                .as_deref()
-                .unwrap_or(DEFAULT_DEV_OUTPUT),
-        ),
+        folder_spelling: config
+            .output_roots
+            .dev_output
+            .as_deref()
+            .unwrap_or(DEFAULT_DEV_OUTPUT),
     };
 
     let release = EffectiveOutputSetting {
         key: RELEASE_OUTPUT_FIELD,
-        folder: PathBuf::from(
-            config
-                .output_roots
-                .release_output
-                .as_deref()
-                .unwrap_or(DEFAULT_RELEASE_OUTPUT),
-        ),
+        folder_spelling: config
+            .output_roots
+            .release_output
+            .as_deref()
+            .unwrap_or(DEFAULT_RELEASE_OUTPUT),
     };
 
     (dev, release)
@@ -1464,19 +1464,20 @@ fn effective_output_settings(config: &Config) -> (EffectiveOutputSetting, Effect
 
 /// Validate one output folder, returning the validated folder when it is valid.
 fn validate_one_output_folder(
-    key: &str,
-    folder: &Path,
+    setting: &EffectiveOutputSetting<'_>,
     project_root: &Path,
     config: &Config,
     diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
     errors: &mut Vec<DiagnosticDraft>,
 ) -> Option<ValidatedOutputFolder> {
+    let key = setting.key;
+    let folder = Path::new(setting.folder_spelling);
     let span = config.setting_span(key);
 
     match classify_output_folder(folder, project_root) {
         Ok(mut valid) => {
             if let Err(reason) = validate_output_folder_containment(&valid, project_root) {
-                let folder_id = Some(diagnostic_strings.intern(&folder.to_string_lossy()));
+                let folder_id = Some(diagnostic_strings.intern(setting.folder_spelling));
                 errors.push(output_folder_diagnostic(
                     key,
                     folder_id,
@@ -1491,7 +1492,7 @@ fn validate_one_output_folder(
         }
         Err(reason) => {
             let folder_id = (!matches!(reason, InvalidOutputFolderReason::Empty))
-                .then(|| diagnostic_strings.intern(&folder.to_string_lossy()));
+                .then(|| diagnostic_strings.intern(setting.folder_spelling));
             errors.push(output_folder_diagnostic(
                 key,
                 folder_id,
@@ -1529,9 +1530,8 @@ fn validate_output_folders_distinct(
         let mut diagnostic = project_config::invalid_config_reason(
             Some(diagnostic_strings.intern(dev_setting.key)),
             InvalidConfigReason::OutputFoldersNotDistinct {
-                dev_folder: diagnostic_strings.intern(&dev_setting.folder.to_string_lossy()),
-                release_folder: diagnostic_strings
-                    .intern(&release_setting.folder.to_string_lossy()),
+                dev_folder: diagnostic_strings.intern(dev_setting.folder_spelling),
+                release_folder: diagnostic_strings.intern(release_setting.folder_spelling),
             },
             config.setting_span(dev_setting.key),
         );

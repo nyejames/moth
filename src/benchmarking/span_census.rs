@@ -17,6 +17,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{self, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::fmt;
 use std::fs;
 use std::num::NonZeroU32;
@@ -349,19 +350,25 @@ fn collect_corpus_files(
 
     while let Some(directory) = pending.pop() {
         let entries = fs::read_dir(&directory).map_err(|error| {
-            SpanCensusError::new(format!("failed to read '{}': {error}", directory.display()))
+            SpanCensusError::new(format!(
+                "failed to read '{}': {error}",
+                portable_path_text(&directory)
+            ))
         })?;
 
         for entry in entries {
             let entry = entry.map_err(|error| {
                 SpanCensusError::new(format!(
                     "failed to read an entry of '{}': {error}",
-                    directory.display()
+                    portable_path_text(&directory)
                 ))
             })?;
             let path = entry.path();
             let metadata = fs::symlink_metadata(&path).map_err(|error| {
-                SpanCensusError::new(format!("failed to stat '{}': {error}", path.display()))
+                SpanCensusError::new(format!(
+                    "failed to stat '{}': {error}",
+                    portable_path_text(&path)
+                ))
             })?;
 
             if metadata.is_dir() {
@@ -404,7 +411,10 @@ fn measure_excluded_js(
 
     for path in js_files {
         let metadata = fs::metadata(path).map_err(|error| {
-            SpanCensusError::new(format!("failed to stat '{}': {error}", path.display()))
+            SpanCensusError::new(format!(
+                "failed to stat '{}': {error}",
+                portable_path_text(path)
+            ))
         })?;
         total_bytes += metadata.len();
         let _ = relative_portable_path(workspace_root, path)?;
@@ -816,8 +826,7 @@ fn relative_portable_path(workspace_root: &Path, path: &Path) -> Result<String, 
     for component in relative.components() {
         let segment = component.as_os_str().to_str().ok_or_else(|| {
             SpanCensusError::new(format!(
-                "path '{}' has a component that is not valid UTF-8",
-                relative.display()
+                "path {relative:?} has a component that is not valid UTF-8"
             ))
         })?;
         segments.push(segment);

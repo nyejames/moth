@@ -21,8 +21,11 @@
 //! - The compiled-artifact half of timer erasure, which needs a built binary
 //! - Feature-lane coverage (see `feature_matrix`)
 
-use crate::architecture_boundary::{BoundaryRule, audit_architecture_boundary_fragment};
+use crate::architecture_boundary::{
+    BoundaryRule, audit_architecture_boundary_fragment, is_test_source,
+};
 use crate::report_file::{ReportRunIdentity, write_report_atomically};
+use crate::rust_scanner::{code_mask, matches_at};
 use crate::source_tree::{relative_display_path, walk_rust_files, workspace_root};
 use crate::timers_erasure_check::audit_timer_source_fragment;
 use serde::Serialize;
@@ -68,6 +71,8 @@ pub enum SourceRule {
     RemovedLegacyConversionName,
     /// The removed legacy diagnostic payload variant was reintroduced by name.
     RemovedLegacyPayloadVariant,
+    /// Production `src/` code interned host-path display text as a diagnostic fact.
+    UnportableDiagnosticPathFact,
     /// Production code outside `compiler_frontend` named a frontend semantic stage owner.
     ExternalStageOrchestration,
     /// Production `compiler_frontend` code named build-system or project config state.
@@ -88,6 +93,7 @@ impl SourceRule {
             Self::TimerErasure => "timer-erasure",
             Self::RemovedLegacyConversionName => "legacy-error-conversion-name",
             Self::RemovedLegacyPayloadVariant => "legacy-error-payload-variant",
+            Self::UnportableDiagnosticPathFact => "unportable-diagnostic-path-fact",
             Self::ExternalStageOrchestration => "external-stage-orchestration",
             Self::CompilerDependencyOnBuild => "compiler-dependency-on-build",
             Self::OracleStaticSolverIndependence => "oracle-static-solver-independence",
@@ -250,6 +256,7 @@ fn audit_source_fragment(relative: &str, content: &str) -> Vec<SourceFinding> {
 
     findings.extend(audit_legacy_error_conversion(relative, content));
     findings.extend(audit_legacy_error_payload(relative, content));
+    findings.extend(audit_unportable_diagnostic_path_fact(relative, content));
     findings.extend(
         audit_architecture_boundary_fragment(relative, content)
             .into_iter()
@@ -323,6 +330,140 @@ fn audit_legacy_error_payload(relative: &str, content: &str) -> Vec<SourceFindin
              diagnostic payloads are typed, never a rendered string"
         ),
     }]
+}
+
+/// Host-path display text must reach diagnostics through `DiagnosticStringBuilder::intern_path`.
+///
+/// A path fact carries the native `Path`'s provenance. Interning `Path::display` or
+/// `to_string_lossy` output stores a lossy rendering in place of the fact, which is why the
+/// portable conversion has one owned operation. Every interning call is inspected whatever its
+/// receiver, and each conversion is reported once per file.
+///
+/// This is a reintroduction tripwire, so an alias or an intermediate binding such as
+/// `let text = path.display().to_string()` escapes it. Only the zero-argument
+/// `.display()` counts, so typed `display(..)` calls are not reported, although a new
+/// zero-argument `display()` would match inside an interning argument. Matching assumes
+/// `rustfmt` layout, which never separates a method name from its `(` or puts whitespace
+/// inside an empty argument list.
+///
+/// Scope is production `src/` only. Extracted crates and `xtask` have their own source surfaces,
+/// and tests may assert displayed text directly. The shared path-based test-source skip applies,
+/// so an inline `#[cfg(test)]` module inside a production file is still scanned.
+fn audit_unportable_diagnostic_path_fact(relative: &str, content: &str) -> Vec<SourceFinding> {
+    if !relative.starts_with("src/") || is_test_source(relative) {
+        return Vec::new();
+    }
+
+    unportable_path_display_conversions(content)
+        .into_iter()
+        .map(|conversion| SourceFinding {
+            file: relative.to_owned(),
+            rule: SourceRule::UnportableDiagnosticPathFact,
+            message: format!(
+                "interns path text from `{conversion}`; diagnostic path facts intern the native \
+                 path through `DiagnosticStringBuilder::intern_path`"
+            ),
+        })
+        .collect()
+}
+
+/// Diagnostic string interning calls that can receive a rendered host path.
+const DIAGNOSTIC_INTERNING_CALLS: &[&str] = &[".intern(", ".get_or_intern("];
+
+/// Host-path display conversions this rule refuses to see interned as a diagnostic fact.
+///
+/// `.to_string_lossy(` needs no companion check because it already produces the rendered text.
+/// `.display()` must be the zero-argument form followed by text production, so the typed
+/// `TypeDisplaySnapshot::display(..)` calls this repository also uses do not match.
+const LOSSY_PATH_DISPLAY: &str = "to_string_lossy";
+const PATH_DISPLAY: &str = "Path::display";
+
+/// Distinct path display conversions passed to diagnostic interning calls.
+fn unportable_path_display_conversions(content: &str) -> Vec<&'static str> {
+    let mut conversions = Vec::new();
+
+    for argument in diagnostic_interning_arguments(content) {
+        if argument.contains(".to_string_lossy(") && !conversions.contains(&LOSSY_PATH_DISPLAY) {
+            conversions.push(LOSSY_PATH_DISPLAY);
+        }
+
+        let displays_path = argument.contains(".display()")
+            && (argument.contains(".to_string(") || argument.contains("format!"));
+        if displays_path && !conversions.contains(&PATH_DISPLAY) {
+            conversions.push(PATH_DISPLAY);
+        }
+    }
+
+    conversions
+}
+
+/// The code-only argument text of every diagnostic interning call in `content`.
+///
+/// `rust_scanner` decides which characters are code, so a call-shaped fragment in a string
+/// literal or a comment is never the call and its text is blanked before the conversion search.
+/// The same mask keeps a parenthesis in a character literal from unbalancing the argument.
+fn diagnostic_interning_arguments(content: &str) -> Vec<String> {
+    let characters: Vec<char> = content.chars().collect();
+    let is_code = code_mask(&characters);
+    let mut arguments = Vec::new();
+
+    for index in 0..characters.len() {
+        if !is_code[index] {
+            continue;
+        }
+
+        let Some(call) = DIAGNOSTIC_INTERNING_CALLS
+            .iter()
+            .find(|call| matches_at(&characters, index, call))
+        else {
+            continue;
+        };
+
+        let opening_parenthesis = index + call.chars().count() - 1;
+        if let Some(argument) = balanced_code_argument(&characters, &is_code, opening_parenthesis) {
+            arguments.push(argument);
+        }
+    }
+    arguments
+}
+
+/// The code text between a call's opening parenthesis and its matching closing parenthesis.
+///
+/// Literal and comment characters are replaced with spaces, so conversions can be matched with
+/// plain substring tests without splicing across a blanked span.
+fn balanced_code_argument(
+    characters: &[char],
+    is_code: &[bool],
+    opening_parenthesis: usize,
+) -> Option<String> {
+    let mut depth = 1_usize;
+
+    for index in opening_parenthesis + 1..characters.len() {
+        if !is_code[index] {
+            continue;
+        }
+
+        match characters[index] {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    let argument = &characters[opening_parenthesis + 1..index];
+                    let argument_is_code = &is_code[opening_parenthesis + 1..index];
+                    return Some(
+                        argument
+                            .iter()
+                            .zip(argument_is_code)
+                            .map(|(character, is_code)| if *is_code { *character } else { ' ' })
+                            .collect(),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

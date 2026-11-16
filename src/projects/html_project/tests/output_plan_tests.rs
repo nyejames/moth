@@ -38,6 +38,35 @@ fn single_file_missing_stem_is_rejected_not_main() {
 }
 
 #[test]
+fn directory_route_outside_source_root_reports_both_paths() {
+    let error = derive_logical_html_path(
+        Path::new("project/src/@entry.moth"),
+        Some(Path::new("project/pages")),
+    )
+    .expect_err("an entry outside the selected source root must be rejected");
+
+    assert_eq!(
+        error.message.as_ref(),
+        "HTML entry 'project/src/@entry.moth' is not inside the selected source root 'project/pages'."
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn directory_route_outside_source_root_renders_backslashes_as_portable_text() {
+    let error = derive_logical_html_path(
+        Path::new("/project/src\\pages/@entry.moth"),
+        Some(Path::new("/project/src")),
+    )
+    .expect_err("a literal backslash component must not match the source root");
+
+    assert_eq!(
+        error.message.as_ref(),
+        "HTML entry '/project/src/pages/@entry.moth' is not inside the selected source root '/project/src'."
+    );
+}
+
+#[test]
 fn directory_route_records_folder_and_title_projections() {
     let route = derive_logical_html_path(
         Path::new("src/docs/basics/@entry.moth"),

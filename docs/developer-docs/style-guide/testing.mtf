@@ -114,9 +114,11 @@ interaction. Check the actual assertions, not just matching feature names.
 - Language and project integration scenarios belong under `tests/cases/`.
 - Keep fixture data and test-only helpers with their owner. Share a helper only
   across genuine repeated use, without hiding the meaningful source shape.
-- Use shared `portable_path_text` for asserted or displayed paths. Keep
-  `Path` and `PathBuf` for filesystem operations and normalize only at the
-  assertion/display boundary.
+- When displayed host-path text is the contract, assert the exact text and
+  derive it with `portable_path_text(native_expected)` only at the assertion
+  boundary. Keep `Path` and `PathBuf` for filesystem operations.
+- Assert native `host_path` values or typed path facts for path identity. Never
+  assert replacement characters as identity.
 
 ### MON and shared lexical coverage
 

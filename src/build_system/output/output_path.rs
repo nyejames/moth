@@ -1,12 +1,15 @@
 //! Portable output-path parsing, deterministic identity and URL segment encoding.
 //!
-//! WHAT: owns the one portable relative-path parser that interprets both `/` and `\` as
-//! separators on every host, the deterministic ASCII-case-folded identity derived from its
-//! validated components and RFC 3986 percent-encoding for URL segments.
-//! WHY: output-folder classification, development/release root comparison and destination
-//! collision checks must all consume the same validated components rather than each owning a
-//! separate lexical parser. `std::path` component classification is host-dependent (Windows
-//! prefixes are only recognised on Windows), so the parser handles every host explicitly.
+//! WHAT: owns the portable output-path parsers, the deterministic ASCII-case-folded identity
+//! derived from their validated components and RFC 3986 percent-encoding for URL segments.
+//! Authored spellings split on both `/` and `\`, while native paths keep their host components and
+//! reject a `\` inside one.
+//! WHY: output-folder classification, development/release root comparison, destination collision
+//! checks and URL rendering must all consume the same validated components rather than each
+//! owning a separate lexical parser. `std::path` component classification is host-dependent
+//! (Windows prefixes are only recognised on Windows), so every lane handles each host explicitly.
+//! A native component carrying a literal `\` is rejected because it has no portable spelling and
+//! would otherwise alias a nested path in identities, collision checks and written destinations.
 
 use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
 
@@ -43,6 +46,15 @@ impl PortableRelativePath {
 
     fn identity_string(&self) -> String {
         self.identity_components().join("/")
+    }
+
+    /// Render the validated `/`-joined spelling without reparsing the path.
+    ///
+    /// This is the portable form for keys and manifest lines. It is never display text: every
+    /// component has already passed the output-path rules. URL rendering still percent-encodes
+    /// each segment separately.
+    pub(crate) fn portable_spelling(&self) -> String {
+        self.components.join("/")
     }
 
     /// Build the deterministic identity of this validated path without reparsing it.
@@ -190,27 +202,56 @@ fn is_reserved_windows_device_basename(component: &str) -> bool {
         )
 }
 
-/// Build the deterministic identity for a project-relative path.
+/// Parse a native project-relative path into portable components.
 ///
-/// Returns an error when the path is not a valid portable relative path, so invalid components
-/// such as roots, prefixes or parent segments are never silently ignored.
-pub(crate) fn output_path_identity(
+/// WHAT: rejects a `Normal` component whose own UTF-8 text contains `\` before the authored
+/// parser can treat that character as a separator.
+/// WHY: host components are authoritative directory-entry names. A Unix filename may contain a
+/// literal `\`, and re-splitting it would silently alias `a\b` with `a/b` in every identity,
+/// collision and writer check. Authored strings keep the both-separator rule in
+/// [`parse_relative_path`], which also enforces every remaining component rule.
+pub(crate) fn parse_native_relative_path(
     relative: &Path,
-) -> Result<OutputPathIdentity, InvalidOutputFolderReason> {
+) -> Result<PortableRelativePath, InvalidOutputFolderReason> {
     let raw = relative
         .to_str()
         .ok_or(InvalidOutputFolderReason::NonUtf8)?;
-    parse_relative_path(raw).map(|portable| portable.identity())
+
+    // A leading separator makes the path rooted, not a directory-entry name. Check it before the
+    // component scan so a Unix filename such as `\server\share` keeps its AbsolutePath
+    // classification instead of the literal-backslash rejection below.
+    if raw.starts_with(['/', '\\']) {
+        return Err(InvalidOutputFolderReason::AbsolutePath);
+    }
+
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            continue;
+        };
+        if name.to_str().is_some_and(|name| name.contains('\\')) {
+            return Err(InvalidOutputFolderReason::InvalidPathComponent);
+        }
+    }
+
+    parse_relative_path(raw)
+}
+
+/// Build the deterministic identity for a project-relative path.
+///
+/// Returns an error when the path is not a valid portable relative path, so invalid components
+/// such as roots, prefixes, parent segments or literal backslash entry names are never silently
+/// ignored.
+pub(crate) fn output_path_identity(
+    relative: &Path,
+) -> Result<OutputPathIdentity, InvalidOutputFolderReason> {
+    parse_native_relative_path(relative).map(|portable| portable.identity())
 }
 
 /// Build the deterministic identity of every component in a project-relative path.
 pub(crate) fn output_path_component_identities(
     relative: &Path,
 ) -> Result<Vec<String>, InvalidOutputFolderReason> {
-    let raw = relative
-        .to_str()
-        .ok_or(InvalidOutputFolderReason::NonUtf8)?;
-    parse_relative_path(raw).map(|portable| portable.identity_components())
+    parse_native_relative_path(relative).map(|portable| portable.identity_components())
 }
 
 /// Yield every strict prefix of a portable output-path component identity.
@@ -245,13 +286,13 @@ pub(crate) fn path_starts_with_component_identity(
 }
 
 /// Normalize a portable relative path into the host path representation used for filesystem IO.
+///
+/// Rejects a native component containing a literal `\` rather than reinterpreting it as a
+/// separator, so the emitted destination always matches the host filename the caller supplied.
 pub(crate) fn normalize_relative_path(
     relative: &Path,
 ) -> Result<PathBuf, InvalidOutputFolderReason> {
-    let raw = relative
-        .to_str()
-        .ok_or(InvalidOutputFolderReason::NonUtf8)?;
-    parse_relative_path(raw).map(|portable| portable.to_path_buf())
+    parse_native_relative_path(relative).map(|portable| portable.to_path_buf())
 }
 
 /// Check whether a filesystem-relative path can be serialized and parsed without changing it.

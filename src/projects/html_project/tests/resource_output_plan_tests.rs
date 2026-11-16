@@ -2,6 +2,8 @@ use super::*;
 use crate::build_system::resource_unions::ResourceOriginUnion;
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::builder_root_slots::ConstFragmentDestination;
+#[cfg(unix)]
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
@@ -94,6 +96,37 @@ fn invalid_config_reason(
     decode_invalid_config(&facts, diagnostic.string_ids())
         .expect("invalid config view should retain its typed reason")
         .1
+}
+
+/// Freeze one invalid-artefact-output-path failure and return its path fact text.
+///
+/// The fact is exactly what the renderer inserts, so asserting it pins the name the diagnostic
+/// shows without coupling the test to unrelated sentence wording.
+#[cfg(unix)]
+fn invalid_config_reason_and_output_path_fact(
+    failure: PreparedFailure,
+    string_table: &StringTable,
+) -> (InvalidConfigReason, String) {
+    let failure = freeze_prepared_failure(failure, string_table, None, None);
+    let (report, diagnostic) = diagnostic_reports(&failure)
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("expected an error-severity diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("expected an invalid config diagnostic");
+    let (_, reason) = decode_invalid_config(&facts, diagnostic.string_ids())
+        .expect("invalid config view should retain its typed reason");
+    let fact_text = match &reason {
+        InvalidConfigReason::InvalidArtefactOutputPath { output_path, .. } => {
+            DiagnosticRenderContext::for_report(report)
+                .string_table
+                .resolve(*output_path)
+                .to_owned()
+        }
+        other => panic!("expected an invalid artefact output path reason, got {other:?}"),
+    };
+    (reason, fact_text)
 }
 fn module_resource_origin(
     package_name: &str,
@@ -1042,4 +1075,91 @@ fn site_root_is_not_planned_as_a_resource_output() {
     // WHY: SiteRoot is a semantic reachability fact, not a resource and has no output path.
     let plan = HtmlResourceOutputPlan::new("app");
     assert!(plan.records.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn literal_backslash_resource_component_is_rejected_before_collision() {
+    // WHAT: a native resource filename containing `\` is rejected as an authored invalid output
+    //       path instead of being re-split onto the `a/b.png` identity already claimed.
+    // WHY: `\` is an ordinary character in a Unix filename, so reinterpreting it as a separator
+    //       would either collide with a distinct resource or emit it somewhere else. The
+    //       diagnostic must name that exact filename rather than show the portable `a/b.png`
+    //       alias beside the invalid-component reason.
+    let mut string_table = StringTable::new();
+    let mut plan = HtmlResourceOutputPlan::new("app");
+    let nested = module_resource_origin("app", "", "a/b.png");
+    plan.plan_origin(
+        nested,
+        Some(authored_site(0)),
+        ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
+        &mut DiagnosticStringBuilder::new(&mut string_table),
+        ResourceUseKind::Executable,
+    )
+    .unwrap();
+
+    let literal = module_resource_origin("app", "", "a\\b.png");
+    let error = plan
+        .plan_origin(
+            literal,
+            Some(authored_site(2)),
+            ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
+            &mut DiagnosticStringBuilder::new(&mut string_table),
+            ResourceUseKind::Executable,
+        )
+        .unwrap_err();
+
+    let (reason, path_fact) = invalid_config_reason_and_output_path_fact(error, &string_table);
+    let InvalidConfigReason::InvalidArtefactOutputPath {
+        reason: InvalidOutputFolderReason::InvalidPathComponent,
+        ..
+    } = reason
+    else {
+        panic!("a literal backslash must reject the authored artefact output path");
+    };
+
+    let native_path = Path::new("a\\b.png");
+    assert_eq!(
+        path_fact,
+        format!("{native_path:?}"),
+        "the diagnostic must name the rejected native component unambiguously"
+    );
+    assert_ne!(
+        path_fact, "a/b.png",
+        "the portable alias names a different, valid resource path"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn provider_runtime_asset_with_literal_backslash_reaches_internal_failure() {
+    // WHAT: provider-declared output paths stay a contract boundary, not an authored diagnostic.
+    // WHY: a provider asset whose logical spelling contains a native `\` cannot be represented
+    //       portably. Authored imports cannot create one, so this is an internal invariant
+    //       breach pinned at the predicate that owns it.
+    let mut string_table = StringTable::new();
+    let origin = provider_resource_origin("html-js", "app", "_moth/js/a\\b.js");
+    let mut plan = HtmlResourceOutputPlan::new("app");
+
+    let error = plan
+        .plan_provider_runtime_asset(
+            origin,
+            Some(authored_site(0)),
+            &mut DiagnosticStringBuilder::new(&mut string_table),
+        )
+        .unwrap_err();
+
+    let PreparedFailure::Infrastructure(errors) = error else {
+        panic!("provider-declared output paths are not authored paths");
+    };
+    let primary = errors
+        .iter()
+        .next()
+        .expect("an infrastructure failure always carries its primary cause");
+    assert_eq!(primary.kind, InfrastructureFailureKind::Internal);
+    assert!(
+        primary.message().contains("InvalidPathComponent"),
+        "the internal failure should retain the rejection reason: {}",
+        primary.message()
+    );
 }

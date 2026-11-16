@@ -14,8 +14,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::PathTable;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::resource_output_plan::ResourceDiagnosticSite;
 use std::path::Path;
 use std::sync::Arc;
@@ -28,9 +27,9 @@ pub(crate) fn duplicate_html_output_path_diagnostic(
 ) -> DiagnosticDraft {
     html_config_diagnostic(
         |string_table| InvalidConfigReason::DuplicateHtmlOutputPath {
-            output_path: path_id(output_path, string_table),
-            entry_point: path_id(duplicate_entry_point, string_table),
-            existing_entry_point: path_id(existing_entry_point, string_table),
+            output_path: string_table.intern_path(output_path),
+            entry_point: string_table.intern_path(duplicate_entry_point),
+            existing_entry_point: string_table.intern_path(existing_entry_point),
         },
         string_table,
     )
@@ -49,7 +48,7 @@ pub(crate) fn resource_output_path_collision_diagnostic(
     string_table: &mut DiagnosticStringBuilder,
 ) -> DiagnosticDraft {
     let reason = InvalidConfigReason::ResourceOutputPathCollision {
-        output_path: path_id(output_path, string_table),
+        output_path: string_table.intern_path(output_path),
         existing_origin: string_table.intern(existing_origin),
         conflicting_origin: string_table.intern(conflicting_origin),
     };
@@ -87,7 +86,7 @@ pub(crate) fn resource_output_path_reserved_diagnostic(
     string_table: &mut DiagnosticStringBuilder,
 ) -> DiagnosticDraft {
     let reason = InvalidConfigReason::ResourceOutputPathReserved {
-        output_path: path_id(output_path, string_table),
+        output_path: string_table.intern_path(output_path),
         origin: string_table.intern(origin),
         artefact_kind: string_table.intern(artefact_kind),
     };
@@ -102,8 +101,20 @@ pub(crate) fn artefact_output_path_invalid_diagnostic(
     span: Option<ResourceDiagnosticSite>,
     string_table: &mut DiagnosticStringBuilder,
 ) -> DiagnosticDraft {
+    // WHAT: intern the Debug spelling only when the rejected name itself caused the failure.
+    // WHY: portable display text rewrites a Unix literal `\` to `/` and replaces non-UTF-8 bytes,
+    // so it can present a different, valid output path beside an invalid-component reason. Every
+    // other reason rejects the path's shape, where portable text names the authored path
+    // accurately.
+    let output_path = match reason {
+        InvalidOutputFolderReason::NonUtf8 | InvalidOutputFolderReason::InvalidPathComponent => {
+            string_table.get_or_intern(format!("{output_path:?}"))
+        }
+        _ => string_table.intern_path(output_path),
+    };
+
     let config_reason = InvalidConfigReason::InvalidArtefactOutputPath {
-        output_path: path_id(output_path, string_table),
+        output_path,
         artefact_kind: string_table.intern(artefact_kind),
         reason,
     };
@@ -138,7 +149,7 @@ pub(crate) fn no_entry_root_diagnostic(
 ) -> DiagnosticDraft {
     html_config_diagnostic(
         |string_table| InvalidConfigReason::NoRootModuleEntries {
-            entry_root: path_id(entry_root, string_table),
+            entry_root: string_table.intern_path(entry_root),
         },
         string_table,
     )
@@ -158,8 +169,4 @@ pub(crate) fn capture_html_diagnostic(
     )
     .map(PreparedFailure::Diagnosed)
     .unwrap_or_else(PreparedFailure::from)
-}
-
-fn path_id(path: &Path, string_table: &mut DiagnosticStringBuilder) -> StringId {
-    string_table.intern(&portable_path_text(path))
 }

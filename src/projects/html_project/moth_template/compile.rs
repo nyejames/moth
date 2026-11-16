@@ -154,6 +154,7 @@ pub(crate) fn compile_moth_template_with_registry(
                     &content,
                     &module_resources,
                     &document_path,
+                    &source_path,
                     &mut resource_plan,
                     &mut diagnostic_strings,
                 ) {

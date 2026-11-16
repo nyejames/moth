@@ -15,6 +15,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::report::Diagnostic
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{DiagnosticDiscoveryStops, DiagnosticSeverity};
 use crate::compiler_frontend::module_compilation::AST_RECOVERY_WORK_TOKENS;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::compiler_tests::test_support::run_stack_budgeted_child;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -671,10 +672,7 @@ fn diagnostic_identity_sequence<T>(
                 .path
                 .strip_prefix(&canonical_project_root)
                 .unwrap_or(position.path.as_path());
-            let normalized_path = relative_path
-                .to_str()
-                .expect("diagnostic logical path should be valid UTF-8")
-                .replace('\\', "/");
+            let normalized_path = portable_path_text(relative_path);
             let line = position.start.line.saturating_add(1) as i32;
             (
                 view.descriptor().code,

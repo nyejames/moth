@@ -144,7 +144,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 - [numeric_text](src/compiler_frontend/numeric_text/): compiler-owned numeric token storage and `StringTable` materialisation adapters over `moth-lexical`.
 - [plain_markdown.rs](src/compiler_frontend/plain_markdown.rs): plain-markdown source handling outside template pipeline.
 - [syntax_errors](src/compiler_frontend/syntax_errors/): shared syntax error construction.
-- [utilities](src/compiler_frontend/utilities/): small frontend-local helpers.
+- [utilities](src/compiler_frontend/utilities/): small frontend-local helpers; [portable_path_display.rs](src/compiler_frontend/utilities/portable_path_display.rs) is the sole host-path display formatter.
 - [keywords.rs](src/compiler_frontend/keywords.rs): compiler `TokenTag` mapping over the shared `moth-lexical` source-word inventory.
 - [arena](src/compiler_frontend/arena/): AST/HIR allocation arenas and capacity budgeting.
 - [instrumentation](src/compiler_frontend/instrumentation/): compile-time counters and frontend stats.

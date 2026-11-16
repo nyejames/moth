@@ -1529,7 +1529,6 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
     );
 }
 
-#[cfg(unix)]
 fn load_config_for_path_test(
     root: &Path,
 ) -> (
@@ -1559,7 +1558,6 @@ fn load_config_for_path_test(
     (config, result)
 }
 
-#[cfg(unix)]
 fn assert_config_path_infrastructure_error(
     failure: crate::build_system::project_config::ProjectConfigFailure,
     expected_message: &str,

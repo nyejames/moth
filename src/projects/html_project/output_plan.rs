@@ -9,6 +9,7 @@
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -107,8 +108,8 @@ fn derive_logical_html_path_from_source_root(
             entry_point,
             format!(
                 "HTML entry '{}' is not inside the selected source root '{}'.",
-                entry_point.display(),
-                source_root.display(),
+                portable_path_text(entry_point),
+                portable_path_text(source_root),
             ),
         )
     })?;

@@ -33,7 +33,7 @@ use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::projects::html_project::binding_packages::web::register_web_binding_packages;
 use crate::projects::html_project::compile_input::{
     HtmlModuleCompileContext, HtmlModuleCompileInput,

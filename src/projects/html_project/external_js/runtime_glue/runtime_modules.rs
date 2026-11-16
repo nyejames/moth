@@ -7,6 +7,7 @@
 use crate::build_system::build::{FileKind, OutputFile};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExternalRuntimeEmissionPlan;
 use crate::projects::html_project::external_js::runtime_glue::paths::runtime_module_output_path;
 use crate::projects::html_project::external_js::runtime_module_registry::RuntimeModuleRegistry;
@@ -41,7 +42,7 @@ pub(crate) fn emit_build_runtime_modules(
         if !occupied_output_paths.insert(runtime_path.clone()) {
             let message = format!(
                 "Generated JS runtime module output path '{}' conflicts with an existing output.",
-                runtime_path.display()
+                portable_path_text(&runtime_path)
             );
             return Err(InfrastructureFailure::internal(
                 CompilerStage::ProjectBuildAssembly,

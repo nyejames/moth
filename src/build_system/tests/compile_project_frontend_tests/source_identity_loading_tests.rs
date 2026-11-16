@@ -8,6 +8,8 @@
 use super::super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
 use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+#[cfg(feature = "timers")]
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 
 #[test]
 fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_cascades() {
@@ -612,11 +614,18 @@ fn directory_frontend_registers_package_and_project_boundaries() {
         "entry-root project modules reuse the boundary display name: {:?}",
         own_modules
     );
+    // A temporary root may have a canonical alias (`/var` versus `/private/var`), so checking only
+    // the authored spelling could miss an identity that embeds the canonical checkout path.
+    let authored_root = portable_path_text(&dir);
+    let canonical_root = portable_path_text(
+        fs::canonicalize(&dir).expect("temporary project root should have a canonical path"),
+    );
     assert!(
-        own_modules
-            .iter()
-            .all(|module| !module.logical_identity.contains(&dir.display().to_string())),
-        "module identities must never contain checkout-specific paths"
+        own_modules.iter().all(|module| {
+            !module.logical_identity.contains(&authored_root)
+                && !module.logical_identity.contains(&canonical_root)
+        }),
+        "module identities must never contain checkout-specific paths (authored {authored_root:?}, canonical {canonical_root:?}): {own_modules:?}"
     );
 
     let semantic_total_count = own_modules

@@ -15,7 +15,6 @@ use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use std::fs;
 use std::sync::Arc;
 
 fn diagnostic_result(
@@ -71,16 +70,13 @@ fn formatted_compiler_messages_include_typed_diagnostics() {
 
 #[test]
 fn compiler_error_page_links_to_project_relative_resolved_source_path() {
-    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-    let root = _tmp_root.path().to_path_buf();
-    let source_file = root.join("src/docs/guide.moth");
-    fs::create_dir_all(
-        source_file
-            .parent()
-            .expect("source file should have a parent directory"),
-    )
-    .expect("should create source dir");
-    fs::write(&source_file, "broken()\n").expect("should write source file");
+    // A synthetic absolute root keeps the expected href literal on each platform. Source identity
+    // construction and rendering do not read the file.
+    #[cfg(unix)]
+    let root = std::path::PathBuf::from("/moth-test/project");
+    #[cfg(windows)]
+    let root = std::path::PathBuf::from(r"C:\moth-test\project");
+    let source_file = root.join("src/docs/guide #100% & 'ü'.moth");
 
     let mut string_table = StringTable::new();
     let mut source_database = SourceDatabase::build(
@@ -114,18 +110,72 @@ fn compiler_error_page_links_to_project_relative_resolved_source_path() {
     assert!(page.contains("color-scheme: dark"));
     assert!(page.contains("data-diagnostic-code=\"MOTH-CONFIG-0001\""));
     assert!(!page.contains(">MOTH-CONFIG-0001<"));
-    assert!(page.contains("guide.moth"));
-    assert!(page.contains("--> src/docs/guide.moth:1:5"));
+    assert!(page.contains("--> src/docs/guide #100% &amp; &#39;ü&#39;.moth:1:5"));
     assert!(page.contains("Unsupported value"));
     assert!(!page.contains("start.header"));
 
     assert!(page.contains("source-caret"));
 
-    // Simple file:// link to the resolved source path.
-    assert!(page.contains("file://"));
+    // The href is a URL: each path segment is percent-encoded before the completed attribute is
+    // HTML-escaped, so the source name's `#`, `%`, `&`, `'`, space and Unicode stay in the path.
+    #[cfg(unix)]
+    let expected_href =
+        "href=\"file:///moth-test/project/src/docs/guide%20%23100%25%20%26%20%27%C3%BC%27.moth\"";
+    #[cfg(windows)]
+    let expected_href = "href=\"file:///C:/moth-test/project/src/docs/guide%20%23100%25%20%26%20%27%C3%BC%27.moth\"";
+    assert!(page.contains(expected_href), "{page}");
+    assert!(
+        !page.contains("guide #100% &amp; &#39;ü&#39;.moth\""),
+        "{page}"
+    );
 
     // SSE client is injected.
     assert!(page.contains("EventSource(\"/docs/__moth/events\")"));
+}
+
+/// A host path with bytes that are not UTF-8 cannot be represented faithfully as a file URL, so
+/// the source frame keeps the portable label instead of linking to a different path.
+#[cfg(unix)]
+#[test]
+fn compiler_error_page_omits_source_link_for_non_utf8_host_path() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    use std::path::PathBuf;
+
+    let root = PathBuf::from("/moth-test").join(OsString::from_vec(b"non-utf8-\xFF".to_vec()));
+    let source_file = root.join("src/docs/guide.moth");
+
+    let mut string_table = StringTable::new();
+    let mut source_database = SourceDatabase::build(
+        std::iter::once(source_file.as_path()),
+        &root.join("main.moth"),
+        None,
+        &mut string_table,
+    )
+    .expect("source identity should build");
+    let source_id = source_database
+        .get_by_canonical_path(&source_file)
+        .expect("source should be registered")
+        .id;
+    source_database
+        .retain_text(source_id, "broken()\n".to_owned())
+        .expect("source text should be retained");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let local_span = LocalSpan::exact(4, 3, &mut span_builder).expect("span should fit inline");
+    let diagnostic = project_config::invalid_config_reason(
+        None,
+        InvalidConfigReason::UnsupportedScalarValue,
+        Some(SourceSpan::new(source_id, local_span)),
+    );
+    let failure = diagnostic_result(diagnostic, string_table, Some(Arc::new(source_database)));
+    let page =
+        render_compiler_error_page(&failure, &root, "/docs", 7, DiagnosticDiscoveryStops::NONE);
+
+    assert!(
+        page.contains(r#"<span class="source-location">--> src/docs/guide.moth:1:5</span>"#),
+        "{page}"
+    );
+    assert!(!page.contains("href=\"file://"), "{page}");
 }
 
 #[test]

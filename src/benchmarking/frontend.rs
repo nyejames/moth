@@ -634,8 +634,8 @@ fn run_frontend_benchmark_with_configured_warning_owner(
             FrontendBenchmarkFailureKind::InvalidUtf8Path,
             Vec::new(),
             format!(
-                "Frontend benchmark path is not valid UTF-8: {}",
-                options.entry_path.display()
+                "Frontend benchmark path is not valid UTF-8: {:?}",
+                options.entry_path
             ),
         )
     })?;

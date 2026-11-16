@@ -29,6 +29,7 @@ use crate::compiler_frontend::source_packages::root_file::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -255,9 +256,9 @@ impl ProjectPathResolver {
             canonical_file,
             format!(
                 "Source file '{}' is outside both entry root '{}' and project root '{}'",
-                canonical_file.display(),
-                self.entry_root.display(),
-                self.project_root.display()
+                portable_path_text(canonical_file),
+                portable_path_text(&self.entry_root),
+                portable_path_text(&self.project_root)
             ),
         ))
     }
@@ -279,12 +280,15 @@ impl ProjectPathResolver {
             declaring_file,
             &mut strings,
         )?;
+
+        // The failure is about the resolved target, so the host path names it rather than the
+        // declaring file that authored the dependency.
         let source_kind = self
             .source_kind_for_canonical_path(&canonical)
             .ok_or_else(|| {
                 InfrastructureFailure::filesystem(
                     CompilerStage::DependencyResolution,
-                    declaring_file,
+                    &canonical,
                     format!(
                         "Resolved dependency '{}' to '{}' but could not determine its source kind.",
                         path_fork.render_portable(
@@ -292,7 +296,7 @@ impl ProjectPathResolver {
                             strings.strings(),
                             &mut Vec::new(),
                         ),
-                        canonical.display()
+                        portable_path_text(&canonical)
                     ),
                 )
             })?;

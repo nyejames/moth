@@ -8,6 +8,7 @@ mod boundary_conversion_tests;
 mod capacity_tests;
 mod codec_tests;
 mod compaction_tests;
+mod diagnostic_string_builder_tests;
 mod family_inventory_tests;
 mod freeze_tests;
 mod label_text_tests;

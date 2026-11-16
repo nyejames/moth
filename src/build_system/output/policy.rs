@@ -11,7 +11,7 @@ use crate::build_system::output::output_path::{
 };
 use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::utilities::basic::normalize_path;
+use crate::compiler_frontend::utilities::basic::normalize_windows_verbatim_path;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -290,7 +290,7 @@ pub(crate) fn canonical_output_root_for_identity(
     output_root: &Path,
 ) -> Result<PathBuf, InvalidOutputFolderReason> {
     canonicalize_output_path(output_root)
-        .map(|canonical| normalize_path(&canonical))
+        .map(|canonical| normalize_windows_verbatim_path(&canonical))
         .map_err(|_| InvalidOutputFolderReason::ResolvesOutsideProjectRoot)
 }
 
@@ -305,7 +305,7 @@ pub(crate) fn validate_directory_output_root_containment(
 ) -> Result<(), InvalidOutputFolderReason> {
     let canonical_output_root = canonical_output_root_for_identity(output_root)?;
     let canonical_project_root = canonicalize_output_path(project_root)
-        .map(|canonical| normalize_path(&canonical))
+        .map(|canonical| normalize_windows_verbatim_path(&canonical))
         .map_err(|_| InvalidOutputFolderReason::ResolvesOutsideProjectRoot)?;
 
     if canonical_output_root == canonical_project_root

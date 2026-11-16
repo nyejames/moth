@@ -9,7 +9,7 @@ use super::super::types::{
 };
 use super::artifacts::BuiltArtifactIndex;
 use crate::build_system::build::FileKind;
-use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::build_system::output::parse_native_relative_path;
 use crate::compiler_tests::integration_test_runner::errors::FixtureLoadError;
 use std::fs;
 use std::path::Path;
@@ -165,10 +165,20 @@ fn visit_golden_directory(
                 root.display()
             ))
         })?;
-        let relative_text = portable_path_text(relative_path);
+        // The native path is the identity here: a Unix filename may contain a literal `\`, which
+        // display text would rewrite into a separator and alias a different golden. Validate the
+        // entry name once, then keep its portable spelling as the comparison key and the native
+        // absolute path for reading contents.
+        let portable = parse_native_relative_path(relative_path).map_err(|reason| {
+            FixtureLoadError::fixture_contract(format!(
+                "Golden file {relative_path:?} under '{}' is not a portable output path ({reason:?}). Golden filenames must be portable output paths.",
+                root.display()
+            ))
+        })?;
+        let spelling = portable.portable_spelling();
         files.push(GoldenFile {
-            expected_kind: golden_artifact_kind(&relative_text),
-            relative_path: relative_text,
+            expected_kind: golden_artifact_kind(&spelling),
+            relative_path: spelling,
             absolute_path: path,
         });
     }
@@ -218,21 +228,14 @@ pub(super) fn validate_golden_outputs(
         ));
     };
 
-    let expected_paths = golden
-        .inventory
-        .files
-        .iter()
-        .map(|file| file.relative_path.clone())
-        .collect::<Vec<_>>();
-
-    if let Some(reason) = validate_expected_artifact_paths(index, &expected_paths) {
+    if let Some(reason) = validate_expected_artifact_paths(index, &golden.inventory.files) {
         return Some((reason, FailureKind::StrictGoldenMismatch));
     }
 
     for file in &golden.inventory.files {
         let relative = &file.relative_path;
 
-        let Some(output) = index.get(relative) else {
+        let Some(output) = index.get_portable_spelling(relative) else {
             return Some((
                 format!("Golden output '{relative}' was not produced."),
                 FailureKind::StrictGoldenMismatch,
@@ -367,15 +370,17 @@ fn produced_file_kind_name(kind: &FileKind) -> &'static str {
 
 fn validate_expected_artifact_paths(
     index: &BuiltArtifactIndex<'_>,
-    expected_paths: &[String],
+    expected_files: &[GoldenFile],
 ) -> Option<String> {
     let actual_paths = index.paths();
 
-    let mut expected = expected_paths
+    // Discovery validates each golden's native path, so these are already the portable spellings
+    // the artifact index keys on.
+    let mut expected = expected_files
         .iter()
-        .map(portable_path_text)
+        .map(|file| file.relative_path.as_str())
         .collect::<Vec<_>>();
-    expected.sort();
+    expected.sort_unstable();
 
     if actual_paths != expected {
         return Some(format!(

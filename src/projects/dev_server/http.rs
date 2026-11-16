@@ -3,7 +3,7 @@
 //! Routes reload, ping and bounded browser runtime reports, serves static output, and falls back
 //! to compiler diagnostics on failed builds. Browser reports never mutate compilation state.
 
-use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::build_system::output::parse_native_relative_path;
 use crate::projects::dev_server::error_page::render_runtime_error_page;
 use crate::projects::dev_server::sse;
 use crate::projects::dev_server::state::{
@@ -52,7 +52,7 @@ fn handle_connection_with_timeouts(
         Err(error) => return Err(error),
     };
 
-    let (request_path, request_query) = split_path_and_query(&request.path);
+    let (request_path, request_query) = split_request_target(&request.path);
 
     if request.method != "GET" {
         let site_local_path = {
@@ -524,10 +524,19 @@ fn is_connection_timeout(error: &io::Error) -> bool {
     )
 }
 
-fn split_path_and_query(path: &str) -> (&str, Option<&str>) {
-    match path.split_once('?') {
+/// Split a raw request target into its path and query, dropping any fragment.
+///
+/// WHAT: treats a raw `#` as the fragment boundary before splitting the query.
+/// WHY: browsers normally omit fragments, but a raw `#` must never reach page or asset lookup.
+fn split_request_target(request_target: &str) -> (&str, Option<&str>) {
+    let target_without_fragment = match request_target.split_once('#') {
+        Some((target_without_fragment, _fragment)) => target_without_fragment,
+        None => request_target,
+    };
+
+    match target_without_fragment.split_once('?') {
         Some((request_path, request_query)) => (request_path, Some(request_query)),
-        None => (path, None),
+        None => (target_without_fragment, None),
     }
 }
 
@@ -595,6 +604,13 @@ fn prepare_static_response(
             );
             return PreparedResponse::text("200 OK", "text/html; charset=utf-8", error_page);
         }
+        ResolvedRequest::MalformedPath => {
+            return PreparedResponse::text(
+                "400 BAD REQUEST",
+                "text/plain; charset=utf-8",
+                "Bad Request",
+            );
+        }
         ResolvedRequest::NotFound | ResolvedRequest::InvalidPath => {
             return PreparedResponse::text(
                 "404 NOT FOUND",
@@ -652,7 +668,14 @@ fn prepare_static_response(
                 );
             }
         };
-        let entry = portable_path_text(relative_path);
+        // The entry key is the validated output spelling, matching the published entry set.
+        let Ok(entry) =
+            parse_native_relative_path(relative_path).map(|portable| portable.portable_spelling())
+        else {
+            // An unrepresentable output name was never published as a known entry, so serve the
+            // page without injecting a client whose reports could never be accepted.
+            return PreparedResponse::text("200 OK", content_type, html.to_owned());
+        };
         let injected_html = static_files::inject_dev_client(
             html,
             &build_state.html_site_config.origin,

@@ -42,6 +42,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 
 use rustc_hash::FxHashMap;
 
@@ -519,7 +520,7 @@ impl ProjectModuleGraph {
                         CompilerStage::ProjectBuildAssembly,
                         format!(
                             "Project module graph owned source entry {} has a stable identity module origin ({:?}) that does not belong to its containing structural module (shared {:?}, retained surface origins {:?})",
-                            record.canonical_path().display(),
+                            portable_path_text(record.canonical_path()),
                             entry_origin,
                             node.shared_origin(),
                             [
@@ -536,7 +537,7 @@ impl ProjectModuleGraph {
                         CompilerStage::ProjectBuildAssembly,
                         format!(
                             "Source tree index owned source ID sets assign canonical path {} to multiple modules; each source file must have exactly one owning module",
-                            canonical_path.display()
+                            portable_path_text(&canonical_path)
                         ),
                     ));
                 }

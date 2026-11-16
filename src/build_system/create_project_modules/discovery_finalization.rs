@@ -14,6 +14,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::sync::Arc;
 /// Finish only retained work on an aborted walk. Queued sources remain unloaded.
 ///
@@ -58,7 +59,7 @@ pub(super) fn finalize_failed_discovery(
                 crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 format!(
                     "retained discovery source {} has no final registration",
-                    file.path.display()
+                    portable_path_text(&file.path)
                 ),
             );
             return finish_discovery_source_owner(
@@ -218,7 +219,7 @@ pub(super) fn retain_known_discovery_sources(
             first_error.get_or_insert_with(|| {
                 InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                     "known discovery source {} has no final registration",
-                    file.path.display()
+                    portable_path_text(&file.path)
                 ))
                 .into()
             });
@@ -293,7 +294,7 @@ pub(super) fn finalize_missing_source_loads(
                 crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 format!(
                     "missing discovery source {} has no final registration",
-                    source_file.path.display()
+                    portable_path_text(&source_file.path)
                 ),
             )
             .into();
@@ -469,7 +470,7 @@ pub(super) fn finalize_reachable_files(
                 crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 format!(
                     "reachable Moth source {} has no prepared traversal output",
-                    source_file.source_file.path.display()
+                    portable_path_text(&source_file.source_file.path)
                 ),
             );
             return Err(discovery_finalization_error(error, source_files));
@@ -525,7 +526,7 @@ pub(super) fn finalize_reachable_files(
                 .ok_or_else(|| {
                     InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                         "final source database is missing reachable source {}",
-                        source_file.path.display()
+                        portable_path_text(&source_file.path)
                     ))
                 })?;
             let final_source_id = final_record.id;
@@ -591,7 +592,7 @@ pub(super) fn finalize_reachable_files(
                 {
                     return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
                         "source inventory slot for {} was not loaded",
-                        source_file.path.display()
+                        portable_path_text(&source_file.path)
                     )));
                 }
                 match source_kind {

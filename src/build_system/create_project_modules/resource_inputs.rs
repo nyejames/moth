@@ -11,6 +11,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 
 use rustc_hash::FxHashMap;
 use std::fs;
@@ -251,7 +252,7 @@ impl ResourceInputRegistry {
                 let bytes = fs::read(canonical_source_path).map_err(|error| {
                     let mut reason = format!(
                         "Failed to read resource source '{}': {error}",
-                        canonical_source_path.display()
+                        portable_path_text(canonical_source_path)
                     );
                     // A shipped `@builder/web/*` asset lives in the one selected package set.
                     if let Some(report) = damaged_package_set_report(canonical_source_path) {

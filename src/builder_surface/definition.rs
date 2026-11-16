@@ -25,6 +25,7 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::builder_root_slots::BuilderRootSlotSchema;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use moth_lexical::identifier::is_identifier;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::words::classify_source_word;
@@ -101,7 +102,7 @@ pub(crate) fn damaged_package_set_report(path: &Path) -> Option<String> {
         format!(
             "The compiler-shipped package set at '{}' is incomplete. Reinstall Moth with the \
              complete `packages/` directory from its release archive beside the executable.",
-            BUILTIN_PACKAGES_ROOT.display()
+            portable_path_text(&*BUILTIN_PACKAGES_ROOT)
         )
     })
 }

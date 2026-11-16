@@ -16,9 +16,8 @@ use crate::compiler_frontend::compiler_messages::render::infrastructure::INFRAST
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, terminal, terse,
 };
-use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Component, Path};
 type IndexedDiagnostic<'a> = (&'a DiagnosticReport, DiagnosticView<'a>);
 pub(super) fn validate_diagnostics(
     messages: &CompilationResult<()>,
@@ -157,14 +156,22 @@ fn validate_structured_diagnostic_assertions(
         let context = DiagnosticRenderContext::for_report(report);
         if let Some(expected_path) = &assertion.path {
             let actual_path = diagnostic_path(report, view, fixture_root);
-            if actual_path != *expected_path {
-                append_structured_mismatch(
+            match actual_path {
+                Ok(actual_path) if actual_path == *expected_path => {}
+                Ok(actual_path) => append_structured_mismatch(
                     &mut mismatches,
                     assertion,
                     "path",
                     expected_path.clone(),
                     actual_path,
-                );
+                ),
+                Err(reason) => append_structured_mismatch(
+                    &mut mismatches,
+                    assertion,
+                    "path",
+                    expected_path.clone(),
+                    reason,
+                ),
             }
         }
 
@@ -249,19 +256,28 @@ fn validate_secondary_label_assertions(
         let label_position = context.site_position(label.site);
 
         if let Some(expected_path) = &secondary_assertion.path {
-            let actual_path = label_position
-                .as_ref()
-                .map(|position| display_path(&position.path, fixture_root))
-                .unwrap_or_else(|| String::from("<no source position>"));
-            if actual_path != *expected_path {
-                append_secondary_mismatch(
+            let actual_path = match label_position.as_ref() {
+                Some(position) => display_path(&position.path, fixture_root),
+                None => Err(String::from("<no source position>")),
+            };
+            match actual_path {
+                Ok(actual_path) if actual_path == *expected_path => {}
+                Ok(actual_path) => append_secondary_mismatch(
                     mismatches,
                     assertion,
                     secondary_assertion.occurrence,
                     "path",
                     expected_path.clone(),
                     actual_path,
-                );
+                ),
+                Err(reason) => append_secondary_mismatch(
+                    mismatches,
+                    assertion,
+                    secondary_assertion.occurrence,
+                    "path",
+                    expected_path.clone(),
+                    reason,
+                ),
             }
         }
 
@@ -336,11 +352,14 @@ fn diagnostic_path(
     report: &DiagnosticReport,
     view: DiagnosticView<'_>,
     fixture_root: &Path,
-) -> String {
-    DiagnosticRenderContext::for_report(report)
-        .site_position(view.primary_site())
-        .map(|position| display_path(&position.path, fixture_root))
-        .unwrap_or_else(|| String::from("<no source position>"))
+) -> Result<String, String> {
+    let Some(position) =
+        DiagnosticRenderContext::for_report(report).site_position(view.primary_site())
+    else {
+        return Err(String::from("<no source position>"));
+    };
+
+    display_path(&position.path, fixture_root)
 }
 
 /// Convert a resolved render-context path into the fixture-relative spelling used by assertions.
@@ -349,13 +368,38 @@ fn diagnostic_path(
 /// The compiler's project identity is entry-root-relative, while canonical fixtures store sources
 /// below `input/`; this helper adds that fixture-only prefix after lookup. It never probes the
 /// filesystem or reconstructs a source location from a path.
-fn display_path(path: &Path, fixture_root: &Path) -> String {
+///
+/// A path component is the authoritative entry name. Rewriting a literal `\` inside one Unix
+/// filename into a separator would alias it with a nested source path, so an actual path that has
+/// no unambiguous component spelling is rejected instead of compared.
+fn display_path(path: &Path, fixture_root: &Path) -> Result<String, String> {
     let relative = path.strip_prefix(fixture_root).unwrap_or(path);
-    let normalized = portable_path_text(relative);
+
+    let mut components = Vec::new();
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            return Err(format!(
+                "The diagnostic source path {relative:?} contains a non-entry path component, so it cannot be compared with an authored path."
+            ));
+        };
+        let Some(name) = name.to_str() else {
+            return Err(format!(
+                "The diagnostic source path {relative:?} is not valid UTF-8, so it cannot be compared with an authored path."
+            ));
+        };
+        if name.contains('\\') {
+            return Err(format!(
+                "The diagnostic source path {relative:?} contains a literal backslash inside one component, so it cannot be compared with an authored path."
+            ));
+        }
+        components.push(name);
+    }
+
+    let normalized = components.join("/");
     if normalized == "input" || normalized.starts_with("input/") {
-        normalized
+        Ok(normalized)
     } else {
-        format!("input/{normalized}")
+        Ok(format!("input/{normalized}"))
     }
 }
 

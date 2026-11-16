@@ -17,7 +17,7 @@ use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, display_column_number, display_line_number,
     relative_display_path_from_root, terse_diagnostic_message,
 };
-use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::fmt::Write;
 
 /// Render a compilation result while preserving the separation between diagnostic and infrastructure lanes.

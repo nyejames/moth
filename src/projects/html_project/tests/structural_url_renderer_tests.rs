@@ -283,3 +283,32 @@ fn hir_resource_id_renders_through_its_module_table() {
 
     assert_eq!(rendered, "./assets/logo.svg");
 }
+
+#[cfg(unix)]
+#[test]
+fn literal_backslash_context_component_is_rejected_not_re_split() {
+    // WHAT: a native document path with a literal `\` component cannot become a URL context.
+    // WHY: the renderer walks native artefact components. Splitting the filename would compute
+    //       URLs for a different page parent instead of the template's real directory.
+    let resource_origin = origin("", "assets/logo.svg");
+    let mut plan = HtmlResourceOutputPlan::new("renderer-tests");
+    let context = ResourceUrlContext::PageDocument(PathBuf::from("a\\b.html"));
+    plan_origin_for(
+        &mut plan,
+        resource_origin.clone(),
+        context.clone(),
+        &mut StringTable::new(),
+    );
+
+    let error = renderer(&plan, &context, "/")
+        .render_owned(&OwnedFoldedString::Pieces(vec![
+            OwnedFoldedStringPiece::Resource(resource_origin),
+        ]))
+        .expect_err("a literal backslash context component must not be re-split");
+
+    assert_eq!(
+        error.message.as_ref(),
+        "HTML structural URL renderer received an invalid context artefact path 'a\\b.html': \
+         InvalidPathComponent"
+    );
+}

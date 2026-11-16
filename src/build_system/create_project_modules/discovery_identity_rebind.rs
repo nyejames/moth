@@ -10,6 +10,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 pub(super) type SourceIdentityMap = FxHashMap<SourceId, SourceId>;
 
 /// Join traversal-local preparation identities to the final source registrations.
@@ -53,7 +54,7 @@ fn final_registration_for(
                 crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 format!(
                     "discovery source {} has no final registration",
-                    canonical_path.display()
+                    portable_path_text(canonical_path)
                 ),
             )
         })

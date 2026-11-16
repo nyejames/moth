@@ -23,6 +23,7 @@ Priorities:
 
 - Construct user-facing source, config, import, syntax, type, rule, borrow and deferred-feature diagnostics as typed `DiagnosticDraft` values through the owning family constructors.
 - Use `compiler_bug!` for proven internal invariants. Operational failures and internal cases not proven impossible are typed `InfrastructureFailure` causes returned in the ordered `InfrastructureErrors` result.
+- Use `DiagnosticStringBuilder::intern_path` for diagnostic path facts instead of interning `display()` or `to_string_lossy()` output, and use `portable_path_text` for host-path text in rendered messages.
 - Diagnostic family constructors should carry typed facts and stable codes, not pre-rendered prose.
 - Include an exact `SourceSpan` when authored source owns the diagnostic and preserve related-site context wherever it adds useful information.
 - Type diagnostics should carry semantic `TypeId`s and context enums. Capture display facts in `TypeDisplaySnapshot` and render through typed family views, not cloned type syntax or formatted type names.

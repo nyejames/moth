@@ -29,6 +29,7 @@ use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternError, PathInternerBuilder, PathInternerFork, PathTable,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 
 use rustc_hash::FxHashMap;
 
@@ -290,7 +291,12 @@ impl SourceDatabase {
             project_path_resolver,
         )?;
         rows.sort_by(|(_, _, left), (_, _, right)| {
-            left.portable_sort_key.cmp(&right.portable_sort_key)
+            // The portable key collapses a literal `\` in a Unix filename to `/`, so distinct
+            // native paths can share one. `Path` compares componentwise, which separates those
+            // identities and keeps assignment independent of registration order.
+            left.portable_sort_key
+                .cmp(&right.portable_sort_key)
+                .then_with(|| left.path.cmp(&right.path))
         });
         database.append_ordered_logical_rows(rows, string_table)?;
         Ok(database)
@@ -363,7 +369,7 @@ impl SourceDatabase {
                         CompilerStage::SourceLoading,
                         format!(
                             "Source identity inventory registered canonical source path {} more than once",
-                            canonical.display(),
+                            portable_path_text(&canonical),
                         ),
                     ),
                 ));
@@ -804,7 +810,7 @@ impl SourceDatabase {
                         format!(
                             "Source identity inventory registered canonical source path {} under \
                          conflicting logical paths {} and {}",
-                            canonical_path.display(),
+                            portable_path_text(&canonical_path),
                             existing_path,
                             requested_path,
                         ),
@@ -820,7 +826,7 @@ impl SourceDatabase {
                         format!(
                             "Source identity inventory registered canonical source path {} under \
                          conflicting kinds {:?} and {:?}",
-                            canonical_path.display(),
+                            portable_path_text(&canonical_path),
                             stored_kind,
                             kind,
                         ),

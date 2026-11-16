@@ -1,23 +1,67 @@
+#[cfg(windows)]
+use super::super::manifest::is_dangerous_system_path;
+use super::super::manifest::{
+    validate_directory_output_root_safety, validate_single_file_output_root_safety,
+};
 use super::super::output_path::{
-    canonicalize_output_path, normalize_directory_output_relative_path, parse_relative_path,
+    canonicalize_output_path, normalize_directory_output_relative_path, parse_native_relative_path,
+    parse_relative_path,
 };
 use super::super::output_roots::{DEFAULT_DEV_OUTPUT, DEFAULT_RELEASE_OUTPUT};
 use super::super::policy::{
     classify_output_folder, validate_directory_output_root_containment,
     validate_output_folder_containment,
 };
+use crate::build_system::output::OutputRejectionReason;
 use crate::build_system::output::output_path::{
     is_lossless_portable_relative_path, normalize_relative_path, output_path_component_identities,
     percent_encode_url_segment,
 };
 use crate::build_system::output::output_path_identity;
-use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
+use crate::compiler_frontend::compiler_errors::{
+    InfrastructureDetail, InfrastructureFailure, InfrastructureFailureKind,
+};
+use crate::compiler_frontend::compiler_messages::{CompilerStage, InvalidOutputFolderReason};
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 fn project_root() -> PathBuf {
     PathBuf::from("/project")
+}
+
+/// Assert one failure came from the shared output-root danger guard, not a later containment rule.
+#[track_caller]
+fn assert_dangerous_rejection(failure: &InfrastructureFailure, output_root: &Path) {
+    assert_eq!(failure.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(failure.stage, CompilerStage::Output);
+    assert_eq!(failure.host_path.as_deref(), Some(output_root));
+
+    let expected_reason = InfrastructureDetail::OutputRejectionReason(
+        OutputRejectionReason::OutputRootDangerousSystemPath
+            .as_metadata_value()
+            .into(),
+    );
+    assert_eq!(
+        failure.details.as_ref(),
+        [expected_reason].as_slice(),
+        "the typed rejection reason must identify the dangerous system path"
+    );
+}
+
+/// Exercise every output lane that shares `reject_dangerous_output_root`.
+///
+/// WHY: both lanes canonicalise first, so an ordinary containment rejection could otherwise mask
+/// a bypassed danger guard.
+#[track_caller]
+fn assert_dangerous_system_path_rejection(output_root: &Path, project_root: &Path) {
+    let directory_failure = validate_directory_output_root_safety(output_root, project_root)
+        .expect_err("a protected system path must never become a directory output root");
+    assert_dangerous_rejection(&directory_failure, output_root);
+
+    let single_file_failure = validate_single_file_output_root_safety(output_root, project_root)
+        .expect_err("a protected system path must never become a single-file output root");
+    assert_dangerous_rejection(&single_file_failure, output_root);
 }
 
 // -------------------------
@@ -300,7 +344,6 @@ fn canonical_project_root_rejects_root_outside_and_visible_outputs() {
 #[cfg(unix)]
 #[test]
 fn visible_symlink_alias_to_outside_root_is_rejected() {
-    use crate::build_system::output::manifest::validate_directory_output_root_safety;
     use crate::compiler_frontend::compiler_errors::{CompilationOutcome, InfrastructureErrors};
     use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
     use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
@@ -361,7 +404,7 @@ fn dangling_output_root_component_is_rejected() {
 #[cfg(windows)]
 #[test]
 fn windows_disk_and_verbatim_disk_roots_share_containment() {
-    use crate::compiler_frontend::utilities::basic::normalize_path;
+    use crate::compiler_frontend::utilities::basic::normalize_windows_verbatim_path;
     use std::path::{Component, Prefix};
 
     fn prefix_kind(path: &Path) -> Option<Prefix<'_>> {
@@ -374,7 +417,7 @@ fn windows_disk_and_verbatim_disk_roots_share_containment() {
     let _project_temp = tempfile::tempdir().expect("should create project temp dir");
     let verbatim_root =
         fs::canonicalize(_project_temp.path()).expect("project root should resolve");
-    let disk_root = normalize_path(&verbatim_root);
+    let disk_root = normalize_windows_verbatim_path(&verbatim_root);
     assert!(matches!(
         prefix_kind(&verbatim_root),
         Some(Prefix::VerbatimDisk(_))
@@ -398,6 +441,164 @@ fn windows_disk_and_verbatim_disk_roots_share_containment() {
 }
 
 // -------------------------
+//  Dangerous System Roots
+// -------------------------
+
+/// Canonical Unix spellings and trailing separators must reach the typed danger rejection.
+///
+/// `/bin` and `/sbin` are symlinks into `/usr` on usr-merged Linux; the guard compares both the
+/// literal and canonical protected roots, so this remains true on either host layout.
+#[cfg(unix)]
+#[test]
+fn unix_dangerous_system_output_roots_are_rejected_with_typed_reason() {
+    let project_temp = tempfile::tempdir().expect("should create project temp dir");
+    let project_root = project_temp.path();
+
+    for root in [
+        Path::new("/"),
+        Path::new("/usr"),
+        Path::new("/usr/"),
+        Path::new("/bin"),
+        Path::new("/sbin"),
+        Path::new("/etc"),
+        Path::new("/etc/"),
+        Path::new("/var"),
+        Path::new("/tmp"),
+        Path::new("/tmp/"),
+    ] {
+        assert_dangerous_system_path_rejection(root, project_root);
+    }
+}
+
+/// macOS canonicalises `/etc`, `/tmp` and `/var` through `/private`, so those aliases must name
+/// the protected canonical roots rather than relying on the authored spelling.
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_canonical_system_root_aliases_are_rejected_with_typed_reason() {
+    let project_temp = tempfile::tempdir().expect("should create project temp dir");
+    let project_root = project_temp.path();
+
+    for (alias, canonical) in [
+        ("/etc", "/private/etc"),
+        ("/tmp", "/private/tmp"),
+        ("/var", "/private/var"),
+        ("/private/etc", "/private/etc"),
+        ("/private/tmp", "/private/tmp"),
+        ("/private/var", "/private/var"),
+    ] {
+        assert_eq!(
+            fs::canonicalize(alias).expect("macOS system alias should resolve"),
+            Path::new(canonical),
+            "'{alias}' must canonicalise to its protected root"
+        );
+        assert_dangerous_system_path_rejection(Path::new(alias), project_root);
+    }
+}
+
+/// Canonical Windows verbatim spellings, drive roots and case/trailing-separator variants must
+/// reach the typed danger rejection rather than falling through to containment.
+#[cfg(windows)]
+#[test]
+fn windows_canonical_system_output_roots_are_rejected_with_typed_reason() {
+    let project_temp = tempfile::tempdir().expect("should create project temp dir");
+    let project_root = project_temp.path();
+
+    for root in [
+        r"\\?\C:\Windows",
+        r"\\?\C:\WINDOWS",
+        r"\\?\c:\windows",
+        r"\\?\C:\Users",
+        r"C:\Windows",
+        r"C:\Windows\",
+        r"c:\WINDOWS",
+        r"C:\Users",
+        r"C:\Users\",
+        r"C:\Program Files",
+        r"\\?\C:\",
+        r"C:\",
+    ] {
+        assert_dangerous_system_path_rejection(Path::new(root), project_root);
+    }
+}
+
+/// A UNC share root is a filesystem root, while a project directory inside the share is not.
+///
+/// WHY: the safety boundary canonicalises its input, which would contact `\\server\share` and
+/// require network access. This asserts the component comparison directly instead.
+#[cfg(windows)]
+#[test]
+fn windows_unc_share_root_is_dangerous_but_share_subdirectory_is_not() {
+    for share_root in [
+        r"\\server\share",
+        r"\\server\share\",
+        r"\\?\UNC\server\share",
+        r"\\?\UNC\server\share\",
+    ] {
+        assert!(
+            is_dangerous_system_path(Path::new(share_root)),
+            "'{share_root}' names a share root and must be dangerous"
+        );
+    }
+
+    for share_subdirectory in [
+        r"\\server\share\project\_dev",
+        r"\\?\UNC\server\share\project\_dev",
+    ] {
+        assert!(
+            !is_dangerous_system_path(Path::new(share_subdirectory)),
+            "'{share_subdirectory}' is not the protected share root"
+        );
+    }
+}
+
+/// The guard folds ASCII case by component, so only an exact protected root is rejected.
+///
+/// WHY: the safety boundary canonicalises first, which masks the fold whenever the host stores the
+/// ordinary spelling. This asserts the comparison itself, including that descendants stay legal.
+#[cfg(windows)]
+#[test]
+fn windows_system_root_guard_folds_case_and_requires_exact_components() {
+    for protected in [
+        r"C:\Windows",
+        r"c:\windows",
+        r"C:\WINDOWS",
+        r"\\?\C:\Windows",
+        r"\\?\c:\WINDOWS",
+        r"C:\Program Files (x86)",
+        r"C:\Users",
+    ] {
+        assert!(
+            is_dangerous_system_path(Path::new(protected)),
+            "'{protected}' names a protected Windows root"
+        );
+    }
+
+    for allowed in [
+        r"C:\Windows\System32",
+        r"C:\Users\build",
+        r"C:\Program Files\app",
+        r"\\?\C:\Users\build\_dev",
+    ] {
+        assert!(
+            !is_dangerous_system_path(Path::new(allowed)),
+            "'{allowed}' is not an exact protected Windows root"
+        );
+    }
+}
+
+/// A project-local hidden output root must remain legal, including Windows temporary projects
+/// that live under `C:\Users\<user>` but are not the protected `C:\Users` root itself.
+#[test]
+fn project_local_hidden_output_root_is_allowed() {
+    let project_temp = tempfile::tempdir().expect("should create project temp dir");
+    let project_root = fs::canonicalize(project_temp.path()).expect("project root should resolve");
+    fs::create_dir(project_root.join("_dev")).expect("should create hidden output root");
+
+    validate_directory_output_root_safety(&project_root.join("_dev"), &project_root)
+        .expect("an ordinary project-local hidden output root is not a protected system path");
+}
+
+// -------------------------
 //  Output-Path Identity Pairs
 // -------------------------
 
@@ -412,14 +613,95 @@ fn case_only_variant_roots_share_an_output_identity() {
 }
 
 #[test]
-fn separator_variant_roots_share_an_output_identity() {
+fn authored_separator_variants_parse_to_one_portable_path() {
+    let slash =
+        parse_relative_path("nested/output").expect("authored slash spelling is a valid path");
+    let backslash =
+        parse_relative_path("nested\\output").expect("authored backslash spelling is a valid path");
+    assert_eq!(
+        slash, backslash,
+        "authored strings treat both separators as structural"
+    );
+    assert_eq!(
+        slash.identity(),
+        backslash.identity(),
+        "authored separator variants must be one output identity"
+    );
+}
+
+#[test]
+fn native_paths_expose_slash_joined_portable_spelling() {
+    let native = Path::new("nested").join("page.html");
+    let portable =
+        parse_native_relative_path(&native).expect("joined path is a valid relative path");
+    assert_eq!(portable.portable_spelling(), "nested/page.html");
+
+    let authored = parse_relative_path("nested\\page.html").expect("authored backslash is valid");
+    assert_eq!(
+        authored.portable_spelling(),
+        "nested/page.html",
+        "both parsers feed the same validated spelling"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn native_component_with_literal_backslash_is_rejected_not_re_split() {
+    // WHAT: a Unix filename may contain `\`, but it is one directory-entry component.
+    // WHY: re-parsing a native path as an authored string would alias `a\b` with `a/b`.
+    let native = Path::new("nested\\output");
+
+    assert_eq!(
+        output_path_identity(native),
+        Err(InvalidOutputFolderReason::InvalidPathComponent),
+        "a literal backslash must not become a separator in the native identity"
+    );
+    assert_eq!(
+        output_path_component_identities(native),
+        Err(InvalidOutputFolderReason::InvalidPathComponent)
+    );
+    assert_eq!(
+        normalize_relative_path(native),
+        Err(InvalidOutputFolderReason::InvalidPathComponent)
+    );
+    assert!(
+        !is_lossless_portable_relative_path(native),
+        "a native path that cannot round-trip is never lossless"
+    );
+    assert!(
+        output_path_identity(Path::new("nested/output")).is_ok(),
+        "the distinct nested file remains a valid output identity"
+    );
+}
+
+#[test]
+fn native_leading_separator_stays_absolute_before_component_scan() {
+    // WHAT: a native spelling that begins with a separator is rooted, even though its remaining
+    //       text also contains `\` characters.
+    // WHY: the component scan rejects a literal `\` inside a Unix filename, so it must run after
+    //      the rooted check or these paths would be misclassified as invalid components.
+    assert_eq!(
+        output_path_identity(Path::new("\\\\server\\share")),
+        Err(InvalidOutputFolderReason::AbsolutePath),
+        "a native UNC-like spelling is rooted on every host"
+    );
+    assert_eq!(
+        normalize_relative_path(Path::new("\\rooted")),
+        Err(InvalidOutputFolderReason::AbsolutePath),
+        "a single leading backslash is a root, not a directory-entry name"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_native_backslash_separates_components_without_rejection() {
     let slash = output_path_identity(Path::new("nested/output"))
         .expect("nested/output is a valid relative path");
     let backslash = output_path_identity(Path::new("nested\\output"))
-        .expect("nested\\output is a valid relative path");
+        .expect("Windows native separators are structural path components");
     assert_eq!(
         slash, backslash,
-        "separator variants must be one output identity"
+        "Windows separator spelling must keep sharing one output identity"
     );
 }
 

@@ -4,11 +4,10 @@ use crate::compiler_frontend::compiler_errors::{InfrastructureDetail, Infrastruc
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::render::infrastructure::format_error_guidance_lines;
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, relative_display_path_from_root, special_file_name_from_path,
+    DiagnosticRenderContext, special_file_name_from_path,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use std::path::Path;
 
 #[test]
 fn guidance_lines_name_the_stage_then_each_rendered_detail() {
@@ -71,14 +70,4 @@ fn special_file_renderer_names_only_the_reserved_config_source() {
         special_file_name_from_path(ordinary_plus_source, context),
         "special file"
     );
-}
-
-#[test]
-fn relative_display_path_strips_root_prefix() {
-    let root = Path::new("/workspace/project");
-    let scope = Path::new("/workspace/project/src/main.moth");
-
-    let relative = relative_display_path_from_root(scope, root);
-
-    assert_eq!(relative, "src/main.moth");
 }

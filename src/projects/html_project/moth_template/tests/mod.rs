@@ -8,8 +8,11 @@ use super::bundle::prepare_file_value_bundle;
 use crate::build_system::create_project_modules::resource_inputs::{
     ResourceContentState, ResourceInputRegistry,
 };
-use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_errors::{
+    CompilationOutcome, CompilationResult, InfrastructureErrors, InfrastructureFailureKind,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::DuplicateMothTemplateInputPathView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
@@ -31,6 +34,7 @@ use crate::compiler_frontend::single_source_compilation::{
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::projects::html_project::moth_template::{
     CompiledMothTemplateDocument, MothTemplateCompileOutput, MothTemplateInput, MothTemplateSource,
     compile_moth_template,
@@ -52,6 +56,13 @@ fn temp_project(files: &[(&str, &str)]) -> TempDir {
     temp_dir
 }
 
+#[cfg(unix)]
+fn non_utf8_file_name(bytes: &[u8]) -> std::ffi::OsString {
+    use std::os::unix::ffi::OsStringExt;
+
+    std::ffi::OsString::from_vec(bytes.to_vec())
+}
+
 fn compile_ok(input: MothTemplateInput) -> MothTemplateCompileOutput {
     match compile_moth_template(input, &mut StringTable::new()) {
         Ok(CompilationOutcome::Success { value, .. }) => value,
@@ -66,6 +77,20 @@ fn expect_diagnosed<T>(result: CompilationResult<T>, message: &str) -> Diagnosti
         Ok(CompilationOutcome::Diagnosed(reports)) => reports,
         Ok(CompilationOutcome::Success { .. }) => panic!("{message}"),
         Err(errors) => panic!("{message}: operational failure: {errors:?}"),
+    }
+}
+
+/// Compile an input that must fail operationally rather than succeed or diagnose.
+fn expect_infrastructure_failure(
+    input: MothTemplateInput,
+    description: &str,
+) -> InfrastructureErrors {
+    match compile_moth_template(input, &mut StringTable::new()) {
+        Ok(CompilationOutcome::Success { .. }) => panic!("{description} must not compile"),
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            panic!("{description} must fail operationally, not diagnostically: {reports:?}")
+        }
+        Err(errors) => errors,
     }
 }
 
@@ -512,7 +537,11 @@ fn mixed_relative_and_absolute_in_memory_paths_are_diagnosed() {
                     source_text: "first".to_owned(),
                 },
                 MothTemplateSource {
-                    display_path: temp_dir.path().join("absolute.mtf"),
+                    // Absolute in-memory names follow the portable spelling contract too: only
+                    // the host prefix and root are native, the remainder uses `/`.
+                    display_path: PathBuf::from(portable_path_text(
+                        temp_dir.path().join("absolute.mtf"),
+                    )),
                     source_text: "second".to_owned(),
                 },
             ]),
@@ -952,6 +981,171 @@ fn file_input_compiles_one_moth_template_file() {
     );
 }
 
+// APFS and HFS+ reject non-UTF-8 file names, so filesystem-input non-UTF-8 coverage needs a
+// Unix filesystem that stores arbitrary bytes. The in-memory test below needs only Unix's
+// arbitrary-byte `OsString` constructor, not such a filesystem, so it also runs on macOS.
+#[cfg(all(unix, not(target_vendor = "apple")))]
+#[test]
+fn directory_input_rejects_non_utf8_file_name_before_identity_conversion() {
+    let temp_dir = temp_project(&[]);
+    let docs = temp_dir.path().join("docs");
+    fs::create_dir_all(&docs).expect("docs directory should be created");
+    let bad_path = docs.join(non_utf8_file_name(b"bad\xFF.mtf"));
+    fs::write(&bad_path, "bad").expect("non-UTF-8 source should be written");
+    let canonical_bad_path =
+        fs::canonicalize(&bad_path).expect("non-UTF-8 source should canonicalize");
+
+    let errors = expect_infrastructure_failure(
+        MothTemplateInput::Directory {
+            path: docs,
+            recursive: false,
+        },
+        "a non-UTF-8 Moth template file name",
+    );
+
+    assert_eq!(
+        errors.primary.kind,
+        InfrastructureFailureKind::Filesystem,
+        "the non-UTF-8 file name should stay a filesystem failure",
+    );
+    assert_eq!(
+        errors.primary.host_path.as_deref(),
+        Some(canonical_bad_path.as_path()),
+        "the failure should retain the native canonical source path",
+    );
+    let expected_message = format!(
+        "Moth template source path {canonical_bad_path:?} contains a non-UTF-8 component; Moth \
+         identity requires UTF-8 paths."
+    );
+    assert_eq!(
+        errors.primary.message.as_ref(),
+        expected_message.as_str(),
+        "a unique non-UTF-8 path should fail the MTF identity gate before duplicate handling",
+    );
+}
+
+#[cfg(all(unix, not(target_vendor = "apple")))]
+#[test]
+fn files_input_rejects_distinct_non_utf8_names_without_collapsing_them() {
+    let temp_dir = temp_project(&[]);
+    let first = temp_dir.path().join(non_utf8_file_name(b"bad\xFF.mtf"));
+    let second = temp_dir.path().join(non_utf8_file_name(b"bad\xFE.mtf"));
+    fs::write(&first, "first").expect("first non-UTF-8 source should be written");
+    fs::write(&second, "second").expect("second non-UTF-8 source should be written");
+    let canonical_first = fs::canonicalize(&first).expect("first source should canonicalize");
+
+    let errors = expect_infrastructure_failure(
+        MothTemplateInput::Files(vec![first, second]),
+        "distinct non-UTF-8 Moth template names",
+    );
+
+    assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(
+        errors.primary.host_path.as_deref(),
+        Some(canonical_first.as_path()),
+        "the first input's native path should be the one rejected",
+    );
+    assert!(
+        errors.primary.message.contains("non-UTF-8"),
+        "the rejection should name the non-UTF-8 component: {}",
+        errors.primary.message,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn literal_backslash_file_names_keep_distinct_identities_and_deterministic_order() {
+    let temp_dir = temp_project(&[("docs/a/b.mtf", "nested"), ("docs/a\\b.mtf", "literal")]);
+    let docs = temp_dir.path().join("docs");
+    let literal_path = docs.join("a\\b.mtf");
+    let nested_path = docs.join("a").join("b.mtf");
+
+    let directory_output = compile_ok(MothTemplateInput::Directory {
+        path: docs,
+        recursive: true,
+    });
+    assert_eq!(
+        directory_output
+            .documents
+            .iter()
+            .map(|document| document.relative_path.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            Some(PathBuf::from("a/b.mtf")),
+            Some(PathBuf::from("a\\b.mtf"))
+        ],
+        "a literal backslash name must not be reinterpreted as a directory separator",
+    );
+    assert_eq!(
+        directory_output
+            .documents
+            .iter()
+            .map(|document| document.content.as_str())
+            .collect::<Vec<_>>(),
+        vec!["<p>nested</p>", "<p>literal</p>"],
+        "directory ordering should follow the native relative paths",
+    );
+
+    let files_output = compile_ok(MothTemplateInput::Files(vec![literal_path, nested_path]));
+    assert_eq!(
+        files_output
+            .documents
+            .iter()
+            .map(|document| document.relative_path.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            Some(PathBuf::from("a\\b.mtf")),
+            Some(PathBuf::from("a/b.mtf"))
+        ],
+        "a file list keeps caller order while preserving both identities",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn literal_backslash_document_name_referencing_resource_reports_typed_failure() {
+    let temp_dir = temp_project(&[
+        ("a\\b.mtf", "# Page\n\n[@logo.svg]"),
+        ("logo.svg", "<svg/>"),
+    ]);
+    let source_path = temp_dir.path().join("a\\b.mtf");
+    let canonical_source_path =
+        fs::canonicalize(&source_path).expect("literal-backslash source should canonicalize");
+    let document_path = Path::new("a\\b.mtf");
+
+    let errors = expect_infrastructure_failure(
+        MothTemplateInput::File(source_path),
+        "a document URL context with a literal backslash",
+    );
+
+    assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(
+        errors.primary.host_path.as_deref(),
+        Some(canonical_source_path.as_path()),
+        "the canonical native source path should be the host path",
+    );
+    assert!(
+        errors
+            .primary
+            .message
+            .contains(&format!("document path {document_path:?}")),
+        "the Debug spelling should keep the literal backslash visible: {}",
+        errors.primary.message,
+    );
+}
+
+// Site-root pieces do not depend on the document URL context, so this document must compile even
+// though its native name could not anchor a relative resource URL.
+#[cfg(unix)]
+#[test]
+fn literal_backslash_document_name_without_resources_skips_url_context_validation() {
+    let temp_dir = temp_project(&[("a\\b.mtf", "Site root: [@/]")]);
+
+    let output = compile_ok(MothTemplateInput::File(temp_dir.path().join("a\\b.mtf")));
+
+    assert_eq!(output.documents[0].content, "<p>Site root: /</p>");
+}
+
 #[test]
 fn direct_directory_input_compiles_direct_child_moth_template_files_sorted_by_relative_path() {
     let temp_dir = temp_project(&[
@@ -1062,6 +1256,117 @@ fn in_memory_sources_compile_without_filesystem_output() {
     assert_eq!(
         output.documents[0].relative_path,
         Some(PathBuf::from("memory/intro.mtf"))
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn in_memory_sources_reject_non_utf8_display_paths() {
+    let display_path = PathBuf::from(non_utf8_file_name(b"memory/bad\xFF.mtf"));
+
+    let errors = expect_infrastructure_failure(
+        MothTemplateInput::Sources(vec![MothTemplateSource {
+            display_path: display_path.clone(),
+            source_text: "bad".to_owned(),
+        }]),
+        "a non-UTF-8 in-memory display path",
+    );
+
+    assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(
+        errors.primary.host_path.as_deref(),
+        Some(display_path.as_path()),
+        "the in-memory logical name should be rejected exactly as supplied",
+    );
+    assert!(
+        errors.primary.message.contains("non-UTF-8"),
+        "the rejection should name the non-UTF-8 component: {}",
+        errors.primary.message,
+    );
+}
+
+// Windows parses `\` as a separator while Unix keeps it inside one filename component, so the
+// portable-name contract must reject that native spelling under either host parser.
+#[test]
+fn in_memory_source_names_require_forward_slash_separators() {
+    let portable_path = PathBuf::from("docs/intro.mtf");
+    let output = compile_ok(MothTemplateInput::Sources(vec![MothTemplateSource {
+        display_path: portable_path.clone(),
+        source_text: "intro".to_owned(),
+    }]));
+    assert_eq!(
+        output.documents[0].relative_path,
+        Some(portable_path),
+        "a `/`-separated relative name should pass through unchanged",
+    );
+
+    let display_path = PathBuf::from("docs\\intro.mtf");
+    let errors = expect_infrastructure_failure(
+        MothTemplateInput::Sources(vec![MothTemplateSource {
+            display_path: display_path.clone(),
+            source_text: "intro".to_owned(),
+        }]),
+        "a backslash-separated relative in-memory name",
+    );
+
+    assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(
+        errors.primary.host_path.as_deref(),
+        Some(display_path.as_path()),
+        "the rejected portable name should be reported exactly as supplied",
+    );
+    let offending_name = format!("source name {display_path:?}");
+    assert!(
+        errors.primary.message.contains(&offending_name),
+        "the rejection should show the backslash instead of a portable rewrite: {}",
+        errors.primary.message,
+    );
+    assert!(
+        errors.primary.message.contains("contains a backslash"),
+        "the rejection should explain the portable separator contract: {}",
+        errors.primary.message,
+    );
+}
+
+#[test]
+fn absolute_in_memory_display_paths_keep_their_display_identity() {
+    let temp_dir = temp_project(&[]);
+    // Absolute in-memory names obey the portable spelling contract: native host prefix and root,
+    // then `/` separators.
+    let first = PathBuf::from(portable_path_text(temp_dir.path().join("memory/intro.mtf")));
+    let second = PathBuf::from(portable_path_text(temp_dir.path().join("memory/guide.mtf")));
+
+    let output = compile_ok(MothTemplateInput::Sources(vec![
+        MothTemplateSource {
+            display_path: first.clone(),
+            source_text: "intro".to_owned(),
+        },
+        MothTemplateSource {
+            display_path: second.clone(),
+            source_text: "guide".to_owned(),
+        },
+    ]));
+
+    assert_eq!(
+        output
+            .documents
+            .iter()
+            .map(|document| document.source_path.clone())
+            .collect::<Vec<_>>(),
+        vec![first, second],
+        "absolute display paths are logical inputs and must not be canonicalized",
+    );
+    assert_eq!(
+        output
+            .documents
+            .iter()
+            .map(|document| document.relative_path.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            Some(PathBuf::from("intro.mtf")),
+            Some(PathBuf::from("guide.mtf"))
+        ],
+        "the common display ancestor should yield request-relative names",
     );
 }
 
@@ -1192,26 +1497,41 @@ fn template_bundle_source_and_header_paths_survive_success_finalization() {
 }
 
 #[test]
-fn duplicate_source_paths_are_diagnostics() {
+fn duplicate_canonical_files_are_diagnostics() {
     let temp_dir = temp_project(&[("intro.mtf", "intro")]);
-    let path = temp_dir.path().join("intro.mtf");
+    let canonical_path =
+        fs::canonicalize(temp_dir.path().join("intro.mtf")).expect("source should canonicalize");
+    let alternate_spelling = temp_dir.path().join(".").join("intro.mtf");
     let mut string_table = StringTable::new();
 
     let messages = expect_diagnosed(
         compile_moth_template(
-            MothTemplateInput::Files(vec![path.clone(), path]),
+            MothTemplateInput::Files(vec![canonical_path.clone(), alternate_spelling]),
             &mut string_table,
         ),
-        "duplicate input paths should fail",
+        "duplicate canonical input paths should fail",
     );
 
     assert_eq!(messages.counts().errors, 1);
-    let (_, diagnostic) = messages
+    let (report, diagnostic) = messages
         .iter()
         .next()
         .expect("duplicate diagnostic should be present");
     assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0028");
     assert_eq!(diagnostic.durable_labels().count(), 1);
+    let facts = diagnostic
+        .family_view::<DuplicateMothTemplateInputPathView>()
+        .expect("duplicate input diagnostic should retain its typed path fact");
+    let context = DiagnosticRenderContext::for_report(report);
+    let path_table = context
+        .path_table()
+        .expect("a retained report should own its path table");
+    let mut scratch = Vec::new();
+    assert_eq!(
+        path_table.render_native_frozen(facts.path, report.context().strings(), &mut scratch),
+        canonical_path,
+        "the fact should name the canonical native path once, not either spelling",
+    );
     let rendered = format_terse_diagnostic_reports(&messages).join("\n");
     assert!(
         rendered.contains("intro.mtf"),

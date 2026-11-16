@@ -30,6 +30,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternerFork,
 };
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 /// Resolve provider-backed and binding-backed dependency classes before indexed source resolution.
 ///
 /// Directory module scheduling calls this with provider references retained by header syntax.
@@ -826,8 +827,8 @@ fn resolve_module_root_bare_dependency(
                 crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 format!(
                     "Owning module root '{}' is outside entry root '{}'",
-                    module_root.display(),
-                    project_path_resolver.entry_root().display()
+                    portable_path_text(&module_root),
+                    portable_path_text(project_path_resolver.entry_root())
                 ),
             ))
         })?;

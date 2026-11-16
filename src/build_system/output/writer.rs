@@ -15,6 +15,7 @@ use crate::build_system::build::{FileKind, Project};
 use crate::build_system::output::{OutputPlan, WriteMode};
 use crate::build_system::utils::{file_error_with_rejection_reason, should_skip_unchanged_write};
 use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -232,7 +233,7 @@ fn prepare_one_destination(
             &relative_path,
             format!(
                 "Output destination '{}' uses a path reserved for the internal build manifest.",
-                relative_path.display()
+                portable_path_text(&relative_path)
             ),
             OutputRejectionReason::ReservedManifestDestination,
         ));
@@ -241,13 +242,13 @@ fn prepare_one_destination(
         let message = if existing_path == &relative_path {
             format!(
                 "Duplicate output destination '{}'. Each output path must be unique.",
-                relative_path.display()
+                portable_path_text(&relative_path)
             )
         } else {
             format!(
                 "Output destinations '{}' and '{}' differ only by ASCII case or path spelling and cannot coexist safely.",
-                existing_path.display(),
-                relative_path.display()
+                portable_path_text(existing_path),
+                portable_path_text(&relative_path)
             )
         };
         return Err(file_error_with_rejection_reason(
@@ -273,8 +274,8 @@ fn prepare_one_destination(
             &relative_path,
             format!(
                 "Output destination '{}' resolves outside the validated output root '{}'.",
-                relative_path.display(),
-                preparation.output_root.display()
+                portable_path_text(&relative_path),
+                portable_path_text(preparation.output_root)
             ),
             OutputRejectionReason::EscapesOutputRoot,
         ));
@@ -284,7 +285,7 @@ fn prepare_one_destination(
             &relative_path,
             format!(
                 "Output destination '{}' resolves to the output root itself.",
-                relative_path.display()
+                portable_path_text(&relative_path)
             ),
             OutputRejectionReason::DestinationIsOutputRoot,
         ));
@@ -294,11 +295,15 @@ fn prepare_one_destination(
         .expect("preflight already validated output-root containment")
         .to_path_buf();
     if !is_lossless_portable_relative_path(&canonical_relative_path) {
+        // WHAT: name the canonical relative path through its Debug spelling.
+        // WHY: the authored path is representable, but a symlink target may contain a Unix
+        // literal `\` or non-UTF-8 bytes. Portable display text would show a different, valid
+        // path instead of the canonical component the rejection is about.
         return Err(file_error_with_rejection_reason(
             &relative_path,
             format!(
-                "Output destination '{}' resolves to a filesystem path that cannot be represented safely in the build manifest.",
-                relative_path.display()
+                "Output destination '{}' resolves to canonical path {canonical_relative_path:?}, which cannot be represented safely in the build manifest.",
+                portable_path_text(&relative_path)
             ),
             OutputRejectionReason::NonLosslessCanonicalPath,
         ));
@@ -311,7 +316,7 @@ fn prepare_one_destination(
             &relative_path,
             format!(
                 "Output destination '{}' resolves to a path reserved for the internal build manifest.",
-                relative_path.display()
+                portable_path_text(&relative_path)
             ),
             OutputRejectionReason::ReservedManifestDestinationCanonical,
         ));
@@ -396,8 +401,8 @@ fn reject_canonical_destination_conflicts(
                 &destination.relative_path,
                 format!(
                     "Output destinations '{}' and '{}' resolve to the same portable filesystem path and cannot coexist safely.",
-                    existing.relative_path.display(),
-                    destination.relative_path.display()
+                    portable_path_text(&existing.relative_path),
+                    portable_path_text(&destination.relative_path)
                 ),
                 OutputRejectionReason::CanonicalDestinationCollision,
             ));
@@ -418,8 +423,8 @@ fn reject_canonical_destination_conflicts(
                     &destination.relative_path,
                     format!(
                         "Output destination '{}' resolves below file '{}'. Only an explicit directory output may contain child destinations.",
-                        destination.relative_path.display(),
-                        ancestor.relative_path.display()
+                        portable_path_text(&destination.relative_path),
+                        portable_path_text(&ancestor.relative_path)
                     ),
                     OutputRejectionReason::FileAncestorConflict,
                 ));
@@ -443,7 +448,7 @@ fn validate_existing_destination(
                 relative_path,
                 format!(
                     "Existing output destination '{}' cannot be inspected safely: {error}",
-                    relative_path.display()
+                    portable_path_text(relative_path)
                 ),
                 OutputRejectionReason::DestinationInspectionFailed,
             ));
@@ -455,7 +460,7 @@ fn validate_existing_destination(
             relative_path,
             format!(
                 "Directory output destination '{}' already exists as a non-directory path.",
-                relative_path.display()
+                portable_path_text(relative_path)
             ),
             OutputRejectionReason::DirectoryDestinationExistsAsNonDirectory,
         ));
@@ -465,7 +470,7 @@ fn validate_existing_destination(
             relative_path,
             format!(
                 "File output destination '{}' already exists as a non-regular path.",
-                relative_path.display()
+                portable_path_text(relative_path)
             ),
             OutputRejectionReason::FileDestinationExistsAsNonFile,
         ));
@@ -477,7 +482,7 @@ fn validate_existing_destination(
                     relative_path,
                     format!(
                         "Existing output destination '{}' cannot be inspected safely for hard-link aliases: {error}",
-                        relative_path.display()
+                        portable_path_text(relative_path)
                     ),
                     OutputRejectionReason::DestinationInspectionFailed,
                 )
@@ -488,7 +493,7 @@ fn validate_existing_destination(
                 relative_path,
                 format!(
                     "Output destination '{}' is hard-linked to another filesystem path and cannot be overwritten safely.",
-                    relative_path.display()
+                    portable_path_text(relative_path)
                 ),
                 OutputRejectionReason::HardLinkedDestination,
             ));
@@ -662,7 +667,7 @@ pub(crate) fn emit_prepared_output_files(
                                 destination,
                                 format!(
                                     "Failed to create output directory '{}': {error}",
-                                    destination.display()
+                                    portable_path_text(destination)
                                 ),
                                 OutputRejectionReason::DirectoryCreationFailed,
                             )
@@ -701,7 +706,7 @@ fn create_parent_dir_if_needed(path: &Path) -> Result<(), InfrastructureFailure>
             parent,
             format!(
                 "Failed to create parent directory '{}': {error}",
-                parent.display()
+                portable_path_text(parent)
             ),
             OutputRejectionReason::ParentDirCreationFailed,
         )
@@ -732,7 +737,7 @@ fn write_bytes_output(
             destination,
             format!(
                 "Failed to write output file '{}': {error}",
-                destination.display()
+                portable_path_text(destination)
             ),
             OutputRejectionReason::FileWriteFailed,
         )

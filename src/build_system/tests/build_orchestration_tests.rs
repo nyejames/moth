@@ -34,7 +34,7 @@ use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceSpan,
 };
-use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::compiler_tests::test_diagnostics::assert_output_rejection;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::settings::Config;
@@ -57,6 +57,22 @@ fn assert_has_config_error<T>(messages: &CompilationResult<T>) {
             .iter_severity(DiagnosticSeverity::Error)
             .any(|(_, view)| view.category() == DiagnosticCategory::Config),
         "expected config-classified diagnostic"
+    );
+}
+
+/// Asserts one exact invalid-config code reached the build boundary.
+///
+/// WHY: these cases compile a real `@config.moth` and propagate its diagnostics through
+///      `build_project`, so the build boundary keeps its own rejection coverage.
+fn assert_has_invalid_config_code<T>(messages: &CompilationResult<T>, expected: InvalidConfigCode) {
+    assert!(
+        diagnosed_reports(messages)
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| view
+                .family_view::<InvalidConfigView>()
+                .is_some_and(|facts| facts.reason == expected)),
+        "expected invalid-config code {expected:?}, got: {:?}",
+        rendered_error_messages(messages)
     );
 }
 
@@ -931,7 +947,7 @@ fn reserved_manifest_destination_is_rejected_before_emission() {
 
     for reserved_descendant in [
         PathBuf::from(".moth_manifest/child.js"),
-        PathBuf::from(r".MOTH_MANIFEST\child.js"),
+        PathBuf::from(".MOTH_MANIFEST").join("child.js"),
     ]
     .into_iter()
     {
@@ -1222,7 +1238,7 @@ fn invalid_utf8_authored_output_path_is_rejected_before_emission() {
                 PathBuf::from("index.html"),
                 FileKind::Html(String::from("<html>home</html>")),
             ),
-            OutputFile::new(invalid_path, FileKind::Js(String::from("invalid"))),
+            OutputFile::new(invalid_path.clone(), FileKind::Js(String::from("invalid"))),
         ],
         entry_page_rel: Some(PathBuf::from("index.html")),
         cleanup_policy: html_cleanup_policy(),
@@ -1234,9 +1250,19 @@ fn invalid_utf8_authored_output_path_is_rejected_before_emission() {
     let Err(messages) = result else {
         panic!("invalid UTF-8 output paths must be rejected before emission");
     };
+    assert_eq!(
+        messages.primary.host_path.as_deref(),
+        Some(invalid_path.as_path()),
+        "the rejected host path must retain its non-UTF-8 bytes"
+    );
+    assert!(
+        !messages.primary.message.contains('\u{FFFD}'),
+        "failure text must not expose a lossy replacement spelling, got: {}",
+        messages.primary.message
+    );
     assert_output_rejection(&Err(messages), "invalid-relative-output-path");
     assert_path_missing(&root.join("index.html"));
-    assert_path_missing(&root.join("safe-�-file.js"));
+    assert_path_missing(&root.join(&invalid_path));
     assert_path_missing(&root.join(BUILD_MANIFEST_FILENAME));
 }
 
@@ -2546,7 +2572,7 @@ fn empty_directory_output_setting_is_rejected() {
     )
     .unwrap_or_else(|never| match never {});
 
-    assert_has_config_error(&result);
+    assert_has_invalid_config_code(&result, InvalidConfigCode::InvalidOutputFolderEmpty);
 }
 
 #[test]
@@ -2573,7 +2599,10 @@ fn absolute_output_setting_is_rejected() {
     )
     .unwrap_or_else(|never| match never {});
 
-    assert_has_config_error(&result);
+    assert_has_invalid_config_code(
+        &result,
+        InvalidConfigCode::InvalidOutputFolderAbsolutePathWithFolder,
+    );
 }
 
 #[test]
@@ -2624,7 +2653,10 @@ fn hidden_output_inside_source_root_is_accepted_and_visible_output_is_rejected()
         &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
-    assert_has_config_error(&result);
+    assert_has_invalid_config_code(
+        &result,
+        InvalidConfigCode::InvalidOutputFolderVisiblePathWithFolder,
+    );
 }
 
 #[test]
@@ -2651,7 +2683,7 @@ fn identical_dev_and_release_folders_are_rejected() {
     )
     .unwrap_or_else(|never| match never {});
 
-    assert_has_config_error(&result);
+    assert_has_invalid_config_code(&result, InvalidConfigCode::OutputFoldersNotDistinct);
 }
 
 #[test]

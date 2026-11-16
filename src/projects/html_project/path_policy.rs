@@ -5,6 +5,7 @@
 
 use crate::build_system::utils::file_error;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -60,7 +61,7 @@ fn resolve_canonical_source_root(
             &config.entry_dir,
             format!(
                 "Failed to resolve selected HTML source root '{}': {error}",
-                source_root_path.display()
+                portable_path_text(&source_root_path)
             ),
         )
     })?;

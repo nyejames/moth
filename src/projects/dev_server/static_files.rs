@@ -1,9 +1,11 @@
 //! Static file and HTML injection helpers for the dev server.
 //!
 //! This module resolves safe output-relative paths, maps content types and installs the
-//! development client before application bootstrap scripts can call its outcome hooks.
+//! development client before application bootstrap scripts can call its outcome hooks. It owns
+//! the request URL boundary: request paths are percent-decoded once before lookup and redirect
+//! locations re-encode the decoded page name.
 
-use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::build_system::output::{parse_native_relative_path, percent_encode_url_segment};
 use crate::projects::dev_server::dev_client::{DEV_CLIENT_MARKER, dev_client_snippet};
 use crate::projects::dev_server::state::{ServedArtifactSnapshot, ServedHtmlEntrySnapshot};
 use crate::projects::routing::{HtmlSiteConfig, PageUrlStyle, prefix_origin};
@@ -29,6 +31,11 @@ pub enum ResolvedRequest {
     },
     MissingEntryPage,
     NotFound,
+    /// The request path carried a malformed percent escape or decoded to invalid UTF-8.
+    /// Rejected as a bad request rather than reported as missing.
+    MalformedPath,
+    /// The decoded request path cannot safely name a file inside the output directory, so it is
+    /// treated as missing.
     InvalidPath,
 }
 
@@ -95,7 +102,11 @@ pub fn validated_html_entries(
         artifacts
             .keys()
             .filter_map(|relative_path| {
-                let entry = portable_path_text(relative_path);
+                // The key is the validated output spelling: the dev client echoes this entry and
+                // the report ledger compares the same spelling.
+                let entry = parse_native_relative_path(relative_path)
+                    .ok()?
+                    .portable_spelling();
                 is_known_entry(&entry, output_dir).then_some(entry)
             })
             .collect(),
@@ -124,9 +135,123 @@ pub fn is_html_content_type(content_type: &str) -> bool {
     content_type.starts_with("text/html")
 }
 
+/// Failure to map a raw HTTP request path onto decoded output text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RequestPathError {
+    /// A percent escape is malformed or the decoded path is not valid UTF-8.
+    MalformedEncoding,
+    /// The decoded path is not a safe site-local request path.
+    UnsafePath,
+}
+
+/// Decode one raw site-local request path into the text used for page and asset lookup.
+///
+/// WHAT: splits the raw path on `/` before decoding each segment into one buffer and validating
+/// the decoded bytes.
+/// WHY: browsers send reserved characters percent-encoded, while `/` must stay structural.
+/// Decoding after splitting exposes encoded separators, dot segments and NUL to the traversal
+/// checks, and each decoded segment maps onto exactly one native path component.
+fn decode_request_path(raw_request_path: &str) -> Result<String, RequestPathError> {
+    let Some(path_after_root) = raw_request_path.strip_prefix('/') else {
+        return Err(RequestPathError::UnsafePath);
+    };
+    // A trailing separator is significant to routing, but an interior empty segment (`//`) would
+    // collapse when mapped onto a native path and is rejected below.
+    let has_trailing_slash = path_after_root.ends_with('/');
+
+    let mut decoded_path = Vec::with_capacity(raw_request_path.len());
+    decoded_path.push(b'/');
+
+    // Omitting the trailing empty segment avoids treating `/about/` as an interior empty segment;
+    // the trailing separator is restored below.
+    for (index, raw_segment) in path_after_root.split_terminator('/').enumerate() {
+        if index > 0 {
+            decoded_path.push(b'/');
+        }
+
+        let segment_start = decoded_path.len();
+        percent_decode_segment_into(raw_segment, &mut decoded_path)?;
+
+        // A decoded separator or NUL would let the URL spelling describe a different native path
+        // than the containment checks validated.
+        let decoded_segment = &decoded_path[segment_start..];
+        if decoded_segment.is_empty()
+            || matches!(decoded_segment, b"." | b"..")
+            || decoded_segment
+                .iter()
+                .any(|&byte| matches!(byte, b'/' | b'\\' | b'\0'))
+        {
+            return Err(RequestPathError::UnsafePath);
+        }
+    }
+
+    if has_trailing_slash {
+        decoded_path.push(b'/');
+    }
+
+    // Decoded separators are rejected per segment, so one whole-path UTF-8 check is equivalent
+    // to checking each segment: an inserted `/` cannot be part of a multibyte sequence.
+    String::from_utf8(decoded_path).map_err(|_| RequestPathError::MalformedEncoding)
+}
+
+/// Append one percent-decoded request path segment to the decoded path buffer.
+fn percent_decode_segment_into(
+    segment: &str,
+    decoded_path: &mut Vec<u8>,
+) -> Result<(), RequestPathError> {
+    let bytes = segment.as_bytes();
+    let mut index = 0;
+
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte != b'%' {
+            decoded_path.push(byte);
+            index += 1;
+            continue;
+        }
+
+        let Some(high) = bytes.get(index + 1).and_then(|byte| hex_digit_value(*byte)) else {
+            return Err(RequestPathError::MalformedEncoding);
+        };
+        let Some(low) = bytes.get(index + 2).and_then(|byte| hex_digit_value(*byte)) else {
+            return Err(RequestPathError::MalformedEncoding);
+        };
+        decoded_path.push((high << 4) | low);
+        index += 3;
+    }
+
+    Ok(())
+}
+
+fn hex_digit_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Encode one decoded site-local URL path for a redirect `Location` header.
+///
+/// WHAT: percent-encodes every path segment while preserving `/` separators.
+/// WHY: redirects echo a decoded request path, but browsers require the encoded URL spelling for
+/// names containing spaces, `%`, `#` or non-ASCII characters.
+fn encode_url_path(decoded_path: &str) -> String {
+    let mut encoded = String::with_capacity(decoded_path.len());
+    for (index, segment) in decoded_path.split('/').enumerate() {
+        if index > 0 {
+            encoded.push('/');
+        }
+        encoded.push_str(&percent_encode_url_segment(segment));
+    }
+    encoded
+}
+
 /// Resolve a request using the effective HTML routing policy from the latest successful build.
 ///
-/// WHAT: applies strict path sanitization, exact-file asset lookup, and page canonicalization.
+/// WHAT: decodes the raw site-local request path once, applies strict path sanitization, exact-file
+/// asset lookup, and page canonicalization.
 /// WHY: page routes and assets must remain separate so canonical redirects never affect assets.
 #[cfg(test)]
 pub fn resolve_request(
@@ -154,6 +279,13 @@ pub(crate) fn resolve_request_with_file_exists(
     config: HtmlSiteConfig,
     file_exists: impl Fn(&Path) -> bool,
 ) -> ResolvedRequest {
+    let decoded_request_path = match decode_request_path(request_path) {
+        Ok(decoded_request_path) => decoded_request_path,
+        Err(RequestPathError::MalformedEncoding) => return ResolvedRequest::MalformedPath,
+        Err(RequestPathError::UnsafePath) => return ResolvedRequest::InvalidPath,
+    };
+    let request_path = decoded_request_path.as_str();
+
     if request_path == "/" {
         let Some(entry_page) = entry_page_rel else {
             return ResolvedRequest::MissingEntryPage;
@@ -166,10 +298,6 @@ pub(crate) fn resolve_request_with_file_exists(
             Ok(_) => ResolvedRequest::NotFound,
             Err(_) => ResolvedRequest::InvalidPath,
         };
-    }
-
-    if !request_path.starts_with('/') {
-        return ResolvedRequest::InvalidPath;
     }
 
     // Step 1: explicit `/index.html` forms are page-route aliases and are resolved before
@@ -304,7 +432,10 @@ fn canonical_redirect_target(
     if site_local_request_path == site_local_canonical {
         None
     } else {
-        Some(prefix_origin(origin, &site_local_canonical))
+        Some(prefix_origin(
+            origin,
+            &encode_url_path(&site_local_canonical),
+        ))
     }
 }
 
@@ -327,7 +458,7 @@ fn index_alias_redirect_target(page_base: &str, style: PageUrlStyle, origin: &st
         }
     };
 
-    prefix_origin(origin, &site_local_target)
+    prefix_origin(origin, &encode_url_path(&site_local_target))
 }
 
 fn directory_url(page_base: &str) -> String {

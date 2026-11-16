@@ -12,7 +12,7 @@ use crate::compiler_frontend::external_packages::{
     ExternalSignatureType,
 };
 use crate::compiler_frontend::module_compilation::{Module, ModuleExternalImport};
-use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::collections::HashSet;
 
 /// Return metadata about one referenced external module export.

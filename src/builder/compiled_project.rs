@@ -14,6 +14,7 @@ use crate::build_system::output::{
     component_identity_prefixes, parse_relative_path, path_starts_with_component_identity,
 };
 use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::projects::settings::BuilderSettings;
 use std::fmt;
 use std::marker::PhantomData;
@@ -241,14 +242,13 @@ impl BuildArtifacts {
         let path = path.as_ref();
         let raw = path.to_str().ok_or_else(|| {
             Error::build(format!(
-                "The build artefact path '{}' is not valid UTF-8.",
-                path.display()
+                "The build artefact path {path:?} is not valid UTF-8."
             ))
         })?;
         let portable = parse_relative_path(raw).map_err(|reason| {
             Error::build(format!(
                 "The build artefact path '{}' cannot be used: {}.",
-                path.display(),
+                portable_path_text(path),
                 describe_rejected_artefact_path(reason)
             ))
         })?;
@@ -256,7 +256,7 @@ impl BuildArtifacts {
         if path_starts_with_component_identity(&relative_path, Path::new(BUILD_MANIFEST_FILENAME)) {
             return Err(Error::build(format!(
                 "The build artefact path '{}' is reserved for the compiler's build manifest.",
-                relative_path.display()
+                portable_path_text(&relative_path)
             )));
         }
 
@@ -272,14 +272,14 @@ impl BuildArtifacts {
             let message = if existing.identity == identity {
                 format!(
                     "The build artefact path '{}' collides with the already registered artefact '{}'.",
-                    relative_path.display(),
-                    existing_path.display()
+                    portable_path_text(&relative_path),
+                    portable_path_text(existing_path)
                 )
             } else {
                 format!(
                     "The build artefact path '{}' conflicts with the already registered artefact '{}': one path is a file and the other is its descendant.",
-                    relative_path.display(),
-                    existing_path.display()
+                    portable_path_text(&relative_path),
+                    portable_path_text(existing_path)
                 )
             };
             return Err(Error::build(message));

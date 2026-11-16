@@ -14,6 +14,7 @@ use crate::compiler_frontend::hir::functions::HirFunction;
 
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::module_compilation::BoracleModuleInput;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::str::FromStr;
@@ -284,18 +285,14 @@ pub(crate) fn run_hir_module(
             ),
         ));
     }
-    let source_path = input.source_path.to_string_lossy();
+    let source_path = portable_path_text(&input.source_path);
     if options.dump == BoracleDump::Differential {
         let problems =
             build_hir_module_problems(&input.hir, &input.external_package_registry, &selection)?;
-        return render_differential_module_report(problems, source_path.as_ref(), &selection);
+        return render_differential_module_report(problems, &source_path, &selection);
     }
     let report = solve_hir_module_parts(&input.hir, &input.external_package_registry, &selection)?;
-    Ok(render_module_report(
-        &report,
-        source_path.as_ref(),
-        options.dump,
-    ))
+    Ok(render_module_report(&report, &source_path, options.dump))
 }
 
 /// Solve one compiler-produced HIR module without flattening its typed results into a dump.

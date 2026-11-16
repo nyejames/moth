@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, DiagnosticDiscoveryStops, DiagnosticDraft, DiagnosticSeverity, NamingConvention,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::settings::Config;
@@ -119,9 +120,53 @@ fn single_file_project_entry_dir_reports_missing_parent_as_filesystem_failure() 
     );
     assert_eq!(failure.host_path.as_deref(), Some(missing_parent.as_path()));
     assert!(
-        failure.message.contains("containing directory") && failure.message.contains("missing"),
+        failure.message.starts_with(&format!(
+            "Could not use containing directory '{}' for single-file build entry '{}': ",
+            portable_path_text(&missing_parent),
+            portable_path_text(&entry_path)
+        )),
         "the failure should explain which containing directory needs attention: {}",
         failure.message
+    );
+}
+
+#[test]
+fn single_file_project_entry_dir_renders_backslash_names_as_portable_text() {
+    let temp = tempfile::tempdir().expect("should create a temporary root");
+    // A literal backslash is one native component on Unix, so only the display conversion
+    // makes this assertion platform-independent.
+    let missing_parent = temp.path().join("missing\\directory");
+    let entry_path = missing_parent.join("main.moth");
+
+    let failure = single_file_project_entry_dir(&entry_path)
+        .expect_err("a missing containing directory must fail output planning");
+
+    assert_eq!(failure.host_path.as_deref(), Some(missing_parent.as_path()));
+    assert!(
+        failure.message.starts_with(&format!(
+            "Could not use containing directory '{}' for single-file build entry '{}': ",
+            portable_path_text(&missing_parent),
+            portable_path_text(&entry_path)
+        )),
+        "native separators in the failure text must render as portable text: {}",
+        failure.message
+    );
+    assert!(
+        !failure.message.contains('\\'),
+        "portable display text must not contain a native backslash: {}",
+        failure.message
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn single_file_project_entry_dir_renders_relative_entry_as_portable_text() {
+    let failure = single_file_project_entry_dir(Path::new("a\\b.moth"))
+        .expect_err("a relative single-file entry cannot resolve a containing directory");
+
+    assert_eq!(
+        failure.message.as_ref(),
+        "Could not resolve containing directory for single-file build entry 'a/b.moth': its path must be absolute"
     );
 }
 

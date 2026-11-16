@@ -28,6 +28,7 @@ use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternError};
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::projects::html_project::external_js::package_registration::{
     JsModuleRegistrationError, register_parsed_js_module, required_runtime_imports_from_parsed,
 };
@@ -80,7 +81,7 @@ impl ExternalImportProvider for JsExternalImportProvider {
                     &request.canonical_source_path,
                     format!(
                         "Failed to read JS import '{}': {error}",
-                        request.canonical_source_path.display()
+                        portable_path_text(&request.canonical_source_path)
                     ),
                 )
                 .into());

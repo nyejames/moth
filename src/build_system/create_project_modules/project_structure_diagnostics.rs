@@ -16,7 +16,7 @@ use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnos
 use crate::compiler_frontend::compiler_messages::{
     CompilerStage, DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use std::path::Path;
 
@@ -26,11 +26,6 @@ use std::path::Path;
 /// failures therefore stay spanless rather than manufacturing a source location.
 pub(super) fn project_structure_diagnostic(reason: InvalidConfigReason) -> DiagnosticDraft {
     project_config::invalid_config_reason(None, reason, None)
-}
-
-/// Intern a path spelling for diagnostic payloads.
-pub(super) fn path_id(path: &Path, strings: &mut DiagnosticStringBuilder<'_>) -> StringId {
-    strings.get_or_intern(path.display().to_string())
 }
 
 /// Reject one authored root filename outside the closed vocabulary.
@@ -45,7 +40,7 @@ pub(super) fn invalid_module_root_file_name_error(
     let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
     let reason = InvalidConfigReason::InvalidModuleRootFileName {
         file_name: diagnostic_strings.intern(file_name),
-        directory: path_id(directory, &mut diagnostic_strings),
+        directory: diagnostic_strings.intern_path(directory),
     };
     capture_structure_diagnostic(project_structure_diagnostic(reason), string_table)
 }
@@ -62,7 +57,7 @@ pub(super) fn config_file_selected_as_entry_error(
     let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
     let reason = InvalidConfigReason::ConfigFileSelectedAsEntry {
         file_name: diagnostic_strings.intern(file_name),
-        directory: path_id(directory, &mut diagnostic_strings),
+        directory: diagnostic_strings.intern_path(directory),
     };
     capture_structure_diagnostic(project_structure_diagnostic(reason), string_table)
 }
@@ -80,7 +75,7 @@ pub(super) fn entry_root_package_prefix_collision_error(
     let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
     let reason = InvalidConfigReason::EntryRootPackagePrefixCollision {
         prefix: diagnostic_strings.intern(registered_prefix),
-        entry_folder: path_id(colliding_folder, &mut diagnostic_strings),
+        entry_folder: diagnostic_strings.intern_path(colliding_folder),
     };
     capture_structure_diagnostic(project_structure_diagnostic(reason), string_table)
 }
@@ -99,7 +94,7 @@ pub(super) fn reserved_package_namespace_root_claim_diagnostic(
     let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
     let reason = InvalidConfigReason::ReservedPackageNamespaceRootClaim {
         root: diagnostic_strings.intern(root),
-        source: path_id(source, &mut diagnostic_strings),
+        source: diagnostic_strings.intern_path(source),
     };
     project_structure_diagnostic(reason)
 }

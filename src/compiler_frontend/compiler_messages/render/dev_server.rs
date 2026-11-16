@@ -16,10 +16,10 @@ use crate::compiler_frontend::compiler_messages::render::infrastructure::{
 use crate::compiler_frontend::compiler_messages::render::subject::DiagnosticSubject;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, ResolvedDiagnosticLabel, display_column_number, display_gutter_width,
-    display_line_number, expand_tabs_for_display, primary_caret_padding, primary_underline_length,
-    relative_display_path_from_root,
+    display_line_number, expand_tabs_for_display, file_href_from_path, primary_caret_padding,
+    primary_underline_length, relative_display_path_from_root,
 };
-use crate::compiler_frontend::utilities::basic::{normalize_path, portable_path_text};
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 
 fn severity_display(severity: DiagnosticSeverity) -> (&'static str, &'static str, &'static str) {
     match severity {
@@ -42,9 +42,8 @@ fn render_source_frame(
         return String::new();
     };
 
-    let display_root = normalize_path(project_root);
     let relative_path =
-        relative_display_path_from_root(primary_position.path.as_path(), &display_root);
+        relative_display_path_from_root(primary_position.path.as_path(), project_root);
     let escaped_relative_path = escape_html(&relative_path);
     let line = display_line_number(i32::try_from(primary_position.start.line).unwrap_or(i32::MAX));
     let column =
@@ -56,10 +55,11 @@ fn render_source_frame(
     let empty_line_label = " ".repeat(line_label.len());
     let escaped_line = escape_html(&expand_tabs_for_display(source_line));
 
-    let location = match primary_position.host_path {
-        Some(host_path) => format!(
-            r#"<a class="source-location" href="file://{}">--> {}:{}:{}</a>"#,
-            escape_html(&portable_path_text(host_path)),
+    let link = primary_position.host_path.and_then(file_href_from_path);
+    let location = match link {
+        Some(href) => format!(
+            r#"<a class="source-location" href="{}">--> {}:{}:{}</a>"#,
+            escape_html(&href),
             escaped_relative_path,
             line,
             column,

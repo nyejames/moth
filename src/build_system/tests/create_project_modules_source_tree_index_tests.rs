@@ -16,6 +16,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::collections::BTreeSet;
 
 fn single_file_dependency_keys(root: &Path) -> Result<BTreeSet<String>, PreparedFailure> {
@@ -355,11 +356,11 @@ fn source_tree_index_rejects_exact_nested_package_path_but_allows_ancestor() {
                 .context()
                 .strings()
                 .resolve(diagnostic.string_ids()[1]),
-            folder
-                .split('/')
-                .fold(entry.clone(), |path, component| path.join(component))
-                .display()
-                .to_string(),
+            portable_path_text(
+                folder
+                    .split('/')
+                    .fold(entry.clone(), |path, component| path.join(component)),
+            ),
             "{reason}"
         );
     };
@@ -446,7 +447,7 @@ fn source_tree_index_rejects_project_folders_that_claim_official_core_package_pr
                 .context()
                 .strings()
                 .resolve(diagnostic.string_ids()[1]),
-            entry.join(folder).display().to_string(),
+            portable_path_text(entry.join(folder)),
             "{reason}"
         );
     };

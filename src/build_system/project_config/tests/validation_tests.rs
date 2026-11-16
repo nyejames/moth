@@ -255,6 +255,18 @@ fn first_invalid_facts(diagnostics: &TestDiagnostics) -> InvalidConfigFacts {
     }
 }
 
+/// Resolve the diagnostic's ordered string facts so tests can compare them to literal text.
+fn resolved_fact_strings<'a>(
+    facts: &InvalidConfigFacts,
+    string_table: &'a StringTable,
+) -> Vec<&'a str> {
+    facts
+        .string_ids
+        .iter()
+        .map(|id| string_table.resolve(*id))
+        .collect()
+}
+
 /// A schema with one record field `site` whose node declares `title` and a closed `channel`.
 ///
 /// Each test rebuilds the schema so the case controls the node's unknown-field policy itself.
@@ -1360,10 +1372,97 @@ fn rejects_empty_grouped_html_output_root() {
     let output_errors = validate_directory_output_settings(&config, &mut string_table)
         .expect_err("an empty output root must be rejected");
     let output_errors = test_diagnostics(output_errors);
+    let facts = first_invalid_facts(&output_errors);
+    assert_eq!(facts.reason, InvalidConfigCode::InvalidOutputFolderEmpty);
     assert_eq!(
-        first_invalid_facts(&output_errors).reason,
-        InvalidConfigCode::InvalidOutputFolderEmpty
+        resolved_fact_strings(&facts, &string_table),
+        vec!["dev_output"],
+        "an empty folder reports its setting key but no folder fact"
     );
+}
+
+#[test]
+fn rejects_absolute_and_visible_grouped_html_output_roots_with_their_folder_facts() {
+    // WHAT: both lexical rejections carry the exact authored folder spelling.
+    // WHY: output folders are config text, not host paths. A Windows-style authored separator must
+    //      read back exactly, so the author can find the setting they wrote.
+    let cases = [
+        (
+            "/absolute/path",
+            InvalidConfigCode::InvalidOutputFolderAbsolutePathWithFolder,
+        ),
+        (
+            "generated\\site",
+            InvalidConfigCode::InvalidOutputFolderVisiblePathWithFolder,
+        ),
+    ];
+
+    for (authored_folder, expected_code) in cases {
+        let mut string_table = StringTable::new();
+        let surface = html_builder_surface();
+        let (config, errors) = validate_and_apply_with_surface(
+            with_required_project(vec![(
+                "html",
+                record(vec![("dev_output", text(authored_folder))]),
+            )]),
+            &surface,
+            &mut string_table,
+        );
+        assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+
+        let output_errors = validate_directory_output_settings(&config, &mut string_table)
+            .expect_err("an unsafe output root must be rejected");
+        let output_errors = test_diagnostics(output_errors);
+        let facts = first_invalid_facts(&output_errors);
+        assert_eq!(facts.reason, expected_code);
+        assert_eq!(
+            resolved_fact_strings(&facts, &string_table),
+            vec![authored_folder, "dev_output"],
+            "an unsafe folder reports its authored spelling and its setting key"
+        );
+    }
+}
+
+#[test]
+fn rejects_identical_dev_and_release_output_folders_with_both_facts() {
+    // WHAT: both facts are the authored dev and release spellings, even when two different
+    //       spellings parse to one output identity.
+    // WHY: the author needs to see which two settings collide. Portable parsing treats `\` as a
+    //       separator on every host, so `generated\_site` and `generated/_site` share an output
+    //       identity while remaining distinct config text.
+    let cases = [
+        ("output", "output"),
+        ("generated\\_site", "generated\\_site"),
+        ("generated\\_site", "generated/_site"),
+    ];
+
+    for (dev_spelling, release_spelling) in cases {
+        let mut string_table = StringTable::new();
+        let surface = html_builder_surface();
+        let (config, errors) = validate_and_apply_with_surface(
+            with_required_project(vec![(
+                "html",
+                record(vec![
+                    ("dev_output", text(dev_spelling)),
+                    ("release_output", text(release_spelling)),
+                ]),
+            )]),
+            &surface,
+            &mut string_table,
+        );
+        assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+
+        let output_errors = validate_directory_output_settings(&config, &mut string_table)
+            .expect_err("development and release folders must be distinct");
+        let output_errors = test_diagnostics(output_errors);
+        let facts = first_invalid_facts(&output_errors);
+        assert_eq!(facts.reason, InvalidConfigCode::OutputFoldersNotDistinct);
+        assert_eq!(
+            resolved_fact_strings(&facts, &string_table),
+            vec![dev_spelling, release_spelling],
+            "the reason names both authored folder spellings"
+        );
+    }
 }
 
 #[cfg(unix)]

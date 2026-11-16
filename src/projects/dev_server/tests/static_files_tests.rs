@@ -3,9 +3,12 @@
 use super::{
     ResolvedRequest, ResolvedRequestKind, content_type_for_path, inject_dev_client, resolve_request,
 };
+use crate::projects::dev_server::state::ServedArtifactSnapshot;
 use crate::projects::routing::{HtmlSiteConfig, PageUrlStyle};
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 fn site_config(page_url_style: PageUrlStyle, redirect_index_html: bool) -> HtmlSiteConfig {
     HtmlSiteConfig {
@@ -61,6 +64,44 @@ fn known_entries_are_exact_html_files_inside_the_output() {
     ] {
         assert!(!super::is_known_entry(invalid, output.path()), "{invalid}");
     }
+}
+
+#[test]
+fn validated_html_entries_use_validated_output_spellings() {
+    let output = tempfile::tempdir().expect("output directory");
+    fs::create_dir(output.path().join("docs")).expect("page directory");
+    fs::write(output.path().join("docs/index.html"), "page").expect("page file");
+
+    let artifacts: ServedArtifactSnapshot = Arc::new(HashMap::from([(
+        PathBuf::from("docs").join("index.html"),
+        Arc::new(b"page".to_vec()),
+    )]));
+    let entries = super::validated_html_entries(output.path(), &artifacts);
+
+    assert_eq!(
+        entries.as_ref(),
+        &HashSet::from([String::from("docs/index.html")])
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn validated_html_entries_skip_unrepresentable_native_names() {
+    let output = tempfile::tempdir().expect("output directory");
+    fs::create_dir(output.path().join("docs")).expect("page directory");
+    fs::write(output.path().join("docs/index.html"), "page").expect("page file");
+
+    // Display text would turn this one Unix filename into the separate `docs/index.html` path and
+    // publish a page entry that names a different artifact.
+    let aliased_name = PathBuf::from("docs\\index.html");
+    fs::write(output.path().join(&aliased_name), "alias").expect("alias file");
+    let artifacts: ServedArtifactSnapshot =
+        Arc::new(HashMap::from([(aliased_name, Arc::new(b"alias".to_vec()))]));
+
+    assert!(
+        super::validated_html_entries(output.path(), &artifacts).is_empty(),
+        "a native component with a literal backslash has no validated portable spelling"
+    );
 }
 
 #[cfg(unix)]
@@ -381,6 +422,175 @@ fn origin_aware_resolution_and_redirects() {
         ResolvedRequest::File {
             path: output_dir.join("site.css"),
             kind: ResolvedRequestKind::Asset,
+        }
+    );
+}
+
+#[test]
+fn encoded_request_paths_resolve_decoded_asset_and_page_names() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let output_dir = root.join("dev");
+    fs::create_dir_all(output_dir.join("docs/hello world")).expect("should create page dir");
+    fs::write(
+        output_dir.join("docs/hello world/index.html"),
+        "<h1>hello</h1>",
+    )
+    .expect("should write page");
+    fs::create_dir_all(output_dir.join("über")).expect("should create unicode page dir");
+    fs::write(output_dir.join("über/index.html"), "<h1>über</h1>")
+        .expect("should write unicode page");
+    fs::write(output_dir.join("report #1.html"), "report").expect("should write hash asset");
+    fs::write(output_dir.join("100%.js"), "percent").expect("should write percent asset");
+    fs::write(output_dir.join("100%25.js"), "literal escape").expect("should write escape asset");
+    fs::write(output_dir.join("a+b.txt"), "plus").expect("should write plus asset");
+    fs::write(output_dir.join("über.css"), "unicode").expect("should write unicode asset");
+
+    let cfg = site_config(PageUrlStyle::TrailingSlash, true);
+
+    assert_eq!(
+        resolve_request("/docs/hello%20world/", None, &output_dir, None, cfg.clone()),
+        ResolvedRequest::File {
+            path: output_dir.join("docs/hello world/index.html"),
+            kind: ResolvedRequestKind::PageHtml,
+        }
+    );
+    assert_eq!(
+        resolve_request("/%C3%BCber/", None, &output_dir, None, cfg.clone()),
+        ResolvedRequest::File {
+            path: output_dir.join("über/index.html"),
+            kind: ResolvedRequestKind::PageHtml,
+        }
+    );
+    assert_eq!(
+        resolve_request("/report%20%231.html", None, &output_dir, None, cfg.clone()),
+        ResolvedRequest::File {
+            path: output_dir.join("report #1.html"),
+            kind: ResolvedRequestKind::Asset,
+        }
+    );
+    assert_eq!(
+        resolve_request("/100%25.js", None, &output_dir, None, cfg.clone()),
+        ResolvedRequest::File {
+            path: output_dir.join("100%.js"),
+            kind: ResolvedRequestKind::Asset,
+        }
+    );
+    // One decode only: the literal escape spelling stays a filename, not a second decode.
+    assert_eq!(
+        resolve_request("/100%2525.js", None, &output_dir, None, cfg.clone()),
+        ResolvedRequest::File {
+            path: output_dir.join("100%25.js"),
+            kind: ResolvedRequestKind::Asset,
+        }
+    );
+    // Path decoding is not form decoding: `+` stays a literal plus.
+    assert_eq!(
+        resolve_request("/a+b.txt", None, &output_dir, None, cfg.clone()),
+        ResolvedRequest::File {
+            path: output_dir.join("a+b.txt"),
+            kind: ResolvedRequestKind::Asset,
+        }
+    );
+    assert_eq!(
+        resolve_request("/%C3%BCber.css", None, &output_dir, None, cfg),
+        ResolvedRequest::File {
+            path: output_dir.join("über.css"),
+            kind: ResolvedRequestKind::Asset,
+        }
+    );
+}
+
+#[test]
+fn encoded_traversal_and_separator_smuggling_are_rejected() {
+    let output_dir = Path::new("/tmp/project/dev");
+    let cfg = HtmlSiteConfig::default();
+
+    for request_path in [
+        "/%2e%2e/secret.txt",
+        "/%2E%2E/secret.txt",
+        "/docs/%2e%2e/index.html",
+        "/docs/.%2e/secret.txt",
+        "/%2e/secret.txt",
+        "/..%2fsecret.txt",
+        "/%2Fetc/passwd",
+        "/docs%2Findex.html",
+        "/docs%5Cindex.html",
+        "/docs\\index.html",
+        "/docs/%00index.html",
+        "/docs/\0index.html",
+        "/docs//index.html",
+        "//docs/index.html",
+    ] {
+        assert_eq!(
+            resolve_request(request_path, None, output_dir, None, cfg.clone()),
+            ResolvedRequest::InvalidPath,
+            "{request_path:?}"
+        );
+    }
+}
+
+#[test]
+fn malformed_percent_encoding_is_rejected_as_malformed_path() {
+    let output_dir = Path::new("/tmp/project/dev");
+    let cfg = HtmlSiteConfig::default();
+
+    for request_path in ["/%FF", "/docs/%C3%28", "/%", "/%2", "/%GG"] {
+        assert_eq!(
+            resolve_request(request_path, None, output_dir, None, cfg.clone()),
+            ResolvedRequest::MalformedPath,
+            "{request_path}"
+        );
+    }
+}
+
+#[test]
+fn redirect_locations_percent_encode_page_names() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let output_dir = root.join("dev");
+    for page in ["about us", "über", "100%", "c#"] {
+        let page_dir = output_dir.join(page);
+        fs::create_dir_all(&page_dir).expect("should create page dir");
+        fs::write(page_dir.join("index.html"), "<h1>page</h1>").expect("should write page");
+    }
+
+    let cfg = site_config(PageUrlStyle::TrailingSlash, true);
+
+    assert_eq!(
+        resolve_request("/about%20us", None, &output_dir, None, cfg.clone()),
+        ResolvedRequest::Redirect {
+            location: String::from("/about%20us/"),
+        }
+    );
+    assert_eq!(
+        resolve_request(
+            "/about%20us/index.html",
+            Some("x=1"),
+            &output_dir,
+            None,
+            cfg.clone()
+        ),
+        ResolvedRequest::Redirect {
+            location: String::from("/about%20us/?x=1"),
+        }
+    );
+    assert_eq!(
+        resolve_request("/%C3%BCber", None, &output_dir, None, cfg.clone()),
+        ResolvedRequest::Redirect {
+            location: String::from("/%C3%BCber/"),
+        }
+    );
+    assert_eq!(
+        resolve_request("/100%25", None, &output_dir, None, cfg.clone()),
+        ResolvedRequest::Redirect {
+            location: String::from("/100%25/"),
+        }
+    );
+    assert_eq!(
+        resolve_request("/c%23", None, &output_dir, None, cfg),
+        ResolvedRequest::Redirect {
+            location: String::from("/c%23/"),
         }
     );
 }

@@ -33,7 +33,7 @@ use std::process::Command;
 fn relative_url_path_from_site_root() {
     let asset = PathBuf::from("_moth/js/glue/module.js");
     assert_eq!(
-        relative_url_path(Path::new(""), &asset),
+        rendered_url_specifier(Path::new(""), &asset),
         "./_moth/js/glue/module.js"
     );
 }
@@ -42,7 +42,7 @@ fn relative_url_path_from_site_root() {
 fn relative_url_path_one_level_deep() {
     let asset = PathBuf::from("_moth/js/glue/module.js");
     assert_eq!(
-        relative_url_path(Path::new("about"), &asset),
+        rendered_url_specifier(Path::new("about"), &asset),
         "../_moth/js/glue/module.js"
     );
 }
@@ -51,7 +51,7 @@ fn relative_url_path_one_level_deep() {
 fn relative_url_path_two_levels_deep() {
     let asset = PathBuf::from("_moth/js/runtime/moth-runtime.js");
     assert_eq!(
-        relative_url_path(Path::new("a/b"), &asset),
+        rendered_url_specifier(Path::new("a/b"), &asset),
         "../../_moth/js/runtime/moth-runtime.js"
     );
 }
@@ -60,8 +60,86 @@ fn relative_url_path_two_levels_deep() {
 fn relative_url_path_shared_prefix() {
     let asset = PathBuf::from("docs/assets/file.js");
     assert_eq!(
-        relative_url_path(Path::new("docs"), &asset),
+        rendered_url_specifier(Path::new("docs"), &asset),
         "./assets/file.js"
+    );
+}
+
+#[test]
+fn relative_url_path_percent_encodes_reserved_characters_and_unicode() {
+    let asset = PathBuf::from("_moth/js/assets/café #1 50% & 'quoted'.js");
+    assert_eq!(
+        rendered_url_specifier(Path::new("_moth/js"), &asset),
+        "./assets/caf%C3%A9%20%231%2050%25%20%26%20%27quoted%27.js"
+    );
+}
+
+#[test]
+fn relative_url_path_keeps_parent_segments_before_encoded_components() {
+    let asset = PathBuf::from("_moth/js/café #1.js");
+    assert_eq!(
+        rendered_url_specifier(Path::new("_moth/js/glue"), &asset),
+        "../caf%C3%A9%20%231.js"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn relative_url_path_rejects_non_utf8_components_without_lossy_replacement() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let asset = Path::new("_moth/js").join(OsString::from_vec(b"bad-\xFF.js".to_vec()));
+    let error = relative_url_path(Path::new("_moth/js/glue"), &asset)
+        .expect_err("non-UTF-8 output components must not be replaced");
+
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
+    assert!(
+        error.message.contains("non-UTF-8"),
+        "expected a non-UTF-8 contract breach, got: {}",
+        error.message
+    );
+}
+
+#[test]
+fn relative_url_path_rejects_an_asset_path_that_names_no_file() {
+    let directory = Path::new("_moth/js/glue");
+    let error = relative_url_path(directory, directory)
+        .expect_err("a directory is not an importable emitted asset");
+
+    assert_eq!(error.kind, InfrastructureFailureKind::Internal);
+    assert!(
+        error.message.contains("no component below"),
+        "expected a no-asset-component contract breach, got: {}",
+        error.message
+    );
+}
+
+#[test]
+fn package_asset_import_specifiers_encode_the_emitted_file_name() {
+    let asset = js_runtime_asset_import(
+        Path::new("café #1 50% & 'quoted'.js"),
+        PathBuf::from("/project/café #1 50% & 'quoted'.js"),
+    );
+    assert_eq!(
+        asset.origin.logical_path().as_str(),
+        "_moth/js/café #1 50% & 'quoted'.js",
+        "the emitted artefact keeps the authored spelling on disk"
+    );
+
+    let imports = vec![
+        crate::compiler_frontend::module_compilation::ModuleExternalImport {
+            package_id: ExternalPackageId(0),
+            runtime_asset: Some(asset),
+            required_runtime_imports: Vec::new(),
+        },
+    ];
+    let paths = super::build_package_asset_path_map(&imports)
+        .expect("validated output components must render a specifier");
+
+    assert_eq!(
+        paths.get(&ExternalPackageId(0)).map(String::as_str),
+        Some("../caf%C3%A9%20%231%2050%25%20%26%20%27quoted%27.js")
     );
 }
 
@@ -1469,10 +1547,10 @@ fn emit_build_runtime_modules_rejects_unregistered_specifier() {
 #[test]
 fn build_import_map_html_includes_moth_runtime() {
     let module = create_module_with_runtime_requirement();
-    let html = build_import_map_html(&module.link_facts.external_import_candidates, Path::new(""));
+    let map = build_import_map_html(&module.link_facts.external_import_candidates, Path::new(""))
+        .expect("validated runtime module paths must render a specifier")
+        .expect("@moth/runtime should produce an import-map entry");
 
-    assert!(html.is_some());
-    let map = html.unwrap();
     assert!(map.contains("<script type=\"importmap\">"));
     assert!(map.contains("@moth/runtime"));
     assert!(map.contains("./_moth/js/runtime/moth-runtime.js"));
@@ -1494,9 +1572,9 @@ fn build_import_map_html_deduplicates_by_specifier() {
         },
     );
 
-    let html = build_import_map_html(&module.link_facts.external_import_candidates, Path::new(""));
-    assert!(html.is_some());
-    let map = html.unwrap();
+    let map = build_import_map_html(&module.link_facts.external_import_candidates, Path::new(""))
+        .expect("validated runtime module paths must render a specifier")
+        .expect("@moth/runtime should produce an import-map entry");
 
     let occurrences = map.matches("@moth/runtime").count();
     assert_eq!(
@@ -1506,6 +1584,12 @@ fn build_import_map_html_deduplicates_by_specifier() {
 }
 
 // Test helpers
+
+#[track_caller]
+fn rendered_url_specifier(from_directory: &Path, to_asset: &Path) -> String {
+    relative_url_path(from_directory, to_asset)
+        .expect("validated output components must render a browser specifier")
+}
 
 fn create_module_with_runtime_requirement() -> Module {
     let mut string_table = StringTable::new();

@@ -14,7 +14,7 @@
 
 use crate::backends::structural_string::StructuralStringUrlMap;
 use crate::build_system::output::{
-    PortableRelativePath, parse_relative_path, percent_encode_url_segment,
+    PortableRelativePath, parse_native_relative_path, percent_encode_url_segment,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -192,7 +192,9 @@ fn parse_portable_path(
         )
     })?;
 
-    parse_relative_path(raw).map_err(|reason| {
+    // This receives a native artefact path, not an authored string. A literal `\` inside one
+    // component is a filename character, so re-splitting it would address a different artefact.
+    parse_native_relative_path(path).map_err(|reason| {
         InfrastructureFailure::internal(
             CompilerStage::ProjectBuildAssembly,
             format!(

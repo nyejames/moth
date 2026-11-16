@@ -423,6 +423,23 @@ fn finish_rejects_source_packages_without_an_installed_directory() {
 }
 
 #[test]
+fn finish_renders_package_roots_as_portable_text() {
+    let message = invalid_definition_message(
+        "backslash relative directory",
+        BuilderDefinition::new("game")
+            .source_package(
+                SourcePackage::new("@builder/game/ui").from_dir("installed-packages\\ui"),
+            )
+            .finish(),
+    );
+
+    assert!(
+        message.contains("directory 'installed-packages/ui' must be an absolute path"),
+        "package root prose must use portable display text: {message}"
+    );
+}
+
+#[test]
 fn core_source_package_paths_reject_builder_source_and_host_packages() {
     let custom_package_dir = package_dir();
 

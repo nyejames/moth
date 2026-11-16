@@ -8,6 +8,7 @@
 //! resolves resource and site-root anchors to text. Output-path conflicts belong to the shared
 //! plan, not to a per-document planner.
 
+use crate::build_system::output::parse_native_relative_path;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
@@ -31,14 +32,28 @@ const DIRECT_TEMPLATE_SITE_ORIGIN: &str = "/";
 /// the final content are planned onto the request-wide plan. The module resource table supplies
 /// authored locations for those live origins and is not a liveness source. The document context
 /// is the request-relative artefact path when the input has one, so nested documents observe
-/// URLs from their real parent.
+/// URLs from their real parent. A document with a resource piece validates that context as a
+/// portable relative path first, because its native source name may be valid identity but not a
+/// usable URL parent.
 pub(super) fn render_structural_content(
     content: &OwnedFoldedString,
     resources: &ModuleResourceTable,
     document_path: &Path,
+    source_path: &Path,
     plan: &mut HtmlResourceOutputPlan,
     diagnostic_strings: &mut DiagnosticStringBuilder,
 ) -> Result<String, PreparedFailure> {
+    // Only a resource piece needs the document context to render a relative URL. Keep plain text
+    // and site-root-only documents independent of that URL contract.
+    let needs_document_url_context = match content {
+        OwnedFoldedString::Text(_) => false,
+        OwnedFoldedString::Pieces(pieces) => pieces
+            .iter()
+            .any(|piece| matches!(piece, OwnedFoldedStringPiece::Resource(_))),
+    };
+    if needs_document_url_context {
+        validate_document_url_context(document_path, source_path)?;
+    }
     let context = ResourceUrlContext::PageDocument(document_path.to_path_buf());
 
     if let OwnedFoldedString::Pieces(pieces) = content {
@@ -76,6 +91,31 @@ pub(super) fn render_structural_content(
     renderer
         .render_owned(content)
         .map_err(PreparedFailure::from)
+}
+
+/// Validate a document path that will anchor resource URLs.
+///
+/// A native source file name may contain a literal backslash or another nonportable component.
+/// That name is valid source identity, but it cannot form a relative document URL for resources.
+/// Report it through the MTF filesystem input lane, with the canonical source path as `host_path`
+/// and the offending document path in `Debug` form so bytes that portable text would rewrite stay
+/// visible.
+fn validate_document_url_context(
+    document_path: &Path,
+    source_path: &Path,
+) -> Result<(), PreparedFailure> {
+    parse_native_relative_path(document_path).map_err(|reason| {
+        PreparedFailure::from(InfrastructureFailure::filesystem(
+            CompilerStage::SourceLoading,
+            source_path,
+            format!(
+                "Moth template document path {document_path:?} is not a valid portable URL \
+                 context: {reason:?}. Resource URLs need a relative document path."
+            ),
+        ))
+    })?;
+
+    Ok(())
 }
 
 /// The document URL path every resource URL is written against.

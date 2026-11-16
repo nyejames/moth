@@ -14,9 +14,10 @@ use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternError, PathInternerFork,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::collections::HashSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,6 +30,12 @@ pub(crate) enum MothTemplateInput {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MothTemplateSource {
+    /// The caller's in-memory logical source name.
+    ///
+    /// This is a portable identity, not a file to open: components must be UTF-8 and the only
+    /// separator is `/`. A relative name must not contain a backslash at all. An absolute name
+    /// may spell only its prefix and root natively; everything after them must still use `/`.
+    /// Filesystem inputs carry canonical native paths instead.
     pub(crate) display_path: PathBuf,
     pub(crate) source_text: String,
 }
@@ -61,20 +68,22 @@ impl MothTemplateInput {
                 units
             }
             MothTemplateInput::Sources(sources) => {
-                let mut units = sources
-                    .into_iter()
-                    .map(|source| MothTemplateSourceUnit {
-                        source_path: normalize_path_for_identity(&source.display_path),
+                let mut units = Vec::with_capacity(sources.len());
+                for source in sources {
+                    validate_in_memory_source_name(&source.display_path)?;
+                    units.push(MothTemplateSourceUnit {
+                        source_path: source.display_path,
                         relative_path: None,
                         source_text: source.source_text,
-                    })
-                    .collect::<Vec<_>>();
+                    });
+                }
 
                 assign_in_memory_relative_paths(&mut units, string_table, path_fork)?;
                 units
             }
         };
 
+        validate_source_path_identities(&units, string_table, path_fork)?;
         reject_duplicate_source_paths(&units, string_table, path_fork)?;
 
         Ok(units)
@@ -90,19 +99,19 @@ fn collect_directory_units(
     collect_moth_template_paths_in_directory(&root, recursive, &mut paths)?;
 
     paths.sort_by(|left, right| {
-        normalized_relative_path(&root, left).cmp(&normalized_relative_path(&root, right))
+        relative_path_under(&root, left).cmp(relative_path_under(&root, right))
     });
 
     let mut units = Vec::with_capacity(paths.len());
     for path in paths {
-        let relative_path = normalized_relative_path(&root, &path);
+        let relative_path = relative_path_under(&root, &path).to_path_buf();
         units.push(read_file_unit(path, Some(relative_path))?);
     }
 
     Ok(units)
 }
 
-/// Give every file-list unit its portable identity relative to the files' longest common
+/// Give every file-list unit its request-relative identity relative to the files' longest common
 /// ancestor directory.
 ///
 /// Distinct directories under that ancestor yield distinct module origins, so same-named
@@ -117,21 +126,19 @@ fn assign_common_ancestor_relative_paths(
         return Ok(());
     }
 
-    let canonical_paths = units
-        .iter()
-        .map(|unit| unit.source_path.clone())
-        .collect::<Vec<_>>();
-    let Some(ancestor) = common_ancestor_directory(&canonical_paths) else {
+    let Some(ancestor) =
+        common_ancestor_directory(units.iter().map(|unit| unit.source_path.as_path()))
+    else {
         return Err(no_common_ancestor_failure(
-            &canonical_paths[0],
-            &canonical_paths[1],
+            &units[0].source_path,
+            &units[1].source_path,
             string_table,
             path_fork,
         ));
     };
 
     for unit in units.iter_mut() {
-        unit.relative_path = Some(normalized_relative_path(&ancestor, &unit.source_path));
+        unit.relative_path = Some(relative_path_under(&ancestor, &unit.source_path).to_path_buf());
     }
 
     Ok(())
@@ -157,11 +164,9 @@ fn assign_in_memory_relative_paths(
         .iter()
         .position(|unit| unit.source_path.is_relative() != basis_is_relative)
     {
-        let first_path = units[0].source_path.clone();
-        let mixed_path = units[mixed_index].source_path.clone();
         return Err(no_common_ancestor_failure(
-            &first_path,
-            &mixed_path,
+            &units[0].source_path,
+            &units[mixed_index].source_path,
             string_table,
             path_fork,
         ));
@@ -177,21 +182,19 @@ fn assign_in_memory_relative_paths(
 
     // An absolute display path is no portable identity by itself; the display paths' common
     // ancestor directory plays the same role a request root plays for file inputs.
-    let display_paths = units
-        .iter()
-        .map(|unit| unit.source_path.clone())
-        .collect::<Vec<_>>();
-    let Some(ancestor) = common_ancestor_directory(&display_paths) else {
+    let Some(ancestor) =
+        common_ancestor_directory(units.iter().map(|unit| unit.source_path.as_path()))
+    else {
         return Err(no_common_ancestor_failure(
-            &display_paths[0],
-            &display_paths[1],
+            &units[0].source_path,
+            &units[1].source_path,
             string_table,
             path_fork,
         ));
     };
 
     for unit in units.iter_mut() {
-        unit.relative_path = Some(normalized_relative_path(&ancestor, &unit.source_path));
+        unit.relative_path = Some(relative_path_under(&ancestor, &unit.source_path).to_path_buf());
     }
 
     Ok(())
@@ -202,8 +205,8 @@ fn assign_in_memory_relative_paths(
 /// Each path's file component is excluded: two sibling files share their parent directory,
 /// while files whose leading components differ (for example files on separate Windows drives)
 /// share no ancestor directory at all.
-fn common_ancestor_directory(paths: &[PathBuf]) -> Option<PathBuf> {
-    let mut component_prefixes = paths.iter().map(|path| {
+fn common_ancestor_directory<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Option<PathBuf> {
+    let mut component_prefixes = paths.into_iter().map(|path| {
         let mut components: Vec<&std::ffi::OsStr> = path
             .components()
             .map(|component| component.as_os_str())
@@ -257,6 +260,64 @@ fn no_common_ancestor_failure(
         Some(Arc::new(path_fork.shared_table())),
     )
 }
+
+/// Validate one user-supplied in-memory source name against the portable-name contract.
+///
+/// In-memory display paths are logical identities, not files to open. Portable names separate
+/// components with `/`: a relative name must not contain a backslash at all, and an absolute name
+/// may spell only its prefix and root natively. A backslash anywhere else would change the
+/// identity once host parsing or downstream URL conversion reads it as a separator. UTF-8
+/// validation belongs to `validate_source_path_identities`, which sees every input path.
+fn validate_in_memory_source_name(display_path: &Path) -> Result<(), PreparedFailure> {
+    // A non-UTF-8 spelling cannot be compared as portable text; the shared identity validation
+    // reports it through the typed source-path failure before duplicate handling.
+    let Some(spelling) = display_path.to_str() else {
+        return Ok(());
+    };
+
+    // Prefix and root spellings are structural host syntax only for an absolute name. A
+    // root-relative Windows name has no prefix and stays a relative in-memory identity.
+    let structural_prefix_len = if display_path.is_absolute() {
+        display_path
+            .components()
+            .take_while(|component| matches!(component, Component::Prefix(_) | Component::RootDir))
+            .map(|component| component.as_os_str().len())
+            .sum::<usize>()
+    } else {
+        0
+    };
+
+    if spelling[structural_prefix_len..].contains('\\') {
+        return Err(InfrastructureFailure::filesystem(
+            CompilerStage::SourceLoading,
+            display_path,
+            format!(
+                "Moth template source name {display_path:?} contains a backslash; in-memory names \
+                 separate components with `/`."
+            ),
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
+/// Validate every source path through the typed UTF-8 identity lane.
+///
+/// Interning here means a unique non-UTF-8 name fails with the MTF-owned failure and native
+/// `host_path` instead of surfacing later as a source-database logical-path failure.
+fn validate_source_path_identities(
+    units: &[MothTemplateSourceUnit],
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Result<(), PreparedFailure> {
+    for unit in units {
+        intern_filesystem_path_identity(&unit.source_path, path_fork, string_table)?;
+    }
+
+    Ok(())
+}
+
 /// Intern one filesystem path for user-facing identity, failing non-UTF-8 paths like the
 /// duplicate-input check does. Compact-table exhaustion is authored input rejection, so it maps
 /// to the typed source capacity diagnostic.
@@ -297,10 +358,9 @@ fn collect_moth_template_paths_in_directory(
     recursive: bool,
     paths: &mut Vec<PathBuf>,
 ) -> Result<(), InfrastructureFailure> {
-    let entries = read_directory_sorted(directory)?;
+    let entries = read_directory_paths(directory)?;
 
-    for entry in entries {
-        let path = entry.path();
+    for path in entries {
         if path.is_dir() {
             // `_` directories are excluded from the project source tree, so recursive template
             // collection must not reintroduce their files.
@@ -319,19 +379,24 @@ fn collect_moth_template_paths_in_directory(
     Ok(())
 }
 
-fn read_directory_sorted(directory: &Path) -> Result<Vec<fs::DirEntry>, InfrastructureFailure> {
+/// Read a directory's entries as native paths, ordered per directory.
+///
+/// Native per-directory sorting fixes recursive traversal and operational failure order because
+/// `read_dir` order is host-dependent. Compiled-output ordering is still owned once by the final
+/// relative-path sort in `collect_directory_units`.
+fn read_directory_paths(directory: &Path) -> Result<Vec<PathBuf>, InfrastructureFailure> {
     let read_dir = fs::read_dir(directory).map_err(|error| {
         InfrastructureFailure::filesystem(
             CompilerStage::SourceLoading,
             directory,
             format!(
                 "Failed to read Moth template directory '{}': {error}",
-                directory.display()
+                portable_path_text(directory)
             ),
         )
     })?;
 
-    let mut entries = Vec::new();
+    let mut paths = Vec::new();
     for entry in read_dir {
         let entry = entry.map_err(|error| {
             InfrastructureFailure::filesystem(
@@ -339,15 +404,15 @@ fn read_directory_sorted(directory: &Path) -> Result<Vec<fs::DirEntry>, Infrastr
                 directory,
                 format!(
                     "Failed to inspect Moth template directory entry in '{}': {error}",
-                    directory.display()
+                    portable_path_text(directory)
                 ),
             )
         })?;
-        entries.push(entry);
+        paths.push(entry.path());
     }
 
-    entries.sort_by_key(|entry| normalize_path_for_identity(&entry.path()));
-    Ok(entries)
+    paths.sort();
+    Ok(paths)
 }
 
 fn read_file_unit(
@@ -361,7 +426,7 @@ fn read_file_unit(
             &source_path,
             format!(
                 "Failed to read Moth template source '{}': {error}",
-                source_path.display()
+                portable_path_text(&source_path)
             ),
         )
     })?;
@@ -380,7 +445,7 @@ fn canonicalize_path(path: &Path) -> Result<PathBuf, InfrastructureFailure> {
             path,
             format!(
                 "Failed to resolve Moth template path '{}': {error}",
-                path.display()
+                portable_path_text(path)
             ),
         )
     })
@@ -391,15 +456,13 @@ fn reject_duplicate_source_paths(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), PreparedFailure> {
-    let mut seen_paths = HashSet::new();
+    let mut seen_paths: HashSet<&Path> = HashSet::new();
     let mut diagnostics = DiagnosticBag::new();
     let mut has_duplicates = false;
 
     for unit in units {
-        let normalized = normalize_path_for_identity(&unit.source_path);
-
-        if !seen_paths.insert(normalized.clone()) {
-            let path = intern_filesystem_path_identity(&normalized, path_fork, string_table)?;
+        if !seen_paths.insert(unit.source_path.as_path()) {
+            let path = intern_filesystem_path_identity(&unit.source_path, path_fork, string_table)?;
             diagnostics.push(imports::duplicate_moth_template_input_path(
                 path, None, None,
             ));
@@ -419,21 +482,13 @@ fn reject_duplicate_source_paths(
     }
 }
 
-fn normalized_relative_path(root: &Path, path: &Path) -> PathBuf {
-    path.strip_prefix(root)
-        .map(normalize_path_for_identity)
-        .unwrap_or_else(|_| normalize_path_for_identity(path))
-}
-
-fn normalize_path_for_identity(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-
-    for component in path.components() {
-        let component_text = component.as_os_str().to_string_lossy().replace('\\', "/");
-        normalized.push(component_text);
-    }
-
-    normalized
+/// The path's native spelling relative to `root` when it is under that root.
+///
+/// The canonical native components are retained so a literal backslash on Unix stays inside one
+/// component. Logical consumers convert these components to a portable `/` spelling at their own
+/// identity boundary.
+fn relative_path_under<'a>(root: &Path, path: &'a Path) -> &'a Path {
+    path.strip_prefix(root).unwrap_or(path)
 }
 
 fn has_moth_template_extension(path: &Path) -> bool {

@@ -6,7 +6,7 @@ use super::*;
 use crate::build_system::build::{
     BackendInvocationFailure, BuildResult, ProjectCompilation, build_project,
 };
-use crate::build_system::output::output_path_identity;
+use crate::build_system::output::parse_native_relative_path;
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
@@ -20,7 +20,6 @@ use crate::compiler_frontend::paths::resource_identity::{
     StableResourceOwnerId,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
-use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use std::collections::{BTreeMap, HashMap};
@@ -54,8 +53,8 @@ impl<'a> BuiltOutputs<'a> {
     /// Index a project's outputs, failing on any path the output writer would not accept and on
     /// any two artifacts that share one canonical output-path identity.
     ///
-    /// Validity and collision identity come from `output_path_identity`, so these tests apply
-    /// the production destination policy rather than a second, almost-equivalent one.
+    /// Validity and collision identity come from `parse_native_relative_path`, so these tests
+    /// apply the production destination policy rather than a second, almost-equivalent one.
     #[track_caller]
     fn index(project: &'a Project) -> Self {
         let mut by_path: BTreeMap<String, &'a OutputFile> = BTreeMap::new();
@@ -67,15 +66,16 @@ impl<'a> BuiltOutputs<'a> {
             }
 
             let relative_path = output.relative_output_path();
-            let identity = match output_path_identity(relative_path) {
-                Ok(identity) => identity,
+            let portable = match parse_native_relative_path(relative_path) {
+                Ok(portable) => portable,
                 Err(reason) => panic!(
                     "the build emitted {relative_path:?}, which the output writer would reject \
                      as an invalid portable destination ({reason:?})"
                 ),
             };
 
-            let spelling = portable_path_text(relative_path);
+            let identity = portable.identity();
+            let spelling = portable.portable_spelling();
             if let Some(existing) = spelling_by_identity.insert(identity, spelling.clone()) {
                 assert_ne!(
                     existing, spelling,
@@ -184,6 +184,17 @@ fn file_kind_name(kind: &FileKind) -> &'static str {
     }
 }
 
+/// Render one emitted relative output path by its validated portable spelling.
+///
+/// Matching never depends on display text here: the parser proves the path is a representable
+/// output destination before its components are joined for the assertion.
+#[track_caller]
+fn portable_output_spelling(relative_path: &Path) -> String {
+    parse_native_relative_path(relative_path)
+        .expect("emitted output paths must be valid portable relative paths")
+        .portable_spelling()
+}
+
 /// The HTML text of an artifact, proving its kind.
 #[track_caller]
 fn html_text(output: &OutputFile) -> &str {
@@ -216,7 +227,7 @@ fn deferred_canvas_output_path(project: &Project) -> String {
     let mut matches: Vec<String> = project
         .deferred_resources
         .iter()
-        .map(|resource| portable_path_text(&resource.relative_output_path))
+        .map(|resource| portable_output_spelling(&resource.relative_output_path))
         .filter(|path| path.starts_with("_moth/js/canvas.js"))
         .collect();
 
@@ -234,7 +245,7 @@ fn deferred_resource_text(project: &mut Project, relative_path: &str) -> String 
     let source_id = project
         .deferred_resources
         .iter()
-        .find(|resource| portable_path_text(&resource.relative_output_path) == relative_path)
+        .find(|resource| portable_output_spelling(&resource.relative_output_path) == relative_path)
         .map(|resource| resource.source_id)
         .unwrap_or_else(|| panic!("expected a deferred resource at '{relative_path}'"));
 
@@ -341,7 +352,7 @@ fn assert_deferred_provider_sources(project: &mut Project, expected: &[(&str, &P
     let mut paths = project
         .deferred_resources
         .iter()
-        .map(|resource| portable_path_text(&resource.relative_output_path))
+        .map(|resource| portable_output_spelling(&resource.relative_output_path))
         .collect::<Vec<_>>();
     paths.sort();
     let mut expected_paths = expected.iter().map(|(path, _)| *path).collect::<Vec<_>>();
@@ -616,7 +627,7 @@ fn build_html_project_local_js_import_emits_generated_glue() {
         .project
         .deferred_resources
         .iter()
-        .map(|resource| portable_path_text(&resource.relative_output_path))
+        .map(|resource| portable_output_spelling(&resource.relative_output_path))
         .filter(|path| path.starts_with("_moth/js/drawing.js"))
         .collect();
     assert_eq!(
@@ -1025,7 +1036,7 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
                 .project
                 .deferred_resources
                 .iter()
-                .map(|asset| portable_path_text(&asset.relative_output_path))
+                .map(|asset| portable_output_spelling(&asset.relative_output_path))
                 .collect::<Vec<_>>();
             let rendered =
                 crate::compiler_tests::integration_test_runner::assertions::execute_html_harness_for_test(
@@ -1550,7 +1561,7 @@ fn build_html_project_unused_html_canvas_markup_does_not_emit_runtime_artifacts(
             .deferred_resources
             .iter()
             .any(
-                |resource| portable_path_text(&resource.relative_output_path)
+                |resource| portable_output_spelling(&resource.relative_output_path)
                     .starts_with("_moth/js/canvas.js")
             ),
         "unused canvas markup should not defer a canvas asset output"
@@ -1603,7 +1614,7 @@ fn build_html_project_pure_core_source_package_imports_emit_no_javascript_artifa
         .output_files
         .iter()
         .filter(|output| matches!(output.file_kind(), FileKind::Js(_)))
-        .map(|output| portable_path_text(output.relative_output_path()))
+        .map(|output| portable_output_spelling(output.relative_output_path()))
         .collect::<Vec<_>>();
     assert!(
         javascript_outputs.is_empty(),
@@ -1614,7 +1625,7 @@ fn build_html_project_pure_core_source_package_imports_emit_no_javascript_artifa
         .project
         .deferred_resources
         .iter()
-        .map(|resource| portable_path_text(&resource.relative_output_path))
+        .map(|resource| portable_output_spelling(&resource.relative_output_path))
         .filter(|path| path.ends_with(".js"))
         .collect::<Vec<_>>();
     assert!(
@@ -1950,7 +1961,7 @@ fn build_html_project_mixed_const_and_function_emits_single_glue_module() {
         .project
         .deferred_resources
         .iter()
-        .map(|resource| portable_path_text(&resource.relative_output_path))
+        .map(|resource| portable_output_spelling(&resource.relative_output_path))
         .filter(|path| path.starts_with("_moth/js/gl_mixed.js"))
         .collect();
     assert_eq!(
@@ -2121,7 +2132,6 @@ fn rebuild_with_new_wrapper_selection_replaces_stale_glue_and_keeps_unowned_file
         assert_eq!(
             manifest
                 .lines()
-                .map(|line| portable_path_text(Path::new(line)))
                 .filter(|line| line.starts_with(GLUE_MODULE_PREFIX))
                 .collect::<Vec<_>>(),
             vec![format!("{GLUE_MODULE_PREFIX}{glue_file}")]

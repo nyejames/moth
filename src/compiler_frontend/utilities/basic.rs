@@ -1,9 +1,17 @@
-//! Frontend path normalisation, portable path text and character classification.
+//! Frontend character classification and Windows verbatim-path normalization for comparison and
+//! rendering.
 
 use std::path::{Path, PathBuf};
 
-// For Windows compatibility.
-pub fn normalize_path(path: &Path) -> PathBuf {
+/// Strip Windows verbatim disk/UNC prefixes so canonicalised paths compare and render like
+/// ordinary paths.
+///
+/// WHAT: converts `\\?\C:\...` to `C:\...` and `\\?\UNC\server\share\...` to
+/// `\\server\share\...`, preserving every component after the prefix and root.
+/// WHY: canonical Windows paths carry verbatim prefixes that break ordinary equality, prefix
+/// tests and display text. This is for comparison and rendering only, not general
+/// canonicalisation, and it is the identity function on non-Windows hosts.
+pub(crate) fn normalize_windows_verbatim_path(path: &Path) -> PathBuf {
     #[cfg(windows)]
     {
         use std::path::{Component, Prefix};
@@ -13,13 +21,9 @@ pub fn normalize_path(path: &Path) -> PathBuf {
         if let Some(Component::Prefix(prefix)) = components.next() {
             match prefix.kind() {
                 Prefix::VerbatimDisk(disk) => {
-                    // Strip \\?\C:\ → C:\
+                    // Strip \\?\C:\ → C:\, preserving `.`, `..` and other remaining components.
                     let mut new_path = PathBuf::from(format!(r"{}:\", disk as char));
-                    for component in components {
-                        if let Component::Normal(name) = component {
-                            new_path.push(name);
-                        }
-                    }
+                    new_path.push(components.as_path());
                     return new_path;
                 }
                 Prefix::VerbatimUNC(server, share) => {
@@ -36,17 +40,6 @@ pub fn normalize_path(path: &Path) -> PathBuf {
     }
 
     path.to_path_buf()
-}
-
-/// Render a filesystem path as deterministic, platform-independent text.
-///
-/// WHAT: applies the existing filesystem-path normalisation, then renders separators as `/`.
-/// WHY: diagnostics, logical display text, and cross-platform assertions need stable text while
-///      filesystem reads and writes must continue to use the native `Path` representation.
-pub(crate) fn portable_path_text(path: impl AsRef<Path>) -> String {
-    normalize_path(path.as_ref())
-        .to_string_lossy()
-        .replace('\\', "/")
 }
 
 /// Character classification helpers shared by tokenizer and template formatting.

@@ -14,6 +14,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulat
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::{DiagnosticSeverity, PreparedFailure};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::path::Path;
 
 fn prepared_failure_reports(
@@ -45,7 +46,7 @@ fn primary_infrastructure_error(failure: PreparedFailure) -> InfrastructureFailu
 /// Authored symlinks stay visible in diagnostics; ordinary paths use their canonical spelling.
 fn diagnostic_path_spelling(expected: &Path) -> String {
     let metadata = fs::symlink_metadata(expected).expect("expected path should exist");
-    if metadata.file_type().is_symlink() {
+    let retained_path = if metadata.file_type().is_symlink() {
         fs::canonicalize(
             expected
                 .parent()
@@ -57,14 +58,10 @@ fn diagnostic_path_spelling(expected: &Path) -> String {
                 .file_name()
                 .expect("expected path should have a file name"),
         )
-        .display()
-        .to_string()
     } else {
-        fs::canonicalize(expected)
-            .expect("expected path should canonicalize")
-            .display()
-            .to_string()
-    }
+        fs::canonicalize(expected).expect("expected path should canonicalize")
+    };
+    portable_path_text(retained_path)
 }
 
 fn assert_not_regular_file_marker_rejected(

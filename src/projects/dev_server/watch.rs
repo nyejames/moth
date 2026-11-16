@@ -5,6 +5,7 @@
 //! WHY: rebuild coordination should react to concrete source changes without re-scanning broad
 //! unrelated trees on every loop iteration.
 
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::projects::settings::{CONFIG_FILE_NAME, Config};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use saying::say;
@@ -469,7 +470,7 @@ fn fingerprint_timestamp_error(path: &Path, error: io::Error) -> io::Error {
         error.kind(),
         format!(
             "dev-server watch: failed to read modification time for {}: {error}",
-            path.display()
+            portable_path_text(path)
         ),
     )
 }

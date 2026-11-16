@@ -17,6 +17,7 @@ use crate::compiler_frontend::compiler_errors::{
     CompilationOutcome, CompilationResult, InfrastructureFailure,
 };
 use crate::compiler_frontend::compiler_messages::{CompilerStage, DiagnosticDiscoveryStops};
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::finish_command_timing;
 use crate::projects::{ProjectCommandCompletion, ProjectCommandStatus, ProjectDiagnosticCounts};
 use std::path::{Path, PathBuf};
@@ -195,7 +196,7 @@ fn single_file_project_entry_dir(entry_path: &Path) -> Result<PathBuf, Infrastru
             CompilerStage::ProjectBuildAssembly,
             format!(
                 "Could not resolve containing directory for single-file build entry '{}'",
-                entry_path.display()
+                portable_path_text(entry_path)
             ),
         ));
     };
@@ -205,7 +206,7 @@ fn single_file_project_entry_dir(entry_path: &Path) -> Result<PathBuf, Infrastru
             CompilerStage::ProjectBuildAssembly,
             format!(
                 "Could not resolve containing directory for single-file build entry '{}': its path must be absolute",
-                entry_path.display()
+                portable_path_text(entry_path)
             ),
         ));
     }
@@ -222,8 +223,8 @@ fn single_file_project_entry_dir(entry_path: &Path) -> Result<PathBuf, Infrastru
         parent,
         format!(
             "Could not use containing directory '{}' for single-file build entry '{}': {problem}",
-            parent.display(),
-            entry_path.display()
+            portable_path_text(parent),
+            portable_path_text(entry_path)
         ),
     ))
 }

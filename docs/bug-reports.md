@@ -18,13 +18,6 @@ A casual log of bugs and limitations found during other work and left for later 
 - Observed: the infrastructure lane is chosen by whether a path sits below the canonical `BUILTIN_PACKAGES_ROOT`. A ProjectLocal or Dependency package registered inside the compiler's `packages/` directory gets a damaged-installation failure instead of an authored diagnostic. An official package root that is a symlink to a directory outside `packages/` gets the authored diagnostic instead. Both need a modified installation.
 - Investigate: whether lane selection should also require Core or compiler-shipped Builder registration identity, kept in one owner for all callers.
 
-### Windows `\\?\` prefix in damaged package set messages
-
-- Found: Core/Builder package namespace and config filename work, 2026-11. Not reproduced on Windows.
-- Where: `BUILTIN_PACKAGES_ROOT` in `src/builder_surface/definition.rs` is canonicalized once and displayed by `damaged_package_set_report`.
-- Observed: `fs::canonicalize` on Windows returns verbatim `\\?\` paths, so the reinstall message is expected to show that prefix. Display only. Classification is unaffected.
-- Investigate: render the root through the existing portable path display helper.
-
 ### Repeated work in single-file namespace validation
 
 - Found: Core/Builder package namespace and config filename final review, 2026-11.
@@ -38,3 +31,66 @@ A casual log of bugs and limitations found during other work and left for later 
 - Where: `docs/docs/packages/package-origins-and-backing.mtf` (backing list and example table).
 - Observed: code has three backings (`MothSource`, `ExternalBinding`, `HostBinding`) and `docs/build-system-design.md` now lists all three. The user-facing package reference still lists only `MothSource` and `ExternalBinding`, so builder SDK host packages have no documented backing.
 - Investigate: add `HostBinding` with a builder SDK host package example, matching `Package classification` in `docs/build-system-design.md`.
+
+### Scaffold `cd` instruction is not shell-quoted
+
+- Found: portable path display hardening inventory, 2026-11.
+- Where: `render_summary` in `crates/moth-cli/src/scaffold/mod.rs` (`format!("  cd {}", report.project_path.display())`) and `crates/moth-cli/src/scaffold/tests/summary_tests.rs`.
+- Observed: the printed next-step command interpolates the native display spelling with no quoting. Spaces, quotes and shell metacharacters break or alter the pasted command. Control characters pass through to the terminal and a non-UTF-8 directory prints a lossy path that cannot address the directory.
+- Investigate: a CLI-owned shell quoting operation with a stated POSIX and Windows contract, control-character handling and no runnable command for an unrepresentable path. Portable path display is the wrong operation here.
+
+### Benchmark invocations pass display text as child arguments
+
+- Found: portable path display hardening inventory, 2026-11.
+- Where: `xtask/src/benchmark_workspace.rs` (`absolute_entry.display().to_string()`, `workload.entry.display().to_string()`) feeding `CliBenchmarkInvocation.args: Vec<String>` and `process_runner.rs`. Related display-only quoting in `xtask/src/profile/runner.rs` (`format_command_line`, `shell_display_arg`).
+- Observed: a non-UTF-8 repository or entry path becomes U+FFFD text, so the compiler is launched against a different path. The recorded profile command quotes only empty or whitespace-bearing arguments.
+- Investigate: keep the entry argument as `PathBuf`/`OsString` through `Command::arg`. Quote recorded command lines completely or label them as non-runnable.
+
+### Import case check skips non-UTF-8 canonical components
+
+- Found: portable path display hardening inventory, 2026-11.
+- Where: `src/compiler_frontend/paths/dependency_resolution.rs` (canonical component collection with `segment.to_str()` and `first_case_mismatch`).
+- Observed: a non-UTF-8 canonical component is dropped from the compared list, the lengths differ and `first_case_mismatch` returns `None`, so `InvalidImportPathReason::CaseMismatch` is skipped. Containment still applies and later source loading may reject the file.
+- Investigate: treat a non-UTF-8 canonical component as a typed rejection or a mismatch instead of omitting it. Confirm which lane rejects the file today.
+
+### Boracle projected field source tests fail on `main`
+
+- Found: portable path display hardening validation, 2026-11.
+- Where: `src/projects/tests/boracle_tests.rs` (`run_source_dump` and `successful_value`), run by `just boracle`.
+- Observed: `boracle_source_base_alias_protects_fresh_projected_storage`, `boracle_source_distinct_projected_fields_remain_disjoint`, `boracle_source_projected_rebind_separates_old_projection_origin` and `boracle_source_projected_write_is_not_a_binding_definition` fail with a user diagnostic (`DiagnosticCode(3044)`) on the projected field write. The same failure reproduces at base `7b50e17e9`.
+- Investigate: whether the frontend now rejects these projected writes by design, in which case the fixtures need updating, or whether the Boracle source path lost a supported form.
+
+### HTML `origin` has no URL encoding contract
+
+- Found: portable path display hardening dev-server URL review, 2026-11.
+- Where: `validate_origin`, `prefix_origin`, `strip_origin_prefix` and `origin_root_url` in `src/projects/routing.rs`. The dev server strips the origin from the raw request path in `src/projects/dev_server/http.rs` before percent-decoding the site-local path.
+- Observed: validation accepts spaces, Unicode and `%` in the `origin` setting. Emitted URLs use the authored spelling verbatim, so a browser requests `/caf%C3%A9/...` for origin `/café` and the dev server's literal prefix match returns 404. It is undefined whether an authored `%20` is already encoded text or a literal percent.
+- Investigate: choose one rule, either restrict origin segments to URL-safe characters or treat the authored origin as decoded text and encode it on emission. Apply the same rule to the dev server prefix match and add loopback coverage.
+
+### Absolute `PathId` facts render with a doubled root separator
+
+- Found: portable path display hardening MTF input review, 2026-11.
+- Where: `DiagnosticPathContext::render` in `src/compiler_frontend/compiler_messages/render/context.rs` and `render_portable_with` in `src/compiler_frontend/symbols/path_interner/fork.rs`.
+- Observed: both join resolved components with `/`. An absolute native path interned with its root component `/` renders as `//project/src/page.mtf`. A Windows prefix and root component would render with mixed separators. Logical relative paths are unaffected.
+- Investigate: whether absolute `PathId` facts should reach diagnostics at all. If they should, render root and prefix components without an extra separator and add exact Unix and Windows assertions.
+
+### Windows root-relative in-memory template names fail as internal errors
+
+- Found: portable path display hardening MTF input review, 2026-11.
+- Where: `validate_in_memory_source_name` and in-memory `Sources` handling in `src/projects/html_project/moth_template/input.rs`.
+- Observed: on Windows `Path::is_relative` reports `/docs/x.mtf` as relative, so the name passes input validation and later fails as an internal logical-path failure instead of a typed input failure.
+- Investigate: classify a leading `/` without a drive prefix explicitly and reject or accept it with the typed input lane on every host.
+
+### Direct Moth template sources reject a non-UTF-8 ancestor above the source root
+
+- Found: portable path display hardening final integration review, 2026-11.
+- Where: `validate_source_path_identities` and `intern_filesystem_path_identity` in `src/projects/html_project/moth_template/input.rs`.
+- Observed: the direct filesystem lane interns each whole native source path, so a non-UTF-8 directory above the selected source root fails the MTF-owned UTF-8 identity check even when every module-relative name is UTF-8. The lane has no production caller outside its tests, and no test covers the case.
+- Investigate: whether identity should be checked only for the root-relative portion. Add a Unix test with a non-UTF-8 ancestor either way.
+
+### Windows protected output roots are only checked on `C:`
+
+- Found: portable path display hardening final review, 2026-11.
+- Where: `DANGEROUS_WINDOWS_ROOTS` in `is_dangerous_system_path` (`src/build_system/output/manifest.rs`).
+- Observed: named Windows protected directories are compared only against their `C:` spelling, so a Windows installation on another drive leaves `D:\Windows`, `D:\Program Files` and `D:\Users` unprotected. Drive and share roots are still rejected by the structural rule.
+- Investigate: derive the protected roots from `SystemDrive` or `SystemRoot` rather than hard-coding `C:`, and keep the component comparison. This limitation predates the native-component safety work.

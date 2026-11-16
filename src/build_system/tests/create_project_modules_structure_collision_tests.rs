@@ -1,4 +1,8 @@
 use super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
+use super::project_structure_diagnostics::{
+    entry_root_package_prefix_collision_error, invalid_module_root_file_name_error,
+    reserved_package_namespace_root_claim_error,
+};
 use super::*;
 
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
@@ -62,6 +66,38 @@ fn assert_reserved_project_dependency_failure(failure: PreparedFailure) {
             }),
         "expected the typed reserved project dependency failure",
     );
+}
+
+/// Assert one structure failure carries the exact typed reason and literal string facts.
+///
+/// Expected facts stay literal instead of being derived through the formatter under test: a raw
+/// `Path::display()` producer would still match on Windows but exposes `\` on Unix.
+fn assert_literal_config_facts(
+    failure: PreparedFailure,
+    expected_reason: InvalidConfigCode,
+    expected_reason_key: &str,
+    expected_facts: &[&str],
+) {
+    let reports = prepared_failure_reports(failure);
+    let (report, diagnostic) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("structure failure should retain one diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-CONFIG-0001");
+    assert_eq!(diagnostic.reason_key(), Some(expected_reason_key));
+
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("structure failure should retain typed config facts");
+    assert_eq!(facts.reason, expected_reason);
+
+    let strings = report.context().strings();
+    let resolved_facts: Vec<&str> = diagnostic
+        .string_ids()
+        .iter()
+        .map(|id| strings.resolve(*id))
+        .collect();
+    assert_eq!(resolved_facts.as_slice(), expected_facts);
 }
 
 // ── Project-structure collision tests ─────────────────────────────────────────
@@ -1236,4 +1272,54 @@ fn registered_source_package_keeps_entry_only_reserved_directory_legal() {
 
     build_namespace_set_for_test(&config, &resolver, &source_packages)
         .expect("entry-only reserved-name modules publish no importable claim");
+}
+
+#[test]
+fn prefix_collision_fact_renders_the_authored_folder_portably() {
+    // A synthetic backslash-separated path is one authored folder on Unix and is already native
+    // spelling on Windows. The diagnostic fact must render `/` on every host, so a raw
+    // `Path::display()` producer is detectably wrong on Unix.
+    let colliding_folder = Path::new(r"src\builder\web");
+    let mut string_table = StringTable::new();
+    let failure = entry_root_package_prefix_collision_error(
+        "builder/web",
+        colliding_folder,
+        &mut string_table,
+    );
+
+    assert_literal_config_facts(
+        failure,
+        InvalidConfigCode::EntryRootPackagePrefixCollision,
+        "invalid_config.entry_root_package_prefix_collision",
+        &["builder/web", "src/builder/web"],
+    );
+}
+
+#[test]
+fn reserved_namespace_claim_fact_renders_the_authored_source_portably() {
+    let claiming_source = Path::new(r"src\core\widget.moth");
+    let mut string_table = StringTable::new();
+    let failure =
+        reserved_package_namespace_root_claim_error("core", claiming_source, &mut string_table);
+
+    assert_literal_config_facts(
+        failure,
+        InvalidConfigCode::ReservedPackageNamespaceRootClaim,
+        "invalid_config.reserved_package_namespace_root_claim",
+        &["core", "src/core/widget.moth"],
+    );
+}
+
+#[test]
+fn invalid_root_file_name_fact_renders_the_authored_directory_portably() {
+    let directory = Path::new(r"src\docs");
+    let mut string_table = StringTable::new();
+    let failure = invalid_module_root_file_name_error(directory, "@page.moth", &mut string_table);
+
+    assert_literal_config_facts(
+        failure,
+        InvalidConfigCode::InvalidModuleRootFileName,
+        "invalid_config.invalid_module_root_file_name",
+        &["@page.moth", "src/docs"],
+    );
 }

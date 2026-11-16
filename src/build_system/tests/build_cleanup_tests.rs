@@ -12,10 +12,12 @@ use crate::build_system::output::{BuilderIdentity, OutputOwner, WriteMode, Write
 use crate::compiler_frontend::compiler_errors::CompilationResult;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
-    InvalidConfigCode, InvalidConfigView,
+    InvalidConfigCode, InvalidConfigView, decode_invalid_config,
 };
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_compilation_result;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -25,18 +27,29 @@ use crate::build_system::output::manifest::{
 };
 use crate::compiler_tests::test_fs::{assert_directory, assert_path_missing};
 
-use crate::compiler_tests::test_support::unused_temp_path;
 use std::collections::{BTreeSet, HashSet};
 
-fn assert_output_owner_conflict<T>(failure: &CompilationResult<T>) {
-    let (_, diagnostic) = diagnosed_reports(failure)
+fn assert_output_owner_conflict<T>(failure: &CompilationResult<T>, expected_output_root: &Path) {
+    let (report, view) = diagnosed_reports(failure)
         .iter_severity(DiagnosticSeverity::Error)
         .next()
         .expect("owner conflict diagnostic should exist");
-    let facts = diagnostic
+    let facts = view
         .family_view::<InvalidConfigView>()
         .expect("owner conflict should retain typed invalid-config facts");
     assert_eq!(facts.reason, InvalidConfigCode::OutputManifestOwnerConflict);
+
+    let (_, reason) = decode_invalid_config(&facts, view.string_ids())
+        .expect("owner conflict should decode to its typed reason");
+    let InvalidConfigReason::OutputManifestOwnerConflict { output_root, .. } = reason else {
+        panic!("owner conflict should decode to its typed reason");
+    };
+    let context = DiagnosticRenderContext::for_report(report);
+    assert_eq!(
+        context.string_table.resolve(output_root),
+        portable_path_text(expected_output_root),
+        "the conflict names the output root the writer was asked to use"
+    );
 }
 
 fn html_owner(profile: BuildProfile) -> OutputOwner {
@@ -414,38 +427,40 @@ fn cleanup_preserves_parent_directories_when_non_managed_files_remain() {
     assert!(output_root.join("docs/basics/notes.txt").exists());
 }
 
+// Generic containment prose names both roots through portable display text, so this test uses
+// ordinary directory names. On Windows the assertions exercise the native `\` to portable `/`
+// rewrite.
 #[test]
-fn validate_output_root_rejects_dangerous_paths() {
-    let project_dir = unused_temp_path("validate_dangerous_project");
-
-    let dangerous_paths = vec![
-        PathBuf::from("/"),
-        PathBuf::from("/usr"),
-        PathBuf::from("/etc"),
-        PathBuf::from("/bin"),
-        PathBuf::from("/var"),
-    ];
-
-    for dangerous in dangerous_paths {
-        let result = validate_directory_output_root_safety(&dangerous, &project_dir);
-        assert!(
-            result.is_err(),
-            "should reject dangerous path: {}",
-            dangerous.display()
-        );
-    }
-}
-
-#[test]
-fn validate_output_root_accepts_project_subdirectory() {
+fn outside_project_output_root_names_both_roots_in_portable_text() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-    fs::create_dir_all(root.join("_dev")).expect("should create output dir");
+    let project_dir = _temp.path().join("project");
+    let output_root = _temp.path().join("elsewhere").join("out");
+    fs::create_dir_all(&project_dir).expect("should create project dir");
+    fs::create_dir_all(&output_root).expect("should create outside output dir");
 
-    let result = validate_directory_output_root_safety(&root.join("_dev"), &root);
+    let failure = validate_directory_output_root_safety(&output_root, &project_dir)
+        .expect_err("an output root outside the project must be rejected");
+
+    assert_eq!(
+        failure.host_path.as_deref(),
+        Some(output_root.as_path()),
+        "the native output root stays authoritative"
+    );
+    let portable_output_root = portable_path_text(&output_root);
+    let portable_project_root = portable_path_text(&project_dir);
     assert!(
-        result.is_ok(),
-        "should accept output root inside project directory"
+        failure
+            .message
+            .contains(&format!("'{portable_output_root}'")),
+        "failure text should name the portable output root, got: {}",
+        failure.message
+    );
+    assert!(
+        failure
+            .message
+            .contains(&format!("'{portable_project_root}'")),
+        "failure text must keep the distinct project root, got: {}",
+        failure.message
     );
 }
 
@@ -829,7 +844,7 @@ fn foreign_profile_in_recoverable_v4_manifest_fails_without_mutation() {
             &project,
             &always_write_options(output_root.clone(), Some(project_dir.clone())),
         );
-        assert_output_owner_conflict(&failure);
+        assert_output_owner_conflict(&failure, &output_root);
         assert_eq!(
             fs::read(output_root.join("index.html")).expect("output should remain"),
             previous_output
@@ -867,7 +882,7 @@ fn foreign_profile_with_invalid_utf8_path_record_fails_without_mutation() {
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
     );
-    assert_output_owner_conflict(&failure);
+    assert_output_owner_conflict(&failure, &output_root);
     assert_eq!(
         fs::read(output_root.join("index.html")).expect("output should remain"),
         previous_output
@@ -968,7 +983,7 @@ fn foreign_owner_with_case_variant_manifest_paths_fails_without_mutation() {
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
     );
-    assert_output_owner_conflict(&failure);
+    assert_output_owner_conflict(&failure, &output_root);
     assert_eq!(
         fs::read(output_root.join("Pages/app.js")).expect("output should remain"),
         previous_output
@@ -1046,7 +1061,7 @@ fn truncated_manifest_recovers_only_for_its_own_builder() {
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
     );
-    assert_output_owner_conflict(&failure);
+    assert_output_owner_conflict(&failure, &output_root);
     assert_eq!(
         fs::read(output_root.join("index.html")).expect("output should remain"),
         previous_output
@@ -1114,7 +1129,7 @@ fn assert_foreign_manifest_owner_fails_without_mutation(builder: &str, profile: 
         &project,
         &always_write_options(output_root.clone(), Some(project_dir.clone())),
     );
-    assert_output_owner_conflict(&failure);
+    assert_output_owner_conflict(&failure, &output_root);
     assert_eq!(
         fs::read(output_root.join("index.html")).expect("index should remain"),
         previous_index
@@ -1553,7 +1568,7 @@ fn dev_then_release_against_same_v4_root_fails_without_mutation() {
 
     let reports = diagnosed_reports(&result);
     assert_eq!(reports.counts().errors, 1);
-    assert_output_owner_conflict(&result);
+    assert_output_owner_conflict(&result, &output_root);
     assert_eq!(
         fs::read(output_root.join("index.html"))
             .expect("output should remain")
@@ -1609,7 +1624,7 @@ fn builder_owner_conflict_fails_without_mutation() {
             .expect_err("a foreign builder must not claim the output root");
     let failure =
         freeze_prepared_failure::<()>(prepared_failure, std::mem::take(&mut string_table));
-    assert_output_owner_conflict(&failure);
+    assert_output_owner_conflict(&failure, &output_root);
     let (_, diagnostic) = diagnosed_reports(&failure)
         .iter_severity(DiagnosticSeverity::Error)
         .next()

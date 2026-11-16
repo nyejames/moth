@@ -12,6 +12,7 @@ use crate::build_system::output::BuilderIdentity;
 use crate::builder_surface::definition::BuilderSurfaceValidationError;
 use crate::builder_surface::{BuilderSurface, OptionalSourceKind, PackageOrigin};
 use crate::compiler_frontend::external_packages::ExternalRegistrationError;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use moth_host::HostFunction;
 use std::fmt;
 use std::path::PathBuf;
@@ -185,14 +186,14 @@ impl BuilderDefinitionDraft {
                 return Err(Error::invalid_definition(format!(
                     "Source package '{}' directory '{}' must be an absolute path.",
                     package.path,
-                    root.display()
+                    portable_path_text(root)
                 )));
             }
             if !root.is_dir() {
                 return Err(Error::invalid_definition(format!(
                     "Source package '{}' directory '{}' does not exist.",
                     package.path,
-                    root.display()
+                    portable_path_text(root)
                 )));
             }
             surface

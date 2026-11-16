@@ -26,7 +26,7 @@ use crate::compiler_frontend::public_interface::{
 };
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginDeclarationId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 #[test]
@@ -2789,7 +2789,9 @@ fn compile_later_request_rejection(
     )
 }
 
-type ResolvedDiagnosticLocation = (String, Option<String>, u32, u32, u32, u32);
+// Source positions stay native: lossy display text can collapse distinct host paths, so it cannot
+// serve as a diagnostic identity.
+type ResolvedDiagnosticLocation = (PathBuf, Option<PathBuf>, u32, u32, u32, u32);
 type CompactLabelIdentity = (&'static str, bool, Option<ResolvedDiagnosticLocation>);
 type CompactDiagnosticIdentity = (String, Option<String>, Vec<CompactLabelIdentity>);
 
@@ -2809,10 +2811,8 @@ fn compact_diagnostic_identity(
             };
             let location = context.site_position(label.site).map(|position| {
                 (
-                    position.path.to_string_lossy().into_owned(),
-                    position
-                        .host_path
-                        .map(|path| path.to_string_lossy().into_owned()),
+                    position.path,
+                    position.host_path.map(Path::to_path_buf),
                     position.start.line,
                     position.start.column,
                     position.end.line,

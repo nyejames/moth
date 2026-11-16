@@ -10,7 +10,7 @@ use super::super::{
     BackendId, CaseRole, EXPECT_FILE_NAME, GOLDEN_DIR_NAME, INPUT_DIR_NAME, MANIFEST_FILE_NAME,
     TestRunnerOptions,
 };
-use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::fs;
 use std::path::Path;
 
@@ -258,6 +258,49 @@ fn nested_golden_files_use_relative_inventory_paths() {
     assert_eq!(
         expectation.golden.inventory.files[0].relative_path,
         "nested/page.html"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_golden_filename_that_would_alias_a_nested_output_path() {
+    // `a\b.html` is one Unix filename, while `a/b.html` is a nested output path. Keying the
+    // golden by display text would have made the two indistinguishable, so fixture loading must
+    // reject the filename before any comparison can run.
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let case_root = root.join("case");
+    let input_root = case_root.join(INPUT_DIR_NAME);
+    let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
+    fs::create_dir_all(&input_root).expect("should create fixture input directory");
+    fs::create_dir_all(&golden_root).expect("should create fixture golden directory");
+    fs::write(input_root.join("@entry.moth"), "[:ok]\n").expect("should write fixture source");
+    fs::write(golden_root.join("a\\b.html"), "<h1>alias</h1>\n")
+        .expect("should write alias golden");
+    fs::write(
+        case_root.join(EXPECT_FILE_NAME),
+        "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\n",
+    )
+    .expect("should write expect file");
+
+    let Err(error) = load_canonical_case_specs(&case_root, None) else {
+        panic!("a golden whose filename contains a literal backslash must fail fixture loading");
+    };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::FixtureContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+    assert!(
+        error
+            .message
+            .contains(&format!("{:?}", Path::new("a\\b.html"))),
+        "the rejected golden must be spelled unambiguously: {error}"
+    );
+    assert!(
+        error.message.contains("portable output path"),
+        "the rejection must say golden filenames are output paths: {error}"
     );
 }
 

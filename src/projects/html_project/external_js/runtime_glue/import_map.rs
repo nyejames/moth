@@ -5,6 +5,7 @@
 //! WHY: provider-created JS assets and emitted runtime modules use bare imports like
 //!      `@moth/runtime`; the import map lets the browser resolve them.
 
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::module_compilation::ModuleExternalImport;
 use crate::projects::html_project::external_js::runtime_glue::paths::{
     relative_url_path, runtime_module_output_path,
@@ -14,26 +15,28 @@ use std::path::Path;
 /// Build import-map HTML for bare runtime specifiers.
 ///
 /// WHAT: produces a `<script type="importmap">` that maps registered core module specifiers
-///       to their emitted relative paths.
+///       to their emitted relative paths, already percent-encoded for direct JSON/HTML embedding.
 /// WHY: provider-created JS assets use bare imports like
 ///      `import {{ mothOk }} from "@moth/runtime";`;
 ///      the import map lets the browser resolve those without rewriting user files.
+///
+/// Returns an error when a runtime module path cannot be rendered as an encoded browser specifier.
 pub(super) fn build_import_map_html(
     external_imports: &[ModuleExternalImport],
     html_output_directory: &Path,
-) -> Option<String> {
+) -> Result<Option<String>, InfrastructureFailure> {
     let mut entries: Vec<(String, String)> = Vec::new();
 
     for external_import in external_imports {
         for runtime_import in &external_import.required_runtime_imports {
             let runtime_path = runtime_module_output_path(&runtime_import.module_name);
-            let relative = relative_url_path(html_output_directory, &runtime_path);
+            let relative = relative_url_path(html_output_directory, &runtime_path)?;
             entries.push((runtime_import.module_name.clone(), relative));
         }
     }
 
     if entries.is_empty() {
-        return None;
+        return Ok(None);
     }
 
     // Deduplicate by specifier.
@@ -49,7 +52,7 @@ pub(super) fn build_import_map_html(
     }
     map_json.push_str("\n  }\n}");
 
-    Some(format!(
+    Ok(Some(format!(
         "<script type=\"importmap\">\n{map_json}\n</script>\n"
-    ))
+    )))
 }

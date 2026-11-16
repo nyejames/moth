@@ -6,6 +6,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::imports:
     MissingImportTargetView, UnsupportedExternalExtensionView,
 };
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+#[cfg(unix)]
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 #[test]
 fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -632,6 +634,102 @@ fn synthetic_nested_module_provider_resolves_from_owning_module_root() {
     );
 }
 
+/// Provider-import canonicalization failures name the joined target as portable text.
+///
+/// WHY: the literal backslash in the temporary root is a real Unix file-name byte. `Path::display`
+///      would leak it into user-facing prose, while the structured `host_path` stays native.
+#[cfg(unix)]
+#[test]
+fn provider_import_canonicalization_failure_reports_portable_target_path() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().join("portable\\root");
+    fs::create_dir_all(&root).expect("should create root with a literal backslash");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        root.join("@entry.moth"),
+        "@blocker/child.js as drawing\n[:entry]\n",
+    )
+    .expect("should write entry");
+    fs::write(root.join("blocker"), "not a directory\n").expect("should write blocking file");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    let entry = fs::canonicalize(root.join("@entry.moth")).expect("entry should canonicalize");
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut providers = ExternalImportProviderRegistry::empty();
+    providers.register(Arc::new(CountingExternalImportProvider::new(Arc::clone(
+        &calls,
+    ))));
+    let mut external_packages = ExternalPackageRegistry::new();
+    let mut cache =
+        crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache::new(
+        );
+    let mut resolution_table = crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable::new();
+    let mut external_imports = super::source_discovery::ExternalImportDiscoveryState {
+        external_packages: &mut external_packages,
+        providers: &providers,
+        cache: &mut cache,
+        resolution_table: &mut resolution_table,
+    };
+    let mut string_table = StringTable::new();
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+
+    let error = match super::source_discovery::collect_reachable_input_files(
+        &entry,
+        &super::module_namespace::ModuleNamespaceSet::default(),
+        &resolver,
+        &style_directives,
+        &mut external_imports,
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut ResourceInputRegistry::new(),
+        &mut path_fork,
+        &mut string_table,
+    ) {
+        Ok(_) => panic!("a target beneath a regular file cannot canonicalize"),
+        Err(error) => error,
+    };
+
+    assert_eq!(
+        calls.load(Ordering::Relaxed),
+        0,
+        "the provider must not run after its prefix target fails"
+    );
+    let (failure, _source_database) = error.into_parts();
+    let PreparedFailure::Infrastructure(errors) = failure else {
+        panic!("provider prefix failure must stay on the infrastructure lane");
+    };
+    let failure = errors
+        .iter()
+        .next()
+        .expect("the prefix failure should be the primary cause");
+    let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
+    let expected_target = portable_path_text(canonical_root.join("blocker/child.js"));
+    assert!(
+        failure.message.contains(&format!(
+            "Failed to canonicalize external import prefix '{expected_target}'"
+        )),
+        "provider prefix failure must name the portable target path: {}",
+        failure.message
+    );
+    assert_eq!(
+        failure.host_path.as_deref(),
+        Some(entry.as_path()),
+        "the declaring source keeps its native host path"
+    );
+}
+
 #[test]
 fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings() {
     for clauses in [
@@ -711,6 +809,77 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
             "accepted provider spellings must retain distinct packages in either clause order"
         );
     }
+}
+
+/// A literal backslash is an ordinary Unix filename byte, so a provider-importing source named
+/// `a\b.moth` must key its resolutions by the same component-joined spelling the compiler renders
+/// for the consumer. The old whole-path `\` rewrite produced `a/b.moth` and lost the resolution.
+#[cfg(unix)]
+#[test]
+fn provider_import_from_a_literal_backslash_source_uses_component_logical_key() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(root.join("@entry.moth"), "[:entry]\n").expect("should write entry root");
+    let consumer = root.join("a\\b.moth");
+    fs::write(&consumer, "@drawing.js as drawing\n")
+        .expect("should write literal-backslash consumer");
+    fs::write(root.join("drawing.js"), "export function draw() {}\n")
+        .expect("should write js provider source");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    let consumer = fs::canonicalize(&consumer).expect("consumer should canonicalize");
+
+    let mut providers = ExternalImportProviderRegistry::empty();
+    providers.register(Arc::new(CanonicalPathPackageProvider::new()));
+    let mut external_packages = ExternalPackageRegistry::new();
+    let mut cache =
+        crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache::new(
+        );
+    let mut resolution_table = crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable::new();
+    let mut external_imports = super::source_discovery::ExternalImportDiscoveryState {
+        external_packages: &mut external_packages,
+        providers: &providers,
+        cache: &mut cache,
+        resolution_table: &mut resolution_table,
+    };
+    let mut string_table = StringTable::new();
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+
+    super::source_discovery::collect_reachable_input_files(
+        &consumer,
+        &super::module_namespace::ModuleNamespaceSet::default(),
+        &resolver,
+        &style_directives,
+        &mut external_imports,
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &mut ResourceInputRegistry::new(),
+        &mut path_fork,
+        &mut string_table,
+    )
+    .expect("provider import from a literal-backslash consumer should resolve");
+
+    assert!(
+        resolution_table.get("a\\b.moth", "drawing.js").is_some(),
+        "resolution keys must join source components, matching the compiler's render_portable consumer spelling"
+    );
+    assert!(
+        resolution_table.get("a/b.moth", "drawing.js").is_none(),
+        "a literal backslash filename must not be reinterpreted as a nested path"
+    );
 }
 
 #[test]

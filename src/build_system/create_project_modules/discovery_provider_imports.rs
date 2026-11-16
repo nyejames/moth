@@ -18,6 +18,7 @@ use crate::compiler_frontend::paths::dependency_resolution::{
 use crate::compiler_frontend::paths::path_normalization::join_and_normalize_components;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 // -------------------------
 //  Provider-backed import resolution
 // -------------------------
@@ -231,7 +232,7 @@ fn resolve_provider_prefix_to_canonical_path(
                 declaring_file,
                 format!(
                     "Failed to canonicalize external import prefix '{}': {error}",
-                    normalized.display()
+                    portable_path_text(&normalized)
                 ),
             ))
         }
@@ -244,6 +245,10 @@ fn resolve_provider_prefix_to_canonical_path(
 }
 
 /// Derives the portable logical path for a canonical source file.
+///
+/// WHY: the key must match the component-joined spelling the compiler renders for the same
+/// consumer source. Replacing every `\` in the whole string would reinterpret a literal backslash
+/// in a Unix filename as a separator and could bind the import to another file's resolutions.
 fn source_file_logical_path(
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
@@ -251,12 +256,19 @@ fn source_file_logical_path(
     let logical = project_path_resolver
         .logical_path_for_canonical_file(canonical_file)
         .map_err(SourceDiscoveryError::from)?;
-    let logical_text = logical.to_str().ok_or_else(|| {
-        SourceDiscoveryError::from(InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &logical, format!(
-            "Source file logical path {logical:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
-        )))
-    })?;
-    Ok(logical_text.replace('\\', "/"))
+    let mut logical_text = String::with_capacity(logical.as_os_str().len());
+    for (index, component) in logical.components().enumerate() {
+        if index > 0 {
+            logical_text.push('/');
+        }
+        let component_text = component.as_os_str().to_str().ok_or_else(|| {
+            SourceDiscoveryError::from(InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &logical, format!(
+                "Source file logical path {logical:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
+            )))
+        })?;
+        logical_text.push_str(component_text);
+    }
+    Ok(logical_text)
 }
 
 // -------------------------

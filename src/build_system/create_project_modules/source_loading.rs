@@ -11,6 +11,7 @@ use crate::compiler_frontend::compiler_messages::compiler_errors::{
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseError, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::collections::BTreeMap;
 #[cfg(not(test))]
 use std::fs;
@@ -241,7 +242,7 @@ impl SelectedSourceTextMap {
                         CompilerStage::SourceLoading,
                         format!(
                             "selected source path {} has no source database slot",
-                            canonical_path.display()
+                            portable_path_text(canonical_path)
                         ),
                     )
                     .into()

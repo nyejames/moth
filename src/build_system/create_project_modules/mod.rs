@@ -97,6 +97,7 @@ use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationR
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
@@ -106,7 +107,6 @@ use crate::compiler_frontend::module_compilation::BoracleModuleInput;
 use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseBuilder};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::sync::Arc;
 
 use crate::projects::settings::Config;
@@ -231,8 +231,8 @@ pub(crate) fn compile_project_frontend_with_inputs(
             )
         } else {
             let mut string_table = StringTable::new();
-            let entry_path = portable_path_text(&config.entry_dir);
-            let entry_path_id = string_table.intern(&entry_path);
+            let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
+            let entry_path_id = diagnostic_strings.intern_path(&config.entry_dir);
             let diagnostic = project_config::project_entry_extension_required(entry_path_id, None);
             let prepared = PreparedDiagnosticBatch::capture_from_bag(
                 DiagnosticBag::from(diagnostic),

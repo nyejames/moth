@@ -7,9 +7,10 @@
 
 use super::super::{ArtifactAssertion, ArtifactKind};
 use crate::build_system::build::{DeferredResourceOutput, FileKind, OutputFile};
-use crate::build_system::output::{OutputPathIdentity, output_path_identity};
+use crate::build_system::output::{
+    OutputPathIdentity, parse_native_relative_path, parse_relative_path,
+};
 use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
-use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::path::Path;
@@ -73,7 +74,7 @@ impl fmt::Display for ArtifactIndexError {
             ),
             Self::InvalidOutputPath { path, reason } => write!(
                 formatter,
-                "the build produced an artifact at '{path}', which the output writer would \
+                "the build produced an artifact at {path}, which the output writer would \
                  reject as an invalid portable destination ({reason:?})"
             ),
         }
@@ -83,10 +84,11 @@ impl fmt::Display for ArtifactIndexError {
 impl<'a> BuiltArtifactIndex<'a> {
     /// Build the index, or explain why the produced artifact set is ambiguous.
     ///
-    /// Validity and collision identity come from `output_path_identity`, the same canonical
-    /// output-path policy the writer enforces, so the harness cannot accept a destination the
-    /// writer would reject or fold case differently than production does. `portable_path_text`
-    /// is used only for lookup keys, sorted display and failure reporting.
+    /// Validity, collision identity and the lookup key come from native output-path parsing, the
+    /// same canonical policy the writer enforces, so the harness cannot accept a destination the
+    /// writer would reject or fold case differently than production does. The key is the
+    /// validated `/`-joined spelling. Authored lookups parse through the authored-string parser;
+    /// rejected native paths are named with their Debug spelling.
     pub(super) fn build(
         output_files: &'a [OutputFile],
         deferred_resources: &'a [DeferredResourceOutput],
@@ -120,15 +122,28 @@ impl<'a> BuiltArtifactIndex<'a> {
         Ok(Self { by_path })
     }
 
+    /// Look up one authored relative path. Unparseable spellings never match a produced artifact.
     pub(super) fn get(&self, relative_path: &str) -> Option<&'a OutputFile> {
-        match self.by_path.get(&portable_path_text(relative_path))? {
+        let spelling = parse_relative_path(relative_path).ok()?.portable_spelling();
+        self.get_portable_spelling(&spelling)
+    }
+
+    /// Look up one already-validated portable spelling without reparsing it.
+    ///
+    /// Authored lookups enter through the authored-string parser and golden inventory paths
+    /// enter through native output-path validation. Either way the spelling is already the index
+    /// key, so reparsing it would repeat that validation and obscure which identity the lookup
+    /// carries.
+    pub(super) fn get_portable_spelling(&self, portable_spelling: &str) -> Option<&'a OutputFile> {
+        match self.by_path.get(portable_spelling)? {
             IndexedArtifact::File(output) => Some(*output),
             IndexedArtifact::DeferredResource(_) => None,
         }
     }
 
     fn lookup(&self, relative_path: &str) -> Option<&IndexedArtifact<'a>> {
-        self.by_path.get(&portable_path_text(relative_path))
+        let spelling = parse_relative_path(relative_path).ok()?.portable_spelling();
+        self.by_path.get(&spelling)
     }
 
     /// Every built artifact path, in portable sorted order.
@@ -176,8 +191,7 @@ impl<'a> BuiltArtifactIndex<'a> {
 
     /// Whether an artifact was produced at the authored relative path.
     pub(super) fn contains(&self, relative_path: &str) -> bool {
-        self.by_path
-            .contains_key(&portable_path_text(relative_path))
+        self.lookup(relative_path).is_some()
     }
 }
 
@@ -689,8 +703,8 @@ fn insert_indexed_path<'a>(
     by_path: &mut BTreeMap<String, IndexedArtifact<'a>>,
     spelling_by_identity: &mut HashMap<OutputPathIdentity, String>,
 ) -> Result<(), ArtifactIndexError> {
-    let identity = match output_path_identity(relative_path) {
-        Ok(identity) => identity,
+    let portable = match parse_native_relative_path(relative_path) {
+        Ok(portable) => portable,
         Err(InvalidOutputFolderReason::NonUtf8) => {
             return Err(ArtifactIndexError::NonUtf8Path {
                 path: format!("{relative_path:?}"),
@@ -698,13 +712,14 @@ fn insert_indexed_path<'a>(
         }
         Err(reason) => {
             return Err(ArtifactIndexError::InvalidOutputPath {
-                path: portable_path_text(relative_path),
+                path: format!("{relative_path:?}"),
                 reason,
             });
         }
     };
 
-    let spelling = portable_path_text(relative_path);
+    let identity = portable.identity();
+    let spelling = portable.portable_spelling();
     if let Some(existing) = spelling_by_identity.insert(identity, spelling.clone()) {
         return Err(if existing == spelling {
             ArtifactIndexError::DuplicatePath { path: spelling }

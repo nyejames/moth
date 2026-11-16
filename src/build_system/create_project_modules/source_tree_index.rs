@@ -42,6 +42,7 @@ use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_module_root_file, module_root_role_for_file_name,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::counter_observation;
 use crate::projects::settings::Config;
 use std::cmp::Ordering;
@@ -53,7 +54,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::project_structure_diagnostics::{
     entry_root_package_prefix_collision_error, invalid_module_root_file_name_error,
-    non_utf8_filesystem_name_error, path_id, project_structure_diagnostic,
+    non_utf8_filesystem_name_error, project_structure_diagnostic,
 };
 
 /// Local namespace facts for one synthetic owning root.
@@ -941,7 +942,7 @@ impl SourceTreeIndex {
                     let reason = InvalidConfigReason::SourceFileFolderCollision {
                         file_name: diagnostic_strings.intern(file_name),
                         folder_name: diagnostic_strings.intern(folder_name),
-                        directory: path_id(&directory, &mut diagnostic_strings),
+                        directory: diagnostic_strings.intern_path(&directory),
                     };
                     let diagnostic = project_structure_diagnostic(reason);
                     let table = string_table.take_for_handoff();
@@ -1523,9 +1524,9 @@ fn aliased_module_root_files_error(
 ) -> PreparedFailure {
     let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
     let diagnostic = project_structure_diagnostic(InvalidConfigReason::AliasedModuleRootFiles {
-        first_root: path_id(first_root, &mut diagnostic_strings),
-        second_root: path_id(second_root, &mut diagnostic_strings),
-        target: path_id(target, &mut diagnostic_strings),
+        first_root: diagnostic_strings.intern_path(first_root),
+        second_root: diagnostic_strings.intern_path(second_root),
+        target: diagnostic_strings.intern_path(target),
     });
     let table = string_table.take_for_handoff();
     PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
@@ -1545,9 +1546,9 @@ fn module_root_outside_claim_error(
     let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
     let diagnostic =
         project_structure_diagnostic(InvalidConfigReason::ModuleRootFileOutsideClaimingModule {
-            root_file: path_id(visible_root_file, &mut diagnostic_strings),
-            claiming_directory: path_id(directory, &mut diagnostic_strings),
-            target: path_id(target, &mut diagnostic_strings),
+            root_file: diagnostic_strings.intern_path(visible_root_file),
+            claiming_directory: diagnostic_strings.intern_path(directory),
+            target: diagnostic_strings.intern_path(target),
         });
     let table = string_table.take_for_handoff();
     PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
@@ -1571,9 +1572,9 @@ fn module_root_not_regular_file_error(
     let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
     let diagnostic =
         project_structure_diagnostic(InvalidConfigReason::ModuleRootFileNotRegularFile {
-            root_file: path_id(visible_root_file, &mut diagnostic_strings),
-            directory: path_id(directory, &mut diagnostic_strings),
-            target: path_id(target, &mut diagnostic_strings),
+            root_file: diagnostic_strings.intern_path(visible_root_file),
+            directory: diagnostic_strings.intern_path(directory),
+            target: diagnostic_strings.intern_path(target),
         });
     let table = string_table.take_for_handoff();
     PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
@@ -1597,9 +1598,9 @@ fn aliased_root_files_error(
 ) -> PreparedFailure {
     let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
     let diagnostic = project_structure_diagnostic(InvalidConfigReason::AliasedModuleRootFiles {
-        first_root: path_id(&left_root_file, &mut diagnostic_strings),
-        second_root: path_id(&right_root_file, &mut diagnostic_strings),
-        target: path_id(&target, &mut diagnostic_strings),
+        first_root: diagnostic_strings.intern_path(&left_root_file),
+        second_root: diagnostic_strings.intern_path(&right_root_file),
+        target: diagnostic_strings.intern_path(&target),
     });
     let table = string_table.take_for_handoff();
     PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
@@ -1641,7 +1642,7 @@ fn classify_package_root_directory(
         let diagnostic =
             project_structure_diagnostic(InvalidConfigReason::SourcePackageMissingRoot {
                 prefix: diagnostic_strings.intern(package_prefix),
-                root: path_id(directory, &mut diagnostic_strings),
+                root: diagnostic_strings.intern_path(directory),
             });
         let table = string_table.take_for_handoff();
         return Err(PreparedFailure::Diagnosed(
@@ -1929,8 +1930,8 @@ fn validate_unique_source_logical_identities(
             "Source tree index classified duplicate logical identity {:?} for physical sources {} \
              and {}; source identity must be unique before SourceId assignment",
             left.logical_identity,
-            left.canonical_path.display(),
-            right.canonical_path.display(),
+            portable_path_text(&left.canonical_path),
+            portable_path_text(&right.canonical_path),
         );
         return Err(InfrastructureFailure::internal(
             CompilerStage::ProjectBuildAssembly,
@@ -1970,7 +1971,7 @@ fn build_source_inventory(
                 format!(
                     "Source tree index classified physical source {} more than once; each canonical \
                  source path must have exactly one SourceRecord",
-                    source.canonical_path.display(),
+                    portable_path_text(&source.canonical_path),
                 ),
             ));
         }

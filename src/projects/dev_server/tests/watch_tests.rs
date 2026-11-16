@@ -2,13 +2,13 @@
 
 use super::{
     FileFingerprint, WatchScope, WatchSession, WatchTarget, collect_fingerprints, detect_changes,
-    fingerprint_from_modified, should_ignore_path,
+    fingerprint_from_modified, fingerprint_timestamp_error, should_ignore_path,
 };
 use crate::projects::settings::{CONFIG_FILE_NAME, Config};
 use std::collections::HashMap;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 #[test]
@@ -294,6 +294,19 @@ fn timestamp_failure_propagates_with_path_context() {
     assert!(
         error.to_string().contains("unreachable.moth"),
         "error should name the affected path: {error}"
+    );
+}
+
+#[test]
+fn timestamp_failure_renders_native_paths_as_portable_text() {
+    let error = fingerprint_timestamp_error(
+        Path::new("watched\\directory/page.moth"),
+        io::Error::new(io::ErrorKind::PermissionDenied, "denied"),
+    );
+
+    assert_eq!(
+        error.to_string(),
+        "dev-server watch: failed to read modification time for watched/directory/page.moth: denied"
     );
 }
 

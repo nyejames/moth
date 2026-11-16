@@ -26,6 +26,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_reports;
 use crate::compiler_frontend::compiler_messages::{CompilerStage, DiagnosticDiscoveryStops};
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::projects::settings::{Config, ProjectConfigError};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -268,8 +269,8 @@ pub fn build_project(
 
     let Some(project_root) = request.project_root.to_str() else {
         return Err(Error::infrastructure(format!(
-            "The project root path '{}' is not valid UTF-8.",
-            request.project_root.display()
+            "The project root path {:?} is not valid UTF-8.",
+            request.project_root
         )));
     };
 
@@ -281,7 +282,7 @@ pub fn build_project(
         return Err(Error::build(format!(
             "The project root '{}' is not a project directory. Point `BuildRequest` at the \
              project directory instead.",
-            request.project_root.display()
+            portable_path_text(&request.project_root)
         )));
     }
 

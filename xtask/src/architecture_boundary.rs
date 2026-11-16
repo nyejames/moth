@@ -372,7 +372,10 @@ fn recursive_hir_ownership(content: &str) -> Vec<String> {
 /// `integration_test_runner`, which ships without `#[cfg(test)]` and is production code backing
 /// `moth tests`. Its remaining `#[cfg(test)]` helpers name no stage owner, so treating them as
 /// production costs nothing and keeps the directory rule from hiding the runner.
-fn is_test_source(relative: &str) -> bool {
+///
+/// `source_audit` reuses this definition for its own rules instead of defining a second
+/// test-source predicate.
+pub(crate) fn is_test_source(relative: &str) -> bool {
     relative.contains("/tests/") || relative.ends_with("_tests.rs")
 }
 

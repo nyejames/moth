@@ -12,6 +12,7 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::fs;
 use std::path::Path;
 
@@ -111,6 +112,36 @@ fn live_source_hash_and_read_reuse_one_cached_filesystem_read() {
         registry.records()[unused_source.index()].content(),
         ResourceContentState::Unhashed,
         "unreachable registered sources must stay unhashed and unread"
+    );
+}
+
+/// A resource read failure names its physical source as portable text.
+///
+/// WHY: generic IO prose keeps portable display text, while the structured host path stays native
+/// for IO and renderer use.
+#[test]
+fn resource_read_failure_reports_portable_host_path() {
+    let directory = tempfile::tempdir().expect("should create resource input directory");
+    let missing_path = directory.path().join("missing").join("asset.bin");
+
+    let mut registry = ResourceInputRegistry::new();
+    let source = registry.register_source(missing_path.clone());
+    let failure = registry
+        .hash_source(source)
+        .expect_err("a missing resource source should fail its first read");
+
+    let portable_path = portable_path_text(&missing_path);
+    assert!(
+        failure
+            .message
+            .contains(&format!("Failed to read resource source '{portable_path}'")),
+        "resource read failure must name the portable host path: {}",
+        failure.message
+    );
+    assert_eq!(
+        failure.host_path.as_deref(),
+        Some(missing_path.as_path()),
+        "the structured host path must stay native"
     );
 }
 

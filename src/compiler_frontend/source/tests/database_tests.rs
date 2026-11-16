@@ -985,6 +985,169 @@ fn loaded_source_line_ranges_reconstruct_the_snapshot() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn duplicate_canonical_registration_reports_portable_canonical_path() {
+    let path = PathBuf::from("/project/back\\slash.moth");
+    let mut string_table = StringTable::new();
+
+    let error = SourceDatabase::build([&path, &path], &path, None, &mut string_table)
+        .expect_err("duplicate canonical registration must fail");
+
+    let SourceDatabaseError::Infrastructure(failure) = error else {
+        panic!("duplicate registration must stay on the infrastructure lane");
+    };
+    assert_eq!(failure.kind, InfrastructureFailureKind::Internal);
+    assert_eq!(failure.host_path, None);
+    assert_eq!(
+        failure.message(),
+        "Source identity inventory registered canonical source path /project/back/slash.moth more than once"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn conflicting_logical_paths_report_portable_canonical_path() {
+    let canonical = PathBuf::from("/project/nested/back\\slash.moth");
+    let nested_entry = canonical.clone();
+    let project_entry = PathBuf::from("/project/entry.moth");
+    let kind = SourceKind::Compiler(SourceFileKind::Moth);
+    let mut string_table = StringTable::new();
+    let mut database = SourceDatabase::empty();
+    database
+        .insert(
+            canonical.clone(),
+            kind,
+            &nested_entry,
+            None,
+            &mut string_table,
+        )
+        .expect("first logical path should register");
+
+    let error = database
+        .insert(canonical, kind, &project_entry, None, &mut string_table)
+        .expect_err("the same canonical source under a different logical path must fail");
+
+    let SourceDatabaseError::Infrastructure(failure) = error else {
+        panic!("logical path conflict must stay on the infrastructure lane");
+    };
+    assert_eq!(failure.kind, InfrastructureFailureKind::Internal);
+    // Only the canonical host path is display-normalized. Logical paths are identity text, so the
+    // literal backslash in the filename stays.
+    assert_eq!(
+        failure.message(),
+        "Source identity inventory registered canonical source path /project/nested/back/slash.moth under \
+         conflicting logical paths back\\slash.moth and nested/back\\slash.moth"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn conflicting_kinds_report_portable_canonical_path() {
+    let canonical = PathBuf::from("/project/back\\slash.moth");
+    let mut string_table = StringTable::new();
+    let mut database = SourceDatabase::empty();
+    database
+        .insert(
+            canonical.clone(),
+            SourceKind::Compiler(SourceFileKind::Moth),
+            &canonical,
+            None,
+            &mut string_table,
+        )
+        .expect("first source kind should register");
+
+    let error = database
+        .insert(
+            canonical.clone(),
+            SourceKind::Compiler(SourceFileKind::MothTemplate),
+            &canonical,
+            None,
+            &mut string_table,
+        )
+        .expect_err("the same canonical source under a different kind must fail");
+
+    let SourceDatabaseError::Infrastructure(failure) = error else {
+        panic!("source kind conflict must stay on the infrastructure lane");
+    };
+    assert_eq!(failure.kind, InfrastructureFailureKind::Internal);
+    assert_eq!(
+        failure.message(),
+        "Source identity inventory registered canonical source path /project/back/slash.moth under \
+         conflicting kinds Compiler(Moth) and Compiler(MothTemplate)"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn colliding_portable_logical_keys_order_by_native_components() {
+    // A Unix filename may contain a literal backslash, and the portable sort key rewrites it to
+    // '/'. The native tie-breaker must keep identity assignment independent of registration order
+    // instead of letting the stable sort fall back to caller order.
+    let backslash = PathBuf::from("/project/a\\b.moth");
+    let nested = PathBuf::from("/project/a/b.moth");
+    let entry = Path::new("/project/main.moth");
+
+    let mut first_strings = StringTable::new();
+    let first = SourceDatabase::build([&backslash, &nested], entry, None, &mut first_strings)
+        .expect("colliding portable keys should still build distinct identities");
+    let mut second_strings = StringTable::new();
+    let second = SourceDatabase::build([&nested, &backslash], entry, None, &mut second_strings)
+        .expect("reversed registration order should build the same identities");
+
+    let first_backslash = first
+        .get_by_canonical_path(&backslash)
+        .expect("literal-backslash source should be registered")
+        .id;
+    let first_nested = first
+        .get_by_canonical_path(&nested)
+        .expect("nested source should be registered")
+        .id;
+    let second_backslash = second
+        .get_by_canonical_path(&backslash)
+        .expect("literal-backslash source should be registered in reverse order")
+        .id;
+    let second_nested = second
+        .get_by_canonical_path(&nested)
+        .expect("nested source should be registered in reverse order")
+        .id;
+
+    assert_ne!(first_backslash, first_nested);
+    assert_eq!(first_backslash, second_backslash);
+    assert_eq!(first_nested, second_nested);
+}
+
+#[test]
+fn portable_logical_order_precedes_the_native_component_tie_break() {
+    // Portable text order, not component-wise order, owns identity order: `a-b` sorts before
+    // `a/b` because '-' precedes '/', while the component tie-break would put the nested path
+    // first. Registration-order independence for ordinary paths is covered by
+    // `source_database_build_orders_records_by_portable_logical_path`.
+    let hyphen = PathBuf::from("/project/a-b.moth");
+    let nested = PathBuf::from("/project/a/b.moth");
+    let mut string_table = StringTable::new();
+    let database = SourceDatabase::build(
+        [&hyphen, &nested],
+        Path::new("/project/main.moth"),
+        None,
+        &mut string_table,
+    )
+    .expect("distinct portable keys should build identities");
+
+    let hyphen_id = database
+        .get_by_canonical_path(&hyphen)
+        .expect("hyphen source should be registered")
+        .id;
+    let nested_id = database
+        .get_by_canonical_path(&nested)
+        .expect("nested source should be registered")
+        .id;
+    assert!(
+        hyphen_id < nested_id,
+        "the portable key must order identities ahead of the component tie-break"
+    );
+}
+
 fn render_source_logical_paths(
     database: &SourceDatabase,
     string_table: &StringTable,

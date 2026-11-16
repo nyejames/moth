@@ -13,9 +13,9 @@ use super::{
     ArtifactAssertion, ArtifactKind, BackendId, ExpectationMode, GoldenMode,
     ParsedBackendExpectation, ParsedExpectationFile, WarningExpectation,
 };
+use crate::build_system::output::parse_relative_path;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_messages::is_well_formed_reason_key;
-use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::compiler_tests::integration_test_runner::errors::FixtureLoadError;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -480,7 +480,10 @@ fn parse_diagnostic_assertions(
             code: assertion.code.clone(),
             occurrence,
             reason: assertion.reason.clone(),
-            path: assertion.path.as_deref().map(portable_path_text),
+            path: assertion
+                .path
+                .as_deref()
+                .map(normalize_authored_source_path),
             line: assertion.line,
             column: assertion.column,
             count: assertion.count,
@@ -573,7 +576,10 @@ fn parse_secondary_label_assertions(
 
         parsed_assertions.push(SecondaryLabelAssertion {
             occurrence,
-            path: assertion.path.as_deref().map(portable_path_text),
+            path: assertion
+                .path
+                .as_deref()
+                .map(normalize_authored_source_path),
             line: assertion.line,
             column: assertion.column,
         });
@@ -610,6 +616,15 @@ fn validate_diagnostic_path(
     )
 }
 
+/// Normalise separators in an authored fixture-relative source path.
+///
+/// Diagnostic assertions name sources, which are not output destinations. Authored TOML may use
+/// either separator on any host, so the comparison key rewrites both to `/`. This reads the
+/// authored text directly; no native path or display rendering is involved.
+fn normalize_authored_source_path(raw: &str) -> String {
+    raw.replace('\\', "/")
+}
+
 fn validate_positive_diagnostic_number(
     path: &Path,
     assertion_label: &str,
@@ -626,6 +641,29 @@ fn validate_positive_diagnostic_number(
     }
 
     Ok(())
+}
+
+/// Parse one authored output path into the portable spelling used by artifact contracts.
+///
+/// WHAT: validates the authored text through the output-path parser and returns its `/`-joined
+///       validated spelling.
+/// WHY: artifact assertions and absence contracts must key on exactly the spelling the built
+///      artifact index uses, and a rejection names the authored field that must hold a portable
+///      output path.
+fn parse_authored_output_path(
+    path: &Path,
+    label: &str,
+    field: &str,
+    raw_path: &str,
+) -> Result<String, FixtureLoadError> {
+    parse_relative_path(raw_path)
+        .map(|portable| portable.portable_spelling())
+        .map_err(|reason| {
+            FixtureLoadError::expectation_contract(format!(
+                "Expectation file '{}' {label} {field} {raw_path:?} is not a portable output path ({reason:?}).",
+                path.display()
+            ))
+        })
 }
 
 fn parse_artifact_assertions(
@@ -646,12 +684,15 @@ fn parse_artifact_assertions(
             )));
         }
 
+        let portable_path =
+            parse_authored_output_path(path, &assertion_label, "'path'", &assertion.path)?;
+
         let kind = parse_artifact_kind(path, &assertion.kind, &assertion_label)?;
         validate_artifact_assertion_fields(path, &assertion_label, assertion)?;
         validate_artifact_assertion_shape(path, &assertion_label, kind, assertion)?;
 
         parsed_assertions.push(ArtifactAssertion {
-            path: portable_path_text(&assertion.path),
+            path: portable_path,
             kind,
             must_contain: assertion.must_contain.clone(),
             must_not_contain: assertion.must_not_contain.clone(),
@@ -1178,8 +1219,8 @@ pub(crate) fn parse_case_flags(
 
 /// Parses, validates and normalises `artifacts_must_not_exist` entries.
 ///
-/// WHAT: rejects empty entries and normalises each path to forward slashes in one pass.
-/// WHY: keeps absence-contract paths comparable to built-artifact paths and catches
+/// WHAT: rejects empty or non-portable entries and stores each validated portable spelling.
+/// WHY: keeps absence-contract paths identical to the built-artifact index keys and catches
 ///      degenerate expectations early at parse time.
 fn parse_artifacts_must_not_exist(
     path: &Path,
@@ -1195,7 +1236,13 @@ fn parse_artifacts_must_not_exist(
                 context
             )));
         }
-        normalized.push(portable_path_text(raw_path));
+
+        normalized.push(parse_authored_output_path(
+            path,
+            context,
+            "'artifacts_must_not_exist' entry",
+            raw_path,
+        )?);
     }
 
     Ok(normalized)

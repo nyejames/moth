@@ -5,6 +5,8 @@ use crate::builder_surface::external_import_providers::registry::ExternalImportP
 use crate::builder_surface::{
     OptionalSourceKind, SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry,
 };
+#[cfg(unix)]
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
@@ -27,8 +29,9 @@ use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Creates a temp directory tree and a resolver for testing.
 struct TestHarness {
@@ -1314,4 +1317,65 @@ fn source_package_logical_paths_use_the_deepest_matching_root() {
         .expect("nested source-backed package file should have a logical path");
 
     assert_eq!(logical_path, PathBuf::from("inner/file.moth"));
+}
+
+#[test]
+fn logical_path_outside_roots_reports_portable_host_paths() {
+    let h = TestHarness::new();
+    let outside = Path::new("/moth-test-outside/back-slash.moth");
+
+    let error = h
+        .resolver
+        .logical_path_for_canonical_file(outside)
+        .expect_err("a file outside both configured roots must not gain a logical path");
+
+    assert_eq!(error.host_path.as_deref(), Some(outside));
+    assert_eq!(
+        error.message(),
+        format!(
+            "Source file '{}' is outside both entry root '{}' and project root '{}'",
+            portable_path_text(outside),
+            portable_path_text(h.resolver.entry_root()),
+            portable_path_text(&h.project_root),
+        )
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn unrecognized_resolved_source_kind_reports_the_canonical_target() {
+    let mut h = TestHarness::new();
+    fs::create_dir_all(h.project_root.join("src/pages/deep")).expect("target folder should exist");
+    let target = h.project_root.join("src/pages/deep/back-slash.txt");
+    fs::write(&target, "content").expect("target should be written");
+    // A different relative depth keeps case validation from reporting the rename first, so the
+    // resolution reaches the canonical source-kind check under test.
+    let alias = h.project_root.join("src/pages/alias.moth");
+    std::os::unix::fs::symlink(&target, &alias).expect("alias symlink should be created");
+    let canonical_target = fs::canonicalize(&target).expect("target should canonicalize");
+    let declaring_source = h.declaring_source();
+    let path = h.make_path(&["pages", "alias"]);
+
+    let error = h
+        .resolver
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
+        .expect_err("a canonical target whose extension names no source kind must fail");
+    let DependencyPathResolutionError::Infrastructure(error) = error else {
+        panic!("an unrecognized canonical target kind must stay on the infrastructure lane");
+    };
+
+    assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(error.host_path.as_deref(), Some(canonical_target.as_path()));
+    assert_eq!(
+        error.message(),
+        format!(
+            "Resolved dependency 'pages/alias' to '{}' but could not determine its source kind.",
+            portable_path_text(&canonical_target)
+        )
+    );
 }

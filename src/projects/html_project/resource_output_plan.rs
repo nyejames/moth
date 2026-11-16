@@ -665,6 +665,9 @@ fn invalid_artefact_output_path(
 
 /// Compiler-owned and provider-declared destinations never carry authored path components, so an
 /// invalid one is a contract breach rather than a user diagnostic.
+///
+/// The message names the path through its Debug spelling because the rejection may be caused by a
+/// native component that portable display text would rewrite into a different path.
 fn invalid_output_path_internal(
     output_path: &Path,
     artefact_kind: &str,
@@ -672,10 +675,7 @@ fn invalid_output_path_internal(
 ) -> PreparedFailure {
     InfrastructureFailure::internal(
         CompilerStage::ProjectBuildAssembly,
-        format!(
-            "HTML {artefact_kind} output path '{}' is invalid: {reason:?}",
-            output_path.display()
-        ),
+        format!("HTML {artefact_kind} output path {output_path:?} is invalid: {reason:?}"),
     )
     .into()
 }

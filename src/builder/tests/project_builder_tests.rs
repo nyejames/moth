@@ -307,15 +307,21 @@ fn warnings_are_returned_as_rendered_lines() {
 #[test]
 fn non_utf8_project_root_returns_infrastructure_error_without_building() {
     let project_root = OsString::from_vec(b"safe-\xFF-root".to_vec());
+    let expected_path_debug = format!("{:?}", Path::new(&project_root));
     let builder = RecordingBuilder::new(BuildBehaviour::Succeed);
 
     let error = build_project(&builder, BuildRequest::new(project_root))
         .expect_err("non-UTF-8 project root should fail the build");
 
     assert_eq!(error.kind(), ErrorKind::Infrastructure);
+    let rendered_error = error.to_string();
     assert!(
-        error.to_string().contains("safe-"),
-        "error should name the rejected root"
+        rendered_error.contains(&expected_path_debug),
+        "error should expose the unrepresentable root bytes: {rendered_error}"
+    );
+    assert!(
+        !rendered_error.contains('\u{FFFD}'),
+        "a non-UTF-8 rejection must not hide offending bytes behind lossy text: {rendered_error}"
     );
     assert_eq!(builder.build_calls.get(), 0);
 }

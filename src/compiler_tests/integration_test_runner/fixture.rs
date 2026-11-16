@@ -15,7 +15,7 @@ use super::{
     WarningExpectation,
 };
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::compiler_tests::integration_test_runner::errors::FixtureLoadError;
 use crate::projects::settings::CONFIG_FILE_NAME;
 use std::collections::{HashMap, HashSet};

@@ -49,7 +49,6 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::utilities::basic::portable_path_text;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -1357,10 +1356,26 @@ fn path_contains_dotdot(
         .any(|component| string_table.resolve(*component) == "..")
 }
 
-/// Strip the file extension from a portable forward-slash source path.
+/// Strip the final component's extension from a portable forward-slash source path.
+///
+/// WHY: the input is already a logical `/` spelling, so a native `Path` round trip adds nothing.
+/// The display conversion it fed also rewrote a literal backslash in a Unix filename into a
+/// separator, collapsing distinct logical identities. Only the final `/` component may change; a
+/// leading dot with no later dot is a dotfile and keeps its name.
 fn extensionless_portable_path(relative_path: &str) -> String {
-    let path = Path::new(relative_path);
-    portable_path_text(path.with_extension(""))
+    let file_name_start = relative_path
+        .rfind('/')
+        .map_or(0, |separator| separator + 1);
+    let file_name = &relative_path[file_name_start..];
+
+    let Some(extension_dot) = file_name.rfind('.') else {
+        return relative_path.to_owned();
+    };
+    if extension_dot == 0 {
+        return relative_path.to_owned();
+    }
+
+    relative_path[..file_name_start + extension_dot].to_owned()
 }
 
 /// Check whether a namespace key is a sub-path of a cross-module entry, indicating a private

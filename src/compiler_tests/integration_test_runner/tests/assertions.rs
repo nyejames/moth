@@ -379,6 +379,64 @@ fn structured_diagnostic_assertions_consume_compiler_identity_and_locations() {
     assert!(result.passed, "{:?}", result.failure_reason);
 }
 
+#[cfg(unix)]
+#[test]
+fn structured_diagnostic_path_assertion_rejects_a_literal_backslash_source_alias() {
+    // `input\main.moth` is one Unix filename at the fixture root, while `input/main.moth` is the
+    // nested source the assertion names. Display text rendered both as `input/main.moth`, so the
+    // alias could satisfy the wrong source identity.
+    let _tmp_fixture_root = tempfile::tempdir().expect("should create temp dir");
+    let fixture_root =
+        fs::canonicalize(_tmp_fixture_root.path()).expect("fixture root should canonicalize");
+    let alias_path = fixture_root.join("input\\main.moth");
+    let source_text = "aa\nbb\ncc\ndddd\n";
+    fs::write(&alias_path, source_text).expect("should write alias source");
+    let entry_path = fixture_root.join("@config.moth");
+
+    let mut string_table = StringTable::new();
+    let mut source_database =
+        SourceDatabase::build([alias_path.as_path()], &entry_path, None, &mut string_table)
+            .expect("alias source identity should build");
+    let source_id = source_database
+        .get_by_canonical_path(&alias_path)
+        .expect("alias source should be registered")
+        .id;
+    source_database
+        .retain_text(source_id, source_text.to_owned())
+        .expect("alias source text should be retained");
+
+    let diagnostic = assignment_target_draft(None, None, Some(test_span(source_id, 7, 1)));
+    let messages = diagnostic_result(
+        vec![diagnostic],
+        string_table,
+        Some(Arc::new(source_database)),
+    );
+    let expectation = structured_diagnostic_expectation(DiagnosticAssertion {
+        code: "MOTH-RULE-0044".to_owned(),
+        occurrence: 1,
+        reason: Some("invalid_assignment_target.immutable_binding".to_owned()),
+        path: Some("input/main.moth".to_owned()),
+        line: Some(3),
+        column: Some(2),
+        count: Some(1),
+        secondary_labels: Vec::new(),
+    });
+
+    let result = validate_failure_result(messages, &expectation, &fixture_root);
+    assert!(
+        !result.passed,
+        "a literal-backslash filename must not satisfy a nested source path"
+    );
+    let reason = result
+        .failure_reason
+        .expect("a path mismatch should explain the alias");
+    assert!(reason.contains("literal backslash"), "{reason}");
+    assert!(
+        reason.contains(&format!("{:?}", Path::new("input\\main.moth"))),
+        "the mismatch must use the source component's Debug spelling: {reason}"
+    );
+}
+
 fn relative_structured_diagnostic_messages(
     scope: &str,
     fixture_root: &Path,
@@ -1075,6 +1133,52 @@ fn nested_golden_validation_compares_relative_paths() {
     assert!(validate_golden_outputs(&build_result, &golden).is_none());
 }
 
+// --- Golden discovery uses native path identity ----------------------------------------------
+//
+// Discovery keys a golden by its validated native entry name. Display text would have rewritten
+// a literal `\` into a separator and replaced non-UTF-8 bytes, so either filename could have
+// satisfied a different, valid nested golden. `tests/fixture.rs` owns the end-to-end alias
+// rejection; this section owns the discovery boundary and its non-UTF-8 entry.
+
+#[cfg(target_os = "linux")]
+#[track_caller]
+fn golden_discovery_rejection(golden_dir: &Path) -> super::super::errors::FixtureLoadError {
+    discover_golden_expectation(golden_dir, None)
+        .expect_err("a golden filename without a portable spelling must be rejected")
+}
+
+// macOS filesystems reject invalid UTF-8 filenames at the syscall boundary, so the discovery
+// rejection can only be exercised where such an entry can exist. Linux permits the name.
+#[cfg(target_os = "linux")]
+#[test]
+fn golden_discovery_rejects_a_non_utf8_filename() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let root = tempfile::tempdir().expect("should create temp dir");
+    let golden_dir = root.path().join("golden");
+    let filename = OsStr::from_bytes(b"page\xff.html");
+    fs::create_dir_all(&golden_dir).expect("should create golden directory");
+    fs::write(golden_dir.join(filename), "<p>lossy</p>\n")
+        .expect("should write golden with a non-UTF-8 filename");
+
+    let error = golden_discovery_rejection(&golden_dir);
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::FixtureContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+    assert!(
+        error.message.contains(&format!("{filename:?}")),
+        "the rejected golden must be spelled with its native bytes: {error}"
+    );
+    assert!(
+        error.message.contains("portable output path"),
+        "the rejection must say golden filenames are output paths: {error}"
+    );
+}
+
 // --- Built-artifact index identity contracts ------------------------------------------------
 //
 // Every success assertion reads artifacts through one index. These tests own the index's
@@ -1167,7 +1271,7 @@ fn artifact_index_rejects_paths_the_output_writer_would_reject() {
     let ArtifactIndexError::InvalidOutputPath { path, reason } = error else {
         panic!("a parent segment is an invalid output path, not {error:?}");
     };
-    assert_eq!(path, "assets/../page.js");
+    assert_eq!(path, format!("{:?}", Path::new("assets/../page.js")));
     assert_eq!(reason, InvalidOutputFolderReason::ParentDirectorySegment);
 }
 
@@ -1187,8 +1291,29 @@ fn artifact_index_rejects_reserved_device_artifact_names() {
     let ArtifactIndexError::InvalidOutputPath { path, reason } = error else {
         panic!("a reserved device name is an invalid output path, not {error:?}");
     };
-    assert_eq!(path, "CON.js");
+    assert_eq!(path, format!("{:?}", Path::new("CON.js")));
     assert_eq!(reason, InvalidOutputFolderReason::InvalidPathComponent);
+}
+
+#[cfg(unix)]
+#[test]
+fn artifact_index_names_a_literal_backslash_path_with_its_debug_spelling() {
+    // `nested\page.js` is one Unix filename, not a nested destination. Rendering it as
+    // `nested/page.js` would name a different, valid output path.
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from("nested\\page.js"),
+        FileKind::Js("// one filename".to_owned()),
+    )]);
+
+    let error = artifact_index_rejection(
+        &build_result,
+        "a literal backslash destination must not be indexed",
+    );
+    let ArtifactIndexError::InvalidOutputPath { path, reason } = error else {
+        panic!("a literal backslash is an invalid output path, not {error:?}");
+    };
+    assert_eq!(reason, InvalidOutputFolderReason::InvalidPathComponent);
+    assert_eq!(path, format!("{:?}", Path::new("nested\\page.js")));
 }
 
 #[test]
@@ -1270,13 +1395,13 @@ fn artifact_index_rejections_name_the_offending_paths() {
     );
 
     let invalid = ArtifactIndexError::InvalidOutputPath {
-        path: "assets/../page.js".to_owned(),
+        path: format!("{:?}", Path::new("assets/../page.js")),
         reason: InvalidOutputFolderReason::ParentDirectorySegment,
     }
     .to_string();
     assert!(
-        invalid.contains("assets/../page.js") && invalid.contains("ParentDirectorySegment"),
-        "invalid-destination rejection must name the path and the writer's reason: {invalid}"
+        invalid.contains("\"assets/../page.js\"") && invalid.contains("ParentDirectorySegment"),
+        "invalid-destination rejection must name the Debug path and the writer's reason: {invalid}"
     );
 }
 

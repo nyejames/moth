@@ -21,7 +21,8 @@ mod tests;
 
 pub(crate) use output_path::{
     OutputPathIdentity, PortableRelativePath, component_identity_prefixes, output_path_identity,
-    parse_relative_path, path_starts_with_component_identity, percent_encode_url_segment,
+    parse_native_relative_path, parse_relative_path, path_starts_with_component_identity,
+    percent_encode_url_segment,
 };
 pub(crate) use output_roots::{
     DEFAULT_DEV_OUTPUT, DEFAULT_RELEASE_OUTPUT, DEV_OUTPUT_FIELD, OutputRootSettings,

@@ -18,6 +18,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, SourceDatabaseBuilder, SourceId, SourceKind, SourceSpanBuilders,
 };
+use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
@@ -56,7 +57,7 @@ impl<'a, 'sources> BoundaryProviderSources<'a, 'sources> {
                     CompilerStage::ProjectBuildAssembly,
                     format!(
                         "provider-owned source {} is absent from the boundary source table",
-                        canonical_path.display()
+                        portable_path_text(canonical_path)
                     ),
                 )
                 .into()
@@ -166,7 +167,7 @@ impl ProviderOwnedSourceStaging {
                         CompilerStage::ProjectBuildAssembly,
                         format!(
                             "provider-owned source {} is absent from the finalized source table",
-                            entry.canonical_path.display()
+                            portable_path_text(&entry.canonical_path)
                         ),
                     )
                 })?;
@@ -175,7 +176,7 @@ impl ProviderOwnedSourceStaging {
                     CompilerStage::ProjectBuildAssembly,
                     format!(
                         "provider-owned source {} lost its retained text",
-                        entry.canonical_path.display()
+                        portable_path_text(&entry.canonical_path)
                     ),
                 )
             })?;
@@ -192,7 +193,7 @@ impl ProviderOwnedSourceStaging {
                         CompilerStage::SourceLoading,
                         format!(
                             "provider-owned source {} could not retain its text: {other:?}",
-                            entry.canonical_path.display()
+                            portable_path_text(&entry.canonical_path)
                         ),
                     ),
                 });
