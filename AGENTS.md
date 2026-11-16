@@ -116,7 +116,7 @@ Exceptions:
 - Delete a plan under `docs/roadmap/plans/` in the same commit that completes it, and remove its roadmap entry. Do not mark it complete and commit that state. See `Adding and maintaining plans` in `docs/roadmap/roadmap.md`.
 - Structured audit tasks update their report, the open-findings index and the audit log as required by `docs/roadmap/audit-guide.md`.
 - Implementation and verification tasks mark an audit-log row stale when they materially change what it records. Only an audit run may record new coverage.
-- Log a bug found during unrelated or out-of-scope work in `docs/bug-reports.md` rather than fixing it in place or leaving it unrecorded.
+- Log a bug found during unrelated or out-of-scope work in `docs/bug-reports.md` rather than fixing it in place or leaving it unrecorded. Remove its entry in the commit that resolves it.
 
 Report documentation made inaccurate by implementation as a separate follow-up. Do not edit generated files under `docs/_release/**` directly. Rebuild them through the compiler.
 

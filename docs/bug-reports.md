@@ -1,6 +1,6 @@
 # Bug reports
 
-A casual log of bugs and limitations found during other work and left for later investigation. Each entry names where the problem lives, what was observed and a starting point for the fix.
+A casual log of bugs and limitations found during other work and left for later investigation. Each entry names where the problem lives, what was observed and a starting point for the fix. Remove an entry in the commit that resolves it.
 
 ## Open
 
