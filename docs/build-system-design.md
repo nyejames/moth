@@ -373,7 +373,7 @@ Dependency resolution has no precedence, nearest-match shadowing or ordered fall
 
 `core/` and `builder/` are reserved package namespace roots with one owning origin each. Core owns every registered path below `core/`, Builder owns every registered path below `builder/`. Builder registrations use an explicit path below the root, such as `@builder/web/site` or `@builder/game`. Neither exact root is importable, and ProjectLocal or Dependency packages cannot claim either root, including case-only variants. Registration rejects empty components, exact reserved-root registrations, case-insensitive equal overlaps, ancestor or descendant overlaps and cross-origin claims. The rule covers source-backed and binding-backed registrations alike, so the backing never changes namespace ownership.
 
-Project-local structural claims reserve only importable names. A local normal or support facade, importable helper or alias that claims `core` or `builder` under case folding is rejected. Entry-only modules, their private helpers, directories containing only entry modules and plain asset directories stay legal because they publish no importable package identity. A directory name alone never triggers that rejection.
+Project-local structural claims reserve only importable names. A local normal or support facade, importable helper or alias that claims `core` or `builder` under case folding is rejected. Entry-only modules, their private helpers, directories containing only entry modules and plain asset directories stay legal because they publish no importable package identity. A directory name alone never triggers that rejection. An import whose first component is either root resolves only to a registered package, never to a local source, so a private helper below a local `core/` directory stays unreachable through `@core`.
 
 A separate exact-path rule protects registered source package identities. A project folder whose full path matches a registered source package path, such as `core/html/` or `builder/web/site/`, collides whichever module owns it, even when the folder holds no importable surface. Comparison ignores ASCII case. A binding-backed package has no source module, so an asset folder at `builder/web/canvas/` or `core/io/` stays legal. An ancestor folder such as `core/` alone, or an unrelated asset directory, stays legal. Unrelated local `html/`, `css/`, `styles/` and `web/` folders also stay legal. Copying a source package folder to a non-colliding local path grants ordinary support-facade visibility rather than Core or Builder identity, while copying a binding asset folder creates no package.
 
@@ -386,9 +386,11 @@ Package origin and backing are independent:
 | Axis | Values |
 |---|---|
 | Origin | Core, Builder, ProjectLocal or Dependency. |
-| Backing | MothSource or ExternalBinding. |
+| Backing | MothSource, ExternalBinding or HostBinding. |
 
-For example, `@core/html` and `@core/css` are Core/MothSource, `@builder/web/site` is Builder/MothSource, `@builder/web/canvas` is Builder/ExternalBinding, a virtual Core IO package is Core/ExternalBinding, a support facade is ProjectLocal/MothSource and an annotated project JavaScript file is ProjectLocal/ExternalBinding.
+ExternalBinding and HostBinding packages are both binding-backed and share the external package registry. A backend lowers or provides every ExternalBinding symbol itself. A HostBinding package is implemented by native Rust host functions registered through the builder SDK, so host requirement production names only HostBinding packages as native host imports.
+
+For example, `@core/html` and `@core/css` are Core/MothSource, `@builder/web/site` is Builder/MothSource, `@builder/web/canvas` is Builder/ExternalBinding, a builder SDK host package such as `@builder/game/platform` is Builder/HostBinding, a virtual Core IO package is Core/ExternalBinding, a support facade is ProjectLocal/MothSource and an annotated project JavaScript file is ProjectLocal/ExternalBinding.
 
 Classification records provenance/implementation. It changes no namespace precedence, visibility, facade privacy, dependency syntax or receiver semantics. Source and binding registries remain separate because their discovery and runtime contracts differ.
 

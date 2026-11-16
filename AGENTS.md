@@ -38,6 +38,7 @@ Use:
 - `docs/docs/progress/@entry.moth` for current implementation status and coverage
 - `docs/roadmap/roadmap.md` for sequencing, active plans, genuinely deferred design, and the rules for adding and maintaining plans
 - `docs/roadmap/audit-log.md` for what has been audited, when, and what has never been audited
+- `docs/bug-reports.md` for bugs found during other work that are outside the current task's scope
 - `index.md` only as a file and module locator
 
 The public unsuffixed files under `docs/docs/design-scope/` own accepted deferred implementation, open questions and excluded language boundaries. The progress matrix tracks implementation of accepted design only.
@@ -115,6 +116,7 @@ Exceptions:
 - Delete a plan under `docs/roadmap/plans/` in the same commit that completes it, and remove its roadmap entry. Do not mark it complete and commit that state. See `Adding and maintaining plans` in `docs/roadmap/roadmap.md`.
 - Structured audit tasks update their report, the open-findings index and the audit log as required by `docs/roadmap/audit-guide.md`.
 - Implementation and verification tasks mark an audit-log row stale when they materially change what it records. Only an audit run may record new coverage.
+- Log a bug found during unrelated or out-of-scope work in `docs/bug-reports.md` rather than fixing it in place or leaving it unrecorded.
 
 Report documentation made inaccurate by implementation as a separate follow-up. Do not edit generated files under `docs/_release/**` directly. Rebuild them through the compiler.
 
