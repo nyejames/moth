@@ -35,9 +35,9 @@ A qualified reference creates an early provider-dependency fact, not a dependenc
 - **Support package**: scoped `@package.moth` packages are depended on by package name. Consumers never encode ancestor paths. A support-only child remains importable only by eligible consumers through its support surface.
 - **Entry-only child module**: an entry-only directory has no importable normal interface. A dependency that requests one receives a missing-surface diagnostic. The entry is never activated.
 - **Core binding-backed package**: `@core/math`, `@core/text` and current peers are registered by the builder.
-- **Core source-backed package**: `@html` and `@styles` are compiler-provided Moth source packages and the fixed template prelude providers.
-- **Builder source-backed package**: `@web/site` belongs to the HTML builder.
-- **Builder binding-backed package**: `@web/canvas` is a builder-owned runtime package.
+- **Core source-backed package**: `@core/html` and `@core/css` are compiler-provided Moth source packages and the fixed template prelude providers. Each publishes through a directly contained `@package.moth`.
+- **Builder source-backed package**: `@builder/web/site` belongs to the HTML builder and publishes through a directly contained `@package.moth`.
+- **Builder binding-backed package**: `@builder/web/canvas` is a builder-owned runtime package with no source facade.
 - **JavaScript file**: project-local annotated JavaScript files require `.js` and a builder external import provider. The `.js` extension is kept.
 
 ### Resolution rules
@@ -49,9 +49,9 @@ A qualified reference creates an early provider-dependency fact, not a dependenc
 - `.moth`, `.mtf` and `.md` source dependency paths are extensionless.
 - Direct `.js` dependency clauses keep the `.js` extension.
 - Scoped support packages are injected by package name, not physical ancestor paths.
-- Core and builder runtime packages use their registered package path.
+- Core and builder runtime packages use their registered package path. The exact `@core` and `@builder` roots are not package targets.
 - Specific symbol bindings use flat direct selections. Direct symbol paths such as `@core/math/sin` remain invalid.
-- Direct dependency clauses on `@mod.moth`, `@package.moth`, `@entry.moth` and `config.moth` are rejected. Depend on the module directory instead.
+- Direct dependency clauses on `@mod.moth`, `@package.moth`, `@entry.moth` and `@config.moth` are rejected. Depend on the module directory instead.
 - `@@name` is invalid. The leading `@` starts a dependency path and is not part of the module name.
 - A bare explicit-extension clause requires `as` or at least one direct selection. An explicit-extension clause with no registered provider gets a targeted diagnostic.
 - A recognised source extension used with an explicit extension gets an extensionless-source diagnostic. `@docs/intro.mtf content` stays invalid as a clause even though `@docs/intro.mtf` is a valid file value in expression position.

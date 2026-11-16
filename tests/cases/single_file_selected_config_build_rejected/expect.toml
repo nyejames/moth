@@ -1,0 +1,21 @@
+entry = "@config.moth"
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-CONFIG-0001"]
+message_contains = ["The build-only config file '@config.moth'", "cannot be selected as a single-file entry"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-CONFIG-0001"
+reason = "invalid_config.config_file_selected_as_entry"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-CONFIG-0001"]
+message_contains = ["The build-only config file '@config.moth'", "cannot be selected as a single-file entry"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-CONFIG-0001"
+reason = "invalid_config.config_file_selected_as_entry"

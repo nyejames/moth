@@ -57,7 +57,7 @@ Source stays target agnostic. The HTML builder may choose JavaScript, Wasm or mi
 
 ### Output folders
 
-The builder generates output folders and manages them through manifests. Builder settings in `config.moth` own output paths. HTML defaults to `_dev` for development and `_release` for release builds. Every directory output root must be hidden from source discovery. Treat generated folders as build artefacts, not source.
+The builder generates output folders and manages them through manifests. Builder settings in `@config.moth` own output paths. HTML defaults to `_dev` for development and `_release` for release builds. Every directory output root must be hidden from source discovery. Treat generated folders as build artefacts, not source.
 
 ### Release versus development output
 

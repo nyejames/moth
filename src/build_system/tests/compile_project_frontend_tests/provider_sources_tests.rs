@@ -410,7 +410,7 @@ fn provider_created_package_registry_survives_into_module() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -472,7 +472,7 @@ fn reexported_js_final_calls_retain_provider_runtime_candidate() {
     let dir = temp.path().to_path_buf();
     fs::create_dir(dir.join("components")).expect("should create components directory");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"js_reexport_probe\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -602,7 +602,7 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -664,7 +664,7 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -750,13 +750,13 @@ fn entry_runtime_metadata_ignores_unused_web_canvas_binding() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
         dir.join("@entry.moth"),
-        "@html canvas\ncanvas_markup #= canvas\nvalue = 1\n",
+        "@core/html canvas\ncanvas_markup #= canvas\nvalue = 1\n",
     )
     .expect("should write page");
 
@@ -766,8 +766,8 @@ fn entry_runtime_metadata_ignores_unused_web_canvas_binding() {
     let mut frontend_surface = builder.frontend_surface();
     let canvas_package_id = frontend_surface
         .binding_packages
-        .resolve_package_id("@web/canvas")
-        .expect("@web/canvas should be registered for HTML projects");
+        .resolve_package_id("@builder/web/canvas")
+        .expect("@builder/web/canvas should be registered for HTML projects");
     let mut warning_owner = fresh_warning_owner();
 
     let modules = successful_compilation_value(compile_project_frontend(
@@ -797,7 +797,7 @@ fn entry_runtime_metadata_ignores_unused_web_canvas_binding() {
             .external_import_candidates
             .iter()
             .any(|import| import.package_id == canvas_package_id),
-        "module link facts should retain the available @web/canvas runtime candidate"
+        "module link facts should retain the available @builder/web/canvas runtime candidate"
     );
     let project_compilation = ProjectCompilation::from_frontend(modules)
         .expect("compiled module should assemble an entry");
@@ -812,7 +812,7 @@ fn entry_runtime_metadata_ignores_unused_web_canvas_binding() {
             .external_imports
             .iter()
             .all(|import| import.package_id != canvas_package_id),
-        "entry runtime metadata should exclude the unused @web/canvas binding for pure @html markup"
+        "entry runtime metadata should exclude the unused @builder/web/canvas binding for pure @core/html markup"
     );
 }
 
@@ -823,7 +823,7 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -879,17 +879,17 @@ fn linked_module_js_lowering_is_observed_separately() {
     let package_root = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
         dir.join("@entry.moth"),
-        "@phase6helper helper\nvalue = helper()\n",
+        "@builder/test/phase6helper helper\nvalue = helper()\n",
     )
     .expect("should write page");
     fs::write(
-        package_root.join("@mod.moth"),
+        package_root.join("@package.moth"),
         "$export\nhelper || -> I32:\n    return 7\n;\n",
     )
     .expect("should write package module");
@@ -900,7 +900,11 @@ fn linked_module_js_lowering_is_observed_separately() {
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
-        .register_filesystem_root("phase6helper", package_root.clone(), PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/test/phase6helper",
+            package_root.clone(),
+            PackageOrigin::Builder,
+        )
         .expect("test source root should register");
 
     let timing_session =
@@ -950,7 +954,7 @@ fn provider_backed_direct_selection_compiles_and_reuses_cache() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1001,7 +1005,7 @@ fn provider_backed_namespace_binding_exposes_function_and_type_members() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1048,7 +1052,7 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
     fs::create_dir_all(dir.join("a")).expect("should create a dir");
     fs::create_dir_all(dir.join("b")).expect("should create b dir");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1105,7 +1109,7 @@ fn provider_backed_opaque_type_passes_to_same_package_function() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1147,7 +1151,7 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
     fs::create_dir_all(dir.join("a")).expect("should create a dir");
     fs::create_dir_all(dir.join("b")).expect("should create b dir");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1191,7 +1195,7 @@ fn directory_project_rejects_retired_entry_root() {
     // The selected directory is the source root; an authored entry_root must be rejected
     // with a migration diagnostic instead of selecting a second root.
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n    entry_root = \"nonexistent\",\n)\n",
     )
     .expect("should write config");
@@ -1200,7 +1204,7 @@ fn directory_project_rejects_retired_entry_root() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
 
-    let config_path = dir.join("config.moth");
+    let config_path = dir.join("@config.moth");
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = crate::build_system::project_config::ProjectConfigParseServices {
@@ -1249,7 +1253,7 @@ fn html_js_provider_namespace_binding_resolves() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1296,7 +1300,7 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources() {
     fs::create_dir_all(src.join("second")).expect("should create second module");
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1422,7 +1426,7 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources_when_
     fs::create_dir_all(src.join("a-b")).expect("should create a-b module");
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1544,7 +1548,7 @@ fn html_js_provider_direct_selection_resolves() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1588,7 +1592,7 @@ fn html_js_provider_direct_alias_for_function_and_opaque_type_resolves() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1632,7 +1636,7 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1685,7 +1689,7 @@ fn html_js_provider_missing_export_keyword_points_into_the_js_source() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1785,7 +1789,7 @@ fn html_js_provider_repeated_imports_reuse_cache() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1838,7 +1842,7 @@ fn html_js_provider_fallible_function_with_error_return_compiles() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");

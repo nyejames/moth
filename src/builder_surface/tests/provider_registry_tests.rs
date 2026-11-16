@@ -52,7 +52,7 @@ impl ExternalImportProvider for DummyProvider {
         let package_id = context
             .package_registry
             .register_package(
-                "@test/dummy",
+                "@builder/test/dummy",
                 crate::builder_surface::PackageOrigin::Builder,
             )
             .expect("test package registration should succeed");
@@ -226,7 +226,7 @@ fn dummy_provider_resolves_import_with_all_fields() {
     };
 
     let request = ExternalImportRequest {
-        import_path: "@test/dummy".to_owned(),
+        import_path: "@builder/test/dummy".to_owned(),
         logical_source_path: PortableResourcePath::from_portable_spelling("dummy.js".to_owned())
             .expect("fixture logical path should be portable"),
         canonical_source_path: PathBuf::from("/test/dummy.js"),

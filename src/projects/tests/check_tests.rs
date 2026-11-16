@@ -237,7 +237,7 @@ fn check_reports_missing_config_input_from_unselected_source() {
     let source_root = root.to_path_buf();
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
@@ -269,7 +269,7 @@ fn check_rejects_unselected_runtime_template_as_non_root_source() {
     let source_root = root.to_path_buf();
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
@@ -298,7 +298,7 @@ fn check_compiles_unselected_same_module_source_closure() {
     let source_root = root.to_path_buf();
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
@@ -368,7 +368,7 @@ fn config_ast_timers_use_dedicated_identities() {
     let source_root = root.to_path_buf();
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
@@ -424,7 +424,7 @@ fn check_retains_source_package_warning() {
     fs::create_dir_all(&package).expect("should create package root");
     fs::create_dir_all(&src).expect("should create entry root");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -516,7 +516,7 @@ result I32 = choose_generic(1)
 fn check_accepts_a_directory_with_only_an_api_facade() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
-    fs::write(root.join("config.moth"), DEFAULT_PAGE_CONFIG).expect("should write project config");
+    fs::write(root.join("@config.moth"), DEFAULT_PAGE_CONFIG).expect("should write project config");
     fs::write(root.join("@mod.moth"), "$export\nanswer #= 42\n")
         .expect("should write the API facade");
 
@@ -596,7 +596,7 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
             symlink(&outside, &output_root).expect("should create sibling symlink");
         }
         fs::write(
-            root.join("config.moth"),
+            root.join("@config.moth"),
             "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
         )
         .expect("should write config");
@@ -629,7 +629,7 @@ fn write_page_project(_prefix: &str, source: &str) -> (tempfile::TempDir, PathBu
     let root = temp.path().to_path_buf();
     let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
-    fs::write(root.join("config.moth"), DEFAULT_PAGE_CONFIG).expect("should write config");
+    fs::write(root.join("@config.moth"), DEFAULT_PAGE_CONFIG).expect("should write config");
     fs::write(src.join("@entry.moth"), source).expect("should write @entry.moth source");
     (temp, root)
 }
@@ -638,7 +638,7 @@ fn write_page_project(_prefix: &str, source: &str) -> (tempfile::TempDir, PathBu
 fn write_page_project_with_module_limit(limit: &str, source: &str) -> (tempfile::TempDir, PathBuf) {
     let (temp, root) = write_page_project("module_limit", source);
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         format!(
             "project #= (\n    name = \"docs\",\n        max_errors_per_module = {limit},\n)\nhtml #= ()\n"
         ),
@@ -758,7 +758,7 @@ if value is:
         .map(|entry| entry.expect("dirent").file_name())
         .collect();
     assert!(
-        remaining.iter().any(|name| name == "config.moth")
+        remaining.iter().any(|name| name == "@config.moth")
             && remaining.iter().any(|name| name == "@entry.moth"),
         "check should leave the authored config and source tree, got {remaining:?}"
     );
@@ -1201,7 +1201,7 @@ fn check_source_on_budgeted_thread(source: String) -> (Vec<String>, usize) {
     // source shape is the only channel the child re-execution has.
     let check_target = if source.contains("$export\n") {
         let root = temp.path().to_path_buf();
-        fs::write(root.join("config.moth"), DEFAULT_PAGE_CONFIG)
+        fs::write(root.join("@config.moth"), DEFAULT_PAGE_CONFIG)
             .expect("should write project config");
         fs::write(root.join("@mod.moth"), source).expect("should write API facade");
         root
@@ -1369,7 +1369,7 @@ fn diagnostic_recovery_request_policy_isolation() {
 
     // A second request in the same process sees the rewritten config, applies the default
     // allowance and starts counting from zero.
-    fs::write(root.join("config.moth"), DEFAULT_PAGE_CONFIG).expect("should write default config");
+    fs::write(root.join("@config.moth"), DEFAULT_PAGE_CONFIG).expect("should write default config");
     let mut default_report = None;
     let default_completion = run_check_command(
         root_text,
@@ -1405,7 +1405,7 @@ fn diagnostic_recovery_request_policy_isolation() {
 
     // A third request disables both counts. The fresh request retains every independent body and
     // carries no stop from either earlier request.
-    fs::write(root.join("config.moth"), UNLIMITED_PAGE_CONFIG)
+    fs::write(root.join("@config.moth"), UNLIMITED_PAGE_CONFIG)
         .expect("should write unlimited config");
     let mut unlimited_report = None;
     let unlimited_completion = run_check_command(
@@ -1662,7 +1662,7 @@ fn eager_check_only_preparation_stops_at_stage0_before_the_project_cutoff() {
     let (_temp, root) = write_page_project("eager_preparation", "[:site]\n");
     let source_root = root.to_path_buf();
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 1,\n    max_errors_per_module = 1,\n)\nhtml #= ()\n",
     )
     .expect("should write two-limit config");

@@ -1,4 +1,4 @@
-@test/pkg-a fallible_custom_error_ok
+@builder/test/pkg-a fallible_custom_error_ok
 
 value = fallible_custom_error_ok() catch:
     then "fallback"

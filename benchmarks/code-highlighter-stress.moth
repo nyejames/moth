@@ -9,7 +9,7 @@ code_snippet #= [$code "moth":
 @core/io print, line, debug
 @core/math sin, cos, tan, PI, TAU, E
 @core/text length, contains, prefix, suffix
-@web/canvas Canvas, draw_rect, fill_circle, stroke_line
+@builder/web/canvas Canvas, draw_rect, fill_circle, stroke_line
 @project config, version, build_number
 @vendor/drawing.js render_scene, apply_filter
 
@@ -545,7 +545,7 @@ name ~= "Priya"
 
 -- imports with paths and resources
 @core/io print
-@web/canvas Canvas
+@builder/web/canvas Canvas
 @project/config theme
 @vendor/assets/logo.png
 
@@ -995,7 +995,7 @@ item_template #= [: <li>[$slot]</li> ]
 @core/text length as len, contains as has
 @core/collections Map as Dict
 @core/time Duration as Span
-@web/canvas Canvas as Board
+@builder/web/canvas Canvas as Board
 
 -- namespace paths
 io.print
@@ -1458,7 +1458,7 @@ compose |a Maybe I32, b Maybe I32| -> Maybe I32:
 @core/collections Map, map_from, keys, values
 @core/random random_float, random_int
 @core/time Duration, Timestamp, now
-@web/canvas Canvas, draw_rect, fill_circle, stroke_line, clear
+@builder/web/canvas Canvas, draw_rect, fill_circle, stroke_line, clear
 
 -- Example: module exports
 $export

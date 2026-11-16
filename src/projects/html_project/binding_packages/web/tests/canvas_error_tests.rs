@@ -12,7 +12,7 @@ fn canvas_failures_keep_their_codes_and_messages() {
         "canvas",
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/packages/web/canvas/canvas.js"
+            "/packages/builder/web/canvas/canvas.js"
         )),
         r#"
 const expectedContext = {};

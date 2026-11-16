@@ -3,7 +3,7 @@
 $export
 local_center #= "project local only"
 
--- Same spelling as the official `@styles` prelude constant, but exported as a runtime function:
+-- Same spelling as the official `@core/css` prelude constant, but exported as a runtime function:
 -- the `.mtf` body must keep binding the official constant rather than this package's name.
 $export
 center || -> String:

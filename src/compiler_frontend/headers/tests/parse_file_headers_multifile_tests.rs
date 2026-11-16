@@ -366,7 +366,7 @@ fn explicit_extension_provider_requires_alias_or_selection() {
 fn dependency_clause_is_rejected_in_config_source() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("config.moth");
+    let file_path = PathBuf::from("@config.moth");
     let options = HeaderParseOptions {
         selected_file: None,
         ..Default::default()

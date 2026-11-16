@@ -1884,7 +1884,7 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
 #[test]
 fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
     let mut project = failure_project(
-        "@test/default measure\n\
+        "@builder/test/default measure\n\
          plain |value F64| -> String:\n\
              label String = cast measure(value)\n    return label\n;\n\
          escaping |value F64, left I32, right I32| -> String:\n\
@@ -5253,7 +5253,7 @@ fn implicit_failure_zero_success_statement_catch_covers_host_argument_evaluation
 #[test]
 fn implicit_failure_zero_success_host_catch_lowers_pending_numeric_argument() {
     let mut project = failure_project(
-        "@test/default consume\n\
+        "@builder/test/default consume\n\
          recover |left I32, right I32|:\n\
              consume(left * right) catch:\n        io.line(\"fallback\")\n    ;\n;\n",
     );
@@ -5324,7 +5324,7 @@ fn implicit_failure_zero_success_host_catch_lowers_pending_numeric_argument() {
 #[test]
 fn implicit_failure_catches_keep_external_float_checks_on_function_boundary() {
     let mut project = failure_project(
-        "@test/default measure\n\
+        "@builder/test/default measure\n\
          Failure = | message String |\n\
          load |value F64| -> F64, Failure!:\n    return value\n;\n\
          recover |value F64| -> F64:\n\
@@ -5363,7 +5363,7 @@ fn implicit_failure_catches_keep_external_float_checks_on_function_boundary() {
     assert_eq!(validation, NumericFailureMode::Trap);
 
     let mut project = failure_project(
-        "@test/default measure\n\
+        "@builder/test/default measure\n\
          load |value F64| -> F64, Error!:\n    return value\n;\n\
          recover |value F64| -> F64:\n\
              result = load(measure(value)) catch then 0.0\n    return result\n;\n",

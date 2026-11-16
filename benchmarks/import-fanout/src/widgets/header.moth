@@ -1,4 +1,4 @@
-@core/constants app_name
+@shared/constants app_name
 @utils/formatting format_label as label
 
 render_header |title String| -> String:

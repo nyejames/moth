@@ -29,8 +29,6 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Sequenced work
 
-- [Core/Builder package namespaces and config filename](./plans/core-builder-package-and-config-naming-plan.md) - Queued after scope-closing: Rename `config.moth` to `@config.moth` while keeping `@project`, require `@package.moth` for registered source packages, move HTML/CSS to `@core/html` and `@core/css`, group the web packages under `@builder/web/` and enforce namespace ownership. This unlocks parallel HTML/CSS package API work.
-
 - [Constraints and fast arithmetic](./plans/constraints-and-fast-math-plan.md) - Queued: Implement compiler-owned `$fast_math`, transitive `$safe_math` and `$infallible` constraints with portable fast integer and floating-point semantics. Ordinary arithmetic remains checked, Dec retains its ordinary behaviour and semantic traps follow the execution-instance fault policy.
 
 - [Numeric optimisation](./plans/numeric-optimisation-plan.md) - Queued after constraints and fast arithmetic: Remove redundant numeric result carriers, error branches and runtime checks through existing proof and backend-lowering systems. Preserve source semantics and measure performance improvements before extending the optimiser.
@@ -254,7 +252,7 @@ After the first `@core/time` JavaScript slice:
 After the canvas reachability refactor:
 
 - JS-backed external package APIs
-- Wasm implementations for JS-backed packages such as `@web/canvas`
+- Wasm implementations for JS-backed packages such as `@builder/web/canvas`
 - current reachability is artefact-planning correctness, not general JS tree shaking or minification
 
 ## Source-package JavaScript provider identity

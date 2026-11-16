@@ -15,13 +15,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The Moth source package directory the fixture builder installs.
-const SOURCE_PACKAGE_DIR: &str = "moth/game";
+const SOURCE_PACKAGE_DIR: &str = "moth/builder/game/core";
 
 /// The project fixture directory, copied out so publication never writes into this crate.
 const PROJECT_FIXTURE_DIR: &str = "moth/project";
 
 /// The project fixture files the build reads. A facade-only project is a valid SDK target.
-const PROJECT_FILES: &[&str] = &["config.moth", "@package.moth"];
+const PROJECT_FILES: &[&str] = &["@config.moth", "@package.moth"];
 
 /// The exact artefact the fixture publishes while native Wasm compilation is unavailable.
 const EXPECTED_STATUS_ARTEFACT: &str = concat!(

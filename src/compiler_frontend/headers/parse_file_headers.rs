@@ -121,7 +121,7 @@ pub fn parse_file_headers_with_table(
 
     let mut scratch = Vec::new();
     let source_path = path_fork.render_native(source_file, string_table, &mut scratch);
-    // `config.moth` stays a fixed build-only source name. It is not a module root role, so it
+    // `@config.moth` stays a fixed build-only source name. It is not a module root role, so it
     // cannot come from the Stage 0 role inventory.
     let is_config_file = source_path
         .file_name()
@@ -398,8 +398,8 @@ fn collect_source_build_config_contracts(
     let mut diagnostics = DiagnosticBag::new();
 
     for output in prepared_files {
-        // The config.moth source has its own declaration-owned contract consumer. Leaving its
-        // top-level contract diagnostics on that path keeps config.moth semantics unchanged.
+        // The `@config.moth` source has its own declaration-owned contract consumer. Leaving its
+        // top-level contract diagnostics on that path keeps config semantics unchanged.
         let is_config_file = path_fork
             .component(output.source_file)
             .is_some_and(|name| file_name_is_config_file(string_table.resolve(name)));

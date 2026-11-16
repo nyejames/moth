@@ -34,32 +34,32 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let default_line = "limit #I32 = 2147483648";
     let package_source = format!(
-        "$config\n{default_line}\n@warnpkg value\n$export\nrun || -> I32:\n    return 1\n;\n"
+        "$config\n{default_line}\n@builder/test/warnpkg value\n$export\nrun || -> I32:\n    return 1\n;\n"
     );
     let warning_package_source = "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n";
-    let consumer_source = "@broken run\nvalue = run()\n";
+    let consumer_source = "@builder/test/broken run\nvalue = run()\n";
 
     for (entry_mode, direct_file) in [("ordinary direct file", true), ("directory", false)] {
         let temporary_directory = tempfile::tempdir().expect("should create temporary project");
         let project_root = temporary_directory.path().to_path_buf();
         let source_root = project_root.join("src");
-        let package_root = project_root.join("packages/broken");
+        let package_root = project_root.join("packages/builder/test/broken");
         fs::create_dir_all(&source_root).expect("should create project source root");
-        let warning_package_root = project_root.join("packages/warnpkg");
+        let warning_package_root = project_root.join("packages/builder/test/warnpkg");
         fs::create_dir_all(&warning_package_root)
             .expect("should create earlier warning source package root");
         fs::write(
-            warning_package_root.join("@mod.moth"),
+            warning_package_root.join("@package.moth"),
             warning_package_source,
         )
         .expect("should write earlier warning source package");
         fs::create_dir_all(&package_root).expect("should create source package root");
         fs::write(
-            project_root.join("config.moth"),
+            project_root.join("@config.moth"),
             "project #= (name = \"docs\")\nhtml #= ()\n",
         )
         .expect("should write project config");
-        fs::write(package_root.join("@mod.moth"), &package_source)
+        fs::write(package_root.join("@package.moth"), &package_source)
             .expect("should write invalid source-package config default");
 
         let entry = if direct_file {
@@ -79,11 +79,15 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
         let mut frontend_surface = BuilderSurface::with_mandatory_core();
         frontend_surface
             .source_packages
-            .register_filesystem_root("broken", package_root, PackageOrigin::Builder)
+            .register_filesystem_root("builder/test/broken", package_root, PackageOrigin::Builder)
             .expect("broken test source root should register");
         frontend_surface
             .source_packages
-            .register_filesystem_root("warnpkg", warning_package_root, PackageOrigin::Builder)
+            .register_filesystem_root(
+                "builder/test/warnpkg",
+                warning_package_root,
+                PackageOrigin::Builder,
+            )
             .expect("warning test source root should register");
 
         let result = compile_project_frontend(
@@ -120,7 +124,7 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
             .expect("invalid package default should retain its authored source position");
         assert_eq!(
             portable_path_text(&position.path),
-            "@mod.moth",
+            "@package.moth",
             "{entry_mode}: diagnostic paths are relative to their owning package boundary"
         );
         assert_eq!(position.line, default_line, "{entry_mode}");
@@ -136,22 +140,22 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temporary project");
     let dir = _temp.path().to_path_buf();
-    let package = dir.join("packages/config_input");
+    let package = dir.join("packages/builder/test/config_input");
     let src = dir.join("src");
     fs::create_dir_all(&package).expect("should create source package root");
     fs::create_dir_all(&src).expect("should create project entry root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "@config_input helper\nproject_snapshot = 1\n$config\nenabled #Bool\nvalue = helper()\n",
+        "@builder/test/config_input helper\nproject_snapshot = 1\n$config\nenabled #Bool\nvalue = helper()\n",
     )
     .expect("should write project source contract");
     fs::write(
-        package.join("@mod.moth"),
+        package.join("@package.moth"),
         "$config\nenabled #Bool\n$export\nhelper || -> I32:\n    return 2\n;\n",
     )
     .expect("should write source-package contract");
@@ -172,7 +176,7 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
-        .register_filesystem_root("config_input", package, PackageOrigin::Builder)
+        .register_filesystem_root("builder/test/config_input", package, PackageOrigin::Builder)
         .expect("test source root should register");
 
     let result = compile_project_frontend_with_inputs(
@@ -256,7 +260,7 @@ fn compile_registered_package_project(
     let dir = temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -325,19 +329,19 @@ fn canonical_mode_compiles_facade_only_project_as_package_assembly() {
 fn registered_support_only_package_compiles_its_external_surface() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let frontend = successful_compilation_value(compile_registered_package_project(
-        "supportpkg",
+        "builder/test/supportpkg",
         &[("@package.moth", "$export\nsupport_label #= \"support\"\n")],
-        "@supportpkg support_label\n~[:[support_label]]\n",
+        "@builder/test/supportpkg support_label\n~[:[support_label]]\n",
     ));
     assert_eq!(
         frontend.source_packages.len(),
         3,
-        "directory compilation publishes the imported package plus official @html and @styles"
+        "directory compilation publishes the imported package plus official @core/html and @core/css"
     );
     let package = frontend
         .source_packages
         .iter()
-        .find(|package| package.package_identity.name() == "supportpkg")
+        .find(|package| package.package_identity.name() == "builder/test/supportpkg")
         .expect("the imported package boundary should be retained");
     let artifact = package
         .boundary
@@ -371,19 +375,19 @@ fn registered_support_only_package_compiles_its_external_surface() {
 fn registered_triple_root_package_keeps_its_entry_dormant() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let frontend = successful_compilation_value(compile_registered_package_project(
-        "triplepkg",
+        "builder/test/triplepkg",
         &[
             ("@mod.moth", "$export\nnormal_label #= \"normal\"\n"),
             ("@package.moth", "$export\nsupport_label #= \"support\"\n"),
             ("@entry.moth", "package_runtime ~= 1\n"),
         ],
-        "@triplepkg support_label\n~[:[support_label]]\n",
+        "@builder/test/triplepkg support_label\n~[:[support_label]]\n",
     ));
     assert_eq!(frontend.source_packages.len(), 3);
     let package = frontend
         .source_packages
         .iter()
-        .find(|package| package.package_identity.name() == "triplepkg")
+        .find(|package| package.package_identity.name() == "builder/test/triplepkg")
         .expect("the imported package boundary should be retained");
     let artifact = package
         .boundary
@@ -434,23 +438,23 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _tmp_dir = tempfile::tempdir().expect("should create temp dir");
     let dir = _tmp_dir.path().to_path_buf();
-    let first_package = dir.join("packages/first");
-    let second_package = dir.join("packages/second");
+    let first_package = dir.join("packages/builder/test/first");
+    let second_package = dir.join("packages/builder/test/second");
     fs::create_dir_all(&first_package).expect("should create first package");
     fs::create_dir_all(&second_package).expect("should create second package");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
-        first_package.join("@mod.moth"),
+        first_package.join("@package.moth"),
         "$export\nfirst || -> I32:\n    return missing_first_package_value\n;\n",
     )
     .expect("should write first diagnosed package");
     fs::write(
-        second_package.join("@mod.moth"),
+        second_package.join("@package.moth"),
         "$export\nsecond || -> I32:\n    return missing_second_package_value\n;\n",
     )
     .expect("should write second diagnosed package");
@@ -462,11 +466,15 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
-        .register_filesystem_root("first", first_package, PackageOrigin::Builder)
+        .register_filesystem_root("builder/test/first", first_package, PackageOrigin::Builder)
         .expect("test source root should register");
     frontend_surface
         .source_packages
-        .register_filesystem_root("second", second_package, PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/test/second",
+            second_package,
+            PackageOrigin::Builder,
+        )
         .expect("test source root should register");
 
     let result = compile_project_frontend(
@@ -497,13 +505,13 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     assert!(
         diagnosed_paths
             .iter()
-            .any(|path| path.ends_with("packages/first/@mod.moth")),
+            .any(|path| path.ends_with("packages/builder/test/first/@package.moth")),
         "first package diagnostic should be retained: {diagnosed_paths:?}"
     );
     assert!(
         diagnosed_paths
             .iter()
-            .any(|path| path.ends_with("packages/second/@mod.moth")),
+            .any(|path| path.ends_with("packages/builder/test/second/@package.moth")),
         "later independent package should still compile: {diagnosed_paths:?}"
     );
 }
@@ -514,25 +522,28 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
     let _tmp_dir = tempfile::tempdir().expect("should create temp dir");
     let dir = _tmp_dir.path().to_path_buf();
     let src = dir.join("src");
-    let package = dir.join("packages/broken");
-    let warning_package = dir.join("packages/warning");
+    let package = dir.join("packages/builder/test/broken");
+    let warning_package = dir.join("packages/builder/test/warning");
     fs::create_dir_all(&package).expect("should create package root");
     fs::create_dir_all(&warning_package).expect("should create warning package root");
     fs::create_dir_all(&src).expect("should create entry root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@broken run\nvalue = run()\n")
-        .expect("should write blocked project consumer");
     fs::write(
-        package.join("@mod.moth"),
+        src.join("@entry.moth"),
+        "@builder/test/broken run\nvalue = run()\n",
+    )
+    .expect("should write blocked project consumer");
+    fs::write(
+        package.join("@package.moth"),
         "$export\nrun || -> I32:\n    return missing_package_value\n;\n",
     )
     .expect("should write diagnosed source package");
     fs::write(
-        warning_package.join("@mod.moth"),
+        warning_package.join("@package.moth"),
         "$export\nwarn || -> String:\n    value ~= \"hello\"\n    result ~= \"unset\"\n    if value is:\n        \"one\" => ~result = \"one\"\n        \"one\" => ~result = \"one\"\n        else => ~result = \"other\"\n    ;\n    return result\n;\n",
     )
     .expect("should write successful warning package");
@@ -545,11 +556,19 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         let mut frontend_surface = BuilderSurface::with_mandatory_core();
         frontend_surface
             .source_packages
-            .register_filesystem_root("broken", package.clone(), PackageOrigin::Builder)
+            .register_filesystem_root(
+                "builder/test/broken",
+                package.clone(),
+                PackageOrigin::Builder,
+            )
             .expect("broken test source root should register");
         frontend_surface
             .source_packages
-            .register_filesystem_root("warning", warning_package.clone(), PackageOrigin::Builder)
+            .register_filesystem_root(
+                "builder/test/warning",
+                warning_package.clone(),
+                PackageOrigin::Builder,
+            )
             .expect("warning test source root should register");
 
         let result = compile_project_frontend(
@@ -577,7 +596,7 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         let position = DiagnosticRenderContext::for_report(report)
             .site_position(view.primary_site())
             .expect("package diagnostic should retain its authored source position");
-        assert!(position.path.ends_with("@mod.moth"));
+        assert!(position.path.ends_with("@package.moth"));
         assert!(position.line.contains("return missing_package_value"));
         let rendered = render_compilation_result_html(&result, &dir);
         assert!(
@@ -593,11 +612,15 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         let mut frontend_surface = BuilderSurface::with_mandatory_core();
         frontend_surface
             .source_packages
-            .register_filesystem_root("broken", package, PackageOrigin::Builder)
+            .register_filesystem_root("builder/test/broken", package, PackageOrigin::Builder)
             .expect("the broken package should register once");
         frontend_surface
             .source_packages
-            .register_filesystem_root("warning", warning_package, PackageOrigin::Builder)
+            .register_filesystem_root(
+                "builder/test/warning",
+                warning_package,
+                PackageOrigin::Builder,
+            )
             .expect("the warning package should register once");
         let result = crate::build_system::create_project_modules::compile_single_file_boracle(
             &config,
@@ -637,7 +660,7 @@ fn same_module_generated_sidecars_rebuild_const_templates_in_their_fresh_store()
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -697,7 +720,7 @@ fn generated_sidecar_refreshes_active_base_public_summary() {
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -781,7 +804,8 @@ independent_result I32 = independent(42)
                 .unwrap_or(-1.0)
         };
         // One initial pass per compiled module: the project module plus the single-module
-        // mandatory Core packages `@html` and `@styles`, which every builder surface compiles.
+        // mandatory Core packages `@core/html` and `@core/css`, which every builder surface
+        // compiles.
         assert_eq!(counter_value("convergence_initial_base_borrow_passes"), 3.0);
         assert_eq!(counter_value("convergence_base_borrow_passes"), 2.0);
         // Four materialisation passes, then rechecks only for `mutating_helper` and `caller`,
@@ -990,7 +1014,7 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
         let dir = _temp.path().to_path_buf();
         fs::create_dir_all(dir.join("src")).expect("should create source root");
         fs::write(
-            dir.join("config.moth"),
+            dir.join("@config.moth"),
             "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
         )
         .expect("should write config");
@@ -1082,7 +1106,7 @@ fn compile_single_api_facade_project(
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1116,7 +1140,7 @@ fn compile_single_page_project(page: &str) -> CompilationResult<ProjectFrontendC
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1239,7 +1263,7 @@ fn static_if_duplicate_identity_request_publishes_one_canonical_sidecar() {
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1352,7 +1376,7 @@ fn inactive_static_if_retained_method_on_concrete_field_publishes_no_request() {
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1442,7 +1466,7 @@ fn valid_identity_request_before_failed_concrete_body_publishes_nothing() {
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1520,7 +1544,7 @@ fn generated_materialisation_preserves_exact_request_span_in_recursive_diagnosti
     fs::create_dir_all(dir.join("src")).expect("should create source root");
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1597,11 +1621,11 @@ fn imported_generic_materialisation_preserves_donor_identity_with_colliding_sour
     let inner_name = String::from("inner");
     let parameter_name = "p".repeat(1024);
     let project_path = dir.join("src/@entry.moth");
-    let package_path = package_root.join("@mod.moth");
+    let package_path = package_root.join("@package.moth");
     fs::create_dir_all(dir.join("src")).expect("should create project source root");
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (
     name = \"docs\",
     ,
@@ -1612,7 +1636,8 @@ html #= ()\n",
     let package_source = format!(
         "{inner_name} type U |text String, result U| -> U:\n    return result\n;\n\n$export\n{function_name} type T |{parameter_name} T| -> I32:\n    if \"one\" is:\n        \"one\" => return 1\n        \"one\" => return 1\n        else => return 1\n    ;\n    return {inner_name}({parameter_name}, 1)\n;\n",
     );
-    let project_source = format!("@pkg {function_name}\nvalue I32 = {function_name}(1)\n");
+    let project_source =
+        format!("@builder/test/pkg {function_name}\nvalue I32 = {function_name}(1)\n");
     fs::write(&package_path, &package_source).expect("should write package source");
     fs::write(&project_path, &project_source).expect("should write project source");
 
@@ -1623,7 +1648,7 @@ html #= ()\n",
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
-        .register_filesystem_root("pkg", package_root, PackageOrigin::Builder)
+        .register_filesystem_root("builder/test/pkg", package_root, PackageOrigin::Builder)
         .expect("test source root should register");
     let result = compile_project_frontend_with_inputs(
         &mut config,
@@ -1698,7 +1723,7 @@ html #= ()\n",
             .expect("donor label should resolve through its frozen identity handle");
         assert_eq!(position.host_path, Some(package_path.as_path()));
         assert!(
-            position.path.ends_with("@mod.moth"),
+            position.path.ends_with("@package.moth"),
             "donor label should use the package snapshot: {}",
             position.path.display()
         );
@@ -1763,11 +1788,11 @@ fn imported_nested_generic_materialisation_preserves_call_site_identity_with_col
     let package_temp = tempfile::tempdir().expect("should create package temp dir");
     let package_root = package_temp.path().to_path_buf();
     let project_path = dir.join("src/@entry.moth");
-    let package_path = package_root.join("@mod.moth");
+    let package_path = package_root.join("@package.moth");
     fs::create_dir_all(dir.join("src")).expect("should create project source root");
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1784,8 +1809,11 @@ outer type T |value T| -> T:
 "#,
     )
     .expect("should write nested generic package source");
-    fs::write(&project_path, "@pkg outer\nvalue I32 = outer(1)\n")
-        .expect("should write project source");
+    fs::write(
+        &project_path,
+        "@builder/test/pkg outer\nvalue I32 = outer(1)\n",
+    )
+    .expect("should write project source");
 
     let mut config = Config::new(dir.join("src"));
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -1794,7 +1822,7 @@ outer type T |value T| -> T:
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
-        .register_filesystem_root("pkg", package_root, PackageOrigin::Builder)
+        .register_filesystem_root("builder/test/pkg", package_root, PackageOrigin::Builder)
         .expect("test source root should register");
     let result = compile_project_frontend_with_inputs(
         &mut config,
@@ -1840,7 +1868,7 @@ outer type T |value T| -> T:
         .expect("nested generic call-site span should resolve");
     assert_eq!(primary.host_path, Some(package_path.as_path()));
     assert!(
-        primary.path.ends_with("@mod.moth"),
+        primary.path.ends_with("@package.moth"),
         "nested generic call site should use package source identity: {}",
         primary.path.display()
     );
@@ -1858,7 +1886,7 @@ fn generated_sidecars_reconstruct_complete_generic_nominal_members() {
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("provider")).expect("should create provider module");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -2055,7 +2083,7 @@ fn requester_public_receiver_evidence_preserves_independent_declaration_bounds()
     let source_root = root.to_path_buf();
     fs::create_dir_all(source_root.join("provider")).expect("should create generic provider");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (name = \"docs\")\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -2239,7 +2267,7 @@ fn generated_sidecars_remap_inherited_nominals_after_multi_module_publication() 
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("provider")).expect("should create provider module");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -2397,7 +2425,7 @@ fn generated_sidecars_reconstruct_hidden_facade_nominal_closure() {
     fs::create_dir_all(dir.join("facade/provider")).expect("should create provider module");
     fs::create_dir_all(dir.join("generics")).expect("should create generic provider module");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -2506,7 +2534,7 @@ fn implicit_failure_generated_private_helper_facts_survive_materialisation_and_c
     let src = dir.join("src");
     fs::create_dir_all(&src).expect("should create project entry root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"implicit-failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -2593,7 +2621,7 @@ fn implicit_failure_later_generated_request_reuses_converged_private_helper_summ
     let helper = src.join("helper");
     fs::create_dir_all(&helper).expect("should create declaring module");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"implicit-failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -2821,7 +2849,7 @@ fn assert_later_request_rejected(declaring_source: &str, requester_source: &str,
     let src = temp_dir.path().join("src");
     fs::create_dir_all(src.join("helper")).expect("should create declaring module");
     fs::write(
-        temp_dir.path().join("config.moth"),
+        temp_dir.path().join("@config.moth"),
         "project #= (\n    name = \"implicit-failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -2896,7 +2924,7 @@ fn implicit_failure_private_helper_infallible_to_fallible_changes_exported_calle
     let src = temp_dir.path().join("src");
     fs::create_dir_all(src.join("helper")).expect("should create declaring module");
     fs::write(
-        temp_dir.path().join("config.moth"),
+        temp_dir.path().join("@config.moth"),
         "project #= (\n    name = \"implicit-failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -3027,7 +3055,7 @@ fn exported_private_chain_witness_rendering_is_stable_across_repeated_compilatio
     let src = temp_dir.path().join("src");
     fs::create_dir_all(&src).expect("should create entry root");
     fs::write(
-        temp_dir.path().join("config.moth"),
+        temp_dir.path().join("@config.moth"),
         "project #= (\n    name = \"implicit-failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -3116,18 +3144,18 @@ fn source_package_warning_staged_by_frontend_outcome() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _tmp_dir = tempfile::tempdir().expect("should create temp dir");
     let dir = _tmp_dir.path().to_path_buf();
-    let package = dir.join("packages/warnpkg");
+    let package = dir.join("packages/builder/test/warnpkg");
     let src = dir.join("src");
     fs::create_dir_all(&package).expect("should create package root");
     fs::create_dir_all(&src).expect("should create entry root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
-        package.join("@mod.moth"),
+        package.join("@package.moth"),
         "$export\nwarn || -> String:\n    value ~= \"hello\"\n    result ~= \"unset\"\n    if value is:\n        \"one\" => ~result = \"one\"\n        \"one\" => ~result = \"one\"\n        else => ~result = \"other\"\n    ;\n    return result\n;\n",
     )
     .expect("should write warning package facade");
@@ -3139,7 +3167,7 @@ fn source_package_warning_staged_by_frontend_outcome() {
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
-        .register_filesystem_root("warnpkg", package, PackageOrigin::Builder)
+        .register_filesystem_root("builder/test/warnpkg", package, PackageOrigin::Builder)
         .expect("test source root should register");
     let result = compile_project_frontend(
         &mut config,
@@ -3226,7 +3254,11 @@ impl BackendBuilder for SuccessfulPackageWarningBuilder {
         let mut surface = BuilderSurface::with_mandatory_core();
         surface
             .source_packages
-            .register_filesystem_root("pkg", self.package_root.clone(), PackageOrigin::Builder)
+            .register_filesystem_root(
+                "builder/test/pkg",
+                self.package_root.clone(),
+                PackageOrigin::Builder,
+            )
             .expect("test source root should register");
         surface
     }
@@ -3239,11 +3271,11 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
     let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
     let project_root = temporary_directory.path().to_path_buf();
     let project_source_root = project_root.clone();
-    let package_root = project_root.join("packages/pkg");
+    let package_root = project_root.join("packages/builder/test/pkg");
     fs::create_dir_all(&project_source_root).expect("should create project source root");
     fs::create_dir_all(&package_root).expect("should create source package root");
     fs::write(
-        project_root.join("config.moth"),
+        project_root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -3252,7 +3284,8 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
     let package_text = "$export\nwarn || -> String:\n    value ~= \"hello\"\n    result ~= \"unset\"\n    if value is:\n        \"one\" => ~result = \"one\"\n        \"one\" => ~result = \"one\"\n        else => ~result = \"other\"\n    ;\n    return result\n;\n";
     fs::write(project_source_root.join("@entry.moth"), project_text)
         .expect("should write project entry module");
-    fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
+    fs::write(package_root.join("@package.moth"), package_text)
+        .expect("should write package module");
 
     let builder = SuccessfulPackageWarningBuilder { package_root };
     let result = build_project(
@@ -3316,11 +3349,11 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
     let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
     let project_root = temporary_directory.path().to_path_buf();
     let project_source_root = project_root.clone();
-    let package_root = project_root.join("packages/pkg");
+    let package_root = project_root.join("packages/builder/test/pkg");
     fs::create_dir_all(&project_source_root).expect("should create project source root");
     fs::create_dir_all(&package_root).expect("should create source package root");
     fs::write(
-        project_root.join("config.moth"),
+        project_root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -3329,7 +3362,8 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
     let package_text = "package_snapshot I32 = undefined_thing\n";
     fs::write(project_source_root.join("@mod.moth"), project_text)
         .expect("should write project module");
-    fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
+    fs::write(package_root.join("@package.moth"), package_text)
+        .expect("should write package module");
 
     let mut config = Config::new(project_source_root.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -3338,7 +3372,7 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
-        .register_filesystem_root("pkg", package_root, PackageOrigin::Builder)
+        .register_filesystem_root("builder/test/pkg", package_root, PackageOrigin::Builder)
         .expect("test source root should register");
 
     let result = compile_project_frontend_with_inputs(
@@ -3372,7 +3406,7 @@ fn compile_paired_root_fixture(case: &str) -> ProjectFrontendCompilation {
     let dir = temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (name = \"docs\")\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -3532,7 +3566,7 @@ fn compile_inline_root_fixture(files: &[(&str, &str)]) -> ProjectFrontendCompila
     let dir = temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (name = \"docs\")\nhtml #= ()\n",
     )
     .expect("should write config");

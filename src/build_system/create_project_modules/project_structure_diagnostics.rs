@@ -14,7 +14,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, InvalidConfigReason, PreparedFailure,
+    CompilerStage, DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
@@ -47,7 +47,84 @@ pub(super) fn invalid_module_root_file_name_error(
         file_name: diagnostic_strings.intern(file_name),
         directory: path_id(directory, &mut diagnostic_strings),
     };
-    let diagnostic = project_structure_diagnostic(reason);
+    capture_structure_diagnostic(project_structure_diagnostic(reason), string_table)
+}
+
+/// Reject the build-only config source when it is selected as a single-file entry.
+///
+/// WHY: single-file compilation has no config consumer, so the reserved source would otherwise
+///      take the synthetic entry role and compile as page content.
+pub(super) fn config_file_selected_as_entry_error(
+    directory: &Path,
+    file_name: &str,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let reason = InvalidConfigReason::ConfigFileSelectedAsEntry {
+        file_name: diagnostic_strings.intern(file_name),
+        directory: path_id(directory, &mut diagnostic_strings),
+    };
+    capture_structure_diagnostic(project_structure_diagnostic(reason), string_table)
+}
+
+/// Reject one local directory whose entry-root-relative path equals a registered package prefix.
+///
+/// WHY: directory traversal and the synthetic inventory for an ordinary selected file find the
+/// same filesystem collision through different bounded scans, so the authored failure is built
+/// once here. The diagnostic names the registered spelling and the authored folder path.
+pub(super) fn entry_root_package_prefix_collision_error(
+    registered_prefix: &str,
+    colliding_folder: &Path,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let reason = InvalidConfigReason::EntryRootPackagePrefixCollision {
+        prefix: diagnostic_strings.intern(registered_prefix),
+        entry_folder: path_id(colliding_folder, &mut diagnostic_strings),
+    };
+    capture_structure_diagnostic(project_structure_diagnostic(reason), string_table)
+}
+
+/// Build the diagnostic for one importable project-local claim on a reserved package root.
+///
+/// WHAT: names the reserved root as authored and the local source that publishes the claim.
+/// WHY: structure validation and synthetic dependency resolution discover the same claim from
+/// different Stage 0 facts, so the authored payload has one owner while each caller keeps its
+/// own failure lane.
+pub(super) fn reserved_package_namespace_root_claim_diagnostic(
+    root: &str,
+    source: &Path,
+    string_table: &mut StringTable,
+) -> DiagnosticDraft {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let reason = InvalidConfigReason::ReservedPackageNamespaceRootClaim {
+        root: diagnostic_strings.intern(root),
+        source: path_id(source, &mut diagnostic_strings),
+    };
+    project_structure_diagnostic(reason)
+}
+
+/// Reject one importable project-local claim on a reserved package namespace root.
+///
+/// WHY: directory namespace validation and the directory walk for a selection without module
+/// roots find the claim through different Stage 0 facts, but the authored failure is identical,
+/// so the diagnosed batch is built once here instead of at both call sites.
+pub(super) fn reserved_package_namespace_root_claim_error(
+    root: &str,
+    source: &Path,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    let diagnostic = reserved_package_namespace_root_claim_diagnostic(root, source, string_table);
+    capture_structure_diagnostic(diagnostic, string_table)
+}
+
+/// Freeze the diagnostic into a diagnosed failure, handing the populated table to the batch.
+///
+/// Stage 0 aborts discovery on these errors, so the caller's table is empty after the handoff.
+fn capture_structure_diagnostic(
+    diagnostic: DiagnosticDraft,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
     let table = string_table.take_for_handoff();
     PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
         DiagnosticBag::from(diagnostic),
@@ -65,7 +142,7 @@ pub(super) fn invalid_module_root_file_name_error(
 ///      infrastructure-error lane rather than authored diagnostic reporting.
 pub(super) fn non_utf8_filesystem_name_error(path: &Path, context: &str) -> InfrastructureFailure {
     InfrastructureFailure::filesystem(
-        crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+        CompilerStage::ProjectBuildAssembly,
         path,
         format!("Non-UTF-8 filesystem name cannot enter compiler identity ({context}): {path:?}"),
     )

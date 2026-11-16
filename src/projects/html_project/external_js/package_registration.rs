@@ -3,7 +3,7 @@
 //! WHAT: converts `ParsedJsModule` into registry entries, used by both the JS external import
 //!       provider and built-in package registration.
 //! WHY: avoids duplicating the conversion logic between project-local `.js` imports and
-//!      builder-owned packages such as `@web/canvas`.
+//!      builder-owned packages such as `@builder/web/canvas`.
 
 use crate::builder_surface::external_import_providers::provider::RequiredRuntimeImport;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;

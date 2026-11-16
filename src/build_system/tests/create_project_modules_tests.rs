@@ -700,12 +700,16 @@ fn discover_modules_for_test_with_resource_inputs(
         Ok(indexes) => indexes,
         Err(failure) => return prepared_failure_result(failure, None, &string_table),
     };
-    let module_namespace_set = ModuleNamespaceSet::build(
+    let module_namespace_set = match ModuleNamespaceSet::build(
         &source_tree_index,
         &project_module_graph,
         source_package_boundary_indexes,
         &external_packages,
-    );
+        &mut string_table,
+    ) {
+        Ok(namespace_set) => namespace_set,
+        Err(failure) => return prepared_failure_result(failure, None, &string_table),
+    };
     let mut external_imports = super::source_discovery::ExternalImportDiscoveryState {
         external_packages: &mut external_packages,
         providers: &external_import_providers,
@@ -829,12 +833,16 @@ fn discover_modules_for_test_with_providers(
         Ok(indexes) => indexes,
         Err(failure) => return prepared_failure_result(failure, None, &string_table),
     };
-    let module_namespace_set = ModuleNamespaceSet::build(
+    let module_namespace_set = match ModuleNamespaceSet::build(
         &source_tree_index,
         &project_module_graph,
         source_package_boundary_indexes,
         &external_packages,
-    );
+        &mut string_table,
+    ) {
+        Ok(namespace_set) => namespace_set,
+        Err(failure) => return prepared_failure_result(failure, None, &string_table),
+    };
     let mut external_imports = super::source_discovery::ExternalImportDiscoveryState {
         external_packages: &mut external_packages,
         providers: external_import_providers,
@@ -949,7 +957,9 @@ fn with_namespace_resolution(
         &project_module_graph,
         source_package_boundary_indexes,
         &external_packages,
-    );
+        &mut string_table,
+    )
+    .expect("namespace reserved-root claims should validate");
     let provider_paths = [
         "child",
         "helper",
@@ -1317,7 +1327,9 @@ pub(super) fn discover_modules_and_graph_for_test_with_check_only(
         &project_module_graph,
         source_package_boundary_indexes,
         &external_packages,
-    );
+        &mut string_table,
+    )
+    .expect("namespace reserved-root claims should validate");
     let mut external_imports = super::source_discovery::ExternalImportDiscoveryState {
         external_packages: &mut external_packages,
         providers: &external_import_providers,
@@ -1540,7 +1552,7 @@ impl ExternalImportProvider for CanonicalPathPackageProvider {
         context: &mut ExternalImportProviderContext,
     ) -> Result<Option<ResolvedExternalImport>, PreparedFailure> {
         let package_path = format!(
-            "@test/{}",
+            "@builder/test/{}",
             request
                 .canonical_source_path
                 .to_string_lossy()
@@ -1609,7 +1621,7 @@ impl ResolvingCountingProvider {
 fn fixture_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAssetIdentity {
     let owner = StableResourceOwnerId::Provider(StableProviderResourceOwnerId::new(
         "html-js",
-        StablePackageIdentity::binding(PackageOrigin::Builder, "@test/fixtures"),
+        StablePackageIdentity::binding(PackageOrigin::Builder, "@builder/test/fixtures"),
     ));
 
     RuntimeAssetIdentity {
@@ -1641,7 +1653,7 @@ impl ExternalImportProvider for ResolvingCountingProvider {
         self.calls.fetch_add(1, Ordering::Relaxed);
         let package_id = context
             .package_registry
-            .register_package("@test/resolving", PackageOrigin::Builder)
+            .register_package("@builder/test/resolving", PackageOrigin::Builder)
             .expect("test package registration should succeed");
         Ok(Some(ResolvedExternalImport {
             package_id,
@@ -2057,7 +2069,7 @@ fn direct_selection_resolves_source_package_facade() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
-    let package_root = root.join("builder/helper");
+    let package_root = root.join("packages/builder/test/helper");
     fs::create_dir_all(&src).expect("should create src dir");
     fs::create_dir_all(&package_root).expect("should create helper package dir");
     fs::write(
@@ -2065,16 +2077,17 @@ fn direct_selection_resolves_source_package_facade() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@helper add\n[:entry]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@builder/helper add\n[:entry]\n")
+        .expect("should write entry");
     fs::write(
-        package_root.join("@mod.moth"),
+        package_root.join("@package.moth"),
         "$export\nadd |a I32, b I32| -> I32:\n    return a + b\n;\n",
     )
     .expect("should write helper package root");
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
     source_packages
-        .register_filesystem_root("helper", package_root, PackageOrigin::Builder)
+        .register_filesystem_root("builder/helper", package_root, PackageOrigin::Builder)
         .expect("test source root should register");
 
     let mut config = Config::new(root.clone());
@@ -2098,18 +2111,24 @@ fn direct_selection_resolves_source_package_facade() {
          source_tree_index,
          _package_prefix,
          string_table,
-         provider_paths,
+         _provider_paths,
          path_fork| {
+            let mut provider_path = PathId::ROOT;
+            for segment in ["builder", "helper"] {
+                provider_path = path_fork
+                    .try_intern_child(provider_path, string_table.intern(segment))
+                    .expect("nested provider path should fit");
+            }
+            let provider = retained_provider_path(provider_path);
             let resolution =
                 DirectoryDependencyResolution::project(namespace_set, source_tree_index, path_fork);
-            let provider = provider_root(&["helper"], provider_paths);
             let resolved = resolution
                 .resolve_dependency(&provider, &declaring_source, string_table)
                 .expect("a direct-selection source-package facade should resolve");
             match resolved {
                 ResolvedDependency::SourcePackageSurface { root_file, .. } => {
                     assert!(
-                        root_file.ends_with("helper/@mod.moth"),
+                        root_file.ends_with("helper/@package.moth"),
                         "expected the helper package facade root file, got {:?}",
                         root_file
                     );
@@ -2125,7 +2144,7 @@ fn underscore_prefixed_source_package_prefix_precedes_hidden_directory_rejection
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
-    let package_root = root.join("builder/toolkit");
+    let package_root = root.join("packages/builder/_vendor/toolkit");
     fs::create_dir_all(&src).expect("should create src dir");
     fs::create_dir_all(&package_root).expect("should create toolkit package dir");
     fs::write(
@@ -2133,17 +2152,24 @@ fn underscore_prefixed_source_package_prefix_precedes_hidden_directory_rejection
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@entry.moth"), "@_vendor/toolkit add\n[:entry]\n")
-        .expect("should write entry");
     fs::write(
-        package_root.join("@mod.moth"),
+        src.join("@entry.moth"),
+        "@builder/_vendor/toolkit add\n[:entry]\n",
+    )
+    .expect("should write entry");
+    fs::write(
+        package_root.join("@package.moth"),
         "$export\nadd |a I32, b I32| -> I32:\n    return a + b\n;\n",
     )
     .expect("should write toolkit package root");
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
     source_packages
-        .register_filesystem_root("_vendor/toolkit", package_root, PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/_vendor/toolkit",
+            package_root,
+            PackageOrigin::Builder,
+        )
         .expect("underscore-prefixed nested package root should register");
 
     let mut config = Config::new(root.clone());
@@ -2170,7 +2196,7 @@ fn underscore_prefixed_source_package_prefix_precedes_hidden_directory_rejection
          _provider_paths,
          path_fork| {
             let mut provider_path = PathId::ROOT;
-            for segment in ["_vendor", "toolkit"] {
+            for segment in ["builder", "_vendor", "toolkit"] {
                 provider_path = path_fork
                     .try_intern_child(provider_path, string_table.intern(segment))
                     .expect("nested provider path should fit");
@@ -2184,7 +2210,7 @@ fn underscore_prefixed_source_package_prefix_precedes_hidden_directory_rejection
             match resolved {
                 ResolvedDependency::SourcePackageSurface { root_file, .. } => {
                     assert!(
-                        root_file.ends_with("toolkit/@mod.moth"),
+                        root_file.ends_with("toolkit/@package.moth"),
                         "expected the toolkit package facade root file, got {:?}",
                         root_file
                     );

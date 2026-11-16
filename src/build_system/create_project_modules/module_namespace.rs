@@ -20,6 +20,9 @@
 
 use super::module_identity::{ModuleId, ModuleIdentityTable};
 use super::project_module_graph::{ProjectModuleGraph, is_support_visible_in_identity_table};
+use super::project_structure_diagnostics::{
+    entry_root_package_prefix_collision_error, reserved_package_namespace_root_claim_error,
+};
 use super::source_package_discovery::SourcePackageBoundaryIndexes;
 use super::source_tree_index::{
     SourceClassification, SourceLogicalIdentity, SourceOwnership, SourceRecordIndex,
@@ -27,17 +30,23 @@ use super::source_tree_index::{
 };
 
 use crate::builder_surface::SourceFileKind;
-use crate::builder_surface::package_metadata::package_paths_overlap;
+use crate::builder_surface::definition::damaged_package_set_report;
+use crate::builder_surface::package_metadata::{
+    package_paths_overlap, reserved_package_namespace_claim_root,
+};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
-use crate::compiler_frontend::compiler_messages::{InvalidImportPathReason, PreparedFailure};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerStage, InvalidImportPathReason, PreparedFailure,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::source_packages::root_file::dependency_component_is_config_file;
+use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
@@ -326,28 +335,91 @@ impl ModuleNamespaceSet {
         project_module_graph: &ProjectModuleGraph,
         package_boundary_indexes: SourcePackageBoundaryIndexes,
         binding_packages: &ExternalPackageRegistry,
-    ) -> Self {
-        let mut namespaces = Self::for_source_packages(package_boundary_indexes, binding_packages);
+        string_table: &mut StringTable,
+    ) -> Result<Self, PreparedFailure> {
+        let mut namespaces =
+            Self::for_source_packages(package_boundary_indexes, binding_packages, string_table)?;
         namespaces.project_namespaces =
             build_project_namespaces(source_tree_index, project_module_graph);
-        namespaces
+        validate_reserved_package_namespace_claims(
+            &namespaces.project_namespaces,
+            source_tree_index,
+            string_table,
+        )?;
+        Ok(namespaces)
     }
 
     /// Synthetic consumers keep local namespace claims separate from reachable source membership.
-    /// Only immediate names below prepared owning roots are read; unrelated source bodies and
-    /// arbitrary descendant directories never enter this inventory.
+    /// Only immediate names below prepared owning roots become collision keys, and a reserved-named
+    /// directory is inspected for importable claims; unrelated source bodies and arbitrary
+    /// descendant directories never enter the key inventory.
+    ///
+    /// `bounded_index` is the Stage 0 index that a selected module-root entry already owns. That
+    /// index is the reserved-root authority for those selections, so the directory walk never
+    /// applies to a synthetic unit that has module namespaces.
     pub(crate) fn for_single_file(
         package_boundary_indexes: SourcePackageBoundaryIndexes,
         binding_packages: &ExternalPackageRegistry,
         project_path_resolver: &ProjectPathResolver,
+        bounded_index: Option<&SourceTreeIndex>,
+        string_table: &mut StringTable,
     ) -> Result<Self, PreparedFailure> {
-        let mut namespaces = Self::for_source_packages(package_boundary_indexes, binding_packages);
+        let mut namespaces =
+            Self::for_source_packages(package_boundary_indexes, binding_packages, string_table)?;
+        let has_module_topology = bounded_index.is_some();
+
+        // A selected module-root entry carries the bounded Stage 0 module topology, so its
+        // reserved-root claims come from module namespaces exactly as directory compilation does.
+        // An ordinary selected file owns no module roots; its importable directory names are
+        // checked by the inventory below.
+        if let Some(index) = bounded_index {
+            let project_module_graph = ProjectModuleGraph::from_source_tree_index(index);
+            let project_namespaces = build_project_namespaces(index, &project_module_graph);
+            validate_reserved_package_namespace_claims(&project_namespaces, index, string_table)?;
+        }
+
         let roots = std::iter::once(project_path_resolver.entry_root().to_path_buf())
             .chain(project_path_resolver.module_roots().cloned())
             .collect::<BTreeSet<_>>();
+        // Directory compilation's exact-prefix rule covers registered source packages only:
+        // binding packages share import names but own no project-local filesystem path. The
+        // synthetic probe therefore uses the same source-package prefixes, so a local folder
+        // matching a binding path stays legal exactly as it does in directory compilation.
+        let registered_package_prefixes = namespaces
+            .package_boundary_indexes
+            .iter()
+            .map(|(package_prefix, _)| package_prefix)
+            .collect::<Vec<_>>();
         for root in roots {
-            let keys = SourceTreeIndex::single_file_dependency_keys(&root)?;
-            namespaces.single_file_dependency_keys.insert(root, keys);
+            let inventory = SourceTreeIndex::single_file_namespace_inventory(
+                &root,
+                has_module_topology,
+                &registered_package_prefixes,
+            )?;
+            // A moduleless selection owns no Stage 0 index, so the bounded walk owns both authored
+            // claims. The collision is reported first, matching directory compilation, which
+            // reports it during traversal before namespace-claim validation.
+            if !has_module_topology {
+                if let Some((registered_prefix, local_directory)) =
+                    inventory.registered_prefix_collision
+                {
+                    return Err(entry_root_package_prefix_collision_error(
+                        &registered_prefix,
+                        &local_directory,
+                        string_table,
+                    ));
+                }
+                if let Some((root_component, source)) = inventory.reserved_root_claim {
+                    return Err(reserved_package_namespace_root_claim_error(
+                        &root_component,
+                        &source,
+                        string_table,
+                    ));
+                }
+            }
+            namespaces
+                .single_file_dependency_keys
+                .insert(root, inventory.keys);
         }
         Ok(namespaces)
     }
@@ -355,20 +427,21 @@ impl ModuleNamespaceSet {
     fn for_source_packages(
         package_boundary_indexes: SourcePackageBoundaryIndexes,
         binding_packages: &ExternalPackageRegistry,
-    ) -> Self {
-        let package_namespaces = build_package_namespaces(&package_boundary_indexes);
+        string_table: &mut StringTable,
+    ) -> Result<Self, PreparedFailure> {
+        let package_namespaces = build_package_namespaces(&package_boundary_indexes, string_table)?;
         let binding_package_paths = binding_packages
             .package_paths()
             .map(|path| path.strip_prefix('@').unwrap_or(path).to_owned())
             .collect();
 
-        Self {
+        Ok(Self {
             project_namespaces: Vec::new(),
             package_namespaces,
             binding_package_paths,
             package_boundary_indexes,
             single_file_dependency_keys: BTreeMap::new(),
-        }
+        })
     }
 
     /// Resolve one compiler-semantic dependency through the boundary-aware namespace.
@@ -708,7 +781,7 @@ impl ModuleNamespaceSet {
         for (dependency_prefix, package_index) in self.package_boundary_indexes.iter() {
             if dependency_prefix == provider_path {
                 return package_index
-                    .root_file_for_entry_root()
+                    .package_public_root_file()
                     .map(|root_file| (dependency_prefix, root_file));
             }
         }
@@ -730,6 +803,96 @@ impl ModuleNamespaceSet {
 // ---------------------------------------------------------------------------
 // Namespace construction
 // ---------------------------------------------------------------------------
+
+/// The first importable claim on a reserved package namespace root in one namespace set.
+///
+/// WHAT: scans every module namespace, regardless of module role, because each module's own
+/// sources can resolve that namespace's entries. Returns the authored root spelling and the
+/// source that publishes the entry.
+/// WHY: project namespaces and registered source-package boundaries share the importability rule
+/// but select different failure lanes, so one scan owns the fact and each caller owns its failure.
+/// Only namespace entries count: the module's own reserved directory name never appears in its own
+/// namespace, so it stays legal. Entries are the single Stage 0 record of what can be imported, so
+/// this check reuses them instead of re-walking the filesystem or recomputing module ownership.
+fn first_reserved_package_namespace_claim<'a>(
+    namespaces: &'a [ModuleNamespace],
+    source_tree_index: &'a SourceTreeIndex,
+) -> Option<(&'a str, &'a Path)> {
+    let identities = source_tree_index.module_identities();
+    for module_id in identities.module_ids() {
+        let namespace = &namespaces[module_id.index()];
+        for (key, entry) in &namespace.entries {
+            let Some(root) = reserved_package_namespace_claim_root(key) else {
+                continue;
+            };
+            let source = match entry {
+                NamespaceEntry::SameModuleSource { source_index, .. } => {
+                    source_tree_index.source(*source_index).canonical_path()
+                }
+                NamespaceEntry::CrossModule {
+                    target_module_id, ..
+                } => identities.record(*target_module_id).root_directory(),
+                // Provider-owned files are ordinary resources, not compiler-semantic source
+                // claims on the package namespace.
+                NamespaceEntry::SameModuleProvider { .. } => continue,
+            };
+            return Some((root, source));
+        }
+    }
+    None
+}
+
+/// Validate reserved-root claims in one already-built project namespace set.
+fn validate_reserved_package_namespace_claims(
+    project_namespaces: &[ModuleNamespace],
+    source_tree_index: &SourceTreeIndex,
+    string_table: &mut StringTable,
+) -> Result<(), PreparedFailure> {
+    let Some((root, source)) =
+        first_reserved_package_namespace_claim(project_namespaces, source_tree_index)
+    else {
+        return Ok(());
+    };
+    Err(reserved_package_namespace_root_claim_error(
+        root,
+        source,
+        string_table,
+    ))
+}
+
+/// Validate reserved-root claims in one already-built source-package namespace set.
+///
+/// A compiler-shipped package set is installed input rather than authored project source, so an
+/// importable claim inside it means the selected `packages/` set is damaged or was modified. It
+/// takes the same infrastructure lane as a missing shipped facade. Third-party and project-local
+/// registrations keep the authored diagnostic used for project namespaces.
+fn validate_source_package_reserved_namespace_claims(
+    package_namespaces: &[ModuleNamespace],
+    source_tree_index: &SourceTreeIndex,
+    string_table: &mut StringTable,
+) -> Result<(), PreparedFailure> {
+    let Some((root, source)) =
+        first_reserved_package_namespace_claim(package_namespaces, source_tree_index)
+    else {
+        return Ok(());
+    };
+    if let Some(report) = damaged_package_set_report(source_tree_index.entry_root()) {
+        return Err(InfrastructureFailure::filesystem(
+            CompilerStage::ProjectBuildAssembly,
+            source,
+            format!(
+                "Source package publishes an importable claim on reserved namespace root \
+                 '@{root}'. {report}"
+            ),
+        )
+        .into());
+    }
+    Err(reserved_package_namespace_root_claim_error(
+        root,
+        source,
+        string_table,
+    ))
+}
 
 /// Build one `ModuleNamespace` per project module from the project index and graph.
 fn build_project_namespaces(
@@ -756,10 +919,16 @@ fn build_project_namespaces(
     namespaces
 }
 
-/// Build one `ModuleNamespace` set per source-package boundary from the retained package indexes.
+/// Build and validate one `ModuleNamespace` set per source-package boundary from the retained
+/// package indexes.
+///
+/// Each boundary is validated from the namespaces just built, so registered source packages
+/// cannot publish an importable claim on `@core` or `@builder` either. No separate walk is
+/// needed: these entries are the same Stage 0 importability facts used for project modules.
 fn build_package_namespaces(
     package_boundary_indexes: &SourcePackageBoundaryIndexes,
-) -> BTreeMap<String, Vec<ModuleNamespace>> {
+    string_table: &mut StringTable,
+) -> Result<BTreeMap<String, Vec<ModuleNamespace>>, PreparedFailure> {
     let mut package_namespaces: BTreeMap<String, Vec<ModuleNamespace>> = BTreeMap::new();
 
     for (dependency_prefix, package_index) in package_boundary_indexes.iter() {
@@ -775,9 +944,14 @@ fn build_package_namespaces(
             populate_package_cross_module_targets(namespace, identities, module_id);
         }
 
+        validate_source_package_reserved_namespace_claims(
+            &namespaces,
+            package_index,
+            string_table,
+        )?;
         package_namespaces.insert(dependency_prefix.to_owned(), namespaces);
     }
-    package_namespaces
+    Ok(package_namespaces)
 }
 
 /// Add same-module source entries for one module from its owned source rows.
@@ -1033,16 +1207,17 @@ fn resolve_entry(
     }
 }
 
-/// Reject direct config paths before namespace absence can change the diagnostic.
+/// Reject a dependency that directly names the build-only `@config.moth` source.
+///
+/// WHAT: runs before namespace absence so the reserved-file reason wins over a missing import.
+/// WHY: ordinary `config` dependencies resolve the `config.moth` helper instead; only the exact
+///      reserved filename is not importable.
 fn reject_direct_special_file_dependency(
     provider: &RetainedDependencyPath,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
 ) -> Result<(), DiagnosticDraft> {
-    let source_component = path_fork
-        .component(provider.path)
-        .map(|component| string_table.resolve(component));
-    if source_component.is_some_and(dependency_component_is_config_file) {
+    if dependency_path_references_config_file(provider.path, path_fork, string_table) {
         return Err(imports::direct_special_file_import(
             provider.path,
             Some(provider.span),

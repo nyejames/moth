@@ -81,7 +81,7 @@ fn direct_external_calls_retains_lowered_call_and_invoke_sites_in_order() {
         .expect("fallible external fixture must register");
     let (build_result, mut path_fork, mut string_table) =
         parse_single_file_ast_build_result_with_registry(
-            "@test/default notify, attempt\n\
+            "@builder/test/default notify, attempt\n\
              probe || -> Error!:\n\
                  notify()\n\
                  notify()\n\

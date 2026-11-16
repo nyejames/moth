@@ -320,7 +320,7 @@ fn reject_dangerous_output_root(
             output_root,
             format!(
                 "Refusing to use '{}' as the build output root because it is a protected system path. \
-                 Configure a project-relative output folder in config.moth.",
+                 Configure a project-relative output folder in @config.moth.",
                 output_root.display()
             ),
             super::writer::OutputRejectionReason::OutputRootDangerousSystemPath,

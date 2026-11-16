@@ -78,7 +78,7 @@ fn write_source(root: &std::path::Path, name: &str, source: &str) -> std::path::
 
 fn write_directory_html_project(root: &Path, page_source: &str) {
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("config should be written");
@@ -87,7 +87,7 @@ fn write_directory_html_project(root: &Path, page_source: &str) {
 
 fn write_directory_html_config_input_project(root: &Path) {
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
     )
     .expect("config should be written");
@@ -148,7 +148,7 @@ fn write_support_scope_project(project: &Path) {
     fs::create_dir_all(project.join("pages/extras")).expect("pages extras should be created");
     write_source(
         project,
-        "config.moth",
+        "@config.moth",
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     );
     write_source(project, "@mod.moth", "");
@@ -230,7 +230,7 @@ fn paired_provider_check_only_uses_the_selected_surface() {
 
     write_source(
         &project,
-        "config.moth",
+        "@config.moth",
         "project #= (name = \"check_only\")\nhtml #= ()\n",
     );
     write_source(&project, "@entry.moth", "@consumer run\n[:run]\n");
@@ -360,7 +360,7 @@ fn check_command_executes_with_typed_config_input() {
 #[test]
 fn check_orders_the_module_stop_before_the_terse_summary_and_omits_it_when_complete() {
     let root = tempdir().expect("temporary directory should be created");
-    fs::write(root.path().join("config.moth"), MODULE_LIMIT_CONFIG_SOURCE)
+    fs::write(root.path().join("@config.moth"), MODULE_LIMIT_CONFIG_SOURCE)
         .expect("limited config should be written");
     fs::write(root.path().join("@entry.moth"), TWO_FAILING_BODIES_SOURCE)
         .expect("page source should be written");
@@ -857,7 +857,7 @@ fn scaffolded_project_checks_and_builds_with_generated_config() {
         String::from_utf8_lossy(&scaffold.stderr)
     );
 
-    let config = fs::read_to_string(project.join("config.moth"))
+    let config = fs::read_to_string(project.join("@config.moth"))
         .expect("generated config should be readable");
     assert!(
         config.contains("name = \"my_site\""),
@@ -903,7 +903,7 @@ fn check_only_shared_helper_rejects_lateral_support_import() {
 
     write_source(
         &project,
-        "config.moth",
+        "@config.moth",
         "project #= (name = \"check_only\")\nhtml #= ()\n",
     );
     write_source(&project, "@entry.moth", "[:ok]\n");

@@ -451,6 +451,8 @@ unit_code! {
         AliasedModuleRootFiles = 90,
         ModuleRootFileOutsideClaimingModule = 91,
         ModuleRootFileNotRegularFile = 92,
+        ConfigFileSelectedAsEntry = 93,
+        ReservedPackageNamespaceRootClaim = 94,
     }
 }
 
@@ -516,6 +518,9 @@ impl InvalidConfigCode {
             InvalidConfigReason::EntryRootPackagePrefixCollision { .. } => {
                 Self::EntryRootPackagePrefixCollision
             }
+            InvalidConfigReason::ReservedPackageNamespaceRootClaim { .. } => {
+                Self::ReservedPackageNamespaceRootClaim
+            }
             InvalidConfigReason::SourcePackageMissingRoot { .. } => Self::SourcePackageMissingRoot,
             InvalidConfigReason::NoRootModuleEntries { .. } => Self::NoRootModuleEntries,
             InvalidConfigReason::AliasedModuleRootFiles { .. } => Self::AliasedModuleRootFiles,
@@ -532,6 +537,9 @@ impl InvalidConfigCode {
             }
             InvalidConfigReason::InvalidModuleRootFileName { .. } => {
                 Self::InvalidModuleRootFileName
+            }
+            InvalidConfigReason::ConfigFileSelectedAsEntry { .. } => {
+                Self::ConfigFileSelectedAsEntry
             }
             InvalidConfigReason::InvalidOutputFolder { folder, reason } => {
                 Self::output_folder_variant(*reason, folder.is_some())
@@ -935,6 +943,9 @@ fn invalid_config_string_ids(
             prefix,
             entry_folder,
         } => strings.extend([*prefix, *entry_folder]),
+        InvalidConfigReason::ReservedPackageNamespaceRootClaim { root, source } => {
+            strings.extend([*root, *source]);
+        }
         InvalidConfigReason::SourcePackageMissingRoot { prefix, root } => {
             strings.extend([*prefix, *root]);
         }
@@ -959,6 +970,10 @@ fn invalid_config_string_ids(
             directory,
         } => strings.extend([*file_name, *folder_name, *directory]),
         InvalidConfigReason::InvalidModuleRootFileName {
+            file_name,
+            directory,
+        } => strings.extend([*file_name, *directory]),
+        InvalidConfigReason::ConfigFileSelectedAsEntry {
             file_name,
             directory,
         } => strings.extend([*file_name, *directory]),
@@ -1217,6 +1232,12 @@ pub(crate) fn decode_invalid_config(
                 entry_folder: strings.take()?,
             }
         }
+        InvalidConfigCode::ReservedPackageNamespaceRootClaim => {
+            InvalidConfigReason::ReservedPackageNamespaceRootClaim {
+                root: strings.take()?,
+                source: strings.take()?,
+            }
+        }
         InvalidConfigCode::SourcePackageMissingRoot => {
             InvalidConfigReason::SourcePackageMissingRoot {
                 prefix: strings.take()?,
@@ -1260,6 +1281,12 @@ pub(crate) fn decode_invalid_config(
         }
         InvalidConfigCode::InvalidModuleRootFileName => {
             InvalidConfigReason::InvalidModuleRootFileName {
+                file_name: strings.take()?,
+                directory: strings.take()?,
+            }
+        }
+        InvalidConfigCode::ConfigFileSelectedAsEntry => {
+            InvalidConfigReason::ConfigFileSelectedAsEntry {
                 file_name: strings.take()?,
                 directory: strings.take()?,
             }

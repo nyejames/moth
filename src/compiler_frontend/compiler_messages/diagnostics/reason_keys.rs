@@ -165,6 +165,7 @@ define_stable_reason_keys! {
         &InvalidConfigCode::ResourceOutputPathCollision => "invalid_config.resource_output_path_collision",
         &InvalidConfigCode::ResourceOutputPathReserved => "invalid_config.resource_output_path_reserved",
         &InvalidConfigCode::EntryRootPackagePrefixCollision => "invalid_config.entry_root_package_prefix_collision",
+        &InvalidConfigCode::ReservedPackageNamespaceRootClaim => "invalid_config.reserved_package_namespace_root_claim",
         &InvalidConfigCode::SourcePackageMissingRoot => "invalid_config.source_package_missing_root",
         &InvalidConfigCode::NoRootModuleEntries => "invalid_config.no_root_module_entries",
         &InvalidConfigCode::AliasedModuleRootFiles => "invalid_config.aliased_module_root_files",
@@ -174,6 +175,7 @@ define_stable_reason_keys! {
         &InvalidConfigCode::FileValuePathUnsupported => "invalid_config.file_value_path_unsupported",
         &InvalidConfigCode::SourceFileFolderCollision => "invalid_config.source_file_folder_collision",
         &InvalidConfigCode::InvalidModuleRootFileName => "invalid_config.invalid_module_root_file_name",
+        &InvalidConfigCode::ConfigFileSelectedAsEntry => "invalid_config.config_file_selected_as_entry",
         &InvalidConfigCode::InvalidOutputFolderEmpty => "invalid_config.invalid_output_folder.empty",
         &InvalidConfigCode::InvalidOutputFolderNonUtf8 => "invalid_config.invalid_output_folder.non_utf8",
         &InvalidConfigCode::InvalidOutputFolderAbsolutePathWithoutFolder

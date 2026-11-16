@@ -371,11 +371,12 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
     (ast, string_table, path_fork)
 }
 
-fn empty_provider_interface(prefix: &str) -> PublicSemanticInterface {
+/// One official Core prelude provider that exports nothing.
+fn empty_core_prelude_interface(package_prefix: &str) -> PublicSemanticInterface {
     let module_origin = StableModuleOriginIdentity::from_portable_path(
-        StablePackageIdentity::project_local(prefix),
-        format!("{prefix}/@mod.moth"),
-        ModuleRootRole::Normal,
+        StablePackageIdentity::source_package(PackageOrigin::Core, package_prefix),
+        format!("{package_prefix}/@package.moth"),
+        ModuleRootRole::Support,
     );
     PublicSemanticInterface {
         module_origin,
@@ -392,15 +393,15 @@ fn empty_provider_interface(prefix: &str) -> PublicSemanticInterface {
 ///
 /// WHY: the prelude merge reads constant declarations only, so provider-lane tests need the same
 ///      export-binding and declaration pair production publishes without compiling a package.
-fn constant_provider_interface(
-    prefix: &str,
+fn constant_core_prelude_interface(
+    package_prefix: &str,
     constant_name: &str,
     folded_text: &str,
 ) -> PublicSemanticInterface {
     let module_origin = StableModuleOriginIdentity::from_portable_path(
-        StablePackageIdentity::project_local(prefix),
-        format!("{prefix}/@mod.moth"),
-        ModuleRootRole::Normal,
+        StablePackageIdentity::source_package(PackageOrigin::Core, package_prefix),
+        format!("{package_prefix}/@package.moth"),
+        ModuleRootRole::Support,
     );
     let constant_origin = OriginDeclarationId::Constant(OriginConstantId::new(
         module_origin.clone(),
@@ -433,23 +434,23 @@ fn constant_provider_interface(
 /// Build the fixed template-prelude input set for a fixture with no package provider headers.
 ///
 /// WHY: production always supplies every official Core prelude package, so a fixture provider set
-///      that silently supplied only `@html` would stop exercising the merged prelude.
+///      that silently supplied only `@core/html` would stop exercising the merged prelude.
 fn standard_template_prelude_dependencies<'a>(
     html: &'a PublicSemanticInterface,
-    styles: &'a PublicSemanticInterface,
+    css: &'a PublicSemanticInterface,
 ) -> SourceProviderDependencySet<'a> {
     SourceProviderDependencySet::new(vec![
         SourceProviderDependency {
             kind: ProviderDependencyKind::TemplatePrelude {
-                package_prefix: "html",
+                package_prefix: "core/html",
             },
             interface: html,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::TemplatePrelude {
-                package_prefix: "styles",
+                package_prefix: "core/css",
             },
-            interface: styles,
+            interface: css,
         },
     ])
     .expect("both standard template prelude providers should register")
@@ -469,7 +470,7 @@ struct MothTemplateScopeFixture {
     _temp_dir: TempDir,
     project_root: PathBuf,
     html_root_file: PathBuf,
-    styles_root_file: PathBuf,
+    css_root_file: PathBuf,
     entry_file_path: PathBuf,
     project_path_resolver: ProjectPathResolver,
     source_files: Arc<SourceDatabase>,
@@ -483,20 +484,20 @@ impl MothTemplateScopeFixture {
         let project_root = temp_dir.path().join("project");
         let entry_root = project_root.join("src");
         let html_root = temp_dir.path().join("html_package");
-        let styles_root = temp_dir.path().join("styles_package");
+        let css_root = temp_dir.path().join("css_package");
 
         fs::create_dir_all(&entry_root).expect("entry root should be created");
         fs::create_dir_all(&html_root).expect("HTML source-backed package should be created");
-        fs::create_dir_all(&styles_root).expect("Styles source-backed package should be created");
+        fs::create_dir_all(&css_root).expect("CSS source-backed package should be created");
         let project_root =
             fs::canonicalize(project_root).expect("project root should canonicalize");
         let entry_root = fs::canonicalize(entry_root).expect("entry root should canonicalize");
         let html_root = fs::canonicalize(html_root).expect("HTML root should canonicalize");
-        let styles_root = fs::canonicalize(styles_root).expect("Styles root should canonicalize");
-        let html_root_file = html_root.join("@mod.moth");
-        let styles_root_file = styles_root.join("@mod.moth");
+        let css_root = fs::canonicalize(css_root).expect("CSS root should canonicalize");
+        let html_root_file = html_root.join("@package.moth");
+        let css_root_file = css_root.join("@package.moth");
 
-        // The miniature `@html` root deliberately includes non-constant exports so the
+        // The miniature `@core/html` root deliberately includes non-constant exports so the
         // Moth template implicit scope proves it is filtering by source declaration kind.
         fs::write(
             &html_root_file,
@@ -516,25 +517,25 @@ render_html || -> String:
         )
         .expect("HTML source-backed package root should be written");
 
-        // The miniature `@styles` root mirrors the official package: exported slot
+        // The miniature `@core/css` root mirrors the official package: exported slot
         // contributions plus a private constant, a runtime value and a type export that must
         // all stay outside the flat prelude.
         fs::write(
-            &styles_root_file,
+            &css_root_file,
             r#"$export
 center #String = [$in style:text-align: center;]
 $export
-styles_runtime || -> String:
+css_runtime || -> String:
     return "runtime"
 ;
 $export
-StylesToken = | color String |
-styles_private #= "private"
+CssToken = | color String |
+css_private #= "private"
 "#,
         )
-        .expect("Styles source-backed package root should be written");
+        .expect("CSS source-backed package root should be written");
 
-        let mut canonical_files = vec![html_root_file.clone(), styles_root_file.clone()];
+        let mut canonical_files = vec![html_root_file.clone(), css_root_file.clone()];
         for (relative_path, source) in files {
             let path = project_root.join(relative_path);
             if let Some(parent) = path.parent() {
@@ -546,11 +547,11 @@ styles_private #= "private"
 
         let mut source_packages = SourcePackageRegistry::new();
         source_packages
-            .register_filesystem_root("html", html_root.clone(), PackageOrigin::Builder)
-            .expect("test HTML source root should register");
+            .register_filesystem_root("core/html", html_root.clone(), PackageOrigin::Core)
+            .expect("test Core HTML source root should register");
         source_packages
-            .register_filesystem_root("styles", styles_root.clone(), PackageOrigin::Builder)
-            .expect("test Styles source root should register");
+            .register_filesystem_root("core/css", css_root.clone(), PackageOrigin::Core)
+            .expect("test Core CSS source root should register");
 
         let source_file_kinds = SourceFileKindRegistry::new();
 
@@ -587,7 +588,7 @@ styles_private #= "private"
             _temp_dir: temp_dir,
             project_root,
             html_root_file,
-            styles_root_file,
+            css_root_file,
             entry_file_path,
             project_path_resolver,
             source_files: Arc::new(source_files),
@@ -645,10 +646,10 @@ styles_private #= "private"
         &self,
         prepared_relative_paths: &[&str],
     ) -> Result<(Ast, StringTable, PathInternerFork), PreparedFailure> {
-        let html_interface = empty_provider_interface("html");
-        let styles_interface = empty_provider_interface("styles");
+        let html_interface = empty_core_prelude_interface("core/html");
+        let css_interface = empty_core_prelude_interface("core/css");
         let provider_dependencies =
-            standard_template_prelude_dependencies(&html_interface, &styles_interface);
+            standard_template_prelude_dependencies(&html_interface, &css_interface);
         self.compile_module_ast_with_providers(prepared_relative_paths, &provider_dependencies)
     }
 
@@ -763,10 +764,10 @@ styles_private #= "private"
         ),
         FixtureHeaderBindingFailure,
     > {
-        let html_interface = empty_provider_interface("html");
-        let styles_interface = empty_provider_interface("styles");
+        let html_interface = empty_core_prelude_interface("core/html");
+        let css_interface = empty_core_prelude_interface("core/css");
         let provider_dependencies =
-            standard_template_prelude_dependencies(&html_interface, &styles_interface);
+            standard_template_prelude_dependencies(&html_interface, &css_interface);
         let mut path_fork = self.source_files.fork_path_interner();
         self.prepare_and_bind_headers_with_providers(
             prepared_relative_paths,
@@ -1045,11 +1046,11 @@ styles_private #= "private"
     }
 
     fn source_path_for_fixture_path(&self, relative_path: &str) -> PathBuf {
-        if relative_path == "@html/@mod.moth" {
+        if relative_path == "@core/html/@package.moth" {
             return self.html_root_file.clone();
         }
-        if relative_path == "@styles/@mod.moth" {
-            return self.styles_root_file.clone();
+        if relative_path == "@core/css/@package.moth" {
+            return self.css_root_file.clone();
         }
 
         self.project_root_path().join(relative_path)
@@ -1547,8 +1548,10 @@ fn module_root_export_syntax_can_target_moth_template_content() {
 #[test]
 fn moth_template_body_sees_flat_html_prelude_constants() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[p]")]);
-    let (ast, string_table, path_fork) = fixture
-        .compile_moth_template_ast_ok("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
+    let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
+        "src/intro.mtf",
+        &["@core/html/@package.moth", "src/intro.mtf"],
+    );
 
     folded_content_contains(&ast, &string_table, &path_fork, "<p style=\"\"></p>");
 }
@@ -1558,8 +1561,10 @@ fn moth_template_note_is_a_discarded_implicit_body_child() {
     // A `.mtf` document is one implicit parent template body, so a top-level note is a valid
     // child there even though the same spelling is rejected in `.moth` source.
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[$note: hidden]visible")]);
-    let (ast, string_table, path_fork) = fixture
-        .compile_moth_template_ast_ok("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
+    let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
+        "src/intro.mtf",
+        &["@core/html/@package.moth", "src/intro.mtf"],
+    );
 
     let content = folded_content_value(&ast, &string_table, &path_fork);
     assert!(
@@ -1573,14 +1578,18 @@ fn moth_template_note_is_a_discarded_implicit_body_child() {
 }
 
 #[test]
-fn moth_template_body_sees_flat_html_and_styles_prelude_constants() {
-    // Both official prelude providers contribute to one `.mtf` body: `p` from `@html` and the
-    // `center` slot contribution from `@styles`. The style value must travel through the same
-    // ordinary constant materialisation as any imported constant.
+fn moth_template_body_sees_flat_html_and_css_prelude_constants() {
+    // Both official prelude providers contribute to one `.mtf` body: `p` from `@core/html` and
+    // the `center` slot contribution from `@core/css`. The style value must travel through the
+    // same ordinary constant materialisation as any imported constant.
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[p, center: Hello]")]);
     let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
         "src/intro.mtf",
-        &["@html/@mod.moth", "@styles/@mod.moth", "src/intro.mtf"],
+        &[
+            "@core/html/@package.moth",
+            "@core/css/@package.moth",
+            "src/intro.mtf",
+        ],
     );
 
     folded_content_contains(&ast, &string_table, &path_fork, "text-align: center;");
@@ -1590,24 +1599,30 @@ fn moth_template_body_sees_flat_html_and_styles_prelude_constants() {
 #[test]
 fn moth_template_header_visibility_contains_html_prelude_constants() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[p]")]);
-    let names = fixture
-        .visible_moth_template_source_names("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
+    let names = fixture.visible_moth_template_source_names(
+        "src/intro.mtf",
+        &["@core/html/@package.moth", "src/intro.mtf"],
+    );
 
     assert!(
         names.contains("p"),
-        "Moth template visibility should include the @html prelude p; visible names: {names:?}"
+        "Moth template visibility should include the @core/html prelude p; visible names: {names:?}"
     );
 }
 
 #[test]
 fn moth_template_prelude_excludes_private_runtime_and_type_exports() {
-    // The flat prelude merges public compile-time constants only. `@styles` publishes `center`,
-    // while its private constant, runtime function and type export must stay unavailable by bare
-    // name just like `@html`'s type and runtime exports.
+    // The flat prelude merges public compile-time constants only. `@core/css` publishes
+    // `center`, while its private constant, runtime function and type export must stay
+    // unavailable by bare name just like `@core/html`'s type and runtime exports.
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "Prelude exclusion probe")]);
     let names = fixture.visible_moth_template_source_names(
         "src/intro.mtf",
-        &["@html/@mod.moth", "@styles/@mod.moth", "src/intro.mtf"],
+        &[
+            "@core/html/@package.moth",
+            "@core/css/@package.moth",
+            "src/intro.mtf",
+        ],
     );
 
     for present in ["p", "center"] {
@@ -1617,9 +1632,9 @@ fn moth_template_prelude_excludes_private_runtime_and_type_exports() {
         );
     }
     for excluded in [
-        "styles_private",
-        "styles_runtime",
-        "StylesToken",
+        "css_private",
+        "css_runtime",
+        "CssToken",
         "HtmlDefaults",
         "render_html",
     ] {
@@ -1642,7 +1657,7 @@ fn moth_template_body_selects_same_module_helper_constant_explicitly() {
     let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
         "src/docs/intro.mtf",
         &[
-            "@html/@mod.moth",
+            "@core/html/@package.moth",
             "src/docs/home_constants.moth",
             "src/docs/intro.mtf",
         ],
@@ -1663,7 +1678,7 @@ fn moth_template_does_not_see_same_directory_facade_exported_constant() {
     let diagnostic = fixture.compile_moth_template_diagnostic(
         "src/docs/intro.mtf",
         &[
-            "@html/@mod.moth",
+            "@core/html/@package.moth",
             "src/docs/@mod.moth",
             "src/docs/intro.mtf",
         ],
@@ -1684,7 +1699,7 @@ fn moth_template_qualified_root_local_declaration_is_not_addressable() {
     let diagnostic = fixture.compile_moth_template_diagnostic(
         "src/docs/intro.mtf",
         &[
-            "@html/@mod.moth",
+            "@core/html/@package.moth",
             "src/docs/@mod.moth",
             "src/docs/intro.mtf",
         ],
@@ -1698,7 +1713,7 @@ fn moth_template_qualified_root_local_declaration_is_not_addressable() {
 #[test]
 fn html_prelude_constant_does_not_collide_with_an_explicit_qualified_selection() {
     // The qualified selection introduces no visible local name, so selecting a helper constant
-    // spelled like an `@html` prelude constant must not be treated as a collision.
+    // spelled like an `@core/html` prelude constant must not be treated as a collision.
     let fixture = MothTemplateScopeFixture::new(&[
         ("src/docs/home_constants.moth", "p #= \"local p\"\n"),
         ("src/docs/intro.mtf", "[p][@home_constants p]"),
@@ -1706,7 +1721,7 @@ fn html_prelude_constant_does_not_collide_with_an_explicit_qualified_selection()
     let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
         "src/docs/intro.mtf",
         &[
-            "@html/@mod.moth",
+            "@core/html/@package.moth",
             "src/docs/home_constants.moth",
             "src/docs/intro.mtf",
         ],
@@ -1721,7 +1736,7 @@ fn moth_template_without_local_bindings_sees_only_html_prelude_constants() {
     let fixture = MothTemplateScopeFixture::new(&[("src/docs/intro.mtf", "[collision]")]);
     let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
         "src/docs/intro.mtf",
-        &["@html/@mod.moth", "src/docs/intro.mtf"],
+        &["@core/html/@package.moth", "src/docs/intro.mtf"],
     );
 
     folded_content_contains(&ast, &string_table, &path_fork, "html");
@@ -1737,7 +1752,7 @@ fn html_prelude_constant_collides_with_an_existing_visible_binding() {
 
     let diagnostic = fixture.compile_moth_template_diagnostic(
         "src/docs/intro.mtf",
-        &["@html/@mod.moth", "src/docs/intro.mtf"],
+        &["@core/html/@package.moth", "src/docs/intro.mtf"],
     );
 
     let diagnostic = assert_ast_failure_diagnostic(&diagnostic, "MOTH-IMPORT-0009", None);
@@ -1750,8 +1765,10 @@ fn html_prelude_constant_collides_with_an_existing_visible_binding() {
 #[test]
 fn exported_html_functions_are_not_visible_to_moth_template_body() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[render_html]")]);
-    let diagnostic = fixture
-        .compile_moth_template_diagnostic("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
+    let diagnostic = fixture.compile_moth_template_diagnostic(
+        "src/intro.mtf",
+        &["@core/html/@package.moth", "src/intro.mtf"],
+    );
     assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
 }
 
@@ -1762,22 +1779,22 @@ fn moth_template_sees_standard_prelude_constants_without_provider_headers() {
     // headers are not in the consumer module's prepared files. The fixed prelude must still
     // collect both constant exports under their flat names.
     let fixture =
-        MothTemplateScopeFixture::new(&[("src/intro.mtf", "[test_constant][styles_constant]")]);
+        MothTemplateScopeFixture::new(&[("src/intro.mtf", "[test_constant][css_constant]")]);
 
-    let html_interface = constant_provider_interface("html", "test_constant", "from html");
-    let styles_interface = constant_provider_interface("styles", "styles_constant", "from styles");
+    let html_interface = constant_core_prelude_interface("core/html", "test_constant", "from html");
+    let css_interface = constant_core_prelude_interface("core/css", "css_constant", "from css");
     let provider_dependencies = SourceProviderDependencySet::new(vec![
         SourceProviderDependency {
             kind: ProviderDependencyKind::TemplatePrelude {
-                package_prefix: "html",
+                package_prefix: "core/html",
             },
             interface: &html_interface,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::TemplatePrelude {
-                package_prefix: "styles",
+                package_prefix: "core/css",
             },
-            interface: &styles_interface,
+            interface: &css_interface,
         },
     ])
     .expect("both standard template prelude providers should register");
@@ -1791,7 +1808,7 @@ fn moth_template_sees_standard_prelude_constants_without_provider_headers() {
         .expect(".mtf body should see both Core constants through the provider interfaces");
 
     folded_content_contains(&ast, &string_table, &path_fork, "from html");
-    folded_content_contains(&ast, &string_table, &path_fork, "from styles");
+    folded_content_contains(&ast, &string_table, &path_fork, "from css");
 }
 
 #[test]
@@ -1801,18 +1818,18 @@ fn cross_package_constant_reexport_does_not_enter_the_flat_prelude() {
     // and its spelling must not collide with the declaring package's real export.
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[test_constant]")]);
 
-    let html_interface = constant_provider_interface("html", "test_constant", "from html");
+    let html_interface = constant_core_prelude_interface("core/html", "test_constant", "from html");
     let reexported_declaration = html_interface.declarations[0].clone();
     let reexported_origin = reexported_declaration.origin.clone();
-    let styles_origin = StableModuleOriginIdentity::from_portable_path(
-        StablePackageIdentity::project_local("styles"),
-        "styles/@mod.moth".to_owned(),
-        ModuleRootRole::Normal,
+    let css_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::source_package(PackageOrigin::Core, "core/css"),
+        "core/css/@package.moth".to_owned(),
+        ModuleRootRole::Support,
     );
-    let styles_interface = PublicSemanticInterface {
-        module_origin: styles_origin.clone(),
+    let css_interface = PublicSemanticInterface {
+        module_origin: css_origin.clone(),
         export_bindings: vec![ExportBinding::new(
-            styles_origin,
+            css_origin,
             "test_constant".to_owned(),
             reexported_origin,
         )],
@@ -1822,21 +1839,21 @@ fn cross_package_constant_reexport_does_not_enter_the_flat_prelude() {
         reusable_evidence: Vec::new(),
         concrete_call_summaries: Vec::new(),
     };
-    styles_interface
+    css_interface
         .validate_for_publication()
         .expect("a re-exporting interface must satisfy publication validation");
     let provider_dependencies = SourceProviderDependencySet::new(vec![
         SourceProviderDependency {
             kind: ProviderDependencyKind::TemplatePrelude {
-                package_prefix: "html",
+                package_prefix: "core/html",
             },
             interface: &html_interface,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::TemplatePrelude {
-                package_prefix: "styles",
+                package_prefix: "core/css",
             },
-            interface: &styles_interface,
+            interface: &css_interface,
         },
     ])
     .expect("both prelude providers should register separate interfaces");
@@ -1859,25 +1876,25 @@ fn same_package_constant_reexport_enters_the_flat_prelude() {
     // own surface and must enter the flat prelude under its exported name.
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[stacked_constant]")]);
 
-    let html_interface = empty_provider_interface("html");
-    let styles_origin = StableModuleOriginIdentity::from_portable_path(
-        StablePackageIdentity::project_local("styles"),
-        "styles/@mod.moth".to_owned(),
-        ModuleRootRole::Normal,
+    let html_interface = empty_core_prelude_interface("core/html");
+    let css_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::source_package(PackageOrigin::Core, "core/css"),
+        "core/css/@package.moth".to_owned(),
+        ModuleRootRole::Support,
     );
     let declaring_origin = StableModuleOriginIdentity::from_portable_path(
-        StablePackageIdentity::project_local("styles"),
-        "styles/constants.moth".to_owned(),
+        StablePackageIdentity::source_package(PackageOrigin::Core, "core/css"),
+        "core/css/constants.moth".to_owned(),
         ModuleRootRole::Normal,
     );
     let constant_origin = OriginDeclarationId::Constant(OriginConstantId::new(
         declaring_origin,
         "constants_source_name".to_owned(),
     ));
-    let styles_interface = PublicSemanticInterface {
-        module_origin: styles_origin.clone(),
+    let css_interface = PublicSemanticInterface {
+        module_origin: css_origin.clone(),
         export_bindings: vec![ExportBinding::new(
-            styles_origin,
+            css_origin,
             "stacked_constant".to_owned(),
             constant_origin.clone(),
         )],
@@ -1889,18 +1906,18 @@ fn same_package_constant_reexport_enters_the_flat_prelude() {
             semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
                 type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
                 folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
-                    "from styles constants".to_owned(),
+                    "from css constants".to_owned(),
                 )),
             }),
         }],
         reusable_evidence: Vec::new(),
         concrete_call_summaries: Vec::new(),
     };
-    styles_interface
+    css_interface
         .validate_for_publication()
         .expect("a same-package re-export must satisfy publication validation");
     let provider_dependencies =
-        standard_template_prelude_dependencies(&html_interface, &styles_interface);
+        standard_template_prelude_dependencies(&html_interface, &css_interface);
 
     let (ast, string_table, path_fork) = fixture
         .compile_moth_template_ast_with_providers(
@@ -1910,7 +1927,7 @@ fn same_package_constant_reexport_enters_the_flat_prelude() {
         )
         .expect("a same-package re-export should enter the flat prelude");
 
-    folded_content_contains(&ast, &string_table, &path_fork, "from styles constants");
+    folded_content_contains(&ast, &string_table, &path_fork, "from css constants");
 }
 
 #[test]
@@ -1923,9 +1940,10 @@ fn duplicate_prelude_constants_across_official_packages_fail_before_body_evaluat
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "no prelude reference")]);
     let mut messages = Vec::new();
 
-    for (first, second) in [("html", "styles"), ("styles", "html")] {
-        let first_interface = constant_provider_interface(first, "shared_name", "from first");
-        let second_interface = constant_provider_interface(second, "shared_name", "from second");
+    for (first, second) in [("core/html", "core/css"), ("core/css", "core/html")] {
+        let first_interface = constant_core_prelude_interface(first, "shared_name", "from first");
+        let second_interface =
+            constant_core_prelude_interface(second, "shared_name", "from second");
         let provider_dependencies = SourceProviderDependencySet::new(vec![
             SourceProviderDependency {
                 kind: ProviderDependencyKind::TemplatePrelude {
@@ -1954,7 +1972,7 @@ fn duplicate_prelude_constants_across_official_packages_fail_before_body_evaluat
             Ok(_) => panic!("a duplicate prelude name must be rejected"),
         };
         assert_eq!(failure.stage, CompilerStage::HeaderParsing);
-        for expected in ["'@html'", "'@styles'", "'shared_name'"] {
+        for expected in ["'@core/html'", "'@core/css'", "'shared_name'"] {
             assert!(
                 failure.message().contains(expected),
                 "collision message should name {expected}: {}",
@@ -1972,16 +1990,20 @@ fn duplicate_prelude_constants_across_official_packages_fail_before_body_evaluat
 #[test]
 fn moth_template_unknown_template_condition_is_rejected_by_const_template_folding() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[if show: visible]")]);
-    let diagnostic = fixture
-        .compile_moth_template_diagnostic("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
+    let diagnostic = fixture.compile_moth_template_diagnostic(
+        "src/intro.mtf",
+        &["@core/html/@package.moth", "src/intro.mtf"],
+    );
     assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
 }
 
 #[test]
 fn moth_template_const_record_field_access_folds_in_template_head() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[html_defaults.color]")]);
-    let (ast, string_table, path_fork) = fixture
-        .compile_moth_template_ast_ok("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
+    let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
+        "src/intro.mtf",
+        &["@core/html/@package.moth", "src/intro.mtf"],
+    );
 
     folded_content_contains(&ast, &string_table, &path_fork, "green");
 }
@@ -1995,7 +2017,7 @@ fn moth_template_body_selects_sibling_content_constant_explicitly() {
     let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
         "src/docs/intro.mtf",
         &[
-            "@html/@mod.moth",
+            "@core/html/@package.moth",
             "src/docs/other.mtf",
             "src/docs/intro.mtf",
         ],
@@ -2008,7 +2030,7 @@ fn generated_self_content_is_not_visible_to_moth_template_body() {
     let fixture = MothTemplateScopeFixture::new(&[("src/docs/intro.mtf", "[content]")]);
     let failure = fixture.compile_moth_template_diagnostic(
         "src/docs/intro.mtf",
-        &["@html/@mod.moth", "src/docs/intro.mtf"],
+        &["@core/html/@package.moth", "src/docs/intro.mtf"],
     );
     assert_ast_failure_diagnostic(
         &failure,
@@ -2029,7 +2051,7 @@ fn moth_dependency_binds_template_content_as_folded_string_constant() {
     ]);
     let (ast, string_table, path_fork) = fixture
         .compile_module_ast(&[
-            "@html/@mod.moth",
+            "@core/html/@package.moth",
             "src/intro.mtf",
             "src/main.moth",
             "src/@entry.moth",
@@ -2054,7 +2076,7 @@ fn moth_namespace_dependency_binds_template_content_as_folded_string_constant() 
     ]);
     let (ast, string_table, path_fork) = fixture
         .compile_module_ast(&[
-            "@html/@mod.moth",
+            "@core/html/@package.moth",
             "src/main.moth",
             "src/@entry.moth",
             "src/intro.mtf",
@@ -2080,7 +2102,7 @@ fn imported_bd_file_produces_no_runtime_or_start_behavior() {
 
     let (headers, mut string_table, path_fork) = fixture
         .prepare_and_bind_headers_for(&[
-            "@html/@mod.moth",
+            "@core/html/@package.moth",
             "src/intro.mtf",
             "src/main.moth",
             "src/@entry.moth",
@@ -2120,7 +2142,7 @@ fn imported_bd_file_produces_no_runtime_or_start_behavior() {
 
     let (ast, ast_string_table, mut ast_path_fork) = fixture
         .compile_module_ast(&[
-            "@html/@mod.moth",
+            "@core/html/@package.moth",
             "src/intro.mtf",
             "src/main.moth",
             "src/@entry.moth",
@@ -2129,7 +2151,8 @@ fn imported_bd_file_produces_no_runtime_or_start_behavior() {
 
     // Only a function whose declaration path descends from the imported `.mtf` file's own
     // path domain would violate the template's no-runtime contract. The entry root may
-    // contribute its implicit `start`, and the `@html` provider module emits its own functions.
+    // contribute its implicit `start`, and the `@core/html` provider module emits its own
+    // functions.
     let template_source_path = fixture.source_path_for_fixture_path("src/intro.mtf");
     let template_source_id = fixture
         .source_files
@@ -2159,16 +2182,20 @@ fn imported_bd_file_produces_no_runtime_or_start_behavior() {
 #[test]
 fn moth_template_dynamic_loop_condition_rejected_by_const_folding() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[loop show: visible]")]);
-    let diagnostic = fixture
-        .compile_moth_template_diagnostic("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
+    let diagnostic = fixture.compile_moth_template_diagnostic(
+        "src/intro.mtf",
+        &["@core/html/@package.moth", "src/intro.mtf"],
+    );
     assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
 }
 
 #[test]
 fn moth_template_external_prelude_call_reports_invalid_value_receiver_first() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[io.line([: [\"test\"]])]")]);
-    let diagnostic = fixture
-        .compile_moth_template_diagnostic("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
+    let diagnostic = fixture.compile_moth_template_diagnostic(
+        "src/intro.mtf",
+        &["@core/html/@package.moth", "src/intro.mtf"],
+    );
     // This helper checks the first AST error; do not skip the receiver diagnostic to search for a
     // later constant-folding family.
     assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0087", None);

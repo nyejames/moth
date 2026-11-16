@@ -2,7 +2,7 @@
 -- once on each docs page. sidebar.js reads the navbar for desktop geometry.
 -- Only rules needing selectors or media queries use an embedded stylesheet.
 
-@web/page
+@builder/web/page
 
 sidebar_toggle_style #= [$css "inline":
     position: absolute;

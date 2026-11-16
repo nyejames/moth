@@ -481,14 +481,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .get(source_file)
         {
             for dependency in dependencies {
-                self.validate_local_source_edge(&dependency.dependency)?;
-                let selections = dependency
-                    .selections(selection_table)
-                    .map_err(BindingEnvironmentError::Internal)?;
-                // Reject direct dependencies of canonical config files. Canonical `@` root
-                // references are already caught by the path parser's LeadingAtInPathComponent
-                // rejection. The config file needs this later check because `config` is a valid
-                // path component character.
+                // Reject a direct dependency on the build-only `@config.moth` before the general
+                // source-edge and extension checks, so the reserved reason wins. An unquoted `@`
+                // component cannot spell the reserved filename, but a quoted component could
+                // otherwise resolve it as an ordinary source name.
                 if dependency_path_references_config_file(
                     dependency.dependency.path,
                     &*self.path_fork,
@@ -500,7 +496,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     )
                     .into());
                 }
-
+                self.validate_local_source_edge(&dependency.dependency)?;
+                let selections = dependency
+                    .selections(selection_table)
+                    .map_err(BindingEnvironmentError::Internal)?;
                 if !selections.is_empty() {
                     // Direct selections use one provider shell, then resolve each selected name
                     // against that provider or source public surface.
@@ -574,7 +573,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         // 8. Add Moth template's compiler-standard constant prelude.
-        // WHY: `.mtf` bodies are synthetic constant initializers, so the official `@html`
+        // WHY: `.mtf` bodies are synthetic constant initializers, so the official `@core/html`
         //      helper constants must join the same file-local visibility maps as authored
         //      constants without a user-visible dependency record.
         self.register_moth_template_constant_prelude(
@@ -1120,6 +1119,16 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             return Ok(());
         }
 
+        // The synthetic path serves as the consumer-local identity for each cross-module
+        // constant. Intern the provider prefix's components once so the grouped Core namespace
+        // keeps the same component structure as an authored `@core/html` path, and each
+        // constant's identity stays distinct from local declarations and from the other
+        // provider's same-spelled export in collision diagnostics.
+        let package_path = self
+            .path_fork
+            .try_intern_portable_path(package_prefix, self.string_table)
+            .map_err(|_| token_lexical::logical_path_capacity())?;
+
         for binding in &interface.export_bindings {
             let Some(origin) = view.exported_origin(binding.public_name()).cloned() else {
                 continue;
@@ -1146,15 +1155,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             }
 
             let name_id = self.string_table.intern(binding.public_name());
-
-            // The synthetic path serves as the consumer-local identity for this cross-module
-            // constant. Include the provider prefix so the prelude's identity stays distinct
-            // from local declarations and from the other provider's same-spelled export in
-            // collision diagnostics.
-            let package_name = self.string_table.intern(package_prefix);
             let synthetic_path = self
                 .path_fork
-                .try_intern_components(&[package_name, name_id])
+                .try_intern_child(package_path, name_id)
                 .ok_or_else(token_lexical::logical_path_capacity)?;
             self.environment
                 .imported_declarations_by_local_path

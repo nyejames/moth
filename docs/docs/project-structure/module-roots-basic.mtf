@@ -12,11 +12,11 @@ Other helper files in the folder hold shared code. All roots can bind that share
 
 ### The names are fixed
 
-Only those three names work. The compiler rejects any other `.moth` name that starts with `@`, `+` or `#`. The error names the invalid file and lists the three accepted root files.
+Only those three names work as roots. Apart from the reserved `@config.moth`, the compiler rejects any other `.moth` name that starts with `@`, `+` or `#`. The error names the invalid file and lists the three accepted root files.
+
+`@config.moth` is the one extra reserved filename. It holds build settings at the selected project root, but it is not a root, it cannot be imported and a nested copy does nothing. A helper named `config.moth` is ordinary source and resolves as `@config`. Case variants such as `@Config.moth` are invalid.
 
 A `+` prefix is not a root marker in another source file. An ordinary supported file such as `+notes.mtf` can be bound like any other helper source.
-
-`config.moth` stays the build config file. `@config.moth` is not a root and is rejected.
 
 ### Roots keep their declarations private
 

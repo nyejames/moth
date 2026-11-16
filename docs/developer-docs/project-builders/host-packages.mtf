@@ -12,29 +12,31 @@ executable runtime below describe accepted target design, not available APIs.
 
 `SourcePackage::new` assigns the public package root. `from_dir` supplies its
 installed files as an absolute path, and `finish` rejects a relative one.
-The installed directory needs at least one API facade root, `@mod.moth` or
-`@package.moth`. A collocated `@entry.moth` is allowed but never activates, and
-an entry-only directory is not an importable source package.
+The installed directory needs a directly contained `@package.moth` facade. A
+collocated `@entry.moth` is allowed but never activates, and an entry-only
+directory is not an importable source package.
 Registration through `BuilderDefinition::source_package` records Builder
 provenance without asking the caller to construct an internal registry entry.
-A package root may have several components, such as `@game/ui`. `finish`
-rejects a source package whose path equals, contains or nests inside another
-registered source or host package path, including case-only variants. Siblings
-such as `@game/ui` and `@game/audio` don't overlap.
+A Builder package root stays below the reserved `builder/` prefix and may have
+several components, such as `@builder/game/ui`. `finish` rejects a source
+package whose path equals, contains or nests inside another registered source
+or host package path, including case-only variants. Siblings such as
+`@builder/game/ui` and `@builder/game/audio` don't overlap.
 
 [codeblock, $code "rust":
     let install_root = std::path::PathBuf::from("/srv/game/installed-packages");
-    let package = SourcePackage::new("@ui")
+    let package = SourcePackage::new("@builder/game/ui")
         .from_dir(install_root.join("ui"));
 ]
 
 Template scope is not a package registration option. The only implicit `.mtf`
-helper scope is the compiler-standard prelude from the mandatory Core `@html`
-and `@styles` packages. The common builder surface registers both roots, so a
-builder cannot substitute either package, register another root under those
-prefixes or opt arbitrary exported constants into template scope. Application
-data reaches a template through an explicit qualified reference such as
-`@provider symbol`. Ambiguous visible names are still errors.
+helper scope is the compiler-standard prelude from the mandatory Core
+`@core/html` and `@core/css` packages. The common builder surface registers
+both roots, so a builder cannot substitute either package, register another
+root below the reserved `core/` prefix or opt arbitrary exported constants into
+template scope. Application data reaches a template through an explicit
+qualified reference such as `@provider symbol`. Ambiguous visible names are
+still errors.
 
 Packages compile in their own semantic boundaries with the same exact numeric
 identities and language-owned defaults. Builder source packages don't inherit
@@ -48,7 +50,7 @@ Apply `["#[moth::host_function]"]` to a supported concrete Rust free function. A
 its generated descriptor to a package explicitly:
 
 [codeblock, $code "rust":
-    let package = HostPackage::new("@platform")
+    let package = HostPackage::new("@builder/game/platform")
         .function(moth::host_binding!(has_prefix));
 ]
 
@@ -199,7 +201,7 @@ host. Register its type and free-function surface in the package:
         window.height = height;
     }
 
-    let package = HostPackage::new("@window")
+    let package = HostPackage::new("@builder/game/window")
         .opaque_type::<Window>()
         .function(moth::host_binding!(resize));
 ]

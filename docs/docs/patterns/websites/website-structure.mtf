@@ -4,7 +4,7 @@ runs an imported module's entry.
 
 ### Who owns each piece?
 
-- `config.moth` supplies optional project and builder settings. It never joins
+- `@config.moth` supplies optional project and builder settings. It never joins
   the module graph.
 - `@entry.moth` owns one selected page's direct fragments, builder slots and
   runtime start. It publishes no API.

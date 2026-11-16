@@ -1,4 +1,4 @@
-A Moth project is a directory tree rooted at the directory selected by the command. That directory is both the build root and the source root. There is no implicit `src/` entry directory, and a nested `config.moth` never applies to an enclosing build.
+A Moth project is a directory tree rooted at the directory selected by the command. That directory is both the build root and the source root. There is no implicit `src/` entry directory, and a nested `@config.moth` never applies to an enclosing build.
 
 ### Starter shape
 
@@ -20,7 +20,7 @@ A configurable value uses `$config` before one explicitly typed top-level `#` bi
 
 [codeblock, $code "text":
     website/
-    ├── config.moth           # optional
+    ├── @config.moth        # optional
     ├── @entry.moth
     ├── @package.moth         # optional external package surface
     ├── shared/
@@ -37,23 +37,27 @@ A configurable value uses `$config` before one explicitly typed top-level `#` bi
 ### Directory roles
 
 - The selected directory is the build root and the top of the discoverable source tree.
-- `config.moth` is optional. When present, only the one at the selected root applies. It is not module source.
+- `@config.moth` is optional. When present, only the one at the selected root applies. It is not module source. A helper named `config.moth` is ordinary source and `@config` resolves it.
 - A directory named `src/` is ordinary source content. There is no configured entry directory or `entry_root`.
 - `_dev/` and `_release/` are hidden generated output folders, not source folders. The build system manages them through manifests.
 - `.moth_manifest` files are build-system metadata used for safe stale-output cleanup. They are not source.
 - A directory component below the selected root whose name starts with `_` is excluded from that build. Select it directly to compile it.
 
-### Reserved package folder names
+### Reserved package namespace roots
 
-A top-level project folder named `html` or `styles`, in any ASCII case, is rejected because it collides with the mandatory Core package prefixes. Keep ordinary HTML and CSS resources in another folder such as `assets/`. Only the exact prefix is reserved, so `styles_local` and other names that start with it remain available.
+`@core` and `@builder` are reserved package namespace roots. Compiler-shipped Core packages register below `@core/`, such as `@core/html`, `@core/css` and `@core/math`, and Builder packages below `@builder/`, such as `@builder/web/site`. Neither root alone names an importable package.
+
+A project-local import name whose first path component claims `core` or `builder`, in any ASCII case, is rejected. This covers normal and support facades, importable helpers and aliases. A directory name alone claims nothing, so entry-only modules, their private helpers, folders that contain only entries and plain asset directories below `core/` or `builder/` stay legal.
+
+A project folder whose full path matches a registered source package path, such as `core/html/` or `builder/web/site/`, collides whichever module owns it, even when the folder holds no importable surface. Comparison ignores ASCII case. A binding-backed package has no source module, so an asset folder at `builder/web/canvas/` stays legal. An ancestor folder such as `core/` alone stays legal, and so do unrelated project folders named `html/`, `css/`, `styles/` or `web/`. `@project` remains a separate reserved interface for project globals.
 
 ### Root files inside source directories
 
-A source directory recognises exactly three optional root files: `@mod.moth`, `@package.moth` and `@entry.moth`. The directory may contain any present subset. One directory forms one structural module with shared helper files.
+A source directory recognises exactly three optional root files: `@mod.moth`, `@package.moth` and `@entry.moth`. The directory may contain any present subset. One directory forms one structural module with shared helper files. `@config.moth` is the reserved build-only filename, not a fourth root, and a nested copy stays inert.
 
 `@mod.moth` publishes a normal API facade. `@package.moth` publishes a scoped support facade, or the external project package surface when it sits at the selected project root. `@entry.moth` owns executable page or application work. Only entry roots may hold top-level runtime code, page fragments and direct builder slots.
 
-Any other `@*.moth` or `+*.moth` spelling is rejected as a structure error. The exact filename is the role. See @#module-roots (Module roots) for the full vocabulary and visibility rules.
+Apart from the reserved `@config.moth`, any other `@*.moth` or `+*.moth` spelling, such as `@page.moth`, is rejected as a structure error. The exact filename is the role. See @#module-roots (Module roots) for the full vocabulary and visibility rules.
 
 A project produces an HTML page for each `@entry.moth` directory. Entry eligibility comes from file presence, not from the amount of authored activity:
 
@@ -75,13 +79,15 @@ A project-root `@package.moth` is the external project package surface. Internal
 
 No folder gains package meaning without an `@package.moth` root. Ordinary directories do not automatically become packages.
 
+Copying a compiler-shipped source package folder, one with `@package.moth` such as `packages/core/html`, to a non-colliding project path gives an ordinary project-local support package. It never gains Core or Builder identity, capabilities or registration. Copying a binding asset folder, such as `packages/builder/web/canvas/`, creates no package, registers none of the original symbols and gains no namespace identity.
+
 A directory may contain both an `@mod.moth` normal root and an `@package.moth` support root. They are two isolated surfaces of one structural module. Helpers are shared, roots cannot import each other and both interfaces publish only from one successful semantic transaction.
 
 For the full package contract see @../packages/#project-local-packages (Project-local packages).
 
 ### Project scaffold
 
-`moth new html` creates a `config.moth` with an explicit valid project name, a root-level `@entry.moth` and a `.gitignore` containing `/_dev` and `/_release`. The generated config is:
+`moth new html` creates an `@config.moth` with an explicit valid project name, a root-level `@entry.moth` and a `.gitignore` containing `/_dev` and `/_release`. The generated config is:
 
 [codeblock, $code "moth":
     project #= (
@@ -102,9 +108,9 @@ The compiler frontend discovers modules, resolves dependencies, checks types, lo
 
 This separation lets the same frontend feed other builders. The frontend does not decide which modules produce artefacts. The builder owns that decision.
 
-### Only config.moth has config semantics
+### Only @config.moth has config semantics
 
-Only the selected project's root-level `config.moth` defines its settings. A nested `config.moth` does not configure the enclosing build. Invalid special root filenames are rejected during source discovery.
+Only the selected project's root-level `@config.moth` defines its settings. A nested `@config.moth` does not configure the enclosing build. An ordinary `config.moth` helper never gains config meaning, and `@config` resolves that helper. Invalid special root filenames are rejected during source discovery.
 
 ### Concepts related to project layout
 

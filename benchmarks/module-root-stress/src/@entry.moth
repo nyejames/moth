@@ -1,4 +1,4 @@
-@core/constants app_name, version
+@shared/constants app_name, version
 @widgets/card Card, render_card
 @widgets/badge render_badge
 @util/formatting format_label

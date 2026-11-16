@@ -4,7 +4,7 @@ Build configuration values are typed primitive values resolved before module AST
 
 ### `$config` declarations
 
-`$config` marks exactly one explicitly typed top-level `#` binding in `config.moth` or a selected source module. The name is the input name, the type is the contract and `=` is the fallback.
+`$config` marks exactly one explicitly typed top-level `#` binding in `@config.moth` or a selected source module. The name is the input name, the type is the contract and `=` is the fallback.
 
 [codeblock, $code "moth":
     $config
@@ -66,15 +66,15 @@ Matching declarations within one compilation boundary agree on name, primitive t
 
 ### Bootstrap versus source defaults
 
-In `config.moth`, a fallback may use earlier visible helper values on the allowed single-file compile-time surface. Same-file forward references remain errors.
+In `@config.moth`, a fallback may use earlier visible helper values on the allowed single-file compile-time surface. Same-file forward references remain errors.
 
 In source modules, defaults remain self-contained primitive literals or `none`. Names, projections, expressions, templates, calls, casts, collections, records and references to other configuration values remain invalid defaults.
 
 Bootstrap contracts resolve from explicit input, a compatible builder primitive global, the fallback or a required-input diagnostic. Source contracts resolve from a matching bootstrap contract, explicit source-only input, a compatible builder global, the common source fallback or a required-input diagnostic.
 
-### Inputs in `config.moth`
+### Inputs in `@config.moth`
 
-In `config.moth`, the `$config` declaration sits at the top level and the grouped project field carries only `name = expression`; for example:
+In `@config.moth`, the `$config` declaration sits at the top level and the grouped project field carries only `name = expression`; for example:
 
 [codeblock, $code "moth":
     $config

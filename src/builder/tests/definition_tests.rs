@@ -30,9 +30,9 @@ fn invalid_definition_message(
 fn finish_registers_source_and_host_packages_with_builder_provenance() {
     let ui_dir = package_dir();
     let definition = BuilderDefinition::new("game")
-        .source_package(SourcePackage::new("@ui").from_dir(ui_dir.path()))
+        .source_package(SourcePackage::new("@builder/game/ui").from_dir(ui_dir.path()))
         .host_package(
-            HostPackage::new("@platform").function(
+            HostPackage::new("@builder/game/platform").function(
                 HostFunction::new("parse_count")
                     .parameter(HostType::String)
                     .parameter(HostType::U8)
@@ -48,13 +48,13 @@ fn finish_registers_source_and_host_packages_with_builder_provenance() {
 
     let source_root = surface
         .source_packages
-        .get_root("ui")
+        .get_root("builder/game/ui")
         .expect("source package should register by its prefix");
     assert_eq!(source_root.metadata.origin, PackageOrigin::Builder);
 
     let package = surface
         .binding_packages
-        .get_package("@platform")
+        .get_package("@builder/game/platform")
         .expect("host package should register");
     assert_eq!(package.metadata.origin, PackageOrigin::Builder);
     assert_eq!(
@@ -74,7 +74,7 @@ fn finish_registers_source_and_host_packages_with_builder_provenance() {
 
     let (_, function) = surface
         .binding_packages
-        .resolve_package_function("@platform", "parse_count")
+        .resolve_package_function("@builder/game/platform", "parse_count")
         .expect("host function should register");
     let parameter_types = function
         .parameters
@@ -116,7 +116,7 @@ fn finish_registers_source_and_host_packages_with_builder_provenance() {
 fn byte_and_u8_keep_distinct_identities_and_optionals_keep_their_payload() {
     let definition = BuilderDefinition::new("game")
         .host_package(
-            HostPackage::new("@platform")
+            HostPackage::new("@builder/game/platform")
                 .function(HostFunction::new("octet").parameter(HostType::Byte))
                 .function(HostFunction::new("number").parameter(HostType::U8))
                 .function(
@@ -129,7 +129,7 @@ fn byte_and_u8_keep_distinct_identities_and_optionals_keep_their_payload() {
 
     let parameter = |name: &str| {
         registry
-            .resolve_package_function("@platform", name)
+            .resolve_package_function("@builder/game/platform", name)
             .expect("function should register")
             .1
             .parameters[0]
@@ -146,7 +146,7 @@ fn byte_and_u8_keep_distinct_identities_and_optionals_keep_their_payload() {
     );
 
     let (_, maybe_name) = registry
-        .resolve_package_function("@platform", "maybe_name")
+        .resolve_package_function("@builder/game/platform", "maybe_name")
         .expect("function should register");
     let maybe_name_returns = maybe_name
         .return_contract
@@ -188,7 +188,7 @@ fn finish_rejects_host_signatures_outside_the_v1_profile() {
         let message = invalid_definition_message(
             case,
             BuilderDefinition::new("game")
-                .host_package(HostPackage::new("@platform").function(function))
+                .host_package(HostPackage::new("@builder/game/platform").function(function))
                 .finish(),
         );
         assert!(message.contains(offender), "{case}: {message}");
@@ -202,68 +202,98 @@ fn finish_rejects_duplicate_and_overlapping_registrations() {
     let cases = [
         (
             "duplicate source package",
-            "@ui",
+            "@builder/game/ui",
             BuilderDefinition::new("game")
-                .source_package(source("@ui"))
-                .source_package(source("@ui")),
+                .source_package(source("@builder/game/ui"))
+                .source_package(source("@builder/game/ui")),
         ),
         (
             "case-only duplicate source package",
-            "@UI",
+            "@builder/game/UI",
             BuilderDefinition::new("game")
-                .source_package(source("@ui"))
-                .source_package(source("@UI")),
+                .source_package(source("@builder/game/ui"))
+                .source_package(source("@builder/game/UI")),
         ),
         (
             "duplicate host package",
-            "@platform",
+            "@builder/game/platform",
             BuilderDefinition::new("game")
-                .host_package(HostPackage::new("@platform"))
-                .host_package(HostPackage::new("@platform")),
+                .host_package(HostPackage::new("@builder/game/platform"))
+                .host_package(HostPackage::new("@builder/game/platform")),
         ),
         (
             "case-only duplicate host package",
-            "@PLATFORM",
+            "@builder/game/PLATFORM",
             BuilderDefinition::new("game")
-                .host_package(HostPackage::new("@platform"))
-                .host_package(HostPackage::new("@PLATFORM")),
+                .host_package(HostPackage::new("@builder/game/platform"))
+                .host_package(HostPackage::new("@builder/game/PLATFORM")),
         ),
         (
             "conflicting host signatures",
             "read",
             BuilderDefinition::new("game").host_package(
-                HostPackage::new("@platform")
+                HostPackage::new("@builder/game/platform")
                     .function(HostFunction::new("read").returns(HostType::String))
                     .function(HostFunction::new("read").returns(HostType::I32)),
             ),
         ),
         (
             "source and host at one path",
-            "@ui",
+            "@builder/game/ui",
             BuilderDefinition::new("game")
-                .source_package(source("@ui"))
-                .host_package(HostPackage::new("@ui")),
+                .source_package(source("@builder/game/ui"))
+                .host_package(HostPackage::new("@builder/game/ui")),
         ),
         (
             "host package nested in a source package",
-            "@ui/native",
+            "@builder/game/ui/native",
             BuilderDefinition::new("game")
-                .source_package(source("@ui"))
-                .host_package(HostPackage::new("@ui/native")),
+                .source_package(source("@builder/game/ui"))
+                .host_package(HostPackage::new("@builder/game/ui/native")),
         ),
         (
             "source package nested in a source package",
-            "@ui/widgets",
+            "@builder/game/ui/widgets",
             BuilderDefinition::new("game")
-                .source_package(source("@ui"))
-                .source_package(source("@ui/widgets")),
+                .source_package(source("@builder/game/ui"))
+                .source_package(source("@builder/game/ui/widgets")),
         ),
         (
             "source and host differing only by case",
-            "@UI",
+            "@builder/game/UI",
             BuilderDefinition::new("game")
-                .source_package(source("@UI"))
-                .host_package(HostPackage::new("@ui")),
+                .source_package(source("@builder/game/UI"))
+                .host_package(HostPackage::new("@builder/game/ui")),
+        ),
+        (
+            "flat builder source package",
+            "@ui",
+            BuilderDefinition::new("game").source_package(source("@ui")),
+        ),
+        (
+            "flat builder host package",
+            "@platform",
+            BuilderDefinition::new("game").host_package(HostPackage::new("@platform")),
+        ),
+        (
+            "reserved namespace root as a source package",
+            "@builder",
+            BuilderDefinition::new("game").source_package(source("@builder")),
+        ),
+        (
+            "reserved namespace root as a host package",
+            "@builder",
+            BuilderDefinition::new("game").host_package(HostPackage::new("@builder")),
+        ),
+        (
+            "Core package claimed by the builder",
+            "@core/game",
+            BuilderDefinition::new("game").source_package(source("@core/game")),
+        ),
+        (
+            "case-only Core package claimed by the builder",
+            "@Core/Game",
+            BuilderDefinition::new("game").host_package(HostPackage::new("@Core/Game")),
         ),
     ];
 
@@ -273,21 +303,21 @@ fn finish_rejects_duplicate_and_overlapping_registrations() {
     }
 
     BuilderDefinition::new("game")
-        .source_package(source("@ui"))
-        .host_package(HostPackage::new("@uikit"))
+        .source_package(source("@builder/game/ui"))
+        .host_package(HostPackage::new("@builder/game/uikit"))
         .finish()
         .expect("sibling paths sharing a prefix do not overlap");
 
     let definition = BuilderDefinition::new("game")
-        .source_package(source("@web/site"))
-        .host_package(HostPackage::new("@web/page"))
+        .source_package(source("@builder/web/site"))
+        .host_package(HostPackage::new("@builder/web/page"))
         .finish()
         .expect("nested sibling source and host packages do not overlap");
     assert!(
         definition
             .surface()
             .source_packages
-            .get_root("web/site")
+            .get_root("builder/web/site")
             .is_some()
     );
 }
@@ -295,7 +325,17 @@ fn finish_rejects_duplicate_and_overlapping_registrations() {
 #[test]
 fn finish_rejects_reserved_and_malformed_package_paths() {
     let dir = package_dir();
-    for path in ["@project", "@Project", "@core", "@CORE/game", "ui", "@ui#x"] {
+    for path in [
+        "@project",
+        "@Project",
+        "@core",
+        "@CORE/game",
+        "@builder",
+        "@BUILDER/game",
+        "@ui",
+        "ui",
+        "@builder/game/ui#x",
+    ] {
         let message = invalid_definition_message(
             &format!("source package {path}"),
             BuilderDefinition::new("game")
@@ -314,6 +354,43 @@ fn finish_rejects_reserved_and_malformed_package_paths() {
 }
 
 #[test]
+fn builder_packages_register_below_an_explicit_group() {
+    let dir = package_dir();
+    let definition = BuilderDefinition::new("game")
+        .source_package(SourcePackage::new("@builder/game/ui").from_dir(dir.path()))
+        .host_package(HostPackage::new("@builder/game/platform"))
+        .finish()
+        .expect("a custom builder group is the one legal Builder package location");
+    let surface = definition.surface();
+
+    let root = surface
+        .source_packages
+        .get_root("builder/game/ui")
+        .expect("the grouped source package registers under its full prefix");
+    assert_eq!(root.metadata.origin, PackageOrigin::Builder);
+    assert!(
+        surface
+            .binding_packages
+            .get_package("@builder/game/platform")
+            .is_some(),
+        "the grouped host package registers under its full path"
+    );
+    for bare in ["builder", "game", "ui"] {
+        assert!(
+            surface.source_packages.get_root(bare).is_none(),
+            "'{bare}' must not become a package surface"
+        );
+        assert!(
+            surface
+                .binding_packages
+                .get_package(&format!("@{bare}"))
+                .is_none(),
+            "@{bare} must not become a binding package"
+        );
+    }
+}
+
+#[test]
 fn finish_rejects_source_packages_without_an_installed_directory() {
     let dir = package_dir();
     let missing = dir.path().join("missing");
@@ -321,13 +398,13 @@ fn finish_rejects_source_packages_without_an_installed_directory() {
     invalid_definition_message(
         "no directory",
         BuilderDefinition::new("game")
-            .source_package(SourcePackage::new("@ui"))
+            .source_package(SourcePackage::new("@builder/game/ui"))
             .finish(),
     );
     invalid_definition_message(
         "missing directory",
         BuilderDefinition::new("game")
-            .source_package(SourcePackage::new("@ui").from_dir(&missing))
+            .source_package(SourcePackage::new("@builder/game/ui").from_dir(&missing))
             .finish(),
     );
     for (case, root) in [
@@ -337,32 +414,34 @@ fn finish_rejects_source_packages_without_an_installed_directory() {
         let message = invalid_definition_message(
             case,
             BuilderDefinition::new("game")
-                .source_package(SourcePackage::new("@ui").from_dir(root))
+                .source_package(SourcePackage::new("@builder/game/ui").from_dir(root))
                 .finish(),
         );
-        assert!(message.contains("@ui"), "{case}: {message}");
+        assert!(message.contains("@builder/game/ui"), "{case}: {message}");
         assert!(message.contains(root), "{case}: {message}");
     }
 }
 
 #[test]
 fn core_source_package_paths_reject_builder_source_and_host_packages() {
-    let custom_html_dir = package_dir();
+    let custom_package_dir = package_dir();
 
     for (case, path) in [
-        ("html", "@html"),
-        ("html nested", "@html/docs"),
-        ("styles", "@styles"),
-        ("styles nested", "@styles/docs"),
+        ("html", "@core/html"),
+        ("html nested", "@core/html/docs"),
+        ("css", "@core/css"),
+        ("css nested", "@core/css/docs"),
+        ("html case variant", "@Core/HTML"),
+        ("css case variant", "@Core/CSS"),
     ] {
         let message = invalid_definition_message(
             case,
             BuilderDefinition::new("game")
-                .source_package(SourcePackage::new(path).from_dir(custom_html_dir.path()))
+                .source_package(SourcePackage::new(path).from_dir(custom_package_dir.path()))
                 .finish(),
         );
         assert!(
-            message.contains("overlaps registered source package"),
+            message.contains("reserved for official Core packages"),
             "{case}: {message}"
         );
         let message = invalid_definition_message(
@@ -372,7 +451,7 @@ fn core_source_package_paths_reject_builder_source_and_host_packages() {
                 .finish(),
         );
         assert!(
-            message.contains("overlaps host package"),
+            message.contains("reserved for official Core packages"),
             "host {case}: {message}"
         );
     }
@@ -385,6 +464,11 @@ fn minimal_sdk_builder_preserves_official_core_source_roots() {
     use crate::builder_surface::definition::CORE_SOURCE_PACKAGE_PREFIXES;
     use crate::builder_surface::source_package_registry::ProvidedSourceRoot;
 
+    assert_eq!(
+        CORE_SOURCE_PACKAGE_PREFIXES,
+        ["core/html", "core/css"],
+        "every builder receives exactly the Core HTML and CSS source packages"
+    );
     let definition = BuilderDefinition::new("game")
         .finish()
         .expect("a minimal SDK builder should finish");
@@ -401,14 +485,30 @@ fn minimal_sdk_builder_preserves_official_core_source_roots() {
                 if path == &BuilderSurface::builtin_source_package_root(prefix)
         ));
     }
+    assert_eq!(
+        surface.source_packages.iter().count(),
+        CORE_SOURCE_PACKAGE_PREFIXES.len(),
+        "a minimal SDK builder registers no other source package"
+    );
+    for removed in ["html", "styles"] {
+        assert!(
+            surface.source_packages.get_root(removed).is_none(),
+            "the removed flat @{removed} package must not stay registered"
+        );
+    }
     assert!(
         surface
             .binding_packages
-            .get_package("@web/canvas")
+            .get_package("@builder/web/canvas")
             .is_none(),
         "official source roots must not load the HTML canvas binding"
     );
-    assert!(surface.source_packages.get_root("web/site").is_none());
+    assert!(
+        surface
+            .source_packages
+            .get_root("builder/web/site")
+            .is_none()
+    );
 }
 
 #[test]

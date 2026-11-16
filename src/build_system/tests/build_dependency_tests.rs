@@ -558,7 +558,7 @@ fn build_html_project_local_js_import_emits_generated_glue() {
     let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -708,8 +708,8 @@ impl BackendBuilder for RegisteredJsPackageBuilder {
     fn frontend_surface(&self) -> BuilderSurface {
         let mut surface = HtmlProjectBuilder::new().frontend_surface();
         let mut packages = [
-            ("campaign", self.package_root.clone()),
-            ("x/y", self.marker_root.clone()),
+            ("builder/test/campaign", self.package_root.clone()),
+            ("builder/test/x/y", self.marker_root.clone()),
         ];
         if self.reverse_registration {
             packages.reverse();
@@ -877,24 +877,24 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
             let marker_root = root.join("marker");
             let mut sources = vec![
                 (
-                    project_root.join("config.moth"),
+                    project_root.join("@config.moth"),
                     "project #= (\n    name = \"package_campaign\",\n)\nhtml #= ()\n",
                 ),
                 (
                     project_root.join("@entry.moth"),
-                    "@binding.js provider_value as project_value\n@campaign package_value\n@x/y\n~[:project=[project_value()]|package=[package_value()]|[y.marker]]\n",
+                    "@binding.js provider_value as project_value\n@builder/test/campaign package_value\n@builder/test/x/y\n~[:project=[project_value()]|package=[package_value()]|[y.marker]]\n",
                 ),
                 (
                     project_root.join("binding.js"),
                     "/** @moth.sig provider_value || -> String */\nexport function projectValue() { return \"project:17\"; }\n",
                 ),
-                (package_root.join("@mod.moth"), package_root_source),
+                (package_root.join("@package.moth"), package_root_source),
                 (
                     package_root.join("providers/binding.js"),
                     "/** @moth.sig provider_value || -> String */\nexport function packageValue() { return \"package:29\"; }\n",
                 ),
                 (
-                    marker_root.join("@mod.moth"),
+                    marker_root.join("@package.moth"),
                     "$export\nmarker #= \"marker:43\"\n",
                 ),
             ];
@@ -1059,7 +1059,7 @@ fn build_html_normal_sibling_name_is_not_visible_from_child_module() {
             .join(if reversed { "reverse" } else { "forward" });
         let mut sources = [
             (
-                "config.moth",
+                "@config.moth",
                 "project #= (\n    name = \"sibling_boundary\",\n)\nhtml #= ()\n",
             ),
             ("src/@entry.moth", "@consumer value\n~[:[value]]\n"),
@@ -1111,7 +1111,7 @@ fn build_html_project_shared_support_provider_keeps_page_wrappers_isolated() {
     fs::create_dir_all(&shared).expect("should create support package");
     fs::create_dir_all(&about).expect("should create second page");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"shared_pages\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1276,7 +1276,7 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
     let facade = src.join("drawing");
     fs::create_dir_all(&facade).expect("should create facade");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1358,7 +1358,7 @@ fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module()
     let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1402,7 +1402,7 @@ fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_m
     let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1444,7 +1444,7 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
     let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1503,13 +1503,13 @@ fn build_html_project_unused_html_canvas_markup_does_not_emit_runtime_artifacts(
     let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        r#"@html canvas
+        r#"@core/html canvas
 [canvas:
   [$in id:unused_canvas]
   [$in style:
@@ -1569,13 +1569,13 @@ fn build_html_project_pure_core_source_package_imports_emit_no_javascript_artifa
     let root = _temp.path().to_path_buf();
 
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
         root.join("@entry.moth"),
-        "@html p\n@styles center\n\n[p, center: official constants only]\n",
+        "@core/html p\n@core/css center\n\n[p, center: official constants only]\n",
     )
     .expect("should write page");
 
@@ -1595,7 +1595,7 @@ fn build_html_project_pure_core_source_package_imports_emit_no_javascript_artifa
     let html = html_text(outputs.at("index.html"));
     assert!(
         html.contains("<p style=\"text-align: center;\">"),
-        "the official @styles constant should render: {html}"
+        "the official @core/css constant should render: {html}"
     );
 
     let javascript_outputs = result
@@ -1607,7 +1607,7 @@ fn build_html_project_pure_core_source_package_imports_emit_no_javascript_artifa
         .collect::<Vec<_>>();
     assert!(
         javascript_outputs.is_empty(),
-        "importing pure @html and @styles must emit no JavaScript artifact, found {javascript_outputs:?}"
+        "importing pure @core/html and @core/css must emit no JavaScript artifact, found {javascript_outputs:?}"
     );
 
     let deferred_javascript = result
@@ -1619,7 +1619,7 @@ fn build_html_project_pure_core_source_package_imports_emit_no_javascript_artifa
         .collect::<Vec<_>>();
     assert!(
         deferred_javascript.is_empty(),
-        "importing pure @html and @styles must defer no JavaScript resource, found {deferred_javascript:?}"
+        "importing pure @core/html and @core/css must defer no JavaScript resource, found {deferred_javascript:?}"
     );
 }
 
@@ -1632,13 +1632,13 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "@web/canvas\nrun |id String| -> String, Error!:\n    canvas_ref = canvas.get_canvas(id)!\n    ctx ~= canvas.context_2d(canvas_ref)!\n    canvas.set_line_width(~ctx, 2.0)\n    gradient ~= canvas.create_linear_gradient(ctx, 0.0, 0.0, 10.0, 0.0)!\n    canvas.add_color_stop(~gradient, 0.0, \"red\")!\n    canvas.set_fill_gradient(~ctx, gradient)\n    canvas.fill_rect(~ctx, 0.0, 0.0, 10.0, 10.0)\n    return \"ok\"\n;\nresult = run(\"game\") catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
+        "@builder/web/canvas\nrun |id String| -> String, Error!:\n    canvas_ref = canvas.get_canvas(id)!\n    ctx ~= canvas.context_2d(canvas_ref)!\n    canvas.set_line_width(~ctx, 2.0)\n    gradient ~= canvas.create_linear_gradient(ctx, 0.0, 0.0, 10.0, 0.0)!\n    canvas.add_color_stop(~gradient, 0.0, \"red\")!\n    canvas.set_fill_gradient(~ctx, gradient)\n    canvas.fill_rect(~ctx, 0.0, 0.0, 10.0, 10.0)\n    return \"ok\"\n;\nresult = run(\"game\") catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
     )
     .expect("should write page");
 
@@ -1688,15 +1688,15 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     let html = html_text(outputs.at("index.html"));
     assert!(
         html.contains("<script type=\"module\">"),
-        "reachable @web/canvas glue should make the inline bundle a module script"
+        "reachable @builder/web/canvas glue should make the inline bundle a module script"
     );
     assert!(
         html.contains("import { __moth_glue_"),
-        "reachable @web/canvas calls should add a glue import preamble"
+        "reachable @builder/web/canvas calls should add a glue import preamble"
     );
     assert!(
         html.contains("<script type=\"importmap\">"),
-        "@web/canvas imports runtime helpers, so HTML should include an import map"
+        "@builder/web/canvas imports runtime helpers, so HTML should include an import map"
     );
 
     outputs.at(RUNTIME_MODULE_PATH);
@@ -1711,13 +1711,13 @@ fn build_html_project_web_canvas_free_function_import_emits_builtin_js_asset_and
     let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "@web/canvas get_canvas, context_2d\ndraw || -> String, Error!:\n    element = get_canvas(\"game_canvas\")!\n    context = context_2d(element)!\n    return \"ok\"\n;\nresult = draw() catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
+        "@builder/web/canvas get_canvas, context_2d\ndraw || -> String, Error!:\n    element = get_canvas(\"game_canvas\")!\n    context = context_2d(element)!\n    return \"ok\"\n;\nresult = draw() catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
     )
     .expect("should write page");
 
@@ -1774,7 +1774,7 @@ fn build_project_discards_backend_warnings_when_multimodule_diagnostics_fail() {
     let docs_dir = src_dir.join("docs");
     fs::create_dir_all(&docs_dir).expect("should create docs directory");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1814,7 +1814,7 @@ fn build_html_project_literal_const_change_reaches_next_build_without_asset() {
     let helper = src.join("helper");
     fs::create_dir_all(&helper).expect("should create helper dir");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1901,7 +1901,7 @@ fn build_html_project_mixed_const_and_function_emits_single_glue_module() {
     let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1973,7 +1973,7 @@ fn write_shared_glue_project(root: &Path, page_dirs: &[&str], page_export: &str)
     let shared = root.join("shared");
     fs::create_dir_all(&shared).expect("should create provider facade");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"shared_glue\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");

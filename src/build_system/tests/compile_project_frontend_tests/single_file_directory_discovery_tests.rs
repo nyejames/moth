@@ -194,10 +194,10 @@ fn single_file_without_source_package_dependencies_skips_registered_package_mate
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
-    let package_root = dir.join("packages/unused");
+    let package_root = dir.join("packages/builder/test/unused");
     fs::create_dir_all(&package_root).expect("should create registered package root");
     fs::write(
-        package_root.join("@mod.moth"),
+        package_root.join("@package.moth"),
         "$export\nunused || -> I32:\n    return missing_package_value\n;\n",
     )
     .expect("should write semantically invalid unused package");
@@ -211,7 +211,7 @@ fn single_file_without_source_package_dependencies_skips_registered_package_mate
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
-        .register_filesystem_root("unused", package_root, PackageOrigin::Builder)
+        .register_filesystem_root("builder/test/unused", package_root, PackageOrigin::Builder)
         .expect("test source root should register");
 
     let frontend = successful_compilation_value(compile_project_frontend(
@@ -244,7 +244,7 @@ fn directory_project_discovers_multiple_entry_modules() {
     fs::create_dir_all(dir.join("page")).expect("should create page dir");
     fs::create_dir_all(dir.join("layout")).expect("should create layout dir");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -291,7 +291,7 @@ fn directory_project_remaps_delta_collisions_across_modules() {
     fs::create_dir_all(dir.join("first")).expect("should create first module dir");
     fs::create_dir_all(dir.join("second")).expect("should create second module dir");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -383,13 +383,13 @@ fn single_file_rejects_source_package_moth_folder_collision() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    // Source-backed package with one valid normal module root plus a .moth/folder collision.
+    // Source-backed package with one valid support facade plus a .moth/folder collision.
     let widget_lib = dir.join("lib").join("widgets");
     fs::create_dir_all(widget_lib.join("widget")).expect("should create widget folder sibling");
     fs::write(widget_lib.join("widget.moth"), "value #= 1\n")
         .expect("should write colliding widget.moth");
-    fs::write(widget_lib.join("@mod.moth"), "value #= 2\n")
-        .expect("should write valid normal module root");
+    fs::write(widget_lib.join("@package.moth"), "value #= 2\n")
+        .expect("should write valid support facade root");
 
     // Main single file that does NOT import the ambiguous source-backed package path.
     let main_path = dir.join("main.moth");
@@ -431,17 +431,17 @@ fn single_file_project_cutoff_after_package_work_refuses_module_admission() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
-    let package_root = dir.join("packages/shared");
+    let package_root = dir.join("packages/builder/test/shared");
     fs::create_dir_all(&package_root).expect("should create registered package root");
     fs::write(
-        package_root.join("@mod.moth"),
+        package_root.join("@package.moth"),
         "$export\nrender || -> I32:\n    return shared_missing\n;\n",
     )
     .expect("should write diagnostically invalid package");
     let moth_path = dir.join("main.moth");
     fs::write(
         &moth_path,
-        "@shared render\nvalue = render() catch:\n    then 0\n;\n",
+        "@builder/test/shared render\nvalue = render() catch:\n    then 0\n;\n",
     )
     .expect("should write package consumer");
 
@@ -452,7 +452,7 @@ fn single_file_project_cutoff_after_package_work_refuses_module_admission() {
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
-        .register_filesystem_root("shared", package_root, PackageOrigin::Builder)
+        .register_filesystem_root("builder/test/shared", package_root, PackageOrigin::Builder)
         .expect("test source root should register");
     crate::compiler_frontend::pipeline_test_support::reset_file_frontend_prepare_count_for_test(
         &dir,
@@ -506,7 +506,7 @@ fn check_project_with_root_entry_only_publishes_no_interface() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");

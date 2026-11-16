@@ -24,7 +24,9 @@ use crate::compiler_frontend::paths::path_normalization::{
     dependency_contains_dotdot, is_relative_dependency_path, join_and_normalize_components,
 };
 use crate::compiler_frontend::source_packages::match_package_prefix;
-use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
+use crate::compiler_frontend::source_packages::root_file::{
+    PreparedSourcePackageRoots, dependency_path_references_config_file,
+};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use std::fs;
@@ -158,10 +160,10 @@ impl ProjectPathResolver {
         })
     }
 
-    /// Returns each source-backed package's selected public-root file as its public surface.
+    /// Returns each source-backed package's required `@package.moth` support facade as its public
+    /// surface.
     ///
-    /// A support root is the external surface when the package is paired or support-only;
-    /// otherwise the normal root is selected.
+    /// A co-located normal root is an internal scope and never the package surface.
     pub(crate) fn source_package_public_surface_files(
         &self,
     ) -> impl Iterator<Item = (&String, &PathBuf)> {
@@ -311,6 +313,13 @@ impl ProjectPathResolver {
         declaring_file: &Path,
         strings: &mut DiagnosticStringBuilder<'_>,
     ) -> Result<(CompileTimePathBase, PathBuf), DependencyPathResolutionError> {
+        // The reserved config filename wins over the extension rejection below so the author sees
+        // why that exact source is not importable.
+        if dependency_path_references_config_file(dependency_path, path_fork, strings.strings()) {
+            return Err(DependencyPathResolutionError::Diagnostic(
+                imports::direct_special_file_import(dependency_path, None),
+            ));
+        }
         if let Some(extension) =
             explicit_source_extension(dependency_path, path_fork, strings.strings())
         {

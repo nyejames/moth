@@ -42,7 +42,7 @@ fn test_project_builder() -> BuilderSelection {
 fn write_directory_project(root: &Path, page_source: &str) {
     fs::create_dir_all(root).expect("should create source root");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write project config");
@@ -157,7 +157,7 @@ fn budget_stopped_build_writes_no_output_and_reports_the_cutoff() {
     fs::create_dir_all(src.join("first")).expect("should create first module directory");
     fs::create_dir_all(src.join("second")).expect("should create second module directory");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 1,\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write project config");

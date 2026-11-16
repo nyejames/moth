@@ -341,7 +341,7 @@ fn rejects_nested_external_type_from_same_path_but_different_package_origin() {
 
     let external_identity = CanonicalTypeIdentity::ExternalOpaque(ExternalOpaqueTypeIdentity::new(
         StablePackageIdentity::binding(
-            crate::builder_surface::PackageOrigin::Builder,
+            crate::builder_surface::PackageOrigin::Dependency,
             "@shared/api",
         ),
         ExternalSymbolPath::from_single("Handle"),
@@ -380,13 +380,13 @@ fn accepts_external_type_with_same_stable_identity_and_different_local_ids() {
     let mut registry = ExternalPackageRegistry::default();
     registry
         .register_package(
-            "@dummy/first",
+            "@builder/test/dummy/first",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("dummy package should shift local package allocation");
     let package_id = registry
         .register_package(
-            "@shared/api",
+            "@builder/test/shared/api",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("consumer package should register");
@@ -427,7 +427,7 @@ fn accepts_external_type_with_same_stable_identity_and_different_local_ids() {
                             ExternalOpaqueTypeIdentity::new(
                                 StablePackageIdentity::binding(
                                     crate::builder_surface::PackageOrigin::Builder,
-                                    "@shared/api",
+                                    "@builder/test/shared/api",
                                 ),
                                 ExternalSymbolPath::from_single("Handle"),
                             ),

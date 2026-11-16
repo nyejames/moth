@@ -1,4 +1,4 @@
-@core/constants app_version
+@shared/constants app_version
 @utils/formatting format_timestamp
 
 render_footer |timestamp String| -> String:

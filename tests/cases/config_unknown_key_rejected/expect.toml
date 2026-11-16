@@ -9,5 +9,5 @@ diagnostic_codes = ["MOTH-CONFIG-0001"]
 code = "MOTH-CONFIG-0001"
 occurrence = 1
 reason = "invalid_config.unknown_record_field"
-path = "input/config.moth"
+path = "input/@config.moth"
 line = 4

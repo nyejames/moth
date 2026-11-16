@@ -21,7 +21,7 @@
 //! registration route and the runtime outcomes that route can lose.
 //!
 //! The fixture follows the canonical project path: `compile_project_frontend_with_inputs` loads
-//! `config.moth` against the builder surface carrying the registered function, then runs the
+//! `@config.moth` against the builder surface carrying the registered function, then runs the
 //! production Stage 0 plus module compilation sequence (AST, HIR validation, borrow validation,
 //! numeric proofs). `lower_hir_to_js` then produces the JavaScript exactly as the HTML builder's
 //! JS path calls it.
@@ -61,7 +61,7 @@ const CONFIG_SOURCE: &str = concat!(
 
 /// Infallible lane: the raw boundary carries no declared error slot, so its finite guard must trap.
 const FINITE_SOURCE: &str = concat!(
-    "@test/default raw_f64_finite\n",
+    "@builder/test/default raw_f64_finite\n",
     "\n",
     "finite_width || -> F64:\n",
     "    return raw_f64_finite()\n",
@@ -71,7 +71,7 @@ const FINITE_SOURCE: &str = concat!(
 /// Fallible lane: the raw boundary declares the builtin `Error!` slot and the source forwards the
 /// raw success value with a direct postfix return, so its finite guard must stay recoverable.
 const FORWARD_SOURCE: &str = concat!(
-    "@test/default raw_f64_forward\n",
+    "@builder/test/default raw_f64_forward\n",
     "\n",
     "forward || -> F64, Error!:\n",
     "    return raw_f64_forward()!\n",
@@ -80,7 +80,7 @@ const FORWARD_SOURCE: &str = concat!(
 
 /// One directly registered raw fixed F64 external function for a fixture.
 struct RawFixedF64Function {
-    /// Leaf name in `@test/default`, which is also the name the source imports.
+    /// Leaf name in `@builder/test/default`, which is also the name the source imports.
     name: &'static str,
     /// JS runtime helper the registered lowering must call.
     js_helper: &'static str,
@@ -135,7 +135,7 @@ fn compile_raw_fixed_f64_fixture(
     let temporary_project = tempfile::tempdir().expect("fixture should create a temporary project");
     let root = temporary_project.path().to_path_buf();
     fs::write(root.join(CONFIG_FILE_NAME), CONFIG_SOURCE)
-        .expect("fixture should write config.moth");
+        .expect("fixture should write the project config");
     fs::write(root.join("@entry.moth"), source).expect("fixture should write the entry module");
 
     // The registered boundary lives on the builder surface's external registry, the same surface

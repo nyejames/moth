@@ -1,6 +1,6 @@
 //! Shared HTML page-routing policy parsing and defaults.
 //!
-//! WHAT: parses routing-related `config.moth` settings into typed values.
+//! WHAT: parses routing-related `@config.moth` settings into typed values.
 //! WHY: keeping one parser avoids drift between builder validation and dev-server runtime behavior.
 
 use crate::compiler_frontend::compiler_messages::InvalidConfigReason;

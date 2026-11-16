@@ -251,13 +251,20 @@ fn namespace_dependency_default_rejects_keyword_shadow_name_variants() {
     for name in ["config", "Config", "CONFIG", "_config", "_Config"] {
         let mut registry = ExternalPackageRegistry::new();
         let provider_name = format!("{name}.js");
-        register_keyword_test_package(&mut registry, &format!("@test/{provider_name}"), "member");
+        register_keyword_test_package(
+            &mut registry,
+            &format!("@builder/test/{provider_name}"),
+            "member",
+        );
 
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
         let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
-        let dependency_path =
-            intern_path(&["test", &provider_name], &mut string_table, &mut path_fork);
+        let dependency_path = intern_path(
+            &["builder", "test", &provider_name],
+            &mut string_table,
+            &mut path_fork,
+        );
         let dependency = test_dependency(dependency_path);
         let expected_name = string_table.intern(name);
         let expected_span = dependency.dependency.span;
@@ -291,13 +298,13 @@ fn namespace_dependency_default_rejects_keyword_shadow_name_variants() {
 fn namespace_dependency_alias_rejects_keyword_shadow_name_variants() {
     for alias in ["config", "Config", "CONFIG", "_config", "_Config"] {
         let mut registry = ExternalPackageRegistry::new();
-        register_keyword_test_package(&mut registry, "@test/namespace_alias", "member");
+        register_keyword_test_package(&mut registry, "@builder/test/namespace_alias", "member");
 
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
         let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
         let dependency_path = intern_path(
-            &["test", "namespace_alias"],
+            &["builder", "test", "namespace_alias"],
             &mut string_table,
             &mut path_fork,
         );
@@ -337,13 +344,17 @@ fn namespace_dependency_alias_rejects_keyword_shadow_name_variants() {
 #[test]
 fn namespace_dependency_alias_collision_retains_exact_alias_span() {
     let mut registry = ExternalPackageRegistry::new();
-    register_keyword_test_package(&mut registry, "@test/namespace_alias_collision", "member");
+    register_keyword_test_package(
+        &mut registry,
+        "@builder/test/namespace_alias_collision",
+        "member",
+    );
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let dependency_path = intern_path(
-        &["test", "namespace_alias_collision"],
+        &["builder", "test", "namespace_alias_collision"],
         &mut string_table,
         &mut path_fork,
     );
@@ -468,14 +479,14 @@ fn selected_dependency_unaliased_name_rejects_keyword_shadow_variants() {
         .enumerate()
     {
         let mut registry = ExternalPackageRegistry::new();
-        let package_path = format!("@test/selected_unaliased_{index}");
+        let package_path = format!("@builder/test/selected_unaliased_{index}");
         register_keyword_test_package(&mut registry, &package_path, source_name);
 
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
         let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
         let dependency_path = intern_path(
-            &["test", &format!("selected_unaliased_{index}")],
+            &["builder", "test", &format!("selected_unaliased_{index}")],
             &mut string_table,
             &mut path_fork,
         );
@@ -526,14 +537,14 @@ fn selected_dependency_alias_rejects_keyword_shadow_name_variants() {
         .enumerate()
     {
         let mut registry = ExternalPackageRegistry::new();
-        let package_path = format!("@test/selected_alias_{index}");
+        let package_path = format!("@builder/test/selected_alias_{index}");
         register_keyword_test_package(&mut registry, &package_path, "member");
 
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
         let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
         let dependency_path = intern_path(
-            &["test", &format!("selected_alias_{index}")],
+            &["builder", "test", &format!("selected_alias_{index}")],
             &mut string_table,
             &mut path_fork,
         );
@@ -724,7 +735,7 @@ fn binding_counters_separate_namespace_clauses_from_selected_names() {
     let mut registry = ExternalPackageRegistry::new();
     let namespace_package = registry
         .register_package(
-            "@test/namespace",
+            "@builder/test/namespace",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("namespace package should register");
@@ -739,7 +750,7 @@ fn binding_counters_separate_namespace_clauses_from_selected_names() {
 
     let selection_package = registry
         .register_package(
-            "@test/selections",
+            "@builder/test/selections",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("selection package should register");
@@ -757,8 +768,16 @@ fn binding_counters_separate_namespace_clauses_from_selected_names() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
-    let namespace_path = intern_path(&["test", "namespace"], &mut string_table, &mut path_fork);
-    let selection_path = intern_path(&["test", "selections"], &mut string_table, &mut path_fork);
+    let namespace_path = intern_path(
+        &["builder", "test", "namespace"],
+        &mut string_table,
+        &mut path_fork,
+    );
+    let selection_path = intern_path(
+        &["builder", "test", "selections"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let namespace_clause = test_dependency(namespace_path);
     let mut selection_clause = test_dependency(selection_path);
     let mut selection_store = Vec::new();
@@ -824,7 +843,10 @@ fn dependency_error_diagnostic(
 fn external_nested_namespace_tree_builds_correctly() {
     let mut registry = ExternalPackageRegistry::new();
     let package_id = registry
-        .register_package("@test/path", crate::builder_surface::PackageOrigin::Builder)
+        .register_package(
+            "@builder/test/path",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
         .expect("test package should register");
 
     registry
@@ -873,7 +895,11 @@ fn external_nested_namespace_tree_builds_correctly() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
-    let dependency_path = intern_path(&["test", "path"], &mut string_table, &mut path_fork);
+    let dependency_path = intern_path(
+        &["builder", "test", "path"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let dependency = test_dependency(dependency_path);
 
     let mut module_symbols = ModuleSymbols::empty();
@@ -953,8 +979,12 @@ fn duplicate_external_namespace_value_and_type_slot_is_rejected() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let span = location_for(&["src", "@entry.moth"], &mut string_table);
-    let surface_path = intern_path(&["test", "path"], &mut string_table, &mut path_fork);
-    let test_package = string_table.intern("@test");
+    let surface_path = intern_path(
+        &["builder", "test", "path"],
+        &mut string_table,
+        &mut path_fork,
+    );
+    let test_package = string_table.intern("@builder/test/path");
     let mut record = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(test_package));
 
     let mut inserter = ExternalNamespaceRecordInserter {
@@ -989,8 +1019,12 @@ fn duplicate_external_namespace_and_value_slot_is_rejected() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let span = location_for(&["src", "@entry.moth"], &mut string_table);
-    let surface_path = intern_path(&["test", "path"], &mut string_table, &mut path_fork);
-    let test_package = string_table.intern("@test");
+    let surface_path = intern_path(
+        &["builder", "test", "path"],
+        &mut string_table,
+        &mut path_fork,
+    );
+    let test_package = string_table.intern("@builder/test/path");
     let mut record = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(test_package));
 
     let mut inserter = ExternalNamespaceRecordInserter {
@@ -1025,8 +1059,12 @@ fn duplicate_external_namespace_and_type_slot_is_rejected() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let span = location_for(&["src", "@entry.moth"], &mut string_table);
-    let surface_path = intern_path(&["test", "path"], &mut string_table, &mut path_fork);
-    let test_package = string_table.intern("@test");
+    let surface_path = intern_path(
+        &["builder", "test", "path"],
+        &mut string_table,
+        &mut path_fork,
+    );
+    let test_package = string_table.intern("@builder/test/path");
     let mut record = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(test_package));
 
     let mut inserter = ExternalNamespaceRecordInserter {
@@ -1187,7 +1225,10 @@ fn unique_namespace_with_value_member_is_none_when_ambiguous() {
 fn missing_package_symbol_candidates_exclude_nested_paths() {
     let mut registry = ExternalPackageRegistry::new();
     let package_id = registry
-        .register_package("@test/path", crate::builder_surface::PackageOrigin::Builder)
+        .register_package(
+            "@builder/test/path",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
         .expect("test package should register");
     registry
         .register_constant_at_path(
@@ -1214,7 +1255,11 @@ fn missing_package_symbol_candidates_exclude_nested_paths() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let dependency_path = intern_path(&["test", "path", "nope"], &mut string_table, &mut path_fork);
+    let dependency_path = intern_path(
+        &["builder", "test", "path", "nope"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let lookup = resolve_external_package_symbol(ExternalPackageSymbolResolutionInput {
         dependency_path: &dependency_path,
         external_package_registry: &registry,
@@ -1245,7 +1290,10 @@ fn missing_package_symbol_candidates_exclude_nested_paths() {
 fn missing_package_symbol_multi_component_path_has_no_candidates() {
     let mut registry = ExternalPackageRegistry::new();
     let package_id = registry
-        .register_package("@test/path", crate::builder_surface::PackageOrigin::Builder)
+        .register_package(
+            "@builder/test/path",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
         .expect("test package should register");
     registry
         .register_constant_at_path(
@@ -1265,7 +1313,7 @@ fn missing_package_symbol_multi_component_path_has_no_candidates() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let dependency_path = intern_path(
-        &["test", "path", "foo", "PI"],
+        &["builder", "test", "path", "foo", "PI"],
         &mut string_table,
         &mut path_fork,
     );
@@ -1350,7 +1398,7 @@ fn prelude_symbol_visibility_has_no_authored_span() {
     let mut registry = ExternalPackageRegistry::new();
     let package_id = registry
         .register_package(
-            "@test/prelude_symbols",
+            "@builder/test/prelude_symbols",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test package registration should not collide");
@@ -1405,7 +1453,7 @@ fn explicit_external_symbol_binding_retains_authored_span() {
     let mut registry = ExternalPackageRegistry::new();
     let package_id = registry
         .register_package(
-            "@test/explicit_symbols",
+            "@builder/test/explicit_symbols",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test package registration should not collide");
@@ -1426,7 +1474,7 @@ fn explicit_external_symbol_binding_retains_authored_span() {
     let provider = RetainedDependencyPath {
         span: dependency_span,
         path: intern_path(
-            &["test", "explicit_symbols"],
+            &["builder", "test", "explicit_symbols"],
             &mut string_table,
             &mut path_fork,
         ),
@@ -1488,7 +1536,7 @@ fn explicit_external_symbol_binding_retains_authored_span() {
 fn register_prelude_namespace_test_package(registry: &mut ExternalPackageRegistry) {
     let package_id = registry
         .register_package(
-            "@test/prelude_ns",
+            "@builder/test/prelude_ns",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test package registration should not collide");
@@ -1508,7 +1556,7 @@ fn prelude_namespace_alias_injects_unshadowed_record() {
     let mut registry = ExternalPackageRegistry::new();
     register_prelude_namespace_test_package(&mut registry);
     registry
-        .register_prelude_namespace_alias("prelude_ns", "@test/prelude_ns")
+        .register_prelude_namespace_alias("prelude_ns", "@builder/test/prelude_ns")
         .expect("prelude alias registration should not collide");
 
     let mut string_table = StringTable::new();
@@ -1559,7 +1607,7 @@ fn prelude_namespace_alias_collides_with_same_file_declaration() {
     let mut registry = ExternalPackageRegistry::new();
     register_prelude_namespace_test_package(&mut registry);
     registry
-        .register_prelude_namespace_alias("prelude_ns", "@test/prelude_ns")
+        .register_prelude_namespace_alias("prelude_ns", "@builder/test/prelude_ns")
         .expect("prelude alias registration should not collide");
 
     let mut string_table = StringTable::new();
@@ -1620,13 +1668,17 @@ fn prelude_namespace_alias_coexists_with_explicit_dependency_of_same_target() {
     let mut registry = ExternalPackageRegistry::new();
     register_prelude_namespace_test_package(&mut registry);
     registry
-        .register_prelude_namespace_alias("prelude_ns", "@test/prelude_ns")
+        .register_prelude_namespace_alias("prelude_ns", "@builder/test/prelude_ns")
         .expect("prelude alias registration should not collide");
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
-    let dependency_path = intern_path(&["test", "prelude_ns"], &mut string_table, &mut path_fork);
+    let dependency_path = intern_path(
+        &["builder", "test", "prelude_ns"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let provider = RetainedDependencyPath {
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         path: dependency_path,
@@ -2278,7 +2330,7 @@ fn binding_provider_with_members(
 ) -> PublicSemanticInterface {
     let package_id = registry
         .register_package(
-            "@test/provider_binding",
+            "@builder/test/provider_binding",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("binding provider package should register");
@@ -2618,7 +2670,7 @@ fn provider_selection_namespace_binding_prefers_source_name_over_facade_alias() 
         )
         .expect("ambiguous provider binding export should build");
     let expected = registry
-        .resolve_package_symbol("@test/provider_binding", "SOURCE")
+        .resolve_package_symbol("@builder/test/provider_binding", "SOURCE")
         .expect("source binding should be registered");
     assert!(matches!(
         record.value_members.get(&export_name),

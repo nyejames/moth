@@ -1,6 +1,6 @@
 @types/models UserProfile
 @types/enums Priority
-@core/constants app_version, build_timestamp
+@shared/constants app_version, build_timestamp
 @utils/formatting format_timestamp
 @widgets/badge render_badge
 

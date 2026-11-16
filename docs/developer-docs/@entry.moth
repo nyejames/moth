@@ -1,4 +1,4 @@
-@html table
+@core/html table
 @docs_styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
 
 [$in title:["Developer documentation"]]

@@ -18,7 +18,7 @@ init_docs_sidebar()!
     A const function can construct the value, and the entry can compose
     several components into a page.
 
-    This guide describes the intended `@html` component layer, including
+    This guide describes the intended `@core/html` component layer, including
     APIs not yet implemented. See the @../../progress (progress matrix)
     for the currently available language and package surface.
 ]

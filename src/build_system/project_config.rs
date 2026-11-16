@@ -1,6 +1,6 @@
 //! Stage 0 config loading and settings application for Moth projects.
 //!
-//! WHAT: owns the public entry points for loading `config.moth` before compilation starts: locating
+//! WHAT: owns the public entry points for loading `@config.moth` before compilation starts: locating
 //! the file, reading it, calling the compiler's config compilation service and applying the folded
 //! values it returns.
 //! WHY: which file is the project's config, what its keys mean and how accepted values reach
@@ -29,7 +29,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMod
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, InvalidConfigReason, PreparedFailure,
+    CompilerStage, DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::module_compilation::{
     ConstExecutionLimits, DEFAULT_MAX_ERRORS_PER_MODULE,
@@ -43,7 +43,9 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::settings::{BuilderSettings, Config, DEFAULT_MAX_ERRORS_PER_PROJECT};
+use crate::projects::settings::{
+    BuilderSettings, CONFIG_FILE_NAME, Config, DEFAULT_MAX_ERRORS_PER_PROJECT,
+};
 
 use moth_lexical::identifier::is_identifier;
 use std::path::Path;
@@ -93,7 +95,7 @@ fn capture_root_diagnostics(
 //  Config Parse Services
 // -------------------------
 
-/// Focused frontend services passed into config parsing so `config.moth` can use the selected
+/// Focused frontend services passed into config parsing so `@config.moth` can use the selected
 /// compiler and builder capability metadata.
 ///
 /// WHAT: bundles the style directives and the complete builder surface (external packages,
@@ -112,9 +114,9 @@ pub(crate) struct ProjectConfigParseServices<'a> {
 //  Public API
 // -------------------------
 
-/// Load and validate the project config from `config.moth` before compilation begins (Stage 0).
+/// Load and validate the project config from `@config.moth` before compilation begins (Stage 0).
 ///
-/// Directory projects treat `config.moth` as optional. Single-file compilation keeps its separate
+/// Directory projects treat `@config.moth` as optional. Single-file compilation keeps its separate
 /// no-config policy because `entry_dir` is not a directory.
 pub fn load_project_config(
     config: &mut Config,
@@ -125,56 +127,61 @@ pub fn load_project_config(
     let config_path = config.config_file_path();
 
     // Single-file compilation uses its separate synthetic path and must not probe a
-    // `<file>/config.moth` path. Directory projects alone select an authored config.
+    // `<file>/@config.moth` path. Directory projects alone select an authored config.
     if !config.entry_dir.is_dir() {
         reset_project_config_state(config);
         return Ok(None);
     }
 
-    match std::fs::symlink_metadata(&config_path) {
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            reset_project_config_state(config);
-
-            if config.entry_dir.is_dir() {
-                let defaults_result = {
-                    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-                    validation::apply_defaults_without_config(
-                        config,
-                        &services.frontend_surface.config_schemas,
-                        &mut diagnostic_strings,
-                    )
-                };
-                if let Err(ConfigApplyError::Diagnostics(errors)) = defaults_result {
-                    return Err(ProjectConfigFailure::Prepared(capture_root_diagnostics(
-                        errors,
-                        string_table,
-                    )));
-                }
-                if let Err(ConfigApplyError::Compiler(error)) = defaults_result {
-                    return Err(ProjectConfigFailure::Prepared(PreparedFailure::from(error)));
-                }
-                apply_directory_name_default(config, string_table)
-                    .map_err(ProjectConfigFailure::Prepared)?;
-            }
-
-            return validate_directory_output_settings_if_needed(config, string_table)
-                .map_err(ProjectConfigFailure::Prepared);
-        }
+    let config_exists = match std::fs::symlink_metadata(&config_path) {
+        // Case-insensitive filesystems resolve `@config.moth` to a differently-cased sibling.
+        // The reserved filename is exact, so only an exactly-named child selects the config.
+        // A case variant falls through to discovery's invalid-root-marker diagnostic.
+        Ok(_) => exact_config_entry_exists(&config.entry_dir)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => {
             return Err(PreparedFailure::from(InfrastructureFailure::filesystem(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                CompilerStage::ProjectBuildAssembly,
                 &config_path,
                 format!("Failed to inspect config path: {error}"),
             ))
             .into());
         }
+    };
+
+    if !config_exists {
+        reset_project_config_state(config);
+
+        if config.entry_dir.is_dir() {
+            let defaults_result = {
+                let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+                validation::apply_defaults_without_config(
+                    config,
+                    &services.frontend_surface.config_schemas,
+                    &mut diagnostic_strings,
+                )
+            };
+            if let Err(ConfigApplyError::Diagnostics(errors)) = defaults_result {
+                return Err(ProjectConfigFailure::Prepared(capture_root_diagnostics(
+                    errors,
+                    string_table,
+                )));
+            }
+            if let Err(ConfigApplyError::Compiler(error)) = defaults_result {
+                return Err(ProjectConfigFailure::Prepared(PreparedFailure::from(error)));
+            }
+            apply_directory_name_default(config, string_table)
+                .map_err(ProjectConfigFailure::Prepared)?;
+        }
+
+        return validate_directory_output_settings_if_needed(config, string_table)
+            .map_err(ProjectConfigFailure::Prepared);
     }
 
     if project_source_builder.is_none() {
         return Err(PreparedFailure::from(InfrastructureFailure::internal(
-            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
-            "config.moth exists but the project source database is absent",
+            CompilerStage::ProjectBuildAssembly,
+            "@config.moth exists but the project source database is absent",
         ))
         .into());
     }
@@ -191,6 +198,30 @@ pub fn load_project_config(
             .map_err(ProjectConfigFailure::Prepared)?;
     }
     Ok(outputs)
+}
+
+/// Whether the selected root has a directory entry named exactly `@config.moth`.
+///
+/// WHAT: scans the root's directory entries and compares each stored child name with
+///       `CONFIG_FILE_NAME`.
+/// WHY: a filesystem lookup can resolve a differently-cased sibling on case-insensitive volumes.
+///      The reserved filename is exact-case, so `@Config.moth` must stay an invalid root marker
+///      instead of silently selecting a differently-spelled config source.
+fn exact_config_entry_exists(entry_dir: &Path) -> Result<bool, PreparedFailure> {
+    let inspection_failure = |error: std::io::Error| {
+        PreparedFailure::from(InfrastructureFailure::filesystem(
+            CompilerStage::ProjectBuildAssembly,
+            entry_dir,
+            format!("Failed to inspect the project root for '@config.moth': {error}"),
+        ))
+    };
+
+    for entry in std::fs::read_dir(entry_dir).map_err(inspection_failure)? {
+        if entry.map_err(inspection_failure)?.file_name() == CONFIG_FILE_NAME {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Clear authored project/config state so one reload cannot retain another config's facts.
@@ -215,7 +246,7 @@ fn reset_project_config_state(config: &mut Config) {
 /// WHAT: when no explicit `project.name` was folded, use the exact final component of the selected
 /// directory without rewriting its spelling. An invalid identifier is a user diagnostic rather
 /// than a silently sanitised name.
-/// WHY: directory compilation is valid without `config.moth`, while stable project identity still
+/// WHY: directory compilation is valid without `@config.moth`, while stable project identity still
 /// needs one canonical name. Scaffolding writes an explicit valid name so this fallback is mostly
 /// invisible.
 fn apply_directory_name_default(
@@ -243,7 +274,7 @@ fn apply_directory_name_default(
                 InvalidConfigReason::InvalidProjectSettingValue {
                     value: diagnostic_strings.intern("<selected directory>"),
                     expected: diagnostic_strings.intern(
-                        "set project.name in config.moth to a valid Moth project identifier",
+                        "set project.name in @config.moth to a valid Moth project identifier",
                     ),
                 },
                 None,
@@ -260,7 +291,7 @@ fn apply_directory_name_default(
                 InvalidConfigReason::InvalidProjectSettingValue {
                     value: diagnostic_strings.intern(directory_name),
                     expected: diagnostic_strings.intern(
-                        "set project.name in config.moth to a valid Moth project identifier",
+                        "set project.name in @config.moth to a valid Moth project identifier",
                     ),
                 },
                 None,
@@ -277,7 +308,7 @@ fn apply_directory_name_default(
 //  Internal Orchestration
 // -------------------------
 
-/// Compile `config.moth` and apply folded top-level constant declarations to the `Config` struct.
+/// Compile `@config.moth` and apply folded top-level constant declarations to the `Config` struct.
 ///
 /// WHY: config uses normal Moth syntax, so Stage 0 hands the source to the compiler's config
 /// compilation service and then applies a dedicated config-only validation pass to the folded
@@ -292,36 +323,36 @@ pub(crate) fn compile_project_config_file(
     reset_project_config_state(config);
     let source_builder = project_source_builder.as_mut().ok_or_else(|| {
         PreparedFailure::from(InfrastructureFailure::internal(
-            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            CompilerStage::ProjectBuildAssembly,
             "project config source database is absent",
         ))
     })?;
     let canonical_config_path = std::fs::canonicalize(config_path).map_err(|error| {
         PreparedFailure::from(InfrastructureFailure::filesystem(
-            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            CompilerStage::ProjectBuildAssembly,
             config_path,
             format!("Failed to canonicalize config path: {error}"),
         ))
     })?;
     let canonical_project_root = std::fs::canonicalize(&config.entry_dir).map_err(|error| {
         PreparedFailure::from(InfrastructureFailure::filesystem(
-            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            CompilerStage::ProjectBuildAssembly,
             &config.entry_dir,
             format!("Failed to canonicalize selected project directory: {error}"),
         ))
     })?;
     if !canonical_config_path.starts_with(&canonical_project_root) {
         return Err(PreparedFailure::from(InfrastructureFailure::filesystem(
-            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            CompilerStage::ProjectBuildAssembly,
             &canonical_config_path,
-            "config.moth resolves outside the selected project directory; project config must not be linked from outside the build root",
+            "@config.moth resolves outside the selected project directory; project config must not be linked from outside the build root",
         ))
         .into());
     }
 
     // Register config before tokenization so its retained syntax and diagnostics share the
     // project identity context with every source discovered later. Config lives at the selected
-    // project root, so its own directory roots the logical path and yields a bare `config.moth`.
+    // project root, so its own directory roots the logical path and yields a bare `@config.moth`.
     let config_file_id = source_builder
         .sources_mut()
         .insert(
@@ -385,7 +416,7 @@ pub(crate) fn compile_project_config_file(
         .retained_text(config_file_id)
         .ok_or_else(|| {
             PreparedFailure::from(InfrastructureFailure::internal(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                CompilerStage::ProjectBuildAssembly,
                 "registered config source lost its retained source text",
             ))
         })?;

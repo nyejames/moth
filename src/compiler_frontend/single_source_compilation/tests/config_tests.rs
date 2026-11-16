@@ -46,7 +46,7 @@ fn compile_project_source(
     let style_directives = StyleDirectiveRegistry::built_ins();
     let outcome = compile_config_source(
         ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
+            authored_path: Path::new("project/@config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code,
             style_directives: &style_directives,
@@ -122,7 +122,7 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
 
     let outcome = compile_config_source(
         ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
+            authored_path: Path::new("project/@config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code,
             style_directives: &style_directives,
@@ -214,7 +214,7 @@ fn projects_authored_anonymous_const_records() {
 
     let compiled = compile_config_source(
         ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
+            authored_path: Path::new("project/@config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "labels #= (\n    first = \"a\",\n)\n",
             style_directives: &style_directives,
@@ -289,8 +289,8 @@ fn diagnosed_late_config_stage_retains_tokenizer_span_builder() {
     let mut path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let authored_path = Path::new("project/config.moth");
-    let canonical_path = Path::new("/project/config.moth");
+    let authored_path = Path::new("project/@config.moth");
+    let canonical_path = Path::new("/project/@config.moth");
     let mut source_files = SourceDatabase::empty();
     let file_id = source_files
         .insert(
@@ -395,7 +395,7 @@ fn rejects_config_local_nominal_values_with_structured_diagnostics() {
 
     let messages = compile_config_source(
         ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
+            authored_path: Path::new("project/@config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "Inner = |\n    x I32,\n|\nOuter = |\n    inner Inner,\n|\nouter #= Outer(Inner(1))\n",
             style_directives: &style_directives,
@@ -431,7 +431,7 @@ fn rejects_authored_plain_bindings_inside_the_service() {
 
     let messages = compile_config_source(
         ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
+            authored_path: Path::new("project/@config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "entry_root = \"src\"\n",
             style_directives: &style_directives,
@@ -467,7 +467,7 @@ fn start_is_an_ordinary_config_constant_name() {
 
     let compiled = compile_config_source(
         ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
+            authored_path: Path::new("project/@config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "start #= \"ordinary\"\nproject #= (name = start)\n",
             style_directives: &style_directives,
@@ -509,7 +509,7 @@ fn authored_start_function_in_config_uses_the_ordinary_rejection() {
             format!("{function_name} || -> I32:\n    return 1\n;\n\nentry_root = \"src\"\n");
         let failure = compile_config_source(
             ConfigCompilationRequest {
-                authored_path: Path::new("project/config.moth"),
+                authored_path: Path::new("project/@config.moth"),
                 file_id: SourceId::COMPILATION_ROOT,
                 source_code: &source,
                 style_directives: &style_directives,
@@ -556,7 +556,7 @@ fn rejects_implicit_sibling_field_reference_inside_a_grouped_project_record() {
 
     let messages = compile_config_source(
         ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
+            authored_path: Path::new("project/@config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= (\n    name = \"docs\",\n    alias = name,\n)\n",
             style_directives: &style_directives,
@@ -605,7 +605,7 @@ fn top_level_config_contract_can_be_referenced_from_a_builder_section_field() {
 
     let messages = compile_config_source(
         ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
+            authored_path: Path::new("project/@config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "$config\norigin #String = \"/docs\"\nhtml #= (\n    origin = origin,\n)\n",
             style_directives: &style_directives,
@@ -1553,8 +1553,8 @@ fn preparation_config_diagnostics_retain_their_original_source_spans() {
         let _path_fork = PathInternerFork::empty();
         let surface = BuilderSurface::with_mandatory_core();
         let directives = StyleDirectiveRegistry::built_ins();
-        let authored_path = Path::new("project/config.moth");
-        let canonical_path = Path::new("/project/config.moth");
+        let authored_path = Path::new("project/@config.moth");
+        let canonical_path = Path::new("/project/@config.moth");
         let sources = SourceDatabase::build([canonical_path], canonical_path, None, &mut strings)
             .expect("the config source registers before compilation");
         let file_id = sources.get_by_canonical_path(canonical_path).unwrap().id;

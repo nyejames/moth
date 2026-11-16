@@ -13,20 +13,27 @@ init_docs_sidebar()!
     The selected project builder supplies packages tied to its artefact model.
     This keeps browser and rendering APIs out of the core language.
 
-    The HTML builder provides static URLs through `@web/site`, binding-backed
-    runtime drawing through `@web/canvas`, WebGL2 rendering through `@web/graphics`
-    and live browser state through `@web/page`. The universal `@html` and
-    `@styles` Core packages are available under every builder and documented in
+    Every registered Builder package name sits below the reserved `@builder`
+    root, at an explicit path the builder chooses. The exact root is not
+    importable, and project-local packages cannot claim it. The HTML builder's
+    static source package publishes through a directly contained
+    `@package.moth`, and its binding-backed packages carry no source facade.
+
+    The HTML builder provides static URLs through `@builder/web/site`,
+    binding-backed runtime drawing through `@builder/web/canvas`, WebGL2
+    rendering through `@builder/web/graphics` and live browser state through
+    `@builder/web/page`. The universal `@core/html` and `@core/css` Core
+    packages are available under every builder and documented in
     @../core/ (Core packages). The
     @../../progress/packages-and-builders (packages and builders progress matrix)
     records current support and accepted next gaps.
 
     ## Package pages
 
-    - @./canvas/ (@web/canvas)
-    - @./graphics/ (@web/graphics)
-    - @./site/ (@web/site)
-    - @./page/ (@web/page)
+    - @./canvas/ (@builder/web/canvas)
+    - @./graphics/ (@builder/web/graphics)
+    - @./site/ (@builder/web/site)
+    - @./page/ (@builder/web/page)
 ]
 
 [section:

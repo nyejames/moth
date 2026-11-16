@@ -16,7 +16,7 @@ The project tree enters as authored text:
 
 [codeblock, $code "text":
 compiler_walkthrough/
-├── config.moth
+├── @config.moth
 ├── @entry.moth
 └── greeting.moth
 ]

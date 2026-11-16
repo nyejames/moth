@@ -18,7 +18,7 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     fs::create_dir_all(dir.join("consumer")).expect("should create second consumer module");
     fs::create_dir_all(dir.join("independent")).expect("should create independent module");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -94,7 +94,7 @@ fn registered_source_database_retains_exact_text_for_multiple_compiled_sources()
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src/about")).expect("should create nested module");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"snapshot\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -154,7 +154,7 @@ fn selected_preload_invalid_utf8_is_a_source_diagnostic() {
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"selected_failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -200,7 +200,7 @@ fn unselected_preload_read_failure_stays_inert() {
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"unselected_failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -268,7 +268,7 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src")).expect("should create entry root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -330,7 +330,7 @@ fn project_facade_rejects_own_project_globals_dependency_for_paired_root_surface
     let _temp = tempfile::tempdir().expect("should create temporary project");
     let dir = _temp.path().to_path_buf();
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -408,7 +408,7 @@ fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completi
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -490,18 +490,18 @@ fn directory_frontend_registers_package_and_project_boundaries() {
     let package_root = _temp.path().to_path_buf();
     // Unique names keep this test's records identifiable when unrelated parallel build tests
     // register their own boundaries into the shared process-global collection scope.
-    const PACKAGE_NAME: &str = "phase4_helper";
+    const PACKAGE_NAME: &str = "builder/test/phase4_helper";
     const PROJECT_NAME: &str = "phase4_demo_project";
     fs::create_dir_all(&dir).expect("should create project directory");
     fs::create_dir_all(&package_root).expect("should create package directory");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
-        package_root.join("@mod.moth"),
+        package_root.join("@package.moth"),
         "$export\nhelper || -> I32:\n    return 7\n;\n",
     )
     .expect("should write package module");
@@ -679,7 +679,7 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
     let dir = _temp.path().to_path_buf();
 
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -978,7 +978,7 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
     let project_b_name = "unguarded_parallel_fixture_b";
     let unrelated_project_name = "unrelated_active_timing_fixture";
     fs::write(
-        dir_a.join("config.moth"),
+        dir_a.join("@config.moth"),
         format!("project #= (\n    name = \"{project_a_name}\",\n)\nhtml #= ()\n"),
     )
     .expect("should write config");
@@ -988,7 +988,7 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
     let dir_b = dir_b_temp.path().to_path_buf();
     fs::create_dir_all(dir_b.join("src")).expect("should create source root");
     fs::write(
-        dir_b.join("config.moth"),
+        dir_b.join("@config.moth"),
         format!("project #= (\n    name = \"{project_b_name}\",\n)\nhtml #= ()\n"),
     )
     .expect("should write config");
@@ -998,7 +998,7 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
     let dir_unrelated = dir_unrelated_temp.path().to_path_buf();
     fs::create_dir_all(dir_unrelated.join("src")).expect("should create unrelated source root");
     fs::write(
-        dir_unrelated.join("config.moth"),
+        dir_unrelated.join("@config.moth"),
         format!("project #= (\n    name = \"{unrelated_project_name}\",\n)\nhtml #= ()\n"),
     )
     .expect("should write unrelated config");
@@ -1172,7 +1172,7 @@ fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src/components")).expect("should create dependency module root");
     fs::write(
-        dir.join("config.moth"),
+        dir.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");

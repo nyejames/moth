@@ -40,7 +40,7 @@ impl std::error::Error for SourcePackageRegistryError {}
 
 /// Registry of source-backed package roots indexed by their package prefix.
 ///
-/// WHAT: maps `@`-stripped package prefixes like `"html"` to filesystem roots.
+/// WHAT: maps `@`-stripped package prefixes like `"core/html"` to filesystem roots.
 /// WHY: the path resolver checks these prefixes before falling back to entry-root resolution.
 #[derive(Clone, Debug, Default)]
 pub struct SourcePackageRegistry {

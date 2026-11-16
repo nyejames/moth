@@ -1,4 +1,4 @@
-@web/site
+@builder/web/site
 @links docs_url
 
 home #= site.root

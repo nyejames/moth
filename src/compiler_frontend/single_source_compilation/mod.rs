@@ -9,7 +9,7 @@
 //!       can finish config validation before freezing the source.
 //!
 //! # What this module owns
-//! - [`config`]: the `config.moth` stage sequence, its dialect surface rules and its folded
+//! - [`config`]: the `@config.moth` stage sequence, its dialect surface rules and its folded
 //!   declaration output and source-span ownership handoff
 //! - [`moth_template`]: the direct `.mtf` stage sequence and the folded `content` constant
 //!

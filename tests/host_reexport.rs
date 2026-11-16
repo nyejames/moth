@@ -32,7 +32,7 @@ fn facade_and_standalone_share_host_descriptors() {
 
     // The compiler registers the standalone type through its public package builder.
     BuilderDefinition::new("game")
-        .host_package(HostPackage::new("@platform").function(descriptor))
+        .host_package(HostPackage::new("@builder/test/platform").function(descriptor))
         .finish()
         .expect("the builder accepts a descriptor from the standalone crate");
 }

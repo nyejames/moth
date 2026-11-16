@@ -109,7 +109,7 @@ fn capture_module_diagnostic(
     )
 }
 
-const WEB_SITE_SOURCE_PACKAGE_PREFIX: &str = "web/site";
+const WEB_SITE_SOURCE_PACKAGE_PREFIX: &str = "builder/web/site";
 
 #[derive(Debug, Default)]
 pub struct HtmlProjectBuilder {
@@ -416,8 +416,8 @@ impl BackendBuilder for HtmlProjectBuilder {
 
     fn frontend_surface(&self) -> BuilderSurface {
         let mut builder_surface = BuilderSurface::with_mandatory_core();
-        // `@web/site` is not part of the standard template prelude, so consumers need an explicit
-        // dependency clause to use it.
+        // `@builder/web/site` is not part of the standard template prelude, so consumers need an
+        // explicit dependency clause to use it.
         builder_surface
             .source_packages
             .register_filesystem_root(
@@ -425,7 +425,7 @@ impl BackendBuilder for HtmlProjectBuilder {
                 BuilderSurface::builtin_source_package_root(WEB_SITE_SOURCE_PACKAGE_PREFIX),
                 crate::builder_surface::PackageOrigin::Builder,
             )
-            .expect("the built-in @web/site source package registers once");
+            .expect("the built-in @builder/web/site source package registers once");
 
         crate::builder_surface::core_packages::register_optional_core_packages(
             &mut builder_surface.binding_packages,

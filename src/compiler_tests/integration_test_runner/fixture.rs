@@ -17,6 +17,7 @@ use super::{
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::compiler_tests::integration_test_runner::errors::FixtureLoadError;
+use crate::projects::settings::CONFIG_FILE_NAME;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -578,7 +579,7 @@ fn resolve_case_entry_path(
     // A directory fixture with a config is a directory compilation even when its root entry is
     // `@entry.moth`; choosing the file first would silently switch it to synthetic single-file
     // mode.
-    if input_root.join("config.moth").is_file() {
+    if input_root.join(CONFIG_FILE_NAME).is_file() {
         return Ok(input_root.to_path_buf());
     }
 

@@ -12,6 +12,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{DiagnosticSeverity, PreparedFailure};
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 
 fn prepared_failure_reports(
     failure: PreparedFailure,
@@ -73,7 +74,7 @@ fn assert_claims_reserved_project_name(claim: impl FnOnce(&Path), reason: &str) 
     let root = _temp.path().to_path_buf();
     fs::write(root.join("@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -130,7 +131,7 @@ fn rejects_nested_reserved_project_globals_dependency() {
     let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -179,7 +180,7 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
     let src = root.join("src");
-    let package_root = root.join("builder/helper");
+    let package_root = root.join("packages/builder/helper");
     fs::create_dir_all(&src).expect("should create src");
     fs::create_dir_all(&package_root).expect("should create helper package");
     fs::write(
@@ -188,12 +189,12 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
     )
     .expect("should write config");
     fs::write(src.join("@entry.moth"), "[:entry]\n").expect("should write project entry");
-    fs::write(package_root.join("@mod.moth"), "value #= 1\n")
+    fs::write(package_root.join("@package.moth"), "value #= 1\n")
         .expect("should write helper package root");
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
     source_packages
-        .register_filesystem_root("helper", package_root, PackageOrigin::Builder)
+        .register_filesystem_root("builder/helper", package_root, PackageOrigin::Builder)
         .expect("test source root should register");
 
     let mut config = Config::new(root.clone());
@@ -205,14 +206,14 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
     )
     .expect("config should parse");
     let resolver = configured_resolver(&config);
-    let declaring_source = fs::canonicalize(root.join("builder/helper/@mod.moth"))
+    let declaring_source = fs::canonicalize(root.join("packages/builder/helper/@package.moth"))
         .expect("package source should canonicalize");
 
     with_namespace_resolution(
         &config,
         &resolver,
         &source_packages,
-        Some("helper"),
+        Some("builder/helper"),
         |namespace_set,
          _source_tree_index,
          package_prefix,
@@ -278,7 +279,7 @@ fn rejects_moth_file_and_folder_collision_in_same_directory() {
     fs::write(root.join("src/UI/@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("src/ui.moth"), "y ~= 2\n").expect("should write colliding file");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -316,7 +317,7 @@ fn rejects_template_file_and_folder_collision_in_same_directory() {
     fs::write(root.join("src/ui/@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("src/ui.mtf"), "template\n").expect("should write colliding file");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -352,7 +353,7 @@ fn allows_same_stem_in_different_directories() {
     fs::write(root.join("src/pages/card.moth"), "y ~= 2\n").expect("should write another card");
     fs::write(root.join("src/@entry.moth"), "z ~= 3\n").expect("should write entry");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -384,7 +385,7 @@ fn rejects_collision_with_empty_folder() {
     fs::write(root.join("src/helper.moth"), "x ~= 1\n").expect("should write colliding file");
     fs::write(root.join("src/@entry.moth"), "y ~= 2\n").expect("should write entry");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -422,7 +423,7 @@ fn js_file_with_same_stem_as_folder_does_not_trigger_collision() {
     fs::write(root.join("src/helper.js"), "// js\n").expect("should write js file");
     fs::write(root.join("src/@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1036,4 +1037,203 @@ fn indexed_module_inventory_rejects_unsupported_markdown_dependency() {
         "unexpected extension in unsupported source file kind diagnostic"
     );
     assert_primary_span_text(&failure, &src.join("@entry.moth"), "@intro");
+}
+
+/// Build the Stage 0 namespace set for one parsed project and its registered source packages.
+///
+/// The namespace owner consumes the same project index, graph and retained package boundary
+/// indexes as production, so reserved-claim validation is exercised without a second traversal.
+fn build_namespace_set_for_test(
+    config: &Config,
+    resolver: &ProjectPathResolver,
+    source_packages: &crate::builder_surface::SourcePackageRegistry,
+) -> Result<ModuleNamespaceSet, PreparedFailure> {
+    let mut string_table = StringTable::new();
+    let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
+    let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
+    let external_import_providers = ExternalImportProviderRegistry::default();
+    let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
+        entry_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &project_root,
+            validated_output_settings: None,
+        },
+        config,
+        source_packages,
+        resolver.source_file_kinds(),
+        &external_import_providers,
+        &mut string_table,
+    )
+    .expect("project source tree index should build");
+    let project_module_graph =
+        super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&source_tree_index);
+    let package_boundary_indexes =
+        super::source_package_discovery::build_source_package_boundary_indexes(
+            source_packages,
+            resolver.source_file_kinds(),
+            &external_import_providers,
+            &mut string_table,
+        )
+        .expect("source-package boundary indexes should build");
+    ModuleNamespaceSet::build(
+        &source_tree_index,
+        &project_module_graph,
+        package_boundary_indexes,
+        &ExternalPackageRegistry::new(),
+        &mut string_table,
+    )
+}
+
+fn assert_reserved_package_claim_failure(
+    failure: PreparedFailure,
+    expected_root: &str,
+    claim_suffix: &str,
+) {
+    let reports = prepared_failure_reports(failure);
+    let (report, diagnostic) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("expected one reserved package namespace diagnostic");
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-CONFIG-0001",
+        "unexpected diagnostic code"
+    );
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("reserved package namespace failure should retain typed config facts");
+    assert_eq!(
+        facts.reason,
+        InvalidConfigCode::ReservedPackageNamespaceRootClaim
+    );
+    let strings = report.context().strings();
+    assert_eq!(
+        strings.resolve(diagnostic.string_ids()[0]),
+        expected_root,
+        "the diagnostic must name the claimed reserved root as authored"
+    );
+    assert!(
+        strings
+            .resolve(diagnostic.string_ids()[1])
+            .ends_with(claim_suffix),
+        "the diagnostic must name the local source claim: {}",
+        strings.resolve(diagnostic.string_ids()[1])
+    );
+}
+
+#[test]
+fn registered_source_package_rejects_importable_claims_below_reserved_package_roots() {
+    // A registered package boundary owns its own module namespaces. An importable helper or
+    // facade below `@core`/`@builder` must fail there exactly as it does in project namespaces.
+    for (case, claim_path, claim_source, expected_root, expected_source_suffix) in [
+        (
+            "package-root helper",
+            "core.moth",
+            "value #= 1\n",
+            "core",
+            "core.moth",
+        ),
+        (
+            "nested normal facade",
+            "Builder/@mod.moth",
+            "$export\nvalue #= 1\n",
+            "Builder",
+            "Builder",
+        ),
+        (
+            "nested support facade",
+            "core/@package.moth",
+            "$export\nvalue #= 1\n",
+            "core",
+            "core",
+        ),
+    ] {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        let package_root = root.join("packages/local/widgets");
+        fs::create_dir_all(&src).expect("should create src dir");
+        fs::create_dir_all(&package_root).expect("should create package dir");
+        fs::write(
+            root.join(settings::CONFIG_FILE_NAME),
+            "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+        )
+        .expect("should write config");
+        fs::write(src.join("@entry.moth"), "[:entry]\n").expect("should write entry");
+        fs::write(package_root.join("@package.moth"), "$export\nvalue #= 1\n")
+            .expect("should write package facade");
+        // A paired internal normal root makes the package root a normal-position consumer, so a
+        // nested support module is visible to it. A support-only root would publish no such
+        // importable entry and correctly stay legal.
+        fs::write(package_root.join("@mod.moth"), "$export\nvalue #= 1\n")
+            .expect("should write internal normal root");
+        let claim = package_root.join(claim_path);
+        fs::create_dir_all(claim.parent().expect("claim has a parent"))
+            .expect("should create claim parent");
+        fs::write(&claim, claim_source).expect("should write claim source");
+
+        let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
+        source_packages
+            .register_filesystem_root("widgets", package_root, PackageOrigin::ProjectLocal)
+            .expect("test source root should register");
+        let mut config = Config::new(root.clone());
+        let style_directives = test_style_directives();
+        parse_project_config_for_test(
+            &mut config,
+            &root.join(settings::CONFIG_FILE_NAME),
+            &style_directives,
+        )
+        .expect("config should parse");
+        let resolver = configured_resolver(&config);
+
+        let failure = build_namespace_set_for_test(&config, &resolver, &source_packages)
+            .err()
+            .unwrap_or_else(|| panic!("{case}: package reserved-root claim must be rejected"));
+        assert_reserved_package_claim_failure(failure, expected_root, expected_source_suffix);
+    }
+}
+
+#[test]
+fn registered_source_package_keeps_entry_only_reserved_directory_legal() {
+    // An entry-only module publishes no importable namespace entry, so its reserved-name
+    // directory, private helper and asset stay legal inside a registered package boundary.
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    let package_root = root.join("packages/local/widgets");
+    fs::create_dir_all(&src).expect("should create src dir");
+    fs::create_dir_all(package_root.join("core")).expect("should create package core directory");
+    fs::create_dir_all(package_root.join("builder/assets"))
+        .expect("should create package asset directory");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@entry.moth"), "[:entry]\n").expect("should write entry");
+    fs::write(package_root.join("@package.moth"), "$export\nvalue #= 1\n")
+        .expect("should write package facade");
+    fs::write(package_root.join("core/@entry.moth"), "[:core entry]\n")
+        .expect("should write entry-only core module");
+    fs::write(package_root.join("core/helper.moth"), "value #= 1\n")
+        .expect("should write private helper");
+    fs::write(package_root.join("builder/assets/logo.png"), "not source")
+        .expect("should write inert asset");
+
+    let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
+    source_packages
+        .register_filesystem_root("widgets", package_root, PackageOrigin::ProjectLocal)
+        .expect("test source root should register");
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    build_namespace_set_for_test(&config, &resolver, &source_packages)
+        .expect("entry-only reserved-name modules publish no importable claim");
 }

@@ -1,2 +1,2 @@
-@test/pkg-a PkgError
+@builder/test/pkg-a PkgError
 ExternalAlias as PkgError

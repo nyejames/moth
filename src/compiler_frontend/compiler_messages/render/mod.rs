@@ -86,9 +86,10 @@ use crate::compiler_frontend::datatypes::display::{
     BOOL_TYPE_SPELLING, TypeDisplayShape, TypeDisplayView,
 };
 use crate::compiler_frontend::datatypes::numeric_operators::common_fixed_integer;
-use crate::compiler_frontend::source_packages::root_file::dependency_component_is_config_file;
+use crate::compiler_frontend::source_packages::root_file::file_name_is_config_file;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
+use crate::projects::settings::CONFIG_FILE_NAME;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass};
 
 pub(crate) fn malformed_template_message(
@@ -1300,22 +1301,19 @@ pub(crate) fn invalid_expression_message(reason: InvalidExpressionReason) -> Str
 
 /// Determine which special file name is referenced by a dependency path.
 ///
-/// WHAT: inspects path components to find a canonical config reference.
-/// WHY: the direct-special-file diagnostic covers the build-only config source, and renderers
-/// should name that file when possible so the author knows which spelling to stop binding
-/// directly. `@` root references are caught earlier by the path parser's
-/// `LeadingAtInPathComponent` rejection.
+/// WHAT: inspects path components to find the reserved build-only config filename.
+/// WHY: the direct-special-file diagnostic covers `@config.moth`, and renderers should name that
+/// file when possible so the author knows which spelling to stop binding directly. Ordinary `@`
+/// root references are caught earlier by the path parser's `LeadingAtInPathComponent` rejection.
 pub(crate) fn special_file_name_from_path(
     path: PathId,
     context: DiagnosticRenderContext<'_>,
-) -> String {
+) -> &'static str {
     let path_text = context.render_path(path);
-    for segment in path_text.split('/') {
-        if dependency_component_is_config_file(segment) {
-            return "config.moth".to_owned();
-        }
+    if path_text.split('/').any(file_name_is_config_file) {
+        return CONFIG_FILE_NAME;
     }
-    "special file".to_owned()
+    "special file"
 }
 
 fn named_value_or_default(

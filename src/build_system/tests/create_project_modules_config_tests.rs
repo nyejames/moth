@@ -330,7 +330,7 @@ fn loads_canonical_config_file_from_project_root() {
     )
     .unwrap_or_else(|_| panic!("canonical config should load"));
 
-    assert_eq!(config.config_file_path(), root.join("config.moth"));
+    assert_eq!(config.config_file_path(), root.join("@config.moth"));
 
     let mut project_source_files = None;
     let mut warning_owner =
@@ -385,7 +385,7 @@ fn loads_canonical_config_file_from_project_root() {
         .collect::<Vec<_>>();
     assert_eq!(
         alpha_provider_package_paths,
-        vec!["@test/resolving".to_owned()],
+        vec!["@builder/test/resolving".to_owned()],
         "alpha should retain the provider candidate resolved for its own source",
     );
 
@@ -503,7 +503,7 @@ fn directory_projects_default_a_missing_config() {
         &mut source_builder,
         &mut string_table,
     )
-    .unwrap_or_else(|_| panic!("a directory project without config.moth uses generated defaults"))
+    .unwrap_or_else(|_| panic!("a directory project without @config.moth uses generated defaults"))
     .expect("directory output defaults should validate");
     assert_eq!(config.project_name, "docs");
     assert_eq!(config.version, None, "no implicit version may be invented");
@@ -599,14 +599,26 @@ fn rejects_direct_canonical_config_dependency_paths() {
             .expect("test path fits");
 
         assert!(
-            crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file(
+            !crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file(
                 path,
                 &path_fork,
                 &string_table,
             ),
-            "direct config import should be treated as a special file: {dependency_path}"
+            "an ordinary helper path must not name the build-only config: {dependency_path}"
         );
     }
+
+    let reserved_path = path_fork
+        .try_intern_portable_path("@config.moth", &mut string_table)
+        .expect("test path fits");
+    assert!(
+        crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file(
+            reserved_path,
+            &path_fork,
+            &string_table,
+        ),
+        "the exact reserved filename is a special file"
+    );
 
     let nested_source_path = path_fork
         .try_intern_portable_path("config/init_config", &mut string_table)
@@ -759,7 +771,7 @@ fn rejects_config_function_declarations() {
 
 #[test]
 fn rejects_config_named_support_type_declarations() {
-    // User-authored `config.moth` is a flat surface of anonymous const records and
+    // User-authored `@config.moth` is a flat surface of anonymous const records and
     // compiler-owned constants: named structs, choices and type aliases are rejected by the
     // compiler-owned config dialect validator, and record-shaped helpers must be declared as
     // anonymous const records instead.
@@ -863,7 +875,7 @@ fn rejects_project_local_config_dependency_even_when_module_root_exists() {
 fn rejects_builder_config_dependency_without_discovering_the_package_root() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let package_root = root.join("builder/defaults");
+    let package_root = root.join("builder/test/defaults");
     fs::create_dir_all(&package_root).expect("should create Builder package folder");
     fs::write(package_root.join("@mod.moth"), "value #= 1\n")
         .expect("should write first package facade root");
@@ -871,12 +883,17 @@ fn rejects_builder_config_dependency_without_discovering_the_package_root() {
         .expect("should write second package facade root");
 
     let config_path = root.join(settings::CONFIG_FILE_NAME);
-    fs::write(&config_path, "@defaults value\n").expect("should write config dependency");
+    fs::write(&config_path, "@builder/test/defaults value\n")
+        .expect("should write config dependency");
 
     let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     frontend_surface
         .source_packages
-        .register_filesystem_root("defaults", package_root, PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/test/defaults",
+            package_root,
+            PackageOrigin::Builder,
+        )
         .expect("test source root should register");
 
     let mut config = Config::new(root.clone());
@@ -929,7 +946,7 @@ fn ordinary_package_folder_does_not_collide_with_source_packages() {
     fs::write(root.join("@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("lib/helper/@mod.moth"), "foo #= 1\n").expect("should write root");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1355,7 +1372,7 @@ fn authored_config_keeps_non_canonical_spelling_in_duplicate_diagnostic() {
     let root = _temp.path().to_path_buf();
 
     fs::create_dir_all(root.join("sub")).expect("should create sub dir");
-    let config_path = root.join("config.moth");
+    let config_path = root.join("@config.moth");
     fs::write(
         &config_path,
         "project #= (\n    name = \"docs\",\n)\nproject #= (\n    name = \"other\",\n)\n",
@@ -1363,7 +1380,7 @@ fn authored_config_keeps_non_canonical_spelling_in_duplicate_diagnostic() {
     .expect("should write config");
 
     // Spell the config path with a `..` detour so it is not equal to its canonical form.
-    let non_canonical_config_path = root.join("sub").join("..").join("config.moth");
+    let non_canonical_config_path = root.join("sub").join("..").join("@config.moth");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -1395,14 +1412,14 @@ fn authored_config_resolver_uses_canonical_parent_for_noncanonical_spelling() {
     let root = _temp.path().to_path_buf();
 
     fs::create_dir_all(root.join("sub")).expect("should create sub dir");
-    let config_path = root.join("config.moth");
+    let config_path = root.join("@config.moth");
     fs::write(
         &config_path,
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
-    let non_canonical_config_path = root.join("sub").join("..").join("config.moth");
+    let non_canonical_config_path = root.join("sub").join("..").join("@config.moth");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -1423,7 +1440,7 @@ fn project_local_lib_directory_is_ignored_as_source_package_root() {
     fs::write(root.join("lib/helper/@mod.moth"), "foo #= 1\n").expect("should write root");
     fs::write(root.join("lib/helper/utils.moth"), "bar #= 2\n").expect("should write lib file");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1469,14 +1486,18 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
     let root = _temp.path().to_path_buf();
 
     fs::create_dir_all(root.join("lib/html")).expect("should create lib/html");
-    fs::create_dir_all(root.join("builder/html")).expect("should create builder/html");
+    fs::create_dir_all(root.join("packages/builder/test/html"))
+        .expect("should create packages/builder/test/html");
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(root.join("src/@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("lib/html/@mod.moth"), "foo #= 1\n").expect("should write root");
-    fs::write(root.join("builder/html/@mod.moth"), "foo #= 1\n")
-        .expect("should write builder package root");
     fs::write(
-        root.join("config.moth"),
+        root.join("packages/builder/test/html/@package.moth"),
+        "foo #= 1\n",
+    )
+    .expect("should write builder package root");
+    fs::write(
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1487,7 +1508,11 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
 
     let mut builder_frontend_surface = crate::builder_surface::SourcePackageRegistry::new();
     builder_frontend_surface
-        .register_filesystem_root("html", root.join("builder/html"), PackageOrigin::Builder)
+        .register_filesystem_root(
+            "builder/test/html",
+            root.join("packages/builder/test/html"),
+            PackageOrigin::Builder,
+        )
         .expect("test source root should register");
 
     let result = super::project_roots::build_project_path_resolver(
@@ -1499,8 +1524,8 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
 
     let resolver = result.expect("builder package should remain independently registered");
     assert_eq!(
-        resolver.source_package_roots().get("html"),
-        Some(&fs::canonicalize(root.join("builder/html")).unwrap())
+        resolver.source_package_roots().get("builder/test/html"),
+        Some(&fs::canonicalize(root.join("packages/builder/test/html")).unwrap())
     );
 }
 
@@ -1576,6 +1601,31 @@ fn dangling_config_symlink_diagnoses_instead_of_defaulting() {
     );
 }
 
+#[test]
+fn directory_at_the_selected_config_path_diagnoses_instead_of_defaulting() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().join("docs");
+    fs::create_dir_all(root.join(settings::CONFIG_FILE_NAME))
+        .expect("should create a directory at the config path");
+
+    let (config, result) = load_config_for_path_test(&root);
+    assert_config_path_infrastructure_error(
+        result.expect_err("a directory at the config path must not use defaults"),
+        "Error reading file when adding new moth files to parse",
+    );
+    assert_eq!(
+        config.project_name, "",
+        "a non-regular config source must not invent a project name"
+    );
+    assert!(
+        fs::metadata(root.join(settings::CONFIG_FILE_NAME))
+            .expect("config path metadata should be readable")
+            .file_type()
+            .is_dir(),
+        "the failure must come from the selected non-regular config entry"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn config_symlink_outside_the_selected_root_diagnoses() {
@@ -1596,9 +1646,34 @@ fn config_symlink_outside_the_selected_root_diagnoses() {
     let (config, result) = load_config_for_path_test(&root);
     assert_config_path_infrastructure_error(
         result.expect_err("an external config symlink must not configure this project"),
-        "config.moth resolves outside the selected project directory",
+        "@config.moth resolves outside the selected project directory",
     );
     assert_eq!(config.project_name, "");
+}
+
+#[cfg(unix)]
+#[test]
+fn in_root_config_symlink_to_differently_named_source_loads() {
+    use std::os::unix::fs::symlink;
+
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().join("docs");
+    fs::create_dir_all(&root).expect("should create directory project root");
+    let target = root.join("actual_config.moth");
+    fs::write(
+        &target,
+        "project #= (\n    name = \"linked\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write in-root config target");
+    symlink("actual_config.moth", root.join(settings::CONFIG_FILE_NAME))
+        .expect("should create in-root config symlink");
+
+    let (config, result) = load_config_for_path_test(&root);
+    assert!(
+        result.is_ok(),
+        "an in-root config symlink must configure this project"
+    );
+    assert_eq!(config.project_name, "linked");
 }
 
 #[cfg(unix)]

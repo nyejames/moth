@@ -6,7 +6,7 @@ support package.
 
 [codeblock, $code "text":
     moth-site/
-      config.moth
+      @config.moth
       @entry.moth
       components/
         @package.moth
@@ -24,7 +24,7 @@ Each directory containing `@entry.moth` produces a page. The HTML builder
 derives the route from the directory, so `docs/functions/@entry.moth` produces
 `docs/functions/index.html`.
 
-`config.moth` holds optional build settings. It never becomes a page or joins
+`@config.moth` holds optional build settings. It never becomes a page or joins
 the module graph.
 
 The `components/` directory holds an `@package.moth` root, which makes

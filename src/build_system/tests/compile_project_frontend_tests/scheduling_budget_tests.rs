@@ -1,6 +1,6 @@
 //! Project scheduling-cutoff and shared-allowance regression coverage.
 //!
-//! WHAT: drives the real directory frontend lane with real `config.moth` values, then inspects the
+//! WHAT: drives the real directory frontend lane with real `@config.moth` values, then inspects the
 //!       retained graph boundary before the terminal wrapper converts it into reports.
 //! WHY: the project threshold is a command-owned soft cutoff, not a result cap. These tests prove
 //!       returned module diagnostics stay intact, unadmitted modules keep `Unavailable` slots, the
@@ -140,7 +140,7 @@ fn run_shared_package_lane(
         .source_packages
         .register_filesystem_root(
             "shared",
-            root.join("packages/shared"),
+            root.join("packages/shared_source"),
             PackageOrigin::ProjectLocal,
         )
         .expect("the shared package root registers");
@@ -312,7 +312,7 @@ fn finish_stopped_package_request(
 }
 
 fn write_project(root: &Path, config_text: &str, files: &[(&str, &str)]) {
-    fs::write(root.join("config.moth"), config_text).expect("config should be written");
+    fs::write(root.join("@config.moth"), config_text).expect("config should be written");
     for (relative_path, contents) in files {
         let relative_path = relative_path.strip_prefix("src/").unwrap_or(relative_path);
         let path = root.join(relative_path);
@@ -803,7 +803,7 @@ fn diagnostic_recovery_project_budget_spans_source_package_work() {
                 "@shared render\nvalue = render() catch:\n    then \"\"\n;\n[:site]\n",
             ),
             (
-                "packages/shared/@mod.moth",
+                "packages/shared_source/@package.moth",
                 "$export\nrender || -> String:\n    return shared_missing\n;\n",
             ),
         ],
@@ -1163,15 +1163,15 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
                 "@shared render\nvalue = render() catch:\n    then 0\n;\n[:site]\n",
             ),
             (
-                "packages/shared/@mod.moth",
+                "packages/shared_source/@package.moth",
                 "@helper value\n$export\nrender || -> I32:\n    return value()\n;\n",
             ),
             (
-                "packages/shared/helper/@mod.moth",
+                "packages/shared_source/helper/@mod.moth",
                 "$export\nvalue || -> I32:\n    return 1\n;\n",
             ),
             (
-                "packages/shared/z_broken/@entry.moth",
+                "packages/shared_source/z_broken/@entry.moth",
                 "a || -> I32:\n    return pkg_missing_one\n;\n\n\
                  b || -> I32:\n    return pkg_missing_two\n;\n",
             ),
@@ -1306,12 +1306,12 @@ fn diagnostic_recovery_package_cutoff_can_diagnose_its_own_root() {
                 "@shared a\nvalue = a() catch:\n    then 0\n;\n[:site]\n",
             ),
             (
-                "packages/shared/@mod.moth",
+                "packages/shared_source/@package.moth",
                 "$export\na || -> I32:\n    return root_missing_one\n;\n\n\
                  $export\nb || -> I32:\n    return root_missing_two\n;\n",
             ),
             (
-                "packages/shared/later/@mod.moth",
+                "packages/shared_source/later/@mod.moth",
                 "$export\nvalue || -> I32:\n    return 1\n;\n",
             ),
         ],
@@ -1394,20 +1394,20 @@ fn write_deferred_check_only_package_project(
                 "@shared render\nvalue = render() catch:\n    then 0\n;\n[:site]\n",
             ),
             (
-                "packages/shared/@mod.moth",
+                "packages/shared_source/@package.moth",
                 "$export\nrender || -> I32:\n    return 7\n;\n",
             ),
             (
-                "packages/shared/broken/@entry.moth",
+                "packages/shared_source/broken/@entry.moth",
                 "a || -> I32:\n    return pkg_missing_one\n;\n\n\
                  b || -> I32:\n    return pkg_missing_two\n;\n",
             ),
             (
-                "packages/shared/z_late/@mod.moth",
+                "packages/shared_source/z_late/@mod.moth",
                 "$export\nlate_value || -> I32:\n    return 1\n;\n",
             ),
-            ("packages/shared/a_orphan.moth", first_orphan),
-            ("packages/shared/b_orphan.moth", second_orphan),
+            ("packages/shared_source/a_orphan.moth", first_orphan),
+            ("packages/shared_source/b_orphan.moth", second_orphan),
         ],
     );
 }

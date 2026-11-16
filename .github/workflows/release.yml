@@ -145,7 +145,7 @@ jobs:
 
           cp README.md "package/${ARCHIVE_NAME}/"
           cp LICENSE "package/${ARCHIVE_NAME}/" 2>/dev/null || true
-          # Compiler-shipped package files (@html, @styles, @web/site and @web/* assets) live beside the binary.
+          # Compiler-shipped package files (@core/html, @core/css, @builder/web/site and @builder/web/* assets) live beside the binary.
           cp -R packages "package/${ARCHIVE_NAME}/packages"
 
       # Hide the checkout's packages so the packaged binary must read its own `packages/`.
@@ -169,11 +169,11 @@ jobs:
           mv packages "$RUNNER_TEMP/checkout-packages"
           SITE="$RUNNER_TEMP/smoke-site"
           mkdir -p "$SITE"
-          printf 'project #= (\n    name = "smoke",\n)\nhtml #= ()\n' > "$SITE/config.moth"
+          printf 'project #= (\n    name = "smoke",\n)\nhtml #= ()\n' > "$SITE/@config.moth"
           cat > "$SITE/@entry.moth" <<'EOF'
-          @html p
-          @styles right
-          @web/canvas as drawing_api
+          @core/html p
+          @core/css right
+          @builder/web/canvas as drawing_api
           @intro content as intro
 
           ~[:[intro]]

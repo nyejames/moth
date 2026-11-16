@@ -12,7 +12,7 @@ Every operation still has one observable Moth contract. A backend chooses how to
 
 ### Relationship to focused packages
 
-`io` may offer the convenient common operation of a domain that a focused package covers in detail. It doesn't duplicate that package's complete API or reimplement its semantics, and both use the same underlying owner where practical. `@core/time` owns `Duration`, `TimeMark` and `Timestamp`, so `io` doesn't provide a second set of time values. Targeted browser input belongs to future `@web/*` packages, while `io.input` provides a portable global view.
+`io` may offer the convenient common operation of a domain that a focused package covers in detail. It doesn't duplicate that package's complete API or reimplement its semantics, and both use the same underlying owner where practical. `@core/time` owns `Duration`, `TimeMark` and `Timestamp`, so `io` doesn't provide a second set of time values. Targeted browser input belongs to future `@builder/web/*` packages, while `io.input` provides a portable global view.
 
 ### Console helpers
 
@@ -285,7 +285,7 @@ HTML-JS maps console helpers to the browser console, one entry per call, and inp
 
 Operations that wait, suspend or run Moth code later need structured async and a host-ingress contract. They include sleep, timeouts, intervals, frame callbacks, event waits, fetch and network IO, WebSocket and server-sent events, listeners that call into Moth and asynchronous file selection or image loading. `io` provides no synchronous-looking forms of them and no general callback mechanism.
 
-Browser-specific event control belongs to future `@web/*` packages. This covers targeted DOM and canvas input sources, propagation, default suppression, composition and IME events, clipboard access and drag and drop.
+Browser-specific event control belongs to future `@builder/web/*` packages. This covers targeted DOM and canvas input sources, propagation, default suppression, composition and IME events, clipboard access and drag and drop.
 
 Complete filesystem, path and networking APIs belong to focused packages. `io` may later offer a few common high-level file operations.
 

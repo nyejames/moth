@@ -15,11 +15,14 @@ init_docs_sidebar()!
     syntax as source packages, but binding-backed implementations don't become
     files in your project.
 
-    `@html` and `@styles` are different. They are mandatory Core/MothSource
-    packages that the common builder surface registers under every builder,
-    including custom SDK builders. Builder configuration never selects them, and
-    `.mtf` templates always see their compile-time constants in the fixed
-    prelude.
+    Every registered Core package name sits below the reserved `@core` root.
+    The exact root is not importable, and no other origin can claim it.
+
+    `@core/html` and `@core/css` are different. They are mandatory
+    Core/MothSource packages that the common builder surface registers under
+    every builder, including custom SDK builders. Builder configuration never
+    selects them, and `.mtf` templates always see their compile-time constants
+    in the fixed prelude.
 
     Most other Core packages require explicit dependency clauses. Unlike large
     standard-library preludes, Moth reserves only a small implicit namespace
@@ -36,8 +39,8 @@ init_docs_sidebar()!
 
     ## Package pages
 
-    - @./html/ (@html)
-    - @./styles/ (@styles)
+    - @./html/ (@core/html)
+    - @./css/ (@core/css)
     - @./prelude (Prelude policy)
     - @./io (Core IO)
     - @./collections (Core collections)

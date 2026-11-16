@@ -1,0 +1,10 @@
+@shared/constants max_items_per_page, default_page_offset
+@shared/constants max_page_limit as limit, enable_cache
+
+compute_offset |page I32| -> I32:
+    return page * max_items_per_page + default_page_offset
+;
+
+is_valid_limit |value I32| -> Bool:
+    return value <= limit
+;

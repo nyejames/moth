@@ -4,7 +4,7 @@ use super::node_asset::run_asset_in_node;
 
 const PAGE_SOURCE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/packages/web/page/page.js"
+    "/packages/builder/web/page/page.js"
 ));
 
 #[test]

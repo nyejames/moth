@@ -1,6 +1,6 @@
 //! Typed HTML document-shell configuration parsing.
 //!
-//! WHAT: parses HTML-shell-specific `config.moth` settings from the generic builder settings
+//! WHAT: parses HTML-shell-specific `@config.moth` settings from the generic builder settings
 //!       into a strict typed struct.
 //! WHY: keeping document policy separate from routing config avoids one oversized parser and
 //!      gives the HTML builder a single source of truth for shell defaults.

@@ -867,7 +867,7 @@ fn dev_cycle_warning_context_is_released_with_its_cycle_report() {
     let source_root = root.to_path_buf();
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1091,7 +1091,7 @@ fn project_build_executor_writes_the_validated_directory_plan() {
     let source_root = root.to_path_buf();
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "$config\nversion #String = \"authored\"\nproject #= (\n    name = \"docs\",\n    version = version,\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write project config");
@@ -1178,7 +1178,7 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
     let source_root = root.to_path_buf();
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -1953,7 +1953,7 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
     fs::create_dir_all(source.join("support")).expect("create support module");
     fs::create_dir_all(source.join("other")).expect("create other page");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (name = \"rebuild_contract\")\nhtml #= ()\n",
     )
     .expect("write config");
@@ -2152,7 +2152,7 @@ fn real_module_allowance_stop_reaches_browser_error_page_and_clears_after_repair
     let root = temp.path();
     let source = root.to_path_buf();
     fs::create_dir_all(&source).expect("create source directory");
-    fs::write(root.join("config.moth"), MODULE_LIMIT_CONFIG_SOURCE).expect("write config");
+    fs::write(root.join("@config.moth"), MODULE_LIMIT_CONFIG_SOURCE).expect("write config");
     fs::write(source.join("@entry.moth"), TWO_FAILING_BODIES_SOURCE).expect("write failing page");
 
     let state = Arc::new(DevServerState::new(root.join("dev")));

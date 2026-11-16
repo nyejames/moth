@@ -63,7 +63,7 @@ fn assert_config_input_overflow_build(
     let facade_directory = root.join("facade");
     fs::create_dir_all(&facade_directory).expect("should create facade module folder");
     fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"k1_diagnostic_regression\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");

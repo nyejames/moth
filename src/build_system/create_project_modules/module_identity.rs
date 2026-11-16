@@ -164,17 +164,6 @@ impl ModuleIdentityRecord {
         self.entry_root_file().is_some()
     }
 
-    /// The role of the package-facing public surface, when this module owns an API facade.
-    pub(crate) fn public_surface_role(&self) -> Option<ModuleRootRole> {
-        self.root_files.public_surface_role()
-    }
-
-    /// The canonical package-facing public-surface root file.
-    pub(crate) fn public_root_file(&self) -> Option<&Path> {
-        self.public_surface_role()
-            .and_then(|role| self.root_file(role))
-    }
-
     /// The structural role of the preparation anchor root.
     #[cfg(test)]
     pub(crate) fn role(&self) -> ModuleRootRole {

@@ -750,7 +750,7 @@ fn export_modifier_rejects_a_receiver_method() {
 fn export_modifier_is_rejected_in_helper_and_config_files() {
     for (file_path, entry_path) in [
         ("src/impl.moth", "src/@entry.moth"),
-        ("src/config.moth", "src/@entry.moth"),
+        ("src/@config.moth", "src/@entry.moth"),
     ] {
         let source = "$export\nvalue #= 1\n";
         let errors = expect_header_error(

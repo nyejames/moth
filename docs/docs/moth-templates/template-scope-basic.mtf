@@ -1,4 +1,4 @@
-A `.mtf` file sees the fixed `@html` and `@styles` helpers and values from helper files in the same module. It does not see module root declarations.
+A `.mtf` file sees the fixed `@core/html` and `@core/css` helpers and values from helper files in the same module. It does not see module root declarations.
 
 ### Selecting a helper value
 
@@ -22,14 +22,14 @@ A value written in `@mod.moth`, `@package.moth` or `@entry.moth` is not visible 
 
 ### The fixed helpers
 
-`.mtf` files see constants from `@html` and `@styles` without a dependency clause:
+`.mtf` files see constants from `@core/html` and `@core/css` without a dependency clause:
 
 [codeblock, $code "text":
     [p: A paragraph.]
     [h1, center: A centred heading.]
 ]
 
-That prelude comes from the official Core `@html` and `@styles` packages. It is available under every builder, not only HTML projects.
+That prelude comes from the official Core `@core/html` and `@core/css` packages. It is available under every builder, not only HTML projects.
 
 ### A nested override
 

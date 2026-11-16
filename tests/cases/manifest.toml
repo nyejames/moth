@@ -18994,6 +18994,13 @@ contract = "language.dependencies.source_package_dependency_cycle_rejected"
 role = "adversarial"
 
 [[case]]
+id = "web_site_copied_local_facade"
+path = "web_site_copied_local_facade"
+tags = ["integration", "source-packages", "dependencies", "templates", "html", "html-wasm"]
+contract = "language.dependencies.copied_package_folder_keeps_local_support_identity"
+role = "adversarial"
+
+[[case]]
 id = "web_site_static_urls"
 path = "web_site_static_urls"
 tags = ["integration", "source-packages", "dependencies", "templates", "html", "html-wasm"]
@@ -19012,6 +19019,13 @@ id = "web_site_case_variant_import_rejected"
 path = "web_site_case_variant_import_rejected"
 tags = ["integration", "source-packages", "dependencies", "diagnostics", "html", "html-wasm"]
 contract = "language.dependencies.package_case_variant_import_rejected"
+role = "primary"
+
+[[case]]
+id = "web_site_old_namespace_import_rejected"
+path = "web_site_old_namespace_import_rejected"
+tags = ["integration", "source-packages", "dependencies", "diagnostics", "html", "html-wasm"]
+contract = "language.dependencies.removed_web_site_namespace_rejected"
 role = "primary"
 
 [[case]]
@@ -19552,7 +19566,7 @@ role = "primary"
 id = "closed_root_build_config_filename_rejected"
 path = "closed_root_build_config_filename_rejected"
 tags = ["integration", "project-structure", "diagnostics", "root-roles"]
-contract = "language.modules.at_config_root_filename_rejected"
+contract = "language.modules.build_config_filename_case_variant_rejected"
 role = "primary"
 
 [[case]]
@@ -20476,4 +20490,25 @@ id = "diagnostic_unclosed_entry_catch_swallows_statement_rejected"
 path = "diagnostic_unclosed_entry_catch_swallows_statement_rejected"
 tags = ["integration", "entry-start", "diagnostics", "fallible", "scopes"]
 contract = "language.syntax.entry_catch_closer_keeps_handler_scope"
+role = "primary"
+
+[[case]]
+id = "helper_config_moth_import_success"
+path = "helper_config_moth_import_success"
+tags = ["integration", "config", "dependencies"]
+contract = "language.config.ordinary_helper_config_name_is_importable"
+role = "primary"
+
+[[case]]
+id = "file_value_reserved_config_reference_rejected"
+path = "file_value_reserved_config_reference_rejected"
+tags = ["integration", "config", "resources", "diagnostics"]
+contract = "language.config.reserved_config_filename_is_not_a_resource"
+role = "boundary"
+
+[[case]]
+id = "single_file_selected_config_build_rejected"
+path = "single_file_selected_config_build_rejected"
+tags = ["integration", "html", "single-file", "diagnostics", "root-roles"]
+contract = "language.entry.reserved_config_selection_is_not_an_entry"
 role = "primary"

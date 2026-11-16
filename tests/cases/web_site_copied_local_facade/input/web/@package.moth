@@ -1,0 +1,6 @@
+-- Static site URL helpers copied into a project-local support package.
+-- It keeps ordinary support visibility and gains no Builder registration.
+$export
+root #String = @/
+$export
+url #String = [:[root][$slot]]

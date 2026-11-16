@@ -14,7 +14,7 @@ The renderer is CommonMark-compatible with GFM extensions. It is not the Moth md
 
 - It is not a moth template file. Moth template syntax is not interpreted.
 - It has no captures, directives or declarations.
-- It does not see same-directory module root constants or `@html` constants.
+- It does not see same-directory module root constants or `@core/html` constants.
 - It has no Moth scope at all.
 
 ### Moth syntax is not interpreted

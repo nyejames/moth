@@ -66,7 +66,8 @@ pub(crate) enum BuilderSurfaceValidationError {
 const BUILTIN_PACKAGES_DIR: &str = "packages";
 
 /// Directory holding every compiler-shipped package file for this process: the source packages
-/// (`@html`, `@styles`, `@web/site`) and the `@web/*` binding assets the HTML builder emits.
+/// (`@core/html`, `@core/css`, `@builder/web/site`) and the `@builder/web/*` binding assets the
+/// HTML builder emits.
 ///
 /// WHAT: `packages/` beside the canonical executable when that directory exists, which is the
 ///       release archive layout; otherwise the `packages/` directory of the source checkout that
@@ -74,14 +75,19 @@ const BUILTIN_PACKAGES_DIR: &str = "packages";
 /// WHY: released binaries run without the checkout, so the installed copy must win. The choice
 ///      is made once for the whole set, never per package or file, so an installation can't mix
 ///      its files with another version's from the checkout. Every registration, the
-///      official-root check and asset reads join onto this one path.
+///      official-root check and asset reads join onto this one path. The selected directory is
+///      canonicalized once because package discovery canonicalizes each registered root before
+///      classifying it; an installed `packages/` symlink would otherwise make its own shipped
+///      package roots look like third-party roots.
 pub(crate) static BUILTIN_PACKAGES_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
-    std::env::current_exe()
+    let installed = std::env::current_exe()
         .and_then(fs::canonicalize)
         .ok()
         .and_then(|executable| Some(executable.parent()?.join(BUILTIN_PACKAGES_DIR)))
-        .filter(|installed| installed.is_dir())
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(BUILTIN_PACKAGES_DIR))
+        .filter(|installed| installed.is_dir());
+    let selected = installed
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(BUILTIN_PACKAGES_DIR));
+    fs::canonicalize(&selected).unwrap_or(selected)
 });
 
 /// Explains a failed read below [`BUILTIN_PACKAGES_ROOT`] as a damaged package set.
@@ -106,12 +112,13 @@ pub(crate) fn damaged_package_set_report(path: &Path) -> Option<String> {
 ///       merges public compile-time constants from the same roots into the flat `.mtf` prelude.
 /// WHY: one owner keeps the roots a builder cannot replace identical to the packages whose
 ///      exported constants a template may name without an import.
-pub const CORE_SOURCE_PACKAGE_PREFIXES: [&str; 2] = ["html", "styles"];
+pub const CORE_SOURCE_PACKAGE_PREFIXES: [&str; 2] = ["core/html", "core/css"];
 
 impl BuilderSurface {
     /// Builds a builder surface with mandatory compiler core packages.
     ///
-    /// WHAT: the minimal default every builder starts from, including source-only HTML and styles.
+    /// WHAT: the minimal default every builder starts from, including the source-only
+    ///       `@core/html` and `@core/css` packages.
     /// WHY: user-facing optional core packages such as `@core/math` and `@core/text`
     /// must be explicit builder opt-ins.
     pub fn with_mandatory_core() -> Self {
@@ -123,7 +130,7 @@ impl BuilderSurface {
                     Self::builtin_source_package_root(prefix),
                     PackageOrigin::Core,
                 )
-                .expect("the official Core source packages have distinct reserved roots");
+                .expect("the mandatory Core source package paths are distinct and valid");
         }
         Self {
             binding_packages: ExternalPackageRegistry::new(),
@@ -255,9 +262,17 @@ impl BuilderSurface {
         self.config_globals.insert(name, value)
     }
 
-    /// Root of one compiler-shipped source package, such as `@html`, `@styles` or `@web/site`.
+    /// Root of one compiler-shipped source package, such as `@core/html`, `@core/css` or
+    /// `@builder/web/site`.
+    ///
+    /// The registered prefix's `/`-separated components become nested directories below the
+    /// selected package set, so a grouped Core name keeps one directory per namespace level.
     pub fn builtin_source_package_root(prefix: &str) -> PathBuf {
-        BUILTIN_PACKAGES_ROOT.join(prefix)
+        let mut root = BUILTIN_PACKAGES_ROOT.clone();
+        for component in prefix.split('/') {
+            root.push(component);
+        }
+        root
     }
 }
 

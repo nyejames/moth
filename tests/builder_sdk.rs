@@ -33,26 +33,27 @@ if value is:
 ~[:pattern_unreachable_after_duplicate_literal_warning result=[result]]
 "#;
 
-/// Imports `greet` from the `@ui` package that only one test builder registers.
-const UI_IMPORT_PAGE_SOURCE: &str = "@ui greet\nvalue = greet()\n";
+/// Imports `greet` from the `@builder/game/ui` package that only one test builder registers.
+const UI_IMPORT_PAGE_SOURCE: &str = "@builder/game/ui greet\nvalue = greet()\n";
 
-/// Imports a shared helper constant and a shared nominal with a receiver method from `@ui`.
-const UI_SUPPORT_HELPER_IMPORT_PAGE_SOURCE: &str =
-    "@ui value, Message\nmessage = Message(\"hello\")\nio.line([: [value] [message.label()]])\n";
+/// Imports a shared helper constant and a shared nominal with a receiver method from `@builder/game/ui`.
+const UI_SUPPORT_HELPER_IMPORT_PAGE_SOURCE: &str = "@builder/game/ui value, Message\nmessage = Message(\"hello\")\nio.line([: [value] [message.label()]])\n";
 
 /// A `Byte` value passed to a host function that takes `Byte`.
-const HOST_BYTE_PAGE_SOURCE: &str = "@platform takes_byte\noctet Byte = 42\ntakes_byte(octet)\n";
+const HOST_BYTE_PAGE_SOURCE: &str =
+    "@builder/game/platform takes_byte\noctet Byte = 42\ntakes_byte(octet)\n";
 
 /// A `U8` value passed where the host function takes `Byte`.
-const HOST_U8_PAGE_SOURCE: &str = "@platform takes_byte\noctet U8 = 42\ntakes_byte(octet)\n";
+const HOST_U8_PAGE_SOURCE: &str =
+    "@builder/game/platform takes_byte\noctet U8 = 42\ntakes_byte(octet)\n";
 
 #[test]
 fn external_crate_defines_source_and_host_packages() {
     let ui_dir = tempfile::tempdir().expect("should create package directory");
     let definition = BuilderDefinition::new("game")
-        .source_package(SourcePackage::new("@ui").from_dir(ui_dir.path()))
+        .source_package(SourcePackage::new("@builder/game/ui").from_dir(ui_dir.path()))
         .host_package(
-            HostPackage::new("@platform").function(
+            HostPackage::new("@builder/game/platform").function(
                 HostFunction::new("has_prefix")
                     .parameter(HostType::String)
                     .parameter(HostType::String)
@@ -71,10 +72,12 @@ fn external_crate_cannot_replace_official_core_source_packages() {
     let package_dir = tempfile::tempdir().expect("should create package directory");
 
     for (case, path) in [
-        ("html", "@html"),
-        ("html nested", "@html/docs"),
-        ("styles", "@styles"),
-        ("styles nested", "@styles/docs"),
+        ("html", "@core/html"),
+        ("html nested", "@core/html/docs"),
+        ("css", "@core/css"),
+        ("css nested", "@core/css/docs"),
+        ("html case variant", "@Core/HTML"),
+        ("css case variant", "@Core/CSS"),
     ] {
         let error = BuilderDefinition::new("game")
             .source_package(SourcePackage::new(path).from_dir(package_dir.path()))
@@ -84,7 +87,7 @@ fn external_crate_cannot_replace_official_core_source_packages() {
         assert!(
             error
                 .to_string()
-                .contains("overlaps registered source package"),
+                .contains("reserved for official Core packages"),
             "{case}: {error}"
         );
     }
@@ -100,6 +103,51 @@ fn external_crate_receives_typed_definition_errors() {
 
     assert_eq!(error.kind(), ErrorKind::InvalidDefinition);
     assert!(error.to_string().contains("@core/game"), "{error}");
+}
+
+#[test]
+fn external_crate_must_register_packages_below_the_builder_namespace_root() {
+    let package_dir = tempfile::tempdir().expect("should create package directory");
+
+    // A flat builder name, the bare reserved root and the Core namespace are rejected, so a
+    // custom builder group such as `game` is the only place its packages can live.
+    for (path, expected) in [
+        ("@ui", "below the 'builder' namespace root"),
+        ("@builder", "reserved namespace root"),
+        ("@core/extra", "reserved for official Core packages"),
+    ] {
+        let error = BuilderDefinition::new("game")
+            .source_package(SourcePackage::new(path).from_dir(package_dir.path()))
+            .finish()
+            .expect_err(&format!("source package {path} must be rejected"));
+        assert_eq!(error.kind(), ErrorKind::InvalidDefinition, "{path}");
+        let message = error.to_string();
+        assert!(message.contains(expected), "{path}: {message}");
+    }
+
+    BuilderDefinition::new("game")
+        .source_package(SourcePackage::new("@builder/game/ui").from_dir(package_dir.path()))
+        .finish()
+        .expect("an explicit custom builder group is a valid source package location");
+
+    for (path, expected) in [
+        ("@platform", "below the 'builder' namespace root"),
+        ("@builder", "reserved namespace root"),
+        ("@Core/extra", "reserved for official Core packages"),
+    ] {
+        let error = BuilderDefinition::new("game")
+            .host_package(HostPackage::new(path))
+            .finish()
+            .expect_err(&format!("host package {path} must be rejected"));
+        assert_eq!(error.kind(), ErrorKind::InvalidDefinition, "{path}");
+        let message = error.to_string();
+        assert!(message.contains(expected), "{path}: {message}");
+    }
+
+    BuilderDefinition::new("game")
+        .host_package(HostPackage::new("@builder/game/platform"))
+        .finish()
+        .expect("an explicit custom builder group is a valid host package location");
 }
 
 /// Accepts any project, records that `build` ran and requires the package facade.
@@ -126,7 +174,7 @@ impl ProjectBuilder for PackageFacadeBuilder {
 /// Writes the project config shared by the SDK fixtures.
 fn write_config(project_root: &Path) {
     fs::write(
-        project_root.join("config.moth"),
+        project_root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\n",
     )
     .expect("should write config");
@@ -142,7 +190,7 @@ fn write_package_facade(project_root: &Path) {
 }
 
 /// Writes a one-page project whose page holds `page_source` and, when requested, its
-/// `@package.moth` facade beside `config.moth`.
+/// `@package.moth` facade beside `@config.moth`.
 fn write_project(project_root: &Path, page_source: &str, with_facade: bool) {
     write_config(project_root);
     fs::write(project_root.join("@entry.moth"), page_source).expect("should write page");
@@ -333,7 +381,7 @@ impl ProjectBuilder for RecordingBuildBuilder {
     }
 }
 
-/// Registers the `@ui` source package installed in `ui_root`.
+/// Registers the `@builder/game/ui` source package installed in `ui_root`.
 struct UiPackageBuilder {
     ui_root: PathBuf,
 }
@@ -341,7 +389,7 @@ struct UiPackageBuilder {
 impl ProjectBuilder for UiPackageBuilder {
     fn definition(&self) -> Result<BuilderDefinition, Error> {
         BuilderDefinition::new("game")
-            .source_package(SourcePackage::new("@ui").from_dir(&self.ui_root))
+            .source_package(SourcePackage::new("@builder/game/ui").from_dir(&self.ui_root))
             .finish()
     }
 
@@ -354,7 +402,7 @@ impl ProjectBuilder for UiPackageBuilder {
     }
 }
 
-/// Registers no packages, so a project importing `@ui` cannot resolve it.
+/// Registers no packages, so a project importing `@builder/game/ui` cannot resolve it.
 struct NoPackageBuilder;
 
 impl ProjectBuilder for NoPackageBuilder {
@@ -372,10 +420,11 @@ impl ProjectBuilder for NoPackageBuilder {
 }
 
 /// Imports official Core source packages without any builder-selected web package.
-const CORE_SOURCE_IMPORT_PAGE: &str = "@html p\n@styles center\nvalue = [p, center: Hello]\n";
+const CORE_SOURCE_IMPORT_PAGE: &str =
+    "@core/html p\n@core/css center\nvalue = [p, center: Hello]\n";
 
 #[test]
-fn minimal_sdk_builder_imports_official_html_and_styles_without_web_packages() {
+fn minimal_sdk_builder_imports_official_core_html_and_css_without_web_packages() {
     let project_dir = tempfile::tempdir().expect("should create project directory");
     write_project(project_dir.path(), CORE_SOURCE_IMPORT_PAGE, false);
     let builder = RecordingBuildBuilder {
@@ -383,19 +432,47 @@ fn minimal_sdk_builder_imports_official_html_and_styles_without_web_packages() {
     };
 
     build_project(&builder, BuildRequest::new(project_dir.path()))
-        .expect("official @html and @styles must import without @web/canvas");
+        .expect("official @core/html and @core/css must import without @builder/web/canvas");
     assert!(
         builder.build_ran.get(),
         "compilation of the official Core imports must reach the builder"
     );
 }
 
+#[test]
+fn minimal_sdk_builder_rejects_removed_flat_core_package_names() {
+    for (case, page_source, removed_name) in [
+        ("html", "@html p\nvalue = p\n", "html"),
+        ("styles", "@styles center\nvalue = center\n", "styles"),
+    ] {
+        let project_dir = tempfile::tempdir().expect("should create project directory");
+        write_project(project_dir.path(), page_source, false);
+        let builder = RecordingBuildBuilder {
+            build_ran: Cell::new(false),
+        };
+
+        let error = build_project(&builder, BuildRequest::new(project_dir.path()))
+            .expect_err("the removed flat Core package name must not resolve");
+        assert_eq!(error.kind(), ErrorKind::Compilation, "{case}");
+        let messages = error.messages().join("\n");
+        assert!(
+            messages.contains(&format!("dependency '{removed_name}'")),
+            "the missing-import diagnostic must name the removed @{removed_name} package: {messages}"
+        );
+        assert!(
+            !builder.build_ran.get(),
+            "{case}: a rejected import must not reach the builder"
+        );
+    }
+}
+
 /// A page holding an explicit `.mtf` file value and a qualified `content` constant reference.
 const MTF_FILE_VALUE_PAGE: &str =
     "intro #= @intro.mtf\nbody = @intro content\n~[: [intro] [body] ]\n";
 
-/// A template body that imports a nested `.mtf` and uses a bare `@html` prelude name.
-const INTRO_TEMPLATE_SOURCE: &str = "[: intro [p: nested [@nested.mtf] ] ]\n";
+/// A template body that imports a nested `.mtf` and uses bare `@core/html` and `@core/css`
+/// prelude names.
+const INTRO_TEMPLATE_SOURCE: &str = "[: intro [p, center: nested [@nested.mtf] ] ]\n";
 
 /// The nested template body reached from `intro.mtf`.
 const NESTED_TEMPLATE_SOURCE: &str = "nested template body\n";
@@ -443,7 +520,7 @@ impl ProjectBuilder for ByteParameterBuilder {
     fn definition(&self) -> Result<BuilderDefinition, Error> {
         BuilderDefinition::new("game")
             .host_package(
-                HostPackage::new("@platform")
+                HostPackage::new("@builder/game/platform")
                     .function(HostFunction::new("takes_byte").parameter(HostType::Byte)),
             )
             .finish()
@@ -458,11 +535,11 @@ impl ProjectBuilder for ByteParameterBuilder {
     }
 }
 
-/// Writes a paired `@ui` source package whose external surface is its support root.
+/// Writes a paired `@builder/game/ui` source package whose external surface is its support root.
 fn write_ui_paired_package(package_root: &Path) {
     fs::write(
         package_root.join("@mod.moth"),
-        "normal_value #= \"normal\"\n",
+        "$export\nnormal_value #= \"normal\"\n",
     )
     .expect("should write normal package root");
     fs::write(
@@ -474,7 +551,7 @@ fn write_ui_paired_package(package_root: &Path) {
         .expect("should write shared package helper");
 }
 
-/// Writes a support-only `@ui` package root that re-exports shared helper declarations.
+/// Writes a support-only `@builder/game/ui` package root that re-exports shared helper declarations.
 fn write_ui_support_package(package_root: &Path) {
     fs::write(
         package_root.join("@package.moth"),
@@ -488,13 +565,25 @@ fn write_ui_support_package(package_root: &Path) {
     .expect("should write shared package helpers");
 }
 
-/// Writes a `@ui` package root whose only module exports `greet`.
+/// Writes a `@builder/game/ui` package root whose only module publishes `greet` through its support facade.
 fn write_ui_package(package_root: &Path) {
+    fs::write(
+        package_root.join("@package.moth"),
+        "$export\ngreet || -> I32:\n    return 1\n;\n",
+    )
+    .expect("should write package module");
+}
+
+/// Writes a `@builder/game/ui` package root that publishes only a normal `@mod.moth` facade.
+///
+/// A registered Moth-source package must publish its external API through `@package.moth`, so the
+/// normal root alone is insufficient even though ordinary modules may use it.
+fn write_ui_normal_only_package(package_root: &Path) {
     fs::write(
         package_root.join("@mod.moth"),
         "$export\ngreet || -> I32:\n    return 1\n;\n",
     )
-    .expect("should write package module");
+    .expect("should write normal-only package root");
 }
 
 #[test]
@@ -529,12 +618,12 @@ fn independent_definitions_do_not_share_source_packages() {
     let no_package_builder = NoPackageBuilder;
 
     build_project(&ui_builder, BuildRequest::new(project_dir.path()))
-        .expect("the registered @ui package should satisfy the import");
+        .expect("the registered @builder/game/ui package should satisfy the import");
     let error = build_project(&no_package_builder, BuildRequest::new(project_dir.path()))
-        .expect_err("a builder without @ui must not resolve the import");
+        .expect_err("a builder without @builder/game/ui must not resolve the import");
     assert_eq!(error.kind(), ErrorKind::Compilation);
     build_project(&ui_builder, BuildRequest::new(project_dir.path()))
-        .expect("the first builder should still resolve @ui after the failing build");
+        .expect("the first builder should still resolve @builder/game/ui after the failing build");
 }
 
 #[test]
@@ -561,7 +650,7 @@ fn builder_registered_paired_source_package_publishes_its_support_interface() {
     let project_dir = tempfile::tempdir().expect("should create project directory");
     write_project(
         project_dir.path(),
-        "@ui greeting\nio.line([: [greeting]])\n",
+        "@builder/game/ui greeting\nio.line([: [greeting]])\n",
         false,
     );
     let ui_dir = tempfile::tempdir().expect("should create package directory");
@@ -572,6 +661,196 @@ fn builder_registered_paired_source_package_publishes_its_support_interface() {
 
     build_project(&builder, BuildRequest::new(project_dir.path())).expect(
         "external consumers must receive the paired package support interface, not its normal root",
+    );
+}
+
+#[test]
+fn builder_registered_normal_only_source_package_is_rejected() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(project_dir.path(), UI_IMPORT_PAGE_SOURCE, false);
+    let ui_dir = tempfile::tempdir().expect("should create package directory");
+    write_ui_normal_only_package(ui_dir.path());
+    let builder = UiPackageBuilder {
+        ui_root: ui_dir.path().to_path_buf(),
+    };
+
+    let error = build_project(&builder, BuildRequest::new(project_dir.path()))
+        .expect_err("a registered package with only @mod.moth must not publish a package surface");
+    assert_eq!(error.kind(), ErrorKind::Compilation);
+    let messages = error.messages().join("\n");
+    assert!(
+        messages.contains("@package.moth"),
+        "the missing-facade diagnostic must name @package.moth: {messages}"
+    );
+}
+
+#[test]
+fn builder_registered_paired_source_package_does_not_expose_its_normal_root() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(
+        project_dir.path(),
+        "@builder/game/ui normal_value\nvalue = normal_value\n",
+        false,
+    );
+    let ui_dir = tempfile::tempdir().expect("should create package directory");
+    write_ui_paired_package(ui_dir.path());
+    let builder = UiPackageBuilder {
+        ui_root: ui_dir.path().to_path_buf(),
+    };
+
+    let error = build_project(&builder, BuildRequest::new(project_dir.path()))
+        .expect_err("external consumers must never observe a paired package's normal root");
+    assert_eq!(error.kind(), ErrorKind::Compilation);
+    let messages = error.messages().join("\n");
+    assert!(
+        messages.contains("normal_value"),
+        "the diagnostic must name the unexposed declaration: {messages}"
+    );
+}
+
+#[test]
+fn project_local_support_folder_is_visible_without_registration() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(
+        project_dir.path(),
+        "@markup greeting\nvalue = greeting()\n",
+        false,
+    );
+    // A project copying a package folder gains ordinary project-local support visibility. It is
+    // not registered as a Builder or Core package and needs no builder definition entry.
+    let markup_root = project_dir.path().join("markup");
+    fs::create_dir_all(&markup_root).expect("should create copied support folder");
+    fs::write(
+        markup_root.join("@package.moth"),
+        "$export\n@impl greeting\n",
+    )
+    .expect("should write copied support facade");
+    fs::write(
+        markup_root.join("impl.moth"),
+        "greeting || -> String:\n    return \"local\"\n;\n",
+    )
+    .expect("should write copied support helper");
+
+    let builder = RecordingBuildBuilder {
+        build_ran: Cell::new(false),
+    };
+    build_project(&builder, BuildRequest::new(project_dir.path())).expect(
+        "a copied project-local support folder must resolve as an ordinary support package",
+    );
+    assert!(
+        builder.build_ran.get(),
+        "a project-local support import must not prevent the build step"
+    );
+}
+
+#[test]
+fn project_local_html_styles_and_css_folders_coexist_with_core_packages() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(
+        project_dir.path(),
+        "@core/html p\n\
+         @core/css center\n\
+         @html local_html\n\
+         @styles local_style\n\
+         @css local_css\n\
+         combined #= [: [local_html] [local_style] [local_css]]\n\
+         value = [p, center: [combined]]\n\
+         ~[:[value]]\n",
+        false,
+    );
+
+    // Ordinary project-local folders keep their own ordinary support identity. They neither
+    // replace the mandatory Core packages nor inherit Core registration from a copied layout.
+    for (folder, export_name, value) in [
+        ("html", "local_html", "local html"),
+        ("styles", "local_style", "local style"),
+        ("css", "local_css", "local css"),
+    ] {
+        let package_root = project_dir.path().join(folder);
+        fs::create_dir_all(&package_root).expect("should create copied support folder");
+        fs::write(
+            package_root.join("@package.moth"),
+            format!("$export\n{export_name} #= \"{value}\"\n"),
+        )
+        .expect("should write copied support facade");
+    }
+
+    let builder = RecordingBuildBuilder {
+        build_ran: Cell::new(false),
+    };
+    build_project(&builder, BuildRequest::new(project_dir.path())).expect(
+        "project-local html, styles and css support facades must coexist with Core packages",
+    );
+    assert!(
+        builder.build_ran.get(),
+        "a successful mixed local/Core import must reach the builder"
+    );
+}
+
+#[test]
+fn registered_package_private_helper_stays_private() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(
+        project_dir.path(),
+        "@builder/game/ui hidden\nvalue = hidden\n",
+        false,
+    );
+    let ui_dir = tempfile::tempdir().expect("should create package directory");
+    fs::write(
+        ui_dir.path().join("@package.moth"),
+        "$export\n@impl greeting\n",
+    )
+    .expect("should write support facade");
+    fs::write(
+        ui_dir.path().join("impl.moth"),
+        "hidden #= \"private\"\n\ngreeting #= hidden\n",
+    )
+    .expect("should write referenced private helper");
+    let builder = UiPackageBuilder {
+        ui_root: ui_dir.path().to_path_buf(),
+    };
+
+    let error = build_project(&builder, BuildRequest::new(project_dir.path()))
+        .expect_err("a package's private helper must not join its public facade");
+    assert_eq!(error.kind(), ErrorKind::Compilation);
+    let messages = error.messages().join("\n");
+    assert!(
+        messages.contains("hidden"),
+        "the unexported-helper diagnostic must name the private declaration: {messages}"
+    );
+}
+
+#[test]
+fn project_local_support_folder_private_helper_stays_private() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(
+        project_dir.path(),
+        "@markup hidden\nvalue = hidden\n",
+        false,
+    );
+    let markup_root = project_dir.path().join("markup");
+    fs::create_dir_all(&markup_root).expect("should create copied support folder");
+    fs::write(
+        markup_root.join("@package.moth"),
+        "$export\n@impl greeting\n",
+    )
+    .expect("should write copied support facade");
+    fs::write(
+        markup_root.join("impl.moth"),
+        "hidden #= \"private\"\n\ngreeting #= hidden\n",
+    )
+    .expect("should write referenced copied private helper");
+    let builder = RecordingBuildBuilder {
+        build_ran: Cell::new(false),
+    };
+
+    let error = build_project(&builder, BuildRequest::new(project_dir.path()))
+        .expect_err("a copied support folder must not expose private helpers");
+    assert_eq!(error.kind(), ErrorKind::Compilation);
+    let messages = error.messages().join("\n");
+    assert!(
+        messages.contains("hidden"),
+        "the unexported-helper diagnostic must name the private declaration: {messages}"
     );
 }
 
@@ -702,7 +981,7 @@ fn write_project_with_builder_section_and_source(
     page_source: &str,
 ) {
     fs::write(
-        project_root.join("config.moth"),
+        project_root.join("@config.moth"),
         format!("project #= (\n    name = \"docs\",\n)\n{section_name} #= (\n{fields})\n"),
     )
     .expect("should write config");
@@ -1165,7 +1444,7 @@ fn located_output_diagnostics_match_with_and_without_compiler_warnings() {
         "staged compiler warnings must not change the located output diagnostic"
     );
     assert!(
-        with_warnings.contains("config.moth"),
+        with_warnings.contains("@config.moth"),
         "the late output diagnostic must retain its authored source location: {with_warnings}"
     );
     assert!(

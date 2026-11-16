@@ -120,7 +120,7 @@ backstop. Unreachable IO calls create no requirement.
   focused package owns in detail, but it never duplicates that package's complete API or
   reimplements its semantics. Shared behaviour uses one compiler or runtime owner. `@core/time` owns
   time values, so `io` is not a second time library. Targeted browser input belongs to future
-  `@web/*` packages. A future filesystem package owns paths and metadata while `io` may expose a few
+  `@builder/web/*` packages. A future filesystem package owns paths and metadata while `io` may expose a few
   common high-level file operations. A focused package existing is not a reason to make common IO
   inconvenient.
 - **Prelude for convenience.** `io` is preluded because ordinary programs need common host
@@ -196,7 +196,7 @@ arbitrary `preventDefault` or propagation control also wait unless they can be c
 at registration.
 
 Outside this package: targeted DOM sources, propagation phases, default suppression and composition
-events belong to `@web/*`. Complete filesystem and networking APIs belong to focused packages. A Wasm
+events belong to `@builder/web/*`. Complete filesystem and networking APIs belong to focused packages. A Wasm
 lowering set needs its own target decision.
 
 ## Previous blockers and rejected approaches

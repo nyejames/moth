@@ -1,12 +1,12 @@
 # Builder-declared contextual constants - deferred design draft
 
 Status: research only, deferred
-Activation: reconsider only after the working `@web/site` and `@web/page` V1 packages and the docs sidebar runtime migration provide evidence of a real cost or usability problem
+Activation: reconsider only after the working `@builder/web/site` and `@builder/web/page` V1 packages and the docs sidebar runtime migration provide evidence of a real cost or usability problem
 Implementation: none authorised by this draft
 
 ## Motivation
 
-Some builder-produced values are deterministic for one output artefact, but not known while reusable source-backed packages or their constant templates are compiled. Examples include the generated page route, effective initial page title, canonical URL and a test of whether a route matches the generated page. Today, such UI can be constructed by passing explicit values into constant-template slots or by using an HTML-builder runtime JavaScript package such as `@web/page`.
+Some builder-produced values are deterministic for one output artefact, but not known while reusable source-backed packages or their constant templates are compiled. Examples include the generated page route, effective initial page title, canonical URL and a test of whether a route matches the generated page. Today, such UI can be constructed by passing explicit values into constant-template slots or by using an HTML-builder runtime JavaScript package such as `@builder/web/page`.
 
 A future optimisation might allow these narrowly declared values to resolve at output assembly, producing static HTML while preserving one shared compilation of reusable components. The motivation is reducing runtime JavaScript and repetitive caller arguments, not adding a general third evaluation mode to every language expression.
 
@@ -39,8 +39,8 @@ A future optimisation might allow these narrowly declared values to resolve at o
 
 ## Activation evidence
 
-Reopen design only with a demonstrated reusable component and measured or documented cost that cannot be handled cleanly with explicit slot arguments, ordinary static strings or the working `@web/page` runtime API. Obtain an accepted exact public API, minimal semantic representation, test plan and compilation/assembly ownership contract before any implementation.
+Reopen design only with a demonstrated reusable component and measured or documented cost that cannot be handled cleanly with explicit slot arguments, ordinary static strings or the working `@builder/web/page` runtime API. Obtain an accepted exact public API, minimal semantic representation, test plan and compilation/assembly ownership contract before any implementation.
 
 ## Status boundary
 
-This document deliberately proposes **no syntax**, registry flag, IR node or implementation task. It records constraints for a later design discussion. The `@web/site` and `@web/page` V1 plan must complete independently.
+This document deliberately proposes **no syntax**, registry flag, IR node or implementation task. It records constraints for a later design discussion. The `@builder/web/site` and `@builder/web/page` V1 plan must complete independently.

@@ -68,7 +68,7 @@ WORK=tmp/docs-build-isolated
 rm -rf "$WORK"
 mkdir -p "$WORK/src"
 rsync -a --exclude='.DS_Store' docs/src/ "$WORK/src/"
-cp docs/config.moth "$WORK/config.moth"
+cp docs/@config.moth "$WORK/@config.moth"
 
 # One warmup, then reset the run-owned output root before each measured trial.
 ./target/release/moth build "$WORK" --release
@@ -79,7 +79,7 @@ for trial in 1 2 3 4 5 6; do
 done
 ```
 
-The copied input set is `docs/config.moth` plus the complete `docs/src` tree. Physical references
+The copied input set is `docs/@config.moth` plus the complete `docs/src` tree. Physical references
 live under `docs/src` (`fonts/`, `styles/`), not `docs/assets`, so the documented site build does
 not need the repository-level `docs/assets` tree. A clean copied build was verified to produce
 88 output files with no diagnostics before measurement.

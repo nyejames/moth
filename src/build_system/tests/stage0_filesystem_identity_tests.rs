@@ -106,6 +106,68 @@ fn assert_not_regular_file_marker_rejected(
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn single_file_selection_checks_the_authored_name_of_a_config_symlink() {
+    use crate::compiler_frontend::compiler_messages::compiler_errors::CompilationOutcome;
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+        InvalidConfigCode, InvalidConfigView,
+    };
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = temp.path();
+    let target = root.join("actual_config.moth");
+    fs::write(
+        &target,
+        "project #= (\n    name = \"linked\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write in-root config target");
+    let selected = root.join("@config.moth");
+    symlink("actual_config.moth", &selected).expect("should create config symlink");
+
+    let config = Config::new(selected.clone());
+    let mut builder_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    let mut string_table = StringTable::new();
+    let extension = selected
+        .extension()
+        .expect("selected path should have a .moth extension");
+    let result = compile_single_file_for_filesystem_test(
+        &config,
+        &mut builder_surface,
+        extension,
+        &mut string_table,
+    );
+
+    let reports = match result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("an authored @config.moth symlink must be rejected")
+        }
+        Err(_) => panic!("an authored @config.moth symlink must produce a user diagnostic"),
+    };
+    let (report, diagnostic) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("config symlink selection should retain an error");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-CONFIG-0001");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("config symlink selection should retain typed config facts");
+    assert_eq!(facts.reason, InvalidConfigCode::ConfigFileSelectedAsEntry);
+
+    let strings = report.context().strings();
+    let rendered = diagnostic
+        .string_ids()
+        .iter()
+        .map(|id| strings.resolve(*id))
+        .collect::<Vec<_>>();
+    assert!(
+        rendered.contains(&"@config.moth"),
+        "the diagnostic must name the authored reserved filename: {rendered:?}"
+    );
+}
+
 #[cfg(test)]
 fn compile_single_file_for_filesystem_test(
     config: &crate::projects::settings::Config,
@@ -509,13 +571,49 @@ mod source_package_boundary_indexes_tests {
         );
     }
 
+    /// Assert one typed config failure and that its rendered message names the required spelling.
+    fn assert_invalid_config_reason_names(
+        failure: PreparedFailure,
+        expected_reason: InvalidConfigCode,
+        expected_text: &str,
+    ) {
+        use crate::compiler_frontend::compiler_messages::render::{
+            DiagnosticRenderContext, render_invalid_config,
+        };
+
+        let reports = prepared_failure_reports(failure);
+        let (report, diagnostic) = reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .find(|(_, diagnostic)| {
+                diagnostic.descriptor().code == "MOTH-CONFIG-0001"
+                    && diagnostic
+                        .family_view::<InvalidConfigView>()
+                        .is_some_and(|facts| facts.reason == expected_reason)
+            })
+            .unwrap_or_else(|| panic!("expected the typed config failure {expected_reason:?}"));
+        let facts = diagnostic
+            .family_view::<InvalidConfigView>()
+            .expect("the selected diagnostic carries typed config facts");
+        let payload = render_invalid_config(
+            &diagnostic,
+            &facts,
+            DiagnosticRenderContext::for_report(report),
+        );
+        assert!(
+            payload.message.contains(expected_text),
+            "the {expected_reason:?} diagnostic must name {expected_text:?}: {}",
+            payload.message
+        );
+    }
+
     #[test]
-    fn canonical_root_with_single_hash_file_derives_unique_view() {
+    fn support_facade_root_derives_package_public_surface() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
-        fs::write(package_root.join("@mod.moth"), "").expect("should write normal module root");
+        fs::write(package_root.join("@package.moth"), "")
+            .expect("should write support facade root");
 
         let mut source_packages = SourcePackageRegistry::new();
         register_pkg(&mut source_packages, &package_root);
@@ -539,8 +637,8 @@ mod source_package_boundary_indexes_tests {
             .root_files()
             .get("pkg")
             .expect("pkg root file should exist");
-        let canonical_root_file = fs::canonicalize(package_root.join("@mod.moth"))
-            .expect("normal module root file should canonicalize");
+        let canonical_root_file = fs::canonicalize(package_root.join("@package.moth"))
+            .expect("support facade root file should canonicalize");
         assert_eq!(
             *root_file, canonical_root_file,
             "derived root file should be canonical"
@@ -555,38 +653,46 @@ mod source_package_boundary_indexes_tests {
             "exactly one package index should exist"
         );
         assert_eq!(
-            index.root_file_for_entry_root(),
+            index.package_public_root_file(),
             Some(canonical_root_file.as_path()),
-            "package root module file should match the derived public surface"
+            "package root module file should match the derived support facade"
         );
     }
 
     #[test]
-    fn repository_builder_packages_select_their_normal_facade() {
-        // The two repository source-backed packages publish normal `@mod.moth` facades. A
-        // registered source package never needs a support facade just because an external project
-        // package does.
-        for prefix in ["html", "web/site"] {
+    fn repository_builder_packages_publish_support_facades() {
+        // Every registered Moth-source package publishes its external API through a directly
+        // contained `@package.moth`. The shipped package roots must follow that rule themselves.
+        let mut package_roots = Vec::new();
+        for (prefix, origin) in [
+            ("core/html", crate::builder_surface::PackageOrigin::Core),
+            ("core/css", crate::builder_surface::PackageOrigin::Core),
+            (
+                "builder/web/site",
+                crate::builder_surface::PackageOrigin::Builder,
+            ),
+        ] {
             let package_root =
                 crate::builder_surface::BuilderSurface::builtin_source_package_root(prefix);
-            let normal_root = package_root.join("@mod.moth");
+            package_roots.push(package_root.clone());
+            let support_root = package_root.join("@package.moth");
             assert!(
-                normal_root.is_file(),
-                "the repository @{prefix} package should publish a normal facade"
+                support_root.is_file(),
+                "the repository @{prefix} package should publish a support facade"
+            );
+            assert!(
+                !package_root.join("@mod.moth").exists(),
+                "the repository @{prefix} package must not fall back to a normal facade"
             );
 
             let mut source_packages = SourcePackageRegistry::new();
             source_packages
-                .register_filesystem_root(
-                    prefix,
-                    package_root.clone(),
-                    crate::builder_surface::PackageOrigin::Builder,
-                )
+                .register_filesystem_root(prefix, package_root.clone(), origin)
                 .expect("the repository package root should register");
 
             let mut string_table = StringTable::new();
             let indexes = build_indexes(&source_packages, &mut string_table)
-                .expect("a normal-only repository package should build a boundary index");
+                .expect("a support-facade repository package should build a boundary index");
             let (registered_prefix, index) = indexes
                 .iter()
                 .next()
@@ -595,36 +701,43 @@ mod source_package_boundary_indexes_tests {
 
             let canonical_root =
                 fs::canonicalize(&package_root).expect("package root should canonicalize");
-            let canonical_normal_root =
-                fs::canonicalize(&normal_root).expect("normal facade should canonicalize");
+            let canonical_support_root =
+                fs::canonicalize(&support_root).expect("support facade should canonicalize");
             let module_id = index
                 .module_identities()
                 .module_id_for_directory(&canonical_root)
-                .expect("the normal facade should define the package module");
+                .expect("the support facade should define the package module");
             let record = index.module_identities().record(module_id);
             assert_eq!(
-                record.normal_root_file(),
-                Some(canonical_normal_root.as_path()),
-                "@{prefix} must keep its normal facade"
-            );
-            assert_eq!(
                 record.support_root_file(),
-                None,
-                "@{prefix} must not be forced to author a support facade"
+                Some(canonical_support_root.as_path()),
+                "@{prefix} must publish its support facade"
             );
             assert_eq!(
-                record.public_surface_role(),
-                Some(ModuleRootRole::Normal),
-                "@{prefix} publishes its normal facade as the external package surface"
+                record.normal_root_file(),
+                None,
+                "@{prefix} needs no separate normal root"
             );
 
             let prepared = indexes.prepared_source_package_roots();
             assert_eq!(
                 prepared.root_files().get(prefix),
-                Some(&canonical_normal_root),
-                "the resolver must consume the normal facade root"
+                Some(&canonical_support_root),
+                "the resolver must consume the support facade root"
             );
         }
+        assert_ne!(
+            package_roots[0], package_roots[1],
+            "Core HTML and CSS keep independent package roots"
+        );
+        assert_ne!(
+            package_roots[0], package_roots[2],
+            "the Core and Builder package sets stay physically distinct"
+        );
+        assert_ne!(
+            package_roots[1], package_roots[2],
+            "the Core and Builder package sets stay physically distinct"
+        );
     }
 
     #[test]
@@ -650,7 +763,7 @@ mod source_package_boundary_indexes_tests {
         let canonical_root_file = fs::canonicalize(package_root.join("@package.moth"))
             .expect("support module root file should canonicalize");
         assert_eq!(
-            index.root_file_for_entry_root(),
+            index.package_public_root_file(),
             Some(canonical_root_file.as_path()),
             "a support root is the package's external public surface"
         );
@@ -660,14 +773,18 @@ mod source_package_boundary_indexes_tests {
             .module_id_for_directory(index.entry_root())
             .expect("the package root directory should have a structural module");
         let record = index.module_identities().record(module_id);
-        assert_eq!(record.public_surface_role(), Some(ModuleRootRole::Support));
-        assert_eq!(
-            record.public_root_file(),
-            Some(canonical_root_file.as_path())
-        );
+        assert_eq!(record.normal_root_file(), None);
+        assert!(record.support_root_file().is_some());
         assert!(
             record.surface_origin(ModuleRootRole::Support).is_some(),
             "the selected public surface must retain its stable support origin"
+        );
+
+        let prepared = indexes.prepared_source_package_roots();
+        assert_eq!(
+            prepared.root_files().get("pkg"),
+            Some(&canonical_root_file),
+            "a support facade is the external package surface"
         );
     }
 
@@ -705,8 +822,34 @@ mod source_package_boundary_indexes_tests {
 
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
-            .expect_err("package root without a normal module root should fail boundary indexing");
-        assert_invalid_config_reason(failure, InvalidConfigCode::SourcePackageMissingRoot);
+            .expect_err("package root without a package facade should fail boundary indexing");
+        assert_invalid_config_reason_names(
+            failure,
+            InvalidConfigCode::SourcePackageMissingRoot,
+            "'@package.moth'",
+        );
+    }
+
+    #[test]
+    fn normal_only_package_root_is_rejected_as_missing_support_facade() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let package_root = root.join("pkg");
+        fs::create_dir_all(&package_root).expect("should create package root");
+        fs::write(package_root.join("@mod.moth"), "").expect("should write normal module root");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        register_pkg(&mut source_packages, &package_root);
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table).expect_err(
+            "a normal-only package root must not publish @mod.moth as its package surface",
+        );
+        assert_invalid_config_reason_names(
+            failure,
+            InvalidConfigCode::SourcePackageMissingRoot,
+            "'@package.moth'",
+        );
     }
 
     #[test]
@@ -723,88 +866,10 @@ mod source_package_boundary_indexes_tests {
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("an entry-only package root publishes no importable facade");
-        assert_invalid_config_reason(failure, InvalidConfigCode::SourcePackageMissingRoot);
-    }
-
-    #[test]
-    fn package_facade_only_package_root_is_accepted_as_external_surface() {
-        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-        let root = _tmp_root.path().to_path_buf();
-        let package_root = root.join("pkg");
-        fs::create_dir_all(&package_root).expect("should create package root");
-        fs::write(package_root.join("@package.moth"), "")
-            .expect("should write package facade root");
-
-        let mut source_packages = SourcePackageRegistry::new();
-        register_pkg(&mut source_packages, &package_root);
-
-        let mut string_table = StringTable::new();
-        let indexes = build_indexes(&source_packages, &mut string_table)
-            .expect("a package-facade-only package should build a boundary index");
-        let (_, index) = indexes.iter().next().expect("package index should exist");
-        let canonical_root_file = fs::canonicalize(package_root.join("@package.moth"))
-            .expect("package facade root should canonicalize");
-        assert_eq!(
-            index.root_file_for_entry_root(),
-            Some(canonical_root_file.as_path()),
-            "a package facade is the package's external public surface"
-        );
-
-        let module_id = index
-            .module_identities()
-            .module_id_for_directory(
-                &fs::canonicalize(&package_root).expect("package root should canonicalize"),
-            )
-            .expect("the package facade should define one structural module");
-        let record = index.module_identities().record(module_id);
-        assert_eq!(record.normal_root_file(), None);
-        assert_eq!(record.public_surface_role(), Some(ModuleRootRole::Support));
-        assert_eq!(
-            record.public_root_file(),
-            Some(canonical_root_file.as_path())
-        );
-
-        let prepared = indexes.prepared_source_package_roots();
-        assert_eq!(
-            prepared.root_files().get("pkg"),
-            Some(&canonical_root_file),
-            "a package facade is the external package surface"
-        );
-    }
-
-    #[test]
-    fn support_only_package_is_accepted_as_an_external_surface() {
-        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-        let root = _tmp_root.path().to_path_buf();
-        let package_root = root.join("pkg");
-        fs::create_dir_all(&package_root).expect("should create package root");
-        fs::write(package_root.join("@package.moth"), "").expect("should write support root");
-
-        let mut source_packages = SourcePackageRegistry::new();
-        register_pkg(&mut source_packages, &package_root);
-
-        let mut string_table = StringTable::new();
-        let indexes = build_indexes(&source_packages, &mut string_table)
-            .expect("a support-only package should build a boundary index");
-        let (_, index) = indexes.iter().next().expect("package index should exist");
-        let module_id = index
-            .module_identities()
-            .module_id_for_directory(
-                &fs::canonicalize(&package_root).expect("package root should canonicalize"),
-            )
-            .expect("support root should define one structural module");
-        let record = index.module_identities().record(module_id);
-        assert_eq!(record.normal_root_file(), None);
-        assert!(record.support_root_file().is_some());
-
-        let prepared = indexes.prepared_source_package_roots();
-        assert_eq!(
-            prepared.root_files().get("pkg"),
-            Some(
-                &fs::canonicalize(package_root.join("@package.moth"))
-                    .expect("support root should canonicalize")
-            ),
-            "a support root is the external package surface"
+        assert_invalid_config_reason_names(
+            failure,
+            InvalidConfigCode::SourcePackageMissingRoot,
+            "'@package.moth'",
         );
     }
 
@@ -870,13 +935,13 @@ mod source_package_boundary_indexes_tests {
     }
 
     #[test]
-    fn invalid_normal_root_beside_canonical_facade_is_rejected() {
+    fn invalid_marker_beside_support_facade_is_rejected() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
-        fs::write(package_root.join("@mod.moth"), "")
-            .expect("should write canonical normal facade root");
+        fs::write(package_root.join("@package.moth"), "")
+            .expect("should write canonical support facade root");
         fs::write(package_root.join("@page.moth"), "").expect("should write invalid root filename");
 
         let mut source_packages = SourcePackageRegistry::new();
@@ -890,12 +955,13 @@ mod source_package_boundary_indexes_tests {
 
     #[cfg(unix)]
     #[test]
-    fn unreadable_normal_module_root_returns_file_error() {
+    fn unreadable_package_root_returns_file_error() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
-        fs::write(package_root.join("@entry.moth"), "").expect("should write normal module root");
+        fs::write(package_root.join("@package.moth"), "")
+            .expect("should write support facade root");
 
         // Remove read permission so the package boundary traversal cannot read the directory.
         // Canonicalization still succeeds because it only traverses the parent.
@@ -919,8 +985,8 @@ mod source_package_boundary_indexes_tests {
         let beta_root = root.join("beta");
         fs::create_dir_all(&alpha_root).expect("should create alpha root");
         fs::create_dir_all(&beta_root).expect("should create beta root");
-        fs::write(alpha_root.join("@mod.moth"), "").expect("should write alpha root");
-        fs::write(beta_root.join("@mod.moth"), "").expect("should write beta root");
+        fs::write(alpha_root.join("@package.moth"), "").expect("should write alpha root");
+        fs::write(beta_root.join("@package.moth"), "").expect("should write beta root");
 
         let mut source_packages = SourcePackageRegistry::new();
         source_packages
@@ -976,7 +1042,7 @@ mod source_package_boundary_indexes_tests {
         let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
-        fs::write(package_root.join("@mod.moth"), "").expect("should write package root");
+        fs::write(package_root.join("@package.moth"), "").expect("should write package root");
         fs::write(package_root.join("helper.js"), "").expect("should write provider file");
 
         let mut source_packages = SourcePackageRegistry::new();
@@ -1413,7 +1479,10 @@ mod module_identity_tests {
             record.support_root_file(),
             Some(fs::canonicalize(&support_root).unwrap().as_path())
         );
-        assert_eq!(record.public_surface_role(), Some(ModuleRootRole::Support));
+        assert_eq!(
+            record.root_files().public_surface_role(),
+            Some(ModuleRootRole::Support)
+        );
 
         let normal_source = index
             .source_index_for_canonical_path(&fs::canonicalize(&normal_target).unwrap())
@@ -1486,7 +1555,7 @@ mod module_identity_tests {
                 .expect("the entry root should own a structural module");
             let record = index.module_identities().record(module_id);
             assert_eq!(
-                record.public_surface_role(),
+                record.root_files().public_surface_role(),
                 public_surface,
                 "{root_name}: the visible root filename selects the public surface"
             );
@@ -1618,7 +1687,7 @@ mod module_identity_tests {
             );
             assert_eq!(record.has_entry_root(), case.has_entry, "{:?}", case.roots);
             assert_eq!(
-                record.public_surface_role(),
+                record.root_files().public_surface_role(),
                 case.public_surface,
                 "{:?}",
                 case.roots
@@ -1667,7 +1736,7 @@ mod module_identity_tests {
         let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
-        fs::write(src.join("config.moth"), "project #= (name = \"t\")\n")
+        fs::write(src.join("@config.moth"), "project #= (name = \"t\")\n")
             .expect("should write build-only config");
 
         let (index, _project_root, entry_root) = discover_index(&root, "src");
@@ -1677,7 +1746,7 @@ mod module_identity_tests {
                 .module_identities()
                 .module_id_for_directory(&entry_root)
                 .is_none(),
-            "config.moth never creates a structural module"
+            "@config.moth never creates a structural module"
         );
     }
 
@@ -2224,13 +2293,15 @@ mod module_identity_tests {
             "@home.moth",
             "@site.moth",
             "@api.moth",
+            // The reserved config filename has no root role, and the old unprefixed name is an
+            // ordinary helper source now. Neither carries a module-root role.
             "@config.moth",
+            "config.moth",
             "+pkg.moth",
             "#pkg.moth",
             "@.moth",
             "+.moth",
             "page.moth",
-            "config.moth",
         ] {
             assert_eq!(
                 module_root_role_for_file_name(invalid),

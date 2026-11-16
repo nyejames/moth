@@ -1,4 +1,4 @@
-@html table
+@core/html table
 
 docs_font #= [:
     @font-face {

@@ -1,6 +1,6 @@
 -- WHAT: preparing a const body full of logical expressions must not spend the const-execution
 --       work allowance.
--- WHY:  `churn` is never executed, and the tight `const_work_limit` in config.moth is already
+-- WHY:  `churn` is never executed, and the tight `const_work_limit` in @config.moth is already
 --       needed by the `fixed()` call below. Charging the allowance while discovering this body
 --       would refuse that unrelated required call.
 

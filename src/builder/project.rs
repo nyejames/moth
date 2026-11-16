@@ -257,7 +257,7 @@ impl WrittenOutputs {
 ///
 /// The request root must be a project directory. The frontend sends every existing non-directory
 /// root down its synthetic single-file lane, but an SDK build publishes through the project's
-/// builder output root and reads the project's `config.moth`, so no such root can be a valid SDK
+/// builder output root and reads the project's `@config.moth`, so no such root can be a valid SDK
 /// target. A missing root is not an existing non-directory root and keeps the shared
 /// path-validation error.
 pub fn build_project(

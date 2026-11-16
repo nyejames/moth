@@ -13,9 +13,9 @@
 /// project-local and dependency packages without inspecting dependency paths.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PackageOrigin {
-    /// Compiler-owned core packages (e.g. `@core/io`, `@html`, `@styles`).
+    /// Compiler-owned core packages (e.g. `@core/io`, `@core/html`, `@core/css`).
     Core,
-    /// Builder-owned packages (e.g. `@web/site`, `@web/canvas`).
+    /// Builder-owned packages (e.g. `@builder/web/site`, `@builder/web/canvas`).
     Builder,
     /// Packages local to the current project.
     ProjectLocal,
@@ -80,34 +80,101 @@ impl PackageMetadata {
     }
 }
 
+/// Namespace roots owned by the Core and Builder package origins.
+///
+/// WHAT: the first path components that only the matching origin may register below.
+/// WHY: `@core` and `@builder` group compiler-shipped and builder-owned packages. Neither root is
+/// an importable package, and acknowledging a `core` or `builder` first component for any other
+/// origin would let a builder or a local package impersonate either namespace.
+const RESERVED_PACKAGE_NAMESPACE_ROOTS: [&str; 2] = ["core", "builder"];
+
+/// Whether one `@`-stripped first path component names a reserved package namespace root.
+pub(crate) fn is_reserved_package_namespace_root(component: &str) -> bool {
+    declared_reserved_root(component).is_some()
+}
+
+/// The declared spelling of the reserved root named by one authored component.
+fn declared_reserved_root(component: &str) -> Option<&'static str> {
+    RESERVED_PACKAGE_NAMESPACE_ROOTS
+        .iter()
+        .copied()
+        .find(|root| component.eq_ignore_ascii_case(root))
+}
+
+/// The reserved root claimed by one importable namespace key, if any.
+///
+/// WHAT: checks the first `/`-separated component of an extensionless namespace key, ignoring
+/// ASCII case, and returns the authored component.
+/// WHY: every owner that decides whether a local name is importable shares this one root
+/// predicate. Directory compilation and selected module-root entries decide importability from
+/// Stage 0 module namespaces, so only their namespace entries reach this check. An ordinary
+/// selected file has no module topology, and its resolver joins every entry-root-relative path,
+/// so each recognized source below `core/` or `builder/` is an importable claim there. Callers
+/// pass only names that can actually be resolved, never provider-owned asset paths.
+pub(crate) fn reserved_package_namespace_claim_root(namespace_key: &str) -> Option<&str> {
+    namespace_key
+        .split('/')
+        .next()
+        .filter(|component| is_reserved_package_namespace_root(component))
+}
+
 /// Validates a registered package path, given without its leading `@` introducer.
 ///
-/// WHAT: one rule for source-backed and binding-backed registration. Components are nonempty
-/// and contain no `#`. `project` is reserved for project globals and `core` for the Core origin,
-/// including ASCII case-only variants.
+/// WHAT: one rule for source-backed and binding-backed registration. Components are nonempty and
+/// contain no `#`. `project` is reserved for project globals. Core packages register below
+/// `core/`, Builder packages below `builder/`, and the other origins may use any other root. Both
+/// reserved roots must keep at least one name component below them.
 /// WHY: native host import names join the canonical package path and symbol path with `#`, and
-/// official Core certification must never follow from a builder choosing a `@core` path.
+/// official Core certification must never follow from a builder choosing a `@core` path. Keeping
+/// the origin/prefix rule here stops either registry from growing a second, weaker copy.
 pub(crate) fn validate_package_path(
     path_without_introducer: &str,
     origin: PackageOrigin,
 ) -> Result<(), &'static str> {
-    if path_without_introducer
-        .split('/')
+    let mut components = path_without_introducer.split('/');
+    if components
+        .clone()
         .any(|component| component.is_empty() || component.contains('#'))
     {
         return Err("must have nonempty '/'-separated components without '#'");
     }
-    let root = path_without_introducer
-        .split('/')
-        .next()
-        .unwrap_or_default();
+    let root = components.next().unwrap_or_default();
     if crate::compiler_frontend::project_globals::claims_project_globals_name(root) {
-        return Err("is reserved for the @project project-globals interface");
+        return Err(
+            "is reserved for the @project project-globals interface; choose a package path outside '@project'",
+        );
     }
-    if root.eq_ignore_ascii_case("core") && origin != PackageOrigin::Core {
-        return Err("is reserved for official Core packages");
+
+    let reserved_root = declared_reserved_root(root);
+    if reserved_root.is_some() && components.next().is_none() {
+        return Err(
+            "is a reserved namespace root, not an importable package; register a package below it",
+        );
     }
-    Ok(())
+
+    match origin {
+        // Core and Builder spellings stay canonical: only the exact lowercase root introduces
+        // their packages, so a case variant cannot create a second registry spelling.
+        PackageOrigin::Core if root != "core" => {
+            Err("must register below the 'core' namespace root")
+        }
+        PackageOrigin::Builder if root != "builder" => match reserved_root {
+            Some("core") => {
+                Err("is reserved for official Core packages; choose a package path outside '@core'")
+            }
+            _ => Err("must register below the 'builder' namespace root"),
+        },
+        PackageOrigin::ProjectLocal | PackageOrigin::Dependency => match reserved_root {
+            Some("core") => {
+                Err("is reserved for official Core packages; choose a package path outside '@core'")
+            }
+            Some(_) => Err(
+                "is reserved for builder-owned packages; choose a package path outside '@builder'",
+            ),
+            None => Ok(()),
+        },
+        _ => Ok(()),
+    }
 }
 
 /// Whether one `@`-stripped package path equals the other or nests inside it at a `/` boundary,

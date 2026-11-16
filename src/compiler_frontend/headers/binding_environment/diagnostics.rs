@@ -78,7 +78,7 @@ pub(crate) fn provider_public_surface_diagnostic(
     not_exported_by_public_surface(requested_path, surface_name, surface_type, span)
 }
 
-/// Diagnostic when a dependency path directly references a module-root file or canonical `config.moth`.
+/// Diagnostic when a dependency path directly references the reserved `@config.moth`.
 pub(super) fn direct_special_file_dependency(
     path: &PathId,
     span: Option<SourceSpan>,

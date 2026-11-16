@@ -129,7 +129,7 @@ impl BuilderDefinitionDraft {
 
     /// Describes the project configuration section this builder reads.
     ///
-    /// `name` is the record name a project authors in `config.moth`, so it must be a Moth
+    /// `name` is the record name a project authors in `@config.moth`, so it must be a Moth
     /// identifier that is not `project`, not a first-party builder identity and not a reserved
     /// Moth name. The closure declares string and bool fields with [`ConfigSection::string`] and
     /// [`ConfigSection::bool`]. Field names follow the same rules and must stay unique. A
@@ -267,7 +267,7 @@ pub struct SourcePackage {
 }
 
 impl SourcePackage {
-    /// Assigns the public package root, such as `@ui`.
+    /// Assigns the public package root, such as `@builder/game/ui`.
     pub fn new(path: impl Into<String>) -> Self {
         Self {
             path: path.into(),
@@ -290,7 +290,7 @@ pub struct HostPackage {
 }
 
 impl HostPackage {
-    /// Assigns the public package root, such as `@platform`.
+    /// Assigns the public package root, such as `@builder/game/platform`.
     pub fn new(path: impl Into<String>) -> Self {
         Self {
             path: path.into(),

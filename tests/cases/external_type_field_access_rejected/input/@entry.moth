@@ -1,4 +1,4 @@
-@test/pkg-a PkgError
+@builder/test/pkg-a PkgError
 
 foo |x PkgError|:
     y = x.something

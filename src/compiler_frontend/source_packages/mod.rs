@@ -12,7 +12,7 @@ pub(crate) mod root_file;
 /// Return the registered package prefix spelled by `components`' leading whole components, with
 /// its component count.
 ///
-/// WHY: builder prefixes may span several components, such as `web/site`, so lookups keyed by a
+/// WHY: builder prefixes may span several components, such as `builder/web/site`, so lookups keyed by a
 /// complete prefix can't compare only the first dependency component. Registration rejects
 /// overlapping prefixes, so at most one prefix matches.
 pub(crate) fn match_package_prefix<'a>(

@@ -73,7 +73,7 @@ fn initial_runtime_paths_watch_the_project_without_bootstrapping() {
         .path()
         .canonicalize()
         .expect("project root should canonicalize");
-    fs::write(root.join("config.moth"), "not valid Moth config")
+    fs::write(root.join("@config.moth"), "not valid Moth config")
         .expect("write invalid config to exercise bootstrap-free startup paths");
 
     let resolved = resolve_dev_runtime_paths(&root);
@@ -81,7 +81,9 @@ fn initial_runtime_paths_watch_the_project_without_bootstrapping() {
     assert_eq!(resolved.output_dir, root.join("_dev"));
     assert_eq!(resolved.watch_scope.output_dir, root.join("_dev"));
     assert!(
-        resolved.watch_scope.watches_path(&root.join("config.moth")),
+        resolved
+            .watch_scope
+            .watches_path(&root.join("@config.moth")),
         "initial watch scope must include config changes after a failed first build"
     );
 }

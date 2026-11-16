@@ -25,9 +25,9 @@ fn source_span_selects_exact_source_when_logical_paths_are_ambiguous() {
 
     // Config registration roots the file at its own directory, while ordinary project sources
     // strip the configured entry root. With an entry root of `src`, both records intentionally
-    // intern to `config.moth` in this one database.
-    let root_config = project_root.join("config.moth");
-    let entry_config = entry_root.join("config.moth");
+    // intern to `@config.moth` in this one database.
+    let root_config = project_root.join("@config.moth");
+    let entry_config = entry_root.join("@config.moth");
     fs::write(&root_config, "root config snapshot\n").expect("should write root config");
     fs::write(&entry_config, "entry source snapshot\n").expect("should write entry source");
     let root_config = fs::canonicalize(root_config).expect("root config should canonicalize");
@@ -65,7 +65,7 @@ fn source_span_selects_exact_source_when_logical_paths_are_ambiguous() {
         .expect("entry source should have a logical path");
     assert_eq!(
         root_logical_path, entry_logical_path,
-        "the project config and entry-root source should share config.moth's logical path"
+        "the project config and entry-root source should share @config.moth's logical path"
     );
 
     database

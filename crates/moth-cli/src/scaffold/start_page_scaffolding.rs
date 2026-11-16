@@ -1,10 +1,10 @@
 //! Scaffold templates for `moth new html`.
 //!
-//! WHAT: Owns the generated content for `config.moth`, the root-level `@entry.moth`, and
+//! WHAT: Owns the generated content for `@config.moth`, the root-level `@entry.moth`, and
 //!       `.gitignore`.
 //! WHY: Centralises template strings so they are not scattered through write logic.
 
-/// Generate the content for `config.moth`.
+/// Generate the content for `@config.moth`.
 ///
 /// The scaffold always writes an explicit valid project name so the created directory has a
 /// stable identity even though directory compilation does not require a config file.

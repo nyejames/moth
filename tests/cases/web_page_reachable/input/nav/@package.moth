@@ -1,4 +1,4 @@
-@web/page sync_navigation
+@builder/web/page sync_navigation
 
 $export
 sync_nav |id String| -> Bool, Error!:

@@ -121,7 +121,7 @@ fn project_temp_dir() -> tempfile::TempDir {
 fn write_project(project_root: &Path, page_source: &str) {
     let src = project_root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
-    fs::write(project_root.join("config.moth"), CONFIG_SOURCE).expect("should write config");
+    fs::write(project_root.join("@config.moth"), CONFIG_SOURCE).expect("should write config");
     fs::write(src.join("@entry.moth"), page_source).expect("should write @entry.moth source");
 }
 
@@ -212,7 +212,7 @@ fn diagnosed_build_exposes_module_allowance_stop_through_public_sdk() {
     let src = temp_dir.path().to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
-        temp_dir.path().join("config.moth"),
+        temp_dir.path().join("@config.moth"),
         MODULE_LIMIT_CONFIG_SOURCE,
     )
     .expect("should write config");

@@ -19,7 +19,7 @@ Declarations are private to their module by default. In `@mod.moth` and `@packag
 
 `public_name` and `render` are visible through the module's normal facade. `private_helper` remains private. An unmarked facade exports nothing.
 
-`$export` applies to the next eligible top-level item only. It must occupy its own line, with no operands. Comment-only lines may intervene, but a blank line breaks attachment. It is valid only in the two facade files, including when both exist in one directory. It does not apply in `@entry.moth`, ordinary helper files or `config.moth`.
+`$export` applies to the next eligible top-level item only. It must occupy its own line, with no operands. Comment-only lines may intervene, but a blank line breaks attachment. It is valid only in the two facade files, including when both exist in one directory. It does not apply in `@entry.moth`, ordinary helper files or the build-only `@config.moth`, which has no export surface.
 
 The directive can mark a function, struct, choice, transparent type alias, trait or compile-time `#` constant. The `#` marker controls when a constant is evaluated, not whether it is public.
 

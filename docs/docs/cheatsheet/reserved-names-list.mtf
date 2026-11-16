@@ -31,6 +31,10 @@ All spellings of `Dec` followed by ASCII digits are reserved, even invalid types
 
 The `@project` dependency root is reserved for project globals.
 
+The `@core` and `@builder` package namespace roots are reserved. Package imports start below them, for example `@core/math` and `@builder/web/site`, and neither root alone names an importable package. A project-local importable name cannot claim either root.
+
+`@config.moth` is the reserved build-only project config filename. It is not a module root, helper, entry or importable dependency. `@Config.moth` is invalid.
+
 ### Core template directives
 
 - `$before`, `$after` - prefix and suffix each direct child.
@@ -60,7 +64,7 @@ Comment-only lines may intervene, but a blank physical line breaks attachment.
 Template heads continue to require commas between directives and expressions.
 All directives are compiler-owned and available under every builder where valid.
 
-No `$project`, `$builder` or `$html_builder` directive exists. Project and builder settings use the ordinary named `project` and builder records in `config.moth`.
+No `$project`, `$builder` or `$html_builder` directive exists. Project and builder settings use the ordinary named `project` and builder records in `@config.moth`.
 
 The former `$page` design is superseded and there is no `$entry` directive. Entry eligibility comes from the `@entry.moth` file role. HTML metadata uses direct top-level const `$in` builder slots in that entry.
 

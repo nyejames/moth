@@ -1,4 +1,4 @@
-@core/constants version
+@shared/constants version
 
 render_about || -> String:
     return [: About page v[version]]

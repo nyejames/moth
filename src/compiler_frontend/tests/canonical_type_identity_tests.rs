@@ -244,12 +244,12 @@ fn register_single_param_list(
     .list_id
 }
 
-/// Builds a test registry with one registered external type at `@test/canvas.Canvas`.
+/// Builds a test registry with one registered external type at `@builder/test/canvas.Canvas`.
 fn test_registry_with_canvas_type() -> ExternalPackageRegistry {
     let mut registry = ExternalPackageRegistry::default();
     let package_id = registry
         .register_package(
-            "@test/canvas",
+            "@builder/test/canvas",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test package should register");
@@ -543,7 +543,7 @@ fn external_opaque_identity_distinguishes_different_packages() {
     let b = ExternalOpaqueTypeIdentity::new(
         StablePackageIdentity::binding(
             crate::builder_surface::PackageOrigin::Builder,
-            "@test/canvas",
+            "@builder/test/canvas",
         ),
         ExternalSymbolPath::from_single("Input"),
     );
@@ -553,23 +553,23 @@ fn external_opaque_identity_distinguishes_different_packages() {
 #[test]
 fn external_opaque_identity_distinguishes_same_package_path_from_different_origins() {
     let symbol_path = ExternalSymbolPath::from_single("Handle");
-    let builder = ExternalOpaqueTypeIdentity::new(
+    let project = ExternalOpaqueTypeIdentity::new(
         StablePackageIdentity::binding(
-            crate::builder_surface::PackageOrigin::Builder,
+            crate::builder_surface::PackageOrigin::ProjectLocal,
             "@shared/api",
         ),
         symbol_path.clone(),
     );
-    let project = ExternalOpaqueTypeIdentity::new(
+    let dependency = ExternalOpaqueTypeIdentity::new(
         StablePackageIdentity::binding(
-            crate::builder_surface::PackageOrigin::ProjectLocal,
+            crate::builder_surface::PackageOrigin::Dependency,
             "@shared/api",
         ),
         symbol_path,
     );
 
     assert_ne!(
-        builder, project,
+        project, dependency,
         "same-spelling packages from different origins must not share opaque type identity"
     );
 }
@@ -590,7 +590,7 @@ fn projects_external_opaque_from_test_registry() {
     let expected = CanonicalTypeIdentity::ExternalOpaque(ExternalOpaqueTypeIdentity::new(
         StablePackageIdentity::binding(
             crate::builder_surface::PackageOrigin::Builder,
-            "@test/canvas",
+            "@builder/test/canvas",
         ),
         ExternalSymbolPath::from_single("Canvas"),
     ));

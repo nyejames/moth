@@ -1,4 +1,4 @@
-@web/canvas Canvas2d, get_canvas, context_2d, fill_rect
+@builder/web/canvas Canvas2d, get_canvas, context_2d, fill_rect
 
 run |id String| -> String, Error!:
     canvas_ref = get_canvas(id)!

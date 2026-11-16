@@ -1,5 +1,5 @@
-@html canvas
-@web/canvas as drawing_api
+@core/html canvas
+@builder/web/canvas as drawing_api
 
 [canvas:
   [$in id:game_canvas]

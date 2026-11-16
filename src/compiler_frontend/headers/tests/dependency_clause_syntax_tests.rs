@@ -430,37 +430,37 @@ fn comma_continued_into_declaration_reports_continuation_entered_statement() {
     let cases = [
         (
             "value binding",
-            "@html/tables data,\nrow = build_row()\n",
+            "@core/html/tables data,\nrow = build_row()\n",
             "row",
         ),
         (
             "compile-time binding",
-            "@html/tables data,\nrow #= build_row()\n",
+            "@core/html/tables data,\nrow #= build_row()\n",
             "row",
         ),
         (
             "function declaration",
-            "@html/tables data,\nrow |value I32| -> String:\n    return value\n;\n",
+            "@core/html/tables data,\nrow |value I32| -> String:\n    return value\n;\n",
             "row",
         ),
         (
             "choice declaration",
-            "@html/tables data,\nStatus ::\n    Ready,\n;\n",
+            "@core/html/tables data,\nStatus ::\n    Ready,\n;\n",
             "Status",
         ),
         (
             "struct declaration",
-            "@html/tables data,\nRow = |value I32|\n",
+            "@core/html/tables data,\nRow = |value I32|\n",
             "Row",
         ),
         (
             "trait declaration",
-            "@html/tables data,\nSHOW must:\n;\n",
+            "@core/html/tables data,\nSHOW must:\n;\n",
             "SHOW",
         ),
         (
             "specialised conformance",
-            "@html/tables data,\nBox of T must SHOW\n",
+            "@core/html/tables data,\nBox of T must SHOW\n",
             "Box",
         ),
     ];
@@ -472,7 +472,7 @@ fn comma_continued_into_declaration_reports_continuation_entered_statement() {
 
 #[test]
 fn comma_continued_selection_alias_is_not_a_type_alias_declaration() {
-    let (clause, string_table) = parse_clause("@html/tables data,\nRow as row_alias\n");
+    let (clause, string_table) = parse_clause("@core/html/tables data,\nRow as row_alias\n");
     let ScannedDependencyBinding::DirectSelections { selections } = clause.binding else {
         panic!("`as` after a continued selection is a selected alias, not a type-alias header");
     };
@@ -489,7 +489,7 @@ fn comma_continued_selection_alias_is_not_a_type_alias_declaration() {
 
 #[test]
 fn clause_terminated_without_comma_is_valid_before_declaration() {
-    let (clause, _) = parse_clause("@html/tables data\nrow = build_row()\n");
+    let (clause, _) = parse_clause("@core/html/tables data\nrow = build_row()\n");
     let ScannedDependencyBinding::DirectSelections { selections } = clause.binding else {
         panic!("expected direct selections");
     };

@@ -280,7 +280,11 @@ fn module_package_dependency_index_walks_only_direct_dependencies() {
 
 #[test]
 fn template_bearing_packages_order_after_both_prelude_packages() {
-    let package_prefixes = vec!["docs".to_owned(), "html".to_owned(), "styles".to_owned()];
+    let package_prefixes = vec![
+        "docs".to_owned(),
+        "core/html".to_owned(),
+        "core/css".to_owned(),
+    ];
     let mut dependencies = vec![Vec::new(), Vec::new(), Vec::new()];
     super::compilation::add_template_prelude_ordering_dependencies(
         &package_prefixes,
@@ -289,12 +293,12 @@ fn template_bearing_packages_order_after_both_prelude_packages() {
     );
     assert_eq!(
         dependencies[0],
-        vec!["html".to_owned(), "styles".to_owned()],
+        vec!["core/html".to_owned(), "core/css".to_owned()],
         "a template-bearing package must wait for both fixed prelude providers"
     );
     assert!(
         dependencies[1].is_empty(),
-        "the @html package must not depend on itself"
+        "the @core/html package must not depend on itself"
     );
     assert!(
         dependencies[2].is_empty(),
@@ -303,8 +307,8 @@ fn template_bearing_packages_order_after_both_prelude_packages() {
 
     let order = super::compilation::order_packages_by_dependency(&package_prefixes, &dependencies)
         .expect("the template edges order both prelude packages first");
-    assert_eq!(package_prefixes[order[0]], "html");
-    assert_eq!(package_prefixes[order[1]], "styles");
+    assert_eq!(package_prefixes[order[0]], "core/css");
+    assert_eq!(package_prefixes[order[1]], "core/html");
     assert_eq!(package_prefixes[order[2]], "docs");
 
     // A `.mtf` authored inside a prelude package adds no self or sibling prelude edge. The

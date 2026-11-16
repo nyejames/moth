@@ -56,7 +56,9 @@ fn classifies_only_the_fixed_root_filenames() {
             "{invalid} is not one of the three fixed root filenames"
         );
     }
-    assert!(file_name_is_config_file("config.moth"));
+    assert!(file_name_is_config_file("@config.moth"));
+    assert!(!file_name_is_config_file("@Config.moth"));
+    assert!(!file_name_is_config_file("config.moth"));
     assert!(!file_name_is_config_file("config"));
 }
 
@@ -91,7 +93,8 @@ fn invalid_special_moth_names_are_recognized_without_a_role_guess() {
         "@home.moth",
         "@site.moth",
         "@api.moth",
-        "@config.moth",
+        "@Config.moth",
+        "@CONFIG.moth",
         "@anything.moth",
         "@Entry.moth",
         "@MOD.moth",
@@ -108,10 +111,10 @@ fn invalid_special_moth_names_are_recognized_without_a_role_guess() {
         );
     }
 
-    for accepted in ["@mod.moth", "@package.moth", "@entry.moth"] {
+    for accepted in ["@mod.moth", "@package.moth", "@entry.moth", "@config.moth"] {
         assert!(
             !file_name_is_invalid_module_root_marker(accepted),
-            "{accepted} is an accepted root filename"
+            "{accepted} is an accepted root or reserved config filename"
         );
     }
 
@@ -133,13 +136,29 @@ fn invalid_special_moth_names_are_recognized_without_a_role_guess() {
 }
 
 #[test]
-fn config_dependency_classification_uses_the_source_component() {
+fn config_dependency_classification_matches_only_the_reserved_filename() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
 
-    let bare_config = path(&["config"], &mut string_table, &mut path_fork);
+    // `config` is an ordinary helper stem that resolves `config.moth`, never the build-only config.
+    let bare_helper_stem = path(&["config"], &mut string_table, &mut path_fork);
+    assert!(!dependency_path_references_config_file(
+        bare_helper_stem,
+        &path_fork,
+        &string_table
+    ));
+
+    let explicit_helper_name = path(&["config.moth"], &mut string_table, &mut path_fork);
+    assert!(!dependency_path_references_config_file(
+        explicit_helper_name,
+        &path_fork,
+        &string_table
+    ));
+
+    // A quoted component can name the reserved file itself.
+    let reserved_file = path(&["@config.moth"], &mut string_table, &mut path_fork);
     assert!(dependency_path_references_config_file(
-        bare_config,
+        reserved_file,
         &path_fork,
         &string_table
     ));
@@ -151,13 +170,13 @@ fn config_dependency_classification_uses_the_source_component() {
         &string_table
     ));
 
-    let ordinary_config_folder = path(
-        &["config", "settings", "project"],
+    let nested_reserved_file = path(
+        &["assets", "@config.moth"],
         &mut string_table,
         &mut path_fork,
     );
-    assert!(!dependency_path_references_config_file(
-        ordinary_config_folder,
+    assert!(dependency_path_references_config_file(
+        nested_reserved_file,
         &path_fork,
         &string_table
     ));
@@ -169,17 +188,17 @@ fn prepared_roots_preserve_canonical_prefix_order() {
         (
             "zeta".to_string(),
             PathBuf::from("/lib/zeta"),
-            PathBuf::from("/lib/zeta/@mod.moth"),
+            PathBuf::from("/lib/zeta/@package.moth"),
         ),
         (
             "alpha".to_string(),
             PathBuf::from("/lib/alpha"),
-            PathBuf::from("/lib/alpha/@mod.moth"),
+            PathBuf::from("/lib/alpha/@package.moth"),
         ),
         (
             "middle".to_string(),
             PathBuf::from("/lib/middle"),
-            PathBuf::from("/lib/middle/@mod.moth"),
+            PathBuf::from("/lib/middle/@package.moth"),
         ),
     ];
 
@@ -194,11 +213,11 @@ fn prepared_roots_preserve_canonical_prefix_order() {
 
 #[test]
 fn config_file_is_distinct_from_the_fixed_roots() {
-    assert!(file_name_is_config_file("config.moth"));
-    assert!(!file_name_is_module_root_file("config.moth"));
-
-    // `@config.moth` is not the build-only config file and is not a root role; Stage 0 rejects it
-    // with the closed-vocabulary source-structure diagnostic.
-    assert!(!file_name_is_config_file("@config.moth"));
+    assert!(file_name_is_config_file("@config.moth"));
     assert!(!file_name_is_module_root_file("@config.moth"));
+    assert_eq!(module_root_role_for_file_name("@config.moth"), None);
+
+    // The old name is an ordinary helper source now and carries no reserved meaning.
+    assert!(!file_name_is_config_file("config.moth"));
+    assert!(!file_name_is_module_root_file("config.moth"));
 }

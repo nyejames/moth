@@ -1,4 +1,4 @@
-@test/pkg-a open as launch
+@builder/test/pkg-a open as launch
 
 launch("hello")
 open("world")

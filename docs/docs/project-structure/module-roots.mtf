@@ -1,5 +1,7 @@
 Every rooted directory forms one structural module. Three optional authored root files give that module its roles. `@mod.moth` publishes the normal API facade, `@package.moth` publishes the scoped support facade or the external project package surface, and `@entry.moth` owns executable entry work.
 
+The build-only `@config.moth` is a reserved compiler filename outside those roles. It never becomes a module root, an importable name or a project global.
+
 ### The three root files
 
 [table:
@@ -44,13 +46,13 @@ Ordinary `.moth` files hold shared implementation. They never own a facade, a st
 
 A rooted directory has one `ModuleId`, one compilation and one atomic publish-or-diagnose outcome. Its `@mod.moth`, `@package.moth` and `@entry.moth`, when present, are three root-local views of that one module. They are not three modules.
 
-A directory containing only `config.moth` is not rooted. `config.moth` remains the optional build-only project config and stays outside the module graph.
+A directory containing only `@config.moth` is not rooted. `@config.moth` remains the optional build-only project config and stays outside the module graph. It publishes no API and cannot be imported. A nested `@config.moth` is inert.
 
 A root marker may be a symlink, but every root must resolve to a distinct physical file owned by its module. The visible symlink name decides the role. Two markers cannot alias one file, and a root cannot resolve into another structural module.
 
 ### The root vocabulary is closed
 
-Only `@mod.moth`, `@package.moth` and `@entry.moth` are authored root files. Any other `.moth` filename whose stem starts with `@`, `+` or `#` is a Stage 0 structure error:
+Apart from the reserved `@config.moth`, only `@mod.moth`, `@package.moth` and `@entry.moth` are authored root files. Any other `.moth` filename whose stem starts with `@`, `+` or `#` is a Stage 0 structure error:
 
 [codeblock, $code "text":
     @page.moth          rejected
@@ -59,12 +61,14 @@ Only `@mod.moth`, `@package.moth` and `@entry.moth` are authored root files. Any
     @Entry.moth         rejected
     +package.moth       rejected
     #package.moth       rejected
-    @config.moth        rejected
+    @Config.moth        rejected
 ]
 
 The diagnostic is `MOTH-CONFIG-0001` (`InvalidModuleRootFileName`). It names the invalid filename and lists the three accepted root files. It does not guess whether the author meant an entry, a normal facade or a support facade.
 
-The rejected spellings are never reclassified as ordinary helper files. `config.moth` without a leading `@` keeps its config meaning. Non-`.moth` files with an `@` prefix, such as `@theme.css`, remain ordinary resources.
+`@config.moth` is the one exact `@`-prefixed `.moth` filename outside the three roots. It configures the selected build root only, carries no module role and never enters the source graph. Case variants such as `@Config.moth` stay invalid.
+
+The rejected spellings are never reclassified as ordinary helper files. An ordinary `config.moth` helper keeps ordinary source rules and resolves through the dependency path `@config`, which never selects the build-only config file. Non-`.moth` files with an `@` prefix, such as `@theme.css`, remain ordinary resources.
 
 A `+` prefix is not a root marker in a non-`.moth` filename. An ordinary supported source such as `+notes.mtf` resolves through the same dependency path and visibility rules as any other helper source.
 

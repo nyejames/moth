@@ -37,7 +37,7 @@ statement, whole namespace or `$config` input. See
 @../packages/#public-reexports (Public re-exports).
 
 `$config` marks one explicitly typed top-level compile-time `#` binding in
-`config.moth` or a selected source module as a build input:
+`@config.moth` or a selected source module as a build input:
 
 [codeblock, $code "moth":
     $config
@@ -124,8 +124,8 @@ placement error, not an unknown name.
 
 Module roles come from `@mod.moth`, `@package.moth` and `@entry.moth`
 filenames. Project and builder settings are ordinary records in
-`config.moth`. Source files and builders cannot register directives or use
-them as macros.
+`@config.moth`, a reserved build-only filename with no module role. Source
+files and builders cannot register directives or use them as macros.
 
 ### Compiler references
 

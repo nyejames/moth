@@ -201,7 +201,7 @@ One counted obligation represented by one runtime persistent retained edge.
 - runtime region-pressure strategy changes
 - REC profiling infrastructure
 - profile-guided strategy selection
-- user-facing `config.moth` REC thresholds
+- user-facing `@config.moth` REC thresholds
 - uniqueness scans on collection removal
 - alias registries
 - `declared region self`
@@ -626,7 +626,7 @@ A compiler-owned heuristic may choose the fallback region when all of these are 
 - fallback lifecycle breadth
 - distance to a cleanup frontier
 
-The initial implementation should keep this heuristic simple and conservative. It must not introduce a user-facing `config.moth` contract.
+The initial implementation should keep this heuristic simple and conservative. It must not introduce a user-facing `@config.moth` contract.
 
 ### 7. REC
 
@@ -1231,7 +1231,7 @@ A small bounded-retention heuristic may be added only when:
 
 No runtime strategy switching is allowed.
 
-No `config.moth` tuning is accepted initially.
+No `@config.moth` tuning is accepted initially.
 
 ## Concurrency and channels
 

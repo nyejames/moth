@@ -18,10 +18,10 @@ use std::path::PathBuf;
 const BUILDER_IDENTITY: &str = "game";
 
 /// The Moth source package the fixture builder installs.
-const SOURCE_PACKAGE: &str = "@game";
+const SOURCE_PACKAGE: &str = "@builder/game/core";
 
 /// The native host package the fixture builder installs.
-const HOST_PACKAGE: &str = "@platform";
+const HOST_PACKAGE: &str = "@builder/game/platform";
 
 /// The host function the fixture project imports.
 const HOST_FUNCTION: &str = "has_prefix";

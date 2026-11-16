@@ -18,7 +18,7 @@ plans under this directory.
 
 ```text
 STATUS: active in parallel under the main roadmap
-CURRENT_SLICE: `@web/graphics` is scaffolded with its README plan. Fixed `U32`/`F32` slots, flat `U32` constants and error-code exports are delivered while the remaining prerequisite binding designs await user review. Delivered Math and Time work remains complete
+CURRENT_SLICE: `@builder/web/graphics` is scaffolded with its README plan. Fixed `U32`/`F32` slots, flat `U32` constants and error-code exports are delivered while the remaining prerequisite binding designs await user review. Delivered Math and Time work remains complete
 BLOCKERS: result-slot/Core const-eval-dependent slices retain their capability gates; shared numeric/ABI/expression changes require coordination with their serial compiler owners
 NEXT_ACTION: refresh current main and the intended package's living plan, then run the complete package gate for an eligible isolated slice
 ```
@@ -55,9 +55,9 @@ contracts. Older package validation and profile-era evidence below retain their
 historical checkpoint meaning, not a fresh validation claim.
 
 The main roadmap links only this umbrella plan. Package-specific plans live in
-`docs/roadmap/plans/packages/` and are linked from the tracker in this file. Built-in `@web/*`
+`docs/roadmap/plans/packages/` and are linked from the tracker in this file. Built-in `@builder/web/*`
 packages are the exception: each keeps its living implementation memory in a `README.md` beside
-its JavaScript asset under `src/projects/html_project/binding_packages/web/`, so package-local
+its package files under `packages/builder/web/`, so package-local
 planning stays out of the global roadmap.
 
 Files in this directory are a deliberate exception to the normal short-lived plan lifecycle:
@@ -107,9 +107,9 @@ This programme owns:
 
 - a narrow audit and hardening pass over existing first-party package foundations
 - useful v1 completion work for existing Core packages
-- deeper expansion of `@web/canvas`
-- `@web/graphics` WebGL2 package design, binding prerequisites and implementation
-- secondary `@html` helper work required by package additions
+- deeper expansion of `@builder/web/canvas`
+- `@builder/web/graphics` WebGL2 package design, binding prerequisites and implementation
+- secondary `@core/html` helper work required by package additions
 - one newly accepted Core package, `@core/json`, after its own design checkpoint
 - JavaScript runtime implementations plus compiler-owned Rust semantic functions for Core constant
   evaluation where the delivered evaluator contract permits them
@@ -185,7 +185,7 @@ contract. Random generators may use different algorithms in the first JavaScript
 implementations unless a specific reproducible sequence is explicitly promised. Bounds, result
 domains, fallibility and other observable rules still need one portable contract.
 
-`@web/*` packages may expose genuine Web Platform concepts. They should still present a curated Moth
+`@builder/web/*` packages may expose genuine Web Platform concepts. They should still present a curated Moth
 surface rather than mechanically clone every JavaScript method.
 
 ### Numeric checkpoint coordination
@@ -261,7 +261,7 @@ permission to execute JavaScript at compile time. Reuse the delivered typed eval
 of creating package-local callback registries.
 
 Web Builder packages may use self-contained annotated JavaScript assets when they model real host
-bindings, as `@web/canvas` does.
+bindings, as `@builder/web/canvas` does.
 
 Do not move Core APIs into annotated JavaScript merely because JavaScript is currently their only
 implementation. Do not introduce a common abstraction over both forms until real repeated code
@@ -282,7 +282,7 @@ A package is complete for its current slice when:
 - the packages and builders progress matrix records the best known next extensions
 - remaining additions no longer block common use and move to later work
 
-`@web/canvas` is the deliberate exception to the narrow-completion bias. It may grow further because
+`@builder/web/canvas` is the deliberate exception to the narrow-completion bias. It may grow further because
 visual and animation-heavy programs are useful Moth compiler, runtime and language stress tests.
 
 ## First-party dependency policy
@@ -409,7 +409,7 @@ Each package plan uses this compact structure:
 The history records major completed versions or refactors only. It is not a phase-by-phase changelog.
 
 Create a package plan only when that package is activated. Do not add speculative placeholder files.
-Built-in `@web/*` packages use their package `README.md` with the same purpose. It may also hold
+Built-in `@builder/web/*` packages use their package `README.md` with the same purpose. It may also hold
 clearly labelled tentative ideas and investigation questions, and it stays a concise handover
 document rather than a changelog.
 
@@ -504,9 +504,9 @@ materially safer to implement. Record the reason in the tracker rather than sile
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
 | 3 | `@core/math` | [core-math.md](./core-math.md) | Activated ahead of order 2 because its existing surface needs no new compiler capability; current-surface coverage, registration cleanup and the accepted scalar expansion with its published numerical contract are delivered; F64-only exact migration pending | Preserve all six constants, thirty-one helpers, their mathematical contracts and shared finite-result boundaries |
 | 4 | `@core/time` | [core-time.md](./core-time.md) | v1 delivered: the semantic contract is published, the four defects it exposed are corrected and the accepted Duration and Timestamp arithmetic is registered and covered | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
-| 5 | `@web/canvas` | [canvas README](../../../../packages/web/canvas/README.md) | README seeded from accepted direction and the deferred notes formerly in `canvas.js`; expansion not started | Expand drawing, state, path, transform, text, image and pixel workflows deeply enough to support substantial visual stress-test programs |
-| 5a | `@html` | `html.md` | TODO: create only when needed | Add broadly useful source-backed markup helpers required by HTML package work, without turning `@html` into a framework. Runtime canvas wrappers stay in `@web/canvas` |
-| 5b | `@web/graphics` | [graphics README](../../../../packages/web/graphics/README.md) | Scaffolded: registered with no public symbols, canonical page and progress row added. Fixed `U32`/`F32` scalar slots, flat named `U32` constants and compiler-owned error-code exports are delivered. Cross-package opaque types, nested annotated paths and bulk collection/data mapping still await user design review | A WebGL2 renderer written directly against `graphics.gl`, through textured, indexed and instanced drawing, without placeholder APIs |
+| 5 | `@builder/web/canvas` | [canvas README](../../../../packages/builder/web/canvas/README.md) | README seeded from accepted direction and the deferred notes formerly in `canvas.js`; expansion not started | Expand drawing, state, path, transform, text, image and pixel workflows deeply enough to support substantial visual stress-test programs |
+| 5a | `@core/html` | `html.md` | TODO: create only when needed | Add broadly useful source-backed markup helpers required by HTML package work, without turning `@core/html` into a framework. Runtime canvas wrappers stay in `@builder/web/canvas` |
+| 5b | `@builder/web/graphics` | [graphics README](../../../../packages/builder/web/graphics/README.md) | Scaffolded: registered with no public symbols, canonical page and progress row added. Fixed `U32`/`F32` scalar slots, flat named `U32` constants and compiler-owned error-code exports are delivered. Cross-package opaque types, nested annotated paths and bulk collection/data mapping still await user design review | A WebGL2 renderer written directly against `graphics.gl`, through textured, indexed and instanced drawing, without placeholder APIs |
 | 6 | `@core/io` | [core-io.md](./core-io.md) | Scope review accepted and Phase 1 snapshot input hardening complete; Phase 2 candidates await user selection | Add portable snapshot input, then an ordered queue only where its final value shape crosses the binding boundary |
 | 7 | `@core/collections` | `core-collections.md` | TODO: create when activated | Audit common non-sorting gaps and integrate specialised collection work without duplicating its accepted contracts |
 | 7a | Collection sorting | [core-collections-sorting.md](./core-collections-sorting.md) | Accepted and queued behind mixed-backend prerequisites | Preserve stable-by-default sort and consume delivered fixed numeric/Byte ordering and compact layouts |
@@ -560,13 +560,13 @@ Numeric API parameters/accessors use F64 while opaque range, units and read
 boundaries remain unchanged. Wider integer support alone does not accept a
 nanosecond representation or silently alter the existing time ABI.
 
-#### `@web/canvas`
+#### `@builder/web/canvas`
 
 Follow the canvas README. A broad package slice is intentional. Exercise mutable opaque handles,
 error recovery, runtime asset reachability, image and pixel data, templates and long-running visual
-programs. WebGL belongs to `@web/graphics`.
+programs. WebGL belongs to `@builder/web/graphics`.
 
-#### `@web/graphics`
+#### `@builder/web/graphics`
 
 Follow the graphics README. The package stays close to WebGL2 and below any scene or engine
 abstraction. Each binding prerequisite is a shared binding-boundary capability accepted in its
@@ -578,7 +578,7 @@ accepted host-reentry design and never ships as a polling handle.
 Follow `core-io.md`. `io` is the broad high-level host-capability facade and the only preluded Core
 package. It may overlap a focused package at the convenient edge without duplicating that package's
 API or semantics. Input stays global, application-oriented and pull-driven through explicitly torn
-down handles. Targeted browser event control belongs to `@web/*`. Sleep, timers, event waits,
+down handles. Targeted browser event control belongs to `@builder/web/*`. Sleep, timers, event waits,
 network events and callbacks into Moth wait for structured async and a host-ingress contract, with
 no synchronous-looking stand-ins.
 
@@ -626,7 +626,7 @@ Likely Web Builder candidates:
 - navigation, location and history
 - clipboard and file selection
 - browser-specific input and event surfaces
-- browser animation-frame scheduling beyond the accepted `@web/graphics` `graphics.frame` scope
+- browser animation-frame scheduling beyond the accepted `@builder/web/graphics` `graphics.frame` scope
 - fetch after the async and task model exists
 
 Cryptography is deliberately absent. Do not add it as a Core candidate, example or implied future
@@ -679,7 +679,7 @@ Canonical package docs:
 - own accepted public types, functions, semantics, fallibility and limitations
 - must be updated in the same phase that changes an accepted contract
 
-Living package plans and `@web/*` package READMEs:
+Living package plans and `@builder/web/*` package READMEs:
 
 - preserve implementation rationale, quirks, prior blockers, rejected approaches and future work
 - never override canonical documentation
@@ -706,6 +706,11 @@ Implementation merged, phase not formally closed:
 - the guard now reuses the HTML JS module scanner, inspects inventoried Core helper and inline JS,
   and allows only exact `RuntimeModuleRegistry` specifiers
 - no cryptography Core package examples were present in canonical docs
+- all Core and Builder package names now use the reserved `@core` and `@builder` roots, with Core
+  at `@core/<name...>` and Builder at an explicit path below `@builder/`
+- every registered Moth-source package publishes through a directly contained `@package.moth`,
+  while ordinary project modules keep their optional root combinations and binding-backed packages
+  stay facade-free
 
 The guard classifies ECMAScript module loading lexically through the HTML JS scanner: static and
 dynamic `import`, `require` and re-export forms. Host-driven script loading of any shape is outside
@@ -827,10 +832,10 @@ candidates are a Wasm lowering set and explicit duration range rules.
 Mandatory closeout: full phase gate plus deterministic parsing, conversion and monotonic-time
 contract coverage. Keep wall-clock tests independent of the machine's current date and time.
 
-### Phase 6 - `@web/canvas` expansion
+### Phase 6 - `@builder/web/canvas` expansion
 
 Refresh the canvas README and accept the slice scope with the user. Runtime canvas wrappers stay in
-`@web/canvas`, never in `@html`. Create `html.md` only when separate broadly useful `@html` helper
+`@builder/web/canvas`, never in `@core/html`. Create `html.md` only when separate broadly useful `@core/html` helper
 work is substantial enough to need its own implementation memory.
 
 Mandatory closeout: full phase gate plus at least one substantial visual-program integration case,

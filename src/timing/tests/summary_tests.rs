@@ -1366,7 +1366,7 @@ fn only_registered_boundaries_produce_rows() {
     assert!(
         boundaries
             .iter()
-            .all(|boundary| boundary.label != "@web/canvas"),
+            .all(|boundary| boundary.label != "@builder/web/canvas"),
         "binding-backed packages are never registered as source boundaries"
     );
 }

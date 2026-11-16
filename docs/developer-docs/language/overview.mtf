@@ -259,7 +259,7 @@ Each Core package has a paired Advanced and Basic page:
 - `docs/docs/packages/core/collections/collections.mtf` / `collections-basic.mtf`
 - `docs/docs/packages/core/prelude/prelude.mtf` / `prelude-basic.mtf`
 - `docs/docs/packages/core/html/html-helpers.mtf` / `html-helpers-basic.mtf`
-- `docs/docs/packages/core/styles/styles-helpers.mtf` / `styles-helpers-basic.mtf`
+- `docs/docs/packages/core/css/styles-helpers.mtf` / `styles-helpers-basic.mtf`
 
 ## Builder packages
 

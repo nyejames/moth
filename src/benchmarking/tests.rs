@@ -261,7 +261,7 @@ fn frontend_benchmark_retains_source_package_warning() {
     std::fs::create_dir_all(&package).expect("should create package root");
     std::fs::create_dir_all(&src).expect("should create entry root");
     std::fs::write(
-        root.join("config.moth"),
+        root.join("@config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
@@ -354,7 +354,7 @@ fn frontend_benchmark_converts_failed_directory_compilation() {
     let source_root = temp_dir.path().to_path_buf();
     std::fs::create_dir_all(&source_root).expect("should create the configured entry root");
     std::fs::write(
-        temp_dir.path().join("config.moth"),
+        temp_dir.path().join("@config.moth"),
         "project #= (name = \"diagnosed\")\nhtml #= ()\n",
     )
     .expect("should write the project config");

@@ -46,7 +46,7 @@ use std::sync::Arc;
 
 /// Exact current-schema metric family for one AST construction path.
 ///
-/// Frontend modules, `config.moth`, and generated materialisation all use the
+/// Frontend modules, `@config.moth`, and generated materialisation all use the
 /// same AST implementation but have deliberately distinct timing identities.
 /// Keeping that choice in the AST context prevents a config or generated AST
 /// span from being misreported as module-attributed frontend work.
@@ -170,7 +170,7 @@ pub(in crate::compiler_frontend) struct AstBuildContext<'a> {
         Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
     >,
 
-    /// Compiler-owned grouped-project config resolution services, present only for config.moth.
+    /// Compiler-owned grouped-project config resolution services, present only for `@config.moth`.
     pub config_resolution: Option<Rc<ConfigResolutionServices>>,
 
     /// Immutable project/package source `$config` values resolved before AST construction.
@@ -223,7 +223,7 @@ pub(crate) struct AstPhaseContext<'a> {
     pub(crate) file_value_resolution: Option<
         Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
     >,
-    /// Compiler-owned grouped-project config resolution services, present only for config.moth.
+    /// Compiler-owned grouped-project config resolution services, present only for `@config.moth`.
     pub(crate) config_resolution: Option<Rc<ConfigResolutionServices>>,
     /// Immutable project/package source `$config` values resolved before AST construction.
     pub(crate) build_config_values: Arc<ResolvedBuildConfigMap>,

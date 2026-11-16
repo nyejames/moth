@@ -253,7 +253,7 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
         );
     }
 
-    for prefix in ["html", "styles"] {
+    for prefix in ["core/html", "core/css"] {
         let core_source = frontend_surface
             .source_packages
             .get_root(prefix)
@@ -273,11 +273,17 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
             "@{prefix} must stay on its official source root"
         );
     }
+    for removed in ["html", "styles"] {
+        assert!(
+            frontend_surface.source_packages.get_root(removed).is_none(),
+            "the removed flat @{removed} package must not stay registered"
+        );
+    }
 
     let site_package = frontend_surface
         .source_packages
-        .get_root("web/site")
-        .expect("HTML frontend surface should register @web/site");
+        .get_root("builder/web/site")
+        .expect("HTML frontend surface should register @builder/web/site");
     assert_eq!(
         site_package.metadata,
         crate::builder_surface::PackageMetadata::source(
@@ -287,8 +293,8 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
 
     let page_package = frontend_surface
         .binding_packages
-        .get_package("@web/page")
-        .expect("HTML frontend surface should register @web/page");
+        .get_package("@builder/web/page")
+        .expect("HTML frontend surface should register @builder/web/page");
     assert_eq!(
         page_package.metadata,
         crate::builder_surface::PackageMetadata::binding(
@@ -298,8 +304,8 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
 
     let canvas_package = frontend_surface
         .binding_packages
-        .get_package("@web/canvas")
-        .expect("HTML frontend surface should register @web/canvas");
+        .get_package("@builder/web/canvas")
+        .expect("HTML frontend surface should register @builder/web/canvas");
     assert_eq!(
         canvas_package.metadata,
         crate::builder_surface::PackageMetadata::binding(

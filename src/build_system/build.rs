@@ -2239,7 +2239,7 @@ pub(crate) fn build_project<E>(
 
 /// Build the shared Stage 0/bootstrap state used by both CLI builds and the dev server.
 ///
-/// WHAT: reuses the single compiler-owned directive set, loads `config.moth`, and runs
+/// WHAT: reuses the single compiler-owned directive set, loads `@config.moth`, and runs
 /// backend-specific config validation into one reusable setup step. No builder supplies
 /// directive syntax. The caller's typed build-config inputs are carried onto the bootstrap state
 /// unchanged.

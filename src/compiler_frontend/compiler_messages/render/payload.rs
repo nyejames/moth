@@ -1090,7 +1090,7 @@ fn direct_special_file_import_message(
     // The direct-special-file diagnostic covers only the build-only config source, which has no
     // authored facade or importable surface.
     format!(
-        "Cannot depend directly on '{special_file}' via '{path_text}'. `config.moth` is a build-only source and is not importable."
+        "Cannot depend directly on '{special_file}' via '{path_text}'. `@config.moth` is a build-only source and is not importable."
     )
 }
 

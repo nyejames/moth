@@ -1,5 +1,5 @@
-@game score
-@platform has_prefix
+@builder/game/core score
+@builder/game/platform has_prefix
 
 project_name #= "native handoff"
 

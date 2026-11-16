@@ -1,4 +1,4 @@
-@test/nested
+@builder/test/nested
 
 bad |value nested.tools.greet| -> I32:
     return 1

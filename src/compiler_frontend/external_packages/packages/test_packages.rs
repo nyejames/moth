@@ -13,12 +13,12 @@ use super::super::registry::ExternalPackageRegistry;
 use super::super::symbol_path::ExternalSymbolPath;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
-/// Registers test packages `@test/pkg-a` and `@test/pkg-b` with a duplicate
+/// Registers test packages `@builder/test/pkg-a` and `@builder/test/pkg-b` with a duplicate
 /// symbol name for integration-test coverage of package-scoped resolution.
 pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPackageRegistry) {
     let pkg_a_id = registry
         .register_package(
-            "@test/pkg-a",
+            "@builder/test/pkg-a",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test package registration should not collide");
@@ -130,7 +130,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
 
     let pkg_b_id = registry
         .register_package(
-            "@test/pkg-b",
+            "@builder/test/pkg-b",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test package registration should not collide");
@@ -173,7 +173,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
 
     let nested_id = registry
         .register_package(
-            "@test/nested",
+            "@builder/test/nested",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test nested package registration should not collide");
@@ -232,7 +232,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
 
     let string_content_id = registry
         .register_package(
-            "@test/string_content",
+            "@builder/test/string_content",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test string-content package registration should not collide");
@@ -262,7 +262,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
 
     let optional_id = registry
         .register_package(
-            "@test/optional",
+            "@builder/test/optional",
             crate::builder_surface::PackageOrigin::Builder,
         )
         .expect("test optional package registration should not collide");
