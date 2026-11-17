@@ -46,12 +46,15 @@ use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::style_directives::{SourceConstraintSet, SourceDirectiveKind};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+use super::super::numeric_intake::NumericIntakeRegistration;
 
 /// One test body domain and its module-shared TIR store. The string table and path fork stay alive
 /// with the context so interned names, paths and captured literal tokens remain valid for the test.
@@ -99,6 +102,7 @@ impl IntakeBody {
 
     fn construction(&self) -> TemplateConstructionContext {
         TemplateConstructionContext::new(Rc::clone(&self.store), None)
+            .with_source_constraints(self.context.source_constraints())
     }
 
     fn domain(&self) -> NumericConstructionDomainId {
@@ -619,6 +623,7 @@ fn bound_range_headers_are_isolated_by_body_domain_and_copies_keep_their_row() {
                 end_kind: RangeEndKind::Exclusive,
                 step: None,
                 domain: NumericScalar::Fixed(FixedScalar::I32),
+                fast_math: false,
             },
             {
                 let value = i32_expression(&mut outer.expressions, &mut outer.constants, 0);
@@ -812,6 +817,7 @@ fn retained_range_step_keeps_built_bounds_and_installs_at_counter_precision() {
         .install_completed_numeric_range_header(
             header_id,
             [None, None, Some(step)],
+            false,
             &mut type_interner,
             &mut body.expressions,
             &mut body.constants,
@@ -929,6 +935,7 @@ fn bound_range_completion_inspects_each_pending_header_once() {
                             end_kind: RangeEndKind::Exclusive,
                             step: None,
                             domain: NumericScalar::Fixed(FixedScalar::I32),
+                            fast_math: false,
                         },
                         {
                             let value =
@@ -1031,6 +1038,37 @@ fn copied_positions_inspect_only_their_registered_numeric_rows() {
 }
 
 #[test]
+fn retained_template_intake_captures_the_authored_constraint_set() {
+    let mut body = IntakeBody::new();
+    let binding = body.declare_pending_binding("limit", "2");
+    let constraints = SourceConstraintSet::default()
+        .with_directive(SourceDirectiveKind::FastMath)
+        .with_directive(SourceDirectiveKind::Infallible);
+    body.context.source_constraints.set(constraints);
+    let domain = body.domain();
+    let fragment = body.pending_numeric_fragment(binding);
+    let mut construction = body.construction();
+    construction
+        .record_head_numeric_intake(
+            domain,
+            fragment.items,
+            fragment.expected,
+            fragment.value_mode,
+            fragment.suffix,
+            None,
+        )
+        .expect("a pending head intake should register");
+    drop(construction);
+
+    let pending = body.store.borrow_mut().take_pending_numeric_intakes(domain);
+    assert_eq!(pending.len(), 1);
+    assert_eq!(
+        pending[0].source_constraints, constraints,
+        "the intake must keep the statement mode that authored it"
+    );
+}
+
+#[test]
 fn duplicate_numeric_intake_registration_preserves_the_original_record() {
     use super::super::numeric_intake::NumericTemplateIntakePosition;
 
@@ -1044,20 +1082,26 @@ fn duplicate_numeric_intake_registration_preserves_the_original_record() {
         .register_pending_numeric_template_intake(
             domain,
             position,
-            fragment.items.clone(),
-            fragment.expected,
-            fragment.value_mode,
-            fragment.suffix,
+            NumericIntakeRegistration {
+                items: fragment.items.clone(),
+                expected: fragment.expected,
+                value_mode: fragment.value_mode,
+                suffix: fragment.suffix,
+                source_constraints: SourceConstraintSet::default(),
+            },
         )
         .expect("first registration succeeds");
     let error = store
         .register_pending_numeric_template_intake(
             domain,
             position,
-            fragment.items,
-            fragment.expected,
-            fragment.value_mode,
-            fragment.suffix,
+            NumericIntakeRegistration {
+                items: fragment.items,
+                expected: fragment.expected,
+                value_mode: fragment.value_mode,
+                suffix: fragment.suffix,
+                source_constraints: SourceConstraintSet::default(),
+            },
         )
         .expect_err("the same position cannot own a second intake");
     assert!(error.message.contains("registered twice"));

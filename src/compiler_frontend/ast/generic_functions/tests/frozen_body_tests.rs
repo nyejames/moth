@@ -82,7 +82,9 @@ use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceId,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
-use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::style_directives::{
+    ConstraintDirectiveSpans, SourceConstraintSet, SourceDirectiveKind, StyleDirectiveRegistry,
+};
 use crate::compiler_frontend::symbols::path_interner::{
     PathId, PathInternerBuilder, PathInternerFork,
 };
@@ -1650,6 +1652,7 @@ fn generated_materialisation_rejects_an_incompatible_string_prefix() {
 fn detachment_releases_recursive_lookup_owners_before_ast_lowering() {
     let source = concat!(
         "suffix #String = \"retained\"\n",
+        "$fast_math\n",
         "draw type T |name T, fallback String = [:donor-default[$slot]]| -> String:\n",
         "    return suffix\n",
         ";\n",
@@ -1706,6 +1709,11 @@ fn detachment_releases_recursive_lookup_owners_before_ast_lowering() {
         .declaring_context_for_identity(identity.declaration())
         .expect("stable generic syntax survives capture release");
     let artefact = &declaring_context.artefacts[template_index];
+    assert_eq!(
+        artefact.source_constraints,
+        SourceConstraintSet::default().with_directive(SourceDirectiveKind::FastMath),
+        "the provider declaration's arithmetic mode must cross the frozen boundary with its body"
+    );
     assert_eq!(artefact.signature.parameters.len(), 2);
     let Some(PublicFoldedValue::ConstTemplate { template, folded }) =
         artefact.signature.parameters[1].folded_default.as_ref()
@@ -1962,6 +1970,8 @@ fn retained_template(
         generic_parameter_owner: None,
         generic_parameter_list_id: GenericParameterListId(0),
         signature: FunctionSignature::default(),
+        source_constraints: SourceConstraintSet::default(),
+        constraint_directive_spans: ConstraintDirectiveSpans::default(),
         body_tokens: has_body.then(|| {
             let owner = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT)
                 .finish()

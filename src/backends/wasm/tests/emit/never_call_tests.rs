@@ -18,7 +18,7 @@ use crate::compiler_frontend::hir::functions::{
     HirFunction, HirFunctionOrigin, HirFunctionReturnContract,
 };
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, RegionId};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirTerminator, RuntimeFailureKind};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use wasmparser::{Operator, Parser, Payload};
@@ -43,6 +43,7 @@ fn never_call_module(
         terminator: HirTerminator::RuntimeFailure {
             message: "halted".to_owned(),
             cause: None,
+            kind: RuntimeFailureKind::NoMatchFallback,
         },
     };
     let run_block = HirBlock {

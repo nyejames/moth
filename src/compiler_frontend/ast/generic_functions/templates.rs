@@ -12,6 +12,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
+use crate::compiler_frontend::style_directives::{ConstraintDirectiveSpans, SourceConstraintSet};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
 use crate::compiler_frontend::symbols::string_interning::FrozenStringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceTokens;
@@ -376,6 +377,19 @@ pub(crate) struct GenericFunctionTemplate {
     pub(crate) generic_parameter_owner: Option<GenericDeclarationOrigin>,
     pub(crate) generic_parameter_list_id: GenericParameterListId,
     pub(crate) signature: FunctionSignature,
+    /// Lexical source constraints authored on the template's function header.
+    ///
+    /// WHAT: the same constraint set `validate_generic_function_body` parses the template with.
+    /// WHY: a materialised instance body is an independent callable and must keep the declaration's
+    ///      mode; the template row is the stable per-declaration owner instances are built from.
+    pub(crate) source_constraints: SourceConstraintSet,
+    /// Authored guarantee directive spans on the template's function head.
+    ///
+    /// WHAT: the `$safe_math` and `$infallible` spans a materialised instance labels its own
+    ///       violations with, or empty fields when the set was reconstructed without syntax.
+    /// WHY: a materialised body is an independent callable; each diagnostic must point at the
+    ///      provider declaration's failing directive, not at the requester call site.
+    pub(crate) constraint_directive_spans: ConstraintDirectiveSpans,
     /// Only the declaring module retains body syntax. Source templates use the active module's
     /// ordinary facts; generated templates use the `Materialised` variant, which owns retained
     /// donor file-reference facts for its canonical source range.

@@ -34,6 +34,9 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::CallTarget;
+use crate::compiler_frontend::hir::constraint_verification::{
+    ConstraintFailure, ConstraintModuleSite, ConstraintUniverse,
+};
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureContributor, HirBuiltinFailureSource,
@@ -643,6 +646,69 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                     .map_err(PreparedFailure::from)?;
             sidecar.module.executable.borrow_analysis = report;
         }
+    }
+
+    // Phase B runs on the final lane-delivered HIR, after every refresh/rewrite above and before
+    // any pruning or exact-summary installation. It is the only writer of the three constraint
+    // bits; a later `check_borrows` would re-seed them false, so no pass below may rebuild a
+    // summary.
+    crate::compiler_frontend::module_compilation::generated::constraint_convergence::
+        converge_constraint_summaries(
+            hir_module,
+            &mut borrow_analysis,
+            generated_transaction,
+            compiler.external_package_registry.as_ref(),
+        )
+        .map_err(PreparedFailure::from)?;
+
+    // Verification runs immediately after phase B, base module first and then each completed
+    // sidecar in sorted identity order. It reads the final summaries and final HIR, never the
+    // backend proof table, and the first module with diagnostics owns the prepared failure. A
+    // module set with no source-constraint boundary skips the snapshot entirely: phase B has
+    // already published the bits, so verification would have nothing to check.
+    let verification = ConstraintUniverse::build(
+        hir_module,
+        &borrow_analysis,
+        generated_transaction,
+        compiler.external_package_registry.as_ref(),
+    )
+    .map_err(PreparedFailure::from)?
+    .and_then(|universe| {
+        universe.verify(
+            compiler.source_files.as_ref(),
+            &mut compiler.string_table,
+            &compiler.path_fork,
+        )
+    });
+    if let Some(failure) = verification {
+        let ConstraintFailure { site, diagnostics } = failure;
+        let environment = match &site {
+            ConstraintModuleSite::Base => Some(&*type_environment),
+            ConstraintModuleSite::Sidecar(identity) => Some(
+                &generated_transaction
+                    .sidecar(identity)
+                    .module
+                    .executable
+                    .type_environment,
+            ),
+        };
+        return Err(PreparedFailure::capture_diagnosed(
+            diagnostics,
+            compiler.string_table.take_for_handoff(),
+            environment,
+            Some(Arc::new(compiler.path_fork.shared_table())),
+        ));
+    }
+
+    for node_id in convergence_model.generated_node_ids() {
+        let Some(ConvergenceNode::Generated(identity)) = convergence_model.node(node_id) else {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "generated convergence node has no generated identity"
+            );
+        };
+        let identity = identity.clone();
+        let sidecar = generated_transaction.sidecar_mut(&identity);
         retain_live_call_summaries(
             &mut sidecar.module.executable.hir,
             &sidecar.module.link_facts.functions,
@@ -1564,7 +1630,7 @@ pub(crate) fn enqueue_convergence_callers(
     }
 }
 
-fn update_generated_summary(
+pub(crate) fn update_generated_summary(
     transaction: &mut GeneratedFunctionTransaction<'_>,
     identity: &GeneratedFunctionIdentity,
     summary: PublicCallSummary,

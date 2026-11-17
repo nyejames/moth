@@ -1,0 +1,5 @@
+value ~I32 = -2147483648
+minus_one I32 = -1
+$fast_math
+~value /= minus_one
+~[:after=[value]]

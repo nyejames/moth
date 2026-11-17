@@ -52,6 +52,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::style_directives::SourceConstraintSet;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -85,13 +86,36 @@ pub(crate) struct PendingNumericTemplateIntake {
     /// WHY: completion materialises the exact authored suffix instead of re-reading tokens, so a
     ///      retained header operand's `!` behaves exactly like a built operand's.
     pub(crate) suffix: DeferredExpressionSuffix,
+    /// Lexical source constraints active where this intake was authored.
+    ///
+    /// WHAT: the effective `$fast_math`/`$safe_math`/`$infallible` set at registration.
+    /// WHY: body-root completion drains the intake after the statement parser restored the
+    ///      enclosing set; the completed operand must still resolve under its own statement's mode.
+    pub(crate) source_constraints: SourceConstraintSet,
+}
+
+/// Authored fragment and receiving metadata for one retained numeric template intake.
+///
+/// WHAT: the pieces the parser captures at the deferral point, bundled so the store registration
+///       call keeps a small argument list while still carrying the lexical constraint set.
+/// WHY: template parsing produces these fields together; grouping them keeps the registration
+///      signature stable when completion needs one more receiving fact.
+#[derive(Debug, Clone)]
+pub(crate) struct NumericIntakeRegistration {
+    pub(crate) items: Vec<ExpressionRpnItem>,
+    pub(crate) expected: ExpectedType,
+    pub(crate) value_mode: ValueMode,
+    /// Authored trailing handling consumed at the deferral point.
+    pub(crate) suffix: DeferredExpressionSuffix,
+    /// Lexical source constraints active where this intake was authored.
+    pub(crate) source_constraints: SourceConstraintSet,
 }
 
 /// Authored TIR position of one retained numeric intake.
 ///
 /// WHAT: identifies the payload-free position node the completed value must be installed into.
 /// WHY: completion runs after the statement's TIR payloads were recorded, so the store must
-///      remember the position instead of searching the graph again.
+/// remember the position instead of searching the graph again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NumericTemplateIntakePosition {
     /// The head-origin expression splice of one recorded `RetainedNumericIntake` node.
@@ -380,6 +404,8 @@ pub(crate) struct NumericTemplateIntakeRecord {
     expected: ExpectedType,
     value_mode: ValueMode,
     suffix: DeferredExpressionSuffix,
+    /// Lexical source constraints active where this intake was authored.
+    source_constraints: SourceConstraintSet,
     state: NumericTemplateIntakeState,
 }
 
@@ -391,6 +417,7 @@ impl NumericTemplateIntakeRecord {
         expected: ExpectedType,
         value_mode: ValueMode,
         suffix: DeferredExpressionSuffix,
+        source_constraints: SourceConstraintSet,
     ) -> Self {
         Self {
             domain,
@@ -399,6 +426,7 @@ impl NumericTemplateIntakeRecord {
             expected,
             value_mode,
             suffix,
+            source_constraints,
             state: NumericTemplateIntakeState::Retained,
         }
     }
@@ -439,11 +467,15 @@ impl TemplateIrStore {
         &mut self,
         domain: NumericConstructionDomainId,
         position: NumericTemplateIntakePosition,
-        items: Vec<ExpressionRpnItem>,
-        expected: ExpectedType,
-        value_mode: ValueMode,
-        suffix: DeferredExpressionSuffix,
+        registration: NumericIntakeRegistration,
     ) -> Result<NumericTemplateIntakeSiteId, InfrastructureFailure> {
+        let NumericIntakeRegistration {
+            items,
+            expected,
+            value_mode,
+            suffix,
+            source_constraints,
+        } = registration;
         // A literal-only range step is the one position whose literal context can only be
         // selected after the bounds resolve, so its literals stay pending until body completion
         // instead of being treated as an already-broken invariant.
@@ -473,7 +505,13 @@ impl TemplateIrStore {
         let site = self.next_numeric_template_intake_site_id();
         self.numeric_template_intakes
             .push(NumericTemplateIntakeRecord::new(
-                domain, position, items, expected, value_mode, suffix,
+                domain,
+                position,
+                items,
+                expected,
+                value_mode,
+                suffix,
+                source_constraints,
             ));
         self.numeric_intake_index
             .domains
@@ -895,6 +933,7 @@ impl TemplateIrStore {
                 expected: record.expected,
                 value_mode: record.value_mode,
                 suffix: record.suffix,
+                source_constraints: record.source_constraints,
             });
             record.state = NumericTemplateIntakeState::Taken;
         }
@@ -1143,6 +1182,7 @@ impl TemplateIrStore {
         &mut self,
         header_id: RetainedRangeHeaderId,
         completed_operands: [Option<ExprId>; 3],
+        fast_math: bool,
         type_interner: &mut AstTypeInterner<'_>,
         expression_builder: &mut AstExpressionBuilder,
         const_values: &mut ConstValueStore,
@@ -1233,6 +1273,7 @@ impl TemplateIrStore {
                 end_kind,
                 step: step.map(|id| expression_builder.own(id)),
                 omitted_start_span,
+                fast_math,
             },
             type_interner,
             expression_builder,
@@ -1627,21 +1668,21 @@ impl TemplateIrStore {
         for site in source.sites.into_iter().flatten() {
             increment_ast_counter(AstCounter::TirNumericCopyRowsInspected);
             let record = &self.numeric_template_intakes[site.index()];
-            let (domain, position, items, expected, value_mode, suffix) = (
+            let (domain, position, registration) = (
                 record.domain,
                 record.position,
-                record.items.clone(),
-                record.expected,
-                record.value_mode,
-                record.suffix,
+                NumericIntakeRegistration {
+                    items: record.items.clone(),
+                    expected: record.expected,
+                    value_mode: record.value_mode,
+                    suffix: record.suffix,
+                    source_constraints: record.source_constraints,
+                },
             );
             self.register_pending_numeric_template_intake(
                 domain,
                 position.with_node_id(copied_node_id),
-                items,
-                expected,
-                value_mode,
-                suffix,
+                registration,
             )?;
         }
 

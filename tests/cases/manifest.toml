@@ -20367,6 +20367,111 @@ contract = "language.directives.balanced_multiline_source_directive_operand_acce
 role = "primary"
 
 [[case]]
+id = "source_constraints_stacking_targets_success"
+path = "source_constraints_stacking_targets_success"
+tags = ["integration", "directives"]
+contract = "language.directives.lexical_constraint_stacking_and_target_acceptance"
+role = "primary"
+
+[[case]]
+id = "source_constraints_cross_module_generic_success"
+path = "source_constraints_cross_module_generic_success"
+tags = ["integration", "directives", "generics"]
+contract = "language.directives.lexical_constraint_cross_module_generic_acceptance"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_cross_module_pruned_handler_rejected"
+path = "source_constraints_cross_module_pruned_handler_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "modules"]
+contract = "language.directives.cross_module_pruned_handler_guard_is_fast_evidence"
+role = "primary"
+
+[[case]]
+id = "source_constraint_compile_time_declaration_rejected"
+path = "source_constraint_compile_time_declaration_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.lexical_constraint_compile_time_target_rejected"
+role = "primary"
+
+[[case]]
+id = "source_constraint_const_body_fast_math_rejected"
+path = "source_constraint_const_body_fast_math_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.lexical_constraint_const_body_target_rejected"
+role = "primary"
+
+[[case]]
+id = "source_constraint_const_body_infallible_nested_rejected"
+path = "source_constraint_const_body_infallible_nested_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.lexical_constraint_nested_const_body_target_rejected"
+role = "boundary"
+
+[[case]]
+id = "source_constraint_infallible_lone_divide_by_zero_rejected"
+path = "source_constraint_infallible_lone_divide_by_zero_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.lexical_constraint_lone_divide_by_zero_rejected"
+role = "primary"
+
+[[case]]
+id = "source_constraint_infallible_map_get_caught_accepted"
+path = "source_constraint_infallible_map_get_caught_accepted"
+tags = ["integration", "directives", "runtime", "constraints"]
+contract = "language.directives.lexical_constraint_infallible_map_get_caught_accepted"
+role = "primary"
+
+[[case]]
+id = "source_constraint_infallible_map_get_escape_rejected"
+path = "source_constraint_infallible_map_get_escape_rejected"
+tags = ["integration", "directives", "diagnostics", "constraints"]
+contract = "language.directives.lexical_constraint_infallible_map_get_escape_rejected"
+role = "primary"
+
+[[case]]
+id = "source_constraint_infallible_ordered_collection_get_rejected"
+path = "source_constraint_infallible_ordered_collection_get_rejected"
+tags = ["integration", "directives", "diagnostics", "constraints"]
+contract = "language.directives.lexical_constraint_infallible_ordered_collection_get_rejected"
+role = "primary"
+
+[[case]]
+id = "source_constraint_parameter_placement_rejected"
+path = "source_constraint_parameter_placement_rejected"
+tags = ["integration", "directives", "diagnostics", "constraints"]
+contract = "language.directives.lexical_constraint_parameter_target_rejected"
+role = "primary"
+
+[[case]]
+id = "source_constraint_struct_field_placement_rejected"
+path = "source_constraint_struct_field_placement_rejected"
+tags = ["integration", "directives", "diagnostics", "constraints"]
+contract = "language.directives.lexical_constraint_struct_field_target_rejected"
+role = "primary"
+
+[[case]]
+id = "source_constraint_import_placement_rejected"
+path = "source_constraint_import_placement_rejected"
+tags = ["integration", "directives", "diagnostics", "constraints"]
+contract = "language.directives.lexical_constraint_import_target_rejected"
+role = "primary"
+
+[[case]]
+id = "source_constraint_const_body_documentation_accepted"
+path = "source_constraint_const_body_documentation_accepted"
+tags = ["integration", "directives", "constraints"]
+contract = "language.directives.lexical_constraint_const_body_documentation_accepted"
+role = "primary"
+
+[[case]]
+id = "source_constraint_template_head_rejected"
+path = "source_constraint_template_head_rejected"
+tags = ["integration", "directives", "diagnostics"]
+contract = "language.directives.lexical_constraint_template_head_rejected"
+role = "boundary"
+
+[[case]]
 id = "source_directive_in_choice_variant_rejected"
 path = "source_directive_in_choice_variant_rejected"
 tags = ["integration", "directives", "diagnostics"]
@@ -20511,4 +20616,579 @@ id = "single_file_selected_config_build_rejected"
 path = "single_file_selected_config_build_rejected"
 tags = ["integration", "html", "single-file", "diagnostics", "root-roles"]
 contract = "language.entry.reserved_config_selection_is_not_an_entry"
+role = "primary"
+
+[[case]]
+id = "fast_math_catch_cannot_recover_runtime_division"
+path = "fast_math_catch_cannot_recover_runtime_division"
+tags = ["integration", "directives", "numeric", "runtime", "html"]
+contract = "language.directives.fast_math_trap_is_not_recoverable_by_catch"
+role = "primary"
+
+[[case]]
+id = "fast_math_folded_initialiser_runtime"
+path = "fast_math_folded_initialiser_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "html"]
+contract = "language.directives.fast_math_folded_initialiser_keeps_the_lexical_mode"
+role = "primary"
+
+[[case]]
+id = "fast_math_required_const_trap_diagnostic"
+path = "fast_math_required_const_trap_diagnostic"
+tags = ["integration", "directives", "numeric", "diagnostics", "html"]
+contract = "language.directives.fast_math_required_const_cannot_fabricate_a_value"
+role = "primary"
+
+[[case]]
+id = "fast_math_optional_trap_stays_runtime"
+path = "fast_math_optional_trap_stays_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "html"]
+contract = "language.directives.fast_math_optional_fold_keeps_the_runtime_trap"
+role = "primary"
+
+[[case]]
+id = "fast_compound_write_back_runtime"
+path = "fast_compound_write_back_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "html", "mutation"]
+contract = "language.directives.fast_math_compound_write_back_wraps_and_truncates"
+role = "primary"
+
+[[case]]
+id = "fast_compound_write_back_trap_runtime"
+path = "fast_compound_write_back_trap_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "html", "mutation"]
+contract = "language.directives.fast_math_compound_write_back_traps_out_of_range"
+role = "primary"
+
+[[case]]
+id = "fast_compound_write_back_wasm_supported"
+path = "fast_compound_write_back_wasm_supported"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm", "mutation"]
+contract = "language.directives.fast_math_compound_write_back_matches_on_supported_wasm_domains"
+role = "primary"
+
+[[case]]
+id = "fast_compound_write_back_wasm_trap"
+path = "fast_compound_write_back_wasm_trap"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm", "mutation"]
+contract = "language.directives.fast_math_compound_write_back_traps_on_wasm"
+role = "primary"
+
+[[case]]
+id = "fast_compound_write_back_wasm_f16_rejected"
+path = "fast_compound_write_back_wasm_f16_rejected"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm", "diagnostics", "mutation"]
+contract = "language.directives.fast_math_f16_compound_write_back_keeps_wasm_limit"
+role = "primary"
+
+[[case]]
+id = "fast_compound_write_back_float_boundary_runtime"
+path = "fast_compound_write_back_float_boundary_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm", "mutation"]
+contract = "language.directives.fast_math_float_to_integer_write_back_keeps_largest_in_range_values"
+role = "primary"
+
+[[case]]
+id = "fast_compound_write_back_i64_float_boundary_trap"
+path = "fast_compound_write_back_i64_float_boundary_trap"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm", "mutation"]
+contract = "language.directives.fast_math_i64_float_write_back_traps_at_the_first_out_of_range_value"
+role = "primary"
+
+[[case]]
+id = "fast_compound_write_back_u64_float_boundary_trap"
+path = "fast_compound_write_back_u64_float_boundary_trap"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm", "mutation"]
+contract = "language.directives.fast_math_u64_float_write_back_traps_at_the_first_out_of_range_value"
+role = "primary"
+
+[[case]]
+id = "fast_compound_write_back_f32_underflow_runtime"
+path = "fast_compound_write_back_f32_underflow_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm", "mutation"]
+contract = "language.directives.fast_math_f32_write_back_keeps_subnormal_and_zero_results_without_trapping"
+role = "primary"
+
+[[case]]
+id = "fast_compound_write_back_f32_overflow_trap"
+path = "fast_compound_write_back_f32_overflow_trap"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm", "mutation"]
+contract = "language.directives.fast_math_f32_write_back_traps_on_overflow"
+role = "primary"
+
+[[case]]
+id = "fast_compound_write_back_projected_place_runtime"
+path = "fast_compound_write_back_projected_place_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "structs", "mutation"]
+contract = "language.directives.fast_math_compound_write_back_reaches_a_projected_place"
+role = "primary"
+
+[[case]]
+id = "fast_compound_write_back_loop_body_runtime"
+path = "fast_compound_write_back_loop_body_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm", "mutation"]
+contract = "language.directives.fast_math_compound_write_back_applies_inside_a_loop_body"
+role = "primary"
+
+[[case]]
+id = "fast_compound_write_back_generic_runtime"
+path = "fast_compound_write_back_generic_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "mutation", "generics"]
+contract = "language.directives.fast_math_compound_write_back_reaches_generic_materialised_instances"
+role = "primary"
+
+[[case]]
+id = "fast_integer_wrap_runtime"
+path = "fast_integer_wrap_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html"]
+contract = "language.directives.fast_math_integer_arithmetic_wraps_at_the_result_width"
+role = "primary"
+
+[[case]]
+id = "fast_remainder_min_by_minus_one_runtime"
+path = "fast_remainder_min_by_minus_one_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html"]
+contract = "language.directives.fast_math_signed_minimum_remainder_is_zero"
+role = "primary"
+
+[[case]]
+id = "fast_integer_division_trap_after_io_runtime"
+path = "fast_integer_division_trap_after_io_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html"]
+contract = "language.directives.fast_math_integer_division_traps_after_prior_io"
+role = "primary"
+
+[[case]]
+id = "fast_trap_before_compound_store_runtime"
+path = "fast_trap_before_compound_store_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html", "mutation"]
+contract = "language.directives.fast_math_trap_before_a_compound_store_keeps_prior_io"
+role = "primary"
+
+[[case]]
+id = "fast_integer_min_division_catch_cannot_recover_runtime"
+path = "fast_integer_min_division_catch_cannot_recover_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html"]
+contract = "language.directives.fast_math_minimum_division_is_not_catchable"
+role = "primary"
+
+[[case]]
+id = "fast_float_nonfinite_trap_after_io_runtime"
+path = "fast_float_nonfinite_trap_after_io_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html"]
+contract = "language.directives.fast_math_float_non_finite_result_traps_after_prior_io"
+role = "primary"
+
+[[case]]
+id = "fast_trap_discards_staged_fragment_runtime"
+path = "fast_trap_discards_staged_fragment_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html"]
+contract = "language.directives.fast_math_trap_discards_staged_fragment_output"
+role = "primary"
+
+[[case]]
+id = "fast_float_signed_zero_divisor_trap_runtime"
+path = "fast_float_signed_zero_divisor_trap_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html"]
+contract = "language.directives.fast_math_float_signed_zero_divisor_traps"
+role = "boundary"
+
+[[case]]
+id = "fast_dec_division_recoverable_runtime"
+path = "fast_dec_division_recoverable_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "html"]
+contract = "language.directives.fast_math_dec_division_stays_recoverable"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_wrap_boundaries_runtime"
+path = "fast_math_wasm_wrap_boundaries_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "language.directives.fast_math_integer_arithmetic_wraps_at_the_result_width"
+role = "backend"
+
+[[case]]
+id = "fast_math_wasm_min_division_trap"
+path = "fast_math_wasm_min_division_trap"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "language.directives.fast_math_minimum_division_is_not_catchable"
+role = "backend"
+
+[[case]]
+id = "fast_math_wasm_divide_zero_trap"
+path = "fast_math_wasm_divide_zero_trap"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "language.directives.fast_math_divide_by_itself_at_zero_traps"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_remainder_zero_trap"
+path = "fast_math_wasm_remainder_zero_trap"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "language.directives.fast_math_zero_remainder_traps"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_signed_division_runtime"
+path = "fast_math_wasm_signed_division_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "language.directives.fast_math_signed_division_truncates_toward_zero"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_dead_trap_result"
+path = "fast_math_wasm_dead_trap_result"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "language.directives.fast_math_dead_results_keep_their_traps"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_untaken_trap_branch_runtime"
+path = "fast_math_wasm_untaken_trap_branch_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "language.directives.fast_math_untaken_branches_do_not_trap"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_float_nonfinite_trap"
+path = "fast_math_wasm_float_nonfinite_trap"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "language.directives.fast_math_float_non_finite_result_traps_after_prior_io"
+role = "backend"
+
+[[case]]
+id = "fast_math_wasm_float_signed_zero_trap"
+path = "fast_math_wasm_float_signed_zero_trap"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "language.directives.fast_math_float_signed_zero_divisor_traps"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_float_power_nonfinite_trap"
+path = "fast_math_wasm_float_power_nonfinite_trap"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "language.directives.fast_math_float_power_non_finite_result_traps"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_range_boundaries_runtime"
+path = "fast_math_wasm_range_boundaries_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "language.directives.fast_math_range_endpoints_never_wrap"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_range_zero_step_trap"
+path = "fast_math_wasm_range_zero_step_trap"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "language.directives.fast_math_range_zero_step_traps"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_range_float_stall_trap"
+path = "fast_math_wasm_range_float_stall_trap"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "language.directives.fast_math_range_float_no_progress_traps"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_trap_boundary_runtime"
+path = "fast_math_wasm_trap_boundary_runtime"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "language.directives.fast_math_single_entry_trap_terminates"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_i8_arithmetic_rejected"
+path = "fast_math_wasm_i8_arithmetic_rejected"
+tags = ["integration", "directives", "numeric", "fixed-width", "html-wasm", "diagnostics"]
+contract = "language.directives.fast_math_i8_keeps_the_wasm_capability_limit"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_u16_arithmetic_rejected"
+path = "fast_math_wasm_u16_arithmetic_rejected"
+tags = ["integration", "directives", "numeric", "fixed-width", "html-wasm", "diagnostics"]
+contract = "language.directives.fast_math_u16_keeps_the_wasm_capability_limit"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_f16_arithmetic_rejected"
+path = "fast_math_wasm_f16_arithmetic_rejected"
+tags = ["integration", "directives", "numeric", "fixed-width", "html-wasm", "diagnostics"]
+contract = "language.directives.fast_math_f16_keeps_the_wasm_capability_limit"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_dec_rejected"
+path = "fast_math_wasm_dec_rejected"
+tags = ["integration", "directives", "numeric", "fixed-width", "html-wasm", "diagnostics"]
+contract = "language.directives.fast_math_dec_keeps_the_wasm_capability_limit"
+role = "primary"
+
+[[case]]
+id = "fast_math_wasm_aggregate_rejected"
+path = "fast_math_wasm_aggregate_rejected"
+tags = ["integration", "directives", "numeric", "fixed-width", "html-wasm", "diagnostics"]
+contract = "language.directives.fast_math_aggregates_keep_the_wasm_capability_limit"
+role = "primary"
+
+
+[[case]]
+id = "source_constraints_safe_math_direct_rejected"
+path = "source_constraints_safe_math_direct_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
+contract = "language.directives.safe_math_rejects_direct_fast_use"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_rejected"
+path = "source_constraints_safe_math_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
+contract = "language.directives.safe_math_rejects_transitive_and_selected_fast_evidence"
+role = "primary"
+
+[[case]]
+id = "source_constraints_folded_call_fast_rejected"
+path = "source_constraints_folded_call_fast_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "const"]
+contract = "language.directives.fast_callee_witness_survives_constant_folding"
+role = "primary"
+
+[[case]]
+id = "source_constraints_folded_call_fast_rejected_release"
+path = "source_constraints_folded_call_fast_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "const", "release"]
+contract = "language.directives.release_folding_keeps_the_fast_callee_witness"
+role = "primary"
+
+[[case]]
+id = "source_constraints_folded_call_summary_rejected_release"
+path = "source_constraints_folded_call_summary_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "const", "release"]
+contract = "language.directives.release_folding_keeps_transitive_fast_summaries"
+role = "primary"
+
+[[case]]
+id = "source_constraints_folded_call_hazards_rejected"
+path = "source_constraints_folded_call_hazards_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "const"]
+contract = "language.directives.callee_hazard_evidence_survives_constant_folding"
+role = "primary"
+
+[[case]]
+id = "source_constraints_folded_call_hazards_rejected_release"
+path = "source_constraints_folded_call_hazards_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "const", "release"]
+contract = "language.directives.release_folding_keeps_callee_hazard_evidence"
+role = "primary"
+
+[[case]]
+id = "source_constraints_folded_call_first_witness_rejected"
+path = "source_constraints_folded_call_first_witness_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "const"]
+contract = "language.directives.folded_call_witness_keeps_source_order"
+role = "primary"
+
+[[case]]
+id = "source_constraints_folded_call_first_witness_rejected_release"
+path = "source_constraints_folded_call_first_witness_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "const", "release"]
+contract = "language.directives.release_folded_call_witness_keeps_source_order"
+role = "primary"
+
+[[case]]
+id = "source_constraints_folded_caught_call_success"
+path = "source_constraints_folded_caught_call_success"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "const"]
+contract = "language.directives.caught_callee_failure_stays_contained"
+role = "primary"
+
+[[case]]
+id = "source_constraints_folded_caught_call_success_release"
+path = "source_constraints_folded_caught_call_success_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "const", "release"]
+contract = "language.directives.release_folding_keeps_caught_failure_contained"
+role = "primary"
+
+[[case]]
+id = "source_constraints_stacked_guarantee_labels_rejected"
+path = "source_constraints_stacked_guarantee_labels_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
+contract = "language.directives.stacked_guarantees_label_their_own_failing_directive"
+role = "primary"
+
+[[case]]
+id = "source_constraints_statement_inherits_function_guarantee_rejected"
+path = "source_constraints_statement_inherits_function_guarantee_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
+contract = "language.directives.inherited_function_constraint_reports_once_at_the_function_head"
+role = "primary"
+
+[[case]]
+id = "source_constraints_generic_instance_rejected"
+path = "source_constraints_generic_instance_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "generics"]
+contract = "language.directives.safe_math_verifies_each_materialised_generic_instance"
+role = "primary"
+
+[[case]]
+id = "source_constraints_generated_callee_witness_rejected"
+path = "source_constraints_generated_callee_witness_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "generics", "html-wasm"]
+contract = "language.directives.safe_math_follows_the_materialised_generated_callee"
+role = "primary"
+
+[[case]]
+id = "source_constraints_cross_package_generated_witness_rejected"
+path = "source_constraints_cross_package_generated_witness_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "generics", "modules"]
+contract = "language.directives.generated_witness_keeps_the_declaring_package_source"
+role = "primary"
+
+[[case]]
+id = "source_constraints_generated_to_generated_witness_rejected"
+path = "source_constraints_generated_to_generated_witness_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "generics"]
+contract = "language.directives.generated_to_generated_witness_reaches_the_fast_operation"
+role = "primary"
+
+[[case]]
+id = "source_constraints_generated_witness_bound_rejected"
+path = "source_constraints_generated_witness_bound_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "generics"]
+contract = "language.directives.generated_witness_honours_the_call_hop_bound"
+role = "primary"
+
+[[case]]
+id = "source_constraints_provider_generated_leaf_rejected"
+path = "source_constraints_provider_generated_leaf_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "generics", "modules"]
+contract = "language.directives.immutable_provider_generated_leaf_stays_unavailable"
+role = "primary"
+
+[[case]]
+id = "source_constraints_generic_skipped_handler_generated_witness_rejected"
+path = "source_constraints_generic_skipped_handler_generated_witness_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "generics"]
+contract = "language.directives.skipped_handler_fast_evidence_follows_generated_bodies"
+role = "primary"
+
+[[case]]
+id = "source_constraints_infallible_rejected"
+path = "source_constraints_infallible_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
+contract = "language.directives.infallible_rejects_unproved_traps_assertions_and_errors"
+role = "primary"
+
+[[case]]
+id = "source_constraints_accepted"
+path = "source_constraints_accepted"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "release"]
+contract = "language.directives.source_constraints_accept_proved_boundaries"
+role = "primary"
+
+[[case]]
+id = "source_constraints_backends_accepted"
+path = "source_constraints_backends_accepted"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "release", "html-wasm"]
+contract = "language.directives.source_constraints_hold_on_html_and_wasm"
+role = "primary"
+
+[[case]]
+id = "source_constraints_facade_rejected"
+path = "source_constraints_facade_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "imports"]
+contract = "language.directives.safe_math_follows_facade_reexports"
+role = "primary"
+
+[[case]]
+id = "source_constraints_statement_safe_math_rejected"
+path = "source_constraints_statement_safe_math_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "statements"]
+contract = "language.directives.statement_safe_math_rejects_fast_use"
+role = "primary"
+
+[[case]]
+id = "source_constraints_statement_safe_math_accepted"
+path = "source_constraints_statement_safe_math_accepted"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "statements"]
+contract = "language.directives.statement_safe_math_accepts_ordinary_use"
+role = "primary"
+
+[[case]]
+id = "source_constraints_statement_infallible_rejected"
+path = "source_constraints_statement_infallible_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "statements"]
+contract = "language.directives.statement_infallible_rejects_handler_and_body_escapes"
+role = "primary"
+
+[[case]]
+id = "source_constraints_statement_infallible_accepted"
+path = "source_constraints_statement_infallible_accepted"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "statements"]
+contract = "language.directives.statement_infallible_accepts_contained_failure"
+role = "primary"
+
+[[case]]
+id = "source_constraints_statement_root_rejected"
+path = "source_constraints_statement_root_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "statements", "runtime"]
+contract = "language.directives.statement_safe_math_verifies_entry_root"
+role = "primary"
+
+[[case]]
+id = "source_constraints_statement_safe_math_second_call_rejected"
+path = "source_constraints_statement_safe_math_second_call_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "statements"]
+contract = "language.directives.statement_safe_math_checks_every_call_site"
+role = "primary"
+
+[[case]]
+id = "source_constraints_statement_safe_math_skipped_handler_rejected"
+path = "source_constraints_statement_safe_math_skipped_handler_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "statements"]
+contract = "language.directives.statement_safe_math_sees_selected_evidence_in_skipped_handlers"
+role = "primary"
+
+[[case]]
+id = "source_constraints_statement_safe_math_skipped_handler_inactive_branch_success"
+path = "source_constraints_statement_safe_math_skipped_handler_inactive_branch_success"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "statements"]
+contract = "language.directives.statement_safe_math_ignores_inactive_skipped_handler_branches"
+role = "primary"
+
+[[case]]
+id = "source_constraints_unknown_external_wrapper_rejected"
+path = "source_constraints_unknown_external_wrapper_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "external", "trusted-contracts"]
+contract = "language.directives.safe_math_and_infallible_reject_untrusted_foreign_wrappers"
+role = "primary"
+
+[[case]]
+id = "source_constraints_recursive_wrapper_rejected"
+path = "source_constraints_recursive_wrapper_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "external", "recursion"]
+contract = "language.directives.recursive_unknown_wrapper_rejects_deterministically"
+role = "primary"
+
+[[case]]
+id = "source_constraints_core_math_trusted_rejected"
+path = "source_constraints_core_math_trusted_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "external", "trusted-contracts"]
+contract = "language.directives.core_math_trust_still_requires_caller_float_validation"
+role = "primary"
+
+[[case]]
+id = "source_constraints_core_io_trusted_success"
+path = "source_constraints_core_io_trusted_success"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "external", "trusted-contracts"]
+contract = "language.directives.core_io_trusted_call_satisfies_safe_math"
+role = "primary"
+
+[[case]]
+id = "source_constraints_exported_annotation_unused_rejected"
+path = "source_constraints_exported_annotation_unused_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "exports"]
+contract = "language.directives.exported_annotations_are_verified_without_a_caller"
 role = "primary"

@@ -11,14 +11,14 @@ use crate::backends::js::NEVER_RETURNED_MESSAGE;
 use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings, ExternalJsLowering,
-    ExternalPackageRegistry, external_never,
+    ExternalNumericContract, ExternalPackageRegistry, external_never,
 };
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionReturnContract};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::regions::HirRegion;
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirTerminator, RuntimeFailureKind};
 use std::sync::Arc;
 
 fn never_call_module(
@@ -109,6 +109,7 @@ fn never_call_emits_call_then_throw_exactly_once() {
         HirTerminator::RuntimeFailure {
             message: "halted".to_owned(),
             cause: None,
+            kind: RuntimeFailureKind::NoMatchFallback,
         },
         HirFunctionReturnContract::Never,
     );
@@ -183,6 +184,7 @@ fn returning_external_never_function_throws_at_runtime() {
                 parameters: Vec::new(),
                 return_contract: external_never(),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
                         "(() => { globalThis.__moth_never_calls = (globalThis.__moth_never_calls || 0) + 1; return 7; })()".to_owned(),
@@ -205,6 +207,7 @@ fn returning_external_never_function_throws_at_runtime() {
         HirTerminator::RuntimeFailure {
             message: "unused".to_owned(),
             cause: None,
+            kind: RuntimeFailureKind::NoMatchFallback,
         },
         HirFunctionReturnContract::Never,
     );

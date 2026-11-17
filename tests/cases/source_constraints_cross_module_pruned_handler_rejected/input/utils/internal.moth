@@ -1,0 +1,14 @@
+calm |value I32| -> I32:
+    return value
+;
+
+$fast_math
+guard_pruned |limit I32| -> Bool:
+    result = calm(1) < calm(2) catch |error|:
+        loop 0 to limit:
+            io.line("x")
+        ;
+        return false
+    ;
+    return result
+;

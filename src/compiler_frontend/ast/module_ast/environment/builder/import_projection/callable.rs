@@ -29,6 +29,7 @@ use crate::compiler_frontend::public_interface::{
     PublicCallableReturnContract, PublicParameterContract,
 };
 use crate::compiler_frontend::semantic_identity::{GeneratedDeclarationIdentity, OriginFunctionId};
+use crate::compiler_frontend::style_directives::{ConstraintDirectiveSpans, SourceConstraintSet};
 
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
@@ -132,6 +133,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         generic_parameter_owner: Some(generic_parameter_owner),
                         generic_parameter_list_id,
                         signature: signature.clone(),
+                        // Provider generic constraints are part of the public callable contract;
+                        // import projection does not carry them yet.
+                        source_constraints: SourceConstraintSet::default(),
+                        constraint_directive_spans: ConstraintDirectiveSpans::default(),
                         body_tokens: None,
                         declaration_span: None,
                     },

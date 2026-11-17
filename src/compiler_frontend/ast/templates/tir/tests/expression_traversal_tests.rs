@@ -173,6 +173,7 @@ impl TirExpressionPayloadMutator for CountingMutator {
             operand_type,
             Some(operand_type),
             &TypeEnvironment::new(),
+            false,
         ) else {
             panic!("self-division of a test expression should resolve");
         };
@@ -1165,6 +1166,7 @@ fn range_loop_header_positions_are_visited_by_mutation_and_collected_by_site_id(
             end_kind: RangeEndKind::Exclusive,
             step: Some(expression(&mut expressions, &mut const_values, 2)),
             domain: NumericScalar::Fixed(FixedScalar::I32),
+            fast_math: false,
         }),
     };
     let header_sites = store.allocate_loop_header_expression_sites(&header);
@@ -2249,6 +2251,7 @@ fn view_walker_reads_loop_header_overlay() {
                 end_kind: RangeEndKind::Exclusive,
                 step: Some(expression(&mut expressions, &mut const_values, 2)),
                 domain: NumericScalar::Fixed(FixedScalar::I32),
+                fast_math: false,
             }),
         };
         let header_sites = store.allocate_loop_header_expression_sites(&header);

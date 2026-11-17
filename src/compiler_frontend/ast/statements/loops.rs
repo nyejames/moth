@@ -177,6 +177,7 @@ pub fn create_loop(
     token_stream.set_position(colon_index.saturating_add(1))?;
 
     let body_scope = body_context.scope;
+    let body_source_constraints = body_context.source_constraints();
     let parsed_body = parse_function_body_statements(
         token_stream,
         body_context,
@@ -198,11 +199,11 @@ pub fn create_loop(
             span,
             scope,
         };
+        let deferred_construct = DeferredConstruct::Loop(Box::new(deferred));
+        let continuation = NumericContinuation::Construct(Box::new(deferred_construct));
         let continuation = numeric_construction
             .borrow_mut()
-            .register_continuation(NumericContinuation::Construct(Box::new(
-                DeferredConstruct::Loop(Box::new(deferred)),
-            )))
+            .register_continuation(continuation, body_source_constraints)
             .map_err(ExpressionParseError::from)?;
         draft.push_pending(continuation);
         return Ok(());

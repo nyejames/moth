@@ -8,7 +8,8 @@ use crate::compiler_frontend::external_packages::{
     ExternalFunctionId,
 };
 use crate::compiler_frontend::external_packages::{
-    ExternalAbiType, ExternalAccessKind, ExternalReturnAlias, ExternalSignatureType,
+    ExternalAbiType, ExternalAccessKind, ExternalNumericContract, ExternalReturnAlias,
+    ExternalSignatureType,
 };
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionDef, ExternalFunctionLowerings, ExternalJsLowering, external_success_returns,
@@ -16,6 +17,10 @@ use crate::compiler_frontend::external_packages::{
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry) {
+    // Collection callables stay `Unknown`: their recoverable error channels belong to the
+    // language-owned builtin surface, and these registrations carry the placeholder infallible
+    // return contract. A trusted contract must describe the registered return contract, so it
+    // cannot certify these callables without moving the builtin signature first.
     let package_id = registry
         .register_package(
             "@core/collections",
@@ -46,6 +51,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         COLLECTION_GET_HOST_NAME.to_owned(),
@@ -83,6 +89,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         COLLECTION_SET_HOST_NAME.to_owned(),
@@ -114,6 +121,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         COLLECTION_PUSH_GROWABLE_HOST_NAME.to_owned(),
@@ -145,6 +153,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         COLLECTION_PUSH_FIXED_HOST_NAME.to_owned(),
@@ -178,6 +187,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         COLLECTION_REMOVE_HOST_NAME.to_owned(),
@@ -208,6 +218,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         COLLECTION_LENGTH_HOST_NAME.to_owned(),

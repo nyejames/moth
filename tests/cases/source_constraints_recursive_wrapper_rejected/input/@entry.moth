@@ -1,0 +1,19 @@
+@untrusted.js step
+
+left |value I32| -> I32:
+    if value > 0:
+        return right(value - 1)
+    ;
+    return step(value)
+;
+
+right |value I32| -> I32:
+    return left(value)
+;
+
+$safe_math
+caller |value I32| -> I32:
+    return left(value)
+;
+
+~[:done]

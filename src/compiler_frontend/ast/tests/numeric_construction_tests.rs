@@ -45,7 +45,9 @@ use crate::compiler_frontend::source::test_support::TestSourceContext;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityContext, LocalSpan, SourceId, SourceSpan,
 };
-use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::style_directives::{
+    SourceConstraintSet, SourceDirectiveKind, StyleDirectiveRegistry,
+};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{TokenRange, TokenizerEntryMode};
@@ -179,6 +181,117 @@ fn assert_released(state: &mut NumericConstructionState) {
 }
 
 #[test]
+fn captured_recipes_and_continuations_keep_their_authored_constraint_sets() {
+    let mut strings = StringTable::new();
+    let mut paths = PathInternerFork::empty();
+    let scope = paths
+        .try_intern_portable_path("constraint_capture.moth", &mut strings)
+        .expect("test scope should intern");
+    let context = body_context(scope, &paths);
+
+    let fast = SourceConstraintSet::default().with_directive(SourceDirectiveKind::FastMath);
+    let safe_and_infallible = SourceConstraintSet::default()
+        .with_directive(SourceDirectiveKind::SafeMath)
+        .with_directive(SourceDirectiveKind::Infallible);
+
+    context.source_constraints.set(fast);
+    let binding = declare_origin_query_binding(
+        &context,
+        &mut strings,
+        &mut paths,
+        scope,
+        0,
+        raw_origin_query_recipe(),
+    );
+    let continuation = context
+        .register_numeric_continuation(empty_return(scope))
+        .expect("retained statement should register");
+
+    // A later sibling's mode never rewrites work already authored under the earlier statement.
+    context.source_constraints.set(safe_and_infallible);
+    {
+        let mut state = context.numeric_state_mut();
+        assert_eq!(state.binding(binding).source_constraints, fast);
+        let retained = state
+            .take_continuation(continuation)
+            .expect("the retained statement is live");
+        assert_eq!(retained.source_constraints, fast);
+    }
+    assert_eq!(context.source_constraints(), safe_and_infallible);
+}
+
+#[test]
+fn then_continuation_exposes_the_constraint_set_for_direct_forward_completion() {
+    use crate::compiler_frontend::ast::statements::value_production::{
+        ThenValueContinuation, ValueReceiverKind,
+    };
+
+    let mut strings = StringTable::new();
+    let mut paths = PathInternerFork::empty();
+    let scope = paths
+        .try_intern_portable_path("then_constraint_capture.moth", &mut strings)
+        .expect("test scope should intern");
+    let context = body_context(scope, &paths);
+    let fast = SourceConstraintSet::default().with_directive(SourceDirectiveKind::FastMath);
+    context.source_constraints.set(fast);
+    let continuation = context
+        .register_numeric_continuation(NumericContinuation::ThenValue(ThenValueContinuation {
+            values: Vec::new(),
+            slot_expected_types: Vec::new(),
+            receiver_kind: ValueReceiverKind::MultiBind,
+            span: None,
+            scope,
+        }))
+        .expect("then continuation should register");
+
+    context
+        .source_constraints
+        .set(SourceConstraintSet::default());
+    assert_eq!(
+        context
+            .numeric_state_mut()
+            .continuation_source_constraints(continuation)
+            .expect("the then continuation is live"),
+        fast,
+        "direct multi-bind forward completion must recover the producing statement's mode"
+    );
+}
+
+#[test]
+fn temporary_constraint_overrides_restore_the_enclosing_set() {
+    let mut strings = StringTable::new();
+    let mut paths = PathInternerFork::empty();
+    let scope = paths
+        .try_intern_portable_path("constraint_override.moth", &mut strings)
+        .expect("test scope should intern");
+    let context = body_context(scope, &paths);
+
+    let safe = SourceConstraintSet::default().with_directive(SourceDirectiveKind::SafeMath);
+    let fast = SourceConstraintSet::default().with_directive(SourceDirectiveKind::FastMath);
+    let infallible = SourceConstraintSet::default().with_directive(SourceDirectiveKind::Infallible);
+    context.source_constraints.set(safe);
+
+    {
+        let _fast_scope = context.enter_source_constraints(fast);
+        assert_eq!(context.source_constraints(), fast);
+        {
+            let _infallible_scope = context.enter_source_constraints(infallible);
+            assert_eq!(context.source_constraints(), infallible);
+        }
+        assert_eq!(
+            context.source_constraints(),
+            fast,
+            "ending an inner resolution restores its immediate caller's set"
+        );
+    }
+    assert_eq!(
+        context.source_constraints(),
+        safe,
+        "ending the deferred resolution restores the enclosing body's set"
+    );
+}
+
+#[test]
 fn recipes_continuations_and_forward_results_are_consumed_once() {
     let mut strings = StringTable::new();
     let mut paths = PathInternerFork::empty();
@@ -215,7 +328,7 @@ fn recipes_continuations_and_forward_results_are_consumed_once() {
     assert!(state.take_binding_recipe(binding).is_err());
 
     let continuation = state
-        .register_continuation(empty_return(scope))
+        .register_continuation(empty_return(scope), SourceConstraintSet::default())
         .expect("continuation should register");
     assert!(state.continuation(continuation).is_some());
     assert!(state.take_continuation(continuation).is_some());
@@ -318,7 +431,11 @@ fn recipes_continuations_and_forward_results_are_consumed_once() {
     state.release();
     assert_released(&mut state);
     assert!(state.binding_value_mode(binding).is_none());
-    assert!(state.register_continuation(empty_return(scope)).is_err());
+    assert!(
+        state
+            .register_continuation(empty_return(scope), SourceConstraintSet::default())
+            .is_err()
+    );
 }
 
 fn declare_origin_query_binding(
@@ -960,7 +1077,7 @@ fn multi_bind_slot_origin_queries_preserve_carriers_and_producer_eligibility() {
             let (continuation, carrier, carrier_class) = {
                 let mut state = context.numeric_state_mut();
                 let continuation = state
-                    .register_continuation(empty_return(scope))
+                    .register_continuation(empty_return(scope), SourceConstraintSet::default())
                     .expect("producer continuation");
                 let class = state.create_class().expect("carrier class");
                 let shape = state

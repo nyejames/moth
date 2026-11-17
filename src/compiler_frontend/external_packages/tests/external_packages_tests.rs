@@ -11,11 +11,11 @@ use crate::compiler_frontend::external_packages::{
     CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalAccessKind, ExternalConstEvalOp,
     ExternalConstantDef, ExternalConstantId, ExternalConstantRawValue, ExternalConstantValue,
     ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings, ExternalHirReturnAlias,
-    ExternalJsLowering, ExternalPackageRegistry, ExternalParameter, ExternalRegistrationError,
-    ExternalReturnAlias, ExternalReturnSlot, ExternalReturnsMut, ExternalReturnsView,
-    ExternalSignatureType, ExternalSymbolCategory, ExternalSymbolId, ExternalSymbolPath,
-    ExternalTypeDef, ExternalTypeId, IO_INPUT_EXTERNAL_TYPE_ID, TextConstEvalOp,
-    external_success_returns,
+    ExternalJsLowering, ExternalNumericContract, ExternalPackageRegistry, ExternalParameter,
+    ExternalRegistrationError, ExternalReturnAlias, ExternalReturnSlot, ExternalReturnsMut,
+    ExternalReturnsView, ExternalSignatureType, ExternalSymbolCategory, ExternalSymbolId,
+    ExternalSymbolPath, ExternalTypeDef, ExternalTypeId, IO_INPUT_EXTERNAL_TYPE_ID,
+    TextConstEvalOp, external_success_returns,
 };
 use crate::compiler_frontend::external_packages::{external_never, external_returns};
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
@@ -74,6 +74,7 @@ fn return_slots_preserve_alias_metadata() {
             None,
         ),
         const_eval: None,
+        numeric_contract: ExternalNumericContract::Unknown,
         lowerings: ExternalFunctionLowerings::default(),
     };
 
@@ -140,6 +141,7 @@ fn register_function_rejects_duplicates() {
                 None,
             ),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .unwrap();
@@ -152,6 +154,7 @@ fn register_function_rejects_duplicates() {
             None,
         ),
         const_eval: None,
+        numeric_contract: ExternalNumericContract::Unknown,
         lowerings: ExternalFunctionLowerings::default(),
     });
 
@@ -307,6 +310,7 @@ fn const_eval_registration_requires_trusted_core_origin_and_exact_signature() {
                 None,
             ),
             const_eval: Some(ExternalConstEvalOp::Text(TextConstEvalOp::Contains)),
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         };
 
@@ -497,6 +501,7 @@ fn register_function_rejects_slots_without_a_moth_value() {
             parameters,
             return_contract: external_returns(returns, None),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         }
     };
@@ -834,6 +839,7 @@ fn empty_void_function(name: &str) -> ExternalFunctionDef {
             None,
         ),
         const_eval: None,
+        numeric_contract: ExternalNumericContract::Unknown,
         lowerings: ExternalFunctionLowerings::default(),
     }
 }
@@ -2519,4 +2525,185 @@ fn duplicate_external_type_id_across_distinct_packages_is_rejected() {
         .expect("the original alpha reverse identity must survive the failed duplicate");
     assert_eq!(package.name(), "@builder/test/alpha");
     assert_eq!(symbol_path.display_text(), "Handle");
+}
+
+/// Registers one synthetic function carrying a numeric contract.
+fn register_numeric_contract_function(
+    registry: &mut ExternalPackageRegistry,
+    package_path: &str,
+    origin: PackageOrigin,
+    numeric_contract: ExternalNumericContract,
+    error: Option<ExternalSignatureType>,
+) -> Result<ExternalFunctionId, ExternalRegistrationError> {
+    let package_id = registry.register_package(package_path, origin)?;
+    registry.register_external_function(
+        package_id,
+        crate::compiler_frontend::external_packages::ExternalFunctionSpec {
+            name: "call".to_owned(),
+            parameters: Vec::new(),
+            return_contract: external_returns(
+                external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
+                error,
+            ),
+            const_eval: None,
+            numeric_contract,
+            lowerings: ExternalFunctionLowerings::default(),
+        },
+    )
+}
+
+#[test]
+fn trusted_numeric_registration_requires_core_origin_and_a_failure_channel() {
+    use crate::compiler_frontend::external_packages::trusted_numeric_contract;
+
+    for (package_path, origin) in [
+        ("@builder/test/numeric-trust", PackageOrigin::Builder),
+        ("@dependency/test/numeric-trust", PackageOrigin::Dependency),
+        ("@local/test/numeric-trust", PackageOrigin::ProjectLocal),
+    ] {
+        let mut registry = ExternalPackageRegistry::default();
+        let error = register_numeric_contract_function(
+            &mut registry,
+            package_path,
+            origin,
+            trusted_numeric_contract(false, false, false),
+            None,
+        )
+        .expect_err("only Core registrations may claim trusted closed evidence");
+        assert!(
+            matches!(error, ExternalRegistrationError::Infrastructure(_)),
+            "non-Core trust must be an infrastructure failure, got {error:?}"
+        );
+    }
+
+    let mut registry = ExternalPackageRegistry::default();
+    let error = register_numeric_contract_function(
+        &mut registry,
+        "@core/test/numeric-trust",
+        PackageOrigin::Core,
+        trusted_numeric_contract(false, false, true),
+        None,
+    )
+    .expect_err("may_fail needs a fallible return contract");
+    assert!(
+        matches!(error, ExternalRegistrationError::Infrastructure(_)),
+        "a may_fail claim without an error slot must be an infrastructure failure, got {error:?}"
+    );
+
+    let mut registry = ExternalPackageRegistry::default();
+    register_numeric_contract_function(
+        &mut registry,
+        "@core/test/numeric-trust",
+        PackageOrigin::Core,
+        trusted_numeric_contract(false, false, true),
+        Some(ExternalSignatureType::BuiltinError),
+    )
+    .expect("a Core may_fail claim with an error slot should register");
+}
+
+#[test]
+fn trusted_numeric_registration_preserves_the_registered_contract() {
+    use crate::compiler_frontend::external_packages::trusted_numeric_contract;
+
+    for contract in [
+        trusted_numeric_contract(false, false, false),
+        trusted_numeric_contract(true, false, false),
+        trusted_numeric_contract(false, true, false),
+        trusted_numeric_contract(false, false, true),
+        trusted_numeric_contract(true, true, true),
+    ] {
+        let mut registry = ExternalPackageRegistry::default();
+        let id = register_numeric_contract_function(
+            &mut registry,
+            "@core/test/numeric-trust",
+            PackageOrigin::Core,
+            contract,
+            Some(ExternalSignatureType::BuiltinError),
+        )
+        .expect("a Core trusted contract should register");
+        assert_eq!(
+            registry
+                .get_function_by_id(id)
+                .expect("the registered callable must be resolvable")
+                .numeric_contract,
+            contract,
+            "registration must store the callable's own contract verbatim"
+        );
+    }
+}
+
+#[test]
+fn core_math_registers_total_ordinary_contracts_for_every_f64_function() {
+    use crate::compiler_frontend::external_packages::trusted_numeric_contract;
+
+    let mut registry = ExternalPackageRegistry::default();
+    crate::builder_surface::core_packages::register_core_math_package(&mut registry);
+
+    let mut count = 0usize;
+    for (_, definition) in registry.functions() {
+        assert_eq!(
+            definition.numeric_contract,
+            trusted_numeric_contract(false, false, false),
+            "Core Math `{}` must certify ordinary semantics, no trap and no error channel",
+            definition.name
+        );
+        let returns = ordinary_returns(definition);
+        assert_eq!(returns.success.len(), 1);
+        assert!(returns.error.is_none());
+        assert_eq!(
+            returns.success[0].value_type,
+            ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64))
+        );
+        count += 1;
+    }
+    assert_eq!(
+        count, 31,
+        "every registered Core Math function must be checked"
+    );
+}
+
+#[test]
+fn core_io_registers_total_reads_and_a_fallible_open() {
+    use crate::compiler_frontend::external_packages::trusted_numeric_contract;
+
+    let mut registry = ExternalPackageRegistry::default();
+    crate::builder_surface::core_packages::register_core_io_package(&mut registry);
+
+    let contract = |id: ExternalFunctionId| {
+        registry
+            .get_function_by_id(id)
+            .unwrap_or_else(|| panic!("{id:?} must be registered"))
+            .numeric_contract
+    };
+    for id in [
+        ExternalFunctionId::IoPrint,
+        ExternalFunctionId::IoLine,
+        ExternalFunctionId::IoDebug,
+        ExternalFunctionId::IoWarn,
+        ExternalFunctionId::IoError,
+        ExternalFunctionId::IoInputUpdate,
+        ExternalFunctionId::IoInputClose,
+        ExternalFunctionId::IoInputKeyDown,
+        ExternalFunctionId::IoInputPointerX,
+        ExternalFunctionId::IoInputLastKeyPressed,
+    ] {
+        assert_eq!(
+            contract(id),
+            trusted_numeric_contract(false, false, false),
+            "{id:?} must be a trusted total callable"
+        );
+    }
+    assert_eq!(
+        contract(ExternalFunctionId::IoInputNew),
+        trusted_numeric_contract(false, false, true),
+        "input.new must certify its recoverable unsupported-host error"
+    );
+    assert!(
+        registry
+            .get_function_by_id(ExternalFunctionId::IoInputNew)
+            .expect("input.new must be registered")
+            .return_contract
+            .is_fallible(),
+        "the trusted may_fail claim needs the registered fallible return contract"
+    );
 }

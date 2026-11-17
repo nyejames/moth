@@ -18,7 +18,8 @@ use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, LoopStepFailureCause, NumericFailureMode,
+    HirFastStoreConversion, HirNumericOp, HirNumericOperands, LoopStepFailureCause,
+    NumericFailureMode,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
@@ -82,6 +83,7 @@ pub(crate) struct HirReachability {
     pub(crate) reachable_site_root_uses: Vec<ReachableSiteRootUse>,
     pub(crate) reachable_runtime_casts: Vec<ReachableRuntimeCastUse>,
     pub(crate) reachable_numeric_ops: Vec<ReachableNumericOpUse>,
+    pub(crate) reachable_fast_store_conversions: Vec<ReachableFastStoreConversionUse>,
     pub(crate) reachable_loop_step_failures: Vec<ReachableLoopStepFailureUse>,
     pub(crate) reachable_float_statements: Vec<ReachableFloatStatementUse>,
     pub(crate) reachable_assertion_messages: Vec<ReachableAssertionMessageUse>,
@@ -149,6 +151,7 @@ struct HirBlockRuntimeFacts {
     reachable_site_root_uses: Vec<ReachableSiteRootUse>,
     reachable_runtime_casts: Vec<ReachableRuntimeCastUse>,
     reachable_numeric_ops: Vec<ReachableNumericOpUse>,
+    reachable_fast_store_conversions: Vec<ReachableFastStoreConversionUse>,
     reachable_loop_step_failures: Vec<ReachableLoopStepFailureUse>,
     reachable_float_statements: Vec<ReachableFloatStatementUse>,
     reachable_assertion_messages: Vec<ReachableAssertionMessageUse>,
@@ -277,15 +280,17 @@ impl HirBackendSelection {
             };
             let mut actual_blocks = crate::compiler_frontend::hir::utils::collect_reachable_blocks(
                 function.entry,
-                |block_id| {
+                |block_id, visit| {
                     let block = index.block_by_id.get(&block_id).copied().ok_or_else(|| {
                         hir_reachability_error(format!(
                             "Backend selection could not resolve HIR block {block_id:?}"
                         ))
                     })?;
-                    Ok::<_, InfrastructureFailure>(
-                        crate::compiler_frontend::hir::utils::terminator_targets(&block.terminator),
-                    )
+                    crate::compiler_frontend::hir::utils::for_each_terminator_target(
+                        &block.terminator,
+                        visit,
+                    );
+                    Ok::<_, InfrastructureFailure>(())
                 },
             )?;
             actual_blocks.sort_by_key(|block_id| block_id.0);
@@ -442,6 +447,18 @@ pub(crate) enum ReachableNumericDelivery {
 pub(crate) struct ReachableNumericOpUse {
     pub(crate) op: HirNumericOp,
     pub(crate) delivery: ReachableNumericDelivery,
+    pub(crate) span: Option<SourceSpan>,
+}
+
+/// A reachable fast compound-assignment write-back conversion.
+///
+/// WHAT: the exact source/target domains and source anchor.
+/// WHY: the fast write-back is a distinct statement, not a runtime cast, so backends with narrow
+///      or otherwise unsupported domains must reject it explicitly instead of failing inside
+///      lowering. Delivery is not retained because it follows from the conversion class.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ReachableFastStoreConversionUse {
+    pub(crate) conversion: HirFastStoreConversion,
     pub(crate) span: Option<SourceSpan>,
 }
 
@@ -681,6 +698,8 @@ impl HirReachability {
             .extend(direct.reachable_runtime_casts.iter().cloned());
         self.reachable_numeric_ops
             .extend(direct.reachable_numeric_ops.iter().cloned());
+        self.reachable_fast_store_conversions
+            .extend(direct.reachable_fast_store_conversions.iter().cloned());
         self.reachable_loop_step_failures
             .extend(direct.reachable_loop_step_failures.iter().cloned());
         self.reachable_float_statements
@@ -897,16 +916,28 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 }
             }
 
+            HirStatementKind::FastStoreConversion {
+                conversion, source, ..
+            } => {
+                self.direct_facts.reachable_fast_store_conversions.push(
+                    ReachableFastStoreConversionUse {
+                        conversion: *conversion,
+                        span,
+                    },
+                );
+                expression_collector.collect(&mut self.direct_facts, *source, span);
+            }
+
             HirStatementKind::LoopStepFailure {
-                cause,
-                failure_mode,
-                ..
+                cause, semantics, ..
             } => {
                 self.direct_facts
                     .reachable_loop_step_failures
                     .push(ReachableLoopStepFailureUse {
                         cause: *cause,
-                        delivery: ReachableNumericDelivery::Statement(*failure_mode),
+                        delivery: ReachableNumericDelivery::Statement(
+                            NumericFailureMode::range_guard(*semantics),
+                        ),
                         span,
                     });
             }

@@ -21,7 +21,7 @@ use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
-use crate::compiler_frontend::hir::utils::terminator_targets;
+use crate::compiler_frontend::hir::utils::{for_each_terminator_target, terminator_targets};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
     PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
@@ -149,6 +149,9 @@ impl<'a> BorrowChecker<'a> {
                     parameters,
                     return_alias: FunctionReturnAliasSummary::Fresh,
                     escapes_builtin_failure: false,
+                    uses_fast_semantics: false,
+                    may_trap: false,
+                    may_fail: false,
                 },
             );
         }
@@ -897,10 +900,14 @@ impl<'a> BorrowChecker<'a> {
         function: &HirFunction,
     ) -> Result<Vec<BlockId>, BorrowCheckError> {
         // Breadth-first traversal over explicit terminator successors.
-        crate::compiler_frontend::hir::utils::collect_reachable_blocks(function.entry, |block_id| {
-            let block = self.block_by_id_or_error(block_id, function.id)?;
-            Ok(terminator_targets(&block.terminator))
-        })
+        crate::compiler_frontend::hir::utils::collect_reachable_blocks(
+            function.entry,
+            |block_id, visit| {
+                let block = self.block_by_id_or_error(block_id, function.id)?;
+                for_each_terminator_target(&block.terminator, visit);
+                Ok(())
+            },
+        )
     }
 }
 
@@ -1120,6 +1127,7 @@ fn collect_statement_defined_locals(statement: &HirStatement, visitor: &mut impl
             }
         }
         HirStatementKind::NumericOp { result, .. }
+        | HirStatementKind::FastStoreConversion { result, .. }
         | HirStatementKind::LoopStepFailure { result, .. }
         | HirStatementKind::FormatFloat { result, .. }
         | HirStatementKind::ValidateFloat { result, .. } => visit_destination(result),
@@ -1201,7 +1209,8 @@ fn collect_statement_loaded_locals(
             collect_expression_loaded_locals(expressions, *end, visitor);
         }
         HirStatementKind::FormatFloat { source, .. }
-        | HirStatementKind::ValidateFloat { source, .. } => {
+        | HirStatementKind::ValidateFloat { source, .. }
+        | HirStatementKind::FastStoreConversion { source, .. } => {
             collect_expression_loaded_locals(expressions, *source, visitor);
         }
         HirStatementKind::Expr(expression) => {
@@ -1231,6 +1240,7 @@ fn collect_statement_written_locals(statement: &HirStatement, visitor: &mut impl
             ..
         } => visitor(local.local()),
         HirStatementKind::NumericOp { result, .. }
+        | HirStatementKind::FastStoreConversion { result, .. }
         | HirStatementKind::LoopStepFailure { result, .. } => visitor(result.local()),
         HirStatementKind::RangeCandidate {
             candidate_result,

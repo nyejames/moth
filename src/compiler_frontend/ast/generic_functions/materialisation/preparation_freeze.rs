@@ -1054,6 +1054,8 @@ impl ModuleMaterialisationCapture {
             function_path: template.function_path,
             source_file: template.source_file,
             declaration_span: template.declaration_span,
+            source_constraints: template.source_constraints,
+            constraint_directive_spans: template.constraint_directive_spans,
             body: StableBodySyntax::capture(
                 body,
                 template.source_file,

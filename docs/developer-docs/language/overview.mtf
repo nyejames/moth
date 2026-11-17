@@ -115,14 +115,19 @@ observable semantics for their topics.
 ### Directives
 
 - `docs/docs/directives/directives.mtf`
+- `docs/docs/directives/constraints.mtf`
 
 Contributor routing for compiler and build handoffs lives in
 `docs/docs/directives/overview.mtf`. That file is not a public page import.
 Template-specific directive meanings and comma-separated head items stay in
 `docs/docs/templates/template-directives.mtf`. `docs/docs/directives/directives.mtf`
 owns independent same-line source annotation stacking, unique directive names
-and `$doc`/`$todo` declaration or statement attachment. Exact named `project` and
-active-builder record fields plus the `$config` input contract stay in the
+and `$doc`/`$todo` declaration or statement attachment.
+`docs/docs/directives/constraints.mtf` owns `$fast_math`, `$safe_math` and
+`$infallible` placement, meanings, proof policy, trusted external evidence and
+the trap boundary. `docs/developer-docs/numeric-backend-contract/` owns the
+ordinary and fast numeric operation contract consumed by backends. Exact named
+`project` and active-builder record fields plus the `$config` input contract stay in the
 project-structure references. Root file roles are fixed at `@mod.moth`,
 `@package.moth` and `@entry.moth`. A source annotation never selects an entry.
 Capability-checked runtime title mutation remains deferred.

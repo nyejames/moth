@@ -1,0 +1,17 @@
+$fast_math
+witness || -> I32:
+    return 1 + 2
+;
+
+probe |value I32| -> I32:
+    $safe_math
+    result I32 = 1 + 1 catch |error|:
+        if false:
+            marker I32 = witness()
+        ;
+        return 0
+    ;
+    return result
+;
+
+~[:value=[probe(1)]]

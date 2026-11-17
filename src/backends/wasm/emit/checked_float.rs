@@ -128,7 +128,13 @@ pub(super) fn emit_checked_float_operation(
     emit_finite_float_check(function, destination, precision, context)
 }
 
-fn emit_finite_float_check(
+/// Traps when the rounded value on the stack is not finite, storing it in `destination` first.
+///
+/// WHAT: stores the incoming scalar with `LocalTee`, replaces it with its finiteness predicate
+///       and traps when that predicate is false.
+/// WHY: every float production path that must never observe a non-finite rounded value shares
+///      this one check, including checked arithmetic and the fast compound write-back.
+pub(super) fn emit_finite_float_check(
     function: &mut Function,
     destination: WasmLirLocalId,
     precision: BinaryFloatPrecision,

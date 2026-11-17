@@ -1,0 +1,5 @@
+value ~U64 = 18446744073709551615
+one U64 = 1
+$fast_math
+~value /= one
+~[:value=[value]]

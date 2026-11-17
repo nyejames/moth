@@ -22,6 +22,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidDeclarationReason, InvalidReceiverDeclarationReason, InvalidStatementPositionReason,
     InvalidTemplateDirectiveReason,
 };
+use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::headers::file_dependency_clauses::parse_and_record_dependency;
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
@@ -186,6 +187,28 @@ fn wrong_target_source_directive(annotation: &SourceDirectiveAnnotation) -> Diag
     )
 }
 
+/// Build the diagnostic for a declaration header that rejects a source directive.
+///
+/// WHAT: a lexical constraint on a compile-time `#` function gets its own reason, because such a
+///       function is never a constraint target. The generic wrong-target text would ask the author
+///       to choose another declaration kind, which could never satisfy the directive.
+/// WHY: the header contract stays the single owner of which declarations a constraint may name.
+fn rejected_header_source_directive(
+    kind: &HeaderKind,
+    annotation: &SourceDirectiveAnnotation,
+) -> DiagnosticDraft {
+    let compile_time_function = matches!(
+        kind,
+        HeaderKind::Function { signature, .. } if signature.evaluation == CallableEvaluation::Const
+    );
+    let reason = if compile_time_function && annotation.kind.is_source_constraint() {
+        InvalidTemplateDirectiveReason::CompileTimeFunctionTarget
+    } else {
+        InvalidTemplateDirectiveReason::WrongTarget
+    };
+    templates::invalid_template_directive(Some(annotation.name_id), reason, Some(annotation.span))
+}
+
 /// Whether this file may author the directive's declared target at all.
 ///
 /// WHAT: `$export` belongs only to an API facade root; `$config` keeps its existing placement
@@ -198,7 +221,12 @@ fn source_directive_allowed_in_file(
     context: &HeaderParseContext<'_>,
 ) -> bool {
     match kind {
-        SourceDirectiveKind::Config | SourceDirectiveKind::Doc | SourceDirectiveKind::Todo => true,
+        SourceDirectiveKind::Config
+        | SourceDirectiveKind::Doc
+        | SourceDirectiveKind::Todo
+        | SourceDirectiveKind::FastMath
+        | SourceDirectiveKind::SafeMath
+        | SourceDirectiveKind::Infallible => true,
         SourceDirectiveKind::Export => {
             !context.is_config_file && context.file_role.is_export_capable()
         }
@@ -269,12 +297,34 @@ fn header_accepts_source_directive(kind: &HeaderKind, directive: SourceDirective
                 | HeaderKind::Trait { .. }
                 | HeaderKind::Constant { .. }
         ),
+        // Free functions, receiver methods and generic functions are all this header kind. Const
+        // functions run only at compile time, so they are not a lexical constraint target.
+        SourceDirectiveKind::FastMath
+        | SourceDirectiveKind::SafeMath
+        | SourceDirectiveKind::Infallible => matches!(
+            kind,
+            HeaderKind::Function { signature, .. }
+                if signature.evaluation == CallableEvaluation::Runtime
+        ),
     }
 }
 
 /// Whether a dependency clause accepts the directive's declared target.
 fn dependency_accepts_source_directive(directive: SourceDirectiveKind) -> bool {
     matches!(directive, SourceDirectiveKind::Export)
+}
+
+/// Whether the AST statement owner may validate this directive against a following statement.
+///
+/// WHAT: documentation, TODO and the three lexical constraints travel into the entry body for
+///       statement attachment; export and config never do.
+/// WHY: the header walk must keep rejecting declaration-only directives at the header boundary
+///       while leaving runtime root statements to the one statement parser that owns them.
+fn source_directive_may_target_statement(directive: SourceDirectiveKind) -> bool {
+    matches!(
+        directive,
+        SourceDirectiveKind::Doc | SourceDirectiveKind::Todo
+    ) || directive.is_source_constraint()
 }
 
 pub(super) fn parse_headers_in_file(
@@ -454,10 +504,7 @@ fn parse_headers_in_file_inner(
                             .starts_header_declaration();
                     if !starts_declaration {
                         if let Some(annotation) = pending.annotations.iter().find(|annotation| {
-                            !matches!(
-                                annotation.kind,
-                                SourceDirectiveKind::Doc | SourceDirectiveKind::Todo
-                            )
+                            !source_directive_may_target_statement(annotation.kind)
                         }) {
                             return Err(diagnostic_failure(wrong_target_source_directive(
                                 annotation,
@@ -488,12 +535,11 @@ fn parse_headers_in_file_inner(
                 HeaderFileItem::RuntimeTemplate
                 | HeaderFileItem::StartBodyToken
                 | HeaderFileItem::ReservedTraitSyntax => {
-                    if let Some(annotation) = pending.annotations.iter().find(|annotation| {
-                        !matches!(
-                            annotation.kind,
-                            SourceDirectiveKind::Doc | SourceDirectiveKind::Todo
-                        )
-                    }) {
+                    if let Some(annotation) = pending
+                        .annotations
+                        .iter()
+                        .find(|annotation| !source_directive_may_target_statement(annotation.kind))
+                    {
                         return Err(diagnostic_failure(wrong_target_source_directive(
                             annotation,
                         )));
@@ -840,7 +886,10 @@ fn handle_symbol_item(
         .iter()
         .find(|directive| !header_accepts_source_directive(&header.kind, directive.kind))
     {
-        return Err(diagnostic_failure(wrong_target_source_directive(directive)));
+        return Err(diagnostic_failure(rejected_header_source_directive(
+            &header.kind,
+            directive,
+        )));
     }
     header.source_directives = source_directives;
 

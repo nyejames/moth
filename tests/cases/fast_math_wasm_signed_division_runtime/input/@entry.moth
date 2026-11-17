@@ -1,0 +1,31 @@
+-- Signed fast division truncates toward zero (never an arithmetic shift), and signed remainder
+-- follows the dividend sign. `MIN % -1` is exactly zero without trapping.
+$fast_math
+divide_i64 |left I64, right I64| -> I64:
+    return left // right
+;
+
+$fast_math
+remainder_i64 |left I64, right I64| -> I64:
+    return left % right
+;
+
+$fast_math
+remainder_i32 |left I32, right I32| -> I32:
+    return left % right
+;
+
+negative_nine I64 = -9
+eight I64 = 8
+negative_one I64 = -1
+minimum_i64 I64 = -9223372036854775808
+minimum_i32 I32 = -2147483648
+minus_one_i32 I32 = -1
+
+quotient = divide_i64(negative_nine, eight)
+remainder = remainder_i64(negative_nine, eight)
+small_quotient = divide_i64(negative_one, eight)
+minimum_remainder_i32 = remainder_i32(minimum_i32, minus_one_i32)
+minimum_remainder_i64 = remainder_i64(minimum_i64, negative_one)
+
+~[:quotient=[quotient] remainder=[remainder] small=[small_quotient] rem32=[minimum_remainder_i32] rem64=[minimum_remainder_i64]]

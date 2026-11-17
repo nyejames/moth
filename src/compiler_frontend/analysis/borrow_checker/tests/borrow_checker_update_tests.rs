@@ -26,7 +26,7 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirTerminator, RuntimeFailureKind};
 use crate::compiler_frontend::hir::validate_hir_module;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -970,6 +970,7 @@ fn transfer_isolated_statement(
         terminator: HirTerminator::RuntimeFailure {
             message: "isolated transfer test".to_owned(),
             cause: None,
+            kind: RuntimeFailureKind::NoMatchFallback,
         },
     };
     transfer_block(&transfer_context, layout, &isolated_block, state).map(|_| ())

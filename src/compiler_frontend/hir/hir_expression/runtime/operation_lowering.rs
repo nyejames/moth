@@ -91,6 +91,7 @@ impl<'a> HirBuilder<'a> {
             HirNumericOp {
                 operator: numeric.operator,
                 domain: numeric.domain,
+                semantics: numeric.semantics,
             },
             operands,
             result_type,

@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0091"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+reason = "invalid_source_constraint.fast_operation"
+path = "input/impl.moth"
+line = 2
+column = 1

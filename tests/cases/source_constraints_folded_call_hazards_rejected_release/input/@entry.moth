@@ -1,0 +1,22 @@
+checked_add |left I32, right I32| -> I32:
+    return left + right
+;
+
+assert_positive |value I32| -> I32:
+    assert(value > 0)
+    return value
+;
+
+$infallible
+folded_checked || -> I32:
+    value I32 = checked_add(1, 2)
+    return value
+;
+
+$infallible
+folded_assert || -> I32:
+    value I32 = assert_positive(1)
+    return value
+;
+
+io.line([folded_checked(), folded_assert()])

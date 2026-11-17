@@ -2681,6 +2681,7 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
         end_kind: RangeEndKind::Exclusive,
         step: None,
         domain: NumericScalar::Fixed(FixedScalar::I32),
+        fast_math: false,
     };
     let expr = runtime_template_range_loop_expression(
         &mut expressions,
@@ -3179,6 +3180,7 @@ fn runtime_template_control_flow_loop_empty_body_does_not_mark_iteration_emitted
         end_kind: RangeEndKind::Exclusive,
         step: None,
         domain: NumericScalar::Fixed(FixedScalar::I32),
+        fast_math: false,
     };
     let expr = runtime_template_range_loop_expression(
         &mut expressions,

@@ -1,0 +1,371 @@
+This reference owns the numeric operation contract shared by the compiler,
+future optimisers and every backend. It remains the authority for later numeric
+optimisation and native backend work. The @../../docs/directives/#constraints
+(Constraints) reference owns source placement, the meaning of each constraint,
+the proof policy and the user-visible trap rule.
+
+Both arithmetic modes use the same typing, operator eligibility, evaluation
+order and per-operation rounding. Fast mode changes the failure outcome of
+eligible fixed-integer and binary-float operations. It does not adopt unchecked
+host arithmetic or create a second operator matrix.
+
+## Ordinary and fast modes
+
+Resolution selects one semantic mode for each fixed-integer or binary-float
+operation. The mode belongs to the **resolved semantic domain**, never the
+destination variable, proof table or backend carrier. An operation resolved to
+a Dec domain always keeps ordinary semantics.
+
+HIR records the canonical numeric domain, operator and semantic mode. The mode
+stays separate from `NumericFailureMode` and `Invoke`, which own failure
+delivery. A fast operation always uses statement delivery: a trap when it has
+fast trap causes and infallible delivery when it is total. It is never an
+`Invoke`, a private-failure-lane producer or an implicit-failure contributor.
+In a required-const context, a fast operation that cannot fold is a
+compile-time diagnostic (`MOTH-RULE-0053`), not a trap.
+
+`LoopStepFailure` records its cause and the owning loop's arithmetic semantics,
+and `FastStoreConversion` records its source and target domains. Both derive
+their `NumericFailureMode` from those facts, so neither statement stores a
+second failure-mode field that could disagree with its cause or conversion.
+
+The ordinary numeric failure codes stay the recoverable set. Fast trap causes
+form a separate classification and never become `Error` codes.
+
+A caller's lexical mode covers caller-authored operands, binding initialisers,
+right-hand expressions and compound write-backs. A callee body keeps its own
+mode, so inlining preserves the callee's arithmetic mode. Explicit `cast`,
+comparisons, logical operations, assertions, collection operations, memory
+checks and foreign validation stay outside fast mode.
+
+## Fixed integers
+
+For an N-bit result, `wrap_N(x)` takes the mathematical value modulo `2^N` and
+reinterprets the high bit for a signed type. No published integer leaves its
+declared range. Equal-type widths keep their declared result domain, so
+`U8 + U8` produces `U8`. The smallest supported mixed domain still applies, so
+`I8 + U8` produces `I16`.
+
+Both modes use the same resolved result type and operator domain. Ordinary
+mode delivers every listed fast failure as recoverable implicit failure. It
+also checks the unwrapped result and reports fixed-integer overflow, including
+`MIN // -1` and exponentiation overflow, the same way.
+
+[table:
+    [th: [: Operator] [: Shared result] [: Fast failure outcome]]
+    [td: [: Addition, subtraction, multiplication, permitted unary minus] [: Value in the resolved domain] [: None. Overflow returns wrap_N]]
+    [td: [: Unsigned //] [: Quotient] [: Zero divisor traps]]
+    [td: [: Signed //] [: Quotient truncated towards zero] [: Zero divisor or MIN // -1 traps]]
+    [td: [: Unsigned %] [: Remainder] [: Zero divisor traps]]
+    [td: [: Signed %] [: Dividend-sign remainder] [: Zero divisor traps. MIN % -1 is zero]]
+    [td: [: Bounded integer power] [: Power in the resolved domain] [: Negative signed exponent traps]]
+    [td: [: Integer /] [: F64 real-division result, then the binary-float rule] [: The binary-float fast failure applies]]
+]
+
+`0 ^ 0` equals `1`. Modular exponentiation must not construct a huge host power
+before truncation. `MIN // -1` does not affect real division.
+
+Unsupported unsigned negation, `Byte` arithmetic and unsupported integer or
+float operator pairs stay compile errors in both modes.
+
+## Binary floats
+
+`F16`, `F32` and `F64` round at every language operation in their resolved
+precision and reject a non-finite published result. Preserve subnormals and
+signed zero. An intermediate host carrier may hold an invalid value only until
+the same operation validates it.
+
+Both modes use the same resolved precision and result rule. Ordinary mode
+delivers every listed fast failure as recoverable implicit failure.
+
+[table:
+    [th: [: Operator] [: Shared result] [: Fast failure outcome]]
+    [td: [: Addition, subtraction, multiplication] [: Rounded result] [: Non-finite result traps]]
+    [td: [: Unary minus] [: Finite negation, including signed zero] [: None]]
+    [td: [: Division and remainder] [: Rounded quotient or dividend-sign remainder] [: Signed zero divisor or non-finite result traps]]
+    [td: [: Power] [: Existing scalar power result] [: Invalid or non-finite result traps]]
+]
+
+Fractional and negative float exponents keep the existing float power contract
+rather than inheriting integer exponent restrictions. Comparisons keep ordinary
+semantics. `$fast_math` implies no reassociation, approximate reciprocal,
+flush-to-zero, fused rounding or lost signed zero.
+
+`1.0 / (a * b)` must fault at the multiplication when that multiplication is
+non-finite, even when the backend could continue and compute a finite final
+result. A float range's uncommitted candidate retains its documented
+termination exception below.
+
+## Dec and mixed domains
+
+Dec has no fast numeric mode. An operation resolved to a Dec domain, including
+accepted Dec and integer mixing, uses exactly the ordinary coefficient, scale,
+rounding and recoverable-failure contract. Dec division by zero and a negative
+Dec power keep their ordinary `Error` recovery. Fast mode adds no Dec wrapper,
+type promotion, trap conversion or fast provenance.
+
+Dec addition and a locally caught Dec division are valid inside a fast scope.
+Their syntax and handling stay ordinary. An implicit compound conversion
+involving Dec also keeps ordinary semantics and failure delivery. If the
+resolved arithmetic uses fixed integer or binary float before an otherwise
+legal non-Dec write-back, apply the arithmetic mode to that operation, not to
+unrelated conversions.
+
+## Compound stores and explicit conversions
+
+Evaluate the place and right-hand expression once in the existing order. Perform
+the arithmetic, then the implicit write-back, then the store. A trap before the
+store leaves the target unchanged but does not roll back earlier effects. The
+trapping invocation publishes none of its runtime fragments.
+
+- Fast integer-to-integer compound write-back reduces to the destination low
+  bits and destination signedness only for conversions Moth already permits.
+- Fast float-to-integer compound write-back truncates towards zero and traps if
+  the result is out of range. It never saturates.
+- Integer-to-float and float-to-float write-back use ordinary precision
+  rounding and trap if the result is non-finite.
+- Conversions involving Dec stay ordinary. Other total conversions stay total.
+
+Explicit `cast` keeps its ordinary failure policy under fast mode. Integer `/=`
+uses real division, while `//=` uses integer quotient.
+
+HIR distinguishes the implicit fast write-back conversion from an explicit
+`cast`, so the two keep different failure policies. A lowerer must not reuse
+ordinary checked narrowing for a fast write-back that wraps.
+
+## Range loops
+
+A range loop keeps one-time header evaluation, direction, signed step,
+last-valid-endpoint termination and the correct value and ordinal bindings.
+Authored header and body arithmetic use their lexical mode.
+
+Generated step and counter updates must never wrap. The existing full-width
+endpoint-distance guard stays before the update. Under `$fast_math`, a dynamic
+zero step, an in-range no-progress candidate and another unavoidable semantic
+range failure become traps instead of recoverable `Error`. A literal zero step
+stays a compile-time diagnostic. An `I32` ordinal overflow is one of those
+failures and traps rather than wrapping.
+
+A floating out-of-range or non-finite *uncommitted* candidate remains normal
+termination. An in-range candidate that stops advancing while the endpoint
+lies ahead traps. Fast range-guard delivery is fast use for `$safe_math`, even
+when the loop header contains no authored arithmetic.
+
+Allocation sizes, pointer and offset calculations, collection bounds and
+capacity arithmetic are never fast operations.
+
+## Trap boundary and host instances
+
+A fast trap ends the current guest call and permanently invalidates the
+execution instance selected by the builder's lifecycle, not necessarily one
+Moth source module. It cannot be caught as a Moth `Error`. The host may continue
+and construct a replacement instance.
+
+An embedder that supports repeated guest calls must quarantine the faulted
+instance and issue no later guest call or guest cleanup helper against it. No
+rollback, normal guest cleanup or safe reuse is promised. Host IO already
+performed remains observable. `crates/lappet/docs/host-abi.md` > `Faults` owns
+the adapter fault contract and `crates/lappet/docs/design.md` >
+`Instances, resources and scheduling` owns instance quarantine.
+
+A fast trap is neither an `assert` failure nor a compiler bug. Lowering must
+not model it as either. The boundary uses the existing builder and host
+integration, adds no new guest runtime and introduces no reset API.
+
+JavaScript and Wasm must expose equivalent Moth behaviour, though host
+reporting and transport may differ. JavaScript throws a fatal `Error` carrying
+the builtin cause message directly from the fast helper or inline check. It
+must not use the ordinary `{ tag, value }` recoverable carrier. Wasm uses
+`unreachable`. Integration tests observe the JavaScript message with
+`runtime_error_contains` and the Wasm trap with `runtime_trap_contains`.
+
+Fast traps need no recoverable-numeric capability. An HTML entry runs once, so
+a trap terminates that run without a new invocation API. Current delivery adds
+no reset helper. A builder or host that later adds repeated calls must enforce
+the same quarantine rule.
+
+## Constraint evidence and call summaries
+
+A selected fast operation is recorded as fast-use evidence when AST resolution
+selects it. The evidence survives folding, dead-result elimination and later
+selection. HIR-generated fast range-guard delivery is also evidence. Lowering
+also records call sites and `$fast_math` range guards from selected AST
+statements it skips: statically infallible handlers and statements after a
+terminator. Inactive static branches record no fast use. Release speculation
+records every call it erases, with its catch containment, and HIR projects
+those calls in source order beside the retained call sites. Evidence, call
+summaries and verdicts are therefore identical in debug and release builds.
+
+`PublicCallSummary` carries three monotone bits: `uses_fast_semantics`,
+`may_trap` and `may_fail`. `may_fail` covers any recoverable error escaping
+through any channel. After the existing convergence completes, a false bit is
+proof for a Moth-source callee. The bits are seeded false when borrow summaries
+are constructed and are written once by the post-lane worklist. An initial
+false bit is a convergence seed, never evidence for `$infallible`.
+
+An external call without a trusted registered contract counts as unknown for
+fast use and trap hazards, and reports an unknown-evidence leaf. Trust is
+registered per callable on `ExternalFunctionDef`, Core-origin only and validated
+like const evaluation. A package or function name never supplies trust.
+
+Core Math's registered contract uses ordinary semantics, has no
+provider-internal trap and has no recoverable error channel. A caller-side
+float validation of a returned value remains a trap hazard for `$infallible`.
+Unclassified provider callables default to unknown.
+
+A trusted contract records `uses_fast_semantics`, `may_trap` and `may_fail` for
+one callable. `may_trap` means a reachable Moth semantic trap in the provider
+body. Host implementation faults, environmental exhaustion and external
+termination are outside `$infallible`, so they are outside a trusted total
+claim. Each registration repeats its contract on the callable spec. A future
+callable states its own contract rather than inheriting a package default. The
+Core classification is:
+
+[table:
+    [th: [: Package] [: Callables] [: fast, trap, fail] [: Basis]]
+    [td: [: `@core/math`] [: every registered F64 function] [: false, false, false] [: JS `Math` inline expressions cannot raise a Moth trap or return an error. Caller-side float validation stays separate.]]
+    [td: [: `@core/io`] [: `print`, `line`, `debug`, `warn`, `error`] [: false, false, false] [: Console helpers convert a Moth string and call a host console method. They return no result slot.]]
+    [td: [: `@core/io`] [: `input.new`] [: false, false, true] [: A host without the required browser input APIs returns a recoverable `Unsupported` error.]]
+    [td: [: `@core/io`] [: remaining `input` callables] [: false, false, false] [: Polling reads and lifecycle calls inspect or mutate a valid handle and return no error. `pointer_x` and `pointer_y` return `F64`, so caller-side float validation stays separate.]]
+    [td: [: `@core/text`] [: `length`, `is_empty`, `contains`, `starts_with`, `ends_with`] [: false, false, false] [: JavaScript string helpers are total for host-representable strings. The I32 length guard is a carrier bound, not a Moth trap.]]
+    [td: [: `@core/random`] [: `random_float`, `random_int`] [: false, false, false] [: `Math.random` and the bounded I32 mapping are total and have no error channel.]]
+    [td: [: `@core/time`] [: clock reads and duration or timestamp arithmetic] [: false, false, false] [: Inline millisecond expressions on opaque handles cannot raise a Moth trap or return an error.]]
+    [td: [: `@core/time`] [: `timestamp_from_iso_string`, `to_iso_string`] [: false, false, true] [: Invalid grammar and out-of-range instants return recoverable errors.]]
+    [td: [: `@core/collections`] [: all registered callables] [: unknown] [: The recoverable collection error channels belong to the language-owned builtin surface and the registration carries its placeholder infallible return contract.]]
+]
+
+An unregistered callable or an explicit `Unknown` contract is unknown evidence.
+A Moth wrapper computes its own bits from its calls, so it cannot launder an
+unknown foreign binding.
+
+Constraint verification runs after summary convergence, private-lane
+installation and handler pruning, and before optional numeric proofs.
+`numeric_proofs` never influences source acceptance. A function boundary uses
+the whole function. A statement boundary uses HIR operations whose span lies
+within the statement span in the same function, including its catch handlers.
+A generated fast range guard is attributed to its authored loop header, never
+to the loop body's first statement.
+AST failure witnesses and HIR constraint witnesses apply the same three-hop
+policy over their own IR. Every post-lane structural scan of pruned-handler
+subgraphs shares `hir::utils::collect_structural_blocks`, so evidence order
+cannot diverge. Fast-use and failure facts have one projection into
+`HirFunctionFailureFacts`.
+
+Statement fast evidence is liveness-independent: a selected fast operation or
+fast call inside a pruned handler still rejects `$safe_math`, because fast
+selection is not a reachability property. Trap and failure evidence is collected
+on the liveness-conditioned CFG from the function entry. A live failure edge
+whose successor lies outside the region rejects `$infallible`, while an edge
+whose successor is in the region is contained and the handler is walked for its
+own traps and escapes. A statement boundary with no live in-region HIR site is
+skipped. This is how a boundary inside an unrouted handler stays inert. A
+generated operation with no statement span uses the exact terminator span and
+then the block's recorded AST span, which attributes a fast range guard to its
+loop header.
+
+`RuntimeFailure` terminators are classified by a producer-set kind, never by
+message text or surrounding block shape:
+
+[table:
+    [th: [: Kind] [: Meaning] [: Counts as a trap]]
+    [td: [: conversion] [: an unrecovered implicit cast or compound write-back] [: yes]]
+    [td: [: range guard] [: the structurally unreachable continuation of a `LoopStepFailure` guard, whose statement owns the trap] [: no]]
+    [td: [: no-match fallback] [: a defensive exhaustive-match stop that no source match reaches] [: no]]
+]
+
+Collection bounds failures stay recoverable `Error` channels. They are not
+semantic traps. A caught bounds failure keeps `$infallible`, but one that
+escapes as `Error!` rejects it, because `$infallible` forbids escaping
+recoverable errors. Growable collection allocation exhaustion is environmental,
+not a Moth semantic trap, so it does not reject `$infallible`. Core
+`@core/collections` callables remain unknown evidence, so a call through them
+rejects both guarantees.
+
+The three bits converge in a post-lane monotone worklist that is separate from
+the escape fixed point and never calls borrow validation. Verification runs
+immediately after that worklist settles. No later pass may rebuild a call
+summary, because a rebuild would re-seed the bits false. Each materialised
+generic instance is a normal sidecar node and is verified at its own
+declaration. A dormant template has no HIR node and contributes no certified
+guarantee.
+
+Untrusted external evidence rejects both guarantees with an unknown-evidence
+reason. A Moth-source or trusted provider leaf whose published bit is true but
+whose body is not part of the current verification universe is reported as
+unavailable evidence, never as a locally observed trap or fast operation. A
+call to a materialised generic instance follows the instance body in whichever
+sidecar owns it, and each witness label keeps the source domain of the module
+it came from.
+Failed boundaries use the `MOTH-RULE-0091` source-constraint family. Each
+failed guarantee names its own directive as the primary label, and the bounded
+call hops keep their own secondary labels. A statement that inherits a
+guarantee keeps the declaring boundary's label and does not report again.
+
+Guarantees ride the existing call summary and `PublicSemanticInterface`
+equality, convergence and publication. They add no separate fingerprint type.
+
+## Backend and optimiser rules
+
+A transformation must preserve typed values, source-visible work, the order of
+the first error or trap and non-executed branches. A dead result is not a
+licence to erase a possible trap. Inlining preserves the callee's arithmetic
+mode. Lowerers consume the mode from validated HIR and never reconstruct fast
+semantics from a name, proof table or target carrier width.
+
+### JavaScript
+
+Reuse the width and domain logic in `numeric_carrier.rs` with demand-driven
+helper use. Use exact low-word multiplication such as `Math.imul` for 32-bit
+modular products and width-normalised `BigInt` for 64-bit operations. Number
+multiplication followed by truncation loses low bits for some `U32` inputs.
+Never publish an out-of-range fixed-width value.
+
+An ordinary or Dec-only module must not import fast helpers. Supported Dec
+operations inside a fast scope still use checked and handled paths.
+
+### WebAssembly
+
+Use native modular integer arithmetic where it is exact, with explicit traps
+for zero divisors and the signed `MIN // -1` quotient. Handle `MIN % -1 == 0`
+explicitly where the target primitive faults. Keep finite-float checks at each
+semantic result boundary.
+
+Fast mode does not widen Wasm support. The accepted contract covers fast
+`I32`, `U32`, `I64`, `U64`, `F32` and `F64` operations. `I8`, `I16`, `U8` and
+`U16` arithmetic, `F16` arithmetic and ranges, Dec values and aggregates retain
+their precise capability diagnostics. Fast traps require no
+recoverable-numeric-failure capability. The progress matrix owns implementation
+status.
+
+### Regression counterexamples
+
+- Signed division by 8 is not an arithmetic shift on negative values.
+- `x // x` still traps when `x` is zero.
+- Signed `MIN // -1` cannot become wrapping negation.
+- A dead result can still trap.
+- An untaken trapping branch remains untaken.
+- An N-bit modular multiply by 8 may legitimately become an N-bit shift when
+  the transformation is equivalent.
+
+### Future native backends
+
+A future LLVM or RISC-V backend must implement the same semantics without
+undefined behaviour or instruction-specific gaps. A native backend must still
+trap zero divisors, signed `MIN // -1`, negative fast integer exponents, signed
+zero float divisors and non-finite float results at their semantic boundaries.
+
+## References
+
+- @../../docs/directives/#constraints (Constraints): source contract, proof
+  policy, external evidence and the user-visible trap rule
+- @../compiler-design/ast-semantics-and-types (AST semantics and types):
+  numeric resolution and typed expression ownership
+- @../compiler-design/backend-lowering (Backend lowering): lowerer handoff and
+  target capability policy
+- @../../docs/numbers (Numbers): ordinary operator domains, literals and
+  checked arithmetic
+- @../../docs/loops/#range-loops (Range loops): ordinary range evaluation,
+  termination and error codes
+- `crates/lappet/docs/host-abi.md` > `Faults` and
+  `crates/lappet/docs/design.md` > `Instances, resources and scheduling`:
+  instance quarantine

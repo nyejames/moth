@@ -1,0 +1,25 @@
+@numeric-backend-contract content as numeric_backend_contract
+@docs_styles navbar, section, theme_head, sidebar, init_docs_sidebar
+
+[$in title:["Numeric backend contract"]]
+[$in description:["Ordinary and fast numeric semantics, constraint evidence, trap transport and backend parity."]]
+[$in head:[theme_head]]
+
+[navbar]
+[sidebar]
+init_docs_sidebar()!
+
+[section, $md:
+    # Numeric backend contract
+
+    This reference defines the numeric operation contract shared by the
+    compiler, optimisers and backends. It separates arithmetic semantics from
+    failure delivery and records how constraint guarantees reach a lowerer.
+
+    The user-facing source contract, proof policy and constraint meanings live
+    in @../../docs/directives/#constraints (Constraints). That page owns source
+    placement and acceptance. This page owns the numeric rules a backend must
+    preserve.
+]
+
+[section, numeric_backend_contract]

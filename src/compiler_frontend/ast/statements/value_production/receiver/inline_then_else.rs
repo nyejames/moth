@@ -11,7 +11,9 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, AuthoredBranchRange, ExprId,
+};
 use crate::compiler_frontend::ast::expressions::parse_expression::{
     create_expression_until, create_expression_with_trailing_newline_policy,
 };
@@ -73,6 +75,8 @@ pub(super) struct InlineThenElseInput<'a, 'b, 'tokens> {
 pub(super) struct InlineThenElseOutput {
     pub(super) then_span: Option<SourceSpan>,
     pub(super) else_span: Option<SourceSpan>,
+    pub(super) then_range: AuthoredBranchRange,
+    pub(super) else_range: AuthoredBranchRange,
     pub(super) then_values: Vec<ExprId>,
     pub(super) else_values: Vec<ExprId>,
     pub(super) needs_slot_inference: bool,
@@ -83,6 +87,8 @@ pub(super) struct InlineThenElseOutput {
 struct ParsedInlineBranchValues {
     then_span: Option<SourceSpan>,
     else_span: Option<SourceSpan>,
+    then_range: AuthoredBranchRange,
+    else_range: AuthoredBranchRange,
     then_values: Vec<StatementExpression>,
     else_values: Vec<StatementExpression>,
     generic_request_ranges: IfGenericRequestRanges,
@@ -102,6 +108,8 @@ pub(super) enum InlineThenElseOutcome {
     Retained {
         then_body: InlineBranchBody,
         else_body: InlineBranchBody,
+        then_range: AuthoredBranchRange,
+        else_range: AuthoredBranchRange,
         generic_request_ranges: IfGenericRequestRanges,
     },
 }
@@ -267,6 +275,7 @@ fn parse_inline_then_else_with_target(
         .into());
     }
 
+    let then_start = token_stream.current_span();
     let then_values = parse_retained_produced_values(ProducedValuesParseInput {
         token_stream,
         context: then_context,
@@ -277,6 +286,7 @@ fn parse_inline_then_else_with_target(
         string_table,
         path_fork,
     })?;
+    let then_end = token_stream.previous_span().unwrap_or(then_start);
     let then_request_end = then_context.generic_request_checkpoint();
 
     require_else_inline(token_stream, then_index)?;
@@ -287,6 +297,7 @@ fn parse_inline_then_else_with_target(
     reject_newline_after_else(token_stream)?;
     reject_empty_value_after_else(token_stream)?;
 
+    let else_start = token_stream.current_span();
     let else_values = parse_retained_produced_values(ProducedValuesParseInput {
         token_stream,
         context: else_context,
@@ -297,6 +308,7 @@ fn parse_inline_then_else_with_target(
         string_table,
         path_fork,
     })?;
+    let else_end = token_stream.previous_span().unwrap_or(else_start);
     let else_request_end = else_context.generic_request_checkpoint();
 
     Ok(ParsedInlineBranchValues {
@@ -304,6 +316,14 @@ fn parse_inline_then_else_with_target(
         else_values,
         then_span,
         else_span,
+        then_range: AuthoredBranchRange {
+            start: then_start,
+            end: then_end,
+        },
+        else_range: AuthoredBranchRange {
+            start: else_start,
+            end: else_end,
+        },
         generic_request_ranges: IfGenericRequestRanges {
             then_branch: GenericRequestRange::new(then_request_start, then_request_end),
             else_branch: GenericRequestRange::new(then_request_end, else_request_end),
@@ -370,6 +390,8 @@ pub(super) fn parse_inline_then_else(
             return Ok(InlineThenElseOutcome::Retained {
                 then_body,
                 else_body,
+                then_range: parsed.then_range,
+                else_range: parsed.else_range,
                 generic_request_ranges: parsed.generic_request_ranges,
             });
         }
@@ -381,6 +403,8 @@ pub(super) fn parse_inline_then_else(
             return Ok(InlineThenElseOutcome::Complete(InlineThenElseOutput {
                 then_span: parsed.then_span,
                 else_span: parsed.else_span,
+                then_range: parsed.then_range,
+                else_range: parsed.else_range,
                 then_values,
                 else_values,
                 needs_slot_inference: true,
@@ -394,6 +418,8 @@ pub(super) fn parse_inline_then_else(
         return Ok(InlineThenElseOutcome::Complete(InlineThenElseOutput {
             then_span: parsed.then_span,
             else_span: parsed.else_span,
+            then_range: parsed.then_range,
+            else_range: parsed.else_range,
             then_values,
             else_values,
             needs_slot_inference: false,
@@ -440,6 +466,7 @@ pub(super) fn parse_inline_then_else(
     // An authored `else` keeps the existing bounded branch parse. Without one,
     // stop at the first receiving boundary so the missing-keyword diagnostic
     let else_follows = inline_else_follows_before_statement_end(token_stream);
+    let then_start = token_stream.current_span();
 
     let input = ExpressionParseInput::until(ExpressionParseResources {
         token_stream,
@@ -489,6 +516,7 @@ pub(super) fn parse_inline_then_else(
                 ))
             }
         };
+    let then_end = token_stream.previous_span().unwrap_or(then_start);
     let then_request_end = then_context.generic_request_checkpoint();
 
     if else_follows {
@@ -517,6 +545,7 @@ pub(super) fn parse_inline_then_else(
         path_fork,
     );
     let else_expression_start_index = token_stream.position();
+    let else_start = token_stream.current_span();
     let input = ExpressionParseInput::ordinary(
         ExpressionParseResources {
             token_stream,
@@ -554,6 +583,7 @@ pub(super) fn parse_inline_then_else(
             ))
         }
     };
+    let else_end = token_stream.previous_span().unwrap_or(else_start);
     let else_request_end = else_context.generic_request_checkpoint();
 
     if !same_logical_line(token_stream, then_index, else_expression_start_index) {
@@ -587,6 +617,14 @@ pub(super) fn parse_inline_then_else(
         return Ok(InlineThenElseOutcome::Retained {
             then_body,
             else_body,
+            then_range: AuthoredBranchRange {
+                start: then_start,
+                end: then_end,
+            },
+            else_range: AuthoredBranchRange {
+                start: else_start,
+                end: else_end,
+            },
             generic_request_ranges: IfGenericRequestRanges {
                 then_branch: GenericRequestRange::new(then_request_start, then_request_end),
                 else_branch: GenericRequestRange::new(then_request_end, else_request_end),
@@ -650,6 +688,14 @@ pub(super) fn parse_inline_then_else(
     Ok(InlineThenElseOutcome::Complete(InlineThenElseOutput {
         then_span,
         else_span,
+        then_range: AuthoredBranchRange {
+            start: then_start,
+            end: then_end,
+        },
+        else_range: AuthoredBranchRange {
+            start: else_start,
+            end: else_end,
+        },
         then_values: vec![then_expr],
         else_values: vec![else_expr],
         needs_slot_inference: false,

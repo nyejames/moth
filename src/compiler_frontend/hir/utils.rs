@@ -6,6 +6,7 @@
 //!      iteration; centralising it here avoids duplicated match logic.
 
 use crate::compiler_frontend::hir::ids::BlockId;
+use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use rustc_hash::FxHashSet;
 use std::collections::VecDeque;
@@ -105,33 +106,45 @@ pub fn try_for_each_terminator_target<E>(
     Ok(())
 }
 
-/// Breadth-first traversal of reachable blocks starting from `entry`.
+/// Breadth-first traversal of the blocks reachable from `entry`, in deterministic BFS order.
 ///
-/// WHAT: collects every block ID reachable via terminator successors.
-/// WHY: backends and analyses need a canonical reachability walk without reconstructing it
-///      inline; this keeps successor logic in one place.
-///
-/// Callers supply a closure that resolves a block ID into its successor list. The closure can
-/// fail (for example if the block is missing), so the error type is generic.
+/// WHAT: visits each reachable block once and returns the visit order. The callback reports a
+///       block's successors through the sink it receives, so no per-block successor list is built.
+/// WHY: every reachability question shares one walk with one visited set and one queue. A failure
+///      such as a missing block stops the walk through the callback's error type.
 pub fn collect_reachable_blocks<E>(
     entry: BlockId,
-    mut get_successors: impl FnMut(BlockId) -> Result<Vec<BlockId>, E>,
+    mut for_each_successor: impl FnMut(BlockId, &mut dyn FnMut(BlockId)) -> Result<(), E>,
 ) -> Result<Vec<BlockId>, E> {
     let mut visited = FxHashSet::default();
-    let mut queue = VecDeque::new();
+    let mut queue = VecDeque::from([entry]);
     let mut order = Vec::new();
-
-    queue.push_back(entry);
 
     while let Some(block_id) = queue.pop_front() {
         if !visited.insert(block_id) {
             continue;
         }
         order.push(block_id);
-        for successor in get_successors(block_id)? {
-            queue.push_back(successor);
-        }
+        for_each_successor(block_id, &mut |successor| queue.push_back(successor))?;
     }
 
     Ok(order)
+}
+
+/// Breadth-first traversal of one function's structural block subgraph.
+///
+/// WHAT: every block reachable from `entry` through any terminator target, in deterministic BFS
+///       order. A missing block stays in the order, but its successors are not followed.
+/// WHY: post-lane analyses must scan pruned catch-handler subgraphs that the live CFG no longer
+///      links, and they run after `compact_block_ids`, so one sparse walk over the module's dense
+///      block table is the shared evidence order for fast use, trap use and call sites.
+pub fn collect_structural_blocks(hir: &HirModule, entry: BlockId) -> Vec<BlockId> {
+    let Ok(order) =
+        collect_reachable_blocks::<std::convert::Infallible>(entry, |block_id, visit| {
+            if let Some(block) = hir.block(block_id) {
+                for_each_terminator_target(&block.terminator, visit);
+            }
+            Ok(())
+        });
+    order
 }

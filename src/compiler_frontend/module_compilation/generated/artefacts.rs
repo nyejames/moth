@@ -13,6 +13,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironmentRemapCache;
 use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
+use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::PathIdRemap;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 /// One independently lowered concrete generic executable.
@@ -21,11 +22,31 @@ use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 pub(crate) struct GeneratedFunctionSidecar {
     pub(crate) identity: GeneratedFunctionIdentity,
     pub(crate) module: Module,
+    /// Frozen source identity for the declaring domain whose spans this sidecar carries.
+    ///
+    /// WHAT: the handle installed by materialisation, before the boundary freezes its sources.
+    /// WHY: verification resolves authored statement spans against the owner that issued them;
+    ///      reinterpreting a donor `SourceId` through the requester database would silently miss
+    ///      a region or select the wrong source text.
+    source_owner: FrozenIdentityHandle,
 }
 
 impl GeneratedFunctionSidecar {
     pub(crate) fn new(identity: GeneratedFunctionIdentity, module: Module) -> Self {
-        Self { identity, module }
+        Self {
+            identity,
+            module,
+            source_owner: FrozenIdentityHandle::new(),
+        }
+    }
+
+    pub(crate) fn with_source_owner(mut self, source_owner: FrozenIdentityHandle) -> Self {
+        self.source_owner = source_owner;
+        self
+    }
+
+    pub(crate) fn source_owner(&self) -> &FrozenIdentityHandle {
+        &self.source_owner
     }
 
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {

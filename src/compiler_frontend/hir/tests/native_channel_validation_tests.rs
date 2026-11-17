@@ -6,6 +6,8 @@ use crate::compiler_frontend::compiler_errors::{InfrastructureFailure, Infrastru
 use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, NumericSemantics};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
@@ -14,6 +16,7 @@ use crate::compiler_frontend::hir::functions::HirFunctionReturnContract;
 use crate::compiler_frontend::hir::hir_builder::validate_module_for_tests;
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::hir::numeric::{HirNumericOp, HirNumericOperands};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
@@ -525,4 +528,92 @@ fn validator_rejects_native_map_key_and_set_value_type_mismatches() {
                 .contains("Builtin operation argument type does not match semantic signature")
         );
     }
+}
+
+#[test]
+fn validator_rejects_fast_numeric_operation_on_a_recoverable_invoke() {
+    let (strings, mut module, mut types) = minimal_lowered_hir_module();
+    let function = module.start_function.expect("fixture has a start function");
+    let entry = module.functions[function.0 as usize].entry;
+    let region = module.blocks[entry.0 as usize].region;
+    let error_type = builtin_error_type_id(&mut types);
+    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let mut operands = Vec::with_capacity(2);
+    for value in [1, 2] {
+        let operand = expression(
+            HirExpressionKind::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, value).expect("small integers fit I32"),
+            ),
+            i32_type,
+            region,
+            ValueKind::Const,
+            &mut module.expressions,
+        );
+        module.side_table.map_value(None, operand);
+        operands.push(operand);
+    }
+    let success_local = LocalId(9000);
+    let error_local = LocalId(9001);
+    let success = BlockId(module.blocks.len() as u32);
+    let failure = BlockId(success.0 + 1);
+    for (block, local, ty) in [
+        (success, success_local, i32_type),
+        (failure, error_local, error_type),
+    ] {
+        module.blocks.push(HirBlock {
+            id: block,
+            region,
+            locals: vec![HirLocal {
+                id: local,
+                ty,
+                mutable: false,
+                region,
+                span: None,
+            }],
+            statements: vec![],
+            terminator: HirTerminator::Return(HirValueRange::empty()),
+        });
+    }
+    module.blocks[entry.0 as usize].terminator = HirTerminator::Invoke {
+        id: HirNodeId(9000),
+        span: None,
+        operation: HirFallibleOperation::NumericOp {
+            op: HirNumericOp {
+                operator: NumericOperator::Add,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
+                semantics: NumericSemantics::Fast,
+            },
+            operands: HirNumericOperands::Binary {
+                left: operands[0],
+                right: operands[1],
+            },
+        },
+        success,
+        success_results: vec![success_local],
+        failure,
+        error_result: error_local,
+    };
+    let fixture = InvokeFixture {
+        strings,
+        module,
+        types,
+        entry,
+        success,
+        failure,
+        success_local,
+        error_local,
+        next_node_id: 9002,
+    };
+
+    let error = fixture
+        .validate()
+        .expect_err("fast arithmetic cannot be the operation of a recoverable Invoke");
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(
+        error
+            .message
+            .contains("a fast numeric operation cannot be delivered through Invoke"),
+        "unexpected rejection message: {}",
+        error.message
+    );
 }

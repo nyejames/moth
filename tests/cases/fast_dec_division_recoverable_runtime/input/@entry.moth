@@ -1,0 +1,11 @@
+$fast_math
+divide_dec |dividend Dec2, divisor Dec2| -> Dec2, Error!:
+    return dividend / divisor
+;
+
+one Dec2 = 1
+zero Dec2 = 0
+recovered Dec2 = divide_dec(one, zero) catch:
+    then 7
+;
+io.line([:recovered=[recovered]])

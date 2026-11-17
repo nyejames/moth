@@ -11,8 +11,8 @@ use crate::build_system::build::FileKind;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings,
-    ExternalJsLowering, ExternalPackageId, ExternalPackageRegistry, ExternalReturnSlot,
-    ExternalSignatureType, ExternalTypeId,
+    ExternalJsLowering, ExternalNumericContract, ExternalPackageId, ExternalPackageRegistry,
+    ExternalReturnSlot, ExternalSignatureType, ExternalTypeId,
 };
 use crate::compiler_frontend::external_packages::{external_never, external_returns};
 use crate::compiler_frontend::module_compilation::Module;
@@ -262,6 +262,7 @@ fn generate_module_glue_rejects_missing_js_lowering_but_accepts_nonmodule_loweri
                 parameters: Vec::new(),
                 return_contract: external_returns(Vec::new(), None),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: lowering,
                     wasm: None,
@@ -630,6 +631,7 @@ fn generate_module_glue_projects_never_external_exports() {
                 parameters: Vec::new(),
                 return_contract: external_never(),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::ExternalModuleExport {
                         export_name: "halt".to_owned(),
@@ -1639,6 +1641,7 @@ fn create_registry_with_export(
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::ExternalModuleExport {
                         export_name: export_name.to_owned(),

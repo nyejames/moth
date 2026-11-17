@@ -62,6 +62,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::instrumentation::ast_counters::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::style_directives::SourceConstraintSet;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -366,6 +367,12 @@ pub(crate) struct PendingBindingRow {
     ///      resolves and hands it over by move (`None` afterwards) instead of cloning RPN per
     ///      probe or resolution.
     pub(crate) recipe: Option<NumericRecipe>,
+    /// Lexical source constraints active where this binding's recipe was authored.
+    ///
+    /// WHAT: the effective `$fast_math`/`$safe_math`/`$infallible` set captured at registration.
+    /// WHY: body-root completion resolves the recipe long after the statement parser restored the
+    ///      enclosing set; arithmetic in this initializer must still resolve under its own mode.
+    pub(crate) source_constraints: SourceConstraintSet,
     pub(crate) origin: BindingOriginQueries,
     /// Scope frame that authored the binding, retained so completion upgrades the canonical
     /// name slot in place.
@@ -1758,13 +1765,28 @@ impl BodyDraft {
 /// WHY: the walk reads retained `then` bodies while it merges receiver classes in the same state.
 ///      Continuations are read by reference, so no body is copied or collected.
 pub(crate) struct DetachedContinuations {
-    entries: Vec<Option<NumericContinuation>>,
+    entries: Vec<Option<RetainedContinuation>>,
+}
+
+/// One retained continuation together with the lexical constraints it was authored under.
+///
+/// WHAT: the statement payload plus the effective source constraint set at registration.
+/// WHY: body-root completion resumes the statement long after the statement parser restored the
+///      enclosing set. Resolution re-activates this captured set so numeric work still sees the
+///      mode of the statement that authored it, not a sibling's or the enclosing body's mode.
+#[derive(Debug)]
+pub(crate) struct RetainedContinuation {
+    pub(crate) continuation: NumericContinuation,
+    pub(crate) source_constraints: SourceConstraintSet,
 }
 
 impl DetachedContinuations {
     /// Read one detached continuation without taking ownership of its authored payload.
     pub(crate) fn get(&self, id: NumericContinuationId) -> Option<&NumericContinuation> {
-        self.entries.get(id.as_usize()).and_then(Option::as_ref)
+        self.entries
+            .get(id.as_usize())
+            .and_then(Option::as_ref)
+            .map(|retained| &retained.continuation)
     }
 }
 
@@ -1788,7 +1810,7 @@ pub(crate) struct NumericConstructionState {
     next_authored_order: u64,
     binding_authored_order: Vec<u64>,
     /// Retained continuations, taken by dense ID exactly once at body-root completion.
-    continuations: Vec<Option<NumericContinuation>>,
+    continuations: Vec<Option<RetainedContinuation>>,
     /// Forward results held until their first consumer or a connected class completes them.
     forward_producers: Vec<ForwardProducer>,
     /// Edges of declared-substitution nodes, addressed by the ranges those nodes hold.
@@ -2392,10 +2414,14 @@ impl NumericConstructionState {
     pub(crate) fn register_continuation(
         &mut self,
         continuation: NumericContinuation,
+        source_constraints: SourceConstraintSet,
     ) -> Result<NumericContinuationId, InfrastructureFailure> {
         self.ensure_live("a numeric-dependent statement")?;
         let id = NumericContinuationId(checked_dense_id(self.continuations.len(), "continuation")?);
-        self.continuations.push(Some(continuation));
+        self.continuations.push(Some(RetainedContinuation {
+            continuation,
+            source_constraints,
+        }));
         Ok(id)
     }
 
@@ -2409,6 +2435,28 @@ impl NumericConstructionState {
         self.continuations
             .get(id.as_usize())
             .and_then(Option::as_ref)
+            .map(|retained| &retained.continuation)
+    }
+
+    /// Read the lexical constraint set captured with one retained continuation.
+    ///
+    /// WHAT: the effective mode at the statement that authored the continuation.
+    /// WHY: multi-bind slot resolution can complete a retained forward producer directly, without
+    ///      going through `resolve_continuation`; that path must still restore the producer's mode.
+    pub(crate) fn continuation_source_constraints(
+        &self,
+        id: NumericContinuationId,
+    ) -> Result<SourceConstraintSet, InfrastructureFailure> {
+        self.continuations
+            .get(id.as_usize())
+            .and_then(Option::as_ref)
+            .map(|retained| retained.source_constraints)
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "constraint lookup read a numeric continuation that is not live",
+                )
+            })
     }
 
     /// Run one read-only walk over the retained continuations while they are detached.
@@ -2440,8 +2488,10 @@ impl NumericConstructionState {
         id: NumericContinuationId,
         value_index: usize,
     ) -> Result<StatementExpression, InfrastructureFailure> {
-        let Some(Some(NumericContinuation::ThenValue(continuation))) =
-            self.continuations.get_mut(id.as_usize())
+        let Some(Some(RetainedContinuation {
+            continuation: NumericContinuation::ThenValue(continuation),
+            ..
+        })) = self.continuations.get_mut(id.as_usize())
         else {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::AstConstruction,
@@ -2478,8 +2528,10 @@ impl NumericConstructionState {
         value_index: usize,
         expression: ExprId,
     ) -> Result<(), InfrastructureFailure> {
-        let Some(Some(NumericContinuation::ThenValue(continuation))) =
-            self.continuations.get_mut(id.as_usize())
+        let Some(Some(RetainedContinuation {
+            continuation: NumericContinuation::ThenValue(continuation),
+            ..
+        })) = self.continuations.get_mut(id.as_usize())
         else {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::AstConstruction,
@@ -2526,6 +2578,7 @@ impl NumericConstructionState {
             .continuations
             .get(id.as_usize())
             .and_then(Option::as_ref)
+            .map(|retained| &retained.continuation)
         {
             Some(NumericContinuation::ThenValue(continuation)) => Some(continuation),
             _ => None,
@@ -2542,8 +2595,10 @@ impl NumericConstructionState {
         value_index: usize,
         type_id: TypeId,
     ) -> Result<(), InfrastructureFailure> {
-        let Some(Some(NumericContinuation::ThenValue(continuation))) =
-            self.continuations.get_mut(id.as_usize())
+        let Some(Some(RetainedContinuation {
+            continuation: NumericContinuation::ThenValue(continuation),
+            ..
+        })) = self.continuations.get_mut(id.as_usize())
         else {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::AstConstruction,
@@ -2570,7 +2625,7 @@ impl NumericConstructionState {
     pub(crate) fn take_continuation(
         &mut self,
         id: NumericContinuationId,
-    ) -> Option<NumericContinuation> {
+    ) -> Option<RetainedContinuation> {
         self.continuations
             .get_mut(id.as_usize())
             .and_then(Option::take)

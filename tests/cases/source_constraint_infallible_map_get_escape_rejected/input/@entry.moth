@@ -1,0 +1,4 @@
+$infallible
+lookup |scores {String = I32}, name String| -> I32, Error!:
+    return scores.get(name)!
+;

@@ -1,0 +1,7 @@
+$fast_math
+wrapped || -> I8:
+    x #I8 = 127 + 1
+    return x
+;
+
+io.line([:value=[wrapped()]])

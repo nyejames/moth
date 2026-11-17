@@ -97,6 +97,11 @@ init_docs_sidebar()!
         ]
 
         [data:
+            [: In progress]
+            [: Accepted design published and implementation underway. No part of the surface is delivered yet.]
+        ]
+
+        [data:
             [: Deferred]
             [: Planned or design-compatible, but not part of the current implemented Alpha surface.]
         ]
@@ -636,10 +641,18 @@ See @../directives (Directives).]
 
         [data:
             [: Numeric constraint directives]
+            [: Partial]
+            [: Broad]
+            [: Frontend / JS / HTML-Wasm]
+            [$md: Accepted source and numeric contracts are published at @../directives/#constraints (Constraints) and @../../developer-docs/numeric-backend-contract (Numeric backend contract). [$html:<code>$fast_math</code>], [$html:<code>$safe_math</code>] and [$html:<code>$infallible</code>] are implemented in the frontend through directive attachment, typed fast mode, folding and constraint verification. Guarantee-verification failures use the [$html:<code>MOTH-RULE-0091</code>] source-constraint family with bounded three-hop witness chains, and trusted Core contracts cover math, io, text, random and time. Core [$html:<code>@core/collections</code>] callables remain unknown evidence, so a call through them rejects both guarantees, while built-in collection access whose bounds error is caught keeps [$html:<code>$infallible</code>]. HTML-JS lowers full fast arithmetic for supported fixed integers and F16/F32/F64. HTML-Wasm lowers fast arithmetic only for its existing supported scalar surface: fast mode does not widen Wasm support and unsupported operations keep their capability diagnostics. Ordinary arithmetic stays checked and Dec never enters fast mode.]
+        ]
+
+        [data:
+            [: Future constraint names]
             [: Deferred]
             [: None]
             [: Frontend]
-            [: [$html:<code>$fast_math</code>], [$html:<code>$safe_math</code>] and [$html:<code>$infallible</code>] are unimplemented compiler-owned numeric constraints. Ordinary arithmetic remains checked; their exact contracts remain queued design.]
+            [: Future design only: [$html:<code>$pure</code>], [$html:<code>$no_io</code>] and a possible [$html:<code>$no_wrap</code>] are not accepted directive syntax or source permissions and are not registered.]
         ]
     ]
 ]

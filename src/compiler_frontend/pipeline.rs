@@ -60,6 +60,7 @@ use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::{OriginTraitId, StableModuleOriginIdentity};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceDatabaseError, SourceId,
+    SpanResolutionSources,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -661,6 +662,10 @@ impl<'a> CompilerFrontend<'a> {
         prior_diagnostics: Option<&mut DiagnosticBag>,
     ) -> Result<HirLoweringResult, PreparedFailure> {
         let static_if_function_provenance = ast.static_if_function_provenance.clone();
+        let span_sources = SpanResolutionSources::new(
+            Some(self.source_files.as_ref()),
+            frozen_identity_handle.and_then(FrozenIdentityHandle::get),
+        );
         let mut result = lower_module_with_owner(
             ast,
             &mut self.string_table,
@@ -671,6 +676,7 @@ impl<'a> CompilerFrontend<'a> {
             self.external_package_registry.as_ref(),
             frozen_identity_handle,
             prior_diagnostics,
+            span_sources,
         )?;
         for (identity, provenance) in static_if_function_provenance {
             let function_id = match identity {

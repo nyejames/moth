@@ -1,0 +1,10 @@
+@helper identity, seed
+
+$safe_math
+caller || -> I32:
+    return identity(2)
+;
+
+seed()
+value I32 = caller()
+io.line([:value=[value]])

@@ -148,6 +148,22 @@ current value while the endpoint still lies ahead, the loop fails at runtime
 with built-in error code 307 (`RangeStepNoProgress`) rather than repeating that
 value.
 
+### Fast arithmetic ranges
+
+Under `$fast_math`, authored start, end and step expressions use their lexical
+fast mode. Generated step and counter updates still never wrap. The full-width
+endpoint-distance guard stays before every update.
+
+A dynamic zero step, an in-range no-progress candidate and another unavoidable
+semantic range failure become traps instead of recoverable `Error`. A literal
+zero step stays a compile-time diagnostic. An `I32` ordinal overflow also traps
+rather than wrapping. A non-finite or out-of-range *uncommitted* floating
+candidate keeps its ordinary termination rule and does not trap.
+
+Fast range-guard delivery is fast use for `$safe_math`, even when the header
+contains no authored arithmetic. See @../directives/#constraints (Constraints)
+and @../../developer-docs/numeric-backend-contract (Numeric backend contract).
+
 Const range loops diagnose statically known zero and no-progress steps while
 folding. @../constants/#const-templates (Const templates) owns those compile-time
 rules.

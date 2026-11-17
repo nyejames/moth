@@ -1449,6 +1449,7 @@ fn classifier_walks_a_4096_deep_runtime_arithmetic_chain_on_a_1_mib_stack() {
                 u64_type,
                 Some(u64_type),
                 &type_environment,
+                false,
             ) else {
                 panic!("the U64 addition resolves");
             };
@@ -1793,4 +1794,30 @@ fn template_collection_loop_step_failure_follows_the_header_operand_evaluation()
         &[BuiltinErrorCode::InvalidLoopStep]
     );
     assert_eq!(facts.body.implicit[1].span, Some(step_span));
+}
+
+#[test]
+fn fast_range_loops_contribute_no_recoverable_guard_failures() {
+    // A fast range loop's ordinal overflow, zero step and float no-progress guards are fatal
+    // deliveries, so they must not appear as implicit recoverable contributors. Contributors
+    // from authored header operands and loop bodies stay classified by their own mode.
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "$fast_math\n\
+         fast_float |start F32, end F32, step F32| -> F32:\n    loop start to end by step |i|:\n    ;\n    return start\n;\n\
+         $fast_math\n\
+         fast_int |start U64, end U64, step I64| -> U64:\n    loop start to end by step |i|:\n    ;\n    return start\n;\n",
+    );
+    for name in ["fast_float", "fast_int"] {
+        let facts = pending_function_failure_facts(
+            function_body_by_name(&ast, &path_fork, &string_table, name),
+            &TemplateIrStore::new(),
+            &ast.expressions,
+        )
+        .expect("fast range loop facts resolve");
+        assert!(
+            facts.body.implicit.is_empty(),
+            "{name} must not contribute a recoverable generated guard failure: {:?}",
+            facts.body.implicit
+        );
+    }
 }

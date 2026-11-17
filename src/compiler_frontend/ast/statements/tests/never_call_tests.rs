@@ -11,7 +11,8 @@ use crate::compiler_frontend::compiler_errors::CompilationResult;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalAccessKind, ExternalFunctionDef, ExternalFunctionLowerings,
-    ExternalPackageRegistry, ExternalParameter, ExternalSignatureType, external_never,
+    ExternalNumericContract, ExternalPackageRegistry, ExternalParameter, ExternalSignatureType,
+    external_never,
 };
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -218,6 +219,7 @@ fn external_never_registry() -> ExternalPackageRegistry {
             parameters: Vec::new(),
             return_contract: external_never(),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("external Never signature must register");
@@ -240,6 +242,7 @@ fn external_never_registry() -> ExternalPackageRegistry {
             ],
             return_contract: external_never(),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("parameterised external Never signature must register");

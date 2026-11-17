@@ -69,4 +69,5 @@ pub(crate) use registration::SourceRegistrationIndex;
 pub(crate) use span::SpanCapacityReason;
 pub(crate) use span::{
     ExtendedSpanBuilder, LocalSpan, SourceSpan, SpanCapacityError, SpanJoinError,
+    SpanResolutionSources,
 };

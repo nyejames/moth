@@ -1,0 +1,7 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+flags = ["release"]
+rendered_output_contains = ["sum=3 wrapped=3"]

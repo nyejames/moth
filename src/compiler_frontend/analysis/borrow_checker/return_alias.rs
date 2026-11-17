@@ -199,6 +199,10 @@ impl<'a> BorrowChecker<'a> {
                         result: result_local,
                         ..
                     }
+                    | HirStatementKind::FastStoreConversion {
+                        result: result_local,
+                        ..
+                    }
                     | HirStatementKind::LoopStepFailure {
                         result: result_local,
                         ..

@@ -57,6 +57,49 @@ impl NumericOperator {
     }
 }
 
+/// The arithmetic semantics selected for one resolved numeric operation.
+///
+/// WHAT: distinguishes ordinary checked arithmetic from `$fast_math` arithmetic on the operation
+///       itself. Delivery stays separate: `NumericFailureMode` records statement trap/discharge
+///       and `Invoke` records recoverable edges.
+/// WHY: fast integer arithmetic wraps where checked arithmetic reports overflow, so a backend
+///      cannot recover the selected semantics from the operator, domain or failure mode. Dec
+///      never selects fast semantics, and the mode never means "catchable" or "infallible".
+///
+/// Declared `pub` inside the crate-private `datatypes::numeric_operators` module so public HIR
+/// types such as `HirNumericOp` can carry it; the effective visibility stays crate-internal.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum NumericSemantics {
+    /// Checked arithmetic: every possible failure is a typed builtin `Error` edge.
+    #[default]
+    Ordinary,
+    /// `$fast_math` arithmetic: fixed integers wrap, and every remaining fault is a fatal trap.
+    Fast,
+}
+
+impl NumericSemantics {
+    /// Whether this mode wraps fixed integers and traps instead of reporting `Error`.
+    pub(crate) fn is_fast(self) -> bool {
+        matches!(self, NumericSemantics::Fast)
+    }
+}
+
+/// Selects one resolved operation's semantics from the active lexical mode.
+///
+/// WHAT: `Fast` only when the authoring scope selected `$fast_math` and the resolved computation
+///       domain is a fixed integer or binary float. Integer `/` computes in `F64`, so it is fast;
+///       `Dec` domains never are.
+/// WHY: every resolution site reads one selector, so deferred completion, folded-away operations
+///      and HIR construction agree on which operations entered fast mode. Dec has no fast mode at
+///      all, and ordinary checked arithmetic stays the default.
+pub(crate) fn numeric_semantics(domain: NumericScalar, fast_math_active: bool) -> NumericSemantics {
+    if fast_math_active && (domain.is_integer() || domain.is_binary_float()) {
+        NumericSemantics::Fast
+    } else {
+        NumericSemantics::Ordinary
+    }
+}
+
 /// The computation (and result) domain of a binary arithmetic operation, or `None` when the
 /// operand pair does not support the operator.
 ///
@@ -425,5 +468,61 @@ pub(crate) fn numeric_failure_codes(
         &[BuiltinErrorCode::InvalidExponent]
     } else {
         &[]
+    }
+}
+
+/// The fatal trap causes of one fast numeric operation.
+///
+/// WHAT: the single owner of the operator/domain trap-cause set for `NumericSemantics::Fast`.
+///       Empty means the fast operation is total. Fast `+ - *` and unary `-` wrap a fixed integer
+///       and never trap; signed `//` traps on a zero divisor or `MIN // -1`; `%` traps on a zero
+///       divisor only; signed `^` traps on a negative exponent while unsigned `^` cannot fail.
+///       Binary floats trap on a non-finite result, and `/`/`%` additionally on a signed-zero
+///       divisor. `Dec` never enters fast mode, so it has no causes.
+/// WHY: fast failures are fatal traps, not recoverable `Error` edges, so they cannot share the
+///      ordinary code set. Reusing `BuiltinErrorCode` as the cause identity keeps one failure
+///      vocabulary and gives each trap its canonical message without a second taxonomy. HIR
+///      delivery reads this table alone to choose `Infallible` or `Fatal`.
+pub(crate) fn fast_numeric_trap_codes(
+    operator: NumericOperator,
+    domain: NumericScalar,
+) -> &'static [BuiltinErrorCode] {
+    if domain.is_binary_float() {
+        return match operator {
+            NumericOperator::Negate => &[],
+            NumericOperator::Divide | NumericOperator::Remainder => &[
+                BuiltinErrorCode::DivideByZero,
+                BuiltinErrorCode::FloatNonFinite,
+            ],
+            NumericOperator::Add
+            | NumericOperator::Subtract
+            | NumericOperator::Multiply
+            | NumericOperator::Power => &[BuiltinErrorCode::FloatNonFinite],
+            // Truncating division has no binary-float domain; it is only reachable as a
+            // compiler bug, and claiming a cause would misreport it as a fast trap.
+            NumericOperator::IntegerDivide => &[],
+        };
+    }
+    if !domain.is_integer() {
+        return &[];
+    }
+    let signed = domain
+        .integer_range()
+        .is_some_and(|(minimum, _)| minimum < 0);
+    match operator {
+        NumericOperator::Add
+        | NumericOperator::Subtract
+        | NumericOperator::Multiply
+        | NumericOperator::Negate => &[],
+        // Integer `/` always resolves to the real-division `F64` domain, so this arm mirrors the
+        // ordinary zero-divisor rule for a defensive classification only.
+        NumericOperator::Divide | NumericOperator::Remainder => &[BuiltinErrorCode::DivideByZero],
+        NumericOperator::IntegerDivide if signed => &[
+            BuiltinErrorCode::DivideByZero,
+            BuiltinErrorCode::IntOverflow,
+        ],
+        NumericOperator::IntegerDivide => &[BuiltinErrorCode::DivideByZero],
+        NumericOperator::Power if signed => &[BuiltinErrorCode::InvalidExponent],
+        NumericOperator::Power => &[],
     }
 }

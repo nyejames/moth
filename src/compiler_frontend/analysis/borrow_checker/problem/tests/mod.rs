@@ -34,7 +34,7 @@ use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::hir::terminators::{
-    HirFallibleOperation, HirJumpArgument, HirTerminator,
+    HirFallibleOperation, HirJumpArgument, HirTerminator, RuntimeFailureKind,
 };
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
@@ -1467,6 +1467,9 @@ fn borrow_problem_hir_extractor_imports_call_access_and_result_alias_facts() {
             }],
             return_alias: FunctionReturnAliasSummary::AliasParams(vec![0]),
             escapes_builtin_failure: false,
+            uses_fast_semantics: false,
+            may_trap: false,
+            may_fail: false,
         },
     );
     let problem =
@@ -1889,6 +1892,9 @@ fn borrow_problem_hir_extractor_preserves_invoke_edge_definitions_and_return_cha
             parameters: Vec::new(),
             return_alias: FunctionReturnAliasSummary::Fresh,
             escapes_builtin_failure: false,
+            uses_fast_semantics: false,
+            may_trap: false,
+            may_fail: false,
         },
     );
     let problem = from_hir(&module, &function, Some(&summaries), None)
@@ -2312,6 +2318,7 @@ fn hir_direct_self_update_fixture() -> (HirModule, HirFunction) {
             terminator: HirTerminator::RuntimeFailure {
                 message: "self-update fixture complete".to_owned(),
                 cause: None,
+                kind: RuntimeFailureKind::NoMatchFallback,
             },
         },
         expressions,
@@ -2740,6 +2747,9 @@ fn borrow_problem_never_call_ends_argument_liveness_at_the_terminator() {
             }],
             return_alias: FunctionReturnAliasSummary::Fresh,
             escapes_builtin_failure: false,
+            uses_fast_semantics: false,
+            may_trap: false,
+            may_fail: false,
         },
     );
     let problem =

@@ -25,7 +25,7 @@ use crate::compiler_frontend::datatypes::ids::{
     TypeId, builtin_type_ids,
 };
 use crate::compiler_frontend::datatypes::number::NumberValue;
-use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, NumericSemantics};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
@@ -45,7 +45,8 @@ use crate::compiler_frontend::hir::module::{
     HirChoice, HirChoiceField, HirChoiceVariant, HirModule,
 };
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, LoopStepFailureCause, NumericFailureMode,
+    HirFastStoreConversion, HirNumericOp, HirNumericOperands, LoopStepFailureCause,
+    NumericFailureMode,
 };
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelationalPatternOp};
@@ -57,6 +58,7 @@ use crate::compiler_frontend::hir::statements::{
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::{
     HirAssertionMessageEvaluation, HirFallibleOperation, HirJumpArgument, HirTerminator,
+    RuntimeFailureKind,
 };
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -152,6 +154,7 @@ fn append_failure_block(
         terminator: HirTerminator::RuntimeFailure {
             message: "test terminator".to_owned(),
             cause: None,
+            kind: RuntimeFailureKind::NoMatchFallback,
         },
     });
     id
@@ -815,6 +818,14 @@ fn validate_numeric_op_for_test_with_types(
     op: HirNumericOp,
     build_types: impl FnOnce(&mut TypeEnvironment) -> (Vec<TypeId>, TypeId),
 ) -> Result<(), InfrastructureFailure> {
+    validate_numeric_op_for_test_with_mode(op, NumericFailureMode::Trap, build_types)
+}
+
+fn validate_numeric_op_for_test_with_mode(
+    op: HirNumericOp,
+    failure_mode: NumericFailureMode,
+    build_types: impl FnOnce(&mut TypeEnvironment) -> (Vec<TypeId>, TypeId),
+) -> Result<(), InfrastructureFailure> {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let (operand_types, result_type) = build_types(&mut type_environment);
     let span = None;
@@ -867,7 +878,7 @@ fn validate_numeric_op_for_test_with_types(
         id: HirNodeId(9000),
         kind: HirStatementKind::NumericOp {
             op,
-            failure_mode: NumericFailureMode::Trap,
+            failure_mode,
             operands,
             result: HirLocalDestination::Define(result_local),
         },
@@ -890,10 +901,7 @@ fn validate_number_numeric_op_for_test(
     right_domain: Option<NumericScalar>,
 ) -> Result<(), InfrastructureFailure> {
     validate_numeric_op_for_test_with_types(
-        HirNumericOp {
-            operator,
-            domain: NumericScalar::Number(scale),
-        },
+        HirNumericOp::ordinary(operator, NumericScalar::Number(scale)),
         |type_environment| {
             let number_type = type_environment.intern_number(scale);
             let right_type = right_domain.map_or(number_type, |domain| match domain {
@@ -1268,26 +1276,26 @@ fn validator_rejects_numeric_ops_with_invalid_fixed_domains() {
     let u32_type = fixed_type(FixedScalar::U32);
     let cases = [
         (
-            HirNumericOp {
-                operator: NumericOperator::IntegerDivide,
-                domain: NumericScalar::Fixed(FixedScalar::F32),
-            },
+            HirNumericOp::ordinary(
+                NumericOperator::IntegerDivide,
+                NumericScalar::Fixed(FixedScalar::F32),
+            ),
             vec![f32_type, f32_type],
             f32_type,
         ),
         (
-            HirNumericOp {
-                operator: NumericOperator::Divide,
-                domain: NumericScalar::Fixed(FixedScalar::U32),
-            },
+            HirNumericOp::ordinary(
+                NumericOperator::Divide,
+                NumericScalar::Fixed(FixedScalar::U32),
+            ),
             vec![u32_type, u32_type],
             u32_type,
         ),
         (
-            HirNumericOp {
-                operator: NumericOperator::Negate,
-                domain: NumericScalar::Fixed(FixedScalar::U32),
-            },
+            HirNumericOp::ordinary(
+                NumericOperator::Negate,
+                NumericScalar::Fixed(FixedScalar::U32),
+            ),
             vec![u32_type],
             u32_type,
         ),
@@ -1305,10 +1313,7 @@ fn validator_rejects_fixed_numeric_op_operand_type_mismatch() {
     let u8_type = fixed_type(FixedScalar::U8);
     let u32_type = fixed_type(FixedScalar::U32);
     let error = validate_numeric_op_for_test(
-        HirNumericOp {
-            operator: NumericOperator::Add,
-            domain: NumericScalar::Fixed(FixedScalar::U32),
-        },
+        HirNumericOp::ordinary(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U32)),
         &[u8_type, u32_type],
         u32_type,
     )
@@ -1323,48 +1328,45 @@ fn validator_accepts_valid_fixed_numeric_ops() {
     let i32_type = fixed_type(FixedScalar::I32);
 
     validate_numeric_op_for_test(
-        HirNumericOp {
-            operator: NumericOperator::Add,
-            domain: NumericScalar::Fixed(FixedScalar::U32),
-        },
+        HirNumericOp::ordinary(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U32)),
         &[u32_type, u32_type],
         u32_type,
     )
     .expect("valid fixed unsigned addition should pass HIR validation");
     validate_numeric_op_for_test(
-        HirNumericOp {
-            operator: NumericOperator::Negate,
-            domain: NumericScalar::Fixed(FixedScalar::I32),
-        },
+        HirNumericOp::ordinary(
+            NumericOperator::Negate,
+            NumericScalar::Fixed(FixedScalar::I32),
+        ),
         &[i32_type],
         i32_type,
     )
     .expect("valid fixed signed negation should pass HIR validation");
     let f64_type = fixed_type(FixedScalar::F64);
     validate_numeric_op_for_test(
-        HirNumericOp {
-            operator: NumericOperator::Divide,
-            domain: NumericScalar::Fixed(FixedScalar::F64),
-        },
+        HirNumericOp::ordinary(
+            NumericOperator::Divide,
+            NumericScalar::Fixed(FixedScalar::F64),
+        ),
         &[f64_type, f64_type],
         f64_type,
     )
     .expect("valid fixed binary-float division should pass HIR validation");
     validate_numeric_op_for_test(
-        HirNumericOp {
-            operator: NumericOperator::IntegerDivide,
-            domain: NumericScalar::Fixed(FixedScalar::U32),
-        },
+        HirNumericOp::ordinary(
+            NumericOperator::IntegerDivide,
+            NumericScalar::Fixed(FixedScalar::U32),
+        ),
         &[u32_type, u32_type],
         u32_type,
     )
     .expect("valid fixed integer division should pass HIR validation");
     let i8_type = fixed_type(FixedScalar::I8);
     validate_numeric_op_for_test(
-        HirNumericOp {
-            operator: NumericOperator::Negate,
-            domain: NumericScalar::Fixed(FixedScalar::I8),
-        },
+        HirNumericOp::ordinary(
+            NumericOperator::Negate,
+            NumericScalar::Fixed(FixedScalar::I8),
+        ),
         &[i8_type],
         i8_type,
     )
@@ -1475,10 +1477,7 @@ fn validator_accepts_uint_numeric_ops_and_rejects_mixed_or_negated_pairs() {
         NumericOperator::Power,
     ] {
         validate_numeric_op_for_test(
-            HirNumericOp {
-                operator,
-                domain: NumericScalar::Fixed(FixedScalar::U32),
-            },
+            HirNumericOp::ordinary(operator, NumericScalar::Fixed(FixedScalar::U32)),
             &[uint_type, uint_type],
             uint_type,
         )
@@ -1488,10 +1487,10 @@ fn validator_accepts_uint_numeric_ops_and_rejects_mixed_or_negated_pairs() {
     // U32 `/` computes in F64, so a `/` NumericOp in the U32 domain itself
     // is rejected: lowering must convert the operands before emitting it.
     let error = validate_numeric_op_for_test(
-        HirNumericOp {
-            operator: NumericOperator::Divide,
-            domain: NumericScalar::Fixed(FixedScalar::U32),
-        },
+        HirNumericOp::ordinary(
+            NumericOperator::Divide,
+            NumericScalar::Fixed(FixedScalar::U32),
+        ),
         &[uint_type, uint_type],
         uint_type,
     )
@@ -1499,10 +1498,7 @@ fn validator_accepts_uint_numeric_ops_and_rejects_mixed_or_negated_pairs() {
     assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 
     let error = validate_numeric_op_for_test(
-        HirNumericOp {
-            operator: NumericOperator::Add,
-            domain: NumericScalar::Fixed(FixedScalar::U32),
-        },
+        HirNumericOp::ordinary(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U32)),
         &[uint_type, int_type],
         uint_type,
     )
@@ -1510,10 +1506,10 @@ fn validator_accepts_uint_numeric_ops_and_rejects_mixed_or_negated_pairs() {
     assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
 
     let error = validate_numeric_op_for_test(
-        HirNumericOp {
-            operator: NumericOperator::Negate,
-            domain: NumericScalar::Fixed(FixedScalar::U32),
-        },
+        HirNumericOp::ordinary(
+            NumericOperator::Negate,
+            NumericScalar::Fixed(FixedScalar::U32),
+        ),
         &[uint_type],
         uint_type,
     )
@@ -1620,10 +1616,7 @@ fn validator_rejects_number_operator_scale_and_operand_mismatches() {
 fn validator_rejects_unregistered_number_domain_without_panicking() {
     let scale = NumberScale::new(7).expect("test Dec scale is valid");
     let error = validate_numeric_op_for_test(
-        HirNumericOp {
-            operator: NumericOperator::Add,
-            domain: NumericScalar::Number(scale),
-        },
+        HirNumericOp::ordinary(NumericOperator::Add, NumericScalar::Number(scale)),
         &[
             builtin_type_ids::fixed_scalar(FixedScalar::I32),
             builtin_type_ids::fixed_scalar(FixedScalar::I32),
@@ -1868,10 +1861,10 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
     let statement = HirStatement {
         id: HirNodeId(9000),
         kind: HirStatementKind::NumericOp {
-            op: HirNumericOp {
-                operator: NumericOperator::Negate,
-                domain: NumericScalar::Fixed(FixedScalar::I32),
-            },
+            op: HirNumericOp::ordinary(
+                NumericOperator::Negate,
+                NumericScalar::Fixed(FixedScalar::I32),
+            ),
             failure_mode: NumericFailureMode::Trap,
             operands: HirNumericOperands::Binary { left, right },
             result: HirLocalDestination::Define(result_local),
@@ -1924,10 +1917,10 @@ fn validator_rejects_numeric_op_operand_domain_mismatch() {
     let statement = HirStatement {
         id: HirNodeId(9000),
         kind: HirStatementKind::NumericOp {
-            op: HirNumericOp {
-                operator: NumericOperator::Add,
-                domain: NumericScalar::Fixed(FixedScalar::I32),
-            },
+            op: HirNumericOp::ordinary(
+                NumericOperator::Add,
+                NumericScalar::Fixed(FixedScalar::I32),
+            ),
             failure_mode: NumericFailureMode::Trap,
             operands: HirNumericOperands::Binary { left, right },
             result: HirLocalDestination::Define(result_local),
@@ -1973,10 +1966,10 @@ fn validator_rejects_integer_divide_on_float_domain() {
     let statement = HirStatement {
         id: HirNodeId(9000),
         kind: HirStatementKind::NumericOp {
-            op: HirNumericOp {
-                operator: NumericOperator::IntegerDivide,
-                domain: NumericScalar::Fixed(FixedScalar::F64),
-            },
+            op: HirNumericOp::ordinary(
+                NumericOperator::IntegerDivide,
+                NumericScalar::Fixed(FixedScalar::F64),
+            ),
             failure_mode: NumericFailureMode::Trap,
             operands: HirNumericOperands::Binary { left, right },
             result: HirLocalDestination::Define(result_local),
@@ -2451,7 +2444,7 @@ fn validator_rejects_format_float_trap_with_non_string_result() {
 }
 
 #[test]
-fn validator_rejects_discharged_mode_on_float_and_range_step_statements() {
+fn validator_rejects_discharged_mode_on_float_statements_and_accepts_fast_range_guards() {
     let dummy_source = || HirValueId(0);
     // (statement kind under test, expected rejection): the `inject_float_statement`
     // fixture reads the failure mode off the passed kind, so each case reuses it;
@@ -2500,6 +2493,8 @@ fn validator_rejects_discharged_mode_on_float_and_range_step_statements() {
         );
     }
 
+    // A fast range guard is the loop-step statement that must fail fatally; its delivery is
+    // derived from the loop mode, so there is no separate mode field to disagree.
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
     let entry_block_index = start_entry_block_index(&module);
@@ -2516,29 +2511,20 @@ fn validator_rejects_discharged_mode_on_float_and_range_step_statements() {
         id: HirNodeId(9000),
         kind: HirStatementKind::LoopStepFailure {
             cause: LoopStepFailureCause::ZeroStep,
-            failure_mode: NumericFailureMode::Infallible,
+            semantics: NumericSemantics::Fast,
             result: HirLocalDestination::Define(result_local),
         },
         span,
     };
     module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
-
-    let error = validate_module_for_tests(
+    validate_module_for_tests(
         &module,
         &string_table,
         &type_environment,
         &ExternalPackageRegistry::new(),
     )
-    .expect_err("validator should reject Infallible on LoopStepFailure");
-    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
-    assert!(
-        error
-            .message
-            .contains("LoopStepFailure cannot use the discharged numeric mode"),
-        "unexpected rejection message: {}",
-        error.message
-    );
+    .expect("a fast range guard must validate with fatal delivery");
 }
 
 #[test]
@@ -3172,7 +3158,7 @@ fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
         entry,
         HirStatementKind::LoopStepFailure {
             cause: LoopStepFailureCause::ZeroStep,
-            failure_mode: NumericFailureMode::Trap,
+            semantics: NumericSemantics::Ordinary,
             result: HirLocalDestination::Define(parameter),
         },
     );
@@ -3195,7 +3181,7 @@ fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
         entry,
         HirStatementKind::LoopStepFailure {
             cause: LoopStepFailureCause::ZeroStep,
-            failure_mode: NumericFailureMode::Trap,
+            semantics: NumericSemantics::Ordinary,
             result: HirLocalDestination::Update(parameter),
         },
     );
@@ -6243,4 +6229,240 @@ fn validator_rejects_a_second_entry_origin() {
         "error should reject the ambiguous entry origin, got: {}",
         error.message
     );
+}
+
+#[test]
+fn validator_checks_numeric_delivery_against_selected_semantics() {
+    let i32_type = fixed_type(FixedScalar::I32);
+    let i32_operands =
+        |_type_environment: &mut TypeEnvironment| (vec![i32_type, i32_type], i32_type);
+    let add = |semantics| HirNumericOp {
+        operator: NumericOperator::Add,
+        domain: NumericScalar::Fixed(FixedScalar::I32),
+        semantics,
+    };
+    let integer_divide = |semantics| HirNumericOp {
+        operator: NumericOperator::IntegerDivide,
+        domain: NumericScalar::Fixed(FixedScalar::I32),
+        semantics,
+    };
+
+    // Ordinary checked arithmetic may trap or be semantically discharged.
+    validate_numeric_op_for_test_with_mode(
+        add(NumericSemantics::Ordinary),
+        NumericFailureMode::Trap,
+        i32_operands,
+    )
+    .expect("ordinary checked arithmetic accepts trap delivery");
+
+    // The generated fast-loop ordinal keeps ordinary checked semantics but requests fatal
+    // delivery, which the validator accepts as a delivery-only distinction.
+    validate_numeric_op_for_test_with_mode(
+        add(NumericSemantics::Ordinary),
+        NumericFailureMode::Fatal,
+        i32_operands,
+    )
+    .expect("an ordinary generated ordinal may deliver fatally");
+
+    // Fast `I32 +` wraps and never traps, so the operation must be discharged.
+    validate_numeric_op_for_test_with_mode(
+        add(NumericSemantics::Fast),
+        NumericFailureMode::Infallible,
+        i32_operands,
+    )
+    .expect("fast integer wrapping addition must use the discharged delivery");
+    for failure_mode in [NumericFailureMode::Fatal, NumericFailureMode::Trap] {
+        let error = validate_numeric_op_for_test_with_mode(
+            add(NumericSemantics::Fast),
+            failure_mode,
+            i32_operands,
+        )
+        .expect_err("fast wrapping addition cannot claim a failure edge");
+        assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+        assert!(
+            error
+                .message
+                .contains("fast delivery does not match its trap causes"),
+            "unexpected rejection message: {}",
+            error.message
+        );
+    }
+
+    // Fast truncating division traps on a zero divisor, so it fails fatally.
+    validate_numeric_op_for_test_with_mode(
+        integer_divide(NumericSemantics::Fast),
+        NumericFailureMode::Fatal,
+        i32_operands,
+    )
+    .expect("fast fallible division uses fatal delivery");
+    for failure_mode in [NumericFailureMode::Trap, NumericFailureMode::Infallible] {
+        let error = validate_numeric_op_for_test_with_mode(
+            integer_divide(NumericSemantics::Fast),
+            failure_mode,
+            i32_operands,
+        )
+        .expect_err("fast division by a runtime zero cannot claim another delivery");
+        assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+        assert!(
+            error
+                .message
+                .contains("fast delivery does not match its trap causes"),
+            "unexpected rejection message: {}",
+            error.message
+        );
+    }
+
+    // Binary-float fast addition traps on a non-finite result, so it fails fatally.
+    let f64_type = fixed_type(FixedScalar::F64);
+    let f64_operands =
+        move |_type_environment: &mut TypeEnvironment| (vec![f64_type, f64_type], f64_type);
+    validate_numeric_op_for_test_with_mode(
+        HirNumericOp {
+            operator: NumericOperator::Add,
+            domain: NumericScalar::Fixed(FixedScalar::F64),
+            semantics: NumericSemantics::Fast,
+        },
+        NumericFailureMode::Fatal,
+        f64_operands,
+    )
+    .expect("fast binary-float addition keeps fatal delivery");
+
+    // `Dec` never selects fast semantics even though the delivery matches a trap cause.
+    let scale = NumberScale::new(2).expect("test Dec scale is valid");
+    let error = validate_numeric_op_for_test_with_mode(
+        HirNumericOp {
+            operator: NumericOperator::Add,
+            domain: NumericScalar::Number(scale),
+            semantics: NumericSemantics::Fast,
+        },
+        NumericFailureMode::Trap,
+        move |type_environment| {
+            let number_type = type_environment.intern_number(scale);
+            (vec![number_type, number_type], number_type)
+        },
+    )
+    .expect_err("Dec must never use fast semantics");
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(
+        error.message.contains("fast semantics requires"),
+        "unexpected rejection message: {}",
+        error.message
+    );
+}
+
+/// Validates one hand-built fast compound write-back statement.
+///
+/// WHAT: injects the conversion, its source load and its destination local into the minimal
+///       module, interning any `Dec` scale first so scalar-to-type lookup stays total.
+/// WHY: fast write-back validation owns its own domain invariants; lowering can never produce an
+///      invalid pair, so only a synthetic statement can prove the rejection.
+fn validate_fast_store_conversion_for_test(
+    conversion: HirFastStoreConversion,
+) -> Result<(), InfrastructureFailure> {
+    let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+    for scalar in [conversion.source, conversion.target] {
+        if let NumericScalar::Number(scale) = scalar {
+            type_environment.intern_number(scale);
+        }
+    }
+
+    let span = None;
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let source_type = conversion.source.type_id(&type_environment);
+    let target_type = conversion.target.type_id(&type_environment);
+    let source_local = LocalId(9000);
+    let result_local = LocalId(9001);
+
+    for (local_id, ty) in [(source_local, source_type), (result_local, target_type)] {
+        module.blocks[entry_block_index].locals.push(HirLocal {
+            id: local_id,
+            ty,
+            mutable: false,
+            region: entry_region,
+            span: None,
+        });
+    }
+    let function = module
+        .start_function
+        .expect("test module should have start");
+    module.functions[function.0 as usize]
+        .params
+        .push(source_local);
+
+    let source = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Load(HirPlace::local(source_local)),
+        source_type,
+        entry_region,
+        ValueKind::RValue,
+    );
+    module.side_table.map_value(span, source);
+
+    let statement = HirStatement {
+        id: HirNodeId(9000),
+        kind: HirStatementKind::FastStoreConversion {
+            conversion,
+            source,
+            result: HirLocalDestination::Define(result_local),
+        },
+        span,
+    };
+    module.side_table.map_statement(span, &statement);
+    module.blocks[entry_block_index].statements.push(statement);
+
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+}
+
+#[test]
+fn fast_store_conversion_accepts_its_classified_domains() {
+    validate_fast_store_conversion_for_test(HirFastStoreConversion {
+        source: NumericScalar::Fixed(FixedScalar::I16),
+        target: NumericScalar::Fixed(FixedScalar::I8),
+    })
+    .expect("an integer wrap is a total fast write-back");
+
+    validate_fast_store_conversion_for_test(HirFastStoreConversion {
+        source: NumericScalar::Fixed(FixedScalar::F64),
+        target: NumericScalar::Fixed(FixedScalar::I32),
+    })
+    .expect("a float-to-integer fast write-back traps when out of range");
+
+    validate_fast_store_conversion_for_test(HirFastStoreConversion {
+        source: NumericScalar::Fixed(FixedScalar::F64),
+        target: NumericScalar::Fixed(FixedScalar::F32),
+    })
+    .expect("a float-to-float fast write-back traps when non-finite");
+}
+
+#[test]
+fn fast_store_conversion_rejects_dec_domains() {
+    let scale = NumberScale::new(2).expect("test Dec scale is valid");
+
+    for conversion in [
+        HirFastStoreConversion {
+            source: NumericScalar::Number(scale),
+            target: NumericScalar::Fixed(FixedScalar::I32),
+        },
+        HirFastStoreConversion {
+            source: NumericScalar::Fixed(FixedScalar::I32),
+            target: NumericScalar::Number(scale),
+        },
+    ] {
+        let error = validate_fast_store_conversion_for_test(conversion)
+            .expect_err("Dec domains must never take the fast write-back");
+        assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+        assert!(
+            error
+                .message
+                .contains("not a permitted fixed numeric write-back"),
+            "unexpected rejection message: {}",
+            error.message
+        );
+    }
 }

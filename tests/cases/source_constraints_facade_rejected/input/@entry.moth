@@ -1,0 +1,8 @@
+@helper public_wrapper
+
+$safe_math
+facade_wrapper |value I32| -> I32:
+    return public_wrapper(value)
+;
+
+~[:value=[facade_wrapper(1)]]

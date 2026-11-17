@@ -1,0 +1,9 @@
+@helper double
+
+$safe_math
+caller |value I32| -> I32:
+    return double(value)
+;
+
+result I32 = caller(2)
+io.line([:value=[result]])

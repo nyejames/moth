@@ -1,0 +1,14 @@
+-- A runtime-untaken branch keeps its trapping operation unexecuted. Both branches are statically
+-- reachable, so a branch condition alone decides whether the trap runs.
+$fast_math
+guarded |left I32, right I32| -> I32:
+    if left is right:
+        return left // right
+    ;
+    return 99
+;
+
+seven I32 = 7
+zero I32 = 0
+value = guarded(seven, zero)
+~[:value=[value]]

@@ -11,7 +11,7 @@
 use crate::backends::js::JsEmitter;
 use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::hir::ids::BlockId;
-use crate::compiler_frontend::hir::utils::terminator_targets;
+use crate::compiler_frontend::hir::utils::for_each_terminator_target;
 
 impl<'hir> JsEmitter<'hir> {
     pub(crate) fn collect_reachable_blocks(
@@ -20,9 +20,10 @@ impl<'hir> JsEmitter<'hir> {
     ) -> Result<Vec<BlockId>, InfrastructureFailure> {
         let mut order = crate::compiler_frontend::hir::utils::collect_reachable_blocks(
             entry_block,
-            |block_id| {
+            |block_id, visit| {
                 let block = self.block_by_id(block_id)?;
-                Ok::<_, InfrastructureFailure>(terminator_targets(&block.terminator))
+                for_each_terminator_target(&block.terminator, visit);
+                Ok::<_, InfrastructureFailure>(())
             },
         )?;
         order.sort_by_key(|block_id| block_id.0);

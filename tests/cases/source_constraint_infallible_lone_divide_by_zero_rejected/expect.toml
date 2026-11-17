@@ -1,0 +1,19 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0091", "MOTH-RULE-0091"]
+message_contains = ["`$infallible` forbids reachable traps, but this boundary's integer division or remainder may divide by zero."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 1
+reason = "invalid_source_constraint.trap_divide_by_zero"
+path = "input/@entry.moth"
+line = 1
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 2
+reason = "invalid_source_constraint.trap_divide_by_zero"
+path = "input/@entry.moth"
+line = 6

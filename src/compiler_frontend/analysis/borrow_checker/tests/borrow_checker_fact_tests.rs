@@ -24,8 +24,8 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
-    CallTarget, ExternalAbiType, ExternalFunctionDef, ExternalFunctionLowerings, ExternalParameter,
-    ExternalReturnSlot, ExternalSignatureType,
+    CallTarget, ExternalAbiType, ExternalFunctionDef, ExternalFunctionLowerings,
+    ExternalNumericContract, ExternalParameter, ExternalReturnSlot, ExternalSignatureType,
 };
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirValueRange};
@@ -2538,6 +2538,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                 Some(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
             ),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("unknown external fixture registration should succeed");
@@ -2983,7 +2984,8 @@ fn collect_statement_values(
             }
         },
         HirStatementKind::FormatFloat { source, .. }
-        | HirStatementKind::ValidateFloat { source, .. } => {
+        | HirStatementKind::ValidateFloat { source, .. }
+        | HirStatementKind::FastStoreConversion { source, .. } => {
             collect_expression_values(expressions, *source, out);
         }
         HirStatementKind::RangeCandidate {

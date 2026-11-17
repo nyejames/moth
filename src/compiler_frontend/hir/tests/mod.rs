@@ -27,6 +27,9 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 };
 
 mod checked_numeric_lowering_tests;
+mod constraint_evidence_tests;
+mod constraint_facts_tests;
+mod fast_numeric_lowering_tests;
 mod float_formatting_lowering_tests;
 mod hir_branch_lowering_tests;
 mod hir_display_tests;

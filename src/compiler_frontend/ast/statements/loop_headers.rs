@@ -214,6 +214,7 @@ impl ParsedRangeSpec {
                     end_kind,
                     step: step.map(|id| parser.expression_builder.own(id)),
                     omitted_start_span: span,
+                    fast_math: parser.scope_context.source_constraints().fast_math_active(),
                 },
                 parser.type_interner,
                 parser.expression_builder,
@@ -1222,16 +1223,19 @@ fn range_slot_span(
 
 /// The authored range operand slots once every one of them is complete.
 ///
-/// WHAT: the completed start, end and step expressions, the authored end kind and the span of an
-///       omitted start.
+/// WHAT: the completed start, end and step expressions, the authored end kind, the span of an
+///       omitted start and the loop statement's captured lexical mode.
 /// WHY: the shared range policy consumes exactly these authored positions, so grouping them keeps
 ///      the policy's inputs and the parser services it borrows separate without a long signature.
+///      The mode travels with the operands because completion runs after the statement parser has
+///      restored the enclosing scope's constraint set.
 pub(crate) struct CompletedRangeOperands {
     pub(crate) start: Option<OwnedExpr>,
     pub(crate) end: OwnedExpr,
     pub(crate) end_kind: RangeEndKind,
     pub(crate) step: Option<OwnedExpr>,
     pub(crate) omitted_start_span: Option<SourceSpan>,
+    pub(crate) fast_math: bool,
 }
 
 /// Build one range loop spec from operands that are already complete.
@@ -1254,6 +1258,7 @@ pub(crate) fn range_loop_spec_from_completed_operands(
         end_kind,
         step,
         omitted_start_span,
+        fast_math,
     } = operands;
     let type_environment = type_interner.environment();
     let selection = range_numeric_domain(
@@ -1312,6 +1317,7 @@ pub(crate) fn range_loop_spec_from_completed_operands(
         end_kind,
         step: step.map(OwnedExpr::id),
         domain,
+        fast_math,
     })
 }
 

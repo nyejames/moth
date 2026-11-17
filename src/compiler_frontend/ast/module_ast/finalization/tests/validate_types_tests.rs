@@ -333,6 +333,7 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
                             end_kind: RangeEndKind::Exclusive,
                             step: None,
                             domain: NumericScalar::Fixed(FixedScalar::I32),
+                            fast_math: false,
                         }),
                     },
                     body: empty_loop_body(),
@@ -482,6 +483,7 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                 end_kind: RangeEndKind::Exclusive,
                 step: None,
                 domain: NumericScalar::Fixed(FixedScalar::I32),
+                fast_math: false,
             }),
         },
         TemplateLoopHeader::Range {
@@ -498,6 +500,7 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                 end_kind: RangeEndKind::Exclusive,
                 step: None,
                 domain: NumericScalar::Fixed(FixedScalar::I32),
+                fast_math: false,
             }),
         },
         TemplateLoopHeader::Range {
@@ -517,6 +520,7 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                 end_kind: RangeEndKind::Exclusive,
                 step: Some(orphan_bool_expression(&mut expressions)),
                 domain: NumericScalar::Fixed(FixedScalar::I32),
+                fast_math: false,
             }),
         },
         TemplateLoopHeader::Range {
@@ -536,6 +540,7 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                 end_kind: RangeEndKind::Exclusive,
                 step: None,
                 domain: NumericScalar::Fixed(FixedScalar::I32),
+                fast_math: false,
             }),
         },
         TemplateLoopHeader::Collection {

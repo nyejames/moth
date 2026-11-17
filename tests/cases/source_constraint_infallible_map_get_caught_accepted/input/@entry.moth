@@ -1,0 +1,9 @@
+$infallible
+lookup |scores {String = I32}, name String| -> I32:
+    score I32 = scores.get(name) catch then 0
+    return score
+;
+
+scores {String = I32} = {"Priya" = 10}
+
+~[:present=[lookup(scores, "Priya")] missing=[lookup(scores, "Rob")]]

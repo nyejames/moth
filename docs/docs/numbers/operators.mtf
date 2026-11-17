@@ -14,6 +14,12 @@ Moth uses word forms for equality and logic:
 
 ### Fixed integer arithmetic
 
+The default checked mode checks each operation in its selected domain. The
+`$fast_math` constraint selects a portable modular result for eligible
+operations in its lexical scope. Both modes use the same domain table below.
+See @../directives/#constraints (Constraints) and
+@../../developer-docs/numeric-backend-contract (Numeric backend contract).
+
 Fixed integer `+`, `-`, `*`, `//`, `%` and `^` choose one common operand
 domain from the complete declared ranges:
 
@@ -94,6 +100,9 @@ domain:
     [td: [: F32 + F64] [: F64]]
 ]
 
+`$fast_math` changes failure delivery only. Rounding and finite-result checks
+stay at the selected precision. See @./#checked-arithmetic (Checked arithmetic).
+
 Binary floats do not support `//`. Each operation completes at its selected
 semantic precision. `F16` rounds after every language-level operation and
 checks finiteness there. An `F32` carrier may implement an `F16` operation, but
@@ -107,6 +116,9 @@ contracts still apply; this rule adds no new correctly-rounded Core Math
 promise.
 
 ### `Dec` arithmetic
+
+Dec has no fast numeric mode. `$fast_math` leaves every Dec operation and every
+conversion involving Dec on these ordinary rules.
 
 - Same-scale `+` and `-` and unary minus are exact.
 - Multiplication computes the exact product then rounds half-even to the result scale.
@@ -150,13 +162,19 @@ characters).
 `+=`, `-=`, `*=`, `/=`, `//=`, `%=` and `^=` use the ordinary operator
 domain, then perform a checked conversion back when the result type differs
 from the left-hand type. Same-type updates add no artificial promotion and
-narrowing pair, but their arithmetic still checks and the store commits only
-on success.
+narrowing pair. These are the ordinary-mode rules and checked arithmetic stays
+the default.
+
+Under `$fast_math`, eligible arithmetic uses fast semantics. An implicit
+write-back follows the fast conversion rules in
+@../../developer-docs/numeric-backend-contract (Numeric backend contract). It
+never reuses ordinary checked narrowing. An explicit `cast` keeps its ordinary
+failure policy.
 
 - Evaluate the place and right operand once.
-- Write only after arithmetic and any write-back conversion succeed.
-- A `catch` on the right-hand expression protects that expression only. Later arithmetic and write-back can still fail.
-- Integer `/=` uses its `F64` result and the checked conversion back. Use `//=` for integer division.
+- Write only after arithmetic and write-back complete. A trap leaves the target unchanged.
+- A `catch` on the right-hand expression protects that expression only. Later arithmetic and write-back keep their own obligations.
+- Integer `/=` uses its `F64` result, while `//=` uses integer division. The conversion back follows the active mode.
 
 To recover a whole update locally, catch a private helper call or compute and
 check the replacement before assignment. See

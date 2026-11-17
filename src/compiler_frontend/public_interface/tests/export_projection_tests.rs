@@ -18,8 +18,8 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
-    ExternalConstEvalOp, ExternalFunctionDef, ExternalFunctionLowerings, ExternalPackageRegistry,
-    ExternalSymbolId, TextConstEvalOp,
+    ExternalConstEvalOp, ExternalFunctionDef, ExternalFunctionLowerings, ExternalNumericContract,
+    ExternalPackageRegistry, ExternalSymbolId, TextConstEvalOp,
 };
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleSymbols, PublicExportEntry, PublicExportTarget,
@@ -656,6 +656,7 @@ fn external_binding_export_identity_resolves_in_independent_registry() {
             parameters: Vec::new(),
             return_contract: external_returns(Vec::new(), None),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("decoy test function should register");

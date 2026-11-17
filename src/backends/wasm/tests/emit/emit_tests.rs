@@ -5,10 +5,10 @@ use crate::backends::wasm::emit::sections::{
 };
 use crate::backends::wasm::lir::function::{WasmLirBlock, WasmLirFunction, WasmLirFunctionOrigin};
 use crate::backends::wasm::lir::instructions::{
-    IntegerCheckMode, WasmCalleeRef, WasmCheckedIntegerOperation, WasmIntegerOperationKind,
-    WasmIntegerPowerScratch, WasmIntegerRangeCandidate, WasmIntegerRangeCandidateScratch,
-    WasmIntegerScratch, WasmLirStmt, WasmLirTerminator, WasmNumericOperationOperands,
-    WasmRangeCandidateKind,
+    IntegerCheckMode, WasmCalleeRef, WasmCheckedIntegerOperation, WasmFastIntegerOperation,
+    WasmFastStoreConversion, WasmIntegerOperationKind, WasmIntegerPowerScratch,
+    WasmIntegerRangeCandidate, WasmIntegerRangeCandidateScratch, WasmIntegerScratch, WasmLirStmt,
+    WasmLirTerminator, WasmNumericOperationOperands, WasmRangeCandidateKind,
 };
 use crate::backends::wasm::lir::linkage::{
     WasmExport, WasmExportKind, WasmFunctionLinkage, WasmImport, WasmImportKind,
@@ -874,6 +874,21 @@ fn checked_float_machine_boundaries_execute_with_native_traps() {
             1.0,
             0.0,
         ),
+        // Both zero signs are zero divisors for `/` and `%`, not positive zero alone.
+        checked_float_binary_case(
+            "f32_divide_negative_zero",
+            BinaryFloatPrecision::Binary32,
+            NumericOperator::Divide,
+            1.0,
+            -0.0,
+        ),
+        checked_float_binary_case(
+            "f64_remainder_negative_zero",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Remainder,
+            1.0,
+            -0.0,
+        ),
         checked_float_binary_case(
             "f32_add_overflow",
             BinaryFloatPrecision::Binary32,
@@ -1092,6 +1107,118 @@ fn validate_float_preserves_finite_bits_and_traps_nonfinite_values_in_node() {
                 );
             }
         }
+    }
+}
+
+/// One exported `F64 -> F32` fast write-back that returns the stored F32 result.
+///
+/// WHY: the fast write-back rounding rule is an LIR instruction-selection contract. Only exact
+///      returned bits can distinguish a demote from a Number detour, and signed zero and
+///      subnormals are otherwise invisible to source-level output.
+fn build_fast_float_round_module(cases: &[(&'static str, f64)]) -> WasmLirModule {
+    let mut module = WasmLirModule::default();
+    for (index, (name, value)) in cases.iter().enumerate() {
+        let source = WasmLirLocalId(0);
+        let dst = WasmLirLocalId(1);
+        module.functions.push(WasmLirFunction {
+            id: WasmLirFunctionId(index as u32),
+            debug_name: (*name).to_owned(),
+            origin: WasmLirFunctionOrigin::ExportWrapper,
+            signature: WasmLirSignature {
+                params: vec![],
+                results: vec![WasmAbiType::F32],
+            },
+            locals: vec![
+                local(source.0, WasmAbiType::F64, "source"),
+                local(dst.0, WasmAbiType::F32, "converted"),
+            ],
+            blocks: vec![WasmLirBlock {
+                id: WasmLirBlockId(0),
+                statements: vec![
+                    WasmLirStmt::ConstF64 {
+                        dst: source,
+                        value: *value,
+                    },
+                    WasmLirStmt::FastStoreConversion {
+                        dst,
+                        source,
+                        conversion: WasmFastStoreConversion::FloatRound {
+                            precision: BinaryFloatPrecision::Binary32,
+                        },
+                    },
+                ],
+                terminator: WasmLirTerminator::Return { values: vec![dst] },
+            }],
+            linkage: WasmFunctionLinkage::ExportedWrapper,
+        });
+        module.exports.push(WasmExport {
+            export_name: (*name).to_owned(),
+            kind: WasmExportKind::Function(WasmLirFunctionId(index as u32)),
+        });
+    }
+    module
+}
+
+#[test]
+fn fast_f32_write_back_preserves_subnormal_and_signed_zero_bits_in_node() {
+    let cases = [
+        // Smallest F64 subnormal demotes to positive zero without trapping.
+        ("underflow_to_zero", f64::from_bits(1), "00000000"),
+        // A value below the smallest normal F32 demotes to the smallest subnormal.
+        ("min_subnormal", 1e-45, "00000001"),
+        ("negative_min_subnormal", -1e-45, "80000001"),
+        // Negative zero keeps its sign bit through the demote.
+        ("negative_zero", -0.0, "80000000"),
+        // The largest finite F32 stays exact at the boundary.
+        ("largest_finite_f32", f64::from(f32::MAX), "7f7fffff"),
+    ];
+    let overflow_cases = [
+        ("overflow_positive", f64::MAX),
+        ("overflow_negative", -f64::MAX),
+        ("nan_source", f64::NAN),
+    ];
+    let mut rows: Vec<(&'static str, f64)> = cases
+        .iter()
+        .map(|(name, value, _)| (*name, *value))
+        .collect();
+    rows.extend(overflow_cases);
+
+    let module = build_fast_float_round_module(&rows);
+    let result = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
+        .expect("fast float write-back LIR should emit");
+    validate_wasm(&result.wasm_bytes);
+
+    let export_specs: Vec<(&str, Option<BinaryFloatPrecision>)> = rows
+        .iter()
+        .map(|(name, _)| (*name, Some(BinaryFloatPrecision::Binary32)))
+        .collect();
+    let actual = execute_wasm_checked_exports_in_node(&result.wasm_bytes, &export_specs);
+    assert_eq!(actual.len(), rows.len());
+    let mut actual_rows = actual.iter();
+
+    for (name, _, expected_bits) in cases {
+        let (actual_name, status, value) = actual_rows.next().expect("Node row");
+        assert_eq!(actual_name.as_str(), name);
+        assert_eq!(
+            status, "ok",
+            "{name} must underflow without trapping, found {status} {value}"
+        );
+        assert_eq!(
+            value, expected_bits,
+            "{name} must keep the exact demoted bits, found {value:?}"
+        );
+    }
+    for (name, _) in overflow_cases {
+        let (actual_name, status, value) = actual_rows.next().expect("Node row");
+        assert_eq!(actual_name.as_str(), name);
+        assert_eq!(
+            status, "trap",
+            "{name} must trap when demoting to a non-finite F32, found {status} {value}"
+        );
+        assert!(
+            value.contains("unreachable"),
+            "{name} should trap through Wasm unreachable, found {value:?}"
+        );
     }
 }
 
@@ -2995,6 +3122,365 @@ fn push_scalar_local(
     id
 }
 
+#[test]
+fn fast_integer_machine_boundaries_wrap_trap_and_stay_modular() {
+    let cases = [
+        (
+            "i32_add_wrap",
+            WasmIntegerOperationKind::Signed32,
+            NumericOperator::Add,
+            i32::MAX as i64,
+            1,
+        ),
+        (
+            "u32_add_wrap",
+            WasmIntegerOperationKind::Unsigned32,
+            NumericOperator::Add,
+            -1,
+            2,
+        ),
+        (
+            "i32_multiply_wrap",
+            WasmIntegerOperationKind::Signed32,
+            NumericOperator::Multiply,
+            65_537,
+            65_537,
+        ),
+        (
+            "u64_multiply_wrap",
+            WasmIntegerOperationKind::Unsigned64,
+            NumericOperator::Multiply,
+            -1,
+            2,
+        ),
+        (
+            "i64_subtract_wrap",
+            WasmIntegerOperationKind::Signed64,
+            NumericOperator::Subtract,
+            i64::MIN,
+            1,
+        ),
+        (
+            "i32_negate_minimum",
+            WasmIntegerOperationKind::Signed32,
+            NumericOperator::Negate,
+            i32::MIN as i64,
+            0,
+        ),
+        (
+            "i32_divide_min_by_negative_one",
+            WasmIntegerOperationKind::Signed32,
+            NumericOperator::IntegerDivide,
+            i32::MIN as i64,
+            -1,
+        ),
+        (
+            "i32_divide_by_zero",
+            WasmIntegerOperationKind::Signed32,
+            NumericOperator::IntegerDivide,
+            7,
+            0,
+        ),
+        (
+            "u32_remainder_by_zero",
+            WasmIntegerOperationKind::Unsigned32,
+            NumericOperator::Remainder,
+            7,
+            0,
+        ),
+        (
+            "i32_remainder_min_by_negative_one",
+            WasmIntegerOperationKind::Signed32,
+            NumericOperator::Remainder,
+            i32::MIN as i64,
+            -1,
+        ),
+        (
+            "i64_remainder_min_by_negative_one",
+            WasmIntegerOperationKind::Signed64,
+            NumericOperator::Remainder,
+            i64::MIN,
+            -1,
+        ),
+        (
+            "i32_divide_truncates_toward_zero",
+            WasmIntegerOperationKind::Signed32,
+            NumericOperator::IntegerDivide,
+            -9,
+            8,
+        ),
+        (
+            "u64_divide_max_by_two",
+            WasmIntegerOperationKind::Unsigned64,
+            NumericOperator::IntegerDivide,
+            -1,
+            2,
+        ),
+        (
+            "i32_power_wraps",
+            WasmIntegerOperationKind::Signed32,
+            NumericOperator::Power,
+            3,
+            20,
+        ),
+        (
+            "u64_power_wraps",
+            WasmIntegerOperationKind::Unsigned64,
+            NumericOperator::Power,
+            3,
+            40,
+        ),
+        (
+            "u32_power_zero_exponent",
+            WasmIntegerOperationKind::Unsigned32,
+            NumericOperator::Power,
+            0,
+            0,
+        ),
+        (
+            "u32_power_max_exponent",
+            WasmIntegerOperationKind::Unsigned32,
+            NumericOperator::Power,
+            2,
+            -1,
+        ),
+        (
+            "i32_power_negative_exponent",
+            WasmIntegerOperationKind::Signed32,
+            NumericOperator::Power,
+            2,
+            -1,
+        ),
+    ];
+
+    let mut module = WasmLirModule::default();
+    for (function_index, (name, kind, operator, left_value, right_value)) in
+        cases.into_iter().enumerate()
+    {
+        let function_id = WasmLirFunctionId(function_index as u32);
+        let (function, export) = fast_integer_boundary_function(
+            function_id,
+            name,
+            kind,
+            operator,
+            left_value,
+            right_value,
+        );
+        module.functions.push(function);
+        module.exports.push(export);
+    }
+    // The fast emitter reads every operand local before storing the result, so an in-place
+    // destination is semantics-safe without a lowering temp. This export pins that property.
+    {
+        let function_id = WasmLirFunctionId(module.functions.len() as u32);
+        let (function, export) =
+            fast_integer_aliasing_function(function_id, "i32_add_aliases_source");
+        module.functions.push(function);
+        module.exports.push(export);
+    }
+
+    let result = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
+        .expect("fast integer boundary module should emit");
+    validate_wasm(&result.wasm_bytes);
+    let export_specs = module
+        .exports
+        .iter()
+        .map(|export| (export.export_name.as_str(), None))
+        .collect::<Vec<_>>();
+    let actual = execute_wasm_checked_exports_in_node(&result.wasm_bytes, &export_specs);
+
+    let expected = [
+        ("i32_add_wrap", "ok", "-2147483648"),
+        ("u32_add_wrap", "ok", "1"),
+        ("i32_multiply_wrap", "ok", "131073"),
+        ("u64_multiply_wrap", "ok", "-2"),
+        ("i64_subtract_wrap", "ok", "9223372036854775807"),
+        ("i32_negate_minimum", "ok", "-2147483648"),
+        ("i32_divide_min_by_negative_one", "trap", "unreachable"),
+        ("i32_divide_by_zero", "trap", "unreachable"),
+        ("u32_remainder_by_zero", "trap", "unreachable"),
+        ("i32_remainder_min_by_negative_one", "ok", "0"),
+        ("i64_remainder_min_by_negative_one", "ok", "0"),
+        ("i32_divide_truncates_toward_zero", "ok", "-1"),
+        ("u64_divide_max_by_two", "ok", "9223372036854775807"),
+        ("i32_power_wraps", "ok", "-808182895"),
+        ("u64_power_wraps", "ok", "-6289078614652622815"),
+        ("u32_power_zero_exponent", "ok", "1"),
+        ("u32_power_max_exponent", "ok", "0"),
+        ("i32_power_negative_exponent", "trap", "unreachable"),
+        ("i32_add_aliases_source", "ok", "9"),
+    ];
+
+    assert_eq!(actual.len(), expected.len());
+    for ((actual_name, actual_status, actual_value), (name, status, value)) in
+        actual.iter().zip(expected)
+    {
+        assert_eq!(actual_name.as_str(), name);
+        assert_eq!(
+            actual_status.as_str(),
+            status,
+            "{name} had an unexpected outcome"
+        );
+        if status == "trap" {
+            assert!(
+                actual_value.contains(value),
+                "{name} should trap through Wasm unreachable, found {actual_value:?}"
+            );
+        } else {
+            assert_eq!(
+                actual_value.as_str(),
+                value,
+                "{name} returned an unexpected result"
+            );
+        }
+    }
+}
+
+fn fast_integer_boundary_function(
+    function_id: WasmLirFunctionId,
+    name: &str,
+    kind: WasmIntegerOperationKind,
+    operator: NumericOperator,
+    left_value: i64,
+    right_value: i64,
+) -> (WasmLirFunction, WasmExport) {
+    let carrier = kind.carrier();
+    let left = WasmLirLocalId(0);
+    let right = WasmLirLocalId(1);
+    let operation_result = WasmLirLocalId(2);
+    let mut locals = vec![
+        local(left.0, carrier, "left"),
+        local(right.0, carrier, "right"),
+        local(operation_result.0, carrier, "operation_result"),
+    ];
+    let mut statements = match carrier {
+        WasmAbiType::I32 => vec![
+            WasmLirStmt::ConstI32 {
+                dst: left,
+                value: left_value as i32,
+            },
+            WasmLirStmt::ConstI32 {
+                dst: right,
+                value: right_value as i32,
+            },
+        ],
+        WasmAbiType::I64 => vec![
+            WasmLirStmt::ConstI64 {
+                dst: left,
+                value: left_value,
+            },
+            WasmLirStmt::ConstI64 {
+                dst: right,
+                value: right_value,
+            },
+        ],
+        _ => unreachable!("fast integer boundary cases use integer carriers"),
+    };
+    let operands = if operator == NumericOperator::Negate {
+        WasmNumericOperationOperands::Unary { operand: left }
+    } else {
+        WasmNumericOperationOperands::Binary { left, right }
+    };
+    let power = if operator == NumericOperator::Power {
+        let factor = WasmLirLocalId(locals.len() as u32);
+        locals.push(local(factor.0, carrier, "power_factor"));
+        let exponent = WasmLirLocalId(locals.len() as u32);
+        locals.push(local(exponent.0, carrier, "power_exponent"));
+        Some(WasmIntegerPowerScratch { factor, exponent })
+    } else {
+        None
+    };
+    statements.push(WasmLirStmt::FastIntegerOp {
+        operation: WasmFastIntegerOperation {
+            dst: operation_result,
+            operator,
+            kind,
+            operands,
+            power,
+        },
+    });
+
+    let function = WasmLirFunction {
+        id: function_id,
+        debug_name: name.to_owned(),
+        origin: WasmLirFunctionOrigin::ExportWrapper,
+        signature: WasmLirSignature {
+            params: vec![],
+            results: vec![carrier],
+        },
+        locals,
+        blocks: vec![WasmLirBlock {
+            id: WasmLirBlockId(0),
+            statements,
+            terminator: WasmLirTerminator::Return {
+                values: vec![operation_result],
+            },
+        }],
+        linkage: WasmFunctionLinkage::ExportedWrapper,
+    };
+    let export = WasmExport {
+        export_name: name.to_owned(),
+        kind: WasmExportKind::Function(function_id),
+    };
+    (function, export)
+}
+
+fn fast_integer_aliasing_function(
+    function_id: WasmLirFunctionId,
+    name: &str,
+) -> (WasmLirFunction, WasmExport) {
+    let destination = WasmLirLocalId(0);
+    let right = WasmLirLocalId(1);
+    let statements = vec![
+        WasmLirStmt::ConstI32 {
+            dst: destination,
+            value: 7,
+        },
+        WasmLirStmt::ConstI32 {
+            dst: right,
+            value: 2,
+        },
+        WasmLirStmt::FastIntegerOp {
+            operation: WasmFastIntegerOperation {
+                dst: destination,
+                operator: NumericOperator::Add,
+                kind: WasmIntegerOperationKind::Signed32,
+                operands: WasmNumericOperationOperands::Binary {
+                    left: destination,
+                    right,
+                },
+                power: None,
+            },
+        },
+    ];
+    let function = WasmLirFunction {
+        id: function_id,
+        debug_name: name.to_owned(),
+        origin: WasmLirFunctionOrigin::ExportWrapper,
+        signature: WasmLirSignature {
+            params: vec![],
+            results: vec![WasmAbiType::I32],
+        },
+        locals: vec![
+            local(destination.0, WasmAbiType::I32, "destination"),
+            local(right.0, WasmAbiType::I32, "right"),
+        ],
+        blocks: vec![WasmLirBlock {
+            id: WasmLirBlockId(0),
+            statements,
+            terminator: WasmLirTerminator::Return {
+                values: vec![destination],
+            },
+        }],
+        linkage: WasmFunctionLinkage::ExportedWrapper,
+    };
+    let export = WasmExport {
+        export_name: name.to_owned(),
+        kind: WasmExportKind::Function(function_id),
+    };
+    (function, export)
+}
+
 fn build_checked_integer_boundary_module() -> WasmLirModule {
     let cases = [
         (
@@ -4582,10 +5068,7 @@ fn build_uint_scalar_fixture(
             statements: vec![hir_statement(
                 id.0 * 100 + 10,
                 HirStatementKind::NumericOp {
-                    op: HirNumericOp {
-                        operator,
-                        domain: NumericScalar::Fixed(uint_scalar),
-                    },
+                    op: HirNumericOp::ordinary(operator, NumericScalar::Fixed(uint_scalar)),
                     failure_mode: NumericFailureMode::Trap,
                     operands: HirNumericOperands::Binary { left, right },
                     result: HirLocalDestination::Define(LocalId(2)),

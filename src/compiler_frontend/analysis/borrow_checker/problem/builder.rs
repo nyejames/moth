@@ -23,7 +23,9 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirWriteTarget};
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
-use crate::compiler_frontend::hir::utils::{collect_reachable_blocks, terminator_targets};
+use crate::compiler_frontend::hir::utils::{
+    collect_reachable_blocks, for_each_terminator_target, terminator_targets,
+};
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use rustc_hash::FxHashMap;
 use std::collections::{BTreeMap, BTreeSet};
@@ -186,14 +188,15 @@ impl<'a> FunctionProblemBuilder<'a> {
             )));
         }
 
-        let reachable_blocks = collect_reachable_blocks(function.entry, |block_id| {
+        let reachable_blocks = collect_reachable_blocks(function.entry, |block_id, visit| {
             let block = block_by_id.get(&block_id.0).ok_or_else(|| {
                 internal_failure(format!(
                     "Boracle problem extraction reached missing HIR block {:?}",
                     block_id
                 ))
             })?;
-            Ok::<_, InfrastructureFailure>(terminator_targets(&block.terminator))
+            for_each_terminator_target(&block.terminator, visit);
+            Ok::<_, InfrastructureFailure>(())
         })?;
 
         let mut builder = Self {
@@ -506,6 +509,11 @@ impl<'a> FunctionProblemBuilder<'a> {
                 ..
             }
             | HirStatementKind::ValidateFloat {
+                source: value,
+                result,
+                ..
+            }
+            | HirStatementKind::FastStoreConversion {
                 source: value,
                 result,
                 ..

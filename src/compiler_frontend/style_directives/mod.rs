@@ -29,12 +29,14 @@ pub use compatibility::{TemplateHeadCompatibility, TemplateHeadTag};
 pub use registry::StyleDirectiveRegistry;
 pub(crate) use source::{
     SourceDirectiveAnnotation, SourceOperandFoldResources, capture_source_directive_operand,
-    fold_source_directive_operand, parse_statement_source_directive_run,
+    constraint_directive_spans, fold_source_directive_operand,
+    parse_statement_source_directive_run, source_constraints_from_annotations,
 };
 pub(crate) use specs::DirectiveOccurrence;
 pub(crate) use specs::{
-    AFTER_DIRECTIVE_NAME, BEFORE_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME,
-    SourceDirectiveKind,
+    AFTER_DIRECTIVE_NAME, BEFORE_DIRECTIVE_NAME, ConstraintDirectiveSpans, INSERT_DIRECTIVE_NAME,
+    SLOT_DIRECTIVE_NAME, SourceConstraintSet, SourceDirectiveKind,
+    StatementSourceConstraintAttachment,
 };
 pub use specs::{
     CoreStyleDirectiveKind, SourceModifierOperand, StyleDirectiveArgumentType,

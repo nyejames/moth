@@ -19,18 +19,21 @@ use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::AstImportedFunctionContract;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
-use crate::compiler_frontend::ast::expressions::expression_store::ExpressionStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{ExprId, ExpressionStore};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 #[cfg(test)]
 use crate::compiler_frontend::hir::expression_store::HirExpressionStoreTestLimits;
 use crate::compiler_frontend::hir::expression_store::{HirConstructionFailure, HirExpressionStore};
+use crate::compiler_frontend::hir::failure_facts::{
+    HirFastUseProvenance, HirSkippedSourceEvidence,
+};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOriginLookup};
 use crate::compiler_frontend::hir::hir_side_table::{HirLocation, HirSideTable};
 use crate::compiler_frontend::hir::ids::{
@@ -47,7 +50,7 @@ use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
-use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan, SpanResolutionSources};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
@@ -78,6 +81,7 @@ pub(in crate::compiler_frontend) fn lower_module(
         external_packages,
         None,
         None,
+        SpanResolutionSources::empty(),
     )
 }
 
@@ -95,6 +99,7 @@ pub(in crate::compiler_frontend) fn lower_module_with_owner<'a>(
     external_packages: &ExternalPackageRegistry,
     frozen_identity_handle: Option<&FrozenIdentityHandle>,
     prior_diagnostics: Option<&'a mut DiagnosticBag>,
+    span_sources: SpanResolutionSources<'_>,
 ) -> Result<HirLoweringResult, PreparedFailure> {
     // The builder owns the module environment for lowering and publication; `build_hir_module`
     // never reads the AST copy, so take it instead of cloning every module-local type table.
@@ -110,7 +115,7 @@ pub(in crate::compiler_frontend) fn lower_module_with_owner<'a>(
 
     ctx.set_frozen_identity_handle(frozen_identity_handle.cloned());
     ctx.set_module_resources(module_resources);
-    ctx.build_hir_module(ast, external_packages)
+    ctx.build_hir_module(ast, external_packages, span_sources)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -270,6 +275,80 @@ pub struct HirBuilder<'a> {
     catch_protected_calls: Vec<CatchProtectedCall>,
     /// All handler roots retained until call-summary convergence prunes inactive paths.
     catch_handlers: Vec<CatchHandlerRecord>,
+
+    /// Selected evidence from AST code that lowering intentionally omits.
+    ///
+    /// WHAT: one accumulator per function for calls and fast-use witnesses that never receive HIR
+    ///       nodes, covering skipped catch handlers and statements after a terminator.
+    /// WHY: constraint verification needs every selected computation, including code that is
+    ///      semantically unreachable but lexically selected. Recording at the skip point keeps
+    ///      the optimisations that avoid lowering dead groups of statements.
+    pub(super) skipped_source_evidence: FxHashMap<FunctionId, HirSkippedSourceEvidence>,
+
+    /// Reused buffers for the skipped-source expression walk.
+    ///
+    /// WHAT: the expression roots of one omitted statement sequence in authored order, plus dense
+    ///       generation marks for the expression IDs that walk already visited.
+    /// WHY: a module can skip hundreds of catch handlers, so a fresh root vector and hash set per
+    ///      skip would allocate and hash on a path that only inspects each expression. The marks
+    ///      make the visit test one indexed compare, and the buffers keep their capacity between
+    ///      skips.
+    pub(super) skipped_source_walk: SkippedSourceWalkScratch,
+}
+
+/// Reusable traversal state for one skipped-source expression walk.
+///
+/// WHAT: the pending expression roots and a per-`ExprId` generation mark set.
+/// WHY: skipped catch handlers and statements after a terminator are walked one sequence at a
+///      time, and each walk must visit an expression at most once even when several edges reach
+///      it. A generation tag resets the mark table in constant time and keeps the dense `Vec`
+///      allocation across the module's skips.
+#[derive(Debug, Default)]
+pub(super) struct SkippedSourceWalkScratch {
+    roots: Vec<ExprId>,
+    visited: Vec<u32>,
+    generation: u32,
+}
+
+impl SkippedSourceWalkScratch {
+    /// Starts one walk and returns the tag [`Self::visit_once`] checks for it.
+    ///
+    /// The caller owns the pending roots for this walk: it fills them after this call and drains
+    /// them before starting the next one, so a nested walk can never inherit them.
+    pub(super) fn begin_walk(&mut self) -> u32 {
+        debug_assert!(
+            self.roots.is_empty(),
+            "skipped-source walks must not nest: the outer walk still has pending roots"
+        );
+        self.generation = self.generation.wrapping_add(1);
+        if self.generation == 0 {
+            // One full reset per `u32::MAX` walks keeps the tag space monotone.
+            self.visited.fill(0);
+            self.generation = 1;
+        }
+        self.generation
+    }
+
+    pub(super) fn push_root(&mut self, id: ExprId) {
+        self.roots.push(id);
+    }
+
+    pub(super) fn pop_root(&mut self) -> Option<ExprId> {
+        self.roots.pop()
+    }
+
+    /// Reports whether this walk has not visited `id` yet, marking it when it is fresh.
+    pub(super) fn visit_once(&mut self, id: ExprId, generation: u32) -> bool {
+        let index = id.index();
+        if self.visited.len() <= index {
+            self.visited.resize(index + 1, 0);
+        }
+        if self.visited[index] == generation {
+            return false;
+        }
+        self.visited[index] = generation;
+        true
+    }
 }
 
 /// Target state for value-block lowering inside `HirBuilder`.
@@ -396,6 +475,8 @@ impl<'a> HirBuilder<'a> {
             active_catch_handler: None,
             catch_protected_calls: Vec::new(),
             catch_handlers: Vec::new(),
+            skipped_source_evidence: FxHashMap::default(),
+            skipped_source_walk: SkippedSourceWalkScratch::default(),
         }
     }
 
@@ -405,6 +486,40 @@ impl<'a> HirBuilder<'a> {
         limits: HirExpressionStoreTestLimits,
     ) {
         self.module.expressions = HirExpressionStore::with_test_limits(limits);
+    }
+
+    /// Records a selected call that lowering intentionally omits from the CFG.
+    ///
+    /// WHAT: appends one `(target, span)` site to its owning function's skipped-source evidence.
+    /// WHY: a statically infallible catch or a statement after a terminator never receives HIR,
+    ///      but constraint verification must still treat its calls as selected evidence.
+    pub(super) fn record_skipped_call_site(
+        &mut self,
+        function: FunctionId,
+        target: CallTarget,
+        span: Option<SourceSpan>,
+    ) {
+        self.skipped_source_evidence
+            .entry(function)
+            .or_default()
+            .record_call(target, span);
+    }
+
+    /// Records a fast-use witness from selected AST code that lowering omits.
+    ///
+    /// WHAT: appends one provenance/span row to the owning function's evidence.
+    /// WHY: a `$fast_math` loop in a skipped handler or after a terminator still selects a fast
+    ///      range guard even though it has no HIR statement to project.
+    pub(super) fn record_skipped_fast_use(
+        &mut self,
+        function: FunctionId,
+        provenance: HirFastUseProvenance,
+        span: Option<SourceSpan>,
+    ) {
+        self.skipped_source_evidence
+            .entry(function)
+            .or_default()
+            .record_fast_use(provenance, span);
     }
 
     fn lower_error_messages(
@@ -531,12 +646,13 @@ impl<'a> HirBuilder<'a> {
     //  Main Build Pipeline
     // -------------------------
 
-    /// Builds an HIR module from an AST.
+    /// Builds an HIR module from an AST, resolving authored spans through the supplied owners.
     /// This is the main entry point for HIR generation.
-    pub fn build_hir_module(
+    pub(in crate::compiler_frontend) fn build_hir_module(
         mut self,
         mut ast: Ast,
         external_packages: &ExternalPackageRegistry,
+        span_sources: SpanResolutionSources<'_>,
     ) -> Result<HirLoweringResult, PreparedFailure> {
         self.module_const_values = std::mem::take(&mut ast.const_values);
 
@@ -618,7 +734,7 @@ impl<'a> HirBuilder<'a> {
         }
 
         // 5. Project semantic failure facts and join exact function origins.
-        if let Err(error) = self.project_function_failure_facts(&ast) {
+        if let Err(error) = self.project_function_failure_facts(&ast, span_sources) {
             return Err(self.lower_error_messages(error));
         }
 

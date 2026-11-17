@@ -18,6 +18,10 @@ A source-authored fallible evidence method exposes its declared `Error!`
 result. The caller still writes plain `cast`. Postfix `!` remains for ordinary
 fallible calls and does not attach to a cast.
 
+`$fast_math` changes arithmetic mode only. An explicit `cast` keeps its
+ordinary failure policy and evidence class. Fast operand arithmetic can still
+trap before the cast runs. See @../directives/#constraints (Constraints).
+
 ### Local recovery
 
 Use `catch` to recover a fallible conversion:

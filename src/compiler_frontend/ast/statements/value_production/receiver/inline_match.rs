@@ -185,6 +185,8 @@ fn parse_inline_value_match(
         InlineThenElseOutcome::Retained {
             then_body,
             else_body,
+            then_range: _,
+            else_range: _,
             generic_request_ranges: _,
         } => {
             // A branch still depends on an unresolved numeric origin, so the committed header and

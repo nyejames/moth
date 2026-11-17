@@ -205,6 +205,7 @@ impl<'a> HirValidator<'a> {
                 ..
             } => self.require_statement_destination(*destination, block_id)?,
             HirStatementKind::NumericOp { result, .. }
+            | HirStatementKind::FastStoreConversion { result, .. }
             | HirStatementKind::LoopStepFailure { result, .. }
             | HirStatementKind::FormatFloat { result, .. }
             | HirStatementKind::ValidateFloat { result, .. } => {
@@ -304,6 +305,23 @@ impl<'a> HirValidator<'a> {
                     )));
                 }
 
+                // Fast arithmetic exists only for fixed integers and binary floats; Dec always
+                // resolves to ordinary checked arithmetic. Its delivery is fully determined by
+                // the trap-cause table, so a Fast operation cannot claim `Invoke`-style recovery.
+                if op.semantics.is_fast() {
+                    if !op.domain.is_integer() && !op.domain.is_binary_float() {
+                        return Err(self.error_with_hir(format!(
+                            "NumericOp::{op} fast semantics requires a fixed integer or \
+                             binary-float domain"
+                        )));
+                    }
+                    if *failure_mode != op.fast_statement_failure_mode() {
+                        return Err(self.error_with_hir(format!(
+                            "NumericOp::{op} fast delivery does not match its trap causes"
+                        )));
+                    }
+                }
+
                 // NumericOp operands normally share their result domain. Dec power alone keeps
                 // its exponent in the exact builtin `I32` domain.
                 let exponent_domain = NumericScalar::Fixed(FixedScalar::I32);
@@ -367,19 +385,46 @@ impl<'a> HirValidator<'a> {
                 )?;
             }
 
-            HirStatementKind::LoopStepFailure {
-                failure_mode,
+            HirStatementKind::FastStoreConversion {
+                conversion,
+                source,
                 result,
-                ..
             } => {
-                if *failure_mode == NumericFailureMode::Infallible {
-                    return Err(self.error_with_hir(
-                        "LoopStepFailure cannot use the discharged numeric mode".to_owned(),
-                    ));
+                // Fast write-back exists only between fixed numeric domains. Dec arithmetic is
+                // never fast, and a same-type conversion is not a write-back at all. The class
+                // alone selects delivery: an integer wrap is total, every trap class is fatal.
+                let Some(required_mode) = conversion.required_failure_mode() else {
+                    return Err(self.error_with_hir(format!(
+                        "FastStoreConversion {conversion} is not a permitted fixed numeric write-back"
+                    )));
+                };
+
+                self.validate_expression(*source, anchor)?;
+                let source_type = self.expression_row(*source)?.ty;
+                if source_type != conversion.source.type_id(self.type_environment) {
+                    return Err(self.error_with_hir(format!(
+                        "FastStoreConversion {conversion} source type does not match its domain"
+                    )));
                 }
+
+                let target_type = conversion.target.type_id(self.type_environment);
+                self.validate_numeric_result_local(
+                    format_args!("FastStoreConversion {conversion}"),
+                    required_mode,
+                    *result,
+                    target_type,
+                )?;
+            }
+
+            HirStatementKind::LoopStepFailure {
+                semantics, result, ..
+            } => {
+                // A fast range guard fails fatally; an ordinary statement guard traps and may be
+                // retargeted by private-lane installation. A recoverable ordinary guard is an
+                // `Invoke` of `HirFallibleOperation::LoopStepFailure`, never this statement.
                 self.validate_numeric_result_local(
                     "LoopStepFailure",
-                    *failure_mode,
+                    NumericFailureMode::range_guard(*semantics),
                     *result,
                     self.type_environment.builtins().bool,
                 )?;

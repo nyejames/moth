@@ -1,0 +1,4 @@
+Point = |
+    $fast_math x I32,
+    y I32,
+|

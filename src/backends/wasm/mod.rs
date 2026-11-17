@@ -11,6 +11,7 @@ pub(crate) mod lir;
 pub(crate) mod request;
 pub(crate) mod result;
 pub(crate) mod runtime;
+pub(crate) mod support;
 
 #[cfg(test)]
 mod tests;

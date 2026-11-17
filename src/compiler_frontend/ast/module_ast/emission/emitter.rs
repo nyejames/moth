@@ -12,8 +12,7 @@
 //! Constants and choices are handled in earlier passes; they do not emit nodes here.
 //! Struct node emission reads the resolved field table produced by environment construction.
 
-use crate::compiler_frontend::ast::AstDocFragment;
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::const_execution::{
     ConstBodyPreparationError, ConstBodyReferenceScope, const_body_rejection_diagnostic,
     executable_for_const_declaration,
@@ -50,6 +49,9 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::ast::templates::top_level_templates::FoldedConstTemplateResult;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::ast::{
+    AstConstraintBoundary, AstDocFragment, AstFastOperationWitness,
+};
 use crate::compiler_frontend::builder_root_slots::ConstFragmentDestination;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
@@ -63,6 +65,10 @@ use crate::compiler_frontend::compiler_messages::{
     GenericSubstitutionDiagnostic, InvalidTemplateStructureReason, PreparedFailure,
 };
 use crate::compiler_frontend::module_compilation::AstRecoveryPolicy;
+use crate::compiler_frontend::style_directives::{
+    ConstraintDirectiveSpans, SourceConstraintSet, SourceDirectiveKind, SourceOperandFoldResources,
+    constraint_directive_spans, fold_source_directive_operand, source_constraints_from_annotations,
+};
 use std::sync::Arc;
 
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
@@ -79,9 +85,6 @@ use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId, SourceSpan};
-use crate::compiler_frontend::style_directives::{
-    SourceDirectiveKind, SourceOperandFoldResources, fold_source_directive_operand,
-};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceTokens;
@@ -147,6 +150,10 @@ pub(in crate::compiler_frontend::ast) struct AstEmission {
     pub(in crate::compiler_frontend::ast) const_function_bodies: Vec<AstNode>,
     /// Declaration-attached documentation records folded during emission.
     pub(in crate::compiler_frontend::ast) doc_fragments: Vec<AstDocFragment>,
+    /// Lexical constraint attachments recorded for function bodies and statements.
+    pub(in crate::compiler_frontend::ast) constraint_boundaries: Vec<AstConstraintBoundary>,
+    /// Selected fast numeric operations recorded during expression resolution.
+    pub(in crate::compiler_frontend::ast) fast_operation_witnesses: Vec<AstFastOperationWitness>,
 }
 
 #[cfg(test)]
@@ -352,6 +359,8 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
     prepared_const_function_paths: FxHashSet<PathId>,
     generic_call_site_identity_handle: Option<FrozenIdentityHandle>,
     doc_fragments: Rc<RefCell<Vec<AstDocFragment>>>,
+    source_constraint_boundaries: Rc<RefCell<Vec<AstConstraintBoundary>>>,
+    fast_operation_witnesses: Rc<RefCell<Vec<AstFastOperationWitness>>>,
     publish_source_docs: bool,
 }
 impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environment> {
@@ -391,6 +400,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             prepared_const_function_paths,
             generic_call_site_identity_handle: None,
             doc_fragments: Rc::new(RefCell::new(Vec::new())),
+            source_constraint_boundaries: Rc::new(RefCell::new(Vec::new())),
+            fast_operation_witnesses: Rc::new(RefCell::new(Vec::new())),
             publish_source_docs: true,
         }
     }
@@ -437,6 +448,12 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             validated_generic_template_bodies: self.validated_generic_template_bodies,
             const_function_bodies: self.const_function_bodies,
             doc_fragments: std::mem::take(&mut self.doc_fragments.borrow_mut()),
+            constraint_boundaries: std::mem::take(
+                &mut self.source_constraint_boundaries.borrow_mut(),
+            ),
+            fast_operation_witnesses: std::mem::take(
+                &mut self.fast_operation_witnesses.borrow_mut(),
+            ),
         })
     }
 
@@ -459,6 +476,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         .with_style_directives(self.context.style_directives)
         .with_source_doc_sink(Rc::clone(&self.doc_fragments))
         .with_source_doc_publication(self.publish_source_docs)
+        .with_source_constraint_boundary_sink(Rc::clone(&self.source_constraint_boundaries))
+        .with_fast_operation_witness_sink(Rc::clone(&self.fast_operation_witnesses))
         .with_build_profile(self.context.build_profile)
         .with_template_const_loop_iteration_limit(self.context.template_const_loop_iteration_limit)
         .with_file_visibility(Arc::clone(&input.visibility))
@@ -497,6 +516,37 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         if let Some(services) = &self.context.config_resolution {
             context = context.with_config_resolution(Rc::clone(services));
         }
+        context
+    }
+
+    /// Applies one callable body's lexical constraints and records its verification boundary.
+    ///
+    /// WHAT: installs the body identity on the fresh scope, sets the declared constraint set, and
+    ///       adds a whole-function boundary fact when at least one constraint is active.
+    /// WHY: every function, generic template and generic instance body starts from an independent
+    ///      context, so this is the one place a declaration's own constraints enter a body and the
+    ///      only place a callee could inherit a caller's set if it were done by mutation.
+    fn apply_callable_source_constraints(
+        &self,
+        context: ScopeContext,
+        function: AstFunctionIdentity,
+        constraints: SourceConstraintSet,
+        directive_spans: ConstraintDirectiveSpans,
+    ) -> ScopeContext {
+        let context = context.with_constraint_function(function);
+        if constraints.is_empty() {
+            return context;
+        }
+        context.source_constraints.set(constraints);
+        self.source_constraint_boundaries
+            .borrow_mut()
+            .push(AstConstraintBoundary {
+                function,
+                scope: context.scope,
+                statement: None,
+                constraints,
+                directive_spans,
+            });
         context
     }
 
@@ -905,6 +955,12 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             validated_generic_template_bodies: self.validated_generic_template_bodies,
             const_function_bodies: self.const_function_bodies,
             doc_fragments: std::mem::take(&mut self.doc_fragments.borrow_mut()),
+            constraint_boundaries: std::mem::take(
+                &mut self.source_constraint_boundaries.borrow_mut(),
+            ),
+            fast_operation_witnesses: std::mem::take(
+                &mut self.fast_operation_witnesses.borrow_mut(),
+            ),
         })
     }
 
@@ -1138,18 +1194,23 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         active_instance_stack.push(request.key.clone());
 
         let mut context = self
-            .build_base_scope_context(BaseScopeContextInput {
-                kind: ContextKind::Function,
-                scope: request.instance_path,
-                top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
-                visibility,
-                // Materialised bodies carry their retained donor owner; the scope threads it so
-                // Stage 0 lookups validate against the frozen facts owner and never alias the
-                // requester call-site source.
-                declaring_file_id: body_source_id,
-                source_file_scope: template.source_file,
-                scope_frame_capacity: 0,
-            })
+            .apply_callable_source_constraints(
+                self.build_base_scope_context(BaseScopeContextInput {
+                    kind: ContextKind::Function,
+                    scope: request.instance_path,
+                    top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
+                    visibility,
+                    // Materialised bodies carry their retained donor owner; the scope threads it so
+                    // Stage 0 lookups validate against the frozen facts owner and never alias the
+                    // requester call-site source.
+                    declaring_file_id: body_source_id,
+                    source_file_scope: template.source_file,
+                    scope_frame_capacity: 0,
+                }),
+                AstFunctionIdentity::Authored(request.instance_path),
+                template.source_constraints,
+                template.constraint_directive_spans,
+            )
             .with_active_generic_type_context(generic_type_context)
             .with_generic_function_instantiation_stack(active_instance_stack.clone());
         if let Some(facts) = body.resolution_facts() {
@@ -1321,6 +1382,12 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             source_file_scope,
             scope_frame_capacity,
         });
+        context = self.apply_callable_source_constraints(
+            context,
+            AstFunctionIdentity::Authored(header.declaration_path),
+            template.source_constraints,
+            ConstraintDirectiveSpans::default(),
+        );
         let generic_type_context = self.build_active_generic_type_context(
             template.generic_parameter_list_id,
             None,
@@ -1426,6 +1493,12 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             source_file_scope,
             scope_frame_capacity,
         });
+        context = self.apply_callable_source_constraints(
+            context,
+            AstFunctionIdentity::Authored(header.declaration_path),
+            source_constraints_from_annotations(&header.source_directives),
+            constraint_directive_spans(&header.source_directives),
+        );
         context.enclosing_callable = Some(enclosing_callable_contract(
             &resolved_signature.signature,
             EnclosingCallableOwner::Function,
@@ -1576,6 +1649,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             source_file_scope,
             scope_frame_capacity,
         });
+        context = context.with_constraint_function(AstFunctionIdentity::Entry);
 
         let error_type = resolve_builtin_error_type_typed(&context, None, string_table)
             .map_err(|error| self.error_messages(error, string_table))?

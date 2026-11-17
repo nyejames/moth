@@ -71,7 +71,10 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidAssignmentTargetReason, InvalidFallibleHandlingReason, TypeMismatchContext,
     ValueReceiverContext,
 };
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_operators::numeric_semantics;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -180,6 +183,31 @@ pub(crate) struct CompoundAssignmentReadyInput<'a, 'env> {
     pub(crate) path_fork: &'a mut PathInternerFork,
 }
 
+/// Whether a compound-assignment write-back must follow `$fast_math` conversion rules.
+///
+/// WHAT: selects fast write-back only when the promoted arithmetic domain resolved to
+///       `NumericSemantics::Fast` and the receiving type is also a fixed scalar.
+/// WHY: the arithmetic's canonical domain is exactly what selected its semantics, so reading the
+///      same selector keeps resolution and store conversion in agreement, including folded-away
+///      arithmetic. `Dec` domains never select fast semantics, and a `Dec` destination keeps the
+///      conversion ordinary even when the source result is fixed.
+fn selects_fast_store_conversion(
+    source_type_id: TypeId,
+    target_type_id: TypeId,
+    type_environment: &TypeEnvironment,
+    fast_math_active: bool,
+) -> bool {
+    let Some(source_domain) = NumericScalar::from_type_id(source_type_id, type_environment) else {
+        return false;
+    };
+    let Some(target_domain) = NumericScalar::from_type_id(target_type_id, type_environment) else {
+        return false;
+    };
+
+    numeric_semantics(source_domain, fast_math_active).is_fast()
+        && !matches!(target_domain, NumericScalar::Number(_))
+}
+
 /// Complete a compound assignment whose right-hand operand is already evaluated.
 ///
 /// WHAT: evaluates `target op rhs` in the promoted domain, then applies the established store
@@ -254,6 +282,16 @@ pub(crate) fn evaluate_compound_assignment_with_ready_rhs(
         ));
     };
 
+    let handling = if selects_fast_store_conversion(
+        source_type_id,
+        target_type_id,
+        type_environment,
+        context.source_constraints().fast_math_active(),
+    ) {
+        CastHandling::FastStoreConversion
+    } else {
+        CastHandling::StoreConversion
+    };
     let cast_span = expression_builder.view_owned(value)?.span();
     let cast = CastFacts {
         source_type_id,
@@ -263,7 +301,7 @@ pub(crate) fn evaluate_compound_assignment_with_ready_rhs(
             policy: evidence.policy,
         },
         fallibility: evidence.fallibility,
-        handling: CastHandling::StoreConversion,
+        handling,
         span: cast_span,
     };
     let cast_value = expression_builder.cast(value, cast, target_type_id)?;

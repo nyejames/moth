@@ -64,6 +64,20 @@ pub(crate) struct PublicCallSummary {
     /// Whether unhandled implicit builtin failure escapes the function boundary.
     /// Signature-only `false` is the initial convergence value, not proof of infallibility.
     pub escapes_builtin_failure: bool,
+    /// Whether any statically selected fast numeric operation or fast contract is reachable.
+    ///
+    /// WHAT: the `$safe_math` guarantee bit. `false` after constraint convergence is proof for a
+    ///       Moth-source callee; the initial `false` is a seed, not evidence.
+    /// WHY: guarantees ride the existing call summary and interface equality instead of a
+    ///      separate fingerprint type. Constraint convergence widens it monotonically.
+    pub uses_fast_semantics: bool,
+    /// Whether a reachable Moth semantic trap can execute in the function.
+    pub may_trap: bool,
+    /// Whether a recoverable builtin error can escape the function through any channel.
+    ///
+    /// Deliberately independent of [`Self::escapes_builtin_failure`]: that field routes private
+    /// failure lanes, while this field records the post-lane proof-based escape fact.
+    pub may_fail: bool,
 }
 
 /// The result of validating one retained call-summary transition.
@@ -140,6 +154,28 @@ pub(in crate::compiler_frontend) fn validate_public_call_summary_transition(
         ));
     }
     widened |= previous.escapes_builtin_failure != next.escapes_builtin_failure;
+
+    // Constraint evidence is one more finite false->true order. A narrowing transition would mean
+    // a later pass replaced proved-absent evidence with blank, so reject it like any other
+    // narrowing instead of letting pass order change the guarantee.
+    for (name, previous, next) in [
+        (
+            "fast semantics",
+            previous.uses_fast_semantics,
+            next.uses_fast_semantics,
+        ),
+        ("trap", previous.may_trap, next.may_trap),
+        ("recoverable failure", previous.may_fail, next.may_fail),
+    ] {
+        if previous && !next {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!("public call summary transition narrowed {name}"),
+            ));
+        }
+        widened |= previous != next;
+    }
+
     for (parameter_index, (previous, next)) in
         previous.parameters.iter().zip(&next.parameters).enumerate()
     {

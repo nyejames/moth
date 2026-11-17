@@ -14,7 +14,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering,
-    ExternalPackageRegistry,
+    ExternalNumericContract, ExternalPackageRegistry,
 };
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
@@ -152,6 +152,7 @@ pub(crate) fn add_reachable_external_import(
                 parameters: vec![],
                 return_contract: external_returns(vec![], None),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression("undefined".to_owned())),
                     wasm: None,

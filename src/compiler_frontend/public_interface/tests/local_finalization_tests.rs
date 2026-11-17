@@ -39,6 +39,9 @@ fn empty_public_call_summary() -> PublicCallSummary {
         parameters: vec![],
         return_alias: FunctionReturnAliasSummary::Fresh,
         escapes_builtin_failure: false,
+        uses_fast_semantics: false,
+        may_trap: false,
+        may_fail: false,
     }
 }
 
@@ -56,6 +59,9 @@ fn public_call_summary_for_access(access: PublicCallParameterAccess) -> PublicCa
         }],
         return_alias: FunctionReturnAliasSummary::Fresh,
         escapes_builtin_failure: false,
+        uses_fast_semantics: false,
+        may_trap: false,
+        may_fail: false,
     }
 }
 
@@ -205,6 +211,86 @@ fn finalizes_free_and_receiver_call_summaries_once() {
             .concrete_call_summaries
             .iter()
             .any(|record| record.origin == method_origin)
+    );
+}
+
+#[test]
+fn finalization_preserves_constraint_bits_from_borrow_analysis() {
+    let origin = OriginFunctionId::new_free(module_origin(), "peek".to_owned());
+    let draft = draft_with_records(vec![function_draft_record(origin.clone(), vec![])]);
+    let mut summary = empty_public_call_summary();
+    summary.uses_fast_semantics = true;
+    summary.may_trap = true;
+    summary.may_fail = true;
+    let mut borrow_analysis = BorrowAnalysis::default();
+    borrow_analysis
+        .public_call_summaries
+        .insert(FunctionId(3), summary.clone());
+    let hir = public_hir_for_origins(&[(FunctionId(3), origin.clone())]);
+
+    let finalized = draft
+        .finalize_after_borrow_validation(&borrow_analysis, &hir)
+        .expect("the callable summary should join");
+
+    let record = finalized
+        .concrete_call_summaries
+        .iter()
+        .find(|record| record.origin == origin)
+        .expect("the finalized interface must publish the callable summary");
+    assert_eq!(
+        record.summary, summary,
+        "local finalization must copy the converged constraint bits verbatim"
+    );
+}
+
+/// WHAT: a private helper that gains fast-use or trap evidence publishes a different summary.
+/// WHY: downstream modules read the published summary, so widening dropped here would hide the evidence from them.
+#[test]
+fn private_helper_fast_and_trap_evidence_changes_the_published_summary() {
+    let origin = OriginFunctionId::new_free(module_origin(), "helper".to_owned());
+    let hir = public_hir_for_origins(&[(FunctionId(3), origin.clone())]);
+    let publish = |summary: PublicCallSummary| {
+        let mut borrow_analysis = BorrowAnalysis::default();
+        borrow_analysis
+            .public_call_summaries
+            .insert(FunctionId(3), summary);
+        let finalized = draft_with_records(vec![function_draft_record(origin.clone(), vec![])])
+            .finalize_after_borrow_validation(&borrow_analysis, &hir)
+            .expect("the callable summary should join");
+        finalized
+            .concrete_call_summaries
+            .into_iter()
+            .find(|record| record.origin == origin)
+            .expect("the finalized interface must publish the callable summary")
+            .summary
+    };
+
+    let ordinary = publish(empty_public_call_summary());
+    let fast = publish(PublicCallSummary {
+        uses_fast_semantics: true,
+        ..empty_public_call_summary()
+    });
+    let trapping = publish(PublicCallSummary {
+        may_trap: true,
+        ..empty_public_call_summary()
+    });
+
+    assert_eq!(ordinary, empty_public_call_summary());
+    assert_eq!(
+        fast,
+        PublicCallSummary {
+            uses_fast_semantics: true,
+            ..empty_public_call_summary()
+        },
+        "fast-use evidence must widen the published summary by exactly that bit"
+    );
+    assert_eq!(
+        trapping,
+        PublicCallSummary {
+            may_trap: true,
+            ..empty_public_call_summary()
+        },
+        "trap evidence must widen the published summary by exactly that bit"
     );
 }
 

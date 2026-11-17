@@ -613,10 +613,7 @@ fn uint_trap_arithmetic_selects_unsigned_operation_kinds() {
                 statements: vec![statement(
                     902,
                     HirStatementKind::NumericOp {
-                        op: HirNumericOp {
-                            operator,
-                            domain: NumericScalar::Fixed(scalar),
-                        },
+                        op: HirNumericOp::ordinary(operator, NumericScalar::Fixed(scalar)),
                         failure_mode: NumericFailureMode::Trap,
                         operands,
                         result: HirLocalDestination::Define(LocalId(0)),

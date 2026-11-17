@@ -620,6 +620,7 @@ fn tir_only_body_construction_context(
     context: &ScopeContext,
 ) -> TemplateConstructionContext {
     TemplateConstructionContext::new(context.template_ir_store.clone(), span)
+        .with_source_constraints(context.source_constraints())
 }
 
 /// Finalizes a control-flow body template's parser-emitted TIR and returns the

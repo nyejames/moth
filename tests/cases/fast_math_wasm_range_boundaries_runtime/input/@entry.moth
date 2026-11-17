@@ -1,0 +1,63 @@
+-- Fast range loops keep their exact endpoints: the in-range guard rejects the successor past the
+-- bound, and the generated ordinal never wraps for these small counts.
+i32_start I32 = 2147483646
+i32_end I32 = 2147483647
+i32_min I32 = -2147483648
+i32_min_end I32 = -2147483647
+i64_start I64 = 9223372036854775806
+i64_end I64 = 9223372036854775807
+u32_start U32 = 2
+u64_start U64 = 2
+zero_u32 U32 = 0
+zero_u64 U64 = 0
+one_i32 I32 = 1
+one_i64 I64 = 1
+minus_one_i32 I32 = -1
+
+i32_count ~= 0
+i32_last ~I32 = 0
+$fast_math
+loop i32_start to & i32_end by one_i32 |value|:
+    ~i32_count += 1
+    ~i32_last = copy value
+;
+
+i32_min_count ~= 0
+i32_min_last ~I32 = 0
+$fast_math
+loop i32_min to & i32_min_end by one_i32 |value|:
+    ~i32_min_count += 1
+    ~i32_min_last = copy value
+;
+
+i64_count ~= 0
+i64_last ~I64 = 0
+$fast_math
+loop i64_start to & i64_end by one_i64 |value|:
+    ~i64_count += 1
+    ~i64_last = copy value
+;
+
+u32_count ~= 0
+u32_last ~U32 = 9
+$fast_math
+loop u32_start to & zero_u32 by minus_one_i32 |value|:
+    ~u32_count += 1
+    ~u32_last = copy value
+;
+
+u64_count ~= 0
+u64_last ~U64 = 9
+$fast_math
+loop u64_start to & zero_u64 by minus_one_i32 |value|:
+    ~u64_count += 1
+    ~u64_last = copy value
+;
+
+equal_count ~= 0
+$fast_math
+loop 2 to & 2 |value|:
+    ~equal_count += 1
+;
+
+~[:i32=[i32_count]/[i32_last] min=[i32_min_count]/[i32_min_last] i64=[i64_count]/[i64_last] u32=[u32_count]/[u32_last] u64=[u64_count]/[u64_last] equal=[equal_count]]

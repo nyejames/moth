@@ -6,6 +6,7 @@
 
 use super::{AstExpressionBuilder, ExpressionStore, OwnerToken};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use rustc_hash::FxHashMap;
 
 /// Reopens a frozen store as a builder for fixture mutation.
 ///
@@ -19,5 +20,6 @@ pub(crate) fn reopen_frozen_store_for_fixture(
         storage,
         candidate_serial: 0,
         limit: u32::MAX,
+        inline_value_if_branch_ranges: FxHashMap::default(),
     })
 }

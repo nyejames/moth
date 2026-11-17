@@ -13,8 +13,9 @@
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalAccessKind, ExternalFunctionLowerings, ExternalFunctionSpec,
-    ExternalJsLowering, ExternalPackageId, ExternalParameter, ExternalReturnSlot,
-    ExternalSignatureType, ExternalTypeId, ExternalTypeSpec, external_returns,
+    ExternalJsLowering, ExternalNumericContract, ExternalPackageId, ExternalParameter,
+    ExternalReturnSlot, ExternalSignatureType, ExternalTypeId, ExternalTypeSpec, external_returns,
+    trusted_numeric_contract,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
@@ -30,6 +31,9 @@ struct TimeFunctionSpec<'a> {
     return_type: &'a ExternalSignatureType,
     /// Set only for the two fallible parse and render helpers.
     error_return_type: Option<&'a ExternalSignatureType>,
+    /// Closed numeric evidence for this callable. Inline clock and duration expressions are total.
+    /// The two runtime parse and render helpers return a recoverable grammar or range error.
+    numeric_contract: ExternalNumericContract,
     js_lowering: TimeJsLowering,
 }
 
@@ -80,6 +84,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[],
             return_type: &time_mark_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("globalThis.performance.now()"),
         },
         TimeFunctionSpec {
@@ -87,6 +92,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&time_mark_type],
             return_type: &duration_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("(globalThis.performance.now() - #0)"),
         },
         TimeFunctionSpec {
@@ -94,6 +100,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&time_mark_type, &time_mark_type],
             return_type: &duration_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("(#1 - #0)"),
         },
         // Wall-clock timestamp
@@ -102,6 +109,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[],
             return_type: &timestamp_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("Date.now()"),
         },
         // Duration construction
@@ -110,6 +118,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&f64_type],
             return_type: &duration_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("(#0 * 1000.0)"),
         },
         TimeFunctionSpec {
@@ -117,6 +126,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&f64_type],
             return_type: &duration_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("#0"),
         },
         // Timestamp construction
@@ -125,6 +135,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&f64_type],
             return_type: &timestamp_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("(#0 * 1000.0)"),
         },
         TimeFunctionSpec {
@@ -132,6 +143,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&f64_type],
             return_type: &timestamp_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("#0"),
         },
         TimeFunctionSpec {
@@ -139,6 +151,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&string_type],
             return_type: &timestamp_type,
             error_return_type: Some(&error_type),
+            numeric_contract: trusted_numeric_contract(false, false, true),
             js_lowering: TimeJsLowering::Runtime("__moth_time_timestamp_from_iso_string"),
         },
         // Duration helpers
@@ -147,6 +160,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&duration_type],
             return_type: &f64_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("(#0 / 1000.0)"),
         },
         TimeFunctionSpec {
@@ -154,6 +168,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&duration_type],
             return_type: &f64_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("#0"),
         },
         TimeFunctionSpec {
@@ -161,6 +176,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&duration_type],
             return_type: &bool_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("(#0 < 0)"),
         },
         TimeFunctionSpec {
@@ -168,6 +184,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&duration_type],
             return_type: &duration_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("Math.abs(#0)"),
         },
         TimeFunctionSpec {
@@ -175,6 +192,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&duration_type, &duration_type, &duration_type],
             return_type: &duration_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("Math.min(Math.max(#0, #1), #2)"),
         },
         TimeFunctionSpec {
@@ -182,6 +200,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&duration_type, &duration_type],
             return_type: &duration_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("(#0 + #1)"),
         },
         TimeFunctionSpec {
@@ -189,6 +208,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&duration_type, &duration_type],
             return_type: &duration_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("(#0 - #1)"),
         },
         TimeFunctionSpec {
@@ -196,6 +216,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&duration_type, &f64_type],
             return_type: &duration_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("(#0 * #1)"),
         },
         // Timestamp helpers
@@ -204,6 +225,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&timestamp_type],
             return_type: &f64_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("(#0 / 1000.0)"),
         },
         TimeFunctionSpec {
@@ -211,6 +233,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&timestamp_type],
             return_type: &f64_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("#0"),
         },
         TimeFunctionSpec {
@@ -218,6 +241,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&timestamp_type],
             return_type: &string_type,
             error_return_type: Some(&error_type),
+            numeric_contract: trusted_numeric_contract(false, false, true),
             js_lowering: TimeJsLowering::Runtime("__moth_time_to_iso_string"),
         },
         TimeFunctionSpec {
@@ -225,6 +249,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&timestamp_type, &duration_type],
             return_type: &timestamp_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("(#0 + #1)"),
         },
         TimeFunctionSpec {
@@ -232,6 +257,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
             parameters: &[&timestamp_type, &timestamp_type],
             return_type: &duration_type,
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
             js_lowering: TimeJsLowering::Inline("(#1 - #0)"),
         },
     ];
@@ -261,6 +287,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
                     parameters,
                     return_contract: external_returns(returns, function.error_return_type.cloned()),
                     const_eval: None,
+                    numeric_contract: function.numeric_contract,
                     lowerings: ExternalFunctionLowerings {
                         js: Some(js_lowering),
                         wasm: None,

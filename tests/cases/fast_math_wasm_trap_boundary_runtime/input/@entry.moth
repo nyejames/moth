@@ -1,0 +1,12 @@
+-- The builder calls `moth_start` once. A fast trap terminates that single guest entry: the
+-- queued runtime fragment is never flushed and no continuation runs.
+$fast_math
+divide_i32 |left I32, right I32| -> I32:
+    return left // right
+;
+
+seven I32 = 7
+zero I32 = 0
+~[:before]
+value = divide_i32(seven, zero)
+~[:after=[value]]

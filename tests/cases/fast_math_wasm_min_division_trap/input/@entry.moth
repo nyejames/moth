@@ -1,0 +1,12 @@
+-- The signed minimum divided by negative one has no representable quotient. Fast mode traps
+-- fatally instead of wrapping the result to the minimum.
+$fast_math
+divide_i32 |left I32, right I32| -> I32:
+    return left // right
+;
+
+minimum I32 = -2147483648
+minus_one I32 = -1
+~[:queued]
+value = divide_i32(minimum, minus_one)
+~[:value=[value]]

@@ -36,6 +36,7 @@ use crate::compiler_frontend::ast::statements::terminality::{
 use crate::compiler_frontend::ast::templates::top_level_templates::collect_const_top_level_fragments;
 use crate::compiler_frontend::ast::{
     Ast, AstBuildResult, AstChoiceDefinition, AstPublicInterfaceProjectionInput,
+    normalize_fast_operation_witnesses,
 };
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
 use crate::compiler_frontend::canonical_type_identity::{
@@ -150,6 +151,12 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         //  Collect doc fragments
         // ----------------------------
         let doc_fragments = std::mem::take(&mut emitted.doc_fragments);
+        // Constraint boundaries stay in authored attachment order for later verification.
+        let constraint_boundaries = std::mem::take(&mut emitted.constraint_boundaries);
+        // Selected fast operations are deduplicated and canonically ordered as the ledger leaves
+        // the emitter, so recording stays one push per selected operation.
+        let mut fast_operation_witnesses = std::mem::take(&mut emitted.fast_operation_witnesses);
+        normalize_fast_operation_witnesses(&mut fast_operation_witnesses);
 
         // ----------------------------
         //  Collect const top-level fragments
@@ -319,6 +326,10 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             self.template_normalization_error_messages(error, &mut emitted.warnings, string_table)
         })?;
         specialization.merge(const_specialization);
+        // Inactive static branches are gone from every finalised executable body. Retain their
+        // conservative authored spans so HIR projection can drop the fast-use evidence and
+        // statement boundaries recorded while both branches were still live.
+        let constraint_pruned_regions = specialization.constraint_pruned_regions().to_vec();
         // The Never proof graph and per-body terminality need the same exit analysis, so each
         // declared Never body is summarised once and both consumers read that summary. The
         // executable declarations lead the node list and keep their exact call targets; a
@@ -484,7 +495,9 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // ----------------------------
         // Speculation runs on the final normalised AST, after static selection and every
         // validation that establishes runtime semantics, and before expression freezing. A
-        // refused candidate is left byte-for-byte as the runtime call.
+        // refused candidate is left byte-for-byte as the runtime call. Folded call sites leave an
+        // AST ledger row because HIR constraint evidence must still see them.
+        let mut release_erased_call_sites = Vec::new();
         if self.context.build_profile == FrontendBuildProfile::Release {
             let scope = ScopeContext::new(
                 ContextKind::Module,
@@ -496,7 +509,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             )
             .with_style_directives(self.context.style_directives)
             .with_build_profile(self.context.build_profile);
-            let notes = rewrite_release_calls(
+            let (notes, erased_call_sites) = rewrite_release_calls(
                 &mut emitted.ast,
                 &mut self.context.expression_builder,
                 &mut self.context.const_values,
@@ -507,6 +520,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             )
             .map_err(PreparedFailure::Infrastructure)?;
             emitted.warnings.extend(notes);
+            release_erased_call_sites = erased_call_sites;
         }
 
         // ----------------------------
@@ -600,6 +614,10 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 expressions,
                 const_values,
                 doc_fragments,
+                constraint_boundaries,
+                fast_operation_witnesses,
+                release_erased_call_sites,
+                constraint_pruned_regions,
                 synthesizes_entry_start,
                 const_top_level_fragments,
                 warnings: emitted.warnings,

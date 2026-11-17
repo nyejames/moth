@@ -7,9 +7,9 @@
 //!      infallible (and, on Wasm, report recoverable numeric failure for exact arithmetic).
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
-use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, NumericSemantics};
 use crate::compiler_frontend::hir::ids::FunctionId;
-use crate::compiler_frontend::hir::numeric::NumericFailureMode;
+use crate::compiler_frontend::hir::numeric::{LoopStepFailureCause, NumericFailureMode};
 use crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes;
 use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
@@ -287,4 +287,131 @@ fn inferred_catch_error_adapter_defines_the_explicit_handler_destination() {
         routed_calls += 1;
     }
     assert_eq!(routed_calls, 1);
+}
+
+#[test]
+fn fast_traps_never_join_the_private_failure_lane() {
+    // `divide` becomes a lane function through its escaping `failer` call. Its fast integer
+    // division traps by definition, so lane installation must leave it a fatal statement instead
+    // of retargeting it onto the inferred recoverable edge.
+    let source = "failer |value I32| -> I32:\n    return value * 2\n;\n\
+         $fast_math\n\
+         divide |value I32, divisor I32| -> I32:\n    bumped = failer(value)\n    return value // divisor\n;\n";
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let mut type_environment = ast.type_environment.clone();
+    let registry = default_external_package_registry(&mut string_table);
+    let mut hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
+    let mut report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+        .expect("lane fixtures must pass borrow checking");
+    infer_builtin_failure_summaries(&hir, &mut report);
+    let divide = function_id_by_name(&hir, &path_fork, &string_table, "divide");
+    assert!(
+        report.analysis.public_call_summaries[&divide].escapes_builtin_failure,
+        "the escaping call must make the helper a lane function"
+    );
+
+    install_private_failure_lanes(&mut hir, &report, &mut type_environment, &registry)
+        .expect("lane installation must succeed");
+
+    assert_eq!(
+        numeric_op_modes(&hir, NumericOperator::IntegerDivide),
+        vec![NumericFailureMode::Fatal],
+        "fast division must keep its fatal delivery"
+    );
+    assert!(
+        !hir.blocks.iter().any(|block| matches!(
+            &block.terminator,
+            HirTerminator::Invoke {
+                operation: HirFallibleOperation::NumericOp { op, .. }, ..
+            } if op.operator == NumericOperator::IntegerDivide
+        )),
+        "no recoverable edge may carry a fast numeric operation"
+    );
+    assert!(
+        hir.blocks.iter().any(|block| matches!(
+            &block.terminator,
+            HirTerminator::Invoke {
+                operation: HirFallibleOperation::Call { .. },
+                ..
+            }
+        )),
+        "the escaping call still uses the inferred lane"
+    );
+}
+
+#[test]
+fn fast_range_guards_and_ordinal_never_join_the_private_failure_lane() {
+    // The fast loop lives in a lane function because of an unrelated escaping call. Its
+    // generated zero-step guard and ordinary checked ordinal overflow are fatal deliveries; lane
+    // installation must not rewrite them into recoverable `Invoke` edges, or a catch handler
+    // would intercept a `$fast_math` trap.
+    let source = "failer |value I32| -> I32:\n    return value * 2\n;\n\
+        \
+         $fast_math\n\
+         looper |start F32, end F32, step F32, seed I32| -> I32:\n\
+         \x20   bumped = failer(seed)\n\
+         \x20   loop start to end by step |i|:\n\
+         \x20   ;\n\
+         \x20   return bumped\n\
+         ;\n";
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let mut type_environment = ast.type_environment.clone();
+    let registry = default_external_package_registry(&mut string_table);
+    let mut hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
+    let mut report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+        .expect("lane fixtures must pass borrow checking");
+    infer_builtin_failure_summaries(&hir, &mut report);
+    let looper = function_id_by_name(&hir, &path_fork, &string_table, "looper");
+    assert!(
+        report.analysis.public_call_summaries[&looper].escapes_builtin_failure,
+        "the escaping call must make the loop function a lane function"
+    );
+
+    install_private_failure_lanes(&mut hir, &report, &mut type_environment, &registry)
+        .expect("lane installation must succeed");
+
+    let guard = hir
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .find_map(|statement| match &statement.kind {
+            HirStatementKind::LoopStepFailure {
+                cause, semantics, ..
+            } if *cause == LoopStepFailureCause::ZeroStep => {
+                Some((*semantics, NumericFailureMode::range_guard(*semantics)))
+            }
+            _ => None,
+        })
+        .expect("the dynamic step must retain its zero-step guard");
+    assert_eq!(guard.0, NumericSemantics::Fast);
+    assert_eq!(
+        guard.1,
+        NumericFailureMode::Fatal,
+        "fast loop guards must stay fatal inside a lane function"
+    );
+    assert_eq!(
+        numeric_op_modes(&hir, NumericOperator::Add),
+        vec![NumericFailureMode::Fatal],
+        "the generated fast ordinal overflow must stay fatal inside a lane function"
+    );
+    assert!(
+        !hir.blocks.iter().any(|block| matches!(
+            &block.terminator,
+            HirTerminator::Invoke {
+                operation: HirFallibleOperation::LoopStepFailure { .. },
+                ..
+            }
+        )),
+        "no recoverable edge may carry a fast loop guard"
+    );
+    assert!(
+        hir.blocks.iter().any(|block| matches!(
+            &block.terminator,
+            HirTerminator::Invoke {
+                operation: HirFallibleOperation::Call { .. },
+                ..
+            }
+        )),
+        "the unrelated escaping call still uses the inferred lane"
+    );
 }

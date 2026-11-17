@@ -7,7 +7,6 @@ use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
-use std::process::Command;
 
 #[test]
 fn number_conversion_helper_artifacts_are_deterministic_for_the_same_demands() {
@@ -77,19 +76,6 @@ fn number_conversion_helper_artifacts_are_deterministic_for_the_same_demands() {
          console.log([narrowed.tag, String(narrowed.value), integer.tag, String(integer.value)].join(\":\"));",
     );
     assert_eq!(run_javascript(&script).trim(), "ok:1234:ok:12");
-}
-
-fn run_javascript(source: &str) -> String {
-    let output = Command::new("node")
-        .args(["--eval", source])
-        .output()
-        .expect("Node.js is required for JavaScript runtime behavior tests");
-    assert!(
-        output.status.success(),
-        "Node.js runtime failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout).expect("Node.js output is UTF-8")
 }
 
 #[test]
@@ -357,10 +343,7 @@ fn lower_number_operation_source(scale: NumberScale) -> String {
         statements: vec![statement(
             1,
             HirStatementKind::NumericOp {
-                op: HirNumericOp {
-                    operator: NumericOperator::Multiply,
-                    domain: NumericScalar::Number(scale),
-                },
+                op: HirNumericOp::ordinary(NumericOperator::Multiply, NumericScalar::Number(scale)),
                 failure_mode: NumericFailureMode::Trap,
                 operands: HirNumericOperands::Binary { left, right },
                 result: HirLocalDestination::Define(LocalId(0)),

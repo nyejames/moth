@@ -30,8 +30,10 @@
 //! they must never re-resolve names globally through the registry.
 
 use crate::compiler_frontend::FrontendBuildProfile;
+use crate::compiler_frontend::ast::AstConstraintBoundary;
 use crate::compiler_frontend::ast::AstDocFragment;
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::AstFastOperationWitness;
+use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, Declaration};
 use crate::compiler_frontend::ast::const_values::const_execution::ConstFunctionExecutable;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::generic_functions::{
@@ -84,7 +86,7 @@ use crate::compiler_frontend::paths::file_references::{
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
-use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::style_directives::{SourceConstraintSet, StyleDirectiveRegistry};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
@@ -99,7 +101,7 @@ use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -510,6 +512,26 @@ pub struct ScopeShared {
     /// WHAT: generated generic instances validate directive operands but must not republish the
     ///       authored declaration's documentation under an instance-specific target.
     pub(crate) publish_source_docs: bool,
+    /// The function or entry body whose statements this scope parses.
+    ///
+    /// WHAT: stable identity inherited by every nested statement scope of one body.
+    /// WHY: statement-level constraint attachments record which function owns their authored range,
+    ///      and nested control-flow scopes have synthetic paths that cannot name that function.
+    pub(crate) constraint_function: Option<AstFunctionIdentity>,
+    /// Statement-level lexical constraint attachments for this module.
+    ///
+    /// WHAT: one shared ledger, written when an annotated statement's subtree finishes parsing.
+    /// WHY: constraint verification consumes authored boundaries after AST construction; keeping
+    ///      them beside the existing documentation ledger avoids attaching non-executable state to
+    ///      every executable node.
+    pub(crate) source_constraint_boundaries: Rc<RefCell<Vec<AstConstraintBoundary>>>,
+    /// Selected fast numeric operations recorded while resolving authored expressions.
+    ///
+    /// WHAT: one shared sink for the whole module, written as each fast operation is selected.
+    /// WHY: resolution runs long before verification, and folding may erase the operation's node
+    ///      in the same parse. Recording beside the expression graph keeps the evidence alive and
+    ///      gives deferred completion the same sink as ordinary parsing.
+    pub(crate) fast_operation_witnesses: Rc<RefCell<Vec<AstFastOperationWitness>>>,
     pub(crate) source_build_config_values: Option<Arc<ResolvedBuildConfigMap>>,
     /// Names of source `$config` contracts declared by this module.
     pub(crate) source_build_config_contract_names: Option<Arc<FxHashSet<BuildInputName>>>,
@@ -665,6 +687,16 @@ pub struct ScopeContext {
     ///      and must never complete or release it themselves.
     pub(crate) numeric_body_root: bool,
 
+    /// Lexical source constraints active for this scope.
+    ///
+    /// WHAT: the three source modifiers inherited from the annotated function body or statement
+    ///       subtree that owns this scope. A cell lets body-root numeric completion re-activate
+    ///       one deferred statement's authored set while it resolves later, without rebuilding
+    ///       the scope that owns the continuation.
+    /// WHY: numeric resolution reads the active mode from the scope it is building; a fresh
+    ///      function body starts empty, so a callee never inherits its caller's constraints.
+    pub(crate) source_constraints: Cell<SourceConstraintSet>,
+
     // Control flow state.
     pub loop_depth: usize,
 }
@@ -717,6 +749,7 @@ impl Clone for ScopeContext {
             // A clone is a sibling child of the same body; it shares the domain but never owns it.
             numeric_construction: Rc::clone(&self.numeric_construction),
             numeric_body_root: false,
+            source_constraints: std::cell::Cell::new(self.source_constraints.get()),
             loop_depth: self.loop_depth,
         }
     }
@@ -1050,6 +1083,9 @@ impl ScopeContext {
             emitted_warnings: Rc::new(RefCell::new(Vec::new())),
             source_docs: Rc::new(RefCell::new(Vec::new())),
             publish_source_docs: true,
+            constraint_function: None,
+            source_constraint_boundaries: Rc::new(RefCell::new(Vec::new())),
+            fast_operation_witnesses: Rc::new(RefCell::new(Vec::new())),
             generic_function_instantiation_requests: Rc::new(RefCell::new(Vec::new())),
             known_infallible_functions: None,
             source_file_scope: None,
@@ -1098,6 +1134,9 @@ impl ScopeContext {
             // the fresh domain whether or not it later parses a body.
             numeric_construction: Rc::new(RefCell::new(NumericConstructionState::new())),
             numeric_body_root: true,
+            // A newly constructed context is an independent body boundary; only its own
+            // attachment may set constraints here.
+            source_constraints: Cell::new(SourceConstraintSet::default()),
             loop_depth: 0,
         }
     }
@@ -1172,6 +1211,7 @@ impl ScopeContext {
             // Block scopes join the enclosing body's numeric inference boundary.
             numeric_construction: Rc::clone(&self.numeric_construction),
             numeric_body_root: false,
+            source_constraints: std::cell::Cell::new(self.source_constraints.get()),
             loop_depth,
         })
     }
@@ -1208,6 +1248,7 @@ impl ScopeContext {
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
             numeric_construction: Rc::clone(&self.numeric_construction),
             numeric_body_root: false,
+            source_constraints: std::cell::Cell::new(self.source_constraints.get()),
             loop_depth: self.loop_depth,
         }
     }
@@ -1273,6 +1314,7 @@ impl ScopeContext {
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
             numeric_construction: Rc::clone(&self.numeric_construction),
             numeric_body_root: false,
+            source_constraints: std::cell::Cell::new(self.source_constraints.get()),
             loop_depth: self.loop_depth,
         }
     }
@@ -1318,6 +1360,7 @@ impl ScopeContext {
                 .clone(),
             numeric_construction: Rc::clone(&parent.numeric_construction),
             numeric_body_root: false,
+            source_constraints: std::cell::Cell::new(parent.source_constraints.get()),
             loop_depth: parent.loop_depth,
         }
     }
@@ -1365,6 +1408,57 @@ impl ScopeContext {
         self.numeric_body_root
     }
 
+    /// The lexical source constraints active in this scope.
+    ///
+    /// WHAT: the one accessor numeric resolution and constraint verification read from the scope
+    ///       they are building.
+    /// WHY: the inherited set descends through every child expression, condition, branch and loop
+    ///      context, so reading it here applies the authored function or statement annotation
+    ///      without revisiting directive syntax.
+    pub(crate) fn source_constraints(&self) -> SourceConstraintSet {
+        self.source_constraints.get()
+    }
+
+    /// Records one selected fast numeric operation for later constraint verification.
+    ///
+    /// WHAT: appends `(owning callable, authored operator span)` to the module's witness ledger
+    ///       when the resolved operation selected fast semantics.
+    /// WHY: this runs at expression-resolution time, so the evidence exists before the operation
+    ///      can fold away or become dead. Recording is one push per selection: deferred numeric
+    ///      completion can resolve an authored fragment again, and the ledger's single drain-time
+    ///      normalisation removes those repeats without a membership scan on every record. Only an
+    ///      authored callable body can own executable fast arithmetic; a scope without a callable
+    ///      identity (declaration shells, struct defaults) records nothing because no `$safe_math`
+    ///      boundary can reach it.
+    pub(crate) fn record_fast_operation_witness(&self, span: Option<SourceSpan>) {
+        let Some(function) = self.constraint_function else {
+            return;
+        };
+        let witness = AstFastOperationWitness {
+            function,
+            scope: self.scope,
+            span,
+        };
+        self.fast_operation_witnesses.borrow_mut().push(witness);
+    }
+
+    /// Activates `constraints` until the returned guard drops.
+    ///
+    /// WHAT: a drop-based override for deferred numeric completion, where a recipe or
+    ///       continuation may return early through `?` on any path.
+    /// WHY: the guard restores the enclosing set on every exit, including error propagation,
+    ///      without wrapping each retained-statement match in a closure.
+    pub(crate) fn enter_source_constraints(
+        &self,
+        constraints: SourceConstraintSet,
+    ) -> SourceConstraintScope<'_> {
+        let previous = self.source_constraints.replace(constraints);
+        SourceConstraintScope {
+            cell: &self.source_constraints,
+            previous,
+        }
+    }
+
     /// Borrow the live construction state.
     ///
     /// Borrows must stay short and must not re-enter parsing: no parser call may run while a
@@ -1392,7 +1486,7 @@ impl ScopeContext {
     ) -> Result<NumericContinuationId, InfrastructureFailure> {
         self.numeric_construction
             .borrow_mut()
-            .register_continuation(continuation)
+            .register_continuation(continuation, self.source_constraints.get())
     }
 
     /// The authored value mode of a pending numeric binding row, if the row is live.
@@ -1584,6 +1678,7 @@ impl ScopeContext {
             mutable: facts.mutable,
             class,
             recipe: Some(recipe),
+            source_constraints: self.source_constraints.get(),
             origin: Default::default(),
             frame: self.current_frame_id,
         })?;
@@ -1594,6 +1689,22 @@ impl ScopeContext {
             .frame_mut(self.current_frame_id)
             .add_pending_numeric_var(name, binding, domain, binding_span);
         Ok(binding)
+    }
+}
+
+/// Restores the enclosing lexical source-constraint set when a deferred resolution finishes.
+///
+/// WHAT: owns the previous set and the scope cell it came from.
+/// WHY: numeric completion resumes retained work through fallible paths; a drop guard keeps the
+///      restoration correct even when a continuation returns an error or takes an early exit.
+pub(crate) struct SourceConstraintScope<'a> {
+    cell: &'a Cell<SourceConstraintSet>,
+    previous: SourceConstraintSet,
+}
+
+impl Drop for SourceConstraintScope<'_> {
+    fn drop(&mut self) {
+        self.cell.set(self.previous);
     }
 }
 

@@ -1,0 +1,8 @@
+$fast_math
+remainder_i64 |left I64, right I64| -> I64:
+    return left % right
+;
+
+zero I64 = 0
+value = remainder_i64(zero, zero)
+~[:value=[value]]

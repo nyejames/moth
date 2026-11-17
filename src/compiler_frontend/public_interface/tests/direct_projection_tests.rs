@@ -65,6 +65,7 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginFunctionId, OriginTypeCategory, OriginTypeId,
 };
 use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::style_directives::{ConstraintDirectiveSpans, SourceConstraintSet};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
@@ -854,6 +855,8 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         generic_parameter_owner: None,
         generic_parameter_list_id: list_id,
         signature: FunctionSignature::default(),
+        source_constraints: SourceConstraintSet::default(),
+        constraint_directive_spans: ConstraintDirectiveSpans::default(),
         body_tokens: Some({
             let body = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT)
                 .finish()

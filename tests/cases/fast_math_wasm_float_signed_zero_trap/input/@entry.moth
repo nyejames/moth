@@ -1,0 +1,10 @@
+-- Fast `/` traps either signed zero divisor, not only positive zero.
+$fast_math
+divide_f64 |left F64, right F64| -> F64:
+    return left / right
+;
+
+one F64 = 1.0
+negative_zero F64 = -0.0
+value = divide_f64(one, negative_zero)
+~[:value=[value]]

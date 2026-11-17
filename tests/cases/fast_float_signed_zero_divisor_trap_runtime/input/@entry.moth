@@ -1,0 +1,10 @@
+$fast_math
+divide |dividend F64, divisor F64| -> F64:
+    return dividend / divisor
+;
+
+io.line([:before=[1]])
+one F64 = 1.0
+negative_zero F64 = -0.0
+value = divide(one, negative_zero)
+io.line([:after=[value]])

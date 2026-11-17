@@ -1,0 +1,32 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+flags = ["release"]
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0091"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+reason = "invalid_source_constraint.fast_operation"
+path = "input/@entry.moth"
+line = 10
+column = 1
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 12
+column = 12
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 2
+path = "input/@entry.moth"
+line = 7
+column = 12
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 3
+path = "input/@entry.moth"
+line = 3
+column = 18

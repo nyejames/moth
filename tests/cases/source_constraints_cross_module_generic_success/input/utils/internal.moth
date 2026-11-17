@@ -1,0 +1,10 @@
+$fast_math
+identity type T |value T| -> T:
+    $infallible
+    return value
+;
+
+$safe_math
+wrap type T |value T| -> T:
+    return identity(value)
+;

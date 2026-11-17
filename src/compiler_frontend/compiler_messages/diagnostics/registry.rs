@@ -4,8 +4,8 @@
 //! WHY: one table gives a single place to check, at compile time, that no two families share a code or a stable code.
 
 use super::families::{
-    calls_data, choices_control_flow, generics_traits_api, imports, names_declarations,
-    project_config, templates, token_lexical, types_borrows_targets,
+    calls_data, choices_control_flow, constraints, generics_traits_api, imports,
+    names_declarations, project_config, templates, token_lexical, types_borrows_targets,
 };
 use super::record::DiagnosticCode;
 use super::schema::FamilyRow;
@@ -16,6 +16,7 @@ const FAMILY_GROUPS_FOR_CHECK: &[&[FamilyRow]] = &[
     names_declarations::FAMILIES,
     calls_data::FAMILIES,
     choices_control_flow::FAMILIES,
+    constraints::FAMILIES,
     types_borrows_targets::FAMILIES,
     templates::FAMILIES,
     project_config::FAMILIES,

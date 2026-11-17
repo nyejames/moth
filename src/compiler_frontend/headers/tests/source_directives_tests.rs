@@ -1029,3 +1029,181 @@ fn todo_before_a_direct_const_template_is_wrong_target() {
     );
     assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
 }
+
+#[test]
+fn constraint_modifiers_attach_to_free_function_method_and_generic_function() {
+    let source = "\
+$fast_math $infallible
+calculate |value I32| -> I32:
+    return value
+;
+
+Box = | value I32 |
+
+$safe_math $fast_math
+read |this Box| -> I32:
+    return this.value
+;
+
+$fast_math
+identity type T |value T| -> T:
+    return value
+;
+";
+    let headers = expect_header_success(
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
+        "constraints must attach to every callable header shape",
+    );
+
+    let attached: Vec<Vec<SourceDirectiveKind>> = headers
+        .headers
+        .iter()
+        .filter(|header| matches!(header.kind, HeaderKind::Function { .. }))
+        .map(|header| {
+            header
+                .source_directives
+                .iter()
+                .map(|directive| directive.kind)
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        attached,
+        [
+            vec![
+                SourceDirectiveKind::FastMath,
+                SourceDirectiveKind::Infallible
+            ],
+            vec![SourceDirectiveKind::SafeMath, SourceDirectiveKind::FastMath],
+            vec![SourceDirectiveKind::FastMath],
+        ],
+        "methods and generic functions are HeaderKind::Function and keep the authored order"
+    );
+}
+
+#[test]
+fn constraint_modifiers_stack_in_either_order() {
+    for (directives, expected) in [
+        (
+            "$safe_math $fast_math",
+            [SourceDirectiveKind::SafeMath, SourceDirectiveKind::FastMath],
+        ),
+        (
+            "$fast_math $safe_math",
+            [SourceDirectiveKind::FastMath, SourceDirectiveKind::SafeMath],
+        ),
+    ] {
+        let source = format!("{directives}\ncalculate || -> I32:\n    return 1\n;\n");
+        let headers = expect_header_success(
+            parse_single_file_headers_with_entry(&source, "src/@entry.moth", "src/@entry.moth"),
+            "different constraint names combine regardless of order",
+        );
+        let header = headers
+            .headers
+            .iter()
+            .find(|header| !header.source_directives.is_empty())
+            .expect("the function should retain the run");
+        assert_eq!(
+            header
+                .source_directives
+                .iter()
+                .map(|directive| directive.kind)
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn constraint_modifiers_reject_non_function_headers() {
+    let cases = [
+        "$fast_math\nButton = | label String |\n",
+        "$safe_math\nStatus :: Ready, Failed;\n",
+        "$infallible\nUserId as I32\n",
+        "$fast_math\nDISPLAY must:\n    show |This| -> String\n;\n",
+        "$safe_math\ninferred #= 1\n",
+        "$infallible\ntyped #I32 = 2\n",
+        "$fast_math\n[if true: hello]\n",
+    ];
+
+    for source in cases {
+        let errors = expect_header_error(
+            parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
+            "lexical constraints target callables only",
+        );
+        assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
+    }
+}
+
+#[test]
+fn constraint_modifiers_reject_const_function_headers() {
+    let cases = [
+        "$fast_math\nsquare #|value I32| -> I32:\n    return value * value\n;\n",
+        "$safe_math\nsquare #|value I32| -> I32:\n    return value * value\n;\n",
+        "$infallible\nsquare #|value I32| -> I32:\n    return value * value\n;\n",
+    ];
+
+    for source in cases {
+        let errors = expect_header_error(
+            parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
+            "const functions execute only at compile time and cannot carry runtime constraints",
+        );
+        assert_directive_reason(
+            &errors,
+            InvalidTemplateDirectiveCode::CompileTimeFunctionTarget,
+        );
+    }
+}
+
+#[test]
+fn constraint_modifiers_reject_dependency_targets() {
+    let source = "$fast_math\n@impl Box,\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
+        "dependency clauses are not constraint targets",
+    );
+    assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
+}
+
+#[test]
+fn constraint_modifier_parentheses_are_rejected() {
+    let source = "$fast_math()\ncalculate || -> I32:\n    return 1\n;\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
+        "a parameterless constraint must not use call spelling",
+    );
+    assert_directive_reason(&errors, InvalidTemplateDirectiveCode::UnexpectedArguments);
+}
+
+#[test]
+fn duplicate_constraint_modifiers_cite_both_authored_spans() {
+    let source = "$fast_math $fast_math\ncalculate || -> I32:\n    return 1\n;\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
+        "repeating one constraint name on one target is a duplicate",
+    );
+    let diagnostic =
+        assert_directive_reason(&errors, InvalidTemplateDirectiveCode::DuplicateModifier);
+    assert_eq!(
+        earlier_directive_span(diagnostic),
+        Some(source_span_for(source, "$fast_math", 0)),
+        "the duplicate must cite the earlier authored directive"
+    );
+}
+
+#[test]
+fn blank_line_and_eof_break_constraint_attachment() {
+    let blank = "$fast_math\n\ncalculate || -> I32:\n    return 1\n;\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(blank, "src/@entry.moth", "src/@entry.moth"),
+        "a blank line must break constraint attachment",
+    );
+    assert_directive_reason(&errors, InvalidTemplateDirectiveCode::DanglingModifier);
+
+    let eof = "$fast_math\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(eof, "src/@entry.moth", "src/@entry.moth"),
+        "a constraint with no following target is dangling",
+    );
+    assert_directive_reason(&errors, InvalidTemplateDirectiveCode::DanglingModifier);
+}

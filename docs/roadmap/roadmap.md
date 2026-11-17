@@ -29,9 +29,7 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Sequenced work
 
-- [Constraints and fast arithmetic](./plans/constraints-and-fast-math-plan.md) - Queued: Implement compiler-owned `$fast_math`, transitive `$safe_math` and `$infallible` constraints with portable fast integer and floating-point semantics. Ordinary arithmetic remains checked, Dec retains its ordinary behaviour and semantic traps follow the execution-instance fault policy.
-
-- [Numeric optimisation](./plans/numeric-optimisation-plan.md) - Queued after constraints and fast arithmetic: Remove redundant numeric result carriers, error branches and runtime checks through existing proof and backend-lowering systems. Preserve source semantics and measure performance improvements before extending the optimiser.
+- [Numeric optimisation](./plans/numeric-optimisation-plan.md) - **NEXT.** Remove redundant numeric result carriers, error branches and runtime checks through existing proof and backend-lowering systems. Preserve source semantics and measure performance improvements before extending the optimiser.
 
 - [Core Math fast counterparts](./plans/core-math-fast-counterparts-plan.md) - Queued after numeric optimisation: Evaluate and implement a small, benchmark-justified set of explicit `fast_*` Core Math helpers, including the distinct `fast_hypot` algorithm. Reuse trusted package contracts and existing lowering machinery without changing ordinary Math.
 
@@ -278,17 +276,24 @@ This work remains deferred and does not reactivate paused programmes.
 
 ## Possible additional constraints
 
-The constraints foundation will implement only `$fast_math`, `$safe_math` and
-`$infallible`; none is implemented yet. It need not grow into a general effects system. Future restrictions require
-their own design and cost justification, not reserved syntax or speculative compiler machinery.
+The delivered constraints foundation implements `$fast_math`, `$safe_math`
+and `$infallible`. Its accepted scope need not grow into a general effects
+system. Future restrictions require their own design and cost justification,
+not reserved syntax or speculative compiler machinery.
 
-Explore `$pure`, `$no_io` and possibly `$no_wrap` later. A no-wrap restriction could allow fast
-trapping arithmetic while prohibiting possible modular overflow. Its exact proof rules are open.
-Purity needs a contract for observable mutation, ambient reads and nondeterminism. Isolate
-side-effect origins in designated compiler- or builder-provided packages with explicit trusted
-contracts. Arbitrary opaque foreign code cannot establish absence guarantees. Moth-source
-packages remain analysable through ordinary canonical summaries.
+Explore `$pure`, `$no_io` and possibly `$no_wrap` later. These remain future
+design only. A no-wrap restriction could allow fast trapping arithmetic while
+prohibiting possible modular overflow. Its exact proof rules are open. Purity
+needs a contract for observable mutation, ambient reads and nondeterminism.
+Isolate side-effect origins in designated compiler- or builder-provided
+packages with explicit trusted contracts. Arbitrary opaque foreign code cannot
+establish absence guarantees. Moth-source packages remain analysable through
+ordinary canonical summaries.
 
-The progress matrix should retain a labelled future-design reminder, separate from accepted
-implementation rows. These candidate names are not implemented, accepted directive syntax or
-permissions granted to source. Preserve the restriction-oriented name **constraints**.
+`$fast_math` is accepted portable fast semantics, not unchecked host
+arithmetic or a general wrap-or-trap control. Its source contract lives in the
+[constraints reference](../docs/directives/constraints.mtf). The progress
+matrix should retain a labelled future-design reminder, separate from accepted
+implementation rows. `$pure`, `$no_io` and `$no_wrap` are not implemented,
+accepted directive syntax or permissions granted to source. Preserve the
+restriction-oriented name **constraints**.

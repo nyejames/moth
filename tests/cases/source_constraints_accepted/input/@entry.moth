@@ -1,0 +1,52 @@
+$safe_math $infallible
+sum_small |left I8, right U8| -> I16:
+    return left + right
+;
+
+$fast_math $infallible
+wrap_small |left U8, right U8| -> U8:
+    return left + right
+;
+
+$fast_math $safe_math
+dec_only |left Dec4, right Dec4| -> Dec4:
+    return left + right
+;
+
+$infallible
+halve_literal |value I32| -> I32:
+    return value // 2
+;
+
+$fast_math $safe_math
+vacuous || -> I32:
+    return 0
+;
+
+fallible_helper |value I32| -> I32, Error!:
+    if value < 0:
+        return! Error("negative")
+    ;
+    return value
+;
+
+$infallible
+handled |value I32| -> I32, Error!:
+    result I32 = fallible_helper(value) catch then 0
+    return result
+;
+
+$infallible
+unused_catch |value I32| -> I32:
+    halved I32 = value // 2 catch then 0
+    return halved
+;
+
+sum = sum_small(1, 2)
+wrapped = wrap_small(1, 2)
+decimal_value = dec_only(1.0, 2.0)
+halved = halve_literal(5)
+vacuous_value = vacuous()
+handled_value = handled(3) catch then 0
+unused_value = unused_catch(4)
+io.line([: sum=[sum] wrapped=[wrapped] dec=[decimal_value] halved=[halved] vacuous=[vacuous_value] handled=[handled_value] unused=[unused_value] ])

@@ -1,0 +1,5 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0021"]
+message_contains = ["`$fast_math` cannot attach to a compile-time `#` function or to a statement inside one."]

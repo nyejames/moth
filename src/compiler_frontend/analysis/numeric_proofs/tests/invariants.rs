@@ -373,21 +373,15 @@ fn declared(local_id: LocalId, ty: TypeId) -> HirLocal {
 }
 
 fn int_op(operator: NumericOperator) -> HirNumericOp {
-    HirNumericOp {
-        operator,
-        domain: NumericScalar::Fixed(FixedScalar::I32),
-    }
+    HirNumericOp::ordinary(operator, NumericScalar::Fixed(FixedScalar::I32))
 }
 
 fn uint_op(operator: NumericOperator) -> HirNumericOp {
-    HirNumericOp {
-        operator,
-        domain: NumericScalar::Fixed(FixedScalar::U32),
-    }
+    HirNumericOp::ordinary(operator, NumericScalar::Fixed(FixedScalar::U32))
 }
 
 fn fixed_op(operator: NumericOperator, domain: NumericScalar) -> HirNumericOp {
-    HirNumericOp { operator, domain }
+    HirNumericOp::ordinary(operator, domain)
 }
 
 fn binary(left: HirValueId, right: HirValueId) -> HirNumericOperands {

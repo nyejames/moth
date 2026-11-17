@@ -1,0 +1,6 @@
+$fast_math $safe_math
+direct |left I32, right I32| -> I32:
+    return left + right
+;
+
+io.line([:value=[direct(1, 2)]])

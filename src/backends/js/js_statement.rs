@@ -6,8 +6,10 @@
 use crate::backends::js::JsEmitter;
 use crate::backends::js::js_expr::{escape_js_string, js_cast_expression_for_policy};
 use crate::backends::js::numeric_carrier::{
-    JsNumericCarrier, JsNumericConversion, binary_float_precision_bits, number_scale_factor_js,
+    JsFastNumericLowering, JsFastStoreConversion, JsNumericCarrier, JsNumericConversion,
+    binary_float_precision_bits, number_scale_factor_js,
 };
+use crate::backends::js::runtime::fatal_numeric_trap_throw;
 use crate::backends::js::value_use::JsValueUse;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::{
@@ -22,9 +24,7 @@ use crate::compiler_frontend::hir::expression_store::HirValueRange;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, HirValueId, LocalId};
-use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode,
-};
+use crate::compiler_frontend::hir::numeric::{HirNumericOp, HirNumericOperands};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelationalPatternOp};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{
@@ -78,34 +78,51 @@ impl<'hir> JsEmitter<'hir> {
 
             HirStatementKind::NumericOp {
                 op,
-                failure_mode,
                 operands,
                 result,
+                ..
             } => {
-                // WHAT: dispatch a checked operation through the helper family selected from its
-                //       semantic result domain.
-                // WHY: the domain's carrier determines both JS arithmetic and the domain bounds.
-                self.emit_numeric_op_statement(
-                    *op,
-                    *failure_mode,
-                    operands,
-                    *result,
-                    statement.id,
-                )?;
+                // WHAT: dispatch the operation through the checked carrier or the fast lowering.
+                // WHY: the semantic result domain determines checked JS arithmetic and its bounds,
+                //      while fast arithmetic owns its wrap and trap helpers. Both deliveries
+                //      consume the same helper envelope, so the statement mode is not re-read.
+                self.emit_numeric_op_statement(*op, operands, *result, statement.id)?;
+            }
+
+            HirStatementKind::FastStoreConversion {
+                conversion,
+                source,
+                result,
+            } => {
+                // WHAT: lower the fast write-back directly to its helper expression.
+                // WHY: these conversions never return the checked `{ tag, value }` carrier and
+                //      never route through `__moth_numeric_trap`; the trapping helpers throw the
+                //      canonical fatal message before the enclosing store executes.
+                let source = self.lower_expr(*source)?;
+                let conversion = JsFastStoreConversion::classify(*conversion)?;
+                self.emit_value_destination(*result, &conversion.expression(&source))?;
             }
 
             HirStatementKind::LoopStepFailure {
                 cause,
-                failure_mode,
+                semantics,
                 result,
+                ..
             } => {
                 let error_code = cause.builtin_error_code();
-                let helper_call = format!(
-                    "__moth_error_result({:?}, {})",
-                    error_code.default_message(),
-                    error_code.as_u32(),
-                );
-                self.emit_numeric_carrier_assignment(helper_call, *failure_mode, *result)?;
+                if !semantics.is_fast() {
+                    let helper_call = format!(
+                        "__moth_error_result({:?}, {})",
+                        error_code.default_message(),
+                        error_code.as_u32(),
+                    );
+                    self.emit_numeric_carrier_assignment(helper_call, *result)?;
+                } else {
+                    // A fast range guard is a fatal trap: throw the canonical cause directly
+                    // instead of constructing the recoverable `{ tag, value }` carrier that a
+                    // Moth handler or an inferred private lane could consume.
+                    self.emit_line(&fatal_numeric_trap_throw(error_code));
+                }
             }
             HirStatementKind::RangeCandidate {
                 current,
@@ -124,26 +141,18 @@ impl<'hir> JsEmitter<'hir> {
                     *in_range_result,
                 )?;
             }
-            HirStatementKind::FormatFloat {
-                source,
-                failure_mode,
-                result,
-            } => {
+            HirStatementKind::FormatFloat { source, result, .. } => {
                 // WHAT: format at the source precision and consume the helper's ABI envelope.
                 // WHY: binary-float formatting is a language builtin with an explicit failure mode; the
                 //      backend must map it to the helper that normalizes JS number text to the
                 //      Moth contract instead of using target-native stringification directly.
-                self.emit_format_float_statement(*failure_mode, *source, *result)?;
+                self.emit_format_float_statement(*source, *result)?;
             }
 
-            HirStatementKind::ValidateFloat {
-                source,
-                failure_mode,
-                result,
-            } => {
+            HirStatementKind::ValidateFloat { source, result, .. } => {
                 // WHAT: validates a finite binary-float at its exact binary precision.
                 // WHY: external values enter the same finite, rounded carrier as other binary floats.
-                self.emit_validate_float_statement(*failure_mode, *source, *result)?;
+                self.emit_validate_float_statement(*source, *result)?;
             }
 
             HirStatementKind::Expr(expression) => {
@@ -241,16 +250,15 @@ impl<'hir> JsEmitter<'hir> {
     fn emit_numeric_op_statement(
         &mut self,
         op: HirNumericOp,
-        failure_mode: NumericFailureMode,
         operands: &HirNumericOperands,
         result: HirLocalDestination,
         statement: HirNodeId,
     ) -> Result<(), InfrastructureFailure> {
-        let (value, proven) = self.lower_numeric_operation(op, operands, statement)?;
-        if proven {
+        let (value, plain_scalar) = self.lower_numeric_operation(op, operands, statement)?;
+        if plain_scalar {
             self.emit_value_destination(result, &value)
         } else {
-            self.emit_numeric_carrier_assignment(value, failure_mode, result)
+            self.emit_numeric_carrier_assignment(value, result)
         }
     }
 
@@ -277,6 +285,15 @@ impl<'hir> JsEmitter<'hir> {
                 vec![self.lower_expr(*left)?, self.lower_expr(*right)?]
             }
         };
+
+        // Fast arithmetic owns its own expressions: fixed integers wrap at the semantic result
+        // width, and fast trapping helpers throw the canonical cause directly. They never build
+        // the checked `{ tag, value }` carrier, so operand scale/bounds arguments and proof-based
+        // check elision do not apply.
+        if op.semantics.is_fast() {
+            let lowering = JsFastNumericLowering::classify(op)?;
+            return Ok((lowering.expression(&lowered_args), true));
+        }
 
         let carrier = JsNumericCarrier::for_scalar(op.domain).unwrap_or_else(|| {
             crate::compiler_bug!(
@@ -631,7 +648,6 @@ impl<'hir> JsEmitter<'hir> {
     ///      and the source row owns the resolved precision.
     fn emit_format_float_statement(
         &mut self,
-        failure_mode: NumericFailureMode,
         source: HirValueId,
         result: HirLocalDestination,
     ) -> Result<(), InfrastructureFailure> {
@@ -641,7 +657,7 @@ impl<'hir> JsEmitter<'hir> {
             "__moth_format_float({source_expr}, {}, \"{scalar}\")",
             binary_float_precision_bits(precision)
         );
-        self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
+        self.emit_numeric_carrier_assignment(helper_call, result)
     }
 
     /// Lower a `HirStatementKind::ValidateFloat` into the exact-precision finite binary-float helper.
@@ -652,7 +668,6 @@ impl<'hir> JsEmitter<'hir> {
     ///      source type owns the rounding step.
     fn emit_validate_float_statement(
         &mut self,
-        failure_mode: NumericFailureMode,
         source: HirValueId,
         result: HirLocalDestination,
     ) -> Result<(), InfrastructureFailure> {
@@ -662,7 +677,7 @@ impl<'hir> JsEmitter<'hir> {
             "__moth_float_validate({source_expr}, {})",
             binary_float_precision_bits(precision)
         );
-        self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
+        self.emit_numeric_carrier_assignment(helper_call, result)
     }
 
     /// The exact binary-float domain and precision of one float statement's source expression.
@@ -698,16 +713,9 @@ impl<'hir> JsEmitter<'hir> {
     fn emit_numeric_carrier_assignment(
         &mut self,
         helper_call: String,
-        failure_mode: NumericFailureMode,
         result: HirLocalDestination,
     ) -> Result<(), InfrastructureFailure> {
-        let assigned_value = match failure_mode {
-            NumericFailureMode::Trap | NumericFailureMode::Infallible => {
-                format!("__moth_numeric_trap({helper_call})")
-            }
-        };
-
-        self.emit_value_destination(result, &assigned_value)
+        self.emit_value_destination(result, &format!("__moth_numeric_trap({helper_call})"))
     }
 
     pub(crate) fn emit_value_destination(

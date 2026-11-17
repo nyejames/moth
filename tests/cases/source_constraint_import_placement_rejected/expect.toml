@@ -1,0 +1,14 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0021"]
+message_contains = ["`$fast_math` must attach to a runtime function declaration"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+occurrence = 1
+reason = "invalid_template_directive.wrong_target"
+path = "input/@entry.moth"
+line = 1

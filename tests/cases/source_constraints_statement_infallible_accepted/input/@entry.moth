@@ -1,0 +1,27 @@
+totalish |value I32| -> I32, Error!:
+    return value
+;
+
+contained |left I32, right I32| -> I32:
+    $infallible
+    value I32 = left // right catch then 0
+    return value
+;
+
+outside_trap |left I32, right I32| -> I32:
+    $infallible
+    halves I32 = 10 // 2
+    return left // right
+;
+
+dead_handler_skipped |value I32, divisor I32| -> I32:
+    parsed I32 = totalish(value) catch |err|:
+        $infallible
+        inner I32 = value // divisor
+        return inner
+    then 0
+    ;
+    return parsed
+;
+
+~[:contained=[contained(8, 2)] halves=[outside_trap(6, 2)] skipped=[dead_handler_skipped(4, 2)]]

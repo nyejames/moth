@@ -1,7 +1,7 @@
 use super::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId,
     SpanCapacityReason,
-    span::{SourceSpan, SpanJoinError},
+    span::{SourceSpan, SpanJoinError, span_within},
 };
 
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -1100,5 +1100,54 @@ fn end_unrepresentable_capacity_is_a_compiler_bug() {
     assert_eq!(
         report.message.as_ref(),
         "span at byte offset 4294967295 with length 1 ends past u32::MAX in a source that was accepted as addressable; this is a compiler bug"
+    );
+}
+
+#[test]
+fn span_containment_requires_one_source_even_at_identical_offsets() {
+    let first_path = PathBuf::from("/project/first.moth");
+    let second_path = PathBuf::from("/project/second.moth");
+    let mut strings = StringTable::new();
+    let mut database =
+        SourceDatabase::build([&first_path, &second_path], &first_path, None, &mut strings)
+            .expect("the two-source test database should build");
+    let first_id = database
+        .get_by_canonical_path(&first_path)
+        .expect("first source should be registered")
+        .id;
+    let second_id = database
+        .get_by_canonical_path(&second_path)
+        .expect("second source should be registered")
+        .id;
+    let text = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!";
+    database
+        .retain_text(first_id, text.to_owned())
+        .expect("first source text should retain");
+    database
+        .retain_text(second_id, text.to_owned())
+        .expect("second source text should retain");
+
+    let mut builder = ExtendedSpanBuilder::new();
+    let span = |source, start: u32, length: u32, builder: &mut ExtendedSpanBuilder| {
+        SourceSpan::new(
+            source,
+            LocalSpan::exact(start, length, builder).expect("short test span should fit"),
+        )
+    };
+    let inner = span(first_id, 10, 2, &mut builder);
+    let start = span(first_id, 4, 20, &mut builder);
+    let end = span(first_id, 4, 20, &mut builder);
+    assert!(span_within(inner, start, end, &database));
+
+    let foreign_start = span(second_id, 4, 20, &mut builder);
+    let foreign_end = span(second_id, 4, 20, &mut builder);
+    assert!(
+        !span_within(inner, foreign_start, foreign_end, &database),
+        "identical byte offsets in another source must not satisfy containment"
+    );
+    assert_eq!(
+        super::span::inline_span_within(inner, foreign_start, foreign_end),
+        Some(false),
+        "the database-free helper applies the same source identity check"
     );
 }

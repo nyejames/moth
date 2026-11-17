@@ -17,7 +17,10 @@ use std::collections::HashSet;
 
 impl<'hir> JsEmitter<'hir> {
     /// Emits the cast helpers selected by reachable HIR policies.
-    pub(crate) fn emit_runtime_cast_helpers(&mut self) {
+    ///
+    /// Returns the emitted helper-name set so later runtime groups can share an already-emitted
+    /// dependency (for example the exact BigInt-to-binary-float rounding helper).
+    pub(crate) fn emit_runtime_cast_helpers(&mut self) -> HashSet<&'static str> {
         // Retain the owned demand set locally while helper emission mutates the output.
         let policies = std::mem::take(&mut self.used_cast_policies);
         let mut emitted = HashSet::<&'static str>::new();
@@ -142,6 +145,7 @@ impl<'hir> JsEmitter<'hir> {
         }
 
         self.used_cast_policies = policies;
+        emitted
     }
 
     fn emit_numeric_conversion_helpers(
@@ -703,7 +707,10 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     /// Rounds an exact BigInt directly to binary16 or binary32, avoiding Number double-rounding.
-    fn emit_bigint_to_binary_float_helper(&mut self, emitted: &mut HashSet<&'static str>) {
+    pub(super) fn emit_bigint_to_binary_float_helper(
+        &mut self,
+        emitted: &mut HashSet<&'static str>,
+    ) {
         if !emitted.insert("__moth_bigint_to_binary_float") {
             return;
         }

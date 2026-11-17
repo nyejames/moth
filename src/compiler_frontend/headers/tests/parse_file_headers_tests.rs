@@ -30,8 +30,8 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
 use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings,
-    ExternalPackageRegistry, ExternalReturnAlias, ExternalSymbolId, ExternalSymbolPath,
-    ExternalTypeDef, ExternalTypeId, external_success_returns,
+    ExternalNumericContract, ExternalPackageRegistry, ExternalReturnAlias, ExternalSymbolId,
+    ExternalSymbolPath, ExternalTypeDef, ExternalTypeId, external_success_returns,
 };
 use crate::compiler_frontend::headers::const_fragments::create_top_level_const_template;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
@@ -1284,6 +1284,7 @@ fn empty_void_function_def(name: &str) -> ExternalFunctionDef {
             None,
         ),
         const_eval: None,
+        numeric_contract: ExternalNumericContract::Unknown,
         lowerings: ExternalFunctionLowerings::default(),
     }
 }

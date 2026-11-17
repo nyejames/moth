@@ -11,7 +11,7 @@ use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_front
 use super::abi::{ExternalAccessKind, ExternalReturnAlias};
 use super::definitions::{
     ExternalConstantDef, ExternalFunctionDef, ExternalFunctionReturnContract, ExternalFunctionSpec,
-    ExternalPackage, ExternalTypeDef, ExternalTypeSpec,
+    ExternalNumericContract, ExternalPackage, ExternalTypeDef, ExternalTypeSpec,
 };
 use super::ids::{
     CanonicalBindingSymbolIdentity, ExternalConstantId, ExternalFunctionId, ExternalPackageId,
@@ -277,6 +277,27 @@ impl ExternalPackageRegistry {
                             path.display_text(),
                             package_path_str,
                             op
+                        ),
+                    ),
+                ));
+            }
+        }
+
+        if let ExternalNumericContract::Trusted(contract) = function.numeric_contract {
+            // Trust is closed evidence a compiler-owned provider promises, so it follows the
+            // const-evaluation rule: Core origin only, and a recoverable-failure claim needs a
+            // fallible return contract to have a channel for it.
+            let valid_registration = package.metadata.origin
+                == crate::builder_surface::PackageOrigin::Core
+                && (!contract.may_fail || function.return_contract.is_fallible());
+            if !valid_registration {
+                return Err(ExternalRegistrationError::Infrastructure(
+                    InfrastructureFailure::internal(
+                        CompilerStage::DependencyResolution,
+                        format!(
+                            "Invalid trusted external numeric-contract registration for '{}' in package '{}': Core origin and a fallible return contract for may_fail are required (compiler bug).",
+                            path.display_text(),
+                            package_path_str
                         ),
                     ),
                 ));
@@ -1254,7 +1275,8 @@ pub(crate) mod test_support {
         ExternalSignatureType,
     };
     use super::super::definitions::{
-        ExternalFunctionDef, ExternalFunctionLowerings, external_returns, external_success_returns,
+        ExternalFunctionDef, ExternalFunctionLowerings, ExternalNumericContract, external_returns,
+        external_success_returns,
     };
     use super::super::ids::ExternalFunctionId;
     use super::ExternalPackageRegistry;
@@ -1332,6 +1354,7 @@ pub(crate) mod test_support {
                 None,
             ),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
     }

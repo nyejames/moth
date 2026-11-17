@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = ""
+runtime_error_contains = ["Floating-point value is out of the target integer range"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = ""
+runtime_trap_contains = ["float unrepresentable in integer range"]

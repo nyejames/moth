@@ -1,0 +1,15 @@
+$fast_math
+fast_leaf |value I32| -> I32:
+    return value + 1
+;
+
+g || -> I32:
+    return fast_leaf(1)
+;
+
+$safe_math
+h || -> I32:
+    return g()
+;
+
+io.line([h()])

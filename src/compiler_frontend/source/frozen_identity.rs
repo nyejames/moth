@@ -210,6 +210,14 @@ impl FrozenIdentityContext {
         self.sources.source_record(id)
     }
 
+    /// Resolve one loaded record without turning a missing source into a compiler bug.
+    ///
+    /// WHY: projection over generated sidecar spans may see a donor source identity that the
+    ///      requester's frozen domain does not own; that is ordinary absence, not corruption.
+    pub(crate) fn try_source_record(&self, id: SourceId) -> Option<&SourceRecord> {
+        self.sources.loaded_record(id)
+    }
+
     #[cfg(test)]
     pub(crate) fn retained_text(&self, id: SourceId) -> Option<&str> {
         self.sources.line_index(id)?;

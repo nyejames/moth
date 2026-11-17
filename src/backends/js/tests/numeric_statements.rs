@@ -6,7 +6,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
 use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
-use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, NumericSemantics};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -23,7 +23,6 @@ use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatemen
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::hir::validate_hir_module;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
-use std::process::Command;
 
 #[test]
 fn trap_mode_loop_step_failure_lowers_to_fatal_throw() {
@@ -44,7 +43,7 @@ fn trap_mode_loop_step_failure_lowers_to_fatal_throw() {
                 1,
                 HirStatementKind::LoopStepFailure {
                     cause,
-                    failure_mode: NumericFailureMode::Trap,
+                    semantics: NumericSemantics::Ordinary,
                     result: HirLocalDestination::Define(LocalId(0)),
                 },
             )],
@@ -465,23 +464,6 @@ fn emitted_candidate_line<'a>(source: &'a str, needle: &str) -> &'a str {
         .unwrap_or_else(|| panic!("emitted JavaScript should contain a line with {needle}"))
 }
 
-/// Runs one generated JavaScript program through Node and returns its stdout.
-///
-/// WHY: exact boundary precision, rejection and signed-zero behavior are properties of the
-///      executed module, not of the emitted source text.
-fn run_javascript(source: &str) -> String {
-    let output = Command::new("node")
-        .args(["--eval", source])
-        .output()
-        .expect("Node.js is required for JavaScript runtime behavior tests");
-    assert!(
-        output.status.success(),
-        "Node.js runtime failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout).expect("Node.js output is UTF-8")
-}
-
 /// Verifies that a trapping boundary keeps a fixed F64 carrier exact.
 ///
 /// WHAT: a finite high-range F64 value, the F64 successor of one and the minimum F64 subnormal
@@ -815,17 +797,11 @@ fn float_helpers_not_emitted_without_float_statement() {
 // ---------------------------------------------------------------------------
 
 fn i32_op(operator: NumericOperator) -> HirNumericOp {
-    HirNumericOp {
-        operator,
-        domain: NumericScalar::Fixed(FixedScalar::I32),
-    }
+    HirNumericOp::ordinary(operator, NumericScalar::Fixed(FixedScalar::I32))
 }
 
 fn f64_op(operator: NumericOperator) -> HirNumericOp {
-    HirNumericOp {
-        operator,
-        domain: NumericScalar::Fixed(FixedScalar::F64),
-    }
+    HirNumericOp::ordinary(operator, NumericScalar::Fixed(FixedScalar::F64))
 }
 
 /// Verifies that trap-mode I32 addition assigns the scalar success value to the result local.
@@ -1489,10 +1465,7 @@ fn f16_operations_complete_at_binary16_at_each_operation() {
             ),
         };
         let entry = lower_returned_numeric_op(
-            HirNumericOp {
-                operator,
-                domain: NumericScalar::Fixed(FixedScalar::F16),
-            },
+            HirNumericOp::ordinary(operator, NumericScalar::Fixed(FixedScalar::F16)),
             operands,
             f16_ty,
             expressions,
@@ -1572,10 +1545,7 @@ fn narrow_i8_operations_check_the_selected_width_at_each_operation() {
             ),
         };
         let entry = lower_returned_numeric_op(
-            HirNumericOp {
-                operator,
-                domain: NumericScalar::Fixed(FixedScalar::I8),
-            },
+            HirNumericOp::ordinary(operator, NumericScalar::Fixed(FixedScalar::I8)),
             operands,
             i8_ty,
             expressions,
@@ -1598,10 +1568,10 @@ fn narrow_i8_operations_check_the_selected_width_at_each_operation() {
         ),
     };
     let entry = lower_returned_numeric_op(
-        HirNumericOp {
-            operator: NumericOperator::Negate,
-            domain: NumericScalar::Fixed(FixedScalar::I8),
-        },
+        HirNumericOp::ordinary(
+            NumericOperator::Negate,
+            NumericScalar::Fixed(FixedScalar::I8),
+        ),
         operands,
         i8_ty,
         expressions,

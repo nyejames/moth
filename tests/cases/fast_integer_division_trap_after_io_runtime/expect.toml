@@ -1,0 +1,7 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "before=1"
+runtime_error_contains = ["Division by zero"]

@@ -832,15 +832,23 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                 let Some(value) = value else {
                     return Ok(None);
                 };
-                match numeric_negation_payload(
-                    self.values,
-                    self.strings,
-                    value,
-                    facts,
-                    self.dec_power_exponent_depth > 0,
-                ) {
-                    Ok(payload) => payload,
-                    Err(error) => return Err(self.label_numeric_failure(error, &[value])),
+                if let Some(numeric) = fast_numeric_operation(facts) {
+                    // Fast negation is total: a fixed integer wraps and a binary float negates
+                    // exactly, so a constant operand always yields a constant result.
+                    fold_fast_numeric_negation(numeric_operand(self.values, value), numeric)?
+                } else {
+                    match numeric_negation_payload(
+                        self.values,
+                        self.strings,
+                        value,
+                        facts,
+                        self.dec_power_exponent_depth > 0,
+                    ) {
+                        Ok(payload) => payload,
+                        Err(error) => {
+                            return Err(self.label_numeric_failure(error, &[value]));
+                        }
+                    }
                 }
             }
             Operation::LogicalNot { .. } => {
@@ -867,6 +875,7 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     expression.span(),
                     self.strings,
                     self.dec_power_exponent_depth > 0,
+                    self.boundary.requirement(),
                 ) {
                     Ok(PayloadFoldOutcome::Folded(payload)) => payload,
                     Ok(PayloadFoldOutcome::NotConstant) => return Ok(None),
@@ -1248,6 +1257,393 @@ fn numeric_negation_payload(
     }
 }
 
+/// The resolved numeric operation when it selected fast arithmetic.
+///
+/// WHY: unary completion matches on the resolved operation kind, so one predicate keeps fast
+///      selection reading the resolved semantics instead of re-deriving it from the domain or the
+///      enclosing scope.
+fn fast_numeric_operation(facts: &ResolvedOperation) -> Option<&ResolvedNumericOperation> {
+    match &facts.kind {
+        ResolvedOperationKind::Numeric(numeric) if numeric.semantics.is_fast() => Some(numeric),
+        _ => None,
+    }
+}
+
+/// Why one fast numeric operation cannot produce a value.
+///
+/// WHAT: the semantic trap causes a fast fold can observe, named by the same numeric failure
+///       family the ordinary checked fold reports.
+/// WHY: a fast fault is a fatal trap at runtime, but compile-time evaluation must still explain
+///      the invalid constant through the existing numeric failure categories. One small cause set
+///      keeps opportunistic folding (leave the runtime operation) and required-const folding
+///      (diagnose) reading the same decision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FastNumericTrap {
+    /// A zero integer divisor, or a zero binary-float divisor for `/` and `%`.
+    DivideByZero,
+    /// Signed `MIN // -1`, whose quotient has no value in the result domain.
+    IntegerOverflow,
+    /// A signed integer power with a negative exponent.
+    InvalidExponent,
+    /// A binary-float operation whose rounded result is not finite.
+    FloatNonFinite,
+}
+
+/// The outcome of one fast numeric fold.
+///
+/// WHAT: either the value fast arithmetic produces or the trap that prevents one.
+/// WHY: a fast operation that wraps is a valid constant, while a trapped one must stay a runtime
+///      operation in an opportunistic fold and become a diagnostic in a required-const context.
+enum FastNumericFold {
+    Value(ConstValuePayload),
+    Trapped(FastNumericTrap),
+}
+
+impl FastNumericFold {
+    /// Converts one fast outcome into the enclosing fold's payload outcome.
+    fn into_payload_outcome(
+        self,
+        requirement: FoldRequirement,
+        context: &mut NumericFoldFailure<'_, '_>,
+    ) -> Result<PayloadFoldOutcome, ConstantFoldError> {
+        match self {
+            Self::Value(payload) => Ok(PayloadFoldOutcome::Folded(payload)),
+            // The runtime operation owns the trap, so an optional fold keeps the authored
+            // expression instead of publishing a value the backend would never produce.
+            Self::Trapped(_) if requirement == FoldRequirement::Opportunistic => {
+                Ok(PayloadFoldOutcome::NotConstant)
+            }
+            Self::Trapped(trap) => Err(fast_numeric_trap_error(trap, context)),
+        }
+    }
+}
+
+/// Folds one binary operation under the fast contract.
+///
+/// WHAT: fixed integers wrap `wrap_N` for `+ - *`, trap on the documented divisors, and compute
+///       powers modularly; binary floats share ordinary rounding and trap on a zero divisor or a
+///       non-finite result.
+/// WHY: fast arithmetic differs from checked arithmetic only in wrapping and in converting the
+///      remaining faults into traps, so this is the one fold entry point that implements that
+///      difference for both optional and required receivers.
+fn fold_fast_numeric_binary(
+    lhs: &ConstValuePayload,
+    rhs: &ConstValuePayload,
+    numeric: &ResolvedNumericOperation,
+) -> Result<FastNumericFold, ConstantFoldError> {
+    if numeric.domain.is_integer() {
+        return fold_fast_integer_binary(lhs, rhs, numeric);
+    }
+    if numeric.domain.is_binary_float() {
+        return fold_fast_float_binary(lhs, rhs, numeric);
+    }
+    // `numeric_semantics` never selects fast mode for a Dec domain, so a Dec operation here is a
+    // broken invariant rather than a source-reachable combination.
+    Err(InfrastructureFailure::internal(
+        CompilerStage::ConstantEvaluation,
+        "Fast folding received a domain outside fixed integers and binary floats.",
+    )
+    .into())
+}
+
+/// Folds one fixed-integer binary operation under the fast contract.
+fn fold_fast_integer_binary(
+    lhs: &ConstValuePayload,
+    rhs: &ConstValuePayload,
+    numeric: &ResolvedNumericOperation,
+) -> Result<FastNumericFold, ConstantFoldError> {
+    let domain = numeric.domain;
+    let NumericScalar::Fixed(scalar) = domain else {
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
+            "Integer fast folding received a non-fixed result domain.",
+        )
+        .into());
+    };
+    let left = integer_value_from_payload(lhs).ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
+            "Integer fast folding received a non-integer left operand.",
+        )
+    })?;
+    let right = integer_value_from_payload(rhs).ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
+            "Integer fast folding received a non-integer right operand.",
+        )
+    })?;
+    let mask = fixed_integer_mask(scalar);
+    let signed = scalar.class() == FixedScalarClass::SignedInteger;
+    // `is_integer` above proves a fixed integer class, whose declared range is always known.
+    let minimum = domain
+        .integer_range()
+        .expect("an integer fast domain has bounds")
+        .0;
+
+    let outcome = match numeric.operator {
+        NumericOperator::Add => FastNumericFold::Value(integer_wrapped_payload(
+            domain,
+            (left as u64).wrapping_add(right as u64) & mask,
+        )),
+        NumericOperator::Subtract => FastNumericFold::Value(integer_wrapped_payload(
+            domain,
+            (left as u64).wrapping_sub(right as u64) & mask,
+        )),
+        NumericOperator::Multiply => FastNumericFold::Value(integer_wrapped_payload(
+            domain,
+            (left as u64).wrapping_mul(right as u64) & mask,
+        )),
+        NumericOperator::IntegerDivide => {
+            if right == 0 {
+                return Ok(FastNumericFold::Trapped(FastNumericTrap::DivideByZero));
+            }
+            // The mathematical quotient of `MIN` and `-1` exceeds the signed domain, and fast
+            // arithmetic traps instead of producing the wrapping negation.
+            if signed && left == minimum && right == -1 {
+                return Ok(FastNumericFold::Trapped(FastNumericTrap::IntegerOverflow));
+            }
+            // Both operands already carry the result domain, so a non-trapping quotient stays
+            // inside it; `i128` division truncates towards zero exactly as the contract requires.
+            FastNumericFold::Value(integer_result_payload(domain, left / right))
+        }
+        NumericOperator::Remainder => {
+            if right == 0 {
+                return Ok(FastNumericFold::Trapped(FastNumericTrap::DivideByZero));
+            }
+            // Remainder by `-1` is zero even where the paired quotient has no value.
+            if signed && left == minimum && right == -1 {
+                FastNumericFold::Value(integer_result_payload(domain, 0))
+            } else {
+                FastNumericFold::Value(integer_result_payload(domain, left % right))
+            }
+        }
+        NumericOperator::Power => {
+            if right < 0 {
+                return Ok(FastNumericFold::Trapped(FastNumericTrap::InvalidExponent));
+            }
+            FastNumericFold::Value(integer_wrapped_payload(
+                domain,
+                modular_power(left as u64 & mask, right as u128, mask),
+            ))
+        }
+        NumericOperator::Divide | NumericOperator::Negate => {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                format!(
+                    "Integer fast folding received unsupported numeric operator '{}'",
+                    numeric.operator.name()
+                ),
+            )
+            .into());
+        }
+    };
+
+    Ok(outcome)
+}
+
+/// Folds one fixed binary-float binary operation under the fast contract.
+///
+/// WHAT: applies the same operand conversion, single rounding step and result domain as ordinary
+///       folding, then reports a zero divisor or non-finite result as a trap.
+/// WHY: fast mode never changes a float's accepted value, its precision or signed zero; only the
+///      failure delivery differs, so both modes must share one arithmetic sequence.
+fn fold_fast_float_binary(
+    lhs: &ConstValuePayload,
+    rhs: &ConstValuePayload,
+    numeric: &ResolvedNumericOperation,
+) -> Result<FastNumericFold, ConstantFoldError> {
+    let domain = numeric.domain;
+    let precision = domain.binary_float_precision().ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
+            "Fast float folding received a domain without binary-float precision.",
+        )
+    })?;
+    let left = float_operand_in_domain(lhs, numeric.left_conversion).ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
+            "Fast float folding received a non-float left operand.",
+        )
+    })?;
+    let right = float_operand_in_domain(rhs, numeric.right_conversion).ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::ConstantEvaluation,
+            "Fast float folding received a non-float right operand.",
+        )
+    })?;
+    let value = match numeric.operator {
+        NumericOperator::Add => left + right,
+        NumericOperator::Subtract => left - right,
+        NumericOperator::Multiply => left * right,
+        NumericOperator::Divide => {
+            // A signed zero divisor is still a zero divisor, so the sign never rescues it.
+            if right == 0.0 {
+                return Ok(FastNumericFold::Trapped(FastNumericTrap::DivideByZero));
+            }
+            left / right
+        }
+        NumericOperator::Remainder => {
+            if right == 0.0 {
+                return Ok(FastNumericFold::Trapped(FastNumericTrap::DivideByZero));
+            }
+            left % right
+        }
+        NumericOperator::Power => numeric_power::pow(left, right),
+        NumericOperator::IntegerDivide | NumericOperator::Negate => {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                format!(
+                    "Binary-float fast folding received unsupported numeric operator '{}'",
+                    numeric.operator.name()
+                ),
+            )
+            .into());
+        }
+    };
+    let rounded = precision.round(value);
+    if !rounded.is_finite() {
+        return Ok(FastNumericFold::Trapped(FastNumericTrap::FloatNonFinite));
+    }
+    Ok(FastNumericFold::Value(float_result_payload(
+        domain, rounded,
+    )))
+}
+
+/// Folds one fixed numeric unary negation under the fast contract.
+///
+/// WHAT: a signed integer negation wraps in the result domain and a binary-float negation is
+///       exact at its precision, including signed zero.
+/// WHY: fast unary negation has no trap cause, so it always yields a constant and records no
+///      failure where the checked fold would report overflow.
+fn fold_fast_numeric_negation(
+    operand: &ConstValuePayload,
+    numeric: &ResolvedNumericOperation,
+) -> Result<ConstValuePayload, ConstantFoldError> {
+    let domain = numeric.domain;
+    if domain.is_integer() {
+        let NumericScalar::Fixed(scalar) = domain else {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                "Integer fast negation received a non-fixed result domain.",
+            )
+            .into());
+        };
+        let value = integer_value_from_payload(operand).ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                "Integer fast negation received a non-integer operand.",
+            )
+        })?;
+        let mask = fixed_integer_mask(scalar);
+        return Ok(integer_wrapped_payload(
+            domain,
+            (value as u64).wrapping_neg() & mask,
+        ));
+    }
+    if domain.is_binary_float() {
+        let precision = domain.binary_float_precision().ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                "Fast float negation received a domain without binary-float precision.",
+            )
+        })?;
+        let value = float_value_from_payload(operand).ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                "Fast float negation received a non-float operand.",
+            )
+        })?;
+        // Negation flips the sign bit without changing the magnitude, so the rounded result is
+        // finite and exact at the domain precision; rounding again keeps one result rule.
+        return Ok(float_result_payload(domain, precision.round(-value)));
+    }
+    // `negation_domain` only resolves signed integers and binary floats, so this is defensive.
+    Err(InfrastructureFailure::internal(
+        CompilerStage::ConstantEvaluation,
+        "Fast negation received a domain outside fixed integers and binary floats.",
+    )
+    .into())
+}
+
+/// The low-bit mask of one fixed integer width.
+fn fixed_integer_mask(scalar: FixedScalar) -> u64 {
+    let width = scalar.bit_width();
+    if width >= u64::BITS {
+        u64::MAX
+    } else {
+        (1u64 << width) - 1
+    }
+}
+
+/// Reinterprets one `wrap_N` bit pattern as a value of the fixed integer result domain.
+///
+/// WHAT: masks the mathematical result modulo `2^N` and sign-extends it for a signed domain.
+/// WHY: every fast integer arithmetic rule, including modular power, produces its result as a
+///      low-bit pattern, so one constructor keeps the domain range invariant without a second
+///      per-operator width table.
+fn integer_wrapped_payload(domain: NumericScalar, bits: u64) -> ConstValuePayload {
+    let NumericScalar::Fixed(scalar) = domain else {
+        crate::compiler_bug!(
+            CompilerStage::ConstantEvaluation,
+            "a wrapped integer result requires a fixed integer domain"
+        )
+    };
+    let width = scalar.bit_width();
+    let masked = bits & fixed_integer_mask(scalar);
+    let value = match scalar.class() {
+        FixedScalarClass::SignedInteger => {
+            // Sign-extend the N-bit pattern through the 64-bit carrier.
+            let sign_extended = if width >= u64::BITS {
+                masked
+            } else if masked & (1u64 << (width - 1)) != 0 {
+                masked | !fixed_integer_mask(scalar)
+            } else {
+                masked
+            };
+            i128::from(sign_extended as i64)
+        }
+        FixedScalarClass::UnsignedInteger => i128::from(masked),
+        FixedScalarClass::BinaryFloat | FixedScalarClass::Octet => crate::compiler_bug!(
+            CompilerStage::ConstantEvaluation,
+            "a wrapped integer result requires an integer result domain"
+        ),
+    };
+    integer_result_payload(domain, value)
+}
+
+/// Modular exponentiation over `2^N` without constructing the unwrapped power.
+///
+/// WHAT: square-and-multiply in the low `N` bits, one bit of the exponent per iteration.
+/// WHY: the contract forbids building a huge host power before truncation, and `0 ^ 0` is `1`
+///      because the empty product is one.
+fn modular_power(mut base: u64, mut exponent: u128, mask: u64) -> u64 {
+    let mut result = 1u64 & mask;
+    base &= mask;
+    while exponent != 0 {
+        if exponent & 1 == 1 {
+            result = result.wrapping_mul(base) & mask;
+        }
+        exponent >>= 1;
+        if exponent != 0 {
+            base = base.wrapping_mul(base) & mask;
+        }
+    }
+    result
+}
+
+/// Maps one fast trap cause onto the existing numeric failure diagnostic family.
+fn fast_numeric_trap_error(
+    trap: FastNumericTrap,
+    context: &mut NumericFoldFailure<'_, '_>,
+) -> ConstantFoldError {
+    match trap {
+        FastNumericTrap::DivideByZero => divide_by_zero_diagnostic(context),
+        FastNumericTrap::IntegerOverflow => integer_overflow_diagnostic(context),
+        FastNumericTrap::InvalidExponent => exponent_operand_context_diagnostic(context),
+        FastNumericTrap::FloatNonFinite => float_non_finite_diagnostic(context),
+    }
+}
+
 fn binary_payload(
     left: &ConstValuePayload,
     right: &ConstValuePayload,
@@ -1255,6 +1651,7 @@ fn binary_payload(
     span: Option<SourceSpan>,
     strings: &mut StringTable,
     inside_dec_power_exponent: bool,
+    requirement: FoldRequirement,
 ) -> Result<PayloadFoldOutcome, ConstantFoldError> {
     if let ResolvedOperationKind::Numeric(numeric) = &facts.kind {
         let mut context = NumericFoldFailure {
@@ -1264,12 +1661,12 @@ fn binary_payload(
             domain: numeric.domain,
             inside_dec_power_exponent,
         };
-        return Ok(PayloadFoldOutcome::Folded(fold_numeric_binary(
-            left,
-            right,
-            numeric,
-            &mut context,
-        )?));
+        if numeric.semantics.is_fast() {
+            let folded = fold_fast_numeric_binary(left, right, numeric)?;
+            return folded.into_payload_outcome(requirement, &mut context);
+        }
+        let folded = fold_numeric_binary(left, right, numeric, &mut context)?;
+        return Ok(PayloadFoldOutcome::Folded(folded));
     }
     if let ResolvedOperationKind::Comparison(comparison) = &facts.kind {
         return Ok(
@@ -1956,7 +2353,7 @@ fn compile_time_evaluation_diagnostic_with_numeric_type(
     )
 }
 
-fn integer_overflow_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, ConstantFoldError> {
+fn integer_overflow_diagnostic(ctx: &mut NumericFoldFailure<'_, '_>) -> ConstantFoldError {
     // An overflow inside a Dec power's exponent follows that power's I32 exponent rule, so it
     // reports the dedicated reason instead of a bare integer overflow.
     let reason = if ctx.inside_dec_power_exponent {
@@ -1964,23 +2361,31 @@ fn integer_overflow_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, 
     } else {
         CompileTimeEvaluationErrorReason::IntegerOverflow
     };
-    Err(compile_time_evaluation_diagnostic_with_numeric_type(
+    compile_time_evaluation_diagnostic_with_numeric_type(
         reason,
         Some(ctx.operator.to_str().to_string()),
         Some(ctx.domain),
         ctx.string_table,
         ctx.span,
-    ))
+    )
 }
 
-fn float_non_finite_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, ConstantFoldError> {
-    Err(compile_time_evaluation_diagnostic_with_numeric_type(
+fn integer_overflow_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, ConstantFoldError> {
+    Err(integer_overflow_diagnostic(ctx))
+}
+
+fn float_non_finite_diagnostic(ctx: &mut NumericFoldFailure<'_, '_>) -> ConstantFoldError {
+    compile_time_evaluation_diagnostic_with_numeric_type(
         CompileTimeEvaluationErrorReason::FloatOverflow,
         Some(ctx.operator.to_str().to_string()),
         Some(ctx.domain),
         ctx.string_table,
         ctx.span,
-    ))
+    )
+}
+
+fn float_non_finite_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, ConstantFoldError> {
+    Err(float_non_finite_diagnostic(ctx))
 }
 
 /// Shared failure context for one numeric fold attempt.
@@ -2088,24 +2493,32 @@ fn checked_int_binary_result(
     Ok(value)
 }
 
-fn divide_by_zero_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, ConstantFoldError> {
-    Err(compile_time_evaluation_diagnostic(
+fn divide_by_zero_diagnostic(ctx: &mut NumericFoldFailure<'_, '_>) -> ConstantFoldError {
+    compile_time_evaluation_diagnostic(
         CompileTimeEvaluationErrorReason::DivideByZero,
         None,
         ctx.string_table,
         ctx.span,
-    ))
+    )
+}
+
+fn divide_by_zero_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, ConstantFoldError> {
+    Err(divide_by_zero_diagnostic(ctx))
+}
+
+fn exponent_operand_context_diagnostic(ctx: &mut NumericFoldFailure<'_, '_>) -> ConstantFoldError {
+    compile_time_evaluation_diagnostic(
+        CompileTimeEvaluationErrorReason::InvalidExponent,
+        Some(ctx.operator.to_str().to_string()),
+        ctx.string_table,
+        ctx.span,
+    )
 }
 
 fn exponent_operand_context_error<T>(
     ctx: &mut NumericFoldFailure<'_, '_>,
 ) -> Result<T, ConstantFoldError> {
-    Err(compile_time_evaluation_diagnostic(
-        CompileTimeEvaluationErrorReason::InvalidExponent,
-        Some(ctx.operator.to_str().to_string()),
-        ctx.string_table,
-        ctx.span,
-    ))
+    Err(exponent_operand_context_diagnostic(ctx))
 }
 
 fn invalid_operator_for_compile_time_type<T>(

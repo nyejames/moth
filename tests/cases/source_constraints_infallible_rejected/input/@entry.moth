@@ -1,0 +1,60 @@
+$infallible
+divide |left I32, right I32| -> I32:
+    return left // right
+;
+
+$infallible
+float_overflow |left F64, right F64| -> F64:
+    return left * right
+;
+
+$infallible
+asserted |value I32| -> I32:
+    assert(value > 0)
+    return value
+;
+
+$infallible
+escapes || -> I32, Error!:
+    return! Error("no value")
+;
+
+$infallible
+halve_or_step |left I32, right I32| -> I32:
+    value I32 = left // right catch then left - 1
+    return value
+;
+
+$fast_math $infallible
+fast_divide |left I32, right I32| -> I32:
+    return left // right
+;
+
+$fast_math $infallible
+fast_float |left F64, right F64| -> F64:
+    return left * right
+;
+
+$fast_math $infallible
+fast_range |limit I32| -> I32:
+    seen ~= 0
+    loop 0 to limit:
+        ~seen = seen
+    ;
+    return seen
+;
+
+fallible_helper |value I32| -> I32, Error!:
+    if value < 0:
+        return! Error("negative")
+    ;
+    return value
+;
+
+$infallible
+fallible_fallback |value I32| -> I32, Error!:
+    result I32 = fallible_helper(value) catch |error|:
+        return fallible_helper(value)!
+    ;
+    return result
+;

@@ -1,0 +1,10 @@
+-- Fast binary-float arithmetic rejects a non-finite semantic result at the operation boundary.
+$fast_math
+multiply_f32 |left F32, right F32| -> F32:
+    return left * right
+;
+
+huge F32 = 3.4028235e38
+two F32 = 2.0
+value = multiply_f32(huge, two)
+~[:value=[value]]

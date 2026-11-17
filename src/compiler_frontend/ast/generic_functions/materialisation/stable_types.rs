@@ -49,6 +49,7 @@ use crate::compiler_frontend::semantic_identity::{
     OriginDeclarationId, OriginFunctionId, OriginTypeId, StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
+use crate::compiler_frontend::style_directives::{ConstraintDirectiveSpans, SourceConstraintSet};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -70,6 +71,19 @@ pub(crate) struct GenericTemplateArtefact {
     ///      `GenericInstantiationDeclarationSite` from it, so a failing instance points at the
     ///      provider declaration.
     pub(super) declaration_span: Option<SourceSpan>,
+    /// Lexical source constraints authored on the provider's generic declaration.
+    ///
+    /// WHAT: the effective `$fast_math`/`$safe_math`/`$infallible` set on the function head.
+    /// WHY: a consumer materialises this body through the artefact; the frozen template must
+    ///      build every instance body under the declaration's arithmetic mode, not the caller's.
+    pub(super) source_constraints: SourceConstraintSet,
+    /// Authored guarantee directive spans on the provider's generic declaration head.
+    ///
+    /// WHAT: the `$safe_math` and `$infallible` primary label spans a materialised instance's
+    ///       constraint diagnostics use.
+    /// WHY: the instance body is materialised in another module; only the artefact carries the
+    ///      provider's guarantee directive locations into that compilation.
+    pub(super) constraint_directive_spans: ConstraintDirectiveSpans,
     pub(super) body: StableBodySyntax,
     pub(super) signature: StableFunctionSignature,
     pub(super) generic_parameters: Box<[StableGenericParameter]>,

@@ -1,0 +1,15 @@
+$fast_math
+bump type T is CASTABLE_TO_I64 |value T, target I32, increment I64| -> I32:
+    amount I64 = cast value
+    local ~I32 = copy target
+    ~local += amount
+    return local
+;
+
+one I64 = 1
+from_i32 = bump(1, 2147483647, one)
+
+small I16 = 1
+from_i16 = bump(small, 2147483647, one)
+
+~[:i32=[from_i32] i16=[from_i16]]

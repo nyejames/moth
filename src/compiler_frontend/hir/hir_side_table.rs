@@ -524,6 +524,18 @@ impl HirSideTable {
         self.terminator_spans.get(&block_id)
     }
 
+    /// The nearest authored span a generated block owns.
+    ///
+    /// WHAT: the exact terminator span, then the AST span mapped onto the block.
+    /// WHY: loop lowering creates guard and commit blocks with no authored statement or
+    ///      terminator span. Falling back to the block's mapped AST location attributes their
+    ///      generated work to the loop header without inventing a source position.
+    pub(crate) fn block_span(&self, block_id: BlockId) -> Option<SourceSpan> {
+        self.terminator_span(block_id)
+            .copied()
+            .or_else(|| self.ast_span_for_hir(HirLocation::Block(block_id)))
+    }
+
     /// Returns the interned path for a local variable.
     #[inline]
     pub(crate) fn local_name_path(&self, local_id: LocalId) -> Option<PathId> {

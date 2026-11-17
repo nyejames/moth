@@ -28,7 +28,7 @@ use crate::compiler_frontend::ast::templates::tir::node::{
     TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
 };
 use crate::compiler_frontend::ast::templates::tir::numeric_intake::{
-    NumericTemplateIntakePosition, RangeOperandSlot,
+    NumericIntakeRegistration, NumericTemplateIntakePosition, RangeOperandSlot,
 };
 use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
 use crate::compiler_frontend::ast::templates::tir::refs::{
@@ -39,6 +39,7 @@ use crate::compiler_frontend::ast::templates::tir::summary::summarize_existing_r
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::style_directives::SourceConstraintSet;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -50,6 +51,12 @@ pub(crate) struct TemplateConstructionContext {
     head_node_count: u32,
     control_flow_node_id: Option<TemplateIrNodeId>,
     span: Option<SourceSpan>,
+    /// Lexical source constraints active while this template is parsed.
+    ///
+    /// WHAT: the enclosing function or statement's `$fast_math`/`$safe_math`/`$infallible` set.
+    /// WHY: retained template intakes complete at the body root, after the statement parser
+    ///      restored the enclosing set, so each intake must capture the mode it was authored under.
+    source_constraints: SourceConstraintSet,
 }
 
 /// True when this node is (or will complete into) a control-flow owner root.
@@ -74,7 +81,14 @@ impl TemplateConstructionContext {
             head_node_count: 0,
             control_flow_node_id: None,
             span,
+            source_constraints: SourceConstraintSet::default(),
         }
+    }
+
+    /// Records the lexical source-constraint set active while this template is parsed.
+    pub(crate) fn with_source_constraints(mut self, constraints: SourceConstraintSet) -> Self {
+        self.source_constraints = constraints;
+        self
     }
     pub(crate) fn span(&self) -> Option<SourceSpan> {
         self.span
@@ -199,10 +213,13 @@ impl TemplateConstructionContext {
             store.register_pending_numeric_template_intake(
                 domain,
                 NumericTemplateIntakePosition::HeadExpression(node_id),
-                items,
-                expected,
-                value_mode,
-                suffix,
+                NumericIntakeRegistration {
+                    items,
+                    expected,
+                    value_mode,
+                    suffix,
+                    source_constraints: self.source_constraints,
+                },
             )?;
             node_id
         };
@@ -371,10 +388,13 @@ impl TemplateConstructionContext {
             store.register_pending_numeric_template_intake(
                 domain,
                 NumericTemplateIntakePosition::ConditionalLoopCondition(node_id),
-                deferred.items,
-                deferred.expected,
-                deferred.value_mode,
-                deferred.suffix,
+                NumericIntakeRegistration {
+                    items: deferred.items,
+                    expected: deferred.expected,
+                    value_mode: deferred.value_mode,
+                    suffix: deferred.suffix,
+                    source_constraints: self.source_constraints,
+                },
             )?;
             node_id
         };
@@ -467,10 +487,13 @@ impl TemplateConstructionContext {
                                 store.register_pending_numeric_template_intake(
                                     domain,
                                     position,
-                                    deferred.items,
-                                    deferred.expected,
-                                    deferred.value_mode,
-                                    deferred.suffix,
+                                    NumericIntakeRegistration {
+                                        items: deferred.items,
+                                        expected: deferred.expected,
+                                        value_mode: deferred.value_mode,
+                                        suffix: deferred.suffix,
+                                        source_constraints: self.source_constraints,
+                                    },
                                 )?;
                             }
                         }
@@ -590,10 +613,13 @@ impl TemplateConstructionContext {
                     store.register_pending_numeric_template_intake(
                         domain,
                         NumericTemplateIntakePosition::LoopCollectionIterable(node_id),
-                        deferred.items,
-                        deferred.expected,
-                        deferred.value_mode,
-                        deferred.suffix,
+                        NumericIntakeRegistration {
+                            items: deferred.items,
+                            expected: deferred.expected,
+                            value_mode: deferred.value_mode,
+                            suffix: deferred.suffix,
+                            source_constraints: self.source_constraints,
+                        },
                     )?;
                 }
             }
@@ -606,10 +632,13 @@ impl TemplateConstructionContext {
                         store.register_pending_numeric_template_intake(
                             domain,
                             NumericTemplateIntakePosition::LoopCollectionStep(node_id),
-                            deferred.items,
-                            deferred.expected,
-                            deferred.value_mode,
-                            deferred.suffix,
+                            NumericIntakeRegistration {
+                                items: deferred.items,
+                                expected: deferred.expected,
+                                value_mode: deferred.value_mode,
+                                suffix: deferred.suffix,
+                                source_constraints: self.source_constraints,
+                            },
                         )?;
                     }
                 }
@@ -674,10 +703,13 @@ impl TemplateConstructionContext {
             store.register_pending_numeric_template_intake(
                 domain,
                 NumericTemplateIntakePosition::ConditionalSelector(node_id),
-                deferred.items,
-                deferred.expected,
-                deferred.value_mode,
-                deferred.suffix,
+                NumericIntakeRegistration {
+                    items: deferred.items,
+                    expected: deferred.expected,
+                    value_mode: deferred.value_mode,
+                    suffix: deferred.suffix,
+                    source_constraints: self.source_constraints,
+                },
             )?;
 
             node_id
@@ -711,6 +743,7 @@ impl TemplateConstructionContext {
             mut head_node_count,
             control_flow_node_id,
             span,
+            ..
         } = self;
 
         let mut store = store.borrow_mut();

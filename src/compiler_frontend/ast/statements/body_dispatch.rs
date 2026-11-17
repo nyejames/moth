@@ -43,6 +43,7 @@ use crate::compiler_frontend::ast::statements::value_production::{
 };
 use crate::compiler_frontend::ast::templates::template::{Template, TemplateType};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::ast::{AstConstraintBoundary, AstConstraintStatementSpan};
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -57,6 +58,10 @@ use crate::compiler_frontend::compiler_messages::{
     SourceScopeConstruct,
 };
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::style_directives::{
+    ConstraintDirectiveSpans, SourceConstraintSet, SourceOperandFoldResources,
+    parse_statement_source_directive_run,
+};
 use crate::compiler_frontend::symbols::identifier_policy;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -363,6 +368,63 @@ fn prefixed_nonplace_write(cursor: &AstCursor) -> bool {
     false
 }
 
+/// Constraints attached to one upcoming statement by a source-directive run.
+///
+/// WHAT: the set to restore once the statement finishes, the effective set to record, and the
+///       target's first authored token.
+/// WHY: a statement annotation applies only to the immediately following statement subtree. This
+///      loop-local record keeps the reset and the verification fact at the one point where the
+///      parser knows both the enclosing and attached sets without threading a second context.
+struct PendingStatementConstraints {
+    enclosing: SourceConstraintSet,
+    effective: SourceConstraintSet,
+    start_span: SourceSpan,
+    directive_spans: ConstraintDirectiveSpans,
+}
+
+/// Returns the last non-newline token span before the cursor.
+///
+/// WHAT: walks backwards from the current position, skipping newline tokens.
+/// WHY: an annotated statement's authored range must end at its final meaningful token even when
+///      the statement parser leaves its trailing newline for the next loop iteration.
+fn last_statement_token_span(cursor: &AstCursor<'_>) -> Option<SourceSpan> {
+    let mut index = cursor.position().min(cursor.length());
+    while index > 0 {
+        index -= 1;
+        let token = cursor.token_ref_at(index)?;
+        if token.tag() != TokenTag::NEWLINE {
+            return Some(token.source_span());
+        }
+    }
+    None
+}
+
+/// Restores the enclosing constraint set and records the completed statement boundary.
+fn finish_pending_statement_constraints(
+    context: &mut ScopeContext,
+    cursor: &AstCursor<'_>,
+    pending: PendingStatementConstraints,
+) {
+    context.source_constraints.set(pending.enclosing);
+    let Some(function) = context.constraint_function else {
+        return;
+    };
+    let end = last_statement_token_span(cursor).unwrap_or(pending.start_span);
+    context
+        .source_constraint_boundaries
+        .borrow_mut()
+        .push(AstConstraintBoundary {
+            function,
+            scope: context.scope,
+            statement: Some(AstConstraintStatementSpan {
+                start: pending.start_span,
+                end,
+            }),
+            constraints: pending.effective,
+            directive_spans: pending.directive_spans,
+        });
+}
+
 /// Parse the statements of one function, entry or nested block body.
 ///
 /// `body_opening` is the effective opening site of an authored block body: the colon that opened
@@ -396,18 +458,31 @@ pub(crate) fn parse_function_body_statements(
     // Authored statement order for this body, including every position whose statement could not
     // finish until the body root had selected each numeric origin's single static type.
     let mut draft = BodyDraft::new();
+    // A constraint run attaches to exactly the next statement. `directive_just_attached` marks the
+    // one loop iteration that parses that statement, so the reset below runs only on the
+    // following iteration, after the whole statement subtree has been parsed.
+    let mut pending_statement_constraints: Option<PendingStatementConstraints> = None;
+    let mut directive_just_attached = false;
 
     while token_stream.position() < token_stream.length() {
+        // The iteration right after attachment parses the annotated statement itself; the
+        // following iteration is the first one allowed to close the attachment.
+        if directive_just_attached {
+            directive_just_attached = false;
+        } else if let Some(pending) = pending_statement_constraints.take() {
+            finish_pending_statement_constraints(&mut context, token_stream, pending);
+        }
+
         let current_tag = token_stream.current_tag();
 
         ast_log!("Parsing Token: ", #current_tag);
 
         if current_tag == TokenTag::STYLE_DIRECTIVE {
             let in_match_arm = context.kind == ContextKind::MatchArm;
-            crate::compiler_frontend::style_directives::parse_statement_source_directive_run(
+            let attachment = parse_statement_source_directive_run(
                 token_stream,
                 &mut context,
-                crate::compiler_frontend::style_directives::SourceOperandFoldResources {
+                SourceOperandFoldResources {
                     type_interner,
                     expression_builder,
                     const_values,
@@ -420,6 +495,18 @@ pub(crate) fn parse_function_body_statements(
                             || current_token_starts_colon_separated_arm_header(cursor))
                 },
             )?;
+            if !attachment.constraints.is_empty() {
+                let enclosing = context.source_constraints.get();
+                let effective = enclosing.union(attachment.constraints);
+                context.source_constraints.set(effective);
+                pending_statement_constraints = Some(PendingStatementConstraints {
+                    enclosing,
+                    effective,
+                    start_span: attachment.target_span,
+                    directive_spans: attachment.directive_spans,
+                });
+                directive_just_attached = true;
+            }
             continue;
         }
 
@@ -941,6 +1028,12 @@ pub(crate) fn parse_function_body_statements(
                 )?));
             }
         }
+    }
+
+    // A constraint attached to the body's final statement must still record its boundary when the
+    // loop ends without another iteration.
+    if let Some(pending) = pending_statement_constraints.take() {
+        finish_pending_statement_constraints(&mut context, token_stream, pending);
     }
 
     // Numeric-dependent statements complete here for an independent body root: it is the only

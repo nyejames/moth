@@ -9,6 +9,9 @@ use super::block_body::ValueBlockBranchBody;
 use super::inline_then_else::{InlineThenElseInput, InlineThenElseOutcome, parse_inline_then_else};
 use super::retained::{DeferredValueBlock, DeferredValueBlockForm, RetainedValueBlock};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, InlineValueIfBranchRanges,
+};
 use crate::compiler_frontend::ast::numeric_construction::StatementExpression;
 use crate::compiler_frontend::ast::statements::value_production::expression_build::{
     build_value_if_expression, then_value_node,
@@ -43,6 +46,19 @@ pub(super) fn parse_inline_value_if(
         path_fork,
     } = input;
 
+    let record_branch_ranges =
+        |expression_builder: &mut AstExpressionBuilder, then_range, else_range| {
+            if let Some(header_span) = span {
+                expression_builder.record_inline_value_if_branch_ranges(
+                    header_span,
+                    InlineValueIfBranchRanges {
+                        then_branch: then_range,
+                        else_branch: else_range,
+                    },
+                );
+            }
+        };
+
     let output = match parse_inline_then_else(InlineThenElseInput {
         token_stream,
         then_context: context,
@@ -56,12 +72,18 @@ pub(super) fn parse_inline_value_if(
         string_table,
         path_fork,
     })? {
-        InlineThenElseOutcome::Complete(output) => output,
+        InlineThenElseOutcome::Complete(output) => {
+            record_branch_ranges(expression_builder, output.then_range, output.else_range);
+            output
+        }
         InlineThenElseOutcome::Retained {
             then_body,
             else_body,
+            then_range,
+            else_range,
             generic_request_ranges,
         } => {
+            record_branch_ranges(expression_builder, then_range, else_range);
             // A branch still depends on an unresolved numeric origin, so the whole inline value-if
             // travels to the enclosing body root, which resolves both branches and builds this
             // block once — never a placeholder value or a second parse.

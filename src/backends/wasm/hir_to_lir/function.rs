@@ -14,7 +14,6 @@ use crate::compiler_frontend::compiler_messages::compiler_errors::Infrastructure
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
-use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -83,10 +82,11 @@ pub(crate) fn lower_function(
         let mut lowered_statements = Vec::new();
         let mut loop_step_trap = false;
         for statement in &hir_block.statements {
-            if let HirStatementKind::LoopStepFailure { failure_mode, .. } = statement.kind {
-                loop_step_trap = failure_mode == NumericFailureMode::Trap;
+            if let HirStatementKind::LoopStepFailure { .. } = &statement.kind {
                 // Recoverable loop-step failures are Invoke terminators and are target-gated.
-                // This statement is the unconditional trap-mode producer.
+                // This statement is the unconditional trap producer: ordinary delivery traps and
+                // fast delivery is fatal.
+                loop_step_trap = true;
                 break;
             }
             lower_statement(&mut function_context, statement, &mut lowered_statements)?;
@@ -227,11 +227,13 @@ fn collect_reachable_blocks(
     // WHY: avoids lowering dead blocks and keeps block-id mapping canonical.
     let mut block_ids = crate::compiler_frontend::hir::utils::collect_reachable_blocks(
         function.entry,
-        |block_id| {
+        |block_id, visit| {
             let block = block_by_id_or_error(context, block_id, function.id)?;
-            Ok::<_, InfrastructureFailure>(
-                crate::compiler_frontend::hir::utils::terminator_targets(&block.terminator),
-            )
+            crate::compiler_frontend::hir::utils::for_each_terminator_target(
+                &block.terminator,
+                visit,
+            );
+            Ok::<_, InfrastructureFailure>(())
         },
     )?;
     block_ids.sort_by_key(|id| id.0);
@@ -243,6 +245,8 @@ fn block_by_id_or_error<'a>(
     block_id: BlockId,
     function_id: FunctionId,
 ) -> Result<&'a crate::compiler_frontend::hir::blocks::HirBlock, InfrastructureFailure> {
+    // Not `HirModule::block`: Wasm lowering also sees hand-built and variant modules whose block
+    // ids are not yet compacted into index order, so resolve the exact id by scan.
     context
         .hir_module
         .blocks

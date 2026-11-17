@@ -5,6 +5,7 @@
 
 pub(crate) mod calls_data;
 pub(crate) mod choices_control_flow;
+pub(crate) mod constraints;
 pub(crate) mod generics_traits_api;
 pub(crate) mod imports;
 pub(crate) mod names_declarations;

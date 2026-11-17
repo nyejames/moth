@@ -1,0 +1,3 @@
+$fast_math
+value #= 1
+~[: [value]]

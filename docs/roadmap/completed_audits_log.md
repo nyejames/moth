@@ -28,8 +28,16 @@ Historical audit resolutions and the index of reports with no outstanding findin
 - [AUD-0018: Source directive parsing](./audits/closed_audits/AUD-0018-source-directive-parsing.md)
 - [AUD-0019: Function body parsing](./audits/closed_audits/AUD-0019-function-body-parsing.md)
 - [AUD-0020: Backend feature validation](./audits/closed_audits/AUD-0020-backend-feature-validation.md)
+- [AUD-0021: Constraint selected-evidence correctness](./audits/closed_audits/AUD-0021-constraints-selected-evidence-correctness.md)
 
 ## Resolution records
+
+- AUD-0021 completed without demonstrated in-scope findings at `abc903852`. Reviewed generated
+  witness resolution, per-guarantee and per-source-domain labels, release-folded call evidence,
+  skipped-code classification and caught-call handling. The implementation handover reported
+  `just validate-full` passed, but the independent audit could only run `git diff --check` because
+  the Rust toolchain was unavailable. Two pre-existing crashes and one unproven spanless-fold
+  profile-parity risk are tracked in `docs/bug-reports.md`. See [AUD-0021](./audits/closed_audits/AUD-0021-constraints-selected-evidence-correctness.md).
 
 - AUD-0017-F01, F02 and F04–F07 were accepted and resolved, and F03 stays rejected. An authored
   nested block in the entry start body (`if`, loop, value `if` or block `catch`) that reaches EOF

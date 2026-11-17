@@ -1,0 +1,24 @@
+@untrusted.js add_one
+
+wrapper |value I32| -> I32:
+    return add_one(value)
+;
+
+$safe_math
+safe_caller |value I32| -> I32:
+    return wrapper(value)
+;
+
+$infallible
+infallible_caller |value I32| -> I32:
+    return wrapper(value)
+;
+
+$safe_math
+dead_external_after_return || -> I32:
+    return 0
+    value I32 = add_one(1)
+    return value
+;
+
+~[:done]

@@ -33,7 +33,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericComparisonDomain, NumericOperator, comparison_domain, numeric_failure_codes,
-    numeric_operation_cannot_fail, range_iteration_domain,
+    numeric_operation_cannot_fail, numeric_semantics, range_iteration_domain,
 };
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
@@ -44,6 +44,14 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(crate) struct ResolvedExpressionType {
     pub(crate) type_id: TypeId,
     pub(crate) failure_facts: ExpressionFailureFacts,
+    /// Authored spans of every operator that selected fast semantics, in resolution order.
+    ///
+    /// WHAT: empty for ordinary expressions and one entry per selected fast operation otherwise,
+    ///       including an operation whose authored span is absent.
+    /// WHY: the evaluating scope owns fast-use evidence, so resolution reports the selection once
+    ///      and never reads a scope or ledger itself. An empty `Vec` allocates nothing, so ordinary
+    ///      expression typing pays no allocation for this channel.
+    pub(crate) fast_operation_spans: Vec<Option<SourceSpan>>,
 }
 
 #[allow(
@@ -59,9 +67,11 @@ pub(crate) fn resolve_expression_result_type(
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
     path_fork: &PathInternerFork,
+    fast_math_active: bool,
 ) -> Result<ResolvedExpressionType, ExpressionTypingError> {
     add_ast_counter(AstCounter::ExpressionTypedStackItems, output_queue.len());
     let (mut nodes, roots) = index_expression_nodes(output_queue, string_table)?;
+    let mut fast_operation_spans = Vec::new();
 
     // Resolve every root before reporting a malformed final shape, preserving pending-literal
     // diagnostics. A lone pending root keeps the direct receiving destination.
@@ -81,6 +91,8 @@ pub(crate) fn resolve_expression_result_type(
             string_table,
             type_environment,
             path_fork,
+            fast_math_active,
+            &mut fast_operation_spans,
         )?;
     }
     let [root] = roots.as_slice() else {
@@ -97,6 +109,7 @@ pub(crate) fn resolve_expression_result_type(
     Ok(ResolvedExpressionType {
         type_id: resolved_type(&nodes, *root)?,
         failure_facts,
+        fast_operation_spans,
     })
 }
 
@@ -249,6 +262,8 @@ fn resolve_indexed_expression(
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
     path_fork: &PathInternerFork,
+    fast_math_active: bool,
+    fast_operation_spans: &mut Vec<Option<SourceSpan>>,
 ) -> Result<(), ExpressionTypingError> {
     let mut frames = vec![ResolutionFrame::Visit {
         index: root,
@@ -539,7 +554,16 @@ fn resolve_indexed_expression(
                     left_type,
                     right_type,
                     type_environment,
+                    fast_math_active,
                 )?;
+                // Fast-use evidence is captured before the operation can fold; the fold replaces
+                // this node with a constant and the ledger must outlive it.
+                if matches!(
+                    &operation.kind,
+                    ResolvedOperationKind::Numeric(numeric) if numeric.semantics.is_fast()
+                ) {
+                    fast_operation_spans.push(operation.span);
+                }
                 items[index] = ExpressionRpnItem::ResolvedOperator(operation);
             }
         }
@@ -575,6 +599,12 @@ fn collect_operation_summaries(items: &[ExpressionRpnItem]) -> ExpressionFailure
 }
 
 /// Captures selected numeric semantics while canonical operand and result types are available.
+///
+/// WHAT: derives the computation domain, numeric semantics, discharge verdict and conversion
+///       edges once from the canonical types and the authoring scope's lexical mode.
+/// WHY: fast arithmetic is selected here, from the active `$fast_math` set and the resolved
+///      domain, so folding, HIR construction and failure facts read one fact. Fast operations
+///      never contribute an implicit recoverable failure, because their remaining faults trap.
 pub(crate) fn resolved_operation(
     operator: Operator,
     span: Option<SourceSpan>,
@@ -582,6 +612,7 @@ pub(crate) fn resolved_operation(
     left_type: TypeId,
     right_type: Option<TypeId>,
     environment: &TypeEnvironment,
+    fast_math_active: bool,
 ) -> Result<ResolvedOperation, ExpressionTypingError> {
     let left = NumericScalar::from_type_id(left_type, environment);
     let right = right_type.and_then(|type_id| NumericScalar::from_type_id(type_id, environment));
@@ -601,8 +632,9 @@ pub(crate) fn resolved_operation(
         })?;
         let discharged =
             numeric_operation_cannot_fail(numeric_operator, left_domain, right, domain);
+        let semantics = numeric_semantics(domain, fast_math_active);
         let codes = numeric_failure_codes(numeric_operator, domain);
-        if !discharged && !codes.is_empty() {
+        if !semantics.is_fast() && !discharged && !codes.is_empty() {
             failure = Some(ImplicitFailureContributor {
                 span,
                 codes,
@@ -621,6 +653,7 @@ pub(crate) fn resolved_operation(
                 .filter(|right| *right != domain && !exponent_edge)
                 .map(|_| domain),
             discharged,
+            semantics,
         })
     } else if matches!(operator, Operator::Range) {
         let domain = left

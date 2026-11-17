@@ -14,6 +14,7 @@ use super::super::visibility::StableFileVisibility;
 use super::ModuleMaterialisationContext;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
+use crate::compiler_frontend::style_directives::{ConstraintDirectiveSpans, SourceConstraintSet};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::tokenizer::tokens::TestSourceTokensBuilder;
 use rustc_hash::FxHashMap;
@@ -40,6 +41,8 @@ impl ModuleMaterialisationContext {
                 function_path: PathId::ROOT,
                 source_file: PathId::ROOT,
                 declaration_span: None,
+                source_constraints: SourceConstraintSet::default(),
+                constraint_directive_spans: ConstraintDirectiveSpans::default(),
                 body: StableBodySyntax {
                     declaration_path: PathId::ROOT,
                     donor_file_id: crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,

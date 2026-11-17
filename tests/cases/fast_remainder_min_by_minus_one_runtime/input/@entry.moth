@@ -1,0 +1,27 @@
+$fast_math
+remainder_i32 |dividend I32, divisor I32| -> I32:
+    return dividend % divisor
+;
+
+$fast_math
+remainder_i64 |dividend I64, divisor I64| -> I64:
+    return dividend % divisor
+;
+
+format_i32 |value I32| -> String:
+    return cast value
+;
+
+format_i64 |value I64| -> String:
+    return cast value
+;
+
+minimum_i32 I32 = -2147483648
+minimum_i64 I64 = -9223372036854775808
+minus_one_i32 I32 = -1
+minus_one_i64 I64 = -1
+
+minimum_remainder_i32 = format_i32(remainder_i32(minimum_i32, minus_one_i32))
+minimum_remainder_i64 = format_i64(remainder_i64(minimum_i64, minus_one_i64))
+
+~[:minimum-remainder i32=[minimum_remainder_i32] i64=[minimum_remainder_i64]]

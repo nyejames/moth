@@ -50,6 +50,7 @@ use crate::compiler_frontend::declaration_syntax::signature_members::FunctionSig
 use crate::compiler_frontend::headers::module_symbols::DeclarationId;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
+use crate::compiler_frontend::style_directives::source_constraints_from_annotations;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
@@ -578,6 +579,11 @@ fn build_generic_function_template(
         generic_parameter_owner: None,
         generic_parameter_list_id,
         signature: signature.clone(),
+        source_constraints: source_constraints_from_annotations(&header.source_directives),
+        constraint_directive_spans:
+            crate::compiler_frontend::style_directives::constraint_directive_spans(
+                &header.source_directives,
+            ),
         declaration_span: header.name_span,
         body_tokens: Some(body),
     }

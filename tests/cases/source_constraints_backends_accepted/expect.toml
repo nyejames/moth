@@ -1,0 +1,12 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+flags = ["release"]
+rendered_output_contains = ["a=10 b=3 c=8"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["a=10 b=3 c=8"]

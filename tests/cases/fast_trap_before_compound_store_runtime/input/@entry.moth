@@ -1,0 +1,10 @@
+$fast_math
+accumulate |target ~I32, divisor I32|:
+    ~target += 10 // divisor
+;
+
+io.line([:before=[7]])
+target ~I32 = 7
+zero I32 = 0
+accumulate(~target, zero)
+io.line([:after=[target]])

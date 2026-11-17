@@ -35,7 +35,9 @@ use crate::compiler_frontend::hir::reachability::{
     HirModuleLinkFacts, collect_module_function_link_facts,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
+use crate::compiler_frontend::hir::terminators::{
+    HirFallibleOperation, HirTerminator, RuntimeFailureKind,
+};
 use crate::compiler_frontend::module_compilation::generated::test_fixtures::{
     PublishedBoundary, assert_compiler_bug, test_sidecar,
 };
@@ -102,6 +104,9 @@ fn summary(return_alias: FunctionReturnAliasSummary) -> PublicCallSummary {
         parameters: Vec::new(),
         return_alias,
         escapes_builtin_failure: false,
+        uses_fast_semantics: false,
+        may_trap: false,
+        may_fail: false,
     }
 }
 
@@ -139,6 +144,7 @@ fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
         terminator: HirTerminator::RuntimeFailure {
             message: "test convergence model".to_owned(),
             cause: None,
+            kind: RuntimeFailureKind::NoMatchFallback,
         },
     });
     collect_module_function_link_facts(&module).expect("test HIR should produce link facts")
@@ -719,6 +725,7 @@ fn failure_facts(
         assertion_message_calls: vec![],
         deferred_custom_catches: vec![],
         infallible_cast_evidence: None,
+        constraint: Default::default(),
     }
 }
 
@@ -1470,6 +1477,32 @@ fn omitted_assertion_calls_use_existing_generated_reverse_dependencies() {
             .escapes_builtin_failure
     );
     assert!(update_generated_summary(&mut transaction, &identity, initial).is_err());
+}
+
+#[test]
+fn generated_constraint_bits_must_not_narrow() {
+    let identity = generated_identity("trap");
+    let mut trapping = summary(FunctionReturnAliasSummary::Fresh);
+    trapping.may_trap = true;
+    let sidecar = test_sidecar(identity.clone(), trapping.clone());
+    let published = PublishedBoundary::empty();
+    let mut transaction = GeneratedFunctionTransaction::new(published.view());
+    let request = transaction.register_requests([GeneratedRequestFacts {
+        identity: identity.clone(),
+        display_name: "trap".to_owned(),
+        call_span: None,
+    }])[0];
+    transaction.enter(request);
+    transaction.complete(request, trapping, sidecar, Default::default());
+
+    let narrowed = summary(FunctionReturnAliasSummary::Fresh);
+    let error = update_generated_summary(&mut transaction, &identity, narrowed)
+        .expect_err("a generated summary must not narrow its trap bit");
+    assert!(
+        error.message.contains("narrowed trap"),
+        "unexpected transition error: {}",
+        error.message
+    );
 }
 
 #[test]
@@ -2237,6 +2270,72 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
 }
 
 #[test]
+fn materialised_generic_sidecar_projects_constraint_boundaries_and_fast_evidence() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    const SOURCE: &str = "\
+$fast_math
+probe type T |value T| -> U8:
+    $safe_math
+    marker I32 = 1
+    return 200 + 56
+;
+result = probe(1)
+~[: result=[result]]
+";
+    let (frontend, _) = compile_owned_service_fixture(SOURCE, true, &[]);
+    let CompilationOutcome::Success {
+        value: frontend, ..
+    } = frontend
+    else {
+        panic!("the materialised generic fixture should compile successfully");
+    };
+
+    let mut materialised_facts = None;
+    for module in frontend.project.successful_module_views() {
+        let hir = &module.executable.hir;
+        for function in &hir.functions {
+            let Some(facts) = hir.function_failure_facts.get(&function.id) else {
+                continue;
+            };
+            if facts.constraint.fast_use.is_empty() {
+                continue;
+            }
+            materialised_facts = Some(facts);
+        }
+    }
+    let facts = materialised_facts
+        .expect("the materialised instance sidecar should carry the generic body's fast evidence");
+    let crate::compiler_frontend::hir::failure_facts::HirFastUseProvenance::AuthoredArithmetic =
+        facts.constraint.fast_use[0].provenance
+    else {
+        panic!(
+            "the folded addition should project as authored arithmetic, got {:?}",
+            facts.constraint.fast_use
+        );
+    };
+    assert!(
+        facts
+            .constraint
+            .boundaries
+            .iter()
+            .any(|boundary| boundary.statement.is_none()
+                && boundary.constraints.fast_math_active()),
+        "the materialised function keeps its declared $fast_math boundary: {:?}",
+        facts.constraint.boundaries
+    );
+    assert!(
+        facts
+            .constraint
+            .boundaries
+            .iter()
+            .any(|boundary| boundary.statement.is_some()
+                && boundary.constraints.safe_math_active()),
+        "the materialised annotated statement keeps its $safe_math boundary: {:?}",
+        facts.constraint.boundaries
+    );
+}
+
+#[test]
 fn completed_service_diagnoses_retained_generic_assertion_and_custom_catch_sites() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let assertion_source = "message type T |marker T, value I32| -> String:\n\
@@ -2741,3 +2840,6 @@ fn final_generated_failure_lanes_keep_external_candidates_without_validation_onl
         }
     }
 }
+
+#[path = "constraint_summary_tests.rs"]
+mod constraint_summary_tests;

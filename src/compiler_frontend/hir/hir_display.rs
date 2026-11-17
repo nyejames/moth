@@ -416,10 +416,7 @@ impl<'a> HirDisplayContext<'a> {
                     out,
                     "numeric_{}_{}(",
                     op,
-                    match failure_mode {
-                        NumericFailureMode::Trap => "trap",
-                        NumericFailureMode::Infallible => "safe",
-                    }
+                    numeric_failure_mode_label(*failure_mode)
                 );
 
                 match operands {
@@ -440,19 +437,32 @@ impl<'a> HirDisplayContext<'a> {
                 out
             }
 
+            HirStatementKind::FastStoreConversion {
+                conversion,
+                source,
+                result,
+            } => format!(
+                "{} = fast_store_conversion_{}_{}({})",
+                self.render_local_destination(*result),
+                conversion,
+                conversion
+                    .required_failure_mode()
+                    .map(numeric_failure_mode_label)
+                    .unwrap_or("invalid"),
+                self.render_expression(expressions, *source)
+            ),
+
             HirStatementKind::LoopStepFailure {
                 cause,
-                failure_mode,
+                semantics,
                 result,
+                ..
             } => {
                 format!(
                     "{} = loop_step_failure_{:?}_{}()",
                     self.render_local_destination(*result),
                     cause,
-                    match failure_mode {
-                        NumericFailureMode::Trap => "trap",
-                        NumericFailureMode::Infallible => "safe",
-                    }
+                    numeric_failure_mode_label(NumericFailureMode::range_guard(*semantics))
                 )
             }
 
@@ -484,10 +494,7 @@ impl<'a> HirDisplayContext<'a> {
                 format!(
                     "{} = format_float_{}({})",
                     self.render_local_destination(*result),
-                    match failure_mode {
-                        NumericFailureMode::Trap => "trap",
-                        NumericFailureMode::Infallible => "safe",
-                    },
+                    numeric_failure_mode_label(*failure_mode),
                     self.render_expression(expressions, *source)
                 )
             }
@@ -500,10 +507,7 @@ impl<'a> HirDisplayContext<'a> {
                 format!(
                     "{} = validate_float_{}({})",
                     self.render_local_destination(*result),
-                    match failure_mode {
-                        NumericFailureMode::Trap => "trap",
-                        NumericFailureMode::Infallible => "safe",
-                    },
+                    numeric_failure_mode_label(*failure_mode),
                     self.render_expression(expressions, *source)
                 )
             }
@@ -1268,6 +1272,16 @@ impl<'a> HirDisplayContext<'a> {
         for line in text.lines() {
             self.push_indented_line(out, indent, line);
         }
+    }
+}
+
+/// The short delivery label HIR numeric statements render.
+#[cfg(any(test, feature = "show_hir"))]
+fn numeric_failure_mode_label(failure_mode: NumericFailureMode) -> &'static str {
+    match failure_mode {
+        NumericFailureMode::Fatal => "fatal",
+        NumericFailureMode::Trap => "trap",
+        NumericFailureMode::Infallible => "safe",
     }
 }
 

@@ -850,7 +850,7 @@ The compiler defines semantic fingerprint contents. The build system owns invali
 
 ### In-memory reuse
 
-The first development build compiles the full selected graph. Later builds reuse successful immutable artefacts. A changed module rebuilds. Semantic consumers rebuild only when a provider's public-interface fingerprint changes, including any exported access/effect/lifetime fact. There is no separate exported-effect fingerprint.
+The first development build compiles the full selected graph. Later builds reuse successful immutable artefacts. A changed module rebuilds. Semantic consumers rebuild only when a provider's public-interface fingerprint changes, including any exported access/effect/lifetime fact. Summary-carried numeric constraint guarantees participate in that interface, so a provider that starts using fast arithmetic or gains a reachable trap invalidates its semantic consumers. There is no separate exported-effect fingerprint.
 
 Entries relink or regenerate when their implementation, dormant-root, runtime-dependency, generated, entry-settings, project-field or relevant backend-config inputs change. A private body change need not recompile semantic consumers. Dormant root changes affect entries that activate that root. Runtime-dependency changes update capabilities, glue and resource planning.
 

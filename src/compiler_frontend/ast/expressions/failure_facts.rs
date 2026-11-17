@@ -180,6 +180,9 @@ impl<'contributors, T> WitnessCandidates<'contributors, T> {
     }
 }
 
+/// The visible call-hop bound shared by AST failure witnesses and HIR constraint witnesses.
+pub(crate) const MAX_CALL_HOPS: usize = 3;
+
 /// Keep at most three private call hops on a failure witness, counting the rest as elided.
 ///
 /// WHAT: stores the first three path hops as labels and records how many further hops the
@@ -190,8 +193,6 @@ pub(crate) fn retain_bounded_witness_hops(
     witness: &mut BuiltinFailureWitness,
     hops: Vec<Option<SourceSpan>>,
 ) {
-    const MAX_CALL_HOPS: usize = 3;
-
     witness.elided_call_hops = hops.len().saturating_sub(MAX_CALL_HOPS) as u32;
     witness.call_spans = hops.into_iter().take(MAX_CALL_HOPS).collect();
 }
@@ -445,7 +446,11 @@ impl ExpressionFailureFacts {
                 source,
                 facts: cast,
             } => {
-                let store_conversion = cast.handling == CastHandling::StoreConversion;
+                let fast_store_conversion = cast.handling == CastHandling::FastStoreConversion;
+                let store_conversion = matches!(
+                    cast.handling,
+                    CastHandling::StoreConversion | CastHandling::FastStoreConversion
+                );
                 facts.merge_child(source, true);
                 facts.authored_cast |= !store_conversion;
                 if cast.fallibility == BuiltinCastFallibility::Fallible {
@@ -461,12 +466,14 @@ impl ExpressionFailureFacts {
                             codes,
                             source: ImplicitFailureSource::AuthoredCastConversion,
                         });
-                    } else if matches!(
-                        cast.evidence,
-                        ResolvedCastEvidence::Builtin {
-                            policy: BuiltinCastPolicyId::NumericConversion { .. }
-                        }
-                    ) && !codes.is_empty()
+                    } else if !fast_store_conversion
+                        && matches!(
+                            cast.evidence,
+                            ResolvedCastEvidence::Builtin {
+                                policy: BuiltinCastPolicyId::NumericConversion { .. }
+                            }
+                        )
+                        && !codes.is_empty()
                     {
                         let arithmetic_span = match source.operation() {
                             V::NumericUnary { facts, .. } | V::NumericBinary { facts, .. } => {

@@ -66,6 +66,11 @@ changing its source syntax.
 template body. Neither source annotations nor a discarded note contribute an
 entry page fragment.
 
+`$fast_math`, `$safe_math` and `$infallible` are parameterless numeric
+constraints. They attach like other source modifiers and each owns an
+independent semantic guarantee. See @./#constraints (Constraints) for
+placement, reach, proof policy and trap behaviour.
+
 ### Attachment and stacking
 
 A contiguous run of source directives attaches to the **immediately following**

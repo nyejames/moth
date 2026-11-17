@@ -54,6 +54,7 @@ Coverage is not quality. An audited area may still have open findings.
 | `frontend.source_directive_parsing` | Recognition, operand capture and attachment of source directives in header preparation and statement position. Excludes template-head directives and later export/config application. | Correctness 2026-11 AUD-0018 `partial` `stale` |
 | `frontend.function_body_parsing` | Statement parsing inside function bodies after header capture of the body range, including nested block closers and whether later statements are absorbed by an unclosed inner block. This run did not exhaust match-arm, multi-bind or generic-body parsers. | Correctness 2026-11 AUD-0019 `partial` `stale` |
 | `backends.feature_validation` | Target-contract validation in `src/backends/backend_feature_validation.rs` (Wasm arms only; the `Js` arm is an intentional no-op). This run did not inspect `external_package_validation.rs`, nested generic-instance occurrences, or every `MOTH-RULE-0064` fixture. | Correctness 2026-11 AUD-0020 `partial` `stale` |
+| `contract.constraints.selected_evidence` | Constraint evidence from release-folded and skipped AST calls through HIR projection, convergence and generated-instance witness diagnostics. Excludes full generic materialisation, const evaluation and backend arithmetic implementations. | Correctness 2026-11 AUD-0021 `partial` |
 
 ## Never audited
 

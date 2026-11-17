@@ -216,6 +216,7 @@ fn occurrence_replacements_are_immutable_and_reuse_unchanged_roots() {
         operand_type,
         Some(operand_type),
         &TypeEnvironment::new(),
+        false,
     ) else {
         panic!("i32 division should resolve");
     };

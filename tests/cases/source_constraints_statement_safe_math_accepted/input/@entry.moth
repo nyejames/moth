@@ -1,0 +1,32 @@
+totalish |value I32| -> I32, Error!:
+    return value
+;
+
+ordinary_statement |value I32| -> I32:
+    $safe_math
+    result I32 = value + 1
+    return result
+;
+
+$fast_math
+dead_boundary_skipped |value I32| -> I32:
+    parsed I32 = totalish(value) catch |err|:
+        $safe_math
+        inner I32 = value + 1
+    then 0
+    ;
+    return parsed
+;
+
+$fast_math
+nested_statement_after_guard |limit I32| -> I32:
+    seen ~= 0
+    loop 0 to limit:
+        $safe_math
+        marker = 1
+        ~seen = seen
+    ;
+    return seen
+;
+
+~[:ordinary=[ordinary_statement(1)] skipped=[dead_boundary_skipped(2)] nested=[nested_statement_after_guard(4)]]

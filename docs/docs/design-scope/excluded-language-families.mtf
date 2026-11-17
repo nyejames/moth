@@ -98,6 +98,8 @@ adapter searches stay outside the language. Only canonical `Error` receives
 implicit failure automatically; a custom error needs explicit mapping. Public
 bare-failure signatures such as a `fails` marker, a third escaping error
 channel and unchecked modes that bypass numeric checks are also outside scope.
+Portable fast semantics through `$fast_math` are accepted design and keep
+Moth's exact widths, finite-value checks and Dec behaviour.
 
 ### Exceptions and catchable panic systems
 

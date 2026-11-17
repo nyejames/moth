@@ -925,6 +925,9 @@ pub enum InvalidTemplateDirectiveReason {
     /// A source modifier attached to a declaration or dependency clause its contract does not
     /// accept.
     WrongTarget,
+    /// A constraint directive attached to a compile-time `#` function or to a statement inside one.
+    /// Compile-time functions and their bodies are never constraint targets.
+    CompileTimeFunctionTarget,
     /// Two same-line source directives were written without whitespace between them.
     MissingSeparator,
 }
@@ -2373,4 +2376,37 @@ pub enum InvalidGenericInstantiationReason {
 pub enum GenericInferenceSubject {
     Function,
     NominalType,
+}
+
+/// Why one `$safe_math` or `$infallible` boundary failed verification.
+///
+/// WHAT: one reason per hazard class the post-lane verifier can prove or cannot disprove.
+/// WHY: the user contract distinguishes a fast operation, a fast range guard, a fast write-back,
+///      a numeric trap cause, an escaping recoverable error and unavailable evidence. Stable
+///      reason keys let tests assert the class without matching prose.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum InvalidSourceConstraintReason {
+    FastOperation,
+    FastRangeGuard,
+    FastWriteBack,
+    UnknownFastEvidence,
+    UnavailableCalleeFastEvidence,
+    FastEvidenceBeyondWitnessBound,
+    FastEvidenceRecursiveCycle,
+    TrapOverflow,
+    TrapDivision,
+    TrapDivideByZero,
+    TrapExponent,
+    TrapFloatNonFinite,
+    TrapFloatDivision,
+    TrapRangeGuard,
+    TrapWriteBack,
+    TrapAssertion,
+    TrapFloatValidation,
+    TrapConversion,
+    UnknownTrapEvidence,
+    UnavailableCalleeTrapEvidence,
+    TrapEvidenceBeyondWitnessBound,
+    TrapEvidenceRecursiveCycle,
+    EscapingError,
 }

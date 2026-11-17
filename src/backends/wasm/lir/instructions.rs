@@ -7,6 +7,7 @@ use crate::backends::wasm::lir::types::{
     WasmAbiType, WasmImportId, WasmLirBlockId, WasmLirFunctionId, WasmLirLocalId, WasmStaticDataId,
 };
 use crate::backends::wasm::runtime::memory::WasmScalarStorageKind;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
 
@@ -29,6 +30,56 @@ impl WasmIntegerOperationKind {
                 WasmAbiType::I64
             }
         }
+    }
+}
+
+/// One fast compound-assignment write-back lowering.
+///
+/// WHAT: the exact conversion the implicit store performs between the arithmetic result carrier
+///       and the target carrier. Integer wraps are total; float-to-integer truncation relies on
+///       the trapping `trunc` instructions; float destinations round at the target precision and
+///       check finiteness.
+/// WHY: this is not an explicit cast and not an ordinary checked store conversion, so it may not
+///      ride the cast-expression or checked-narrowing paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WasmFastStoreConversion {
+    /// Keep the destination low bits and signedness; `source_signed` selects the extension when
+    /// the destination carrier is wider than the source carrier.
+    IntegerWrap {
+        source_signed: bool,
+        target: WasmIntegerOperationKind,
+    },
+    /// Truncate toward zero. `i32.trunc_*`/`i64.trunc_*` trap on NaN and out-of-range values.
+    FloatToInteger { target: WasmIntegerOperationKind },
+    /// Convert an integer carrier to the target float precision.
+    IntegerToFloat {
+        source_signed: bool,
+        precision: BinaryFloatPrecision,
+    },
+    /// Round a binary float at the target precision and trap when the result is non-finite.
+    FloatRound { precision: BinaryFloatPrecision },
+}
+
+impl WasmFastStoreConversion {
+    /// The ABI carrier of the destination local.
+    pub(crate) fn destination_carrier(self) -> WasmAbiType {
+        match self {
+            Self::IntegerWrap { target, .. } | Self::FloatToInteger { target } => target.carrier(),
+            Self::IntegerToFloat { precision, .. } | Self::FloatRound { precision } => {
+                float_carrier(precision)
+            }
+        }
+    }
+}
+
+fn float_carrier(precision: BinaryFloatPrecision) -> WasmAbiType {
+    match precision {
+        BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
+        BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
+        BinaryFloatPrecision::Binary16 => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm fast store conversion does not support F16 carriers"
+        ),
     }
 }
 
@@ -96,6 +147,29 @@ pub(crate) struct WasmCheckedIntegerOperation {
     pub operands: WasmNumericOperationOperands,
     /// Allocation policy for this operation's scratch locals.
     pub scratch: WasmIntegerScratch,
+}
+
+/// One `$fast_math` integer operation's coherent target payload.
+///
+/// WHAT: the complete semantic record of a `WasmLirStmt::FastIntegerOp`: native modular `+`, `-`,
+///       `*` and unary `-`, truncating `//`/`%` with only their fast trap causes, and modular
+///       power.
+/// WHY: fast arithmetic is a third lowering family beside runtime-checked ordinary arithmetic
+///      and proven-total ordinary arithmetic. It wraps by language rule, so it must never emit
+///      an overflow predicate (which would trap a valid result) and must never be confused with a
+///      statement the analysis proved failure-free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WasmFastIntegerOperation {
+    /// Destination local for the operation result.
+    pub dst: WasmLirLocalId,
+    /// Backend-neutral operator within the integer domain.
+    pub operator: NumericOperator,
+    /// Signed/unsigned 32/64-bit semantic domain.
+    pub kind: WasmIntegerOperationKind,
+    /// Operand locals in source evaluation order.
+    pub operands: WasmNumericOperationOperands,
+    /// Power's loop scratch; `None` for every other operator.
+    pub power: Option<WasmIntegerPowerScratch>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -308,6 +382,18 @@ pub(crate) enum WasmLirStmt {
     CheckedIntegerOp {
         operation: WasmCheckedIntegerOperation,
     },
+    /// `$fast_math` integer arithmetic in its canonical semantic result domain.
+    ///
+    /// WHAT: native modular `+`, `-`, `*` and unary `-`; truncating `//` that traps on a zero
+    ///       divisor or signed `MIN // -1`; dividend-sign `%` that traps only on a zero divisor;
+    ///       and square-and-multiply power that traps on a signed negative exponent.
+    /// WHY: fast integer arithmetic wraps by language rule, so its lowering must not share the
+    ///      ordinary overflow predicates or the proven-safe native path: the former would trap a
+    ///      valid wrapped result and the latter already relies on an analysis fact that does not
+    ///      cover fast statements.
+    FastIntegerOp {
+        operation: WasmFastIntegerOperation,
+    },
     /// Trap on non-finite input and write the validated float to `dst` at its exact precision.
     ValidateFloat {
         dst: WasmLirLocalId,
@@ -320,6 +406,18 @@ pub(crate) enum WasmLirStmt {
         operator: NumericOperator,
         precision: BinaryFloatPrecision,
         operands: WasmNumericOperationOperands,
+    },
+    /// Fast compound-assignment write-back conversion before the store.
+    ///
+    /// WHAT: converts `source` into `dst` using the exact fast write-back rules. Integer wraps are
+    ///       total; float truncation traps in the native `trunc` opcode; float rounding traps on a
+    ///       non-finite result.
+    /// WHY: the implicit fast write-back is not an explicit cast, so it must not reuse checked
+    ///      cast lowering or the cast capability gate.
+    FastStoreConversion {
+        dst: WasmLirLocalId,
+        source: WasmLirLocalId,
+        conversion: WasmFastStoreConversion,
     },
     /// Compute a range candidate in backend-local scratch and commit only if accepted.
     ///

@@ -711,7 +711,7 @@ impl SourceDatabase {
         Ok(slot)
     }
 
-    fn loaded_record(&self, id: SourceId) -> Option<&SourceRecord> {
+    pub(crate) fn loaded_record(&self, id: SourceId) -> Option<&SourceRecord> {
         let slot = self.get(id)?;
         let loaded_index = match slot.load {
             SourceLoadStatus::Loaded(index) => index,
@@ -990,7 +990,7 @@ impl FrozenSourceDatabase {
         })
     }
 
-    fn loaded_record(&self, id: SourceId) -> Option<&SourceRecord> {
+    pub(crate) fn loaded_record(&self, id: SourceId) -> Option<&SourceRecord> {
         let slot = self.get(id)?;
         let loaded_index = match slot.load {
             SourceLoadStatus::Loaded(index) => index,

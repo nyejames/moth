@@ -1,0 +1,8 @@
+$fast_math
+fast_add |value I32| -> I32:
+    return value + 1
+;
+
+public_wrapper |value I32| -> I32:
+    return fast_add(value)
+;

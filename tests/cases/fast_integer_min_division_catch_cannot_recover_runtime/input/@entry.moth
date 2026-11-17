@@ -1,0 +1,10 @@
+io.line([:before=[1]])
+minimum I32 = -2147483648
+minus_one I32 = -1
+
+$fast_math
+value = minimum // minus_one catch:
+    then 0
+;
+
+io.line([:after=[value]])

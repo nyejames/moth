@@ -194,6 +194,9 @@ cannot hide a project/config dependency. Only calls whose arguments fold to
 constants are rewritten. A refusal, failed proof, numeric failure,
 unrepresentable result shape or exhausted work/memory budget leaves the
 runtime call and its rewritten constant children in place.
+A call that is the direct subject of a `catch` also stays a runtime call, so
+its handler keeps a subject. Every erased call is recorded with its catch
+containment so constraint evidence matches the debug build.
 Replacement unites the call site's and evaluated value's synthetic-interface
 provenance so later link facts retain erased dependencies.
 

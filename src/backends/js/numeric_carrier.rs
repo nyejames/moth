@@ -9,12 +9,17 @@
 //! and binary floats remain separate from exact decimal `Dec`. Dec operations and exact casts
 //! use a shared BigInt coefficient family with scales supplied by validated HIR or cast policies.
 
+use crate::backends::js::runtime::NumericRuntimeHelperUsage;
 use crate::compiler_frontend::builtins::casts::evidence::numeric_conversion_fallibility;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::number::NumberValue;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::hir::numeric::{
+    FastStoreConversionClass, HirFastStoreConversion, HirNumericOp,
+};
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::{FixedScalarClass, FixedScalarValue};
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
@@ -138,20 +143,25 @@ impl JsNumericCarrier {
         }
     }
 
+    /// The fixed width and signedness of one integer carrier.
+    ///
+    /// WHAT: derives the semantic bit width from the carrier's exact bounds and reports whether
+    ///       the domain is signed (its minimum is negative).
+    /// WHY: fast wrapping arithmetic and fast compound write-back both reduce a value to the
+    ///      *result domain's* width, never the JS carrier's width. One derivation keeps the two
+    ///      from disagreeing about `I32` versus `U32` or a narrow `I8`.
+    pub(crate) fn integer_width_and_signedness(self) -> Option<(u8, bool)> {
+        let (minimum, maximum) = self.integer_bounds()?;
+        let width = u8::try_from((maximum - minimum + 1).trailing_zeros()).ok()?;
+        matches!(width, 8 | 16 | 32 | 64).then_some((width, minimum < 0))
+    }
+
     /// Family stem used by checked numeric helper names.
     pub(crate) fn helper_family(self) -> &'static str {
         match self {
             Self::ExactInteger { .. } => "int",
             Self::BigInteger { .. } => "bigint",
-            Self::BinaryFloat {
-                precision: BinaryFloatPrecision::Binary16,
-            } => "float16",
-            Self::BinaryFloat {
-                precision: BinaryFloatPrecision::Binary32,
-            } => "float32",
-            Self::BinaryFloat {
-                precision: BinaryFloatPrecision::Binary64,
-            } => "float",
+            Self::BinaryFloat { precision } => checked_float_helper_family(precision),
             Self::ScaledInteger { .. } => "number",
         }
     }
@@ -529,6 +539,170 @@ pub(crate) fn number_scale_factor_js(scale: u16) -> String {
     factor
 }
 
+/// The JavaScript lowering of one fast compound-assignment write-back conversion.
+///
+/// WHAT: owns the conversion class, its rendered expression and its runtime-helper demand.
+/// WHY: demand tracking and statement lowering must agree on exactly which helpers a fast
+///      write-back needs. Ordinary modules keep emitting no new code: every helper is demanded
+///      only by a reachable fast conversion, and the expressions never use the checked cast
+///      helpers that ordinary store conversions do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum JsFastStoreConversion {
+    /// Integer write-back: keep the destination low bits and signedness.
+    IntegerWrap {
+        target: JsNumericCarrier,
+        bits: u8,
+        signed: bool,
+    },
+    /// Float-to-integer write-back: truncate toward zero and throw when out of range.
+    FloatToInteger { target: JsNumericCarrier },
+    /// Integer-to-binary-float write-back: round at the destination precision.
+    IntegerToFloat {
+        source: JsNumericCarrier,
+        precision: BinaryFloatPrecision,
+    },
+    /// Binary-float rounding write-back.
+    FloatToFloat { precision: BinaryFloatPrecision },
+}
+
+impl JsFastStoreConversion {
+    /// Classifies one HIR fast write-back into its JavaScript lowering.
+    pub(crate) fn classify(
+        conversion: HirFastStoreConversion,
+    ) -> Result<Self, InfrastructureFailure> {
+        let class = conversion.classify().ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
+                format!("JS backend received invalid fast store conversion {conversion}"),
+            )
+        })?;
+        let carrier = |scalar: NumericScalar| {
+            JsNumericCarrier::for_scalar(scalar).ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::BackendLowering,
+                    format!("JS backend has no numeric carrier for {scalar:?}"),
+                )
+            })
+        };
+
+        match class {
+            FastStoreConversionClass::IntegerWrap => {
+                let target = carrier(conversion.target)?;
+                let (bits, signed) = target.integer_width_and_signedness().ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::BackendLowering,
+                        format!(
+                            "JS fast integer write-back target {target:?} has no fixed 8/16/32/64-bit width"
+                        ),
+                    )
+                })?;
+                Ok(Self::IntegerWrap {
+                    target,
+                    bits,
+                    signed,
+                })
+            }
+            FastStoreConversionClass::FloatToInteger => Ok(Self::FloatToInteger {
+                target: carrier(conversion.target)?,
+            }),
+            FastStoreConversionClass::IntegerToFloat => Ok(Self::IntegerToFloat {
+                source: carrier(conversion.source)?,
+                precision: conversion.target.binary_float_precision().ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::BackendLowering,
+                        "JS fast integer-to-float target has no precision",
+                    )
+                })?,
+            }),
+            FastStoreConversionClass::FloatToFloat => Ok(Self::FloatToFloat {
+                precision: conversion.target.binary_float_precision().ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::BackendLowering,
+                        "JS fast float write-back target has no precision",
+                    )
+                })?,
+            }),
+        }
+    }
+
+    /// Records the runtime helpers this conversion needs from the numeric prelude.
+    pub(crate) fn require_helpers(self, usage: &mut NumericRuntimeHelperUsage) {
+        match self {
+            Self::IntegerWrap { .. } => usage.fast_integer_wrap = true,
+            Self::FloatToInteger { .. } => usage.fast_float_to_integer = true,
+            Self::IntegerToFloat { source, precision } => {
+                usage.fast_float_conversion = true;
+                if matches!(source, JsNumericCarrier::BigInteger { .. })
+                    && precision != BinaryFloatPrecision::Binary64
+                {
+                    usage.fast_bigint_to_float = true;
+                }
+            }
+            Self::FloatToFloat { .. } => usage.fast_float_conversion = true,
+        }
+    }
+
+    /// Renders the conversion of the JavaScript expression `value`.
+    ///
+    /// Integer wraps produce a BigInt helper result; the Number carrier converts it back exactly
+    /// because every Number-carried integer destination width is at most 32 bits.
+    pub(crate) fn expression(self, value: &str) -> String {
+        let bits = |precision: BinaryFloatPrecision| binary_float_precision_bits(precision);
+        match self {
+            Self::IntegerWrap {
+                target,
+                bits: width,
+                signed,
+            } => {
+                let wrapped = format!("__moth_fast_wrap_integer({value}, {width}, {signed})");
+                match target {
+                    JsNumericCarrier::BigInteger { .. } => wrapped,
+                    JsNumericCarrier::ExactInteger { .. } => format!("Number({wrapped})"),
+                    JsNumericCarrier::BinaryFloat { .. }
+                    | JsNumericCarrier::ScaledInteger { .. } => {
+                        crate::compiler_bug!(
+                            CompilerStage::BackendLowering,
+                            "JS fast integer wrap target must be an integer carrier"
+                        )
+                    }
+                }
+            }
+            Self::FloatToInteger { target } => {
+                let (minimum, maximum) = target.integer_bounds_js().unwrap_or_else(|| {
+                    crate::compiler_bug!(
+                        CompilerStage::BackendLowering,
+                        "JS fast float-to-integer target must be an integer carrier"
+                    )
+                });
+                format!("__moth_fast_float_to_integer({value}, {minimum}, {maximum})")
+            }
+            Self::IntegerToFloat { source, precision } => {
+                let precision_bits = bits(precision);
+                let numeric = match source {
+                    JsNumericCarrier::BigInteger { .. }
+                        if precision != BinaryFloatPrecision::Binary64 =>
+                    {
+                        format!("__moth_bigint_to_binary_float({value}, {precision_bits})")
+                    }
+                    JsNumericCarrier::BigInteger { .. } => format!("Number({value})"),
+                    JsNumericCarrier::ExactInteger { .. } => value.to_owned(),
+                    JsNumericCarrier::BinaryFloat { .. }
+                    | JsNumericCarrier::ScaledInteger { .. } => {
+                        crate::compiler_bug!(
+                            CompilerStage::BackendLowering,
+                            "JS fast integer-to-float source must be an integer carrier"
+                        )
+                    }
+                };
+                format!("__moth_fast_float_conversion({numeric}, {precision_bits})")
+            }
+            Self::FloatToFloat { precision } => {
+                format!("__moth_fast_float_conversion({value}, {})", bits(precision))
+            }
+        }
+    }
+}
+
 /// A helper dependency selected by a `JsNumericConversion`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum JsNumericRuntimeHelper {
@@ -568,4 +742,353 @@ pub(crate) fn binary_float_precision_bits(precision: BinaryFloatPrecision) -> u8
         BinaryFloatPrecision::Binary32 => 32,
         BinaryFloatPrecision::Binary64 => 64,
     }
+}
+
+/// The JavaScript lowering of one fast scalar numeric operation.
+///
+/// WHAT: owns the operation's helper/expression shape, its rendered JavaScript and its
+///       runtime-helper demand.
+/// WHY: demand tracking and statement lowering must agree on exactly which fast helper a
+///      reachable operation needs. Fast arithmetic reduces by the semantic result domain's width,
+///      so the selection reads the carrier's fixed width and signedness instead of the JS carrier
+///      type alone. Total operations render plain width-normalised expressions; trapping
+///      operations render helpers that throw the canonical cause directly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum JsFastNumericLowering {
+    /// A Number-carried integer at most 32 bits wide.
+    NumberInteger {
+        operator: NumericOperator,
+        bits: u8,
+        signed: bool,
+        minimum: i128,
+    },
+    /// A BigInt-carried 64-bit integer whose operation is exact after width normalisation.
+    BigIntWrap {
+        operator: NumericOperator,
+        signed: bool,
+    },
+    /// A BigInt-carried 64-bit operation that owns a zero/minimum/exponent trap.
+    BigIntHelper {
+        operator: NumericOperator,
+        signed: bool,
+        minimum: i128,
+    },
+    /// A binary-float operation with per-operation rounding and a finite-result trap.
+    BinaryFloat {
+        operator: NumericOperator,
+        precision: BinaryFloatPrecision,
+    },
+    /// Binary-float negation is total; it rounds in the resolved precision and never traps.
+    BinaryFloatNegate { precision: BinaryFloatPrecision },
+}
+
+impl JsFastNumericLowering {
+    /// Classifies one validated fast operation into its JavaScript lowering.
+    ///
+    /// Rejects ordinary operations, `Dec` domains and unsupported domain/operator pairs: a fast
+    /// operation is always a fixed integer or binary float, and integer `/` already computes in
+    /// `F64`, so an integer `Divide` can only be an internal contradiction.
+    pub(crate) fn classify(op: HirNumericOp) -> Result<Self, InfrastructureFailure> {
+        if !op.semantics.is_fast() {
+            return Err(fast_lowering_error(format!(
+                "JS backend received non-fast numeric operation {op} on the fast lowering path"
+            )));
+        }
+        let carrier = JsNumericCarrier::for_scalar(op.domain).ok_or_else(|| {
+            fast_lowering_error(format!(
+                "JS backend has no numeric carrier for fast operation domain {:?}",
+                op.domain
+            ))
+        })?;
+
+        match carrier {
+            JsNumericCarrier::ExactInteger { min, max } => {
+                let (bits, signed) = carrier.integer_width_and_signedness().ok_or_else(|| {
+                    fast_lowering_error("fast Number integer carrier has no fixed width".to_owned())
+                })?;
+                match op.operator {
+                    NumericOperator::Add
+                    | NumericOperator::Subtract
+                    | NumericOperator::Multiply
+                    | NumericOperator::IntegerDivide
+                    | NumericOperator::Remainder
+                    | NumericOperator::Power
+                    | NumericOperator::Negate => Ok(Self::NumberInteger {
+                        operator: op.operator,
+                        bits,
+                        signed,
+                        minimum: min,
+                    }),
+                    NumericOperator::Divide => Err(fast_lowering_error(format!(
+                        "fast integer division resolved to the Number integer carrier {min}..={max}"
+                    ))),
+                }
+            }
+            JsNumericCarrier::BigInteger { min, .. } => {
+                let (_, signed) = carrier.integer_width_and_signedness().ok_or_else(|| {
+                    fast_lowering_error("fast BigInt carrier has no fixed width".to_owned())
+                })?;
+                match op.operator {
+                    NumericOperator::Add
+                    | NumericOperator::Subtract
+                    | NumericOperator::Multiply
+                    | NumericOperator::Negate => Ok(Self::BigIntWrap {
+                        operator: op.operator,
+                        signed,
+                    }),
+                    NumericOperator::IntegerDivide
+                    | NumericOperator::Remainder
+                    | NumericOperator::Power => Ok(Self::BigIntHelper {
+                        operator: op.operator,
+                        signed,
+                        minimum: min,
+                    }),
+                    NumericOperator::Divide => Err(fast_lowering_error(format!(
+                        "fast integer division resolved to the BigInt carrier starting at {min}"
+                    ))),
+                }
+            }
+            JsNumericCarrier::BinaryFloat { precision } => match op.operator {
+                NumericOperator::Add
+                | NumericOperator::Subtract
+                | NumericOperator::Multiply
+                | NumericOperator::Divide
+                | NumericOperator::Remainder
+                | NumericOperator::Power => Ok(Self::BinaryFloat {
+                    operator: op.operator,
+                    precision,
+                }),
+                NumericOperator::Negate => Ok(Self::BinaryFloatNegate { precision }),
+                NumericOperator::IntegerDivide => Err(fast_lowering_error(
+                    "fast truncating integer division has no binary-float domain".to_owned(),
+                )),
+            },
+            JsNumericCarrier::ScaledInteger { .. } => Err(fast_lowering_error(format!(
+                "fast numeric operation {op} resolved to a Dec domain"
+            ))),
+        }
+    }
+
+    /// Records the runtime helpers this operation needs from the numeric prelude.
+    ///
+    /// WHY: the Number-carried division, remainder and power helpers call the width normaliser,
+    ///      so a fast Number integer always demands that shared helper and only the trapping
+    ///      helper its own operator uses. Fast BigInt add, subtract, multiply and negate inline
+    ///      their `BigInt.asIntN`/`asUintN` normalisation and demand no runtime code.
+    pub(crate) fn require_helpers(self, usage: &mut NumericRuntimeHelperUsage) {
+        match self {
+            Self::NumberInteger { operator, .. } => {
+                usage.fast_number_integer_wrap = true;
+                match operator {
+                    NumericOperator::IntegerDivide => usage.fast_number_integer_division = true,
+                    NumericOperator::Remainder => usage.fast_number_integer_remainder = true,
+                    NumericOperator::Power => usage.fast_number_integer_power = true,
+                    NumericOperator::Add
+                    | NumericOperator::Subtract
+                    | NumericOperator::Multiply
+                    | NumericOperator::Negate => {}
+                    NumericOperator::Divide => crate::compiler_bug!(
+                        CompilerStage::BackendLowering,
+                        "JS fast Number integer helper demand received a real-division domain"
+                    ),
+                }
+            }
+            // Width-normalised BigInt expressions use only `BigInt.asIntN`/`asUintN`.
+            Self::BigIntWrap { .. } => {}
+            Self::BigIntHelper { operator, .. } => match operator {
+                NumericOperator::IntegerDivide => usage.fast_big_integer_division = true,
+                NumericOperator::Remainder => usage.fast_big_integer_remainder = true,
+                NumericOperator::Power => usage.fast_big_integer_power = true,
+                NumericOperator::Add
+                | NumericOperator::Subtract
+                | NumericOperator::Multiply
+                | NumericOperator::Divide
+                | NumericOperator::Negate => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "JS fast BigInt helper demand received an operation with no trapping helper"
+                ),
+            },
+            Self::BinaryFloat {
+                operator,
+                precision,
+            } => {
+                require_fast_float_helpers(usage, precision, operator);
+            }
+            Self::BinaryFloatNegate { .. } => {}
+        }
+    }
+
+    /// Renders the operation over already-lowered operand expressions.
+    pub(crate) fn expression(self, operands: &[String]) -> String {
+        match self {
+            Self::NumberInteger {
+                operator,
+                bits,
+                signed,
+                minimum,
+            } => match (operator, operands) {
+                (NumericOperator::Add, [left, right]) => {
+                    format!("__moth_fast_int_wrap(({left} + {right}), {bits}, {signed})")
+                }
+                (NumericOperator::Subtract, [left, right]) => {
+                    format!("__moth_fast_int_wrap(({left} - {right}), {bits}, {signed})")
+                }
+                (NumericOperator::Multiply, [left, right]) => {
+                    format!("__moth_fast_int_wrap(Math.imul({left}, {right}), {bits}, {signed})")
+                }
+                (NumericOperator::Negate, [operand]) => {
+                    format!("__moth_fast_int_wrap(-({operand}), {bits}, {signed})")
+                }
+                (NumericOperator::IntegerDivide, [left, right]) => {
+                    format!("__moth_fast_int_div({left}, {right}, {bits}, {signed}, {minimum})")
+                }
+                (NumericOperator::Remainder, [left, right]) => {
+                    format!("__moth_fast_int_mod({left}, {right}, {bits}, {signed})")
+                }
+                (NumericOperator::Power, [left, right]) => {
+                    format!("__moth_fast_int_pow({left}, {right}, {bits}, {signed})")
+                }
+                _ => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "JS fast Number integer operation {operator:?} has unexpected operand shape"
+                ),
+            },
+            Self::BigIntWrap { operator, signed } => {
+                let normalization = if signed { "asIntN" } else { "asUintN" };
+                match (operator, operands) {
+                    (NumericOperator::Add, [left, right]) => {
+                        format!("BigInt.{normalization}(64, ({left} + {right}))")
+                    }
+                    (NumericOperator::Subtract, [left, right]) => {
+                        format!("BigInt.{normalization}(64, ({left} - {right}))")
+                    }
+                    (NumericOperator::Multiply, [left, right]) => {
+                        format!("BigInt.{normalization}(64, ({left} * {right}))")
+                    }
+                    (NumericOperator::Negate, [operand]) => {
+                        format!("BigInt.{normalization}(64, -({operand}))")
+                    }
+                    _ => crate::compiler_bug!(
+                        CompilerStage::BackendLowering,
+                        "JS fast BigInt wrap operation {operator:?} has unexpected operand shape"
+                    ),
+                }
+            }
+            Self::BigIntHelper {
+                operator,
+                signed,
+                minimum,
+            } => match (operator, operands) {
+                (NumericOperator::IntegerDivide, [left, right]) => {
+                    format!("__moth_fast_bigint_div({left}, {right}, {minimum}n)")
+                }
+                (NumericOperator::Remainder, [left, right]) => {
+                    format!("__moth_fast_bigint_mod({left}, {right})")
+                }
+                (NumericOperator::Power, [left, right]) => {
+                    format!("__moth_fast_bigint_pow({left}, {right}, {signed})")
+                }
+                _ => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "JS fast BigInt helper operation {operator:?} has unexpected operand shape"
+                ),
+            },
+            Self::BinaryFloat {
+                operator,
+                precision,
+            } => {
+                let operation = match operator {
+                    NumericOperator::Add => "add",
+                    NumericOperator::Subtract => "sub",
+                    NumericOperator::Multiply => "mul",
+                    NumericOperator::Divide => "div",
+                    NumericOperator::Remainder => "mod",
+                    NumericOperator::Power => "pow",
+                    NumericOperator::IntegerDivide | NumericOperator::Negate => {
+                        crate::compiler_bug!(
+                            CompilerStage::BackendLowering,
+                            "JS fast binary-float operation {operator:?} has no helper"
+                        )
+                    }
+                };
+                let family = fast_float_helper_family(precision);
+                match operands {
+                    [left, right] => format!("__moth_{family}_{operation}({left}, {right})"),
+                    _ => crate::compiler_bug!(
+                        CompilerStage::BackendLowering,
+                        "JS fast binary-float operation {operator:?} has unexpected operand shape"
+                    ),
+                }
+            }
+            Self::BinaryFloatNegate { precision } => match operands {
+                [operand] => match precision {
+                    BinaryFloatPrecision::Binary16 => format!("Math.f16round(-({operand}))"),
+                    BinaryFloatPrecision::Binary32 => format!("Math.fround(-({operand}))"),
+                    BinaryFloatPrecision::Binary64 => format!("(-({operand}))"),
+                },
+                _ => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "JS fast binary-float negation has unexpected operand shape"
+                ),
+            },
+        }
+    }
+}
+
+fn require_fast_float_helpers(
+    usage: &mut NumericRuntimeHelperUsage,
+    precision: BinaryFloatPrecision,
+    operator: NumericOperator,
+) {
+    let demands_power = operator == NumericOperator::Power;
+    match precision {
+        BinaryFloatPrecision::Binary16 => {
+            usage.fast_binary16_ops = true;
+            if demands_power {
+                usage.fast_binary16_power = true;
+            }
+        }
+        BinaryFloatPrecision::Binary32 => {
+            usage.fast_binary32_ops = true;
+            if demands_power {
+                usage.fast_binary32_power = true;
+            }
+        }
+        BinaryFloatPrecision::Binary64 => {
+            usage.fast_binary64_ops = true;
+            if demands_power {
+                usage.fast_binary64_power = true;
+            }
+        }
+    }
+}
+
+/// Helper family stem for checked binary-float helpers.
+///
+/// WHAT: the `__moth_<stem>_<operation>` prefix for one precision's recoverable-carrier family.
+/// WHY: the lowering that calls a helper and the runtime emitter that defines it must state the
+///      same name; one function owns all three checked stems.
+pub(crate) fn checked_float_helper_family(precision: BinaryFloatPrecision) -> &'static str {
+    match precision {
+        BinaryFloatPrecision::Binary16 => "float16",
+        BinaryFloatPrecision::Binary32 => "float32",
+        BinaryFloatPrecision::Binary64 => "float",
+    }
+}
+
+/// Helper family stem for fast binary-float helpers.
+///
+/// WHAT: the `__moth_<stem>_<operation>` prefix for one precision's fatal-delivery family.
+/// WHY: fast lowering and the runtime emitter must agree on the same three stems, and fast helpers
+///      never share a name with the checked family.
+pub(crate) fn fast_float_helper_family(precision: BinaryFloatPrecision) -> &'static str {
+    match precision {
+        BinaryFloatPrecision::Binary16 => "fast_float16",
+        BinaryFloatPrecision::Binary32 => "fast_float32",
+        BinaryFloatPrecision::Binary64 => "fast_float",
+    }
+}
+
+fn fast_lowering_error(message: String) -> InfrastructureFailure {
+    InfrastructureFailure::internal(CompilerStage::BackendLowering, message)
 }

@@ -6,6 +6,7 @@
 //! structured source diagnostic instead of a backend-internal lowering error.
 
 use crate::backends::external_package_validation::BackendTarget;
+use crate::backends::wasm::support;
 use crate::compiler_frontend::builtins::casts::evidence::numeric_conversion_fallibility;
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId,
@@ -23,7 +24,6 @@ use crate::compiler_frontend::datatypes::definitions::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{BuiltinTypeKey, TypeId};
-use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::HirLocal;
@@ -40,16 +40,15 @@ use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::reachability::{
     HirBackendSelection, HirReachability, ReachableAssertionMessageUse,
-    ReachableFloatStatementKind, ReachableFloatStatementUse, ReachableLoopStepFailureUse,
-    ReachableMapUse, ReachableMapUseKind, ReachableNumericDelivery, ReachableNumericOpUse,
-    ReachableRuntimeCastForm, ReachableRuntimeCastUse,
+    ReachableFastStoreConversionUse, ReachableFloatStatementKind, ReachableFloatStatementUse,
+    ReachableLoopStepFailureUse, ReachableMapUse, ReachableMapUseKind, ReachableNumericDelivery,
+    ReachableNumericOpUse, ReachableRuntimeCastForm, ReachableRuntimeCastUse,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::{
     HirAssertionMessageEvaluation, HirFallibleOperation, HirTerminator,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -131,6 +130,11 @@ pub fn validate_hir_backend_feature_support(
             )?;
             validate_wasm_checked_numeric_ops(
                 &reachability.reachable_numeric_ops,
+                input.target,
+                string_table,
+            )?;
+            validate_wasm_fast_store_conversions(
+                &reachability.reachable_fast_store_conversions,
                 input.target,
                 string_table,
             )?;
@@ -591,15 +595,17 @@ fn validate_wasm_checked_numeric_ops(
 
 /// Classifies one reachable numeric operation for the Wasm target.
 ///
-/// WHAT: an unimplemented trap-mode domain or operator keeps the operation limit.
-///       Invoke on a supported operation is a recoverable-failure rejection.
-/// WHY: operation limits retain priority when both apply, such as F16 or a narrow integer
-///      domain delivered by Invoke. Supported trap-mode arithmetic is not reported as
-///      unsupported.
+/// WHAT: an unimplemented numeric domain or operator keeps the operation limit, and an Invoke on
+///       a supported operation is a recoverable-failure rejection.
+/// WHY: operation limits retain priority when both apply, such as F16 or a narrow integer domain
+///      delivered by Invoke. Supported statement-delivered arithmetic, ordinary or fast, is not
+///      reported as unsupported.
 fn wasm_numeric_rejection(
     numeric_op: &ReachableNumericOpUse,
 ) -> Option<UnsupportedBackendFeatureReason> {
-    if !wasm_supports_trap_numeric_op(numeric_op) {
+    // One support owner serves ordinary and fast operations alike: fast mode never widens the
+    // target surface, and a fast trap never needs recoverable-numeric delivery.
+    if !support::supports_numeric_operation(numeric_op.op) {
         return Some(UnsupportedBackendFeatureReason::CheckedNumericOperations);
     }
     if numeric_op.delivery == ReachableNumericDelivery::Invoke {
@@ -608,31 +614,34 @@ fn wasm_numeric_rejection(
     None
 }
 
-/// Whether the checked-integer lowering implements this exact domain.
+/// Reports a reachable fast compound-assignment write-back Wasm cannot deliver natively.
 ///
-/// WHAT: the LIR checked-integer kinds are the 32/64-bit signed and unsigned forms, so
-///       `I8`/`I16`/`U8`/`U16` results have no checked path even though their carriers exist.
-/// WHY: a narrow operand pair keeps its own type, so an operation can select a domain the
-///      target cannot deliver. That is a capability limit with its own diagnostic, never a
-///      trap substitution or a silently widened result.
-fn wasm_supports_checked_integer_domain(domain: NumericScalar) -> bool {
-    matches!(
-        domain,
-        NumericScalar::Fixed(
-            FixedScalar::I32 | FixedScalar::U32 | FixedScalar::I64 | FixedScalar::U64
-        )
-    )
-}
+/// WHAT: defers to the shared capability mapping, which accepts integer wrap between supported
+///       `I32`/`U32`/`I64`/`U64` targets, float truncation from `F32`/`F64` into those targets,
+///       integer-to-`F32`/`F64`, and `F32`/`F64` rounding. Narrow integer targets and `F16`
+///       domains keep the existing checked-numeric-operation limit.
+/// WHY: fast mode does not widen the backend's numeric support. The write-back must fail in
+///      feature validation with a precise target diagnostic instead of an internal lowering
+///      error, and it may never be approximated by saturation or silent truncation.
+fn validate_wasm_fast_store_conversions(
+    conversions: &[ReachableFastStoreConversionUse],
+    target: BackendTarget,
+    string_table: &mut DiagnosticStringBuilder,
+) -> Result<(), DiagnosticDraft> {
+    let Some(conversion) = conversions
+        .iter()
+        .find(|conversion| !support::supports_fast_store_conversion(conversion.conversion))
+    else {
+        return Ok(());
+    };
 
-fn wasm_supports_trap_numeric_op(numeric_op: &ReachableNumericOpUse) -> bool {
-    if numeric_op.op.domain.is_integer() {
-        return wasm_supports_checked_integer_domain(numeric_op.op.domain);
-    }
+    let diagnostic = types_borrows_targets::unsupported_backend_feature(
+        string_table.intern(target.as_str()),
+        UnsupportedBackendFeatureReason::CheckedNumericOperations,
+        conversion.span,
+    );
 
-    matches!(
-        numeric_op.op.domain.binary_float_precision(),
-        Some(BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64)
-    ) && numeric_op.op.operator != NumericOperator::IntegerDivide
+    Err(diagnostic)
 }
 
 /// Reports a reachable range candidate whose counter precision Wasm cannot round.
@@ -1254,7 +1263,8 @@ fn search_statement(
         HirStatementKind::Expr(value)
         | HirStatementKind::PushRuntimeFragment { value, .. }
         | HirStatementKind::FormatFloat { source: value, .. }
-        | HirStatementKind::ValidateFloat { source: value, .. } => {
+        | HirStatementKind::ValidateFloat { source: value, .. }
+        | HirStatementKind::FastStoreConversion { source: value, .. } => {
             search_expression(hir, type_environment, *value, search);
         }
         HirStatementKind::MapOp { receiver, args, .. } => {
@@ -1698,6 +1708,15 @@ where
         HirStatementKind::FormatFloat { source, .. }
         | HirStatementKind::ValidateFloat { source, .. } => {
             first_unsupported_expression_occurrence(*source, module, search)
+        }
+        HirStatementKind::FastStoreConversion { source, result, .. } => {
+            first_unsupported_result_local_occurrence(
+                locals,
+                result.local(),
+                statement.span,
+                search,
+            )
+            .or_else(|| first_unsupported_expression_occurrence(*source, module, search))
         }
         HirStatementKind::MapOp { receiver, args, .. } => {
             first_unsupported_expression_occurrence(*receiver, module, search).or_else(|| {

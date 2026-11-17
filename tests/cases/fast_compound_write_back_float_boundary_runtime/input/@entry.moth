@@ -1,0 +1,15 @@
+largest ~I64 = 9223372036854774784
+one I32 = 1
+$fast_math
+~largest /= one
+
+lowest ~I64 = -9223372036854775808
+$fast_math
+~lowest /= one
+
+biggest ~U64 = 18446744073709549568
+one64 U64 = 1
+$fast_math
+~biggest /= one64
+
+~[:largest=[largest] lowest=[lowest] biggest=[biggest]]

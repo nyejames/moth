@@ -23,6 +23,10 @@ statement. Both take a compile-time `String` value, often written as a
 template. `$doc` records declaration documentation. `$todo` has no runtime
 or builder effect. Use [$html:<code>$doc &#91;$md: ...&#93;</code>] to request Markdown explicitly.
 
+`$fast_math`, `$safe_math` and `$infallible` are parameterless numeric
+constraints on a function or complete statement. Ordinary checked arithmetic
+stays the default. See @../directives/#constraints (Constraints).
+
 ### Stacking and operands
 
 Source directives may share one line or use consecutive lines. No commas

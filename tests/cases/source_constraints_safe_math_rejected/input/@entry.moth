@@ -1,0 +1,101 @@
+$fast_math
+fast_leaf |value I32| -> I32:
+    return value + 1
+;
+
+$safe_math
+one_hop |value I32| -> I32:
+    return fast_leaf(value)
+;
+
+wrap_two |value I32| -> I32:
+    return fast_leaf(value)
+;
+
+wrap_three |value I32| -> I32:
+    return wrap_two(value)
+;
+
+wrap_four |value I32| -> I32:
+    return wrap_three(value)
+;
+
+$safe_math
+beyond_bound |value I32| -> I32:
+    return wrap_four(value)
+;
+
+$fast_math $safe_math
+folded || -> I32:
+    value I32 = 1 + 2
+    return value
+;
+
+$safe_math
+cycle_a |n I32| -> I32:
+    return cycle_b(n - 1)
+;
+
+$safe_math
+cycle_b |n I32| -> I32:
+    if n > 0:
+        return cycle_a(n)
+    ;
+    return fast_leaf(n)
+;
+
+$fast_math $safe_math
+range_guard |limit I32| -> I32:
+    seen ~= 0
+    loop 0 to limit:
+        ~seen = seen
+    ;
+    return seen
+;
+
+$safe_math
+lowered_handler_guard |divisor I32, limit I32| -> I32:
+    result I32 = 10 // divisor catch |error|:
+        $fast_math
+        loop 0 to limit:
+            io.line("x")
+        ;
+        return 0
+    ;
+    return result
+;
+
+$fast_math $safe_math
+dead_guard_after_return |limit I32| -> I32:
+    return 0
+    loop 0 to limit:
+        io.line("x")
+    ;
+;
+
+$safe_math
+dead_call_after_return || -> I32:
+    return 0
+    value I32 = fast_leaf(1)
+    return value
+;
+
+$fast_math $safe_math
+dead_arithmetic_after_return || -> I32:
+    return 0
+    value I32 = 1 + 1
+    return value
+;
+
+$safe_math $fast_math
+reversed_order || -> I32:
+    value I32 = 7 + 8
+    return value
+;
+
+one_hop(1)
+beyond_bound(1)
+folded()
+cycle_a(2)
+range_guard(2)
+reversed_order()

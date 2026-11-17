@@ -2,6 +2,14 @@ Runtime numeric operations use their selected semantic result type. A failed
 check produces implicit built-in failure for the enclosing handler or function
 contract. Moth does not wrap the value, saturate it or implicitly panic.
 
+Ordinary checked arithmetic is the default. `$fast_math` changes only resolved
+fixed-integer and binary-float operations in its lexical scope. There, integer
+addition, subtraction, multiplication, negation and power wrap, and the
+remaining numeric failures trap instead of taking an implicit `Error` edge. It
+changes no operator eligibility, Dec rule or target capability. See
+@../directives/#constraints (Constraints) and
+@../../developer-docs/numeric-backend-contract (Numeric backend contract).
+
 ### Checked results
 
 A common arithmetic type must contain every operand, but need not contain
@@ -214,6 +222,10 @@ discharge kept. A wider carrier never proves semantic safety.
 An authored catch remains eligible if a proof removes its failure path, but
 that catch creates no runtime error edge. Folding and runtime execution use the
 same result types, rounding and failure rules.
+
+Fast mode is a source semantic selection, not a proof or check-elision choice.
+An ordinary operation stays ordinary through every optimisation pass. See
+@../directives/#constraints (Constraints).
 
 ### Related behaviour
 

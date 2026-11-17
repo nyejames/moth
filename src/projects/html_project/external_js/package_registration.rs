@@ -10,9 +10,9 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalAccessKind, ExternalConstantDef, ExternalConstantValue,
-    ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering, ExternalPackageId,
-    ExternalPackageRegistry, ExternalParameter, ExternalRegistrationError, ExternalReturnSlot,
-    ExternalSignatureType, ExternalTypeSpec, external_never, external_returns,
+    ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering, ExternalNumericContract,
+    ExternalPackageId, ExternalPackageRegistry, ExternalParameter, ExternalRegistrationError,
+    ExternalReturnSlot, ExternalSignatureType, ExternalTypeSpec, external_never, external_returns,
 };
 use crate::projects::html_project::external_js::parser::parsed_js_module::{
     ParsedJsFunction, ParsedJsModule, ParsedReturnClause, ParsedSignature,
@@ -196,6 +196,7 @@ fn convert_parsed_function_to_spec(
         parameters,
         return_contract,
         const_eval: None,
+        numeric_contract: ExternalNumericContract::Unknown,
         lowerings: ExternalFunctionLowerings {
             js: Some(ExternalJsLowering::ExternalModuleExport {
                 export_name: function.js_name.clone(),

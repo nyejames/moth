@@ -357,6 +357,8 @@ fn template_for_deferred_generic_call(
         generic_parameter_owner: template.generic_parameter_owner.clone(),
         generic_parameter_list_id: template.generic_parameter_list_id,
         signature: template.signature.clone(),
+        source_constraints: template.source_constraints,
+        constraint_directive_spans: template.constraint_directive_spans,
         body_tokens: template.body_tokens.clone(),
         declaration_span: template.declaration_span,
     }

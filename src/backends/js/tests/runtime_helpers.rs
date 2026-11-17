@@ -10,7 +10,6 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
-use std::process::Command;
 
 // Runtime helper contract tests
 // ---------------------------------------------------------------------------
@@ -725,19 +724,6 @@ fn lower_error_runtime_module() -> String {
     )
     .expect("error runtime fixture should lower to JavaScript")
     .source
-}
-
-fn run_javascript(source: &str) -> String {
-    let output = Command::new("node")
-        .args(["--eval", source])
-        .output()
-        .expect("Node.js is required for JavaScript runtime behavior tests");
-    assert!(
-        output.status.success(),
-        "Node.js runtime failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout).expect("Node.js output is UTF-8")
 }
 
 /// Verifies that emitted collection, map, and Core IO errors retain their unsigned code records

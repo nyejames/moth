@@ -1,0 +1,19 @@
+$fast_math
+wrap_i8 |target ~I8, increment I16|:
+    ~target += increment
+;
+
+$fast_math
+truncate_i32 |target ~I32, divisor I32|:
+    ~target /= divisor
+;
+
+wrapped ~I8 = 127
+one I16 = 1
+wrap_i8(~wrapped, one)
+
+truncated ~I32 = 7
+two I32 = 2
+truncate_i32(~truncated, two)
+
+~[:wrap=[wrapped] trunc=[truncated]]

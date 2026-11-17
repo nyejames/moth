@@ -1,0 +1,3 @@
+divide |$fast_math left I32, right I32| -> I32:
+    return left + right
+;

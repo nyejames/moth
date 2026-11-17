@@ -14,9 +14,10 @@ use crate::compiler_frontend::style_directives::compatibility::{
 };
 use crate::compiler_frontend::style_directives::specs::{
     CONFIG_DIRECTIVE_NAME, CoreStyleDirectiveKind, DOC_DIRECTIVE_NAME, EXPORT_DIRECTIVE_NAME,
-    INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME, SourceModifierOperand, SourceModifierTarget,
-    StyleDirectiveArgumentType, StyleDirectiveContexts, StyleDirectiveEffects,
-    StyleDirectiveHandlerSpec, StyleDirectiveSpec, TODO_DIRECTIVE_NAME,
+    FAST_MATH_DIRECTIVE_NAME, INFALLIBLE_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME,
+    SAFE_MATH_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME, SourceDirectiveKind, SourceModifierOperand,
+    SourceModifierTarget, StyleDirectiveArgumentType, StyleDirectiveContexts,
+    StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveSpec, TODO_DIRECTIVE_NAME,
 };
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 
@@ -214,6 +215,21 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
             TODO_DIRECTIVE_NAME,
             SourceModifierTarget::DeclarationOrStatementTodo,
             SourceModifierOperand::RequiredSingleString,
+        ),
+        StyleDirectiveSpec::source_modifier(
+            FAST_MATH_DIRECTIVE_NAME,
+            SourceModifierTarget::SourceConstraint(SourceDirectiveKind::FastMath),
+            SourceModifierOperand::None,
+        ),
+        StyleDirectiveSpec::source_modifier(
+            SAFE_MATH_DIRECTIVE_NAME,
+            SourceModifierTarget::SourceConstraint(SourceDirectiveKind::SafeMath),
+            SourceModifierOperand::None,
+        ),
+        StyleDirectiveSpec::source_modifier(
+            INFALLIBLE_DIRECTIVE_NAME,
+            SourceModifierTarget::SourceConstraint(SourceDirectiveKind::Infallible),
+            SourceModifierOperand::None,
         ),
     ]
 }

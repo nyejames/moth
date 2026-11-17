@@ -2,6 +2,11 @@ Moth checks each numeric operation in its selected result type. Overflow,
 division by zero and non-finite binary-float results produce recoverable
 failure rather than wrapping or implicitly panicking.
 
+This is the ordinary default. The `$fast_math` constraint selects a separate
+portable fast contract: integer addition, subtraction, multiplication,
+negation and power wrap, while the remaining failures, such as division by
+zero and non-finite float results, trap. See @../directives/#constraints (Constraints).
+
 Narrow same-type operations can fail:
 
 [table:

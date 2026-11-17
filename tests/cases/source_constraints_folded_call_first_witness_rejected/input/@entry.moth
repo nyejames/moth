@@ -1,0 +1,13 @@
+$fast_math
+fast_leaf |value I32| -> I32:
+    return value + 1
+;
+
+$safe_math
+mixed |n I32| -> I32:
+    first I32 = fast_leaf(1)
+    second I32 = fast_leaf(n)
+    return first + second
+;
+
+io.line([mixed(2)])

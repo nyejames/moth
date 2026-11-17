@@ -6,7 +6,8 @@ use super::super::abi::{
 use super::super::definitions::external_returns;
 use super::super::definitions::{
     ExternalConstantDef, ExternalConstantValue, ExternalFunctionDef, ExternalFunctionLowerings,
-    ExternalJsLowering, ExternalReturnSlot, ExternalTypeDef, external_success_returns,
+    ExternalJsLowering, ExternalNumericContract, ExternalReturnSlot, ExternalTypeDef,
+    external_success_returns,
 };
 use super::super::ids::{ExternalConstantId, ExternalFunctionId, ExternalTypeId};
 use super::super::registry::ExternalPackageRegistry;
@@ -48,6 +49,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         "__moth_test_pkg_a_open".to_owned(),
@@ -73,6 +75,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     Some(ExternalSignatureType::BuiltinError),
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
                         "({ tag: \"ok\", value: #0 })".to_owned(),
@@ -95,6 +98,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     Some(ExternalSignatureType::BuiltinError),
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
                         "({ tag: \"err\", value: { message: \"external failed\", code: 91 } })"
@@ -118,6 +122,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     Some(ExternalSignatureType::External(ExternalTypeId(1005))),
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
                         "({ tag: \"ok\", value: \"custom-ok\" })".to_owned(),
@@ -149,6 +154,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         "__moth_test_pkg_b_open".to_owned(),
@@ -220,6 +226,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
                         "\"hello nested\"".to_owned(),
@@ -252,6 +259,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression("#0".to_owned())),
                     wasm: None,
@@ -282,6 +290,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
                         "({ tag: \"some\", value: \"present\" })".to_owned(),
@@ -307,6 +316,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
                         "({ tag: \"none\" })".to_owned(),

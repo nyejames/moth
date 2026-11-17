@@ -1,0 +1,30 @@
+$fast_math
+identity type T |value T| -> T:
+    $infallible
+    return value
+;
+
+Point = |
+    x I32,
+|
+
+$safe_math
+is_positive |this Point| -> Bool:
+    return this.x > 0
+;
+
+$fast_math $infallible
+entry_value = identity(1)
+
+$safe_math $fast_math
+if entry_value > 0:
+    branch_value = entry_value
+;
+
+$fast_math
+loop 0 to 2 |i|:
+    io.line("loop")
+;
+
+$fast_math
+io.line("constraints")

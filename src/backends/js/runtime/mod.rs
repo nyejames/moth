@@ -34,13 +34,15 @@ mod strings;
 
 pub(crate) use collections::collection_javascript_helpers;
 pub(crate) use errors::error_result_source;
+pub(crate) use numeric::fatal_numeric_trap_throw;
 
 use crate::backends::js::JsEmitter;
 
-/// Describes which checked numeric carrier families are required by emitted JS.
+/// Describes which checked and fast numeric carriers are required by emitted JS.
 ///
-/// WHY: each family is shared by every semantic domain with its carrier, while unreachable carrier
-///      families stay out of the generated prelude.
+/// WHY: each checked family is shared by every semantic domain with its carrier, while
+///      unreachable families stay out of the generated prelude. Fast arithmetic tracks each
+///      trapping helper separately, so a wrapping operation never carries unused code.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct NumericRuntimeHelperUsage {
     pub(crate) number_integer_ops: bool,
@@ -49,12 +51,50 @@ pub(crate) struct NumericRuntimeHelperUsage {
     pub(crate) binary16_ops: bool,
     pub(crate) binary32_ops: bool,
     pub(crate) binary64_ops: bool,
-    pub(crate) binary_float_power: bool,
+    /// A checked binary-float `Power` op demands that precision's `pow` member and the shared
+    /// power helper.
+    pub(crate) binary16_power: bool,
+    pub(crate) binary32_power: bool,
+    pub(crate) binary64_power: bool,
     pub(crate) format_binary16: bool,
     pub(crate) format_binary32: bool,
     pub(crate) format_binary64: bool,
     pub(crate) validate_float: bool,
-    pub(crate) loop_step_failure: bool,
+    /// A trap-delivered statement consumes the checked `{ tag, value }` helper carrier.
+    pub(crate) numeric_trap: bool,
+    /// A fast Number-carried integer wraps at its semantic result width.
+    pub(crate) fast_number_integer_wrap: bool,
+    /// A fast Number-carried integer traps a zero divisor or `MIN // -1`.
+    pub(crate) fast_number_integer_division: bool,
+    /// A fast Number-carried integer traps a zero divisor.
+    pub(crate) fast_number_integer_remainder: bool,
+    /// A fast Number-carried integer keeps modular power in the semantic width.
+    pub(crate) fast_number_integer_power: bool,
+    /// A fast BigInt-carried integer traps a zero divisor or `MIN // -1`.
+    pub(crate) fast_big_integer_division: bool,
+    /// A fast BigInt-carried integer traps a zero divisor.
+    pub(crate) fast_big_integer_remainder: bool,
+    /// A fast BigInt-carried integer keeps modular power in the 64-bit width.
+    pub(crate) fast_big_integer_power: bool,
+    /// Fast binary16 operations need the rounding and finite-trap family.
+    pub(crate) fast_binary16_ops: bool,
+    /// Fast binary32 operations need the rounding and finite-trap family.
+    pub(crate) fast_binary32_ops: bool,
+    /// Fast binary64 operations need the finite-trap family.
+    pub(crate) fast_binary64_ops: bool,
+    /// A fast binary-float `Power` op demands that precision's `pow` member and the shared power
+    /// helper.
+    pub(crate) fast_binary16_power: bool,
+    pub(crate) fast_binary32_power: bool,
+    pub(crate) fast_binary64_power: bool,
+    /// A fast compound write-back keeps integer low bits and signedness.
+    pub(crate) fast_integer_wrap: bool,
+    /// A fast compound write-back truncates a binary float into an integer range.
+    pub(crate) fast_float_to_integer: bool,
+    /// A fast compound write-back rounds a binary float at a destination precision.
+    pub(crate) fast_float_conversion: bool,
+    /// A fast integer-to-float write-back needs the exact BigInt rounding helper.
+    pub(crate) fast_bigint_to_float: bool,
 }
 
 impl NumericRuntimeHelperUsage {
@@ -75,6 +115,20 @@ impl NumericRuntimeHelperUsage {
         self.format_binary16 || self.format_binary32 || self.format_binary64
     }
 
+    /// Whether any emitted binary-float family member calls the shared power implementation.
+    ///
+    /// WHY: a family emits its `pow` member only when a selected Power op demands it, so the
+    ///      `pow` member and `__moth_float_power` are emitted together. A non-power page carries
+    ///      neither and contains no dangling reference.
+    pub(crate) fn uses_float_power(self) -> bool {
+        self.binary16_power
+            || self.binary32_power
+            || self.binary64_power
+            || self.fast_binary16_power
+            || self.fast_binary32_power
+            || self.fast_binary64_power
+    }
+
     pub(crate) fn any(self) -> bool {
         self.number_integer_ops
             || self.big_integer_ops
@@ -82,10 +136,23 @@ impl NumericRuntimeHelperUsage {
             || self.binary16_ops
             || self.binary32_ops
             || self.binary64_ops
-            || self.binary_float_power
             || self.uses_float_formatter()
             || self.validate_float
-            || self.loop_step_failure
+            || self.numeric_trap
+            || self.fast_number_integer_wrap
+            || self.fast_number_integer_division
+            || self.fast_number_integer_remainder
+            || self.fast_number_integer_power
+            || self.fast_big_integer_division
+            || self.fast_big_integer_remainder
+            || self.fast_big_integer_power
+            || self.fast_binary16_ops
+            || self.fast_binary32_ops
+            || self.fast_binary64_ops
+            || self.fast_integer_wrap
+            || self.fast_float_to_integer
+            || self.fast_float_conversion
+            || self.fast_bigint_to_float
     }
 }
 
@@ -127,9 +194,12 @@ impl<'hir> JsEmitter<'hir> {
             self.emit_runtime_map_helpers();
         }
         self.emit_runtime_string_helpers(emitted_code_uses_maps);
-        self.emit_runtime_cast_helpers();
+        let mut emitted_helpers = self.emit_runtime_cast_helpers();
         if emitted_code_uses_numeric_helpers.any() {
-            self.emit_runtime_numeric_helpers(emitted_code_uses_numeric_helpers);
+            self.emit_runtime_numeric_helpers(
+                emitted_code_uses_numeric_helpers,
+                &mut emitted_helpers,
+            );
         }
     }
 }

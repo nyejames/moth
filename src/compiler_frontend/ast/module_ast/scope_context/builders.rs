@@ -200,16 +200,44 @@ impl ScopeContext {
         self
     }
 
-    pub fn with_source_doc_sink(
-        mut self,
-        sink: Rc<RefCell<Vec<crate::compiler_frontend::ast::AstDocFragment>>>,
-    ) -> ScopeContext {
+    pub fn with_source_doc_sink(mut self, sink: Rc<RefCell<Vec<AstDocFragment>>>) -> ScopeContext {
         Rc::make_mut(&mut self.shared).source_docs = sink;
         self
     }
 
     pub fn with_source_doc_publication(mut self, publish: bool) -> ScopeContext {
         Rc::make_mut(&mut self.shared).publish_source_docs = publish;
+        self
+    }
+
+    /// Install the function identity whose statements this context parses.
+    ///
+    /// WHAT: sets the stable per-body identity inherited by nested statement scopes.
+    /// WHY: statement constraint facts must name their owning function even when the statement
+    ///      sits inside a synthetic control-flow scope path.
+    pub(crate) fn with_constraint_function(
+        mut self,
+        function: AstFunctionIdentity,
+    ) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).constraint_function = Some(function);
+        self
+    }
+
+    /// Share the module-wide statement constraint boundary ledger.
+    pub(crate) fn with_source_constraint_boundary_sink(
+        mut self,
+        sink: Rc<RefCell<Vec<AstConstraintBoundary>>>,
+    ) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).source_constraint_boundaries = sink;
+        self
+    }
+
+    /// Share the module-wide selected-fast-operation witness ledger.
+    pub(crate) fn with_fast_operation_witness_sink(
+        mut self,
+        sink: Rc<RefCell<Vec<AstFastOperationWitness>>>,
+    ) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).fast_operation_witnesses = sink;
         self
     }
 

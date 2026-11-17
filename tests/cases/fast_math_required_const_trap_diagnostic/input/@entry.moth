@@ -1,0 +1,10 @@
+-- A required constant inside a fast function can wrap, but an operation that cannot return a
+-- value must be diagnosed with the compile-time numeric failure family instead of a fabricated
+-- constant.
+$fast_math
+trap || -> I8:
+    x #I8 = 1 // 0
+    return x
+;
+
+io.line([:value=[trap()]])

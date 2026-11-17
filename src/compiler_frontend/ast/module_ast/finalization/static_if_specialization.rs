@@ -10,6 +10,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::compiler_frontend::ast::AstConstraintPrunedRegion;
 use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::resolver::{
     ConstResolutionError, ConstValueEnvironment, ConstValueResolver,
@@ -18,6 +19,7 @@ use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, Cons
 use crate::compiler_frontend::ast::expressions::expression_rewrite::{
     promote_replacement, replacement_input, rewrite_expression_children,
 };
+use crate::compiler_frontend::ast::expressions::expression_store::AuthoredBranchRange;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, CompletedOperation, ExprId, ExpressionOperationView,
 };
@@ -34,6 +36,7 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -104,6 +107,7 @@ pub(super) struct CommittedGenericRequests {
 
 pub(super) struct StaticIfSpecialization {
     inactive_generic_requests: Vec<GenericRequestRange>,
+    inactive_constraint_regions: Vec<AstConstraintPrunedRegion>,
     selection_count: usize,
     function_provenance: FxHashMap<AstFunctionIdentity, SyntheticInterfaceProvenance>,
 }
@@ -112,6 +116,8 @@ impl StaticIfSpecialization {
     pub(super) fn merge(&mut self, mut other: Self) {
         self.inactive_generic_requests
             .append(&mut other.inactive_generic_requests);
+        self.inactive_constraint_regions
+            .append(&mut other.inactive_constraint_regions);
         self.selection_count += other.selection_count;
         for (function_path, provenance) in other.function_provenance.drain() {
             self.function_provenance
@@ -129,6 +135,11 @@ impl StaticIfSpecialization {
         &self,
     ) -> &FxHashMap<AstFunctionIdentity, SyntheticInterfaceProvenance> {
         &self.function_provenance
+    }
+
+    /// Inactive static-`if` branch spans retained for constraint-evidence projection.
+    pub(super) fn constraint_pruned_regions(&self) -> &[AstConstraintPrunedRegion] {
+        &self.inactive_constraint_regions
     }
 
     pub(super) fn run(
@@ -152,6 +163,7 @@ impl StaticIfSpecialization {
         let mut specializer = StaticIfSpecializer {
             resolver,
             inactive_generic_requests: Vec::new(),
+            inactive_constraint_regions: Vec::new(),
             selection_count: 0,
             current_function: None,
             function_provenance: FxHashMap::default(),
@@ -166,6 +178,7 @@ impl StaticIfSpecialization {
 
         Ok(Self {
             inactive_generic_requests: specializer.inactive_generic_requests,
+            inactive_constraint_regions: specializer.inactive_constraint_regions,
             selection_count: specializer.selection_count,
             function_provenance: specializer.function_provenance,
         })
@@ -251,6 +264,7 @@ impl StaticIfSpecialization {
 struct StaticIfSpecializer<'a> {
     resolver: ConstValueResolver<'a>,
     inactive_generic_requests: Vec<GenericRequestRange>,
+    inactive_constraint_regions: Vec<AstConstraintPrunedRegion>,
     selection_count: usize,
     current_function: Option<AstFunctionIdentity>,
     function_provenance: FxHashMap<AstFunctionIdentity, SyntheticInterfaceProvenance>,
@@ -327,6 +341,18 @@ impl StaticIfSpecializer<'_> {
                 if let Some((select_then, provenance)) = selection {
                     self.record_selected_provenance(&provenance);
                     self.record_inactive_range(branch_metadata.request_ranges, select_then);
+                    let discarded = if select_then {
+                        else_body.as_deref().zip(branch_metadata.else_scope)
+                    } else {
+                        Some(then_body.as_slice()).zip(Some(branch_metadata.then_scope))
+                    };
+                    if let Some((discarded_body, discarded_scope)) = discarded {
+                        self.record_inactive_constraint_region(
+                            discarded_body,
+                            Some(discarded_scope),
+                            None,
+                        );
+                    }
                     self.merge_provenance_map(if select_then {
                         then_provenance
                     } else {
@@ -617,6 +643,36 @@ impl StaticIfSpecializer<'_> {
                 if let Some((select_then, provenance)) = selection {
                     self.record_selected_provenance(&provenance);
                     self.record_inactive_range(value_if.generic_request_ranges, select_then);
+                    let (discarded_body, discarded_scope) = if select_then {
+                        (value_if.else_body.as_slice(), value_if.else_scope)
+                    } else {
+                        (value_if.then_body.as_slice(), value_if.then_scope)
+                    };
+                    // An inline value-`if` parses both branches under the enclosing scope. Scope
+                    // filtering would then also match the selected branch, so only distinct
+                    // branch scopes enable it.
+                    let exclusive_scope =
+                        (value_if.then_scope != value_if.else_scope).then_some(discarded_scope);
+                    // Retained inline branches resolve later under the enclosing scope, so their
+                    // witness scope may not descend from the branch. The parser records the exact
+                    // authored token range of both branches; use the discarded one when present.
+                    let exact_range = value_if
+                        .span
+                        .and_then(|span| {
+                            self.resolver.builder().inline_value_if_branch_ranges(span)
+                        })
+                        .map(|ranges| {
+                            if select_then {
+                                ranges.else_branch
+                            } else {
+                                ranges.then_branch
+                            }
+                        });
+                    self.record_inactive_constraint_region(
+                        discarded_body,
+                        exclusive_scope,
+                        exact_range,
+                    );
                     self.merge_provenance_map(if select_then {
                         then_provenance
                     } else {
@@ -774,6 +830,42 @@ impl StaticIfSpecializer<'_> {
         Ok(())
     }
 
+    /// Records one conservative authored span covering a discarded static branch body.
+    ///
+    /// WHAT: the minimum authored statement/expression start and maximum authored end reachable
+    ///       from the branch, keyed by the owning callable.
+    /// WHY: both branches are fully resolved before selection, so their fast-use evidence and
+    ///      statement boundaries already exist. The removed body produces no HIR, so its ledger
+    ///      rows must be filtered by span during projection. Authored statement node spans often
+    ///      cover only a keyword, so expression spans are included as well; a branch with no
+    ///      authored span records nothing.
+    fn record_inactive_constraint_region(
+        &mut self,
+        body: &[AstNode],
+        scope: Option<PathId>,
+        exact_range: Option<AuthoredBranchRange>,
+    ) {
+        let Some(function) = self.current_function else {
+            return;
+        };
+        let (Some(start), Some(end)) = exact_range
+            .map(|range| (Some(range.start), Some(range.end)))
+            .unwrap_or_else(|| {
+                let extent = authored_branch_extent(body, self.resolver.builder());
+                (extent.start, extent.end)
+            })
+        else {
+            return;
+        };
+        self.inactive_constraint_regions
+            .push(AstConstraintPrunedRegion {
+                function,
+                scope,
+                start,
+                end,
+            });
+    }
+
     fn record_inactive_range(&mut self, ranges: IfGenericRequestRanges, select_then: bool) {
         self.selection_count += 1;
         self.inactive_generic_requests.push(if select_then {
@@ -782,6 +874,113 @@ impl StaticIfSpecializer<'_> {
             ranges.then_branch
         });
     }
+}
+
+/// Inclusive authored span extent of one static-`if` branch body.
+#[derive(Default)]
+struct AuthoredExtent {
+    start: Option<SourceSpan>,
+    end: Option<SourceSpan>,
+}
+
+impl AuthoredExtent {
+    fn add(&mut self, span: SourceSpan) {
+        self.start = Some(self.start.map_or(span, |current| current.min(span)));
+        self.end = Some(self.end.map_or(span, |current| current.max(span)));
+    }
+}
+
+fn authored_branch_extent(body: &[AstNode], builder: &AstExpressionBuilder) -> AuthoredExtent {
+    let mut extent = AuthoredExtent::default();
+    collect_body_extent(body, builder, &mut extent);
+    extent
+}
+
+fn collect_body_extent(
+    body: &[AstNode],
+    builder: &AstExpressionBuilder,
+    extent: &mut AuthoredExtent,
+) {
+    for node in body {
+        collect_node_extent(node, builder, extent);
+    }
+}
+
+fn collect_node_extent(
+    node: &AstNode,
+    builder: &AstExpressionBuilder,
+    extent: &mut AuthoredExtent,
+) {
+    if let Some(span) = node.span {
+        extent.add(span);
+    }
+    // Immediate expression roots include declaration initializers and patterns; nested statement
+    // bodies are visited explicitly below so their own node spans are retained too.
+    node.visit_immediate_expression_ids(&mut |expression| {
+        collect_expression_extent(builder, expression, extent);
+    });
+    match &node.kind {
+        NodeKind::If(_, then_body, else_body, _) => {
+            collect_body_extent(then_body, builder, extent);
+            if let Some(else_body) = else_body {
+                collect_body_extent(else_body, builder, extent);
+            }
+        }
+        NodeKind::LexicalScope { body }
+        | NodeKind::Function(_, _, body)
+        | NodeKind::EntryStart(_, body) => collect_body_extent(body, builder, extent),
+        NodeKind::Match { arms, default, .. } => {
+            for arm in arms {
+                collect_body_extent(&arm.body, builder, extent);
+            }
+            if let Some(default) = default {
+                collect_body_extent(default, builder, extent);
+            }
+        }
+        NodeKind::RangeLoop { body, .. }
+        | NodeKind::CollectionLoop { body, .. }
+        | NodeKind::WhileLoop(_, body) => collect_body_extent(body, builder, extent),
+        _ => {}
+    }
+}
+
+fn collect_expression_extent(
+    builder: &AstExpressionBuilder,
+    expression: ExprId,
+    extent: &mut AuthoredExtent,
+) {
+    let Ok(view) = builder.view(expression) else {
+        return;
+    };
+    if let Some(span) = view.span() {
+        extent.add(span);
+    }
+    // `visit_children` below already reaches the operation's condition, scrutinee, guarded value
+    // and guards. Only statement bodies need explicit traversal; recursing into both would walk
+    // nested value blocks once per nesting level.
+    if let ExpressionOperationView::ValueBlock(block) = view.operation() {
+        match block {
+            ValueBlock::If(value_if) => {
+                collect_body_extent(&value_if.then_body, builder, extent);
+                collect_body_extent(&value_if.else_body, builder, extent);
+            }
+            ValueBlock::LexicalScope(scope) => collect_body_extent(&scope.body, builder, extent),
+            ValueBlock::Match(value_match) => {
+                for arm in &value_match.arms {
+                    collect_body_extent(&arm.body, builder, extent);
+                }
+                if let Some(default) = &value_match.default {
+                    collect_body_extent(default, builder, extent);
+                }
+            }
+            ValueBlock::Catch(value_catch) => {
+                if let FallibleHandling::Handler { body, .. } = &value_catch.handler {
+                    collect_body_extent(body, builder, extent);
+                }
+            }
+        }
+    }
+    view.visit_children(|child| collect_expression_extent(builder, child.id(), extent));
 }
 
 /// Error for a ledger slot that survived body completion without publishing its request.

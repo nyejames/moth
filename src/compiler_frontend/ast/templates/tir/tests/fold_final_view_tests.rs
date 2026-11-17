@@ -914,6 +914,7 @@ fn const_template_projection_repeats_slots_in_const_loops() -> Result<(), Templa
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
                 domain: NumericScalar::Fixed(FixedScalar::I32),
+                fast_math: false,
             }),
         };
         let root = builder.push_loop_node(header, body, None, location);
@@ -1046,6 +1047,7 @@ fn const_template_projection_preserves_loop_aggregate_content() -> Result<(), Te
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
                 domain: NumericScalar::Fixed(FixedScalar::I32),
+                fast_math: false,
             }),
         };
         let aggregate_output = builder.store.push_node(TemplateIrNode::new(
@@ -1159,6 +1161,7 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
                 domain: NumericScalar::Fixed(FixedScalar::I32),
+                fast_math: false,
             }),
         };
         let root = builder.push_loop_node(header, body, None, location);
@@ -1292,6 +1295,7 @@ fn build_range_loop_template(
             step: None,
             end_kind: RangeEndKind::Exclusive,
             domain: NumericScalar::Fixed(FixedScalar::I32),
+            fast_math: false,
         }),
     };
     let root = builder.push_loop_node(header, body_root, aggregate_wrapper, None);
@@ -1331,6 +1335,7 @@ fn build_float_range_loop_template(
             step: Some(float_expression_at(expressions, constants, scalar, step)),
             end_kind: RangeEndKind::Exclusive,
             domain: NumericScalar::Fixed(scalar),
+            fast_math: false,
         }),
     };
     let root = builder.push_loop_node(header, body_root, None, None);
@@ -1464,6 +1469,7 @@ fn final_view_fold_loop_binding_and_body_provenance_reach_exact_result() {
                     step: None,
                     end_kind: RangeEndKind::Exclusive,
                     domain: NumericScalar::Fixed(FixedScalar::I32),
+                    fast_math: false,
                 }),
             };
             let root = builder.push_loop_node(header, body, None, None);
@@ -1570,6 +1576,7 @@ fn final_view_fold_loop_preserves_visited_no_output_selector_provenance() {
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
                 domain: NumericScalar::Fixed(FixedScalar::I32),
+                fast_math: false,
             }),
         };
         let root = builder.push_loop_node(header, no_output_body, None, None);
@@ -1742,6 +1749,7 @@ fn collect_float_counters(
         end_kind,
         step,
         domain: NumericScalar::Fixed(scalar),
+        fast_math: false,
     };
     let mut cursor = ConstRangeCursor::new(
         &range,
@@ -1856,6 +1864,7 @@ fn range_cursor_rejects_non_progressing_float32_range() {
             1.0,
         )),
         domain: NumericScalar::Fixed(FixedScalar::F32),
+        fast_math: false,
     };
     let error =
         expect_non_progressing_range(&expressions, &constants, range, "a stalled F32 update");
@@ -1883,6 +1892,7 @@ fn range_cursor_rejects_non_progressing_float16_range() {
             1.0,
         )),
         domain: NumericScalar::Fixed(FixedScalar::F16),
+        fast_math: false,
     };
     let error =
         expect_non_progressing_range(&expressions, &constants, range, "a stalled F16 update");
@@ -2065,6 +2075,7 @@ fn collect_integer_counters(case: &IntegerRangeCase) -> Vec<i128> {
         end_kind: case.end_kind,
         step,
         domain: NumericScalar::Fixed(case.domain),
+        fast_math: false,
     };
     let mut cursor = ConstRangeCursor::new(
         &range,
@@ -2294,6 +2305,7 @@ fn range_cursor_rejects_zero_step_on_empty_uint_range() {
             integer_value(FixedScalar::I32, 0),
         )),
         domain: NumericScalar::Fixed(FixedScalar::U64),
+        fast_math: false,
     };
     let error = range_failure(
         range,
@@ -2324,6 +2336,7 @@ fn range_cursor_rejects_negative_zero_float_step_on_equal_endpoints() {
                 .expect("negative zero is representable at F32"),
         )),
         domain: NumericScalar::Fixed(FixedScalar::F32),
+        fast_math: false,
     };
     let error = range_failure(range, &expressions, &constants, "a negative zero F32 step");
     assert_range_step_diagnostic(

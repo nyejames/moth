@@ -1,0 +1,17 @@
+fast_generic type T |value T| -> I32:
+    $fast_math
+    doubled I32 = 1 + 1
+    return doubled
+;
+
+probe type T |value T| -> I32:
+    $safe_math
+    result I32 = 1 + 1 catch |error|:
+        return fast_generic(value)
+    ;
+    return result
+;
+
+result_i32 I32 = probe(2)
+result_bool I32 = probe(true)
+io.line([:value=[result_i32 + result_bool]])

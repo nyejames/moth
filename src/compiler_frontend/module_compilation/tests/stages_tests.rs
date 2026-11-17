@@ -20,6 +20,7 @@ use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceId, SourceSpan,
+    SpanResolutionSources,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -98,7 +99,11 @@ fn lower_hir_capacity_failure_keeps_error_without_warnings_and_captured_site() {
         rows: 1,
         ..Default::default()
     });
-    let failure = match builder.build_hir_module(ast, &ExternalPackageRegistry::new()) {
+    let failure = match builder.build_hir_module(
+        ast,
+        &ExternalPackageRegistry::new(),
+        SpanResolutionSources::empty(),
+    ) {
         Ok(_) => panic!("the first authored HIR expression should exceed the forced row limit"),
         Err(failure) => failure,
     };

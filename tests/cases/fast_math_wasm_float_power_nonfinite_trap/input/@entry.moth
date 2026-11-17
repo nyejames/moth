@@ -1,0 +1,10 @@
+-- Fast binary-float power reuses the ordinary power helper and traps a non-finite result.
+$fast_math
+power_f64 |base F64, exponent F64| -> F64:
+    return base ^ exponent
+;
+
+two F64 = 2.0
+thousand_twenty_four F64 = 1024.0
+value = power_f64(two, thousand_twenty_four)
+~[:value=[value]]

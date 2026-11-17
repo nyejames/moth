@@ -20,6 +20,15 @@ Exported callables expose their failures through a declared error channel or
 handle them before returning. The compiler diagnoses any implicit failure left
 unrepresented at that boundary.
 
+`$fast_math` changes the failure outcome of eligible fixed-integer and
+binary-float operations. A fast numeric failure traps instead of producing an
+implicit `Error`. A trap never enters a `catch` handler, ends the current guest
+call and invalidates the builder-selected execution instance. Work performed
+before the trap is not undone, so side effects such as `io.line` output remain.
+The trapping invocation publishes none of its runtime fragments. See
+@../directives/#constraints (Constraints) and
+@../../developer-docs/numeric-backend-contract (Numeric backend contract).
+
 Expression-wide `catch` handles the whole selected expression, including
 arithmetic, receivers, arguments and nested calls. Parentheses are not required.
 Implicit failures and built-in `Error!` outcomes may share one catch. The same
@@ -177,9 +186,10 @@ See the error-condition mappings and resource limits in the
 ### Checked operations and bare backend behaviour
 
 The table compares **Moth's required result** with selected bare backend
-operations **without Moth's semantic checks**. It is not an unchecked Moth mode
-or a catalogue of exact generated instructions. Helpers and representations may
-differ. A backend must preserve Moth semantics wherever it supports the feature.
+operations **without Moth's semantic checks**. It is not an unchecked Moth mode,
+the `$fast_math` contract or a catalogue of exact generated instructions.
+Helpers and representations may differ. A backend must preserve Moth semantics
+wherever it supports the feature.
 
 Arithmetic checks the selected semantic result domain, not an operand's storage
 width. `U8 + U8` stays `U8`, so `255 + 1` overflows rather than producing a

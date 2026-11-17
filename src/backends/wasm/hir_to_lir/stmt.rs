@@ -4,11 +4,13 @@ use crate::backends::wasm::hir_to_lir::context::{WasmFunctionLoweringContext, lo
 use crate::backends::wasm::hir_to_lir::expr::{expression_type, lower_expression};
 use crate::backends::wasm::hir_to_lir::imports::resolve_host_call_import;
 use crate::backends::wasm::lir::instructions::{
-    IntegerCheckMode, WasmCalleeRef, WasmCheckedIntegerOperation, WasmIntegerOperationKind,
-    WasmIntegerPowerScratch, WasmIntegerRangeCandidate, WasmIntegerRangeCandidateScratch,
-    WasmIntegerScratch, WasmLirStmt, WasmNumericOperationOperands, WasmRangeCandidateKind,
+    IntegerCheckMode, WasmCalleeRef, WasmCheckedIntegerOperation, WasmFastIntegerOperation,
+    WasmIntegerOperationKind, WasmIntegerPowerScratch, WasmIntegerRangeCandidate,
+    WasmIntegerRangeCandidateScratch, WasmIntegerScratch, WasmLirStmt,
+    WasmNumericOperationOperands, WasmRangeCandidateKind,
 };
 use crate::backends::wasm::lir::types::{WasmAbiType, WasmLirLocalId};
+use crate::backends::wasm::support;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
@@ -16,11 +18,10 @@ use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode,
+    HirFastStoreConversion, HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
-use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
 
 pub(crate) fn lower_statement(
@@ -100,16 +101,33 @@ pub(crate) fn lower_statement(
             }
 
             if op.domain.is_integer() {
-                lower_checked_integer_operation(
-                    context,
-                    statement.id,
-                    *op,
-                    *failure_mode,
-                    operands,
-                    result.local(),
-                    statements,
-                )
+                if op.semantics.is_fast() {
+                    lower_fast_integer_operation(
+                        context,
+                        *op,
+                        *failure_mode,
+                        operands,
+                        result.local(),
+                        statements,
+                    )
+                } else {
+                    lower_checked_integer_operation(
+                        context,
+                        statement.id,
+                        *op,
+                        *failure_mode,
+                        operands,
+                        result.local(),
+                        statements,
+                    )
+                }
             } else {
+                // WHAT: ordinary trap-mode and `$fast_math` binary-float operations share this
+                //       lowering.
+                // WHY: both semantics require per-operation native rounding, a signed-zero
+                //      divisor trap for `/` and `%`, and a finite check at every semantic result
+                //      boundary. Only the HIR delivery differs (`Trap` versus `Fatal`), and the
+                //      backend emits no failure carrier for either.
                 lower_checked_float_operation(
                     context,
                     *op,
@@ -120,8 +138,14 @@ pub(crate) fn lower_statement(
                 )
             }
         }
-        // Trap-mode loop-step statements reach here: the Wasm feature validator
-        // rejects only recoverable `Invoke` guards, so this stays infrastructure.
+        HirStatementKind::FastStoreConversion {
+            conversion,
+            source,
+            result,
+        } => lower_fast_store_conversion(context, *conversion, *source, result.local(), statements),
+        // Statement loop-step guards are lowered as block terminators by `lower_function`; the
+        // Wasm feature validator rejects only recoverable `Invoke` guards, so reaching here stays
+        // an infrastructure failure.
         HirStatementKind::LoopStepFailure { .. } => Err(InfrastructureFailure::lir_transformation(
             "Loop-step failure must be lowered as a block terminator",
         )),
@@ -213,44 +237,22 @@ pub(crate) fn lower_call_callee(
     })
 }
 
-fn lower_checked_integer_operation(
+/// Lowers one integer operation's operands in source evaluation order.
+///
+/// WHY: runtime-checked and fast integer lowering receive the same HIR operand shape, so one
+///      step decides it and each family appends only its own LIR statement afterwards.
+fn lower_integer_operands(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
-    statement: HirNodeId,
     op: HirNumericOp,
-    failure_mode: NumericFailureMode,
     operands: &HirNumericOperands,
-    result: LocalId,
     statements: &mut Vec<WasmLirStmt>,
-) -> Result<(), InfrastructureFailure> {
-    if !matches!(
-        failure_mode,
-        NumericFailureMode::Trap | NumericFailureMode::Infallible
-    ) || !op.domain.is_integer()
-    {
-        crate::compiler_bug!(
-            CompilerStage::BackendLowering,
-            "Wasm lowering does not support checked numeric operation {op} in {failure_mode:?} mode"
-        );
-    }
-
-    let kind = integer_operation_kind(op.domain)?;
-    // Proven-safe operations keep evaluation order, domain and signedness while losing only
-    // the redundant runtime predicates. Every other mode retains the checked lowering below.
-    let check_mode = if context
-        .module_context
-        .numeric_proofs
-        .integer_operation_is_safe(statement)
-    {
-        IntegerCheckMode::ProvenSafe
-    } else {
-        IntegerCheckMode::Runtime
-    };
-    let lir_operands = match (op.operator, operands) {
+) -> Result<WasmNumericOperationOperands, InfrastructureFailure> {
+    match (op.operator, operands) {
         (NumericOperator::Negate, HirNumericOperands::Unary { operand }) => {
             let lowered = lower_expression(context, *operand, statements)?;
-            WasmNumericOperationOperands::Unary {
+            Ok(WasmNumericOperationOperands::Unary {
                 operand: lowered.value,
-            }
+            })
         }
         (
             NumericOperator::Add
@@ -263,29 +265,90 @@ fn lower_checked_integer_operation(
         ) => {
             let lowered_left = lower_expression(context, *left, statements)?;
             let lowered_right = lower_expression(context, *right, statements)?;
-            WasmNumericOperationOperands::Binary {
+            Ok(WasmNumericOperationOperands::Binary {
                 left: lowered_left.value,
                 right: lowered_right.value,
-            }
+            })
         }
         _ => crate::compiler_bug!(
             CompilerStage::BackendLowering,
-            "Wasm lowering received invalid integer numeric operands for {op}"
+            "Wasm integer lowering received invalid numeric operands for {op}"
         ),
-    };
+    }
+}
 
+/// Resolves one integer operation's result local and verifies its native carrier.
+fn integer_operation_destination(
+    context: &WasmFunctionLoweringContext<'_, '_>,
+    result: LocalId,
+    carrier: WasmAbiType,
+) -> Result<WasmLirLocalId, InfrastructureFailure> {
     let Some(destination) = context.local_map.get(&result).copied() else {
         return Err(InfrastructureFailure::lir_transformation(format!(
             "Wasm lowering could not resolve numeric result local {result:?}"
         )));
     };
-    let expected_carrier = kind.carrier();
-    let destination_carrier = context.local_type_by_id.get(&destination).copied();
-    if destination_carrier != Some(expected_carrier) {
+    let actual_carrier = context.local_type_by_id.get(&destination).copied();
+    if actual_carrier != Some(carrier) {
         return Err(InfrastructureFailure::lir_transformation(format!(
-            "Wasm lowering expected numeric result carrier {expected_carrier:?}, found {destination_carrier:?}"
+            "Wasm lowering expected numeric result carrier {carrier:?}, found {actual_carrier:?}"
         )));
     }
+    Ok(destination)
+}
+
+/// Allocates power's factor and exponent loop locals at the operation carrier.
+fn allocate_power_scratch(
+    context: &mut WasmFunctionLoweringContext<'_, '_>,
+    carrier: WasmAbiType,
+) -> WasmIntegerPowerScratch {
+    WasmIntegerPowerScratch {
+        factor: context.alloc_temp(carrier),
+        exponent: context.alloc_temp(carrier),
+    }
+}
+
+fn lower_checked_integer_operation(
+    context: &mut WasmFunctionLoweringContext<'_, '_>,
+    statement: HirNodeId,
+    op: HirNumericOp,
+    failure_mode: NumericFailureMode,
+    operands: &HirNumericOperands,
+    result: LocalId,
+    statements: &mut Vec<WasmLirStmt>,
+) -> Result<(), InfrastructureFailure> {
+    if !matches!(
+        failure_mode,
+        NumericFailureMode::Fatal | NumericFailureMode::Trap | NumericFailureMode::Infallible
+    ) || !op.domain.is_integer()
+    {
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm lowering does not support checked numeric operation {op} in {failure_mode:?} mode"
+        );
+    }
+
+    let kind = support::integer_operation_kind(op.domain).unwrap_or_else(|| {
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm checked integer lowering does not implement the exact domain {op}"
+        )
+    });
+    // Proven-safe operations keep evaluation order, domain and signedness while losing only
+    // the redundant runtime predicates. Every other mode retains the checked lowering below.
+    let check_mode = if context
+        .module_context
+        .numeric_proofs
+        .integer_operation_is_safe(statement)
+    {
+        IntegerCheckMode::ProvenSafe
+    } else {
+        IntegerCheckMode::Runtime
+    };
+    let lir_operands = lower_integer_operands(context, op, operands, statements)?;
+
+    let expected_carrier = kind.carrier();
+    let destination = integer_operation_destination(context, result, expected_carrier)?;
 
     // Checked lowering keeps an operand's old value available to overflow predicates and commits
     // the assignment only after the checked operation succeeds. Proven-safe native arithmetic
@@ -324,10 +387,7 @@ fn lower_checked_integer_operation(
         _ => None,
     };
     let power_scratch = if op.operator == NumericOperator::Power {
-        Some(WasmIntegerPowerScratch {
-            factor: context.alloc_temp(expected_carrier),
-            exponent: context.alloc_temp(expected_carrier),
-        })
+        Some(allocate_power_scratch(context, expected_carrier))
     } else {
         None
     };
@@ -354,6 +414,65 @@ fn lower_checked_integer_operation(
         });
     }
 
+    Ok(())
+}
+
+/// Lowers one `$fast_math` integer operation into its distinct modular LIR family.
+///
+/// WHAT: resolves the native 32/64-bit domain, lowers operands in source order and allocates only
+///       power's loop scratch.
+/// WHY: fast arithmetic wraps by language rule, so it must not enter the ordinary checked path
+///      (whose overflow predicates would trap) or read the optional proof table (which describes
+///      ordinary statements). The emitter reads operands before storing the result, so an
+///      in-place destination needs no alias temp.
+fn lower_fast_integer_operation(
+    context: &mut WasmFunctionLoweringContext<'_, '_>,
+    op: HirNumericOp,
+    failure_mode: NumericFailureMode,
+    operands: &HirNumericOperands,
+    result: LocalId,
+    statements: &mut Vec<WasmLirStmt>,
+) -> Result<(), InfrastructureFailure> {
+    if !matches!(
+        failure_mode,
+        NumericFailureMode::Fatal | NumericFailureMode::Infallible
+    ) || !op.domain.is_integer()
+        || !op.semantics.is_fast()
+    {
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm fast integer lowering received {op} in {failure_mode:?} mode"
+        );
+    }
+
+    let kind = support::integer_operation_kind(op.domain).unwrap_or_else(|| {
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm fast integer lowering does not implement the exact domain {}",
+            op.domain
+        )
+    });
+
+    let lir_operands = lower_integer_operands(context, op, operands, statements)?;
+
+    let expected_carrier = kind.carrier();
+    let destination = integer_operation_destination(context, result, expected_carrier)?;
+
+    let power = if op.operator == NumericOperator::Power {
+        Some(allocate_power_scratch(context, expected_carrier))
+    } else {
+        None
+    };
+
+    statements.push(WasmLirStmt::FastIntegerOp {
+        operation: WasmFastIntegerOperation {
+            dst: destination,
+            operator: op.operator,
+            kind,
+            operands: lir_operands,
+            power,
+        },
+    });
     Ok(())
 }
 
@@ -385,19 +504,11 @@ fn lower_validate_float(
                 "Wasm binary-float validation source has type {source_type:?}, which is not a binary float"
             )
         });
-    let precision = source_scalar
-        .binary_float_precision()
-        .filter(|precision| {
-            matches!(
-                precision,
-                BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64
-            )
-        })
-        .ok_or_else(|| {
-            InfrastructureFailure::lir_transformation(format!(
-                "Wasm binary-float validation requires an F32 or F64 source, found {source_scalar}"
-            ))
-        })?;
+    let precision = support::native_binary_float_precision(source_scalar).ok_or_else(|| {
+        InfrastructureFailure::lir_transformation(format!(
+            "Wasm binary-float validation requires an F32 or F64 source, found {source_scalar}"
+        ))
+    })?;
     let expected_carrier = match precision {
         BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
         BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
@@ -517,29 +628,24 @@ fn lower_checked_float_operation(
     result: LocalId,
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<(), InfrastructureFailure> {
-    if failure_mode != NumericFailureMode::Trap || !op.domain.is_binary_float() {
+    if !matches!(
+        failure_mode,
+        NumericFailureMode::Fatal | NumericFailureMode::Trap | NumericFailureMode::Infallible
+    ) || !op.domain.is_binary_float()
+    {
         crate::compiler_bug!(
             CompilerStage::BackendLowering,
             "Wasm lowering does not support checked float operation {op} in {failure_mode:?} mode"
         );
     }
 
-    let precision = op
-        .domain
-        .binary_float_precision()
-        .filter(|precision| {
-            matches!(
-                precision,
-                BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64
-            )
-        })
-        .unwrap_or_else(|| {
-            crate::compiler_bug!(
-                CompilerStage::BackendLowering,
-                "Wasm checked float lowering does not support {} precision",
-                op.domain
-            )
-        });
+    let precision = support::native_binary_float_precision(op.domain).unwrap_or_else(|| {
+        crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm checked float lowering does not support {} precision",
+            op.domain
+        )
+    });
     let expected_type = op.domain.type_id(context.module_context.type_environment);
 
     let lir_operands = match (op.operator, operands) {
@@ -748,20 +854,12 @@ fn lower_float_range_candidate(
     let [current, step, end] = inputs;
     // Binary16 is unreachable here: validate_wasm_range_candidate_domains rejects a reachable
     // F16 counter before lowering. Only Binary32 and Binary64 have native carriers.
-    let precision = match domain.binary_float_precision() {
-        Some(BinaryFloatPrecision::Binary16) => crate::compiler_bug!(
+    let Some(precision) = support::native_binary_float_precision(domain) else {
+        crate::compiler_bug!(
             CompilerStage::BackendLowering,
             "Wasm float range candidates do not support {} precision",
             domain
-        ),
-        Some(precision @ (BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64)) => {
-            precision
-        }
-        None => crate::compiler_bug!(
-            CompilerStage::BackendLowering,
-            "Wasm float range candidates do not support {} precision",
-            domain
-        ),
+        );
     };
     let expected_type = domain.type_id(context.module_context.type_environment);
     if expression_type(context, current) != expected_type
@@ -845,24 +943,60 @@ fn resolve_range_candidate_destinations(
     Ok([candidate_dst, in_range_dst])
 }
 
-/// Map one exact checked-integer domain onto the LIR kind Wasm implements.
+/// Lowers one fast compound-assignment write-back into its distinct LIR conversion.
 ///
-/// The checked lowering emits 32/64-bit range predicates, so the supported domain set is exactly
-/// `I32`/`U32`/`I64`/`U64`; narrower fixed integers have no checked path and stay behind the
-/// backend capability gate.
-fn integer_operation_kind(
-    domain: NumericScalar,
-) -> Result<WasmIntegerOperationKind, InfrastructureFailure> {
-    match domain {
-        NumericScalar::Fixed(FixedScalar::I32) => Ok(WasmIntegerOperationKind::Signed32),
-        NumericScalar::Fixed(FixedScalar::U32) => Ok(WasmIntegerOperationKind::Unsigned32),
-        NumericScalar::Fixed(FixedScalar::I64) => Ok(WasmIntegerOperationKind::Signed64),
-        NumericScalar::Fixed(FixedScalar::U64) => Ok(WasmIntegerOperationKind::Unsigned64),
-        _ => crate::compiler_bug!(
-            CompilerStage::BackendLowering,
-            "Wasm checked integer lowering does not implement the exact domain {domain}"
-        ),
+/// WHAT: validates the HIR conversion and delivery, resolves the destination local's carrier and
+///       lowers the arithmetic source exactly once.
+/// WHY: the fast write-back is not an explicit cast; it must not enter the checked cast expression
+///      path, and the trap must run before the store reads the result local.
+fn lower_fast_store_conversion(
+    context: &mut WasmFunctionLoweringContext<'_, '_>,
+    conversion: HirFastStoreConversion,
+    source: HirValueId,
+    result: LocalId,
+    statements: &mut Vec<WasmLirStmt>,
+) -> Result<(), InfrastructureFailure> {
+    if conversion.required_failure_mode().is_none() {
+        return Err(InfrastructureFailure::lir_transformation(format!(
+            "Wasm lowering received invalid fast store conversion {conversion}"
+        )));
     }
+
+    let source_type = expression_type(context, source);
+    let expected_source_type = conversion
+        .source
+        .type_id(context.module_context.type_environment);
+    if source_type != expected_source_type {
+        return Err(InfrastructureFailure::lir_transformation(format!(
+            "Wasm fast store conversion {conversion} source type does not match its domain"
+        )));
+    }
+
+    let Some(conversion) = support::fast_store_conversion(conversion) else {
+        return Err(InfrastructureFailure::lir_transformation(format!(
+            "Wasm fast store conversion {conversion} requires a native I32/U32/I64/U64 integer \
+             or F32/F64 binary-float domain"
+        )));
+    };
+    let Some(destination) = context.local_map.get(&result).copied() else {
+        return Err(InfrastructureFailure::lir_transformation(format!(
+            "Wasm lowering could not resolve fast store conversion result local {result:?}"
+        )));
+    };
+    let expected_carrier = conversion.destination_carrier();
+    if context.local_type_by_id.get(&destination).copied() != Some(expected_carrier) {
+        return Err(InfrastructureFailure::lir_transformation(format!(
+            "Wasm fast store conversion expected destination carrier {expected_carrier:?}"
+        )));
+    }
+
+    let source = lower_expression(context, source, statements)?;
+    statements.push(WasmLirStmt::FastStoreConversion {
+        dst: destination,
+        source: source.value,
+        conversion,
+    });
+    Ok(())
 }
 
 /// Whether the widened I64 product scratch exists only for check-only range predicates.

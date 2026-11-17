@@ -53,7 +53,9 @@ use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::module::HirChoice;
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
+};
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
@@ -61,6 +63,7 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::hir_log;
 
 mod calls;
+mod constraint_evidence;
 mod expression_walk;
 mod fallible;
 mod numeric;
@@ -954,11 +957,6 @@ impl<'a> HirBuilder<'a> {
                 "Catch protected expression has no failure facts",
             )
         })?;
-        if facts.is_statically_infallible_catch() {
-            // AST validated the authored handler. Converged facts show no error edge can run,
-            // so only the protected value remains executable HIR.
-            return self.lower_expression_results(protected);
-        }
         // The parser owns catch compatibility; its validated disposition, not the protected
         // root shape, decides which payload arrives in the handler.
         let FailureDisposition::HandledByCatch { error_type_id } = facts.disposition else {
@@ -986,6 +984,12 @@ impl<'a> HirBuilder<'a> {
         } else {
             result_type_ids
         };
+        // A statically infallible catch cannot route an error. Lower the protected value directly,
+        // but first keep the handler's selected evidence because the handler never reaches the CFG.
+        if facts.is_statically_infallible_catch() {
+            self.record_skipped_catch_handler_evidence(owner.store(), &value_catch.handler)?;
+            return self.lower_expression_results(protected);
+        }
         let lowered = self.lower_fallible_results_with_branching(
             FallibleBranchingContext {
                 result_type_ids,
@@ -1044,34 +1048,46 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
         match &cast.evidence {
-            ResolvedCastEvidence::Builtin { policy } => match (cast.fallibility, cast.handling) {
-                (BuiltinCastFallibility::Infallible, _) => self
-                    .lower_infallible_builtin_cast_expression(
+            ResolvedCastEvidence::Builtin { policy } => {
+                if cast.handling == CastHandling::FastStoreConversion {
+                    return self
+                        .lower_fast_store_conversion_expression(source, cast, *policy, span);
+                }
+                match (cast.fallibility, cast.handling) {
+                    (BuiltinCastFallibility::Infallible, _) => self
+                        .lower_infallible_builtin_cast_expression(
+                            source,
+                            cast,
+                            *policy,
+                            expr_type_id,
+                            span,
+                        ),
+                    (BuiltinCastFallibility::Fallible, CastHandling::StoreConversion) => self
+                        .lower_store_conversion_cast_expression(
+                            source,
+                            cast,
+                            *policy,
+                            expr_type_id,
+                            span,
+                        ),
+                    (
+                        BuiltinCastFallibility::Fallible,
+                        CastHandling::Implicit | CastHandling::Recover,
+                    ) => self.lower_fallible_builtin_cast_expression(
                         source,
                         cast,
                         *policy,
                         expr_type_id,
                         span,
                     ),
-                (BuiltinCastFallibility::Fallible, CastHandling::StoreConversion) => self
-                    .lower_store_conversion_cast_expression(
-                        source,
-                        cast,
-                        *policy,
-                        expr_type_id,
-                        span,
-                    ),
-                (
-                    BuiltinCastFallibility::Fallible,
-                    CastHandling::Implicit | CastHandling::Recover,
-                ) => self.lower_fallible_builtin_cast_expression(
-                    source,
-                    cast,
-                    *policy,
-                    expr_type_id,
-                    span,
-                ),
-            },
+                    (_, CastHandling::FastStoreConversion) => {
+                        Err(InfrastructureFailure::hir_transformation(
+                            "Fast store conversion bypassed its dedicated lowering",
+                        )
+                        .into())
+                    }
+                }
+            }
             ResolvedCastEvidence::UserDefined { method_path, .. } => self
                 .lower_user_defined_cast_expression(source, cast, method_path, expr_type_id, span),
             ResolvedCastEvidence::GenericBound => Err(InfrastructureFailure::hir_transformation(
@@ -1160,6 +1176,64 @@ impl<'a> HirBuilder<'a> {
         })
     }
 
+    /// Lowers the implicit `$fast_math` write-back of one compound-assignment arithmetic result.
+    ///
+    /// WHAT: emits a dedicated `FastStoreConversion` statement and returns a load of its target
+    ///       local. Integer destinations wrap; every other conversion traps before the enclosing
+    ///       store executes.
+    /// WHY: fast write-back semantics differ from explicit casts and ordinary checked store
+    ///      conversions. It must never become an `Invoke`, a private-lane producer or an ordinary
+    ///      checked narrowing helper, and it must not contribute a recoverable failure fact.
+    fn lower_fast_store_conversion_expression(
+        &mut self,
+        source: ExpressionView<'_>,
+        cast: &CastFacts,
+        policy: BuiltinCastPolicyId,
+        span: &Option<SourceSpan>,
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
+        let BuiltinCastPolicyId::NumericConversion {
+            source: source_domain,
+            target: target_domain,
+        } = policy
+        else {
+            return Err(InfrastructureFailure::hir_transformation(
+                "Fast store conversion requires numeric conversion evidence",
+            )
+            .into());
+        };
+        let conversion = crate::compiler_frontend::hir::numeric::HirFastStoreConversion {
+            source: source_domain,
+            target: target_domain,
+        };
+        if conversion.required_failure_mode().is_none() {
+            return Err(InfrastructureFailure::hir_transformation(format!(
+                "Fast store conversion {conversion} is not a permitted numeric write-back"
+            ))
+            .into());
+        }
+
+        let mut prelude = Vec::new();
+        let source_value = self.lower_child_expression_for_parent(&mut prelude, source)?;
+        let target_type = self.lower_type_id(cast.target_type_id)?;
+        let result_local = self.allocate_temp_local(target_type, None)?;
+        let statement = HirStatement {
+            id: self.allocate_node_id(),
+            kind: HirStatementKind::FastStoreConversion {
+                conversion,
+                source: source_value,
+                result: HirLocalDestination::Define(result_local),
+            },
+            span: *span,
+        };
+        self.side_table.map_statement(*span, &statement);
+        prelude.push(statement);
+
+        let region = self.current_region_or_error()?;
+        let no_span = None;
+        let value = self.make_local_load_expression(result_local, target_type, &no_span, region)?;
+        Ok(LoweredExpression { prelude, value })
+    }
+
     /// Lowers a fallible builtin cast through explicit native success/error continuations.
     fn lower_fallible_builtin_cast_expression(
         &mut self,
@@ -1184,7 +1258,7 @@ impl<'a> HirBuilder<'a> {
                 }
                 self.lower_results_to_active_catch_success_value(results, span)?
             }
-            CastHandling::StoreConversion => {
+            CastHandling::StoreConversion | CastHandling::FastStoreConversion => {
                 return Err(InfrastructureFailure::hir_transformation(
                     "Store conversion cast bypassed compound-assignment lowering",
                 )
@@ -1218,7 +1292,9 @@ impl<'a> HirBuilder<'a> {
         if self.numeric_failure_is_recoverable()? {
             return self.lower_fallible_results_to_success_value(results, span);
         }
-        use crate::compiler_frontend::hir::terminators::{HirTerminator, RuntimeFailureCause};
+        use crate::compiler_frontend::hir::terminators::{
+            HirTerminator, RuntimeFailureCause, RuntimeFailureKind,
+        };
         let cause = if store {
             RuntimeFailureCause::StoreConversion {
                 error: results.error_local,
@@ -1238,6 +1314,7 @@ impl<'a> HirBuilder<'a> {
                 }
                 .to_owned(),
                 cause: Some(cause),
+                kind: RuntimeFailureKind::Conversion,
             },
             span,
             *span,
@@ -1305,10 +1382,12 @@ impl<'a> HirBuilder<'a> {
                     value,
                 })
             }
-            (_, CastHandling::StoreConversion) => Err(InfrastructureFailure::hir_transformation(
-                "Store conversion cast reached HIR with non-builtin evidence",
-            )
-            .into()),
+            (_, CastHandling::StoreConversion | CastHandling::FastStoreConversion) => {
+                Err(InfrastructureFailure::hir_transformation(
+                    "Store conversion cast reached HIR with non-builtin evidence",
+                )
+                .into())
+            }
         }
     }
 

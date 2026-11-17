@@ -1,0 +1,9 @@
+-- Dec never enters fast semantics; inside `$fast_math` it keeps the ordinary operation and the
+-- Wasm target's existing Dec capability rejection.
+$fast_math
+add_dec |left Dec2, right Dec2| -> Dec2:
+    return left + right
+;
+
+value = add_dec(1.25, 2.5)
+~[:value=[value]]

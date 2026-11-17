@@ -214,6 +214,7 @@ fn mixed_statement_tree_visits_rows_in_source_order() {
                 end_kind: RangeEndKind::Exclusive,
                 step: Some(step),
                 domain: NumericScalar::Fixed(FixedScalar::I32),
+                fast_math: false,
             }),
             body: vec![expression_statement(loop_value)],
         },

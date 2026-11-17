@@ -1,0 +1,150 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = [
+    "MOTH-RULE-0091",
+    "MOTH-RULE-0091",
+    "MOTH-RULE-0091",
+    "MOTH-RULE-0091",
+    "MOTH-RULE-0091",
+    "MOTH-RULE-0091",
+    "MOTH-RULE-0091",
+    "MOTH-RULE-0091",
+    "MOTH-RULE-0091",
+    "MOTH-RULE-0091",
+    "MOTH-RULE-0091",
+]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 2
+reason = "invalid_source_constraint.fast_evidence_beyond_witness_bound"
+path = "input/@entry.moth"
+line = 23
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 3
+reason = "invalid_source_constraint.fast_operation"
+path = "input/@entry.moth"
+line = 28
+column = 12
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 30
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 4
+reason = "invalid_source_constraint.fast_operation"
+path = "input/@entry.moth"
+line = 34
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 36
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 2
+path = "input/@entry.moth"
+line = 44
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 3
+path = "input/@entry.moth"
+line = 3
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 5
+reason = "invalid_source_constraint.fast_operation"
+path = "input/@entry.moth"
+line = 39
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 44
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 2
+path = "input/@entry.moth"
+line = 3
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 6
+reason = "invalid_source_constraint.fast_range_guard"
+path = "input/@entry.moth"
+line = 47
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 7
+reason = "invalid_source_constraint.fast_range_guard"
+path = "input/@entry.moth"
+line = 56
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 60
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 8
+reason = "invalid_source_constraint.fast_range_guard"
+path = "input/@entry.moth"
+line = 68
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 71
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 9
+reason = "invalid_source_constraint.fast_operation"
+path = "input/@entry.moth"
+line = 76
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 79
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 2
+path = "input/@entry.moth"
+line = 3
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 10
+reason = "invalid_source_constraint.fast_operation"
+path = "input/@entry.moth"
+line = 83
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 86
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 11
+reason = "invalid_source_constraint.fast_operation"
+path = "input/@entry.moth"
+line = 90
+column = 1
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 92

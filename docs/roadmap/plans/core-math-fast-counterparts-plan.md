@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task by task. Track work with `- [ ]` checkboxes.
 
-**Status:** Queued. Start after constraints and fast arithmetic, then numeric optimisation, have merged and published their permanent contracts.
+**Status:** Queued. Start after numeric optimisation has merged and published its permanent contracts.
 
 **Goal:** Add a small, justified set of explicit `fast_*` F64 functions to `@core/math`, preserving ordinary Math APIs while exposing selected trap-only or deliberately cheaper numerical contracts.
 
@@ -10,16 +10,16 @@
 
 **Tech stack:** Rust, external package registry, HTML-JS backend, Core Math `.mtf` references, Moth integration tests and benchmarks.
 
-**Repository destination:** `docs/roadmap/plans/core-math-fast-counterparts-plan.md`. This is plan **3 of 3**, sequenced after `constraints-and-fast-math-plan.md` and `numeric-optimisation-plan.md`.
+**Repository destination:** `docs/roadmap/plans/core-math-fast-counterparts-plan.md`. This plan follows numeric optimisation.
 
 ## Global constraints
 
 - Follow `AGENTS.md`, `index.md`, the developer style/testing/validation guides, `docs/compiler-design-overview.md` and `docs/build-system-design.md`. Read `docs/docs/packages/core/math/math.mtf` and `docs/roadmap/plans/packages/core-math.md` for the existing Math contract.
-- Read the permanent constraints and numeric backend contracts delivered by plan 1. Plan 2's final checked-carrier behaviour is the performance baseline. Do not reinterpret the `$fast_math`, `$safe_math`, `$infallible` or ordinary numeric contracts.
+- Read the permanent constraints and numeric backend contracts delivered by the constraints and fast arithmetic work. Numeric optimisation's final checked-carrier behaviour is the performance baseline. Do not reinterpret the `$fast_math`, `$safe_math`, `$infallible` or ordinary numeric contracts.
 - Keep the existing `@core/math` origin, explicit dependency, F64-only positional signatures, shared parameters, fresh returns and absence of a declared Error slot. Keep all current ordinary function bodies, names and numerical guarantees.
 - A `fast_*` function is **explicitly selected by its name**, callable with or without `$fast_math` on the caller. `$fast_math` does not rewrite ordinary `sqrt`, `hypot` or other calls into fast counterparts.
 - Registered fast helpers contribute fast-math use to `$safe_math` and their potential semantic traps to `$infallible`, through trusted per-callable metadata, regardless of calling scope, alias, facade or re-export. Do not infer those facts from the `fast_` prefix or package path.
-- NaN and infinity must never become Moth F64 values. Fast numerical invalidity is a semantic trap, **never an implicit recoverable Error**, including from inside a function that declares `Error!` or a surrounding `catch`. The builder-selected execution-instance fault policy is the one established by plan 1.
+- NaN and infinity must never become Moth F64 values. Fast numerical invalidity is a semantic trap, **never an implicit recoverable Error**, including from inside a function that declares `Error!` or a surrounding `catch`. The builder-selected execution-instance fault policy is the one established by that work.
 - No F16/F32 overloads, generic Math, new approximations with unapproved bounds, Dec fast mode, separate Math error ABI, new Wasm Math lowerings or custom constant evaluator.
 
 ## Review focus
@@ -52,7 +52,7 @@ Begin by profiling **all five candidates** against the merged ordinary Core Math
 
 - Retain a candidate when it has a measured material advantage in a representative successful-call workload **or** a useful, explicitly different numerical contract. Document which reason applies.
 - `fast_hypot` is the principal algorithmically distinct candidate and should be retained if its measured cost and documented overflow/underflow tradeoff are acceptable. Compare it with ordinary hypot rather than claiming it is automatically faster.
-- Omit `fast_sqrt`, `fast_log`, `fast_exp` and `fast_pow` if their generated code and end-to-end cost are effectively identical to regular calls after plan 2. Their trap-versus-Error difference alone is not an obligation to double the API.
+- Omit `fast_sqrt`, `fast_log`, `fast_exp` and `fast_pow` if their generated code and end-to-end cost are effectively identical to regular calls after numeric optimisation. Their trap-versus-Error difference alone is not an obligation to double the API.
 - Record omitted candidates and the evidence. If the measurements suggest a different public subset or no worthwhile helper, stop at this gate for Nye's decision. Do not invent a wider approximation or silently publish five aliases.
 
 After the subset is sealed, the remaining tasks implement **only** those names. Every selected function keeps the existing regular Math mathematical result contract unless the explicit `fast_hypot` composition above overrides it. There is no global `fast_math` Core Math dispatch table.
@@ -74,11 +74,11 @@ V1 executes on the existing HTML-JS Core Math path. The current registry has `wa
 Reconfirm locators when the plan activates. These paths were checked against main when this plan was written.
 
 - `src/builder_surface/core_packages/math.rs` contains one `MathFunctionSpec { name, js_lowering, parameter_count }` table and one `ExternalFunctionSpec` registration loop. Extend only the rows and bounded trusted-call contract metadata needed for the sealed subset. Do not duplicate the ordinary registration loop or build a function-family hierarchy.
-- `src/compiler_frontend/external_packages/definitions.rs` owns `ExternalFunctionSpec`, `ExternalFunctionLowerings` and `ExternalJsLowering::{InlineExpression,RuntimeFunction}`. Reuse plan 1's trusted per-callable fast-use/trap facts. If the F64 boundary lacks a per-callable trap-delivery policy, add **one narrowly named classification in this existing owner**, rather than a generic effects structure.
+- `src/compiler_frontend/external_packages/definitions.rs` owns `ExternalFunctionSpec`, `ExternalFunctionLowerings` and `ExternalJsLowering::{InlineExpression,RuntimeFunction}`. Reuse the delivered trusted per-callable fast-use and trap facts. If the F64 boundary lacks a per-callable trap-delivery policy, add **one narrowly named classification in this existing owner**, rather than a generic effects structure.
 - `src/compiler_frontend/hir/hir_expression/numeric.rs` and its external-value validation owners already select the shared finite-result recovery/fatal lane. Thread trusted fast delivery through that same owner, not a second finite predicate in Math.
 - `src/backends/js/js_calls.rs` already lowers external inline templates and runtime function targets. One occurrence of each argument is mandatory. Keep the sealed unary/binary direct `Math.*` candidates inline when that remains their complete lowering.
 - For `fast_hypot`, register `ExternalJsLowering::RuntimeFunction("__moth_math_fast_hypot")`. Put its nontrivial, single-purpose JS body in `src/backends/js/package_bindings/core/math.rs` and use `CoreJsHelper`, `referenced_external_runtime_function` and `emit_referenced_core_helpers` from `src/backends/js/package_bindings/core/mod.rs`. Update the current Core helper inventory so first-party validation sees it. Emit only when reachable.
-- Reuse the numeric runtime's existing trap/integrity mechanism established by plan 1 for `fast_hypot`'s step checks. Never call an Error-carrier-producing operation and silently unwrap it as if its failure were recoverable. Do not add a generic Math helper runtime or a second finite-result validation implementation.
+- Reuse the numeric runtime's existing trap/integrity mechanism established by that work for `fast_hypot`'s step checks. Never call an Error-carrier-producing operation and silently unwrap it as if its failure were recoverable. Do not add a generic Math helper runtime or a second finite-result validation implementation.
 - `docs/docs/packages/core/math/math.mtf`, `math-basic.mtf` and `@entry.moth` own Math's user-facing contract and navigation. `docs/roadmap/plans/packages/core-math.md` is the ongoing package programme record, not a duplicate numeric specification. The progress owners are `docs/docs/progress/@entry.moth` and `docs/docs/progress/packages-and-builders/@entry.moth`.
 
 ## 3. Execution tasks and gates
@@ -96,7 +96,7 @@ Reconfirm locators when the plan activates. These paths were checked against mai
 
 - [ ] Add failing registration and frontend tests for each sealed name's F64 signature, arity, fresh success result, lack of Error slot, explicit Core dependency and access through direct/aliased/re-exported imports.
 - [ ] Add failing `$safe_math` and `$infallible` tests. Fast helpers contribute fast use independent of caller mode. Potential invalid inputs contribute a semantic trap. Regular Math calls inside a fast scope retain their ordinary contract. Unknown external wrappers remain conservative.
-- [ ] Extend the existing `MathFunctionSpec` table and one registration loop, using trusted per-callable facts from plan 1. Validate those facts at the existing provider boundary. Keep regular row metadata unchanged and preserve current public interface/fingerprint propagation.
+- [ ] Extend the existing `MathFunctionSpec` table and one registration loop, using the delivered trusted per-callable facts. Validate those facts at the existing provider boundary. Keep regular row metadata unchanged and preserve current public interface/fingerprint propagation.
 - [ ] Run the focused registry/frontend tests and review emitted public contract facts and diagnostic witnesses for a private helper changed from ordinary to fast.
 
 **Gate:** Selected fast APIs have one provider-owned identity and correct transitive constraint semantics. No name-prefix dispatch or separate package registration mechanism exists.

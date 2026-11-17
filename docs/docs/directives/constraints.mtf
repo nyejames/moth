@@ -1,0 +1,235 @@
+`$fast_math`, `$safe_math` and `$infallible` are compiler-owned numeric
+constraints. They refine how a function or complete statement computes and
+which numeric guarantees it exposes. Ordinary checked arithmetic stays the
+default, so a program needs no constraint to get the existing checked
+behaviour.
+
+Each constraint adds one guarantee. It does not make every operation succeed,
+make a call faster or widen target support. The Progress matrix owns
+implementation status: @../progress (Progress).
+
+### Placement and reach
+
+The three names are parameterless source modifiers. Write `$fast_math`, never
+`$fast_math()`. They follow the ordinary source-directive attachment rules and
+may share a line with whitespace in any order:
+
+[codeblock, $code "moth":
+    $fast_math $infallible
+    increment |value I32| -> I32:
+        return value + 1
+    ;
+
+    $safe_math
+    recover |left I32, right I32| -> I32:
+        value = left + right catch then 0
+        return value
+    ;
+]
+
+A blank physical line, a scope boundary or the end of the file breaks
+attachment. Repeating a name on one target is an error that identifies both
+occurrences, including repetition without arguments.
+
+Valid targets are functions, methods, generic functions and complete executable
+statements. A compound statement includes its condition, branches and body.
+A function annotation covers the function body. A runtime root statement is a
+valid target.
+
+Imports, parameters, fields, types, export groups, compile-time-only
+declarations and template heads are not targets. Compile-time function bodies
+are not constraint targets either, so `$fast_math`, `$safe_math` and
+`$infallible` on any statement inside a `#` function body, at any depth, are
+rejected, as they are on a `#` function header. Moth has no file-level numeric
+mode.
+
+An annotation applies to the lexical scope of its target. It covers
+caller-authored operands, binding initialisers, right-hand expressions and
+compound write-backs in that scope. A callee body keeps its own contract, and a
+call never propagates the caller's mode into the callee. Explicit `cast`,
+comparisons, logical operations, assertions, collection operations, memory
+checks and foreign validation keep their current contracts.
+
+### `$fast_math`
+
+`$fast_math` selects fast semantics only for resolved fixed-integer and
+binary-float arithmetic. It does not make unrelated calls, `cast` or `Dec`
+operations fast. A fast numeric failure traps rather than taking an implicit
+recoverable `Error` edge. In a required-const context, a fast operation that
+cannot fold is a compile-time diagnostic instead of a trap. Fast mode never
+weakens storage or bounds invariants.
+
+A selected fast operation counts as fast use even when it later folds to a
+constant or its result becomes dead. A fast annotation with no reachable fast
+operation is vacuous. The exact operator rules, compound write-back rules,
+range-loop traps and backend parity contract live in
+@../../developer-docs/numeric-backend-contract (Numeric backend contract).
+
+### `$safe_math`
+
+`$safe_math` guarantees that no executed or statically selected reachable
+computation uses fast numeric semantics. The guarantee follows direct, generic,
+recursive and module calls, and any trusted provider contract that exposes fast
+behaviour. A fast range guard counts as fast use even when the loop header
+contains no authored arithmetic. This includes a guard in a statically skipped
+handler or in statements after a terminator.
+
+A generic function's constraints are verified separately for each materialised
+instance. A dormant generic template has no executable body, so it publishes no
+guarantee until an instance is materialised.
+
+An unclassified external call rejects `$safe_math` because its fast behaviour
+cannot be certified absent. Inspect or replace the callable, or register a
+trusted closed numeric contract for it.
+
+`$safe_math` does not guarantee that arithmetic succeeds. An ordinary checked
+operation can still fail, and a boundary can still return an error or trap for
+an unrelated reason. A value that previously wrapped is an ordinary valid value
+with no history taint.
+
+### `$infallible`
+
+`$infallible` guarantees that no recoverable error escapes its boundary and no
+reachable Moth semantic panic or trap can execute. It admits proven-total
+operations and locally recovered errors only when the complete recovery path
+satisfies the guarantee. It excludes environmental exhaustion, external
+termination and implementation faults, and it does not prove termination.
+
+A statement boundary ends at statement completion or escape. A function
+boundary ends at its return. A missing error slot does not make a function
+infallible. An `Error!` function can satisfy `$infallible` while keeping its
+declared return contract. The slot stays in the ABI and keeps catch
+eligibility even when no failure escapes.
+
+A failure caught inside the statement is contained, but the handler's own traps
+and escaping errors remain part of the boundary. A trap or error outside the
+annotated statement does not reject it. A boundary in a handler that no live
+failure edge reaches is not checked, while fast selection inside a selected
+handler still counts for the enclosing statement.
+
+Authored `catch` eligibility stays separate from actual failure production.
+The existing expression-level call-count and nesting rules still decide where a
+catch is legal, and a currently unreachable handler still receives ordinary
+source validation. An unproved assertion, fast trap or escaping error rejects
+the annotation.
+
+### Combining constraints
+
+Names may share a target and their order does not change the result.
+`$safe_math $fast_math` first selects the lexical fast mode, then rejects the
+boundary only when an actual relevant fast operation or contract is reachable.
+A Dec-only computation remains valid when its transitive calls also meet the
+safe guarantee, because Dec never enters fast mode. `$fast_math $infallible`
+is valid when the fast computation is proved trap-free.
+
+A fast range guard is a fast operation for this check. Combining `$fast_math`
+with `$safe_math` rejects a fast range even when the loop body contains no
+authored arithmetic.
+
+### Proof policy
+
+The proof policy is bounded and target-independent. It uses exact type bounds,
+valid constants, existing mandatory failure discharge and narrow local facts.
+Accepted local facts are a nonzero literal or folded divisor, a signed divisor
+whose literal or folded value is not `-1` and a non-negative literal or folded
+exponent. A fast operation with no trap cause counts as total. Nothing else
+proves an operation safe. An unproved potential error or semantic trap fails
+`$infallible`. It never runs SMT, general loop induction or whole-program path
+solving.
+
+A reachable assertion, unknown external call, caller-side validation of an
+external float result, a store conversion that can trap, an unproved fast trap
+or an escaping recoverable edge rejects `$infallible`. The check follows direct,
+generic, recursive and module calls through the existing monotone convergence.
+
+Semantic reachability is checked after static selection, but before optional
+optimisation erases evidence. A selected fast operation counts even when a
+later fold or dead-result elimination removes it. Inactive ordinary branches
+still receive syntax and type validation, and call provenance survives a fold
+that happens before constraint verification.
+
+Private and exported annotations are checked at their declaration, even when
+no selected caller reaches the function. Facades, public interfaces and
+re-exports preserve the guarantee.
+
+### External calls and trusted providers
+
+Moth-source packages are analysed normally. Opaque foreign JavaScript or native
+bindings cannot establish the absence of fast operations or traps by virtue of
+their type signature. Only an explicit compiler or builder registration
+provides trusted closed evidence for a callable. A wrapper around an unknown
+binding cannot launder its behaviour, and an unclassified provider callable
+counts as unknown rather than certified safe.
+
+Declared guarantees, known positive hazards, proved absence and provisional or
+unknown summaries stay distinct. An unknown summary cannot prove absence for
+`$infallible`.
+
+### Trap boundary
+
+A fast numeric failure is a semantic trap. `catch` handles recoverable `Error`
+only, so it never intercepts a trap. Work done before a trap is not undone, so
+side effects such as `io.line` output remain. If a trap happens before a
+compound store commits, the target keeps its previous value. The trapping
+invocation publishes none of its runtime fragments.
+
+A trap ends the current guest call and invalidates the execution instance
+selected by the builder's lifecycle. That instance cannot run later Moth code.
+The host may construct a replacement instance. The quarantine contract and
+the JavaScript and Wasm transport rules, including the rule that no reset
+helper exists, belong to
+@../../developer-docs/numeric-backend-contract (Numeric backend contract)
+and `crates/lappet/docs/host-abi.md` > `Faults`.
+
+### Examples
+
+These are the minimum valid examples:
+
+[codeblock, $code "moth":
+    $safe_math $infallible
+    sum_small |left I8, right U8| -> I16:
+        return left + right
+    ;
+
+    $fast_math $infallible
+    wrap_small |left U8, right U8| -> U8:
+        return left + right
+    ;
+
+    $fast_math $safe_math
+    dec_only |left Dec4, right Dec4| -> Dec4:
+        return left + right
+    ;
+]
+
+The first function is valid because every `I8 + U8` sum fits `I16`. Equal
+narrow types do not widen, so `I8 + I8` and `U8 + U8` may overflow in ordinary
+mode. The second function is infallible because wrapping addition cannot trap.
+The third is safe because Dec uses ordinary semantics.
+
+These combinations are invalid:
+
+[codeblock, $code "moth":
+    -- INVALID: reaches wrap_small's fast arithmetic
+    $safe_math
+    call_wrapper |left U8, right U8| -> U8:
+        return wrap_small(left, right)
+    ;
+
+    -- INVALID: the divisor is not proved nonzero
+    $fast_math $infallible
+    divide |left I32, right I32| -> I32:
+        return left // right
+    ;
+
+    -- INVALID: the handler's checked arithmetic can overflow
+    $infallible
+    halve_or_step |left I32, right I32| -> I32:
+        value I32 = left // right catch then left - 1
+        return value
+    ;
+]
+
+The division failure is caught, but the handler's checked `left - 1` can
+overflow when `left` is `I32` minimum. That failure escapes the `$infallible`
+boundary.

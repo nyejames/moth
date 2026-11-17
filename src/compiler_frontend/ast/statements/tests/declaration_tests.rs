@@ -3,7 +3,8 @@
 //! WHAT: validates mutability, explicit types, and named-type annotations in declarations.
 //! WHY: declaration parsing is the entrypoint for most AST values and must preserve type intent.
 
-use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::ast::AstConstraintBoundary;
+use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, NodeKind};
 use crate::compiler_frontend::ast::const_values::ConstValuePayload;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
@@ -31,7 +32,9 @@ use crate::compiler_frontend::external_packages::{
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
 };
-use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::style_directives::{
+    SourceConstraintSet, SourceDirectiveKind, StyleDirectiveRegistry,
+};
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -48,6 +51,83 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
+
+/// Resolves the first-token offset of one statement constraint boundary.
+fn statement_boundary_start(boundary: &AstConstraintBoundary) -> u32 {
+    let statement = boundary
+        .statement
+        .expect("the boundary should describe a statement");
+    statement
+        .start
+        .local()
+        .inline_range()
+        .expect("an authored token start is always an inline span")
+        .start()
+}
+
+/// Resolves the end offset of the final authored token of one statement boundary.
+fn statement_boundary_end(boundary: &AstConstraintBoundary) -> u32 {
+    let statement = boundary
+        .statement
+        .expect("the boundary should describe a statement");
+    statement
+        .end
+        .local()
+        .inline_range()
+        .expect("an authored token end is always an inline span")
+        .end()
+}
+
+/// Finds the statement boundary whose first token is `needle`.
+fn statement_boundary_at<'a>(
+    ast: &'a crate::compiler_frontend::ast::Ast,
+    source: &str,
+    needle: &str,
+) -> &'a AstConstraintBoundary {
+    let offset = u32::try_from(source.find(needle).expect("fixture contains the statement"))
+        .expect("fixture offsets fit the span domain");
+    ast.constraint_boundaries
+        .iter()
+        .find(|boundary| {
+            boundary.statement.is_some() && statement_boundary_start(boundary) == offset
+        })
+        .unwrap_or_else(|| panic!("missing constraint boundary for `{needle}`"))
+}
+
+/// Finds the whole-function boundary for one authored function name.
+fn function_boundary_named<'a>(
+    ast: &'a crate::compiler_frontend::ast::Ast,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    name: &str,
+) -> &'a AstConstraintBoundary {
+    ast.constraint_boundaries
+        .iter()
+        .find(|boundary| {
+            boundary.statement.is_none()
+                && matches!(
+                    boundary.function,
+                    AstFunctionIdentity::Authored(path)
+                        if path_fork
+                            .component(path)
+                            .is_some_and(|component| string_table.resolve(component) == name)
+                )
+        })
+        .unwrap_or_else(|| panic!("missing whole-function constraint boundary for `{name}`"))
+}
+
+fn assert_boundary_constraints(boundary: &AstConstraintBoundary, expected: &[SourceDirectiveKind]) {
+    let expected = expected
+        .iter()
+        .copied()
+        .fold(SourceConstraintSet::default(), |constraints, kind| {
+            constraints.with_directive(kind)
+        });
+    assert_eq!(
+        boundary.constraints, expected,
+        "unexpected constraint set at the recorded boundary"
+    );
+}
 
 #[test]
 fn prefixed_statement_probe_respects_nested_syntax_and_boundaries() {
@@ -1540,6 +1620,256 @@ fn source_directive_at_a_match_arm_boundary_is_dangling() {
         &failure,
         "MOTH-SYNTAX-0021",
         Some("invalid_template_directive.dangling_modifier"),
+    );
+}
+
+#[test]
+fn lexical_constraints_reject_statements_inside_compile_time_function_bodies() {
+    // A compile-time body never reaches runtime HIR, so no statement inside one is a constraint
+    // target, at any depth. Parsing stops at the first rejected directive, so each depth gets its
+    // own source.
+    for directive in ["$fast_math", "$safe_math", "$infallible"] {
+        let bodies = [
+            format!("    {directive}\n    return 1\n"),
+            format!("    if true:\n        {directive}\n        return 1\n    ;\n"),
+            format!("    loop true:\n        {directive}\n        break\n    ;\n"),
+        ];
+        for body in bodies {
+            let source = format!("square #|| -> I32:\n{body};\n");
+            let failure = parse_single_file_ast_diagnostic(&source);
+            assert_ast_diagnostic(
+                &failure,
+                "MOTH-SYNTAX-0021",
+                Some("invalid_template_directive.compile_time_function_target"),
+            );
+        }
+    }
+}
+
+#[test]
+fn lexical_constraints_cover_the_annotated_statement_subtree_and_reset_between_siblings() {
+    let source = "\
+$fast_math
+first || -> I32:
+    $infallible
+    if true:
+        $safe_math
+        value = 1
+    ;
+    $safe_math
+    return 0
+;
+$infallible
+second || -> I32:
+    $safe_math
+    return 1
+;
+";
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+
+    assert_boundary_constraints(
+        function_boundary_named(&ast, &path_fork, &string_table, "first"),
+        &[SourceDirectiveKind::FastMath],
+    );
+    assert_boundary_constraints(
+        statement_boundary_at(&ast, source, "if true:"),
+        &[
+            SourceDirectiveKind::FastMath,
+            SourceDirectiveKind::Infallible,
+        ],
+    );
+    // The nested declaration inherits the function's fast mode and the statement's infallible
+    // claim, then adds its own safe claim: the subtree really is inside both enclosing annotations.
+    assert_boundary_constraints(
+        statement_boundary_at(&ast, source, "value = 1"),
+        &[
+            SourceDirectiveKind::FastMath,
+            SourceDirectiveKind::SafeMath,
+            SourceDirectiveKind::Infallible,
+        ],
+    );
+    // The next sibling sees neither the if statement's infallible claim nor its safe claim.
+    assert_boundary_constraints(
+        statement_boundary_at(&ast, source, "return 0"),
+        &[SourceDirectiveKind::FastMath, SourceDirectiveKind::SafeMath],
+    );
+    assert_boundary_constraints(
+        function_boundary_named(&ast, &path_fork, &string_table, "second"),
+        &[SourceDirectiveKind::Infallible],
+    );
+    // A different function body never inherits the first function's fast mode.
+    assert_boundary_constraints(
+        statement_boundary_at(&ast, source, "return 1"),
+        &[
+            SourceDirectiveKind::SafeMath,
+            SourceDirectiveKind::Infallible,
+        ],
+    );
+}
+
+#[test]
+fn constraints_attach_to_loop_declarations_returns_and_root_statements() {
+    let source = "\
+run || -> I32:
+    $fast_math
+    loop true:
+        break
+    ;
+    $safe_math
+    value = 1
+    $infallible
+    return value
+;
+$fast_math
+entry = 1
+~[: [entry]]
+";
+    let (ast, _path_fork, _string_table) = parse_single_file_ast(source);
+
+    assert_boundary_constraints(
+        statement_boundary_at(&ast, source, "loop true:"),
+        &[SourceDirectiveKind::FastMath],
+    );
+    assert_boundary_constraints(
+        statement_boundary_at(&ast, source, "value = 1"),
+        &[SourceDirectiveKind::SafeMath],
+    );
+    assert_boundary_constraints(
+        statement_boundary_at(&ast, source, "return value"),
+        &[SourceDirectiveKind::Infallible],
+    );
+    let root = statement_boundary_at(&ast, source, "entry = 1");
+    assert_eq!(root.function, AstFunctionIdentity::Entry);
+    assert_boundary_constraints(root, &[SourceDirectiveKind::FastMath]);
+}
+
+#[test]
+fn statement_constraint_boundary_covers_the_compound_assignment_rhs() {
+    let source = "\
+run || -> I32:
+    value ~= 1
+    $fast_math
+    ~value += 2
+    return value
+;
+";
+    let (ast, _path_fork, _string_table) = parse_single_file_ast(source);
+    let boundary = statement_boundary_at(&ast, source, "~value += 2");
+    assert_boundary_constraints(boundary, &[SourceDirectiveKind::FastMath]);
+    assert_eq!(
+        statement_boundary_end(boundary) - statement_boundary_start(boundary),
+        "~value += 2".len() as u32,
+        "the boundary must end at the authored operand, not before the compound assignment"
+    );
+}
+
+#[test]
+fn different_constraint_names_stack_on_one_statement_in_any_order() {
+    for directives in ["$safe_math $fast_math", "$fast_math $safe_math"] {
+        let source =
+            format!("run || -> I32:\n    {directives}\n    value = 1\n    return value\n;\n");
+        let (ast, _path_fork, _string_table) = parse_single_file_ast(&source);
+        assert_boundary_constraints(
+            statement_boundary_at(&ast, &source, "value = 1"),
+            &[SourceDirectiveKind::FastMath, SourceDirectiveKind::SafeMath],
+        );
+    }
+}
+
+#[test]
+fn constraints_reject_compile_time_statement_targets() {
+    for source in [
+        "run ||:\n    $fast_math\n    value #= 1\n;\n",
+        "run || -> I32:\n    $safe_math\n    value #I32 = 1\n    return value\n;\n",
+    ] {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_diagnostic(
+            &failure,
+            "MOTH-SYNTAX-0021",
+            Some("invalid_template_directive.wrong_target"),
+        );
+    }
+}
+
+#[test]
+fn constraints_reject_statement_call_spelling() {
+    let source = "run || -> I32:\n    $infallible()\n    return 1\n;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.unexpected_arguments"),
+    );
+}
+
+#[test]
+fn blank_line_and_scope_boundary_break_statement_constraint_attachment() {
+    for source in [
+        "run || -> I32:\n    $fast_math\n\n    return 1\n;\n",
+        "run || -> I32:\n    if true:\n        $fast_math\n    ;\n    return 1\n;\n",
+    ] {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_diagnostic(
+            &failure,
+            "MOTH-SYNTAX-0021",
+            Some("invalid_template_directive.dangling_modifier"),
+        );
+    }
+}
+
+#[test]
+fn duplicate_statement_constraint_cites_the_earlier_span() {
+    let source = "run || -> I32:\n    $fast_math $fast_math\n    return 1\n;\n";
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.duplicate_modifier"),
+    );
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let first = LocalSpan::exact(
+        source
+            .find("$fast_math")
+            .expect("fixture contains the directive") as u32,
+        "$fast_math".len() as u32,
+        &mut span_builder,
+    )
+    .expect("the first directive span fits inline");
+    assert_eq!(
+        ast_error_label_spans(diagnostic),
+        [Some(SourceSpan::new(SourceId::COMPILATION_ROOT, first))],
+        "the duplicate must cite the earlier authored directive"
+    );
+}
+
+#[test]
+fn constraint_source_modifiers_are_rejected_in_template_heads() {
+    for source in [
+        "[: [$fast_math: body] ]",
+        "[: [$safe_math: body] ]",
+        "[: [$infallible: body] ]",
+    ] {
+        let failure = parse_single_file_ast_diagnostic(source);
+        assert_ast_diagnostic(
+            &failure,
+            "MOTH-SYNTAX-0021",
+            Some("invalid_template_directive.wrong_context"),
+        );
+    }
+}
+
+#[test]
+fn docs_and_constraints_stack_on_one_local_declaration() {
+    let source =
+        "run || -> I32:\n    $doc [:Local docs.] $fast_math\n    value = 1\n    return value\n;\n";
+    let (ast, _path_fork, string_table) = parse_single_file_ast(source);
+    assert_eq!(
+        string_table.resolve(ast.doc_fragments[0].value),
+        "Local docs."
+    );
+    assert_boundary_constraints(
+        statement_boundary_at(&ast, source, "value = 1"),
+        &[SourceDirectiveKind::FastMath],
     );
 }
 

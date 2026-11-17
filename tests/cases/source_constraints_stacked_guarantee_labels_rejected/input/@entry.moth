@@ -1,0 +1,16 @@
+$fast_math
+fast_leaf |value I32| -> I32:
+    return value + 1
+;
+
+$safe_math $infallible
+safe_first |left I32, right I32| -> I32:
+    other I32 = fast_leaf(left)
+    return other // right
+;
+
+$infallible $safe_math
+infallible_first |left I32, right I32| -> I32:
+    other I32 = fast_leaf(left)
+    return other // right
+;

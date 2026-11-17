@@ -539,6 +539,7 @@ fn private_failure_lane_installation_leaves_a_never_contract_unchanged() {
             contributors: vec![],
             assertion_message_calls: vec![],
             deferred_custom_catches: vec![],
+            constraint: Default::default(),
         },
     );
     let mut report = BorrowCheckReport::default();
@@ -548,6 +549,9 @@ fn private_failure_lane_installation_leaves_a_never_contract_unchanged() {
             parameters: vec![],
             return_alias: FunctionReturnAliasSummary::Fresh,
             escapes_builtin_failure: true,
+            uses_fast_semantics: false,
+            may_trap: false,
+            may_fail: false,
         },
     );
     let mut type_environment = TypeEnvironment::new();
@@ -713,7 +717,8 @@ fn never_receiver_method_lowers_the_receiver_to_argument_slot_zero() {
 #[test]
 fn never_external_binding_lowers_to_an_external_terminating_call() {
     use crate::compiler_frontend::external_packages::{
-        ExternalFunctionDef, ExternalFunctionLowerings, ExternalPackageRegistry, external_never,
+        ExternalFunctionDef, ExternalFunctionLowerings, ExternalNumericContract,
+        ExternalPackageRegistry, external_never,
     };
 
     let mut path_fork = super::PathInternerFork::empty();
@@ -728,6 +733,7 @@ fn never_external_binding_lowers_to_an_external_terminating_call() {
             parameters: vec![],
             return_contract: external_never(),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("synthetic Never binding should register");
@@ -845,6 +851,9 @@ fn never_call_records_the_never_contract_for_an_imported_target() {
                 parameters: vec![],
                 return_alias: FunctionReturnAliasSummary::Fresh,
                 escapes_builtin_failure: false,
+                uses_fast_semantics: false,
+                may_trap: false,
+                may_fail: false,
             },
             return_contract: FunctionReturnContract::Never,
         },
@@ -930,6 +939,9 @@ fn never_call_records_the_never_contract_for_a_generated_target() {
                 parameters: vec![],
                 return_alias: FunctionReturnAliasSummary::Fresh,
                 escapes_builtin_failure: false,
+                uses_fast_semantics: false,
+                may_trap: false,
+                may_fail: false,
             },
             return_contract: FunctionReturnContract::Never,
         },
@@ -1018,6 +1030,7 @@ fn lane_split_moves_an_authored_terminator_location_to_the_success_block() {
         contributors: vec![],
         assertion_message_calls: vec![],
         deferred_custom_catches: vec![],
+        constraint: Default::default(),
     };
 
     let mut module = HirModule::new();
@@ -1107,6 +1120,9 @@ fn lane_split_moves_an_authored_terminator_location_to_the_success_block() {
             parameters: vec![],
             return_alias: FunctionReturnAliasSummary::Fresh,
             escapes_builtin_failure: true,
+            uses_fast_semantics: false,
+            may_trap: false,
+            may_fail: false,
         },
     );
 

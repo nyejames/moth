@@ -18,7 +18,7 @@ use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, NumericSemantics};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expression_store::{HirConstructionFailure, HirExpressionStore};
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
@@ -114,6 +114,7 @@ fn resolved_numeric_expression(
         left_type,
         right_type,
         environment,
+        false,
     )
     .unwrap_or_else(|_| panic!("fixture operation facts resolve"));
     expressions
@@ -632,6 +633,7 @@ fn compound_u8_store_conversion_traps_before_writing_target() {
         HirNumericOp {
             operator: NumericOperator::Add,
             domain: NumericScalar::Fixed(FixedScalar::I16),
+            semantics: NumericSemantics::Ordinary,
         }
     );
     // The mixed-width U8 + I8 arithmetic completes inside its I16 common domain: it carries
@@ -698,6 +700,7 @@ fn compound_u8_store_conversion_returns_error_before_writing_target() {
         HirNumericOp {
             operator: NumericOperator::Add,
             domain: NumericScalar::Fixed(FixedScalar::I16),
+            semantics: NumericSemantics::Ordinary,
         }
     );
     // Discharged arithmetic stays Infallible even inside Error! functions: only the store
@@ -806,6 +809,7 @@ fn compound_same_type_u8_arithmetic_returns_error_before_writing_target() {
         HirNumericOp {
             operator: NumericOperator::Add,
             domain: NumericScalar::Fixed(FixedScalar::U8),
+            semantics: NumericSemantics::Ordinary,
         }
     );
     // `255 + 1` overflows U8, so the operation stays checked; the builtin Error! contract must
@@ -925,7 +929,8 @@ fn checked_int_addition_lowers_to_int_add_numeric_op() {
     assert!(
         op == HirNumericOp {
             operator: NumericOperator::Add,
-            domain: NumericScalar::Fixed(FixedScalar::I32)
+            domain: NumericScalar::Fixed(FixedScalar::I32),
+            semantics: NumericSemantics::Ordinary
         }
     );
     assert!(matches!(
@@ -967,7 +972,8 @@ fn checked_int_subtraction_lowers_to_int_sub_numeric_op() {
     assert!(
         op == HirNumericOp {
             operator: NumericOperator::Subtract,
-            domain: NumericScalar::Fixed(FixedScalar::I32)
+            domain: NumericScalar::Fixed(FixedScalar::I32),
+            semantics: NumericSemantics::Ordinary
         }
     );
 }
@@ -1010,7 +1016,8 @@ fn checked_regular_division_lowers_to_float_div_numeric_op() {
     assert!(
         op == HirNumericOp {
             operator: NumericOperator::Divide,
-            domain: NumericScalar::Fixed(FixedScalar::F64)
+            domain: NumericScalar::Fixed(FixedScalar::F64),
+            semantics: NumericSemantics::Ordinary
         }
     );
 
@@ -1081,7 +1088,8 @@ fn mixed_int_float_addition_converts_the_explicitly_coerced_operand() {
     assert!(
         op == HirNumericOp {
             operator: NumericOperator::Add,
-            domain: NumericScalar::Fixed(FixedScalar::F64)
+            domain: NumericScalar::Fixed(FixedScalar::F64),
+            semantics: NumericSemantics::Ordinary
         }
     );
 
@@ -1159,7 +1167,8 @@ fn unary_int_negation_lowers_to_int_neg_numeric_op() {
     assert!(
         op == HirNumericOp {
             operator: NumericOperator::Negate,
-            domain: NumericScalar::Fixed(FixedScalar::I32)
+            domain: NumericScalar::Fixed(FixedScalar::I32),
+            semantics: NumericSemantics::Ordinary
         }
     );
 }
@@ -1339,6 +1348,7 @@ fn fixed_u8_addition_keeps_the_operand_domain() {
         HirNumericOp {
             operator: NumericOperator::Add,
             domain: NumericScalar::Fixed(FixedScalar::U8),
+            semantics: NumericSemantics::Ordinary,
         }
     );
     let HirNumericOperands::Binary { left, right } = operands else {
@@ -1373,6 +1383,7 @@ fn fixed_i32_i64_addition_promotes_only_the_left_operand() {
         HirNumericOp {
             operator: NumericOperator::Add,
             domain: NumericScalar::Fixed(FixedScalar::I64),
+            semantics: NumericSemantics::Ordinary,
         }
     );
     let HirNumericOperands::Binary { left, right } = operands else {
@@ -1405,6 +1416,7 @@ fn fixed_u8_division_converts_both_operands_to_f64() {
         HirNumericOp {
             operator: NumericOperator::Divide,
             domain: NumericScalar::Fixed(FixedScalar::F64),
+            semantics: NumericSemantics::Ordinary,
         }
     );
     let HirNumericOperands::Binary { left, right } = operands else {
@@ -1441,6 +1453,7 @@ fn fixed_f16_f32_multiplication_promotes_only_the_left_operand() {
         HirNumericOp {
             operator: NumericOperator::Multiply,
             domain: NumericScalar::Fixed(FixedScalar::F32),
+            semantics: NumericSemantics::Ordinary,
         }
     );
     let HirNumericOperands::Binary { left, right } = operands else {
@@ -1472,6 +1485,7 @@ fn fixed_i8_negation_keeps_its_operand_domain() {
         HirNumericOp {
             operator: NumericOperator::Negate,
             domain: NumericScalar::Fixed(FixedScalar::I8),
+            semantics: NumericSemantics::Ordinary,
         }
     );
     let HirNumericOperands::Unary { operand } = operands else {
@@ -1503,6 +1517,7 @@ fn fixed_f64_negation_keeps_its_operand_domain() {
         HirNumericOp {
             operator: NumericOperator::Negate,
             domain: NumericScalar::Fixed(FixedScalar::F64),
+            semantics: NumericSemantics::Ordinary,
         }
     );
     let HirNumericOperands::Unary { operand } = operands else {
@@ -1616,6 +1631,7 @@ fn mixed_signed_unsigned_addition_promotes_to_the_common_signed_width() {
         HirNumericOp {
             operator: NumericOperator::Add,
             domain: NumericScalar::Fixed(FixedScalar::I32),
+            semantics: NumericSemantics::Ordinary,
         }
     );
     let HirNumericOperands::Binary { left, right } = operands else {
@@ -1698,6 +1714,7 @@ fn fixed_u32_addition_uses_native_error_delivery() {
         HirNumericOp {
             operator: NumericOperator::Add,
             domain: NumericScalar::Fixed(FixedScalar::U32),
+            semantics: NumericSemantics::Ordinary,
         }
     );
     assert!(
@@ -1774,6 +1791,7 @@ fn number_arithmetic_converts_mixed_integer_operands_to_the_number_scale() {
         HirNumericOp {
             operator: NumericOperator::Add,
             domain: NumericScalar::Number(scale),
+            semantics: NumericSemantics::Ordinary,
         }
     );
     assert_eq!(expression_row(&builder, lowered.value).ty, number_type);
@@ -1848,6 +1866,7 @@ fn number_power_keeps_its_exponent_in_fixed_i32() {
         HirNumericOp {
             operator: NumericOperator::Power,
             domain: NumericScalar::Number(scale),
+            semantics: NumericSemantics::Ordinary,
         }
     );
     assert_eq!(expression_row(&builder, lowered.value).ty, number_type);

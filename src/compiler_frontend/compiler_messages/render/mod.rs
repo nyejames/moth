@@ -17,6 +17,7 @@ pub(crate) use tests::infrastructure_tests::assert_compiler_bug_views;
 
 mod borrow;
 mod calls;
+mod constraints;
 pub(super) mod context;
 mod control_flow;
 mod declarations;
@@ -30,6 +31,7 @@ mod templates;
 
 pub(crate) use borrow::*;
 pub(crate) use calls::*;
+pub(crate) use constraints::*;
 pub(crate) use context::*;
 pub(crate) use control_flow::*;
 pub(crate) use declarations::*;
@@ -524,6 +526,9 @@ pub(crate) fn invalid_template_directive_message(
             "doc" | "todo" => {
                 format!("`${name}` is a source directive and cannot appear in a template head.")
             }
+            "fast_math" | "safe_math" | "infallible" => {
+                format!("`${name}` is a source modifier and cannot appear in a template head.")
+            }
             "note" => {
                 "`$note` is only allowed as a child template in a template body. Use `--` for comments in Moth code.".to_owned()
             }
@@ -541,6 +546,9 @@ pub(crate) fn invalid_template_directive_message(
             "config" => "`$config` must immediately precede an explicitly typed top-level compile-time `#` binding.\n                 Add that binding on the following line, or remove the directive.".to_owned(),
             "doc" => "`$doc` must immediately precede an eligible declaration.\n                 Add the declaration on the following line, or remove the directive.".to_owned(),
             "todo" => "`$todo` must immediately precede an eligible declaration or executable statement.\n                 Add that construct on the following line, or remove the directive.".to_owned(),
+            "fast_math" | "safe_math" | "infallible" => format!(
+                "`${name}` must immediately precede a function declaration or a complete executable statement.\n                 Add that construct on the following line, or remove the directive."
+            ),
             _ => format!(
                 "`${name}` must immediately precede an eligible declaration or dependency clause.\n                 Add an eligible item on the following line, or remove the directive."
             ),
@@ -562,8 +570,14 @@ pub(crate) fn invalid_template_directive_message(
             "doc" => "`$doc` must attach to an eligible declaration.".to_owned(),
             "todo" => "`$todo` must attach to an eligible declaration or executable statement."
                 .to_owned(),
+            "fast_math" | "safe_math" | "infallible" => format!(
+                "`${name}` must attach to a runtime function declaration (including methods and generic functions) or a complete executable statement."
+            ),
             _ => format!("`${name}` cannot modify this item."),
         },
+        InvalidTemplateDirectiveReason::CompileTimeFunctionTarget => format!(
+            "`${name}` cannot attach to a compile-time `#` function or to a statement inside one.\n                 Compile-time functions and their bodies are not constraint targets. Remove the directive, or move it to a runtime function or statement."
+        ),
     }
 }
 
@@ -579,7 +593,7 @@ pub(crate) fn render_invalid_template_directive(
     let reason = facts.reason.to_reason(facts.detail);
     let guidance = if facts.reason == InvalidTemplateDirectiveCode::UnknownDirective {
         vec![
-            "Known directives include `$md`, `$raw`, `$before`, `$after`, `$slot`, `$in`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, `$doc`, and the `$export` and `$config` source modifiers.".to_owned(),
+            "Known directives include `$md`, `$raw`, `$before`, `$after`, `$slot`, `$in`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, `$doc`, the `$export` and `$config` source modifiers, and the `$fast_math`, `$safe_math` and `$infallible` source constraints.".to_owned(),
         ]
     } else {
         Vec::new()

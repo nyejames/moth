@@ -1,0 +1,8 @@
+-- Fast mode does not widen Wasm support: a U16 arithmetic domain keeps its capability rejection.
+$fast_math
+add_u16 |left U16, right U16| -> U16:
+    return left + right
+;
+
+value = add_u16(1, 2)
+~[:value=[value]]

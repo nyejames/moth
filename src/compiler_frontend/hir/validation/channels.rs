@@ -422,12 +422,21 @@ impl HirValidator<'_> {
                 )?;
                 return Ok(());
             }
-            HirFallibleOperation::NumericOp { op, operands } => HirStatementKind::NumericOp {
-                op: *op,
-                operands: operands.clone(),
-                failure_mode: NumericFailureMode::Trap,
-                result,
-            },
+            HirFallibleOperation::NumericOp { op, operands } => {
+                // Fast arithmetic is always statement delivery: its remaining faults are fatal
+                // traps, so it can never be the operation of a recoverable `Invoke` edge.
+                if op.semantics.is_fast() {
+                    return Err(self.error_with_hir(
+                        "a fast numeric operation cannot be delivered through Invoke",
+                    ));
+                }
+                HirStatementKind::NumericOp {
+                    op: *op,
+                    operands: operands.clone(),
+                    failure_mode: NumericFailureMode::Trap,
+                    result,
+                }
+            }
             HirFallibleOperation::FormatFloat { source } => HirStatementKind::FormatFloat {
                 source: *source,
                 failure_mode: NumericFailureMode::Trap,

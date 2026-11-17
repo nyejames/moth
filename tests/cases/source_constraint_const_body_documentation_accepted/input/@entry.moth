@@ -1,0 +1,10 @@
+square #|value I32| -> I32:
+    $doc [:Keep the compile-time offset.]
+    $todo [:Fold the offset into the result.]
+    scaled #I32 = 1
+    $todo [:Keep the runtime product.]
+    result I32 = value * value + scaled
+    return result
+;
+first #I32 = square(3)
+~[:first=[first] ]

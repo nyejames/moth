@@ -1,0 +1,8 @@
+-- Fast mode does not widen Wasm support: F16 arithmetic keeps its precise capability rejection.
+$fast_math
+add_f16 |left F16, right F16| -> F16:
+    return left + right
+;
+
+value = add_f16(1.5, 2.5)
+~[:value=[value]]

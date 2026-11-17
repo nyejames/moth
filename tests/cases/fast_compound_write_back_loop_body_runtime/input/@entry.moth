@@ -1,0 +1,14 @@
+count_up || -> I32:
+    total ~I32 = 2147483646
+    one I64 = 1
+    loop true:
+        $fast_math
+        ~total += one
+        if total is -2147483647:
+            break
+        ;
+    ;
+    return total
+;
+
+~[:total=[count_up()]]

@@ -1,9 +1,11 @@
 //! Instruction lowering from Wasm LIR to wasm-encoder instructions.
 
+use crate::backends::wasm::emit::checked_float::emit_finite_float_check;
 use crate::backends::wasm::emit::sections::WasmEmitPlan;
 use crate::backends::wasm::lir::instructions::{
-    WasmCalleeRef, WasmIntegerRangeCandidate, WasmLirStmt, WasmLirTerminator,
-    WasmRangeCandidateKind, WasmScalarComparisonOp, WasmScalarComparisonType,
+    WasmCalleeRef, WasmFastStoreConversion, WasmIntegerOperationKind, WasmIntegerRangeCandidate,
+    WasmLirStmt, WasmLirTerminator, WasmRangeCandidateKind, WasmScalarComparisonOp,
+    WasmScalarComparisonType,
 };
 use crate::backends::wasm::lir::types::{
     WasmAbiType, WasmLirBlockId, WasmLirFunctionId, WasmLirLocalId,
@@ -225,6 +227,9 @@ pub(crate) fn emit_statement(
         WasmLirStmt::CheckedIntegerOp { operation } => {
             super::checked_integer::emit_checked_integer_operation(function, operation, context)?;
         }
+        WasmLirStmt::FastIntegerOp { operation } => {
+            super::checked_integer::emit_fast_integer_operation(function, operation, context)?;
+        }
         WasmLirStmt::ValidateFloat {
             dst,
             source,
@@ -272,6 +277,11 @@ pub(crate) fn emit_statement(
                 context,
             )?,
         },
+        WasmLirStmt::FastStoreConversion {
+            dst,
+            source,
+            conversion,
+        } => emit_fast_store_conversion(function, *dst, *source, *conversion, context, plan)?,
         WasmLirStmt::IntegerToFloat {
             dst,
             source,
@@ -416,6 +426,147 @@ pub(crate) fn emit_statement(
     }
 
     Ok(())
+}
+
+/// Emits one fast compound-assignment write-back conversion.
+///
+/// WHAT: maps the semantic conversion onto the native conversion opcodes. Integer wraps are
+///       total; float truncation uses the trapping `trunc` opcodes; narrowing a float checks the
+///       demoted result is finite before the destination local is observed.
+/// WHY: the fast write-back is not an explicit cast, so this path must not reuse checked cast
+///      lowering and must not emit a saturating conversion.
+fn emit_fast_store_conversion(
+    function: &mut Function,
+    dst: WasmLirLocalId,
+    source: WasmLirLocalId,
+    conversion: WasmFastStoreConversion,
+    context: &LirBodyEmitContext<'_>,
+    plan: &WasmEmitPlan,
+) -> Result<(), InfrastructureFailure> {
+    let source_type = local_type(source, context, "fast store conversion source")?;
+    let destination_type = local_type(dst, context, "fast store conversion destination")?;
+    let expected_destination = conversion.destination_carrier();
+    if destination_type != expected_destination {
+        return Err(InfrastructureFailure::wasm_generation(format!(
+            "Wasm fast store conversion requires destination carrier {expected_destination:?}, \
+             found {destination_type:?}"
+        )));
+    }
+
+    match conversion {
+        WasmFastStoreConversion::IntegerWrap { source_signed, .. } => {
+            let extension = match (source_type, destination_type) {
+                (WasmAbiType::I32, WasmAbiType::I32) | (WasmAbiType::I64, WasmAbiType::I64) => None,
+                (WasmAbiType::I64, WasmAbiType::I32) => Some(Instruction::I32WrapI64),
+                (WasmAbiType::I32, WasmAbiType::I64) if source_signed => {
+                    Some(Instruction::I64ExtendI32S)
+                }
+                (WasmAbiType::I32, WasmAbiType::I64) => Some(Instruction::I64ExtendI32U),
+                (source_type, destination_type) => {
+                    return Err(InfrastructureFailure::wasm_generation(format!(
+                        "Wasm fast integer write-back requires integer carriers, found {source_type:?} -> {destination_type:?}"
+                    )));
+                }
+            };
+            function.instruction(&Instruction::LocalGet(local_index(source, context)?));
+            if let Some(extension) = extension {
+                function.instruction(&extension);
+            }
+            function.instruction(&Instruction::LocalSet(local_index(dst, context)?));
+            Ok(())
+        }
+        WasmFastStoreConversion::FloatToInteger { target } => {
+            let opcode = match (source_type, target) {
+                (WasmAbiType::F32, WasmIntegerOperationKind::Signed32) => Instruction::I32TruncF32S,
+                (WasmAbiType::F32, WasmIntegerOperationKind::Unsigned32) => {
+                    Instruction::I32TruncF32U
+                }
+                (WasmAbiType::F64, WasmIntegerOperationKind::Signed32) => Instruction::I32TruncF64S,
+                (WasmAbiType::F64, WasmIntegerOperationKind::Unsigned32) => {
+                    Instruction::I32TruncF64U
+                }
+                (WasmAbiType::F32, WasmIntegerOperationKind::Signed64) => Instruction::I64TruncF32S,
+                (WasmAbiType::F32, WasmIntegerOperationKind::Unsigned64) => {
+                    Instruction::I64TruncF32U
+                }
+                (WasmAbiType::F64, WasmIntegerOperationKind::Signed64) => Instruction::I64TruncF64S,
+                (WasmAbiType::F64, WasmIntegerOperationKind::Unsigned64) => {
+                    Instruction::I64TruncF64U
+                }
+                (source_type, target) => {
+                    return Err(InfrastructureFailure::wasm_generation(format!(
+                        "Wasm fast float-to-integer write-back requires an F32/F64 source, found {source_type:?} -> {target:?}"
+                    )));
+                }
+            };
+            function.instruction(&Instruction::LocalGet(local_index(source, context)?));
+            function.instruction(&opcode);
+            function.instruction(&Instruction::LocalSet(local_index(dst, context)?));
+            Ok(())
+        }
+        WasmFastStoreConversion::IntegerToFloat {
+            source_signed,
+            precision,
+        } => {
+            if precision != binary_precision_for_carrier(destination_type)? {
+                return Err(InfrastructureFailure::wasm_generation(
+                    "Wasm fast integer-to-float write-back precision does not match its destination carrier",
+                ));
+            }
+            emit_statement(
+                function,
+                &WasmLirStmt::IntegerToFloat {
+                    dst,
+                    source,
+                    source_signed,
+                },
+                context,
+                plan,
+            )
+        }
+        WasmFastStoreConversion::FloatRound { precision } => {
+            if precision != binary_precision_for_carrier(destination_type)? {
+                return Err(InfrastructureFailure::wasm_generation(
+                    "Wasm fast float write-back precision does not match its destination carrier",
+                ));
+            }
+            match (source_type, destination_type) {
+                (WasmAbiType::F32, WasmAbiType::F32) | (WasmAbiType::F64, WasmAbiType::F64) => {
+                    function.instruction(&Instruction::LocalGet(local_index(source, context)?));
+                    function.instruction(&Instruction::LocalSet(local_index(dst, context)?));
+                    Ok(())
+                }
+                (WasmAbiType::F32, WasmAbiType::F64) => emit_statement(
+                    function,
+                    &WasmLirStmt::FloatExtend { dst, source },
+                    context,
+                    plan,
+                ),
+                (WasmAbiType::F64, WasmAbiType::F32) => {
+                    function.instruction(&Instruction::LocalGet(local_index(source, context)?));
+                    function.instruction(&Instruction::F32DemoteF64);
+                    emit_finite_float_check(function, dst, BinaryFloatPrecision::Binary32, context)
+                }
+                (source_type, destination_type) => {
+                    Err(InfrastructureFailure::wasm_generation(format!(
+                        "Wasm fast float write-back requires binary float carriers, found {source_type:?} -> {destination_type:?}"
+                    )))
+                }
+            }
+        }
+    }
+}
+
+fn binary_precision_for_carrier(
+    carrier: WasmAbiType,
+) -> Result<BinaryFloatPrecision, InfrastructureFailure> {
+    match carrier {
+        WasmAbiType::F32 => Ok(BinaryFloatPrecision::Binary32),
+        WasmAbiType::F64 => Ok(BinaryFloatPrecision::Binary64),
+        _ => Err(InfrastructureFailure::wasm_generation(format!(
+            "Wasm fast float write-back requires an F32/F64 carrier, found {carrier:?}"
+        ))),
+    }
 }
 
 fn emit_float_range_candidate(

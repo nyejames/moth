@@ -1,0 +1,9 @@
+identity type T |value T| -> I32:
+    $fast_math
+    doubled I32 = 1 + 1
+    return doubled
+;
+
+seed || -> I32:
+    return identity(1)
+;

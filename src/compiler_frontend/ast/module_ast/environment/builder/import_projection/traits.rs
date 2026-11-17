@@ -19,6 +19,7 @@ use crate::compiler_frontend::public_interface::{
     PublicTraitReturnContract, TraitSurfaceTypeIdentity,
 };
 use crate::compiler_frontend::semantic_identity::{OriginFunctionId, OriginTraitId};
+use crate::compiler_frontend::style_directives::{ConstraintDirectiveSpans, SourceConstraintSet};
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement,
     TraitReceiverRequirement, TraitVisibility,
@@ -328,6 +329,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     generic_parameter_owner: Some(method.generic_parameter_owner),
                     generic_parameter_list_id: registered.list_id,
                     signature: method.signature,
+                    // Imported method constraints belong to the provider's public callable
+                    // contract, which this projection does not carry yet.
+                    source_constraints: SourceConstraintSet::default(),
+                    constraint_directive_spans: ConstraintDirectiveSpans::default(),
                     body_tokens: None,
                     declaration_span: None,
                 },

@@ -18,20 +18,6 @@ use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
-use std::process::Command;
-
-fn run_javascript(source: &str) -> String {
-    let output = Command::new("node")
-        .args(["--eval", source])
-        .output()
-        .expect("Node.js is required for JavaScript runtime behavior tests");
-    assert!(
-        output.status.success(),
-        "Node.js runtime failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout).expect("Node.js output is UTF-8")
-}
 
 fn unsigned_literal(scalar: FixedScalar, value: u64) -> FixedScalarValue {
     FixedScalarValue::unsigned(scalar, value).expect("fixture value fits its unsigned scalar")
@@ -44,10 +30,7 @@ fn lower_uint_operation_source(scalar: FixedScalar) -> String {
     let uint_type: TypeId = builtin_type_ids::fixed_scalar(scalar);
     let region = RegionId(0);
     lower_minimal_module_with_numeric_op(
-        HirNumericOp {
-            operator: NumericOperator::Add,
-            domain: NumericScalar::Fixed(scalar),
-        },
+        HirNumericOp::ordinary(NumericOperator::Add, NumericScalar::Fixed(scalar)),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: fixed_scalar_expression(

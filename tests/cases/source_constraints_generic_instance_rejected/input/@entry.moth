@@ -1,0 +1,9 @@
+$safe_math
+generic_user type T |value T| -> I32:
+    $fast_math
+    doubled I32 = 1 + 1
+    return doubled
+;
+
+result I32 = generic_user(true)
+io.line([:value=[result]])

@@ -6,6 +6,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::imports:
     ExternalJsBindingShape, InvalidExternalModuleView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
+use crate::compiler_frontend::external_packages::ExternalNumericContract;
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 fn fresh_warning_owner() -> BoundaryAccumulator {
@@ -164,6 +165,7 @@ fn register_dummy_draw_function(
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings::default(),
             },
         )
@@ -189,6 +191,7 @@ fn register_dummy_make_widget_function(
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings::default(),
             },
         )
@@ -221,6 +224,7 @@ fn register_dummy_use_widget_function(
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings::default(),
             },
         )
@@ -387,6 +391,7 @@ fn register_dummy_draw_function_with_js_lowering(
                     None,
                 ),
                 const_eval: None,
+                numeric_contract: ExternalNumericContract::Unknown,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction("draw".to_owned())),
                     wasm: None,

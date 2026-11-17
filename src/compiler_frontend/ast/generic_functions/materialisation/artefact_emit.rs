@@ -1239,6 +1239,8 @@ impl GenericTemplateArtefact {
                 generic_parameter_owner: nested.generic_parameter_owner.clone(),
                 generic_parameter_list_id,
                 signature: signature.clone(),
+                source_constraints: nested.source_constraints,
+                constraint_directive_spans: nested.constraint_directive_spans,
                 body_tokens: Some(body),
                 declaration_span: nested.declaration_span,
             };

@@ -233,6 +233,9 @@ fn generated_summary() -> PublicCallSummary {
         parameters: Vec::new(),
         return_alias: FunctionReturnAliasSummary::Fresh,
         escapes_builtin_failure: false,
+        uses_fast_semantics: false,
+        may_trap: false,
+        may_fail: false,
     }
 }
 

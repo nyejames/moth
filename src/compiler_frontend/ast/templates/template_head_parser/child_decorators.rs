@@ -464,7 +464,8 @@ fn string_decorator_wrapper(
     string_table: &StringTable,
 ) -> ChildDecoratorResult<TemplateWrapperReference> {
     let mut construction_context =
-        TemplateConstructionContext::new(context.template_ir_store.clone(), span);
+        TemplateConstructionContext::new(context.template_ir_store.clone(), span)
+            .with_source_constraints(context.source_constraints());
     match plain_text {
         Some(text) => {
             construction_context.record_text(text, string_table.resolve(text).len(), span);

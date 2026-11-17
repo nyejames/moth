@@ -1,0 +1,7 @@
+square #|| -> I32:
+    if true:
+        $infallible
+        return 1
+    ;
+    return 0
+;

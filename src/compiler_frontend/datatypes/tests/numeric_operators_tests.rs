@@ -6,8 +6,9 @@
 //! mixed-family rejection keep their explicit negative rows.
 
 use crate::compiler_frontend::datatypes::numeric_operators::{
-    NumericOperator, binary_operation_domain, common_fixed_integer, comparison_supported,
-    negation_domain, numeric_failure_codes, numeric_operation_cannot_fail, range_iteration_domain,
+    NumericOperator, NumericSemantics, binary_operation_domain, common_fixed_integer,
+    comparison_supported, fast_numeric_trap_codes, negation_domain, numeric_failure_codes,
+    numeric_operation_cannot_fail, numeric_semantics, range_iteration_domain,
 };
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::decimal::NumberScale;
@@ -566,4 +567,91 @@ fn byte_is_outside_every_numeric_operator_domain() {
         Some(byte),
         byte
     ));
+}
+
+#[test]
+fn fast_semantics_selects_only_fixed_integer_and_binary_float_domains() {
+    assert_eq!(NumericSemantics::default(), NumericSemantics::Ordinary);
+
+    for scalar in FIXED_INTEGERS.into_iter().chain(FIXED_FLOATS) {
+        let domain = fixed(scalar);
+        assert_eq!(
+            numeric_semantics(domain, false),
+            NumericSemantics::Ordinary,
+            "{scalar:?} without an active mode"
+        );
+        assert_eq!(
+            numeric_semantics(domain, true),
+            NumericSemantics::Fast,
+            "{scalar:?} under an active mode"
+        );
+        assert!(numeric_semantics(domain, true).is_fast());
+    }
+
+    // `Dec` arithmetic is never fast, including scale zero.
+    for domain in [number(0), number(2)] {
+        assert_eq!(numeric_semantics(domain, false), NumericSemantics::Ordinary);
+        assert_eq!(
+            numeric_semantics(domain, true),
+            NumericSemantics::Ordinary,
+            "Dec has no fast mode"
+        );
+    }
+}
+
+#[test]
+fn fast_trap_causes_follow_the_operator_and_domain_table() {
+    use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
+    use NumericOperator as Op;
+
+    for scalar in FIXED_INTEGERS {
+        let signed = matches!(scalar, I8 | I16 | I32 | I64);
+        for operator in BINARY_OPERATORS.into_iter().chain([Op::Negate]) {
+            let expected: &[BuiltinErrorCode] = match operator {
+                Op::Add | Op::Subtract | Op::Multiply | Op::Negate => &[],
+                Op::Divide | Op::Remainder => &[BuiltinErrorCode::DivideByZero],
+                Op::IntegerDivide if signed => &[
+                    BuiltinErrorCode::DivideByZero,
+                    BuiltinErrorCode::IntOverflow,
+                ],
+                Op::IntegerDivide => &[BuiltinErrorCode::DivideByZero],
+                Op::Power if signed => &[BuiltinErrorCode::InvalidExponent],
+                Op::Power => &[],
+            };
+            assert_eq!(
+                fast_numeric_trap_codes(operator, fixed(scalar)),
+                expected,
+                "{operator:?} on {scalar:?}"
+            );
+        }
+    }
+
+    for scalar in FIXED_FLOATS {
+        for operator in BINARY_OPERATORS.into_iter().chain([Op::Negate]) {
+            let expected: &[BuiltinErrorCode] = match operator {
+                Op::Negate => &[],
+                Op::Divide | Op::Remainder => &[
+                    BuiltinErrorCode::DivideByZero,
+                    BuiltinErrorCode::FloatNonFinite,
+                ],
+                // Truncating division has no binary-float domain and claims no cause.
+                Op::IntegerDivide => &[],
+                Op::Add | Op::Subtract | Op::Multiply | Op::Power => {
+                    &[BuiltinErrorCode::FloatNonFinite]
+                }
+            };
+            assert_eq!(
+                fast_numeric_trap_codes(operator, fixed(scalar)),
+                expected,
+                "{operator:?} on {scalar:?}"
+            );
+        }
+    }
+
+    for operator in BINARY_OPERATORS.into_iter().chain([Op::Negate]) {
+        assert!(
+            fast_numeric_trap_codes(operator, number(0)).is_empty(),
+            "{operator:?} on Dec must claim no fast trap"
+        );
+    }
 }

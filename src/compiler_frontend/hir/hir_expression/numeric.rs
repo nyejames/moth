@@ -10,7 +10,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::{
-    NumericOperator, numeric_operation_cannot_fail,
+    NumericOperator, NumericSemantics, numeric_operation_cannot_fail,
 };
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
@@ -18,13 +18,16 @@ use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, LoopStepFailureCause, NumericFailureMode,
+    GeneratedNumericDelivery, HirNumericOp, HirNumericOperands, LoopStepFailureCause,
+    NumericFailureMode,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
-use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
+use crate::compiler_frontend::hir::terminators::{
+    HirFallibleOperation, HirTerminator, RuntimeFailureKind,
+};
 use crate::compiler_frontend::source::SourceSpan;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
@@ -57,6 +60,12 @@ impl<'a> HirBuilder<'a> {
     }
 
     /// Emits an operation at its selected precision and preserves its failure continuation.
+    ///
+    /// WHAT: fast arithmetic always delivers as a `NumericOp` statement — `Fatal` when the fast
+    ///       trap-cause table has causes and `Infallible` when it is total. Ordinary arithmetic
+    ///       keeps the established discharge, handler and function-contract selection.
+    /// WHY: a fast failure is fatal, so it must never take the active builtin `Error` handler or
+    ///      an `Error!` return contract even though both would accept an ordinary numeric failure.
     pub(crate) fn emit_checked_numeric_value(
         &mut self,
         op: HirNumericOp,
@@ -65,6 +74,10 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
         discharged: bool,
     ) -> Result<HirValueId, HirConstructionFailure> {
+        if op.semantics.is_fast() {
+            let failure_mode = op.fast_statement_failure_mode();
+            return self.emit_scalar_numeric_value(op, failure_mode, operands, success_type, span);
+        }
         if discharged {
             return self.emit_scalar_numeric_value(
                 op,
@@ -91,12 +104,12 @@ impl<'a> HirBuilder<'a> {
 
     /// Emits a scalar-result numeric operation and returns the success local load.
     ///
-    /// WHAT: emits `HirStatementKind::NumericOp` with `Trap` or the semantically discharged
-    ///       `Infallible` mode and returns a load of the scalar result local. Discharged
-    ///       operations keep the trapping operation and evaluation; only the failure edge is
-    ///       gone, so backends share one lowering with a dead check.
-    /// WHY: `Trap` and `Infallible` differ only in the recorded mode, so one helper owns both
-    ///      instead of two identical emitters.
+    /// WHAT: emits `HirStatementKind::NumericOp` with `Fatal`, `Trap` or the semantically
+    ///       discharged `Infallible` mode and returns a load of the scalar result local.
+    ///       Discharged operations keep the trapping operation and evaluation; only the failure
+    ///       edge is gone, so backends share one lowering with a dead check.
+    /// WHY: the three modes differ only in their recorded delivery, so one helper owns all of
+    ///      them instead of three identical emitters.
     fn emit_scalar_numeric_value(
         &mut self,
         op: HirNumericOp,
@@ -107,7 +120,7 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<HirValueId, HirConstructionFailure> {
         debug_assert!(matches!(
             failure_mode,
-            NumericFailureMode::Trap | NumericFailureMode::Infallible
+            NumericFailureMode::Fatal | NumericFailureMode::Trap | NumericFailureMode::Infallible
         ));
         let result_local = self.allocate_temp_local(success_type, None)?;
         self.emit_numeric_op_statement(
@@ -124,55 +137,60 @@ impl<'a> HirBuilder<'a> {
     }
 
     /// Emits the terminal loop-step failure with arithmetic's builtin failure owner.
+    ///
+    /// WHAT: fast loop guards always fail fatally, producing the `LoopStepFailure` statement and
+    ///       its unreachable success edge; ordinary guards keep handler and contract selection.
+    /// WHY: a `$fast_math` range loop must not turn a zero step or a stalled float step into a
+    ///      catchable Moth `Error`, even inside an active builtin handler, an `Error!` function or
+    ///      a private no-slot function whose inferred lane would otherwise retarget the guard.
+    ///      The guard is generated by the loop as a whole, so the authored step span is only a
+    ///      refinement: an implicit step has none and the loop header owns the generated site.
     pub(crate) fn emit_loop_step_failure(
         &mut self,
         cause: LoopStepFailureCause,
-        span: &Option<SourceSpan>,
+        semantics: NumericSemantics,
+        step_span: &Option<SourceSpan>,
+        loop_span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        if self.active_handler_accepts_builtin_failure()?
-            || self.numeric_failure_is_recoverable()?
-        {
+        let guard_span = step_span.or(*loop_span);
+        let recoverable = !semantics.is_fast()
+            && (self.active_handler_accepts_builtin_failure()?
+                || self.numeric_failure_is_recoverable()?);
+        if recoverable {
             let error_type = self.builtin_error_type_id()?;
             let results = self.emit_fallible_operation(
                 HirFallibleOperation::LoopStepFailure { cause },
                 &[],
                 error_type,
-                span,
+                &guard_span,
             )?;
             // The loop-step failure always fails. The structural success edge must still terminate.
-            self.lower_numeric_results_to_success_values(results, span)?;
-            let block = self.current_block_id_or_error()?;
-            self.emit_terminator(
-                block,
-                HirTerminator::RuntimeFailure {
-                    message: cause.builtin_error_code().default_message().to_owned(),
-                    cause: None,
-                },
-                span,
-            )?;
+            self.lower_numeric_results_to_success_values(results, &guard_span)?;
         } else {
             let result_local =
                 self.allocate_temp_local(self.type_environment.builtins().bool, None)?;
             self.emit_statement_kind_with_span(
                 HirStatementKind::LoopStepFailure {
                     cause,
-                    failure_mode: NumericFailureMode::Trap,
+                    semantics,
                     result: HirLocalDestination::Define(result_local),
                 },
-                span,
-                *span,
-            )?;
-            let block = self.current_block_id_or_error()?;
-            self.emit_terminator(
-                block,
-                HirTerminator::RuntimeFailure {
-                    message: cause.builtin_error_code().default_message().to_owned(),
-                    cause: None,
-                },
-                span,
+                &guard_span,
+                guard_span,
             )?;
         }
-        Ok(())
+
+        // Both deliveries end the block: a recoverable guard's fallthrough is its success edge.
+        let block = self.current_block_id_or_error()?;
+        self.emit_terminator(
+            block,
+            HirTerminator::RuntimeFailure {
+                message: cause.builtin_error_code().default_message().to_owned(),
+                cause: None,
+                kind: RuntimeFailureKind::RangeGuard,
+            },
+            &guard_span,
+        )
     }
 
     /// Numeric recovery shares the native continuation machinery with calls and casts.
@@ -394,16 +412,20 @@ impl<'a> HirBuilder<'a> {
 
     /// Emits a checked numeric operation and writes its success value to `target`.
     ///
-    /// WHAT: uses the same failure-mode selection as source-authored arithmetic, then stores the
-    ///       success value to an explicitly classified local destination.
+    /// WHAT: selects trap, fatal or discharged delivery from the generated caller's request and
+    ///       the enclosing handler/contract, then stores the success value to an explicitly
+    ///       classified local destination.
     /// WHY: compiler-generated arithmetic must preserve both its recoverable-vs-trapping semantics
     ///      and whether the caller defines scratch storage or updates persistent loop state.
+    ///      `GeneratedNumericDelivery::Fatal` keeps a fast range ordinal failure fatal even in a
+    ///      catch handler or an `Error!` function.
     pub(crate) fn emit_checked_numeric_assignment(
         &mut self,
         target: HirLocalDestination,
         op: HirNumericOp,
         left: HirValueId,
         right: HirValueId,
+        delivery: GeneratedNumericDelivery,
         span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         let discharged =
@@ -421,18 +443,17 @@ impl<'a> HirBuilder<'a> {
                 span,
             );
         }
-        let recoverable = self.active_handler_accepts_builtin_failure()?
-            || self.numeric_failure_is_recoverable()?;
+        let recoverable = delivery == GeneratedNumericDelivery::Inherit
+            && (self.active_handler_accepts_builtin_failure()?
+                || self.numeric_failure_is_recoverable()?);
 
         // Generated updates retain the authored span and commit only on the success edge.
         if !recoverable {
-            return self.emit_numeric_op_statement(
-                op,
-                NumericFailureMode::Trap,
-                operands,
-                target,
-                span,
-            );
+            let failure_mode = match delivery {
+                GeneratedNumericDelivery::Fatal => NumericFailureMode::Fatal,
+                GeneratedNumericDelivery::Inherit => NumericFailureMode::Trap,
+            };
+            return self.emit_numeric_op_statement(op, failure_mode, operands, target, span);
         }
 
         let success_type = self.checked_numeric_result_type(op)?;

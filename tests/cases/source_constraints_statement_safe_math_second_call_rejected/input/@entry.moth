@@ -1,0 +1,16 @@
+calm |value I32| -> I32:
+    return value
+;
+$fast_math
+witness |left I32, right I32| -> Bool:
+    marker = left + right
+    return marker > 0
+;
+probe |value I32| -> Bool:
+    early = witness(value, 2)
+    $safe_math
+    result = calm(value) < calm(1) catch |error|:
+        return witness(value, 1)
+    ;
+    return result
+;

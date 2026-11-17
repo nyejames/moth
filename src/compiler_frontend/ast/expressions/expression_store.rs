@@ -35,6 +35,7 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
+use rustc_hash::FxHashMap;
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -674,6 +675,27 @@ impl AstExpressionBuilder {
     }
 }
 
+/// Complete authored token range of one inline value-`if` branch.
+///
+/// WHAT: the first and last token spans of the branch expression, including tokens that a folded
+///       expression node no longer covers.
+/// WHY: inline branch values are resolved at the enclosing body root under the enclosing scope,
+///       so their recorded fast-use operator can sit beyond both the surviving node span and the
+///       branch scope's subtree. The parser owns the token cursor and records the exact range
+///       here before the expression graph can fold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AuthoredBranchRange {
+    pub(crate) start: SourceSpan,
+    pub(crate) end: SourceSpan,
+}
+
+/// Complete authored ranges of both branches of one inline value-`if`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct InlineValueIfBranchRanges {
+    pub(crate) then_branch: AuthoredBranchRange,
+    pub(crate) else_branch: AuthoredBranchRange,
+}
+
 /// Append-only builder for the expression store of one AST phase.
 ///
 /// WHAT: owns the `ExpressionStore` while expressions are built. Each append is checked against
@@ -695,6 +717,12 @@ pub(crate) struct AstExpressionBuilder {
     pub(super) storage: ExpressionStore,
     pub(super) candidate_serial: u64,
     pub(super) limit: u32,
+    /// Exact authored branch ranges keyed by the inline value-`if` header span.
+    ///
+    /// WHAT: parser-owned token extents used by static branch pruning.
+    /// WHY: retained inline branches are evaluated later under the enclosing scope, so the scope
+    ///      and the folded expression node cannot identify the discarded branch's operator span.
+    pub(super) inline_value_if_branch_ranges: FxHashMap<SourceSpan, InlineValueIfBranchRanges>,
 }
 impl AstExpressionBuilder {
     pub(crate) fn new() -> Result<Self, InfrastructureFailure> {
@@ -702,6 +730,7 @@ impl AstExpressionBuilder {
             storage: ExpressionStore::new()?,
             candidate_serial: 0,
             limit: u32::MAX,
+            inline_value_if_branch_ranges: FxHashMap::default(),
         })
     }
     /// Reserves expression rows only. Side tables grow on demand: reserving them from the estimate
@@ -713,6 +742,26 @@ impl AstExpressionBuilder {
         builder.storage.rows.reserve(estimate.expressions);
         Ok(builder)
     }
+    /// Records the parser-captured authored ranges of one inline value-`if`.
+    pub(crate) fn record_inline_value_if_branch_ranges(
+        &mut self,
+        header_span: SourceSpan,
+        ranges: InlineValueIfBranchRanges,
+    ) {
+        self.inline_value_if_branch_ranges
+            .insert(header_span, ranges);
+    }
+
+    /// Returns the authored ranges recorded for one inline value-`if` header.
+    pub(crate) fn inline_value_if_branch_ranges(
+        &self,
+        header_span: SourceSpan,
+    ) -> Option<InlineValueIfBranchRanges> {
+        self.inline_value_if_branch_ranges
+            .get(&header_span)
+            .copied()
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.storage.rows.len()
     }

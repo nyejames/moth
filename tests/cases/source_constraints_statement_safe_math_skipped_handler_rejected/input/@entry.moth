@@ -1,0 +1,76 @@
+calm_early |value I32| -> I32:
+    return value
+;
+
+$fast_math
+witness |value I32| -> I32:
+    marker = value + 1
+    return marker
+;
+
+$fast_math
+stop_forever || -> !:
+    marker = 1 + 2
+    assert(false, "halted")
+;
+
+call_skipped |value I32| -> I32:
+    $safe_math
+    result I32 = 1 + 1 catch |error|:
+        return witness(value)
+    ;
+    return result
+;
+
+never_skipped |value I32| -> I32:
+    $safe_math
+    result I32 = 1 + 1 catch |error|:
+        stop_forever()
+    ;
+    return result
+;
+
+guard_skipped |value I32, limit I32| -> Bool:
+    $safe_math
+    result = calm(value) < calm(1) catch |error|:
+        seen ~= 0
+        $fast_math
+        loop 0 to limit:
+            ~seen = seen
+        ;
+        return seen > 0
+    ;
+    return result
+;
+
+ordered_guard_skipped |value I32, limit I32| -> Bool:
+    $safe_math
+    result = calm_early(value) < calm_early(1) catch |error|:
+        seen ~= 0
+        $fast_math
+        loop 0 to limit:
+            ~seen = seen
+        ;
+        return seen > 0
+    ;
+    return result
+;
+
+literal_guard_skipped |limit I32| -> I32:
+    $safe_math
+    result I32 = 10 // 2 catch |error|:
+        seen ~= 0
+        $fast_math
+        loop 0 to limit:
+            ~seen = seen
+        ;
+        return seen
+    ;
+    return result
+;
+
+calm |value I32| -> I32:
+    return value
+;
+
+~[:ok=guard_skipped(2, 3)]

@@ -21,6 +21,7 @@ init_docs_sidebar()!
     ## Explore the internals
 
     - @./compiler-design (Compiler design): staged pipeline, task-reading matrix and cross-cutting contracts
+    - @./numeric-backend-contract (Numeric backend contract): ordinary and fast numeric semantics, constraint evidence, trap transport and backend parity
     - @./project-builders (Rust project builders): public SDK tutorial, host bindings, capabilities and application output
     - @./wasm-optimisation (Wasm optimisation): shared compiler and native execution policy
     - @../docs/lappet (Lappet): planned native runtime, embedding and package infrastructure

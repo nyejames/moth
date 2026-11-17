@@ -1,0 +1,28 @@
+add_one |value I32| -> I32:
+    return 2147483647 + value
+;
+
+foldable |value I32| -> I32:
+    return value + 1
+;
+
+fast_leaf |value I32| -> I32:
+    return value + 1
+;
+
+$infallible
+direct || -> I32:
+    return add_one(1) catch then -1
+;
+
+$infallible
+direct_foldable || -> I32:
+    return foldable(3) catch then -1
+;
+
+$infallible
+nested || -> I32:
+    return (fast_leaf(1) + 1) catch then -1
+;
+
+io.line([: source_constraints_folded_caught_call_success direct=[direct()] foldable=[direct_foldable()] nested=[nested()]])

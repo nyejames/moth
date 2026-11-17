@@ -1,0 +1,10 @@
+Box = |
+    value I32,
+|
+
+box ~= Box(value = 2147483647)
+one I64 = 1
+$fast_math
+~box.value += one
+
+~[:field=[box.value]]

@@ -13,7 +13,7 @@ use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings,
-    ExternalPackageRegistry, ExternalSignatureType,
+    ExternalNumericContract, ExternalPackageRegistry, ExternalSignatureType,
 };
 use crate::compiler_frontend::external_packages::{external_never, external_returns};
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -35,7 +35,7 @@ use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::hir::terminators::{
-    HirAssertionMessageEvaluation, HirFallibleOperation, HirTerminator,
+    HirAssertionMessageEvaluation, HirFallibleOperation, HirTerminator, RuntimeFailureKind,
 };
 use crate::compiler_frontend::hir::{expressions::ValueKind, ids::LocalId};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
@@ -67,6 +67,7 @@ fn direct_external_calls_retains_lowered_call_and_invoke_sites_in_order() {
             parameters: vec![],
             return_contract: external_returns(vec![], None),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("infallible external fixture must register");
@@ -76,6 +77,7 @@ fn direct_external_calls_retains_lowered_call_and_invoke_sites_in_order() {
             parameters: vec![],
             return_contract: external_returns(vec![], Some(ExternalSignatureType::BuiltinError)),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("fallible external fixture must register");
@@ -760,6 +762,7 @@ fn cfg_successors_cover_branch_match_break_continue_and_terminal_edges() {
                 HirTerminator::RuntimeFailure {
                     message: "stop".to_owned(),
                     cause: None,
+                    kind: RuntimeFailureKind::NoMatchFallback,
                 },
             ),
         ],
@@ -1845,6 +1848,7 @@ runner || -> !:
             parameters: vec![],
             return_contract: external_never(),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("synthetic Never binding should register");
@@ -2073,10 +2077,7 @@ fn invoke_calls_retain_call_facts_and_both_successors() {
 
 #[test]
 fn invoke_numeric_facts_preserve_exact_domain_and_recoverable_delivery() {
-    let op = HirNumericOp {
-        operator: NumericOperator::Add,
-        domain: NumericScalar::Fixed(FixedScalar::I32),
-    };
+    let op = HirNumericOp::ordinary(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::I32));
     let span = Some(call_site_span(40, 2));
     let module = hir_module(
         FunctionId(0),

@@ -29,7 +29,9 @@ use crate::compiler_frontend::hir::hir_statement::match_captures::substitute_loc
 use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelationalPatternOp};
 use crate::compiler_frontend::hir::regions::HirRegion;
-use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
+use crate::compiler_frontend::hir::terminators::{
+    HirJumpArgument, HirTerminator, NO_MATCH_RUNTIME_FAILURE_MESSAGE, RuntimeFailureKind,
+};
 use crate::compiler_frontend::hir::utils::terminator_targets;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
@@ -641,8 +643,9 @@ impl<'a> HirBuilder<'a> {
             self.emit_terminator(
                 no_match_block_id,
                 HirTerminator::RuntimeFailure {
-                    message: "No match arm selected".to_owned(),
+                    message: NO_MATCH_RUNTIME_FAILURE_MESSAGE.to_owned(),
                     cause: None,
+                    kind: RuntimeFailureKind::NoMatchFallback,
                 },
                 span,
             )?;

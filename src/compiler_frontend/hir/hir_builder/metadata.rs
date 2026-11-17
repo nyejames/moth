@@ -19,14 +19,24 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureContributor, HirBuiltinFailureSource,
-    HirDeferredCustomCatchCheck, HirFunctionFailureFacts,
+    HirConstraintBoundary, HirConstraintEvidence, HirDeferredCustomCatchCheck,
+    HirFastUseProvenance, HirFastUseWitness, HirFunctionFailureFacts, HirLiveErasedCallSite,
+    HirSelectedCallSite, HirSelectedCallSiteLedger, HirSkippedSourceEvidence,
 };
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirStableFunctionOrigin};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
+use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
+use crate::compiler_frontend::hir::utils::{collect_reachable_blocks, for_each_terminator_target};
 use crate::compiler_frontend::module_metadata::ModuleDocFragment;
+use crate::compiler_frontend::source::{SourceSpan, SpanResolutionSources};
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::convert::Infallible;
 
 impl<'a> HirBuilder<'a> {
     /// Record this expression's synthetic-interface provenance in its owning HIR block.
@@ -155,7 +165,9 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn project_function_failure_facts(
         &mut self,
         ast: &Ast,
+        span_sources: SpanResolutionSources<'_>,
     ) -> Result<(), HirConstructionFailure> {
+        let mut constraint_evidence = self.project_constraint_evidence(ast, span_sources)?;
         let builtin_error_type =
             self.type_environment
                 .type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
@@ -242,11 +254,336 @@ impl<'a> HirBuilder<'a> {
                     contributors,
                     assertion_message_calls,
                     deferred_custom_catches,
+                    constraint: constraint_evidence.remove(&function_id).unwrap_or_default(),
                 },
             );
         }
 
         Ok(())
+    }
+
+    /// Projects source constraint boundaries and selected fast-use evidence onto HIR functions.
+    ///
+    /// WHAT: maps AST callable identities to lowered `FunctionId`s, drops evidence inside inactive
+    ///       static-`if` regions of the same callable, and merges the AST fast-operation ledger
+    ///       with fast operations present in retained HIR.
+    /// WHY: verification runs after AST bodies and directive syntax are gone. Dormant generic
+    ///       template rows have no HIR function and are dropped here, which makes them inert; a
+    ///       materialised instance is an ordinary function in its sidecar and projects normally.
+    ///       Deduplication is by `(provenance, span)`, so one authored operation recorded before
+    ///       folding and retained as HIR appears once, while a folded-away row survives.
+    fn project_constraint_evidence(
+        &self,
+        ast: &Ast,
+        span_sources: SpanResolutionSources<'_>,
+    ) -> Result<FxHashMap<FunctionId, HirConstraintEvidence>, HirConstructionFailure> {
+        let mut evidence = self
+            .module
+            .functions
+            .iter()
+            .map(|function| (function.id, HirConstraintEvidence::default()))
+            .collect::<FxHashMap<_, _>>();
+
+        self.project_authored_constraint_evidence(ast, &span_sources, &mut evidence);
+        self.project_selected_hir_evidence(ast, &span_sources, &mut evidence)?;
+
+        for function_evidence in evidence.values_mut() {
+            function_evidence.fast_use.sort_unstable();
+            function_evidence.fast_use.dedup();
+        }
+
+        Ok(evidence)
+    }
+
+    /// Projects boundaries and the authored fast-operation ledger, excluding inactive branches.
+    fn project_authored_constraint_evidence(
+        &self,
+        ast: &Ast,
+        span_sources: &SpanResolutionSources<'_>,
+        evidence: &mut FxHashMap<FunctionId, HirConstraintEvidence>,
+    ) {
+        let function_id = |identity: AstFunctionIdentity| match identity {
+            AstFunctionIdentity::Entry => self.module.start_function,
+            AstFunctionIdentity::Authored(path) => self.functions_by_name.get(&path).copied(),
+        };
+        let is_pruned = |identity: AstFunctionIdentity, scope, span: Option<SourceSpan>| {
+            ast.constraint_pruned_regions.iter().any(|region| {
+                region.function == identity
+                    && (region.scope.is_some_and(|region_scope| {
+                        self.path_fork.starts_with(scope, region_scope)
+                    }) || span.is_some_and(|span| {
+                        span_sources.span_within(span, region.start, region.end)
+                    }))
+            })
+        };
+
+        for boundary in &ast.constraint_boundaries {
+            let Some(function_id) = function_id(boundary.function) else {
+                continue;
+            };
+            if let Some(statement) = boundary.statement
+                && (is_pruned(boundary.function, boundary.scope, Some(statement.start))
+                    || is_pruned(boundary.function, boundary.scope, Some(statement.end)))
+            {
+                continue;
+            }
+            evidence
+                .entry(function_id)
+                .or_default()
+                .boundaries
+                .push(HirConstraintBoundary {
+                    statement: boundary.statement,
+                    constraints: boundary.constraints,
+                    directive_spans: boundary.directive_spans,
+                });
+        }
+
+        for witness in &ast.fast_operation_witnesses {
+            let Some(function_id) = function_id(witness.function) else {
+                continue;
+            };
+            if is_pruned(witness.function, witness.scope, witness.span) {
+                continue;
+            }
+            evidence
+                .entry(function_id)
+                .or_default()
+                .fast_use
+                .push(HirFastUseWitness {
+                    provenance: HirFastUseProvenance::AuthoredArithmetic,
+                    span: witness.span,
+                });
+        }
+    }
+
+    /// Projects fast operations and direct call targets from retained HIR.
+    fn project_selected_hir_evidence(
+        &self,
+        ast: &Ast,
+        span_sources: &SpanResolutionSources<'_>,
+        evidence: &mut FxHashMap<FunctionId, HirConstraintEvidence>,
+    ) -> Result<(), HirConstructionFailure> {
+        for function in &self.module.functions {
+            let mut fast_use = Vec::new();
+            let mut live_selected_call_sites = HirSelectedCallSiteLedger::default();
+            let mut live_erased_call_sites: Vec<HirLiveErasedCallSite> = Vec::new();
+            let function_blocks = self.selected_function_blocks(function.id, function.entry);
+            for block_id in &function_blocks {
+                let Some(block) = self
+                    .block_index_by_id
+                    .get(block_id)
+                    .and_then(|index| self.module.blocks.get(*index))
+                else {
+                    continue;
+                };
+                self.record_block_constraint_evidence(
+                    block,
+                    &mut fast_use,
+                    &mut live_selected_call_sites,
+                );
+            }
+            // Skipped and release-erased call evidence is filtered by the same callable identity
+            // and discarded static-`if` spans as the authored evidence ledger.
+            let identity = if self.module.start_function == Some(function.id) {
+                Some(AstFunctionIdentity::Entry)
+            } else {
+                self.functions_by_name.iter().find_map(|(path, id)| {
+                    (*id == function.id).then_some(AstFunctionIdentity::Authored(*path))
+                })
+            };
+            let is_pruned = |span: Option<SourceSpan>| {
+                span.is_some_and(|span| {
+                    ast.constraint_pruned_regions.iter().any(|region| {
+                        identity.is_none_or(|identity| region.function == identity)
+                            && span_sources.span_within(span, region.start, region.end)
+                    })
+                })
+            };
+            let mut skipped_call_sites = Vec::new();
+            if let Some(skipped) = self.skipped_source_evidence.get(&function.id) {
+                // The omitted statements still have authored source. Drop evidence that lives only
+                // in an inactive static-`if` branch, using the same pruned regions and span rule as
+                // the authored evidence ledger.
+                // One skipped catch handler can name hundreds of calls; reserve once instead of
+                // regrowing the site list one row at a time.
+                skipped_call_sites.reserve(skipped.call_sites().len());
+                for site in skipped.call_sites() {
+                    if is_pruned(site.span) {
+                        continue;
+                    }
+                    skipped_call_sites.push(HirSelectedCallSite {
+                        target: site.target.clone(),
+                        span: site.span,
+                    });
+                }
+                for witness in skipped.fast_use() {
+                    if !is_pruned(witness.span) {
+                        fast_use.push(*witness);
+                    }
+                }
+            }
+            // Release folding erased these calls before HIR existed, but they were selected source.
+            // Adding the row here makes callee summary bits and witness hops identical to a debug
+            // build that keeps the runtime call. Resolution uses the ordinary call-target mapping
+            // rather than a second AST-path translation. The live subset also feeds
+            // liveness-conditioned trap and escaping-failure analysis.
+            let skipped_spans = self
+                .skipped_source_evidence
+                .get(&function.id)
+                .map(HirSkippedSourceEvidence::skipped_spans)
+                .unwrap_or_default();
+            for site in &ast.release_erased_call_sites {
+                if identity != Some(site.function) || is_pruned(site.span) {
+                    continue;
+                }
+                let target = self.resolve_call_target_or_error(&site.target)?;
+                // A spanless call cannot be matched against skipped source. Treating it as live is
+                // the conservative direction: trap evidence may reject source that debug accepts,
+                // never the reverse.
+                let live = match site.span {
+                    None => true,
+                    Some(span) => !skipped_spans
+                        .iter()
+                        .any(|skipped| span_sources.span_within(span, *skipped, *skipped)),
+                };
+                if live {
+                    insert_live_erased_site_in_source_order(
+                        &mut live_erased_call_sites,
+                        HirLiveErasedCallSite {
+                            target,
+                            span: site.span,
+                            failure_caught: site.failure_caught,
+                        },
+                        span_sources,
+                    );
+                } else {
+                    insert_selected_site_in_source_order(
+                        &mut skipped_call_sites,
+                        HirSelectedCallSite {
+                            target,
+                            span: site.span,
+                        },
+                        span_sources,
+                    );
+                }
+            }
+            let mut live_sites = live_selected_call_sites.into_sites();
+            for site in &live_erased_call_sites {
+                insert_selected_site_in_source_order(
+                    &mut live_sites,
+                    HirSelectedCallSite {
+                        target: site.target.clone(),
+                        span: site.span,
+                    },
+                    span_sources,
+                );
+            }
+            let mut selected_call_sites = HirSelectedCallSiteLedger::default();
+            for site in live_sites.into_iter().chain(skipped_call_sites) {
+                selected_call_sites.push(&site.target, site.span);
+            }
+            let function_evidence = evidence.entry(function.id).or_default();
+            function_evidence.fast_use.extend(fast_use);
+            function_evidence.selected_call_sites = selected_call_sites.into_sites();
+            function_evidence.live_erased_call_sites = live_erased_call_sites;
+        }
+        Ok(())
+    }
+
+    /// Block ids of one function's selected code, including unrouted catch-handler subgraphs.
+    ///
+    /// WHAT: the entry-reachable CFG plus every handler root and successor not yet linked to it.
+    /// WHY: convergence may prune an unrouted handler later, so its fast operations and call
+    ///      targets must be recorded now while the blocks still exist.
+    fn selected_function_blocks(&self, function: FunctionId, entry: BlockId) -> Vec<BlockId> {
+        let reachable_from = |root: BlockId| -> Vec<BlockId> {
+            let Ok(order) = collect_reachable_blocks::<Infallible>(root, |block_id, visit| {
+                if let Some(block) = self
+                    .block_index_by_id
+                    .get(&block_id)
+                    .and_then(|index| self.module.blocks.get(*index))
+                {
+                    for_each_terminator_target(&block.terminator, visit);
+                }
+                Ok(())
+            });
+            order
+        };
+        let mut blocks = reachable_from(entry);
+        let mut seen_blocks = blocks.iter().copied().collect::<FxHashSet<_>>();
+        for record in &self.catch_handlers {
+            if record.owner != function || seen_blocks.contains(&record.handler.block) {
+                continue;
+            }
+            let handler_blocks = reachable_from(record.handler.block);
+            for block_id in handler_blocks {
+                if seen_blocks.insert(block_id) {
+                    blocks.push(block_id);
+                }
+            }
+        }
+        blocks
+    }
+
+    /// Records the fast-use and direct-call evidence one retained block owns.
+    fn record_block_constraint_evidence(
+        &self,
+        block: &HirBlock,
+        fast_use: &mut Vec<HirFastUseWitness>,
+        selected_call_sites: &mut HirSelectedCallSiteLedger,
+    ) {
+        for statement in &block.statements {
+            match &statement.kind {
+                HirStatementKind::Call { target, .. } => {
+                    selected_call_sites.push(target, statement.span);
+                }
+                HirStatementKind::NumericOp { op, .. } if op.semantics.is_fast() => {
+                    fast_use.push(HirFastUseWitness {
+                        provenance: HirFastUseProvenance::AuthoredArithmetic,
+                        span: statement.span,
+                    });
+                }
+                HirStatementKind::LoopStepFailure { semantics, .. } if semantics.is_fast() => {
+                    fast_use.push(HirFastUseWitness {
+                        provenance: HirFastUseProvenance::RangeGuard,
+                        span: statement.span,
+                    });
+                }
+                // Every fast write-back is selected fast semantics, including the total integer
+                // wrap that carries `Infallible` delivery.
+                HirStatementKind::FastStoreConversion { .. } => {
+                    fast_use.push(HirFastUseWitness {
+                        provenance: HirFastUseProvenance::StoreConversion,
+                        span: statement.span,
+                    });
+                }
+                _ => {}
+            }
+        }
+        if let HirTerminator::Invoke {
+            span,
+            operation: HirFallibleOperation::NumericOp { op, .. },
+            ..
+        } = &block.terminator
+            && op.semantics.is_fast()
+        {
+            fast_use.push(HirFastUseWitness {
+                provenance: HirFastUseProvenance::AuthoredArithmetic,
+                span: *span,
+            });
+        }
+        match &block.terminator {
+            HirTerminator::Invoke {
+                span,
+                operation: HirFallibleOperation::Call { target, .. },
+                ..
+            } => selected_call_sites.push(target, *span),
+            HirTerminator::NeverCall { target, .. } => selected_call_sites.push(
+                target,
+                self.module.side_table.terminator_span(block.id).copied(),
+            ),
+            _ => {}
+        }
     }
 
     fn project_failure_contributors(
@@ -295,4 +632,64 @@ impl<'a> HirBuilder<'a> {
                 });
         }
     }
+}
+
+/// Insert one erased call into an evaluation-ordered selected-site list.
+///
+/// WHAT: places the row before the first retained site the erased call is evaluated before.
+/// WHY: debug lowering emits argument calls before their outer call statement, so containment
+///      outranks source start. Disjoint calls follow authored source order, which is the order
+///      retained HIR statements already use.
+fn insert_selected_site_in_source_order(
+    sites: &mut Vec<HirSelectedCallSite>,
+    site: HirSelectedCallSite,
+    sources: &SpanResolutionSources<'_>,
+) {
+    let Some(site_span) = site.span else {
+        sites.push(site);
+        return;
+    };
+    let position = sites.iter().position(|existing| {
+        existing
+            .span
+            .is_some_and(|existing| site_precedes(site_span, existing, sources))
+    });
+    match position {
+        Some(index) => sites.insert(index, site),
+        None => sites.push(site),
+    }
+}
+
+/// Insert one live erased call into an evaluation-ordered selected-site list.
+fn insert_live_erased_site_in_source_order(
+    sites: &mut Vec<HirLiveErasedCallSite>,
+    site: HirLiveErasedCallSite,
+    sources: &SpanResolutionSources<'_>,
+) {
+    let Some(site_span) = site.span else {
+        sites.push(site);
+        return;
+    };
+    let position = sites.iter().position(|existing| {
+        existing
+            .span
+            .is_some_and(|existing| site_precedes(site_span, existing, sources))
+    });
+    match position {
+        Some(index) => sites.insert(index, site),
+        None => sites.push(site),
+    }
+}
+
+fn site_precedes(left: SourceSpan, right: SourceSpan, sources: &SpanResolutionSources<'_>) -> bool {
+    if left == right {
+        return false;
+    }
+    if sources.span_within(left, right, right) {
+        return true;
+    }
+    if sources.span_within(right, left, left) {
+        return false;
+    }
+    left < right
 }

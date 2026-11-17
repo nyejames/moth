@@ -191,6 +191,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::style_directives::{ConstraintDirectiveSpans, SourceConstraintSet};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -231,6 +232,138 @@ pub struct AstDocFragment {
     pub span: Option<SourceSpan>,
 }
 
+/// One lexical source-constraint attachment retained past AST construction.
+///
+/// WHAT: names the constrained callable and, for a statement attachment, the exact authored token
+///       range the constraint covers.
+/// WHY: constraint verification runs after AST construction. This is the one record that lets a
+///      later stage map a directive attachment onto HIR operations without re-walking directive
+///      syntax, and it deliberately keeps span endpoints as authored token spans instead of
+///      inventing a joined byte range that the source's extended-span table does not own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AstConstraintBoundary {
+    /// The callable body whose lexical scope owns this attachment.
+    pub(crate) function: AstFunctionIdentity,
+    /// Lexical scope where the constraint attached.
+    ///
+    /// WHY: a discarded static-`if` branch is exactly a child scope subtree. Keeping the scope
+    ///      lets projection exclude evidence recorded after folding, whose operator span may no
+    ///      longer be inside the branch's surviving authored extent.
+    pub(crate) scope: PathId,
+    /// The annotated statement's authored token range; `None` means the whole callable body.
+    pub(crate) statement: Option<AstConstraintStatementSpan>,
+    /// Constraints active at this boundary, including those inherited from enclosing annotations.
+    pub(crate) constraints: SourceConstraintSet,
+    /// Authored directive spans of the guarantees this boundary declares itself.
+    ///
+    /// WHAT: the run's `$safe_math` and `$infallible` spans, each `None` when that guarantee was
+    ///       inherited here or the boundary came from a reconstructed constraint set.
+    /// WHY: verification runs after directive syntax is gone, so each label must survive with the
+    ///      boundary. A statement that merely inherits a guarantee leaves that field empty, letting
+    ///      the enclosing owner keep its own directive instead of reusing this run's first span.
+    pub(crate) directive_spans: ConstraintDirectiveSpans,
+}
+
+/// Inclusive authored token range of one constrained statement.
+///
+/// WHAT: the first and last token spans of the attached statement.
+/// WHY: joining two token spans into one byte range needs the source's extended-span builder,
+///      which the statement parser does not own. Two authored endpoints let later span-based
+///      verification test containment without manufacturing an unresolvable span.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AstConstraintStatementSpan {
+    pub(crate) start: SourceSpan,
+    pub(crate) end: SourceSpan,
+}
+
+/// One discarded static-`if` branch that must not contribute constraint evidence.
+///
+/// WHAT: the owning callable and the inclusive authored token range of the inactive branch body.
+/// WHY: the fast-use ledger and constraint boundaries are recorded while both branches are
+///      resolved, but an inactive branch is not selected code. Recording one conservative region
+///      per discarded branch lets HIR projection drop those rows without retaining the removed
+///      subtree or re-walking the expression graph. Authored node spans are the only endpoints
+///      available at selection time; `None` spans (generated nodes) contribute nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AstConstraintPrunedRegion {
+    /// The callable body whose static branch was discarded.
+    pub(crate) function: AstFunctionIdentity,
+    /// The discarded branch's lexical scope, when that scope is exclusive to the branch.
+    ///
+    /// WHAT: `Some` only when the two branches were parsed under distinct child scopes.
+    /// WHY: scope identity is exact even when a folded expression's surviving span no longer
+    ///      reaches the operator the fast-use ledger recorded. Inline value-`if` shares its
+    ///      enclosing scope between both branches, so scope filtering is unsound there and the
+    ///      span fallback must decide instead.
+    pub(crate) scope: Option<PathId>,
+    /// First authored span in the discarded branch.
+    pub(crate) start: SourceSpan,
+    /// Last authored span in the discarded branch.
+    pub(crate) end: SourceSpan,
+}
+
+/// One selected fast numeric operation recorded while resolving an authored expression.
+///
+/// WHAT: the callable that owns the operation and the authored operator span, and nothing else.
+/// WHY: `$safe_math` must still see a fast use after constant folding or dead-result elimination
+///      removes the executable operation. Resolution records the selection before either
+///      optimisation runs, so this sparse evidence outlives the node it describes. One record per
+///      distinct operation keeps the ledger proportional to authored fast arithmetic rather than
+///      to the expression graph, and the owning callable lets a later verifier attribute the use
+///      without re-reading directives or lexical scopes.
+///
+/// The derived order is the ledger's canonical order: owning callable, lexical scope, then
+/// operator span, with the entry body first and an absent span before any real one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct AstFastOperationWitness {
+    /// The callable body whose authored expression selected fast arithmetic.
+    pub(crate) function: AstFunctionIdentity,
+    /// The lexical scope that resolved the operation.
+    ///
+    /// WHY: inactive static branches are scope subtrees. A folded operation's recorded operator
+    ///      span can outlive its expression node, but its scope still names the discarded branch.
+    pub(crate) scope: PathId,
+    /// The authored operator span; `None` for a synthetic operation without source text.
+    pub(crate) span: Option<SourceSpan>,
+}
+
+/// Canonicalises a drained fast-operation witness ledger.
+///
+/// WHAT: sorts by [`AstFastOperationWitness`]'s order and drops duplicate rows.
+/// WHY: recording is one push per selected operation, so an expression resolved twice by deferred
+///      completion would otherwise carry two rows for one authored operation. Normalising once
+///      here, where the ledger leaves the emitter, keeps the recorder allocation-free per
+///      selection and replaces a linear membership scan per record with a single sort at the
+///      drain point.
+pub(crate) fn normalize_fast_operation_witnesses(witnesses: &mut Vec<AstFastOperationWitness>) {
+    witnesses.sort_unstable();
+    witnesses.dedup();
+}
+
+/// One selected ordinary call that release constant folding replaced with its value.
+///
+/// WHAT: the owning callable, the callee's AST declaration path and the authored call span.
+/// WHY: release speculation runs on the completed AST before HIR, so a folded call site is
+///      absent from every HIR block. The erased call is still selected source, though: its callee's
+///      summary bits and fast-use witness must reach the caller exactly as they do in a debug build
+///      that keeps the call. HIR projects each row through the same call-target mapping and
+///      inactive-static-branch filter as authored and skipped call evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AstReleaseErasedCallSite {
+    /// The callable body whose expression release speculation folded.
+    pub(crate) function: AstFunctionIdentity,
+    /// The callee's ordered declaration path in this module's AST.
+    pub(crate) target: PathId,
+    /// The authored span of the erased call expression; `None` for generated calls.
+    pub(crate) span: Option<SourceSpan>,
+    /// Whether an enclosing catch owns this call's recoverable failure.
+    ///
+    /// WHAT: recorded from the rewrite walk's catch-subject containment.
+    /// WHY: debug keeps the call and its failure edge enters the handler, while the erased call
+    ///      has no such edge. HIR widens `may_fail` only for escaping erased failures.
+    pub(crate) failure_caught: bool,
+}
+
 /// Unified AST output for all source files in one compilation unit.
 ///
 /// WHAT: the fully resolved, typed executable AST produced by Stage 4, ready for HIR lowering.
@@ -246,6 +379,41 @@ pub struct Ast {
     /// Immutable semantic expression authority for all executable roots.
     pub(crate) expressions: ExpressionStore,
     pub doc_fragments: Vec<AstDocFragment>,
+    /// Lexical source-constraint attachments, in authored attachment order.
+    ///
+    /// WHAT: one record per constrained function body and per constrained statement.
+    /// WHY: constraint verification after AST construction must attach guarantees to HIR callables
+    ///      and statement ranges without re-reading source directives.
+    pub(crate) constraint_boundaries: Vec<AstConstraintBoundary>,
+
+    /// Selected fast numeric operations, in canonical ledger order.
+    ///
+    /// WHAT: one sparse record per authored fast operation, kept from resolution through folding
+    ///       and dead-result elimination.
+    /// WHY: `$safe_math` and `$infallible` verification run after optimisation, so evidence of a
+    ///      selected fast operation cannot live on the (possibly folded) expression node. The
+    ///      ledger is recorded beside the executable AST, ordered and deduplicated once on drain,
+    ///      then projected per function into HIR constraint evidence before the AST is dropped.
+    pub(crate) fast_operation_witnesses: Vec<AstFastOperationWitness>,
+
+    /// Selected ordinary calls erased by release constant folding, in recording order.
+    ///
+    /// WHAT: one sparse row per folded call site, keyed by its owning callable.
+    /// WHY: `$safe_math` and `$infallible` verification run after release speculation, so a folded
+    ///      call has no HIR block that could evidence its callee. The ledger keeps the call site
+    ///      visible to HIR projection without retaining the erased expression tree or disabling a
+    ///      profitable fold. It is empty in debug builds because no call is erased there.
+    pub(crate) release_erased_call_sites: Vec<AstReleaseErasedCallSite>,
+
+    /// Inactive static-`if` branches, retained so HIR projection can drop their evidence rows.
+    ///
+    /// WHAT: one conservative authored range per discarded branch, keyed by owning callable.
+    /// WHY: both static branches are fully resolved, so their fast-use evidence and statement
+    ///      boundaries exist before selection. Inactive branches produce no HIR operations, and
+    ///      their ledger rows must not make an annotation invalid. The ranges stay as authored
+    ///      spans because a joined byte range needs the source's extended-span table, which the
+    ///      statement parser does not own.
+    pub(crate) constraint_pruned_regions: Vec<AstConstraintPrunedRegion>,
 
     /// Whether preparation synthesized the compiler-owned entry `start` body.
     ///
@@ -618,3 +786,7 @@ mod numeric_construction_tests;
 #[cfg(test)]
 #[path = "tests/numeric_known_shape_tests.rs"]
 mod numeric_known_shape_tests;
+
+#[cfg(test)]
+#[path = "tests/fast_use_witness_tests.rs"]
+mod fast_use_witness_tests;

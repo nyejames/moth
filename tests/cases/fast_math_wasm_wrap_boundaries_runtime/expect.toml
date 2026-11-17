@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "i32=-2147483648 u32=0 u64=0 sub=9223372036854775807 mul32=1 mul64=1 neg=-2147483648 pow32=-808182895 pow64=12157665459056928801"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "i32=-2147483648 u32=0 u64=0 sub=9223372036854775807 mul32=1 mul64=1 neg=-2147483648 pow32=-808182895 pow64=12157665459056928801"

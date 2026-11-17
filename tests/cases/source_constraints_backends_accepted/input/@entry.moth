@@ -1,0 +1,19 @@
+$safe_math $infallible
+identity |value I32| -> I32:
+    return value
+;
+
+$fast_math $infallible
+wrap_u32 |left U32, right U32| -> U32:
+    return left + right
+;
+
+$safe_math
+safe_wrapper |value I32| -> I32:
+    return identity(value)
+;
+
+a = identity(10)
+b = wrap_u32(1, 2)
+c = safe_wrapper(8)
+~[:a=[a] b=[b] c=[c]]

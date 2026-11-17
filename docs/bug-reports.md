@@ -4,6 +4,27 @@ A casual log of bugs and limitations found during other work and left for later 
 
 ## Open
 
+### Unreachable generic call after return crashes summary convergence
+
+- Found: Constraints branch implementation and independent merge review, 2026-11.
+- Where: `call_escapes_builtin_failure` / `retained_call_summary` in `src/compiler_frontend/module_compilation/generated/convergence.rs` (around line 1080).
+- Observed: a generic call after an unconditional return is unreachable, but summary convergence still looks for its exact callable summary and raises a compiler bug: `implicit builtin failure contributor has no exact call summary for ...`. The implementation agent reproduced the crash on original base `d80f56343` without any constraint directives, so it predates `$safe_math` and `$infallible`.
+- Investigate: preserve the unreachable-call repro as a compiler test, trace how its builtin failure contributor survives without an exact summary and either exclude dead contributors at their owner or ensure the mandatory summary is available before convergence. Keep selected-source fast-use accounting distinct from liveness-conditioned failure propagation. User-authored unreachable code must not trigger an infrastructure failure.
+
+### Mutable local passed by `~` gets an invalid parameter effect summary
+
+- Found: Constraints branch implementation and independent merge review, 2026-11.
+- Where: `validate_parameter_summary` in `src/compiler_frontend/public_call_summary.rs` (around line 263), with the upstream mutation/transfer summary producer still to identify.
+- Observed: copy an immutable function parameter to a mutable local, then pass that local to another function through `~`. Compilation fails with `MOTH-INFRA-0001` and an `invalid effect combination` message instead of accepting the legal access or producing a source diagnostic. The implementation agent reproduced it on original base `d80f56343` and referenced a temporary probe at `tmp/probes-t3/p90`, which is not a durable test fixture.
+- Investigate: first commit a minimal repro under `tests/cases/`, then follow the parameter's declared access, mutation effect and transfer effect to find the first inconsistent producer. Preserve the `Shared` versus `Mutable` summary invariants and fix the producer rather than weakening the validator to accept invalid combinations.
+
+### Spanless release-folded calls may lose debug/release constraint parity
+
+- Found: Constraints follow-up `abc903852` source review, 2026-11. This is a potential limitation, not a reproduced source-level defect.
+- Where: `project_selected_hir_evidence` in `src/compiler_frontend/hir/hir_builder/metadata.rs`, specifically the `None => true` liveness fallback for `ast.release_erased_call_sites`, and the release-fold ledger in `ast/const_values/const_execution/rewrite.rs`.
+- Observed: a folded call with no source span cannot be matched against skipped statement spans, so the release path assumes it was live. If such a call originates in a skipped handler or after a terminator and its callee may trap or fail, release could reject `$infallible` where debug accepts. No test reached this case. The numeric backend contract calls for identical debug and release verdicts.
+- Investigate: determine whether any legal source or materialised callable can produce a spanless erased call in skipped code. Add a focused debug/release parity test if reachable. If impossible, document and enforce that invariant at the producer, then remove the fallback ambiguity. Otherwise carry explicit liveness or enclosing statement identity into the ledger rather than guessing from absent span data.
+
 ### `ReservedConfigFile` path reason is unreachable for file values
 
 - Found: Core/Builder package namespace and config filename work, 2026-11.

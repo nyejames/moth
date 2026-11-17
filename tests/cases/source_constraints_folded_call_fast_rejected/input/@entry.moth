@@ -1,0 +1,12 @@
+$fast_math
+fast_leaf |value I32| -> I32:
+    return value + 1
+;
+
+$safe_math
+live_const_call || -> I32:
+    value I32 = fast_leaf(1)
+    return value
+;
+
+io.line([live_const_call()])

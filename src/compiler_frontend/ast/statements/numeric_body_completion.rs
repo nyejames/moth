@@ -330,19 +330,30 @@ impl Completion<'_, '_> {
 
         // Dense body-local groups arrive in first-operand registration order. Their store row
         // handles let installation address exactly this header and its at-most-three intake sites.
+        // Every operand of one header captures the loop statement's set, so the first operand's
+        // mode speaks for the header after installation leaves its per-intake scope.
         let mut range_headers = Vec::new();
         // A collection header installs once, after its source and optional step complete, so its
         // operands group by position node in the same authored order.
         let mut collection_headers: Vec<(TemplateIrNodeId, [Option<ExprId>; 2])> = Vec::new();
 
         for intake in intakes {
+            // A retained template intake completes after its statement parser restored the
+            // enclosing set. Re-activate the set captured at registration for the whole intake,
+            // including header installation and selector capture.
+            let context = self.context;
+            let _constraint_scope = context.enter_source_constraints(intake.source_constraints);
             if let Some(slot) = intake.position.range_operand_slot() {
                 // Range slots are registered with their containing header and group. Bounds
                 // complete before the step, so a retained step takes the literal context their
                 // completed or parse-time-built operands select.
                 let (header, group) = intake.range_header.expect("retained range operand handle");
                 if group == range_headers.len() {
-                    range_headers.push((header, [None, None, None]));
+                    range_headers.push((
+                        header,
+                        [None, None, None],
+                        intake.source_constraints.fast_math_active(),
+                    ));
                 }
                 let expected = match slot {
                     RangeOperandSlot::Start | RangeOperandSlot::End => intake.expected,
@@ -465,13 +476,14 @@ impl Completion<'_, '_> {
                 .install_completed_numeric_intake(intake.site, value.id(), selector_pattern)?;
         }
 
-        for (header, operands) in range_headers {
+        for (header, operands, fast_math) in range_headers {
             self.context
                 .template_ir_store
                 .borrow_mut()
                 .install_completed_numeric_range_header(
                     header,
                     operands,
+                    fast_math,
                     self.type_interner,
                     self.expression_builder,
                     self.const_values,
@@ -564,6 +576,11 @@ impl Completion<'_, '_> {
                 BindingSlot::Resolving(ResolvingBinding { shape, seed: None });
             let recipe = self.state.borrow_mut().take_binding_recipe(binding)?;
             let row = self.state.borrow().binding(binding).clone();
+            // Completion resolves a recipe long after its statement parser restored the enclosing
+            // set. Re-activate the set captured with the recipe for every nested resolution this
+            // binding performs; the guard restores the caller's set on every exit path.
+            let context = self.context;
+            let _constraint_scope = context.enter_source_constraints(row.source_constraints);
             let resolved = match recipe {
                 NumericRecipe::Raw { items, family } => {
                     let recipe_span = items
@@ -912,6 +929,15 @@ impl Completion<'_, '_> {
         producer: PendingMultiBindProducer,
         expected: ExpectedType,
     ) -> Result<TypeId, ExpressionParseError> {
+        // A nested `then` producer can complete directly during slot resolution, bypassing the
+        // continuation guard in `resolve_continuation`. Restore the producing statement's captured
+        // mode around its expression completion just as the ordinary continuation path does.
+        let producer_constraints = self
+            .state
+            .borrow()
+            .continuation_source_constraints(producer.continuation)?;
+        let context = self.context;
+        let _constraint_scope = context.enter_source_constraints(producer_constraints);
         let expression = {
             let mut state = self.state.borrow_mut();
             state.take_then_value(producer.continuation, producer.value_index)?
@@ -1066,14 +1092,16 @@ impl Completion<'_, '_> {
             }
         }
         self.resumed[index] = ContinuationResolution::Resolving;
-        let Some(continuation) = self.state.borrow_mut().take_continuation(id) else {
+        let Some(retained) = self.state.borrow_mut().take_continuation(id) else {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::AstConstruction,
                 "numeric construction completion requested a continuation that was already taken",
             )
             .into());
         };
-        let nodes = match continuation {
+        let context = self.context;
+        let _constraint_scope = context.enter_source_constraints(retained.source_constraints);
+        let nodes = match retained.continuation {
             NumericContinuation::Binding(continuation) => self.resume_binding(continuation)?,
             NumericContinuation::Assignment(continuation) => {
                 self.resume_assignment(continuation)?
@@ -1797,6 +1825,9 @@ impl Completion<'_, '_> {
                 end_kind: deferred.end_kind,
                 step,
                 omitted_start_span: deferred.span,
+                // The owning statement's captured set is active here: binding resolution and
+                // continuation resumption both restore it around completion.
+                fast_math: self.context.source_constraints().fast_math_active(),
             },
             self.type_interner,
             self.expression_builder,

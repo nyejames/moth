@@ -8,9 +8,10 @@
 use crate::compiler_frontend::external_packages::CORE_IO_PACKAGE_PATH;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalAccessKind, ExternalFunctionDef, ExternalFunctionId,
-    ExternalFunctionLowerings, ExternalJsLowering, ExternalPackageRegistry, ExternalReturnAlias,
-    ExternalReturnSlot, ExternalSignatureType, ExternalSymbolPath, ExternalTypeDef,
-    IO_INPUT_EXTERNAL_TYPE_ID, external_returns, external_success_returns,
+    ExternalFunctionLowerings, ExternalJsLowering, ExternalNumericContract,
+    ExternalPackageRegistry, ExternalReturnAlias, ExternalReturnSlot, ExternalSignatureType,
+    ExternalSymbolPath, ExternalTypeDef, IO_INPUT_EXTERNAL_TYPE_ID, external_returns,
+    external_success_returns, trusted_numeric_contract,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
@@ -18,6 +19,7 @@ struct IoConsoleFunctionSpec {
     id: ExternalFunctionId,
     path: &'static str,
     js_helper: &'static str,
+    numeric_contract: ExternalNumericContract,
 }
 
 const IO_CONSOLE_FUNCTIONS: &[IoConsoleFunctionSpec] = &[
@@ -25,26 +27,33 @@ const IO_CONSOLE_FUNCTIONS: &[IoConsoleFunctionSpec] = &[
         id: ExternalFunctionId::IoPrint,
         path: "print",
         js_helper: "__moth_io_print",
+        // Console output converts a Moth string with `String` and calls a console method. Neither
+        // step selects fast arithmetic, raises a Moth trap or returns a recoverable error.
+        numeric_contract: trusted_numeric_contract(false, false, false),
     },
     IoConsoleFunctionSpec {
         id: ExternalFunctionId::IoLine,
         path: "line",
         js_helper: "__moth_io_line",
+        numeric_contract: trusted_numeric_contract(false, false, false),
     },
     IoConsoleFunctionSpec {
         id: ExternalFunctionId::IoDebug,
         path: "debug",
         js_helper: "__moth_io_debug",
+        numeric_contract: trusted_numeric_contract(false, false, false),
     },
     IoConsoleFunctionSpec {
         id: ExternalFunctionId::IoWarn,
         path: "warn",
         js_helper: "__moth_io_warn",
+        numeric_contract: trusted_numeric_contract(false, false, false),
     },
     IoConsoleFunctionSpec {
         id: ExternalFunctionId::IoError,
         path: "error",
         js_helper: "__moth_io_error",
+        numeric_contract: trusted_numeric_contract(false, false, false),
     },
 ];
 
@@ -54,6 +63,9 @@ struct IoInputFunctionSpec {
     parameters: Vec<(ExternalSignatureType, ExternalAccessKind)>,
     returns: Vec<ExternalReturnSlot>,
     error_return_type: Option<ExternalSignatureType>,
+    /// Polling reads and lifecycle calls inspect or mutate a valid handle and stay total. `new` is
+    /// the only fallible input callable because an unsupported host returns a recoverable error.
+    numeric_contract: ExternalNumericContract,
 }
 
 fn input_handle_param() -> Vec<(ExternalSignatureType, ExternalAccessKind)> {
@@ -93,6 +105,10 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
                 IO_INPUT_EXTERNAL_TYPE_ID,
             ))],
             error_return_type: Some(ExternalSignatureType::BuiltinError),
+            // `new` returns a recoverable `Unsupported` error when the host lacks the required
+            // browser input APIs. A supported host installs listeners without selecting fast
+            // arithmetic or raising a Moth trap.
+            numeric_contract: trusted_numeric_contract(false, false, true),
         },
         IoInputFunctionSpec {
             id: ExternalFunctionId::IoInputUpdate,
@@ -100,6 +116,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
             parameters: input_mutable_handle_param(),
             returns: external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
         },
         IoInputFunctionSpec {
             id: ExternalFunctionId::IoInputClose,
@@ -107,6 +124,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
             parameters: input_mutable_handle_param(),
             returns: external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
         },
         IoInputFunctionSpec {
             id: ExternalFunctionId::IoInputKeyDown,
@@ -114,6 +132,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
             parameters: input_handle_and_string_param(),
             returns: external_success_returns(ExternalAbiType::Bool, ExternalReturnAlias::Fresh),
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
         },
         IoInputFunctionSpec {
             id: ExternalFunctionId::IoInputKeyPressed,
@@ -121,6 +140,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
             parameters: input_handle_and_string_param(),
             returns: external_success_returns(ExternalAbiType::Bool, ExternalReturnAlias::Fresh),
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
         },
         IoInputFunctionSpec {
             id: ExternalFunctionId::IoInputKeyReleased,
@@ -128,6 +148,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
             parameters: input_handle_and_string_param(),
             returns: external_success_returns(ExternalAbiType::Bool, ExternalReturnAlias::Fresh),
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
         },
         IoInputFunctionSpec {
             id: ExternalFunctionId::IoInputPointerX,
@@ -138,6 +159,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
                 ExternalReturnAlias::Fresh,
             ),
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
         },
         IoInputFunctionSpec {
             id: ExternalFunctionId::IoInputPointerY,
@@ -148,6 +170,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
                 ExternalReturnAlias::Fresh,
             ),
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
         },
         IoInputFunctionSpec {
             id: ExternalFunctionId::IoInputPointerDown,
@@ -155,6 +178,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
             parameters: input_handle_and_string_param(),
             returns: external_success_returns(ExternalAbiType::Bool, ExternalReturnAlias::Fresh),
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
         },
         IoInputFunctionSpec {
             id: ExternalFunctionId::IoInputPointerPressed,
@@ -162,6 +186,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
             parameters: input_handle_and_string_param(),
             returns: external_success_returns(ExternalAbiType::Bool, ExternalReturnAlias::Fresh),
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
         },
         IoInputFunctionSpec {
             id: ExternalFunctionId::IoInputPointerReleased,
@@ -169,6 +194,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
             parameters: input_handle_and_string_param(),
             returns: external_success_returns(ExternalAbiType::Bool, ExternalReturnAlias::Fresh),
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
         },
         IoInputFunctionSpec {
             id: ExternalFunctionId::IoInputLastKeyPressed,
@@ -178,6 +204,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
                 Box::new(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
             ))],
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
         },
         IoInputFunctionSpec {
             id: ExternalFunctionId::IoInputLastKeyReleased,
@@ -187,6 +214,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
                 Box::new(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
             ))],
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
         },
         IoInputFunctionSpec {
             id: ExternalFunctionId::IoInputLastPointerPressed,
@@ -196,6 +224,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
                 Box::new(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
             ))],
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
         },
         IoInputFunctionSpec {
             id: ExternalFunctionId::IoInputLastPointerReleased,
@@ -205,6 +234,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
                 Box::new(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
             ))],
             error_return_type: None,
+            numeric_contract: trusted_numeric_contract(false, false, false),
         },
     ]
 }
@@ -247,6 +277,7 @@ fn register_io_console_function(
             None,
         ),
         const_eval: None,
+        numeric_contract: spec.numeric_contract,
         lowerings: ExternalFunctionLowerings {
             js: Some(ExternalJsLowering::RuntimeFunction(
                 spec.js_helper.to_owned(),
@@ -296,6 +327,7 @@ fn register_io_input_function(
             .collect(),
         return_contract: external_returns(spec.returns, spec.error_return_type),
         const_eval: None,
+        numeric_contract: spec.numeric_contract,
         lowerings: ExternalFunctionLowerings {
             js: Some(ExternalJsLowering::RuntimeFunction(
                 spec.id.name().to_owned(),

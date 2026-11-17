@@ -1,0 +1,5 @@
+$fast_math
+$safe_math
+unverified |value I32| -> I32:
+    return value + 1
+;

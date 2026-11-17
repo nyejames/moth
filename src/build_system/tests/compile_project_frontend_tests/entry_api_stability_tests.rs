@@ -5,8 +5,9 @@ use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::hir::reachability::collect_reachability_from_function_link_facts;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
-use crate::compiler_frontend::hir::utils::{collect_reachable_blocks, terminator_targets};
+use crate::compiler_frontend::hir::utils::{collect_reachable_blocks, for_each_terminator_target};
 use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
+use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_interface::{
     PublicDeclarationSemantics, PublicSemanticInterface,
 };
@@ -116,13 +117,14 @@ fn entry_runtime_fragment_pushes(artifact: &CompiledModuleArtifact) -> usize {
         .iter()
         .find(|function| function.id == start_id)
         .expect("the start function must exist in HIR");
-    let reachable = collect_reachable_blocks(start.entry, |block_id| {
+    let reachable = collect_reachable_blocks(start.entry, |block_id, visit| {
         let block = hir
             .blocks
             .iter()
             .find(|block| block.id == block_id)
             .ok_or_else(|| format!("reachable block {block_id:?} must exist in HIR"))?;
-        Ok::<_, String>(terminator_targets(&block.terminator))
+        for_each_terminator_target(&block.terminator, visit);
+        Ok::<_, String>(())
     })
     .expect("the start function's reachable blocks must resolve");
     reachable
@@ -1040,5 +1042,124 @@ fn qualified_cycle_diagnostics_are_deterministic_across_repeated_compiles() {
             .iter_severity(DiagnosticSeverity::Error)
             .all(|(_, view)| view.descriptor().code.starts_with("MOTH-")),
         "every qualified-cycle failure must be a typed user diagnostic"
+    );
+}
+
+/// Returns the published call summary for one free exported function.
+fn exported_summary<'a>(
+    interface: &'a PublicSemanticInterface,
+    name: &str,
+) -> &'a PublicCallSummary {
+    &interface
+        .concrete_call_summaries
+        .iter()
+        .find(|record| record.origin.defining_name() == name && record.origin.receiver().is_none())
+        .unwrap_or_else(|| panic!("the interface must publish a summary for `{name}`"))
+        .summary
+}
+
+/// Compiles one exported callable whose private helper body is the only changing source fact.
+fn compile_exported_callable_with_helper(helper_body: &str) -> ProjectFrontendCompilation {
+    let entry = "@impl compute\n\nresult = compute(1) catch:\n    then 0\n;\n~[result]\n";
+    let provider = format!(
+        "compute |value I32| -> I32, Error!:\n    result = helper(value)!\n    return result\n;\n\nhelper |value I32| -> I32, Error!:\n{helper_body}\n;\n"
+    );
+    compile_fixture(&[
+        ("src/@mod.moth", BASE_FACADE),
+        ("src/@entry.moth", entry),
+        ("src/impl.moth", &provider),
+    ])
+}
+
+/// WHAT: an exported callable's private helper becoming fast, trapping or escaping changes the
+///       provider public interface even though the exported signature is byte-identical.
+/// WHY:  interface equality is the cache invalidation key. If a private helper's constraint bits
+///       did not ride the public call summary, a cached consumer would keep the stale guarantee.
+#[test]
+fn private_helper_constraint_changes_invalidate_the_provider_interface_fingerprint() {
+    let baseline = compile_exported_callable_with_helper("    return value");
+    let fast = compile_exported_callable_with_helper("    $fast_math\n    return value + 1");
+    let trapping = compile_exported_callable_with_helper("    assert(value > 0)\n    return value");
+    let escaping = compile_exported_callable_with_helper("    return! Error(\"no value\")");
+
+    let baseline_interface = interface_fingerprint_content(
+        only_project_artifact(&baseline)
+            .normal_interface
+            .as_ref()
+            .expect("the fixture must publish its normal facade interface"),
+    );
+    let baseline_summary = exported_summary(&baseline_interface, "compute");
+    assert!(
+        !baseline_summary.uses_fast_semantics
+            && !baseline_summary.may_trap
+            && !baseline_summary.may_fail,
+        "an ordinary total helper must leave every constraint bit false"
+    );
+
+    for (name, compiled, bit) in [
+        (
+            "fast",
+            &fast,
+            (|summary: &PublicCallSummary| summary.uses_fast_semantics)
+                as fn(&PublicCallSummary) -> bool,
+        ),
+        ("trapping", &trapping, |summary: &PublicCallSummary| {
+            summary.may_trap
+        }),
+        ("escaping", &escaping, |summary: &PublicCallSummary| {
+            summary.may_fail
+        }),
+    ] {
+        let interface = interface_fingerprint_content(
+            only_project_artifact(compiled)
+                .normal_interface
+                .as_ref()
+                .expect("the variant fixture must publish its normal facade interface"),
+        );
+        let summary = exported_summary(&interface, "compute");
+        assert!(
+            bit(summary),
+            "the {name} private helper must widen the exported callable's matching bit"
+        );
+        assert_ne!(
+            baseline_interface, interface,
+            "a {name} private helper must invalidate the provider public interface"
+        );
+    }
+}
+
+/// WHAT: a receiver method on an exported struct publishes its constraint bits.
+/// WHY:  a method is not independently exported, so its only public evidence is the summary
+///       attached to the exported receiver declaration. Dropping it would leave method consumers
+///       without an invalidation fact.
+#[test]
+fn public_receiver_method_constraint_bits_are_published() {
+    let files = [
+        (
+            "src/@entry.moth",
+            "@child Box\n\nbox = Box(1)\n~[: [box.peek()] ]\n",
+        ),
+        (
+            "src/child/@mod.moth",
+            "$export\nBox = |\n    value I32,\n|\n\n$fast_math\npeek |this Box| -> I32:\n    return this.value + 1\n;\n",
+        ),
+    ];
+    let compiled = compile_fixture(&files);
+    let interface = interface_fingerprint_content(normal_interface_for(&compiled, "child"));
+    let method_summary = &interface
+        .concrete_call_summaries
+        .iter()
+        .find(|record| {
+            record.origin.defining_name() == "peek" && record.origin.receiver().is_some()
+        })
+        .expect("an exported struct must publish its receiver method summary")
+        .summary;
+    assert!(
+        method_summary.uses_fast_semantics,
+        "the method's selected fast operation must publish through its receiver declaration"
+    );
+    assert!(
+        !method_summary.may_trap && !method_summary.may_fail,
+        "the ordinary method body must not publish trap or failure evidence"
     );
 }

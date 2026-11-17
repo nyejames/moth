@@ -76,6 +76,9 @@ pub(crate) enum LabelDraftMessage {
     BuiltinWriteBackOrigin {
         target_type_id: TypeId,
     },
+    ConstraintDirective,
+    ConstraintEvidence,
+    ConstraintCallHop,
 }
 
 /// The message of a compact label. Each variant of `LabelDraftMessage` has one code, and a label
@@ -118,6 +121,9 @@ impl LabelMessageCode {
     pub(super) const SCOPE_OPENER_STARTS_HERE: Self = Self(30);
     pub(super) const EARLIER_SCOPE_OPENER_ON_LINE: Self = Self(31);
     pub(super) const SCOPE_CLOSER_BEFORE_THIS: Self = Self(32);
+    pub(super) const CONSTRAINT_DIRECTIVE: Self = Self(33);
+    pub(super) const CONSTRAINT_EVIDENCE: Self = Self(34);
+    pub(super) const CONSTRAINT_CALL_HOP: Self = Self(35);
 
     /// Whether the label keeps a row in `label_data`. Config origin, substitutions, typed failure producers
     /// and write-back origins carry data; the rest never read the row.
@@ -169,6 +175,9 @@ impl LabelMessageCode {
             Self::SCOPE_OPENER_STARTS_HERE => "SCOPE_OPENER_STARTS_HERE",
             Self::EARLIER_SCOPE_OPENER_ON_LINE => "EARLIER_SCOPE_OPENER_ON_LINE",
             Self::SCOPE_CLOSER_BEFORE_THIS => "SCOPE_CLOSER_BEFORE_THIS",
+            Self::CONSTRAINT_DIRECTIVE => "CONSTRAINT_DIRECTIVE",
+            Self::CONSTRAINT_EVIDENCE => "CONSTRAINT_EVIDENCE",
+            Self::CONSTRAINT_CALL_HOP => "CONSTRAINT_CALL_HOP",
             Self::CONFLICTS_WITH_EARLIER_HEAD_ITEM => "CONFLICTS_WITH_EARLIER_HEAD_ITEM",
             Self::MISSING_EXPORT_DECLARATION => "MISSING_EXPORT_DECLARATION",
             Self::EXTERNAL_IMPORT_SITE => "EXTERNAL_IMPORT_SITE",
@@ -335,6 +344,9 @@ pub(super) fn encode_label(
             data: [pending_type_word(target_type_id)?, 0],
             ..plain(LabelMessageCode::BUILTIN_WRITE_BACK_ORIGIN)
         },
+        LabelDraftMessage::ConstraintDirective => plain(LabelMessageCode::CONSTRAINT_DIRECTIVE),
+        LabelDraftMessage::ConstraintEvidence => plain(LabelMessageCode::CONSTRAINT_EVIDENCE),
+        LabelDraftMessage::ConstraintCallHop => plain(LabelMessageCode::CONSTRAINT_CALL_HOP),
     })
 }
 
@@ -498,6 +510,9 @@ impl LabelWord {
             LabelMessageCode::SCOPE_CLOSER_BEFORE_THIS => {
                 DurableLabelMessage::ScopeCloserBeforeThis
             }
+            LabelMessageCode::CONSTRAINT_DIRECTIVE => DurableLabelMessage::ConstraintDirective,
+            LabelMessageCode::CONSTRAINT_EVIDENCE => DurableLabelMessage::ConstraintEvidence,
+            LabelMessageCode::CONSTRAINT_CALL_HOP => DurableLabelMessage::ConstraintCallHop,
             LabelMessageCode::MISSING_EXPORT_DECLARATION => {
                 DurableLabelMessage::MissingExportDeclaration
             }
@@ -593,6 +608,9 @@ pub(crate) enum DurableLabelMessage<'a> {
     BuiltinWriteBackOrigin {
         target_type: TypeDisplayId,
     },
+    ConstraintDirective,
+    ConstraintEvidence,
+    ConstraintCallHop,
 }
 
 /// The generic substitutions of one label, borrowed from the store's substitution arena.

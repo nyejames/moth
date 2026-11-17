@@ -1,19 +1,22 @@
 //! Native integer operation emission for Wasm LIR.
 //!
-//! WHAT: emits trap-mode integer arithmetic against the operation's signed or unsigned 32/64-bit
-//!       semantic domain, with a Wasm `unreachable` on every runtime-checked numeric failure.
+//! WHAT: emits the runtime-checked, proven-safe and `$fast_math` integer arithmetic families
+//!       against the operation's signed or unsigned 32/64-bit semantic domain, with a Wasm
+//!       `unreachable` for every fault the selected family reports.
 //! WHY: Wasm integer instructions wrap and have target-specific traps, so runtime-checked
 //!      operations must verify every failure before relying on the native result; source operand
 //!      locals remain untouched. Proven-safe statements skip only redundant predicates because
-//!      the analysis table already excluded those exact failures, and they may write an aliasing
-//!      destination directly because operands are read before the result `local.set`.
+//!      the analysis table already excluded those exact failures, and fast statements wrap by
+//!      language rule without any overflow predicate. Both no-check families may write an
+//!      aliasing destination directly because operands are read before the result `local.set`.
 
 use crate::backends::wasm::emit::instructions::{
     LirBodyEmitContext, ensure_local_abi, local_index,
 };
 use crate::backends::wasm::lir::instructions::{
-    IntegerCheckMode, WasmCheckedIntegerOperation, WasmIntegerOperationKind,
-    WasmIntegerPowerScratch, WasmIntegerScratch, WasmNumericOperationOperands,
+    IntegerCheckMode, WasmCheckedIntegerOperation, WasmFastIntegerOperation,
+    WasmIntegerOperationKind, WasmIntegerPowerScratch, WasmIntegerScratch,
+    WasmNumericOperationOperands,
 };
 use crate::backends::wasm::lir::types::{WasmAbiType, WasmLirLocalId};
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -25,6 +28,90 @@ use wasm_encoder::{BlockType, Function, Instruction};
 enum SignedRelation {
     LessThan,
     GreaterThan,
+}
+
+/// Resolves one integer operation's operand shape for the checked and fast emitters.
+///
+/// WHAT: accepts unary `Negate` and the six binary operators, verifying every operand local's
+///       native carrier.
+/// WHY: both integer families read the same HIR-derived operand shape, so one resolver keeps
+///      them from accepting different operator sets.
+fn resolve_integer_operands(
+    operator: NumericOperator,
+    operands: WasmNumericOperationOperands,
+    carrier: WasmAbiType,
+    context: &LirBodyEmitContext<'_>,
+    family: &str,
+) -> Result<(Option<WasmLirLocalId>, Option<WasmLirLocalId>), InfrastructureFailure> {
+    match (operator, operands) {
+        (NumericOperator::Negate, WasmNumericOperationOperands::Unary { operand }) => {
+            ensure_local_abi(
+                operand,
+                carrier,
+                context,
+                &format!("{family} integer operand"),
+            )?;
+            Ok((Some(operand), None))
+        }
+        (
+            NumericOperator::Add
+            | NumericOperator::Subtract
+            | NumericOperator::Multiply
+            | NumericOperator::IntegerDivide
+            | NumericOperator::Remainder
+            | NumericOperator::Power,
+            WasmNumericOperationOperands::Binary { left, right },
+        ) => {
+            ensure_local_abi(
+                left,
+                carrier,
+                context,
+                &format!("{family} integer left operand"),
+            )?;
+            ensure_local_abi(
+                right,
+                carrier,
+                context,
+                &format!("{family} integer right operand"),
+            )?;
+            Ok((Some(left), Some(right)))
+        }
+        _ => Err(InfrastructureFailure::wasm_generation(format!(
+            "Wasm {family} integer operation has an invalid operand shape for {operator:?}"
+        ))),
+    }
+}
+
+/// Verifies that power's loop scratch locals stay distinct from every other operation local.
+///
+/// WHY: checked and fast power share the square-and-multiply loop, so they share its aliasing
+///      contract; only the checked family has an extra widened product scratch to exclude.
+fn ensure_power_scratch_is_distinct(
+    scratch: WasmIntegerPowerScratch,
+    carrier: WasmAbiType,
+    destination: WasmLirLocalId,
+    left: WasmLirLocalId,
+    right: WasmLirLocalId,
+    product_scratch: Option<WasmLirLocalId>,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), InfrastructureFailure> {
+    ensure_local_abi(scratch.factor, carrier, context, "integer power factor")?;
+    ensure_local_abi(scratch.exponent, carrier, context, "integer power exponent")?;
+    if scratch.factor == scratch.exponent
+        || scratch.factor == destination
+        || scratch.exponent == destination
+        || scratch.factor == left
+        || scratch.factor == right
+        || scratch.exponent == left
+        || scratch.exponent == right
+        || product_scratch == Some(scratch.factor)
+        || product_scratch == Some(scratch.exponent)
+    {
+        return Err(InfrastructureFailure::wasm_generation(
+            "Wasm integer power scratch locals alias another operation local".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn emit_checked_integer_operation(
@@ -52,30 +139,8 @@ pub(super) fn emit_checked_integer_operation(
         "checked integer destination",
     )?;
 
-    let (left, right) = match (*operator, operands) {
-        (NumericOperator::Negate, WasmNumericOperationOperands::Unary { operand }) => {
-            ensure_local_abi(*operand, carrier, context, "checked integer operand")?;
-            (Some(*operand), None)
-        }
-        (
-            NumericOperator::Add
-            | NumericOperator::Subtract
-            | NumericOperator::Multiply
-            | NumericOperator::IntegerDivide
-            | NumericOperator::Remainder
-            | NumericOperator::Power,
-            WasmNumericOperationOperands::Binary { left, right },
-        ) => {
-            ensure_local_abi(*left, carrier, context, "checked integer left operand")?;
-            ensure_local_abi(*right, carrier, context, "checked integer right operand")?;
-            (Some(*left), Some(*right))
-        }
-        _ => {
-            return Err(InfrastructureFailure::wasm_generation(format!(
-                "Wasm checked integer operation has an invalid operand shape for {operator:?}"
-            )));
-        }
-    };
+    let (left, right) =
+        resolve_integer_operands(*operator, *operands, carrier, context, "checked")?;
 
     if left == Some(*destination) || right == Some(*destination) {
         // Runtime lowering needs the pre-operation operand values for its predicates; proven-safe
@@ -150,30 +215,20 @@ pub(super) fn emit_checked_integer_operation(
                 "Wasm proven-safe integer operation cannot be Power".to_owned(),
             ));
         }
-        ensure_local_abi(scratch.factor, carrier, context, "integer power factor")?;
-        ensure_local_abi(scratch.exponent, carrier, context, "integer power exponent")?;
-        let (left_operand, right_operand) = match (left, right) {
-            (Some(left_operand), Some(right_operand)) => (left_operand, right_operand),
-            _ => {
-                return Err(InfrastructureFailure::wasm_generation(
-                    "Wasm integer power has an invalid operand shape".to_owned(),
-                ));
-            }
-        };
-        if scratch.factor == scratch.exponent
-            || scratch.factor == *destination
-            || scratch.exponent == *destination
-            || scratch.factor == left_operand
-            || scratch.factor == right_operand
-            || scratch.exponent == left_operand
-            || scratch.exponent == right_operand
-            || product_scratch == Some(scratch.factor)
-            || product_scratch == Some(scratch.exponent)
-        {
+        let (Some(left_operand), Some(right_operand)) = (left, right) else {
             return Err(InfrastructureFailure::wasm_generation(
-                "Wasm integer power scratch locals alias another operation local".to_owned(),
+                "Wasm integer power has an invalid operand shape".to_owned(),
             ));
-        }
+        };
+        ensure_power_scratch_is_distinct(
+            scratch,
+            carrier,
+            *destination,
+            left_operand,
+            right_operand,
+            product_scratch,
+            context,
+        )?;
     }
 
     if *check_mode == IntegerCheckMode::ProvenSafe {
@@ -201,7 +256,7 @@ pub(super) fn emit_checked_integer_operation(
         };
         return match (*operator, left, right) {
             (NumericOperator::Negate, Some(operand), None) => {
-                emit_proven_safe_negation(function, *destination, operand, *kind, context)
+                emit_wrapping_negation(function, *destination, operand, *kind, context)
             }
             (
                 NumericOperator::Add
@@ -243,24 +298,332 @@ pub(super) fn emit_checked_integer_operation(
             context,
         ),
         (NumericOperator::IntegerDivide, Some(left), Some(right), None) => {
-            emit_checked_division(function, *destination, left, right, *kind, context)
+            emit_guarded_division(function, *destination, left, right, *kind, context)
         }
         (NumericOperator::Remainder, Some(left), Some(right), None) => {
-            emit_checked_remainder(function, *destination, left, right, *kind, context)
+            emit_guarded_remainder(function, *destination, left, right, *kind, context)
         }
-        (NumericOperator::Power, Some(left), Some(right), Some(_)) => emit_checked_power(
-            function,
-            *destination,
-            left,
-            right,
-            *kind,
-            *scratch,
-            context,
-        ),
+        (NumericOperator::Power, Some(left), Some(right), Some(power_scratch)) => {
+            emit_integer_power_loop(
+                function,
+                IntegerPowerOperation {
+                    destination: *destination,
+                    base: left,
+                    source_exponent: right,
+                    kind: *kind,
+                    scratch: power_scratch,
+                    product: IntegerPowerProduct::Checked { product_scratch },
+                },
+                context,
+            )
+        }
         _ => Err(InfrastructureFailure::wasm_generation(format!(
             "Wasm checked integer operation has inconsistent scratch locals for {operator:?}"
         ))),
     }
+}
+
+/// Emits one `$fast_math` integer operation.
+///
+/// WHAT: native modular `+`, `-`, `*` and unary `-`; truncating `//`/`%` guarded only by their
+///       fast trap causes; and square-and-multiply power in the semantic width.
+/// WHY: fast integer arithmetic is neither runtime-checked nor analysis-proven: it must wrap by
+///      language rule, so emitting the ordinary overflow predicates would reject valid results.
+///      Traps use the same `unreachable` transport as the ordinary trap path, but only for the
+///      causes `fast_numeric_trap_codes` names.
+pub(super) fn emit_fast_integer_operation(
+    function: &mut Function,
+    operation: &WasmFastIntegerOperation,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), InfrastructureFailure> {
+    let WasmFastIntegerOperation {
+        dst: destination,
+        operator,
+        kind,
+        operands,
+        power,
+    } = *operation;
+    let carrier = kind.carrier();
+    ensure_local_abi(destination, carrier, context, "fast integer destination")?;
+
+    let (left, right) = resolve_integer_operands(operator, operands, carrier, context, "fast")?;
+
+    let power_scratch = match (operator, power) {
+        (NumericOperator::Power, Some(scratch)) => {
+            let (Some(left_operand), Some(right_operand)) = (left, right) else {
+                return Err(InfrastructureFailure::wasm_generation(
+                    "Wasm fast integer power has an invalid operand shape".to_owned(),
+                ));
+            };
+            ensure_power_scratch_is_distinct(
+                scratch,
+                carrier,
+                destination,
+                left_operand,
+                right_operand,
+                None,
+                context,
+            )?;
+            Some(scratch)
+        }
+        (NumericOperator::Power, None) => {
+            return Err(InfrastructureFailure::wasm_generation(
+                "Wasm fast integer power is missing its loop scratch locals".to_owned(),
+            ));
+        }
+        (_, Some(_)) => {
+            return Err(InfrastructureFailure::wasm_generation(
+                "Wasm fast non-power integer operation has unexpected scratch locals".to_owned(),
+            ));
+        }
+        (_, None) => None,
+    };
+
+    match (operator, left, right, power_scratch) {
+        (NumericOperator::Negate, Some(operand), None, None) => {
+            emit_wrapping_negation(function, destination, operand, kind, context)
+        }
+        (NumericOperator::Add, Some(left), Some(right), None) => emit_fast_native_binary(
+            function,
+            destination,
+            left,
+            right,
+            kind,
+            NumericOperator::Add,
+            context,
+        ),
+        (NumericOperator::Subtract, Some(left), Some(right), None) => emit_fast_native_binary(
+            function,
+            destination,
+            left,
+            right,
+            kind,
+            NumericOperator::Subtract,
+            context,
+        ),
+        (NumericOperator::Multiply, Some(left), Some(right), None) => emit_fast_native_binary(
+            function,
+            destination,
+            left,
+            right,
+            kind,
+            NumericOperator::Multiply,
+            context,
+        ),
+        (NumericOperator::IntegerDivide, Some(left), Some(right), None) => {
+            emit_guarded_division(function, destination, left, right, kind, context)
+        }
+        (NumericOperator::Remainder, Some(left), Some(right), None) => {
+            emit_guarded_remainder(function, destination, left, right, kind, context)
+        }
+        (NumericOperator::Power, Some(base), Some(source_exponent), Some(power_scratch)) => {
+            emit_integer_power_loop(
+                function,
+                IntegerPowerOperation {
+                    destination,
+                    base,
+                    source_exponent,
+                    kind,
+                    scratch: power_scratch,
+                    product: IntegerPowerProduct::Wrapping,
+                },
+                context,
+            )
+        }
+        _ => Err(InfrastructureFailure::wasm_generation(format!(
+            "Wasm fast integer operation has inconsistent operands for {operator:?}"
+        ))),
+    }
+}
+
+/// Emit one mod-2^N native binary operation and write the low bits to `destination`.
+///
+/// WHY: Wasm `i32`/`i64` add, subtract and multiply are exactly the language's modular
+///      operations; unlike the checked path there is no predicate between the operands and the
+///      destination store.
+fn emit_fast_native_binary(
+    function: &mut Function,
+    destination: WasmLirLocalId,
+    left: WasmLirLocalId,
+    right: WasmLirLocalId,
+    kind: WasmIntegerOperationKind,
+    operator: NumericOperator,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), InfrastructureFailure> {
+    emit_native_integer_binary(function, left, right, kind, operator, context)?;
+    function.instruction(&Instruction::LocalSet(local_index(destination, context)?));
+    Ok(())
+}
+
+/// How one integer power accumulation produces its next product.
+///
+/// WHY: checked power keeps every accumulated product inside the semantic domain before
+///      comparing it, while fast power keeps only the low bits. The square-and-multiply loop is
+///      otherwise identical, so the loop shape has one owner and only the product step varies.
+#[derive(Clone, Copy)]
+enum IntegerPowerProduct {
+    /// Checked product, optionally using the widened I64 scratch for 32-bit multiply predicates.
+    Checked {
+        product_scratch: Option<WasmLirLocalId>,
+    },
+    /// Fast modular product with no overflow predicate.
+    Wrapping,
+}
+
+impl IntegerPowerProduct {
+    fn emit(
+        self,
+        function: &mut Function,
+        destination: WasmLirLocalId,
+        left: WasmLirLocalId,
+        right: WasmLirLocalId,
+        kind: WasmIntegerOperationKind,
+        context: &LirBodyEmitContext<'_>,
+    ) -> Result<(), InfrastructureFailure> {
+        match self {
+            Self::Checked { product_scratch } => emit_checked_multiply_into(
+                function,
+                destination,
+                left,
+                right,
+                kind,
+                product_scratch,
+                context,
+            ),
+            Self::Wrapping => {
+                emit_wrapping_integer_multiply(function, destination, left, right, kind, context)
+            }
+        }
+    }
+}
+
+/// The shared input of checked and fast integer power emission.
+///
+/// WHY: the two operands, result, carrier, loop scratch and product policy travel together
+///      through one square-and-multiply pass, so they form one operation record rather than six
+///      positional parameters.
+#[derive(Clone, Copy)]
+struct IntegerPowerOperation {
+    destination: WasmLirLocalId,
+    base: WasmLirLocalId,
+    source_exponent: WasmLirLocalId,
+    kind: WasmIntegerOperationKind,
+    scratch: WasmIntegerPowerScratch,
+    product: IntegerPowerProduct,
+}
+
+/// Emits the signed-exponent guard and square-and-multiply loop shared by integer power.
+///
+/// WHAT: traps a negative signed exponent, then multiplies products selected by the exponent's
+///       low bit while shifting it right until zero.
+/// WHY: raising the value before truncation would construct a huge power and lose a modular
+///      result. `0 ^ 0` stays `1` because the accumulator starts there and the loop body never
+///      runs for a zero exponent.
+fn emit_integer_power_loop(
+    function: &mut Function,
+    operation: IntegerPowerOperation,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), InfrastructureFailure> {
+    let IntegerPowerOperation {
+        destination,
+        base,
+        source_exponent,
+        kind,
+        scratch,
+        product,
+    } = operation;
+    let WasmIntegerPowerScratch { factor, exponent } = scratch;
+
+    if is_signed(kind) {
+        emit_signed_local_relation(
+            function,
+            source_exponent,
+            kind,
+            SignedRelation::LessThan,
+            context,
+        )?;
+        emit_unreachable_if_true(function);
+    }
+
+    function.instruction(&Instruction::LocalGet(local_index(base, context)?));
+    function.instruction(&Instruction::LocalSet(local_index(factor, context)?));
+    function.instruction(&Instruction::LocalGet(local_index(
+        source_exponent,
+        context,
+    )?));
+    function.instruction(&Instruction::LocalSet(local_index(exponent, context)?));
+    // A trap aborts before the caller observes this result, so the accumulator may live here.
+    emit_integer_constant(function, kind, 1);
+    function.instruction(&Instruction::LocalSet(local_index(destination, context)?));
+
+    function.instruction(&Instruction::Block(BlockType::Empty));
+    function.instruction(&Instruction::Loop(BlockType::Empty));
+    emit_local_is_zero(function, exponent, kind, context)?;
+    function.instruction(&Instruction::BrIf(1));
+
+    emit_local_is_odd(function, exponent, kind, context)?;
+    function.instruction(&Instruction::If(BlockType::Empty));
+    product.emit(function, destination, destination, factor, kind, context)?;
+    function.instruction(&Instruction::End);
+
+    // An unused final factor square must not introduce an overflow past the result.
+    emit_shift_exponent_right(function, exponent, kind, context)?;
+    emit_local_is_zero(function, exponent, kind, context)?;
+    function.instruction(&Instruction::I32Eqz);
+    function.instruction(&Instruction::If(BlockType::Empty));
+    product.emit(function, factor, factor, factor, kind, context)?;
+    function.instruction(&Instruction::End);
+
+    function.instruction(&Instruction::Br(0));
+    function.instruction(&Instruction::End);
+    function.instruction(&Instruction::End);
+    Ok(())
+}
+
+/// Emits unary negation as the modular `0 - operand` with no minimum predicate.
+///
+/// WHY: proven-safe negation excludes the signed minimum by analysis, and fast negation wraps
+///      that minimum to itself, so neither family needs the runtime-checked minimum predicate.
+///      Unsigned negation has no language domain at all.
+fn emit_wrapping_negation(
+    function: &mut Function,
+    destination: WasmLirLocalId,
+    operand: WasmLirLocalId,
+    kind: WasmIntegerOperationKind,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), InfrastructureFailure> {
+    if signed_bounds(kind).is_none() {
+        return Err(InfrastructureFailure::wasm_generation(
+            "Wasm modular negation requires a signed integer domain".to_owned(),
+        ));
+    }
+
+    emit_integer_constant(function, kind, 0);
+    function.instruction(&Instruction::LocalGet(local_index(operand, context)?));
+    function.instruction(integer_opcode(kind, NumericOperator::Subtract)?);
+    function.instruction(&Instruction::LocalSet(local_index(destination, context)?));
+    Ok(())
+}
+
+/// Emit one modular multiply without any overflow predicate.
+fn emit_wrapping_integer_multiply(
+    function: &mut Function,
+    destination: WasmLirLocalId,
+    left: WasmLirLocalId,
+    right: WasmLirLocalId,
+    kind: WasmIntegerOperationKind,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), InfrastructureFailure> {
+    emit_native_integer_binary(
+        function,
+        left,
+        right,
+        kind,
+        NumericOperator::Multiply,
+        context,
+    )?;
+    function.instruction(&Instruction::LocalSet(local_index(destination, context)?));
+    Ok(())
 }
 
 fn emit_checked_add(
@@ -383,31 +746,13 @@ fn emit_checked_negation(
     Ok(())
 }
 
-/// Emits proven-safe negation as `0 - operand` with no minimum predicate.
+/// Emits truncating division with its zero-divisor and signed `MIN // -1` guards.
 ///
-/// WHY: the analysis fact for this statement excludes the signed minimum, so the subtract-based
-///      negation cannot overflow and needs no runtime check.
-fn emit_proven_safe_negation(
-    function: &mut Function,
-    destination: WasmLirLocalId,
-    operand: WasmLirLocalId,
-    kind: WasmIntegerOperationKind,
-    context: &LirBodyEmitContext<'_>,
-) -> Result<(), InfrastructureFailure> {
-    if signed_bounds(kind).is_none() {
-        return Err(InfrastructureFailure::wasm_generation(
-            "Wasm proven-safe negation requires a signed integer domain".to_owned(),
-        ));
-    }
-
-    emit_integer_constant(function, kind, 0);
-    function.instruction(&Instruction::LocalGet(local_index(operand, context)?));
-    function.instruction(integer_opcode(kind, NumericOperator::Subtract)?);
-    function.instruction(&Instruction::LocalSet(local_index(destination, context)?));
-    Ok(())
-}
-
-fn emit_checked_division(
+/// WHY: runtime-checked ordinary division and `$fast_math` division report exactly the same
+///      faults, so one guard sequence serves both. Wasm delivers either failure as
+///      `unreachable`, which keeps one Moth trap transport and does not depend on the engine's
+///      `div_s` trap message.
+fn emit_guarded_division(
     function: &mut Function,
     destination: WasmLirLocalId,
     left: WasmLirLocalId,
@@ -437,7 +782,12 @@ fn emit_checked_division(
     Ok(())
 }
 
-fn emit_checked_remainder(
+/// Emits dividend-sign remainder with its zero-divisor guard.
+///
+/// WHY: runtime-checked ordinary remainder and `$fast_math` remainder report only a zero
+///      divisor, and Wasm `rem_s`/`rem_u` are defined to return zero for `MIN % -1` without
+///      trapping, so the signed minimum needs no branch.
+fn emit_guarded_remainder(
     function: &mut Function,
     destination: WasmLirLocalId,
     left: WasmLirLocalId,
@@ -456,85 +806,6 @@ fn emit_checked_remainder(
         context,
     )?;
     function.instruction(&Instruction::LocalSet(local_index(destination, context)?));
-    Ok(())
-}
-
-fn emit_checked_power(
-    function: &mut Function,
-    destination: WasmLirLocalId,
-    base: WasmLirLocalId,
-    source_exponent: WasmLirLocalId,
-    kind: WasmIntegerOperationKind,
-    scratch: WasmIntegerScratch,
-    context: &LirBodyEmitContext<'_>,
-) -> Result<(), InfrastructureFailure> {
-    let product_scratch = scratch.product;
-    let Some(WasmIntegerPowerScratch { factor, exponent }) = scratch.power else {
-        crate::compiler_bug!(
-            CompilerStage::BackendLowering,
-            "Wasm integer power is missing its loop scratch locals"
-        )
-    };
-
-    if is_signed(kind) {
-        emit_signed_local_relation(
-            function,
-            source_exponent,
-            kind,
-            SignedRelation::LessThan,
-            context,
-        )?;
-        emit_unreachable_if_true(function);
-    }
-
-    function.instruction(&Instruction::LocalGet(local_index(base, context)?));
-    function.instruction(&Instruction::LocalSet(local_index(factor, context)?));
-    function.instruction(&Instruction::LocalGet(local_index(
-        source_exponent,
-        context,
-    )?));
-    function.instruction(&Instruction::LocalSet(local_index(exponent, context)?));
-    // A trap aborts before the caller commits this result, so it can hold the accumulator.
-    emit_integer_constant(function, kind, 1);
-    function.instruction(&Instruction::LocalSet(local_index(destination, context)?));
-
-    function.instruction(&Instruction::Block(BlockType::Empty));
-    function.instruction(&Instruction::Loop(BlockType::Empty));
-    emit_local_is_zero(function, exponent, kind, context)?;
-    function.instruction(&Instruction::BrIf(1));
-
-    emit_local_is_odd(function, exponent, kind, context)?;
-    function.instruction(&Instruction::If(BlockType::Empty));
-    emit_checked_multiply_into(
-        function,
-        destination,
-        destination,
-        factor,
-        kind,
-        product_scratch,
-        context,
-    )?;
-    function.instruction(&Instruction::End);
-
-    // An unused final factor square must not introduce an overflow past the result.
-    emit_shift_exponent_right(function, exponent, kind, context)?;
-    emit_local_is_zero(function, exponent, kind, context)?;
-    function.instruction(&Instruction::I32Eqz);
-    function.instruction(&Instruction::If(BlockType::Empty));
-    emit_checked_multiply_into(
-        function,
-        factor,
-        factor,
-        factor,
-        kind,
-        product_scratch,
-        context,
-    )?;
-    function.instruction(&Instruction::End);
-
-    function.instruction(&Instruction::Br(0));
-    function.instruction(&Instruction::End);
-    function.instruction(&Instruction::End);
     Ok(())
 }
 

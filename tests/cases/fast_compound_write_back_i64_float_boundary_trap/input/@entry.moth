@@ -1,0 +1,5 @@
+value ~I64 = 9223372036854775807
+one I32 = 1
+$fast_math
+~value /= one
+~[:value=[value]]

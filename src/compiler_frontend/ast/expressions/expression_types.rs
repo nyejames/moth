@@ -101,6 +101,19 @@ pub(crate) enum CastHandling {
 
     /// Compiler-inserted conversion at a compound-assignment store.
     StoreConversion,
+
+    /// Compiler-inserted conversion at a compound-assignment store under `$fast_math`.
+    ///
+    /// WHAT: the implicit write-back of an arithmetic result that resolved `Fast` into a
+    ///       different fixed target type. Integer-to-integer keeps the destination low bits and
+    ///       signedness (total); float-to-integer truncates toward zero and traps out of range;
+    ///       integer-to-float and float-to-float round at the destination precision and trap when
+    ///       non-finite. Conversions involving `Dec` never take this handling because `Dec`
+    ///       arithmetic is always ordinary.
+    /// WHY: a fast write-back has different failure semantics from an explicit `cast` and from
+    ///      an ordinary checked store conversion, so HIR and the backends must be able to tell
+    ///      it apart. It never contributes a recoverable `CompoundWriteBack` failure fact.
+    FastStoreConversion,
 }
 
 /// Bodyless handling retained in the expression store's handling records.

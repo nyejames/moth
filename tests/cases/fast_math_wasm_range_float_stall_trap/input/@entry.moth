@@ -1,0 +1,11 @@
+-- An in-range float candidate that rounds back to the current value makes no progress. Under
+-- `$fast_math` that generated guard is fatal instead of recoverable.
+start F32 = 1e20
+end F32 = 2e20
+tiny_step F32 = 1.0
+count ~= 0
+$fast_math
+loop start to & end by tiny_step |value|:
+    ~count += 1
+;
+~[:count=[count]]

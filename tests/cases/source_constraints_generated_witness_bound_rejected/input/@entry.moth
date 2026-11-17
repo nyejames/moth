@@ -1,0 +1,29 @@
+leaf type T |value T| -> I32:
+    $fast_math
+    doubled I32 = 1 + 1
+    return doubled
+;
+
+step_four type T |value T| -> I32:
+    return leaf(value)
+;
+
+step_three type T |value T| -> I32:
+    return step_four(value)
+;
+
+step_two type T |value T| -> I32:
+    return step_three(value)
+;
+
+step_one type T |value T| -> I32:
+    return step_two(value)
+;
+
+$safe_math
+caller |value I32| -> I32:
+    return step_one(value)
+;
+
+result I32 = caller(2)
+io.line([:value=[result]])

@@ -109,7 +109,8 @@ Current open questions include:
 - source-level bitwise integer operations
 - speculative `Byte` buffer and text-encoding APIs
 - grouped `if:` handlers, rewind and richer effects
-- explicit numeric wrapping and other wrap-or-trap controls
+- explicit numeric wrapping and other wrap-or-trap controls beyond the accepted
+  `$fast_math` contract, including a possible `$no_wrap`
 - native-trap assertion optimisation
 
 `$checked` concerns a separate borrow-proof budget, not a numeric check mode.

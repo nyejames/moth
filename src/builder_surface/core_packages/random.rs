@@ -11,7 +11,7 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering, ExternalParameter,
-    external_success_returns,
+    external_success_returns, trusted_numeric_contract,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
@@ -34,6 +34,9 @@ pub fn register_core_random_package(registry: &mut ExternalPackageRegistry) {
                     None,
                 ),
                 const_eval: None,
+                // `Math.random` returns a binary64 value without selecting fast arithmetic,
+                // raising a Moth trap or returning an error.
+                numeric_contract: trusted_numeric_contract(false, false, false),
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         "__moth_random_float".to_owned(),
@@ -63,6 +66,10 @@ pub fn register_core_random_package(registry: &mut ExternalPackageRegistry) {
                     None,
                 ),
                 const_eval: None,
+                // The helper swaps reversed bounds, short-circuits equal bounds and maps
+                // `Math.random` into the inclusive I32 range with `Math.floor`. That arithmetic
+                // is total for I32 bounds and has no error channel.
+                numeric_contract: trusted_numeric_contract(false, false, false),
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
                         "__moth_random_int".to_owned(),

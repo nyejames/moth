@@ -248,6 +248,8 @@ fn evaluate_expression_inner(
     }
 
     // General path: resolve operator types across the full RPN shape, then attempt folding.
+    // The lexical constraint set belongs to the authoring scope, so a deferred fragment completes
+    // under the set its own statement captured rather than a sibling's mode.
     let resolved = resolve_expression_result_type(
         &mut ordered_nodes,
         span,
@@ -257,7 +259,13 @@ fn evaluate_expression_inner(
         string_table,
         type_interner.environment(),
         path_fork,
+        context.source_constraints().fast_math_active(),
     )?;
+    // Fast-use evidence belongs to the authoring scope, so the evaluating context records it
+    // before construction and folding can replace the operation.
+    for &span in &resolved.fast_operation_spans {
+        context.record_fast_operation_witness(span);
+    }
     let resolved_type = resolved.type_id;
     let mut operation_failure_facts = resolved.failure_facts;
     validate_expression_result_type(

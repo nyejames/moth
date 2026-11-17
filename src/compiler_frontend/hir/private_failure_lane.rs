@@ -39,7 +39,7 @@ use crate::compiler_frontend::hir::statements::{
 use crate::compiler_frontend::hir::terminators::{
     HirFallibleOperation, HirJumpArgument, HirTerminator, RuntimeFailureCause,
 };
-use crate::compiler_frontend::hir::utils::terminator_targets;
+use crate::compiler_frontend::hir::utils::{collect_structural_blocks, terminator_targets};
 use crate::compiler_frontend::hir::validation::validate_hir_module;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 
@@ -236,11 +236,19 @@ impl LaneInstaller<'_> {
         match &statement.kind {
             HirStatementKind::Call { target, .. } => self.target_uses_private_lane(target),
             HirStatementKind::NumericOp { failure_mode, .. }
-            | HirStatementKind::LoopStepFailure { failure_mode, .. }
             | HirStatementKind::FormatFloat { failure_mode, .. }
             | HirStatementKind::ValidateFloat { failure_mode, .. } => {
+                // Only `Trap` delivery is recoverable-by-lane-installation. Fast arithmetic and
+                // fast range guards use `Fatal`, so the lane never reads their semantics.
                 Ok(self.lane_functions.contains(&function_id)
                     && *failure_mode == NumericFailureMode::Trap
+                    && statement_has_implicit_failure(&statement.kind))
+            }
+            HirStatementKind::LoopStepFailure { semantics, .. } => {
+                // A fast guard is `Fatal`, so it is never lane-eligible; an ordinary statement
+                // guard traps and here becomes a recoverable lane producer.
+                Ok(self.lane_functions.contains(&function_id)
+                    && !semantics.is_fast()
                     && statement_has_implicit_failure(&statement.kind))
             }
             _ => Ok(false),
@@ -479,7 +487,7 @@ impl LaneInstaller<'_> {
             .hir
             .functions
             .iter()
-            .flat_map(|function| reachable_blocks(self.hir, function.entry))
+            .flat_map(|function| collect_structural_blocks(self.hir, function.entry))
             .collect::<FxHashSet<_>>();
         // Several records may share one handler, and handler subgraphs may overlap, so
         // deduplicated roots share a single visited set. The walk stops at
@@ -498,7 +506,7 @@ impl LaneInstaller<'_> {
                 continue;
             }
             remove.insert(block_id);
-            let Some(block) = self.hir.blocks.get(block_id.0 as usize) else {
+            let Some(block) = self.hir.block(block_id) else {
                 continue;
             };
             for target in terminator_targets(&block.terminator) {
@@ -543,7 +551,7 @@ impl LaneInstaller<'_> {
         let lane_functions = self.lane_functions.iter().copied().collect::<Vec<_>>();
         for function_id in lane_functions {
             let entry = self.function_entry(function_id)?;
-            for block_id in reachable_blocks(self.hir, entry) {
+            for block_id in collect_structural_blocks(self.hir, entry) {
                 let cause = match &self.hir.blocks[block_id.0 as usize].terminator {
                     HirTerminator::RuntimeFailure {
                         cause: Some(cause), ..
@@ -593,7 +601,7 @@ impl LaneInstaller<'_> {
         if !entry_is_fallible {
             return Ok(false);
         }
-        let blocks = reachable_blocks(self.hir, entry);
+        let blocks = collect_structural_blocks(self.hir, entry);
         if blocks.iter().any(|block_id| {
             matches!(
                 self.hir.blocks[block_id.0 as usize].terminator,
@@ -815,23 +823,4 @@ fn private_lane_functions(
         }
     }
     Ok(lane_functions)
-}
-
-fn reachable_blocks(hir: &HirModule, entry: BlockId) -> Vec<BlockId> {
-    let mut pending = VecDeque::from([entry]);
-    let mut seen = FxHashSet::default();
-    let mut blocks = Vec::new();
-    while let Some(block_id) = pending.pop_front() {
-        if !seen.insert(block_id) {
-            continue;
-        }
-        let Some(block) = hir.blocks.get(block_id.0 as usize) else {
-            continue;
-        };
-        blocks.push(block_id);
-        for target in terminator_targets(&block.terminator) {
-            pending.push_back(target);
-        }
-    }
-    blocks
 }

@@ -30,7 +30,8 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
-    SourceDirectiveKind, SourceModifierOperand, StyleDirectiveKind,
+    ConstraintDirectiveSpans, SourceConstraintSet, SourceDirectiveKind, SourceModifierOperand,
+    StatementSourceConstraintAttachment, StyleDirectiveKind,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -58,6 +59,39 @@ pub(crate) struct SourceDirectiveAnnotation {
     pub(crate) name_id: StringId,
     pub(crate) span: SourceSpan,
     pub(crate) operand: Option<TokenRange>,
+}
+
+/// Projects one directive attachment list onto the lexical constraint set it declares.
+///
+/// WHAT: unions the constraint kinds in a header or statement run and ignores documentation,
+///       TODO, export and config annotations.
+/// WHY: function attachment and generic templates read the same authored list as statement
+///      attachment, so the projection lives beside the annotation type instead of in each owner.
+pub(crate) fn source_constraints_from_annotations(
+    annotations: &[SourceDirectiveAnnotation],
+) -> SourceConstraintSet {
+    annotations
+        .iter()
+        .fold(SourceConstraintSet::default(), |constraints, annotation| {
+            constraints.with_directive(annotation.kind)
+        })
+}
+
+/// The authored guarantee directive spans in one attachment run.
+///
+/// WHAT: keeps the `$safe_math` and `$infallible` spans separately and ignores documentation,
+///       TODO, export, config and `$fast_math` annotations.
+/// WHY: verification labels each violation at the guarantee that failed. `$fast_math` only selects
+///      semantics, so the shared header and statement projection keeps the two reportable
+///      guarantees and nothing else.
+pub(crate) fn constraint_directive_spans(
+    annotations: &[SourceDirectiveAnnotation],
+) -> ConstraintDirectiveSpans {
+    let mut spans = ConstraintDirectiveSpans::default();
+    for annotation in annotations {
+        spans.record(annotation.kind, annotation.span);
+    }
+    spans
 }
 
 /// Captures one source directive's operand from the token after its name.
@@ -322,15 +356,17 @@ fn source_directive_text(
 /// Parses one contiguous source-directive run at an executable statement boundary.
 ///
 /// WHAT: consumes every directive in the run, requires the target construct to start on a later
-///       line, validates `$doc`'s declaration target and folds `$doc`/`$todo` operands.
+///       line, validates `$doc`'s declaration target, folds `$doc`/`$todo` operands and returns
+///       the lexical constraint set the run attaches to the next statement.
 /// WHY: statement attachment must not rescan past directives per name or cross a scope close. The
-///       caller re-enters ordinary statement dispatch at the returned target position.
+///       caller re-enters ordinary statement dispatch at the returned target position and applies
+///       the returned set to exactly that statement's subtree.
 pub(crate) fn parse_statement_source_directive_run(
     cursor: &mut AstCursor<'_>,
     context: &mut ScopeContext,
     resources: SourceOperandFoldResources<'_, '_>,
     target_is_scope_boundary: impl Fn(&AstCursor<'_>) -> bool,
-) -> Result<(), ExpressionParseError> {
+) -> Result<StatementSourceConstraintAttachment, ExpressionParseError> {
     let SourceOperandFoldResources {
         type_interner,
         expression_builder,
@@ -408,8 +444,14 @@ pub(crate) fn parse_statement_source_directive_run(
         // `capture_source_directive_operand` leaves a bare directive on its own token and
         // advances a directive with an operand to the next boundary. Normalize both shapes so a
         // contiguous run advances exactly once per directive. A following directive stays in
-        // place so the separator check can inspect its authored adjacency.
-        if cursor.position() == operand_start && cursor.current_tag() != TokenTag::STYLE_DIRECTIVE {
+        // place so the separator check can inspect its authored adjacency, and a newline stays in
+        // place so the run can record that the target starts on a later line.
+        if cursor.position() == operand_start
+            && !matches!(
+                cursor.current_tag(),
+                TokenTag::STYLE_DIRECTIVE | TokenTag::NEWLINE
+            )
+        {
             cursor.advance();
         }
         annotations.push(SourceDirectiveAnnotation {
@@ -483,6 +525,10 @@ pub(crate) fn parse_statement_source_directive_run(
     }
     let declaration_target =
         statement_declaration_target(cursor, context, &mut *string_table, &mut *path_fork)?;
+    // Compile-time-only declarations can run no arithmetic, so they are not a constraint target.
+    // `$doc` still accepts them: documentation on a compile-time binding is ordinary metadata.
+    let compile_time_declaration_target = statement_target_is_compile_time_declaration(cursor);
+    let target_span = cursor.current_span();
     let source = cursor.canonical_owner().cloned().ok_or_else(|| {
         InfrastructureFailure::internal(
             CompilerStage::AstConstruction,
@@ -492,6 +538,8 @@ pub(crate) fn parse_statement_source_directive_run(
     let doc_sink = context
         .publish_source_docs
         .then(|| Rc::clone(&context.source_docs));
+    let mut constraints = SourceConstraintSet::default();
+    let mut directive_spans = ConstraintDirectiveSpans::default();
 
     for annotation in annotations {
         match annotation.kind {
@@ -540,6 +588,30 @@ pub(crate) fn parse_statement_source_directive_run(
                     },
                 )?;
             }
+            SourceDirectiveKind::FastMath
+            | SourceDirectiveKind::SafeMath
+            | SourceDirectiveKind::Infallible => {
+                // A compile-time function body is never a constraint target at any nesting depth.
+                // Checked first, so a `#` binding inside such a body gets the function reason.
+                if context.is_const_body() {
+                    return Err(templates::invalid_template_directive(
+                        Some(annotation.name_id),
+                        InvalidTemplateDirectiveReason::CompileTimeFunctionTarget,
+                        Some(annotation.span),
+                    )
+                    .into());
+                }
+                if compile_time_declaration_target {
+                    return Err(templates::invalid_template_directive(
+                        Some(annotation.name_id),
+                        InvalidTemplateDirectiveReason::WrongTarget,
+                        Some(annotation.span),
+                    )
+                    .into());
+                }
+                constraints = constraints.with_directive(annotation.kind);
+                directive_spans.record(annotation.kind, annotation.span);
+            }
             SourceDirectiveKind::Config | SourceDirectiveKind::Export => {
                 return Err(templates::invalid_template_directive(
                     Some(annotation.name_id),
@@ -551,7 +623,11 @@ pub(crate) fn parse_statement_source_directive_run(
         }
     }
 
-    Ok(())
+    Ok(StatementSourceConstraintAttachment {
+        constraints,
+        target_span,
+        directive_spans,
+    })
 }
 
 fn missing_source_directive_separator(name_id: StringId, span: SourceSpan) -> ExpressionParseError {
@@ -632,6 +708,23 @@ fn statement_declaration_target(
         return Ok(None);
     }
     Ok(path_fork.try_intern_child(context.scope, symbol_id))
+}
+
+/// Whether the next statement starts a compile-time-only binding or constant template.
+///
+/// WHAT: reads only the declaration marker after the binding name: the `#` compile-time constant
+///       marker (`name #= ...`, `name #Type = ...`) and the `::` constant-template shape.
+/// WHY: lexical constraints describe executable arithmetic and failure behaviour, so a
+///      compile-time declaration is not a valid target even though `$doc` may still document it.
+fn statement_target_is_compile_time_declaration(cursor: &AstCursor<'_>) -> bool {
+    let symbol_offset = match cursor.current_tag() {
+        TokenTag::SYMBOL => 0usize,
+        TokenTag::MUTABLE if cursor.peek_next_tag() == Some(TokenTag::SYMBOL) => 1usize,
+        _ => return false,
+    };
+    cursor
+        .token_ref_at_offset(symbol_offset + 1)
+        .is_some_and(|follower| matches!(follower.tag(), TokenTag::HASH | TokenTag::DOUBLE_COLON))
 }
 
 /// Flatten an already-folded source-directive operand into final text.

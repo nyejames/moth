@@ -48,6 +48,9 @@ fn empty_summary() -> PublicCallSummary {
         parameters: Vec::new(),
         return_alias: FunctionReturnAliasSummary::Fresh,
         escapes_builtin_failure: false,
+        uses_fast_semantics: false,
+        may_trap: false,
+        may_fail: false,
     }
 }
 
@@ -62,6 +65,9 @@ fn shared_summary(parameter_count: usize) -> PublicCallSummary {
             .collect(),
         return_alias: FunctionReturnAliasSummary::Fresh,
         escapes_builtin_failure: false,
+        uses_fast_semantics: false,
+        may_trap: false,
+        may_fail: false,
     }
 }
 

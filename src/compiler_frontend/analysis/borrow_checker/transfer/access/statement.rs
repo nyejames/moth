@@ -173,7 +173,8 @@ pub(crate) fn transfer_statement(
         }
 
         HirStatementKind::FormatFloat { source, result, .. }
-        | HirStatementKind::ValidateFloat { source, result, .. } => {
+        | HirStatementKind::ValidateFloat { source, result, .. }
+        | HirStatementKind::FastStoreConversion { source, result, .. } => {
             let location = context.diagnostics.statement_error_span(statement);
             transfer_call_arguments_and_result(
                 &mut CallTransferContext {
@@ -398,7 +399,8 @@ pub(crate) fn transfer_statement(
             )?;
         }
         HirStatementKind::FormatFloat { source, .. }
-        | HirStatementKind::ValidateFloat { source, .. } => {
+        | HirStatementKind::ValidateFloat { source, .. }
+        | HirStatementKind::FastStoreConversion { source, .. } => {
             transfer_aggregate_expression_ownership(
                 layout,
                 state,

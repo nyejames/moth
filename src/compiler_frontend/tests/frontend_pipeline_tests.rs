@@ -60,7 +60,8 @@ use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAbiType, ExternalAccessKind, ExternalFunctionDef,
-    ExternalFunctionLowerings, ExternalParameter, ExternalReturnSlot, ExternalSignatureType,
+    ExternalFunctionLowerings, ExternalNumericContract, ExternalParameter, ExternalReturnSlot,
+    ExternalSignatureType,
 };
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -79,7 +80,7 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{HirNumericOperands, NumericFailureMode};
 use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::{
-    HirFallibleOperation, HirTerminator, RuntimeFailureCause,
+    HirFallibleOperation, HirTerminator, RuntimeFailureCause, RuntimeFailureKind,
 };
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
@@ -1017,6 +1018,63 @@ fn compiles_multi_file_dependency_program_through_borrow_check() {
         "the imported helper must carry its own borrow summary"
     );
 }
+
+#[test]
+fn multi_file_same_shape_static_branches_project_evidence_per_source() {
+    let mut project = FrontendProject::new(
+        &[
+            (
+                "src/@entry.moth",
+                "@alpha alpha\n@bravo bravo\nfirst = alpha()\nbravo()\n~[: result=[first]]\n",
+            ),
+            (
+                "src/alpha.moth",
+                "$fast_math\nalpha || -> I32:\n    if 1 > 2:\n        return 100 + 1\n    else\n        return 0\n    ;\n;\n",
+            ),
+            (
+                "src/bravo.moth",
+                "$fast_math\nbravo || -> I32:\n    if 1 < 2:\n        return 100 + 1\n    else\n        return 0\n    ;\n;\n",
+            ),
+        ],
+        "src/@entry.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+
+    let hir = project.hir();
+    let function_id = |name: &str| {
+        hir.functions
+            .iter()
+            .find(|function| {
+                hir.side_table
+                    .function_name_path(function.id)
+                    .and_then(|path| project.frontend.path_fork.component(path))
+                    .is_some_and(|component| {
+                        project.frontend.string_table.resolve(component) == name
+                    })
+            })
+            .unwrap_or_else(|| panic!("the multi-file module should lower {name}"))
+            .id
+    };
+    let alpha = &hir.function_failure_facts[&function_id("alpha")];
+    let bravo = &hir.function_failure_facts[&function_id("bravo")];
+
+    assert!(
+        alpha.constraint.fast_use.is_empty(),
+        "alpha's inactive then branch must not leave evidence: {:?}",
+        alpha.constraint.fast_use
+    );
+    assert_eq!(
+        bravo.constraint.fast_use.len(),
+        1,
+        "bravo's selected branch keeps its one folded fast-operation witness: {:?}",
+        bravo.constraint.fast_use
+    );
+    assert_eq!(
+        bravo.constraint.fast_use[0].provenance,
+        crate::compiler_frontend::hir::failure_facts::HirFastUseProvenance::AuthoredArithmetic
+    );
+}
+
 #[test]
 fn frontend_diagnostics_preserve_source_spans() {
     let mut project = FrontendProject::new(
@@ -1910,6 +1968,7 @@ fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
                 None,
             ),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("float host signature must register");
@@ -2257,6 +2316,7 @@ fn private_failure_lane_preserves_unrelated_fatal_fallible_edge() {
     hir.blocks[fatal_block.0 as usize].terminator = HirTerminator::RuntimeFailure {
         message: "Unrecoverable foreign fault".to_owned(),
         cause: None,
+        kind: RuntimeFailureKind::NoMatchFallback,
     };
     if let HirTerminator::RuntimeFailure { message, .. } =
         &mut hir.blocks[conversion_block.0 as usize].terminator
@@ -5266,6 +5326,7 @@ fn implicit_failure_zero_success_host_catch_lowers_pending_numeric_argument() {
             }],
             return_contract: external_returns(vec![], Some(ExternalSignatureType::BuiltinError)),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("fallible host test signature must register");
@@ -5344,6 +5405,7 @@ fn implicit_failure_catches_keep_external_float_checks_on_function_boundary() {
                 None,
             ),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("float host signature must register");
@@ -5382,6 +5444,7 @@ fn implicit_failure_catches_keep_external_float_checks_on_function_boundary() {
                 None,
             ),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("float host signature must register");
@@ -5763,4 +5826,23 @@ fn source_calls_record_the_callee_evaluation_classification() {
         CallableEvaluation::Runtime,
         "an ordinary function call must remain a runtime call"
     );
+}
+
+#[test]
+fn exported_no_slot_fast_range_loop_is_accepted() {
+    // Fast range guards are fatal deliveries and contribute no implicit recoverable failure, so
+    // an exported ordinary-return function (no `Error!` slot) stays publishable. Dynamic bounds
+    // and step keep every generated guard in the lowered HIR.
+    let mut project = failure_api_project(
+        "$export\n\
+         $fast_math\n\
+         loop_export |start F32, end F32, step F32| -> F32:\n\
+         \x20   loop start to end by step |i|:\n\
+         \x20   ;\n\
+         \x20   return start\n\
+         ;\n",
+    );
+    project
+        .failure_contract_result()
+        .expect("a fast range loop's fatal guards must not make an exported no-slot function fail");
 }

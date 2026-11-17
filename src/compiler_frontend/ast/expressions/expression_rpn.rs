@@ -11,7 +11,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::{
-    NumericComparisonDomain, NumericOperator,
+    NumericComparisonDomain, NumericOperator, NumericSemantics,
 };
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
@@ -175,6 +175,11 @@ pub(crate) struct ResolvedNumericOperation {
     pub left_conversion: Option<NumericScalar>,
     pub right_conversion: Option<NumericScalar>,
     pub discharged: bool,
+    /// Checked or `$fast_math` arithmetic selected once from the authoring scope.
+    ///
+    /// WHY: folding, HIR construction and later fast-use evidence must read one selected fact
+    ///      instead of re-reading a scope, and the operation itself owns the mode it evaluates in.
+    pub semantics: NumericSemantics,
 }
 
 impl ResolvedOperation {

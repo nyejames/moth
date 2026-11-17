@@ -1,0 +1,5 @@
+half ~F16 = cast 1.0
+third F32 = 3.0
+$fast_math
+~half /= third
+~[:half=[half]]

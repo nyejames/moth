@@ -233,6 +233,31 @@ impl<'a> GeneratedFunctionTransaction<'a> {
         })
     }
 
+    /// Borrow one completed sidecar without taking mutable access.
+    ///
+    /// WHY: verification reads every completed sidecar's final HIR and source owner after phase B;
+    ///      mutable access belongs only to the publication stages around it.
+    pub(crate) fn sidecar(
+        &self,
+        identity: &GeneratedFunctionIdentity,
+    ) -> &GeneratedFunctionSidecar {
+        let record_id = self.completed_by_identity.get(identity).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "Generated transaction cannot find sidecar {identity:?}"
+            )
+        });
+        self.completed_records
+            .get(record_id.index())
+            .map(|record| &record.sidecar)
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
+                    "Generated transaction sidecar index for {identity:?} is out of range"
+                )
+            })
+    }
+
     pub(crate) fn sidecar_mut(
         &mut self,
         identity: &GeneratedFunctionIdentity,

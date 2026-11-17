@@ -32,11 +32,11 @@ use crate::compiler_frontend::datatypes::definitions::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
-use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, NumericSemantics};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{
-    CallTarget, ExternalFunctionDef, ExternalFunctionLowerings, ExternalPackageRegistry,
-    external_never,
+    CallTarget, ExternalFunctionDef, ExternalFunctionLowerings, ExternalNumericContract,
+    ExternalPackageRegistry, external_never,
 };
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirValueRange};
@@ -60,7 +60,7 @@ use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::hir::terminators::{
-    HirAssertionMessageEvaluation, HirFallibleOperation, HirTerminator,
+    HirAssertionMessageEvaluation, HirFallibleOperation, HirTerminator, RuntimeFailureKind,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -815,10 +815,7 @@ fn wasm_feature_validation_allows_reachable_trap_integer_numeric_op() {
         let statement = numeric_op_statement(
             &mut expressions,
             10,
-            HirNumericOp {
-                operator: NumericOperator::Add,
-                domain,
-            },
+            HirNumericOp::ordinary(NumericOperator::Add, domain),
             None,
         );
         let module = hir_module_with_expressions(
@@ -874,10 +871,7 @@ fn wasm_feature_validation_rejects_reachable_narrow_integer_numeric_ops() {
             let blocks = numeric_op_blocks(
                 &mut expressions,
                 10,
-                HirNumericOp {
-                    operator: NumericOperator::Add,
-                    domain,
-                },
+                HirNumericOp::ordinary(NumericOperator::Add, domain),
                 None,
                 delivery,
             );
@@ -908,10 +902,7 @@ fn wasm_feature_validation_rejects_reachable_narrow_integer_numeric_ops() {
     let blocks = numeric_op_blocks(
         &mut expressions,
         10,
-        HirNumericOp {
-            operator: NumericOperator::Add,
-            domain: NumericScalar::Fixed(FixedScalar::I32),
-        },
+        HirNumericOp::ordinary(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::I32)),
         None,
         ReachableNumericDelivery::Statement(NumericFailureMode::Trap),
     );
@@ -938,6 +929,191 @@ fn wasm_feature_validation_rejects_reachable_narrow_integer_numeric_ops() {
 }
 
 #[test]
+fn wasm_feature_validation_accepts_fast_traps_without_recoverable_capability() {
+    // Fast arithmetic traps are fatal statement traps, so they must pass the Wasm gate without
+    // demanding the recoverable-numeric delivery Wasm does not implement. The same check covers
+    // an infallible fast wrap operation: fast mode never widens support, but it also never adds a
+    // recoverable capability requirement.
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let cases = [
+        (
+            HirNumericOp {
+                operator: NumericOperator::Add,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
+                semantics: NumericSemantics::Fast,
+            },
+            NumericFailureMode::Infallible,
+        ),
+        (
+            HirNumericOp {
+                operator: NumericOperator::IntegerDivide,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
+                semantics: NumericSemantics::Fast,
+            },
+            NumericFailureMode::Fatal,
+        ),
+        (
+            HirNumericOp {
+                operator: NumericOperator::IntegerDivide,
+                domain: NumericScalar::Fixed(FixedScalar::U64),
+                semantics: NumericSemantics::Fast,
+            },
+            NumericFailureMode::Fatal,
+        ),
+        (
+            HirNumericOp {
+                operator: NumericOperator::Power,
+                domain: NumericScalar::Fixed(FixedScalar::I64),
+                semantics: NumericSemantics::Fast,
+            },
+            NumericFailureMode::Fatal,
+        ),
+        (
+            HirNumericOp {
+                operator: NumericOperator::Power,
+                domain: NumericScalar::Fixed(FixedScalar::U32),
+                semantics: NumericSemantics::Fast,
+            },
+            NumericFailureMode::Infallible,
+        ),
+    ];
+
+    for (op, failure_mode) in cases {
+        let mut expressions = test_expression_store();
+        let blocks = numeric_op_blocks(
+            &mut expressions,
+            10,
+            op,
+            None,
+            ReachableNumericDelivery::Statement(failure_mode),
+        );
+        let module = hir_module_with_expressions(
+            FunctionId(0),
+            vec![function(FunctionId(0), BlockId(0))],
+            blocks,
+            expressions,
+        );
+        let reachability = test_reachability(&module);
+        let result = validate_hir_backend_feature_support(
+            BackendFeatureValidationInput {
+                hir: &module,
+                reachability: &reachability,
+                target: BackendTarget::Wasm,
+                type_environment: Some(&type_environment),
+            },
+            &mut string_table,
+        );
+        assert!(
+            result.is_ok(),
+            "Wasm should accept {op} with {failure_mode:?} delivery"
+        );
+    }
+}
+
+#[test]
+fn wasm_feature_validation_keeps_fast_narrow_and_f16_operations_gated() {
+    // D5: fast mode does not widen support. Every domain its ordinary counterpart rejects keeps
+    // the same precise capability reason rather than failing later during lowering.
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let domains = [
+        NumericScalar::Fixed(FixedScalar::I8),
+        NumericScalar::Fixed(FixedScalar::I16),
+        NumericScalar::Fixed(FixedScalar::U8),
+        NumericScalar::Fixed(FixedScalar::U16),
+        NumericScalar::Fixed(FixedScalar::F16),
+    ];
+
+    for domain in domains {
+        let mut expressions = test_expression_store();
+        let blocks = numeric_op_blocks(
+            &mut expressions,
+            10,
+            HirNumericOp {
+                operator: NumericOperator::Add,
+                domain,
+                semantics: NumericSemantics::Fast,
+            },
+            None,
+            ReachableNumericDelivery::Statement(NumericFailureMode::Infallible),
+        );
+        let module = hir_module_with_expressions(
+            FunctionId(0),
+            vec![function(FunctionId(0), BlockId(0))],
+            blocks,
+            expressions,
+        );
+
+        let diagnostic = wasm_feature_validation_diagnostic(
+            &module,
+            &type_environment,
+            &mut string_table,
+            "Wasm should keep a fast operation in an unsupported domain behind the capability gate",
+        );
+        assert_unsupported_feature(
+            &diagnostic,
+            &mut string_table,
+            UnsupportedBackendFeatureReason::CheckedNumericOperations,
+        );
+    }
+}
+
+#[test]
+fn wasm_feature_validation_accepts_fast_range_guards_and_ordinal_delivery() {
+    // A fast range loop's generated guards and ordinal update are fatal by construction. They
+    // must be accepted beside fast body arithmetic because no recoverable numeric delivery
+    // remains; the gate must not treat their `Fatal` mode as the ordinary `Trap` lane.
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let mut expressions = test_expression_store();
+    let body_op = numeric_statement_with_mode(
+        &mut expressions,
+        10,
+        HirNumericOp {
+            operator: NumericOperator::Add,
+            domain: NumericScalar::Fixed(FixedScalar::I32),
+            semantics: NumericSemantics::Fast,
+        },
+        None,
+        NumericFailureMode::Infallible,
+    );
+    let ordinal = HirStatement {
+        id: HirNodeId(11),
+        kind: HirStatementKind::LoopStepFailure {
+            cause: crate::compiler_frontend::hir::numeric::LoopStepFailureCause::ZeroStep,
+            semantics: NumericSemantics::Fast,
+            result: HirLocalDestination::Define(LocalId(9001)),
+        },
+        span: None,
+    };
+    let module = hir_module_with_expressions(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![body_op, ordinal],
+            HirTerminator::Return(HirValueRange::empty()),
+        )],
+        expressions,
+    );
+    let reachability = test_reachability(&module);
+    let result = validate_hir_backend_feature_support(
+        BackendFeatureValidationInput {
+            hir: &module,
+            reachability: &reachability,
+            target: BackendTarget::Wasm,
+            type_environment: Some(&type_environment),
+        },
+        &mut string_table,
+    );
+    assert!(
+        result.is_ok(),
+        "Wasm should accept a fast range loop whose only numeric deliveries are fatal traps"
+    );
+}
+
+#[test]
 fn wasm_recoverable_gate_fires_for_proven_safe_unsigned_operation() {
     // `1 + 1` delivered by Invoke is provably safe (the companion analyser
     // test pins `integer_operation_is_safe`), yet the gate must still reject it with
@@ -950,10 +1126,7 @@ fn wasm_recoverable_gate_fires_for_proven_safe_unsigned_operation() {
     let blocks = numeric_op_blocks(
         &mut expressions,
         10,
-        HirNumericOp {
-            operator: NumericOperator::Add,
-            domain: NumericScalar::Fixed(FixedScalar::U32),
-        },
+        HirNumericOp::ordinary(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U32)),
         None,
         ReachableNumericDelivery::Invoke,
     );
@@ -998,10 +1171,7 @@ fn wasm_feature_validation_rejects_reachable_return_error_numeric_ops() {
         let blocks = numeric_op_blocks(
             &mut expressions,
             10,
-            HirNumericOp {
-                operator: NumericOperator::Add,
-                domain,
-            },
+            HirNumericOp::ordinary(NumericOperator::Add, domain),
             None,
             ReachableNumericDelivery::Invoke,
         );
@@ -1051,7 +1221,7 @@ fn wasm_feature_validation_allows_trap_float_operations_without_f16() {
             let statement = numeric_op_statement(
                 &mut expressions,
                 10,
-                HirNumericOp { operator, domain },
+                HirNumericOp::ordinary(operator, domain),
                 None,
             );
             let module = hir_module_with_expressions(
@@ -1091,10 +1261,7 @@ fn wasm_feature_validation_keeps_f16_numeric_operations_gated() {
     let statement = numeric_op_statement(
         &mut expressions,
         10,
-        HirNumericOp {
-            operator: NumericOperator::Add,
-            domain: NumericScalar::Fixed(FixedScalar::F16),
-        },
+        HirNumericOp::ordinary(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::F16)),
         None,
     );
     let module = hir_module_with_expressions(
@@ -1124,10 +1291,7 @@ fn wasm_feature_validation_keeps_f16_numeric_operations_gated() {
     let blocks = numeric_op_blocks(
         &mut expressions,
         10,
-        HirNumericOp {
-            operator: NumericOperator::Add,
-            domain: NumericScalar::Fixed(FixedScalar::F16),
-        },
+        HirNumericOp::ordinary(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::F16)),
         None,
         ReachableNumericDelivery::Invoke,
     );
@@ -1212,10 +1376,10 @@ fn wasm_feature_validation_rejects_integer_division_on_float_domains() {
     let statement = numeric_op_statement(
         &mut expressions,
         10,
-        HirNumericOp {
-            operator: NumericOperator::IntegerDivide,
-            domain: NumericScalar::Fixed(FixedScalar::F32),
-        },
+        HirNumericOp::ordinary(
+            NumericOperator::IntegerDivide,
+            NumericScalar::Fixed(FixedScalar::F32),
+        ),
         None,
     );
     let module = hir_module_with_expressions(
@@ -2654,6 +2818,7 @@ fn wasm_feature_validation_accepts_never_call_without_a_result_type() {
                 HirTerminator::RuntimeFailure {
                     message: "halted".to_owned(),
                     cause: None,
+                    kind: RuntimeFailureKind::NoMatchFallback,
                 },
             ),
         ],
@@ -2711,6 +2876,7 @@ fn wasm_feature_validation_keeps_never_call_argument_diagnostics_at_the_authored
                 HirTerminator::RuntimeFailure {
                     message: "halted".to_owned(),
                     cause: None,
+                    kind: RuntimeFailureKind::NoMatchFallback,
                 },
             ),
         ],
@@ -2861,6 +3027,7 @@ fn wasm_feature_validation_rejects_host_never_call_at_the_authored_call() {
             parameters: vec![],
             return_contract: external_never(),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("host Never function should register");
@@ -3488,6 +3655,7 @@ fn invoke_blocks(
             HirTerminator::RuntimeFailure {
                 message: "unhandled fixture failure".to_owned(),
                 cause: None,
+                kind: RuntimeFailureKind::NoMatchFallback,
             },
         ),
     ]
@@ -3580,17 +3748,14 @@ fn fixed_scalar_value(scalar: FixedScalar) -> FixedScalarValue {
 }
 
 fn int_add_op() -> HirNumericOp {
-    HirNumericOp {
-        operator: NumericOperator::Add,
-        domain: NumericScalar::Fixed(FixedScalar::I32),
-    }
+    HirNumericOp::ordinary(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::I32))
 }
 
 fn int_mul_op() -> HirNumericOp {
-    HirNumericOp {
-        operator: NumericOperator::Multiply,
-        domain: NumericScalar::Fixed(FixedScalar::I32),
-    }
+    HirNumericOp::ordinary(
+        NumericOperator::Multiply,
+        NumericScalar::Fixed(FixedScalar::I32),
+    )
 }
 
 fn float_statement(

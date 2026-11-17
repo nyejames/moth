@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "tiny=1e-45 flushed=0 zero=0"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "tiny=1e-45 flushed=0 zero=0"

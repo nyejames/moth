@@ -40,7 +40,8 @@ use crate::compiler_frontend::external_packages::test_support::{
 };
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAbiType as RegistryAbiType, ExternalFunctionDef, ExternalFunctionId,
-    ExternalFunctionLowerings, ExternalHirReturnAlias, ExternalReturnSlot, ExternalSignatureType,
+    ExternalFunctionLowerings, ExternalHirReturnAlias, ExternalNumericContract, ExternalReturnSlot,
+    ExternalSignatureType,
 };
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::ids::LocalId;
@@ -1391,6 +1392,7 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
                 ))),
             ),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("fallible external fixture registration should succeed");

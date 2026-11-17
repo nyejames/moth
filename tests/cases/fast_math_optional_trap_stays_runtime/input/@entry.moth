@@ -1,0 +1,8 @@
+-- Optional folding must not diagnose the fast trap. The authored division stays in the runtime
+-- body, so calling this function would trap; compiling it without calling is valid.
+$fast_math
+unused || -> I8:
+    return 7 // 0
+;
+
+io.line([:ok])

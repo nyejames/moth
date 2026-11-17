@@ -44,6 +44,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::number::NumberValue;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericSemantics;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{
     ConstEvalLeafType, ConstEvalSlotType, ExternalFunctionId,
@@ -179,6 +180,8 @@ struct FoldFixture {
     strings: StringTable,
     types: TypeEnvironment,
     path_fork: PathInternerFork,
+    /// Whether this fixture resolves and folds arithmetic under `$fast_math`.
+    fast_math_active: bool,
 }
 
 impl FoldFixture {
@@ -189,6 +192,7 @@ impl FoldFixture {
             strings: StringTable::new(),
             types: TypeEnvironment::new(),
             path_fork: PathInternerFork::empty(),
+            fast_math_active: false,
         }
     }
 
@@ -332,6 +336,7 @@ impl FoldFixture {
             &mut self.strings,
             &self.types,
             &self.path_fork,
+            self.fast_math_active,
         )
         .unwrap_or_else(|_| panic!("test operator sequence should resolve"));
     }
@@ -426,6 +431,28 @@ impl FoldFixture {
             FoldServices::new(&mut self.strings, None, None),
             FoldRequirement::Opportunistic,
         )
+    }
+
+    /// Folds under the required-const contract, where a fast trap is an invalid constant.
+    fn fold_required(&mut self, root: ExprId) -> Result<ConstantFoldOutcome, ConstantFoldError> {
+        constant_fold(
+            root,
+            &mut self.builder,
+            &mut self.constants,
+            FoldServices::new(&mut self.strings, None, None),
+            FoldRequirement::Required,
+        )
+    }
+
+    fn fold_binary_required(
+        &mut self,
+        operator: Operator,
+        span: Option<SourceSpan>,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) -> Result<ConstantFoldOutcome, ConstantFoldError> {
+        let root = self.binary(lhs, rhs, operator, span);
+        self.fold_required(root)
     }
 
     fn fold_binary(
@@ -1381,6 +1408,779 @@ fn constant_fold_rejects_integer_unary_negation_overflow() {
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("-"),
         &f.strings,
+    );
+}
+
+#[test]
+fn fast_fixed_integer_arithmetic_wraps_in_the_result_domain() {
+    // Every fixed integer width wraps `wrap_N` for `+ - *`; the result is a valid constant, not
+    // an overflow and not a retained runtime operation.
+    let mut f = FoldFixture::new();
+    f.fast_math_active = true;
+    let cases = [
+        (
+            "I8 addition wraps the high bit",
+            FixedScalar::I8,
+            127,
+            FixedScalar::I8,
+            1,
+            Operator::Add,
+            FixedScalarValue::signed(FixedScalar::I8, -128).expect("-128 fits I8"),
+        ),
+        (
+            "I8 subtraction wraps the low bit",
+            FixedScalar::I8,
+            -128,
+            FixedScalar::I8,
+            1,
+            Operator::Subtract,
+            FixedScalarValue::signed(FixedScalar::I8, 127).expect("127 fits I8"),
+        ),
+        (
+            "I8 multiplication wraps",
+            FixedScalar::I8,
+            100,
+            FixedScalar::I8,
+            2,
+            Operator::Multiply,
+            FixedScalarValue::signed(FixedScalar::I8, -56).expect("-56 fits I8"),
+        ),
+        (
+            "U8 addition wraps to zero",
+            FixedScalar::U8,
+            255,
+            FixedScalar::U8,
+            1,
+            Operator::Add,
+            FixedScalarValue::unsigned(FixedScalar::U8, 0).expect("0 fits U8"),
+        ),
+        (
+            "U8 subtraction underflows to the maximum",
+            FixedScalar::U8,
+            0,
+            FixedScalar::U8,
+            1,
+            Operator::Subtract,
+            FixedScalarValue::unsigned(FixedScalar::U8, 255).expect("255 fits U8"),
+        ),
+        (
+            "U8 multiplication wraps",
+            FixedScalar::U8,
+            200,
+            FixedScalar::U8,
+            2,
+            Operator::Multiply,
+            FixedScalarValue::unsigned(FixedScalar::U8, 144).expect("144 fits U8"),
+        ),
+        (
+            "I32 addition wraps the signed maximum",
+            FixedScalar::I32,
+            i128::from(i32::MAX),
+            FixedScalar::I32,
+            1,
+            Operator::Add,
+            FixedScalarValue::signed(FixedScalar::I32, i64::from(i32::MIN))
+                .expect("I32 minimum fits"),
+        ),
+        (
+            "U32 addition wraps to zero",
+            FixedScalar::U32,
+            i128::from(u32::MAX),
+            FixedScalar::U32,
+            1,
+            Operator::Add,
+            FixedScalarValue::unsigned(FixedScalar::U32, 0).expect("0 fits U32"),
+        ),
+        (
+            "U32 multiplication keeps the low 32 bits",
+            FixedScalar::U32,
+            i128::from(u32::MAX),
+            FixedScalar::U32,
+            i128::from(u32::MAX),
+            Operator::Multiply,
+            // (2^32 - 1)^2 = 2^64 - 2^33 + 1, whose low 32 bits are 1.
+            FixedScalarValue::unsigned(FixedScalar::U32, 1).expect("1 fits U32"),
+        ),
+        (
+            "I64 addition wraps the signed maximum",
+            FixedScalar::I64,
+            i128::from(i64::MAX),
+            FixedScalar::I64,
+            1,
+            Operator::Add,
+            FixedScalarValue::signed(FixedScalar::I64, i64::MIN).expect("I64 minimum fits"),
+        ),
+        (
+            "I64 multiplication wraps its minimum by negative one",
+            FixedScalar::I64,
+            i128::from(i64::MIN),
+            FixedScalar::I64,
+            -1,
+            Operator::Multiply,
+            FixedScalarValue::signed(FixedScalar::I64, i64::MIN).expect("I64 minimum fits"),
+        ),
+        (
+            "U64 addition wraps to zero",
+            FixedScalar::U64,
+            i128::from(u64::MAX),
+            FixedScalar::U64,
+            1,
+            Operator::Add,
+            FixedScalarValue::unsigned(FixedScalar::U64, 0).expect("0 fits U64"),
+        ),
+        (
+            "U64 multiplication keeps the low 64 bits",
+            FixedScalar::U64,
+            i128::from(u64::MAX),
+            FixedScalar::U64,
+            2,
+            Operator::Multiply,
+            FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX - 1)
+                .expect("u64::MAX - 1 fits U64"),
+        ),
+    ];
+    for (case, left_scalar, left, right_scalar, right, operator, expected) in cases {
+        let lhs = f.fixed_integer(left_scalar, left);
+        let rhs = f.fixed_integer(right_scalar, right);
+        let folded = f.folded_binary(operator, None, lhs, rhs);
+        assert_eq!(f.fixed_scalar_value(folded), expected, "{case}");
+    }
+}
+
+#[test]
+fn fast_unary_negation_wraps_the_signed_minimum() {
+    let mut f = FoldFixture::new();
+    f.fast_math_active = true;
+    for (scalar, minimum) in [
+        (FixedScalar::I8, i128::from(i8::MIN)),
+        (FixedScalar::I16, i128::from(i16::MIN)),
+        (FixedScalar::I32, i128::from(i32::MIN)),
+        (FixedScalar::I64, i128::from(i64::MIN)),
+    ] {
+        let operand = f.fixed_integer(scalar, minimum);
+        let root = f.unary(operand, Operator::Negate, None);
+        let folded = expect_folded(f.fold(root).expect("fast negation folds by wrapping"));
+        let expected = match scalar {
+            FixedScalar::I8 => FixedScalarValue::signed(scalar, i64::from(i8::MIN)),
+            FixedScalar::I16 => FixedScalarValue::signed(scalar, i64::from(i16::MIN)),
+            FixedScalar::I32 => FixedScalarValue::signed(scalar, i64::from(i32::MIN)),
+            FixedScalar::I64 => FixedScalarValue::signed(scalar, i64::MIN),
+            _ => unreachable!("the table holds signed fixed integers"),
+        }
+        .expect("the signed minimum fits its domain");
+        assert_eq!(f.fixed_scalar_value(folded), expected, "{}", scalar.name());
+    }
+}
+
+#[test]
+fn fast_integer_power_uses_modular_exponentiation() {
+    let mut f = FoldFixture::new();
+    f.fast_math_active = true;
+    let cases = [
+        (
+            "U8 base two wraps to zero at the domain width",
+            FixedScalar::U8,
+            2,
+            FixedScalar::U8,
+            8,
+            FixedScalarValue::unsigned(FixedScalar::U8, 0).expect("0 fits U8"),
+        ),
+        (
+            "zero exponent is one",
+            FixedScalar::U8,
+            3,
+            FixedScalar::U8,
+            0,
+            FixedScalarValue::unsigned(FixedScalar::U8, 1).expect("1 fits U8"),
+        ),
+        (
+            "zero to the zero power is one",
+            FixedScalar::U8,
+            0,
+            FixedScalar::U8,
+            0,
+            FixedScalarValue::unsigned(FixedScalar::U8, 1).expect("1 fits U8"),
+        ),
+        (
+            "zero to a positive power is zero",
+            FixedScalar::U8,
+            0,
+            FixedScalar::U8,
+            5,
+            FixedScalarValue::unsigned(FixedScalar::U8, 0).expect("0 fits U8"),
+        ),
+        (
+            "large exponent stays modular",
+            FixedScalar::U8,
+            3,
+            FixedScalar::U8,
+            200,
+            FixedScalarValue::unsigned(FixedScalar::U8, 161).expect("161 fits U8"),
+        ),
+        (
+            "signed power reinterprets the high bit",
+            FixedScalar::I8,
+            2,
+            FixedScalar::I8,
+            7,
+            FixedScalarValue::signed(FixedScalar::I8, -128).expect("-128 fits I8"),
+        ),
+        (
+            "U64 power uses the full domain",
+            FixedScalar::U64,
+            2,
+            FixedScalar::U64,
+            63,
+            FixedScalarValue::unsigned(FixedScalar::U64, 1u64 << 63).expect("2^63 fits U64"),
+        ),
+        (
+            "U64 exponent uses every exponent bit",
+            FixedScalar::U64,
+            2,
+            FixedScalar::U64,
+            i128::from(u64::MAX),
+            FixedScalarValue::unsigned(FixedScalar::U64, 0).expect("0 fits U64"),
+        ),
+        (
+            "U64 full exponent keeps the modular inverse",
+            FixedScalar::U64,
+            3,
+            FixedScalar::U64,
+            i128::from(u64::MAX),
+            FixedScalarValue::unsigned(FixedScalar::U64, 12_297_829_382_473_034_411)
+                .expect("the odd-power residue fits U64"),
+        ),
+        (
+            "negative base with an odd exponent keeps its sign",
+            FixedScalar::I8,
+            -2,
+            FixedScalar::I8,
+            3,
+            FixedScalarValue::signed(FixedScalar::I8, -8).expect("-8 fits I8"),
+        ),
+        (
+            "negative base with an even exponent is positive",
+            FixedScalar::I8,
+            -2,
+            FixedScalar::I8,
+            2,
+            FixedScalarValue::signed(FixedScalar::I8, 4).expect("4 fits I8"),
+        ),
+        (
+            "signed minimum base squares to zero at the domain width",
+            FixedScalar::I8,
+            -128,
+            FixedScalar::I8,
+            2,
+            FixedScalarValue::signed(FixedScalar::I8, 0).expect("0 fits I8"),
+        ),
+        (
+            "mixed I8 and U8 power wraps in the resolved I16 domain",
+            FixedScalar::I8,
+            127,
+            FixedScalar::U8,
+            200,
+            FixedScalarValue::signed(FixedScalar::I16, -25_599).expect("-25599 fits I16"),
+        ),
+        (
+            "mixed I8 and U8 negative base keeps the resolved I16 domain",
+            FixedScalar::I8,
+            -2,
+            FixedScalar::U8,
+            3,
+            FixedScalarValue::signed(FixedScalar::I16, -8).expect("-8 fits I16"),
+        ),
+        (
+            "mixed I8 and U8 large unsigned exponent wraps to zero",
+            FixedScalar::I8,
+            -128,
+            FixedScalar::U8,
+            255,
+            FixedScalarValue::signed(FixedScalar::I16, 0).expect("0 fits I16"),
+        ),
+    ];
+    for (case, base_scalar, base, exponent_scalar, exponent, expected) in cases {
+        let lhs = f.fixed_integer(base_scalar, base);
+        let rhs = f.fixed_integer(exponent_scalar, exponent);
+        let folded = f.folded_binary(Operator::Exponent, None, lhs, rhs);
+        assert_eq!(f.fixed_scalar_value(folded), expected, "{case}");
+    }
+}
+
+#[test]
+fn fast_integer_division_and_remainder_keep_the_minimum_exceptions() {
+    let mut f = FoldFixture::new();
+    f.fast_math_active = true;
+
+    let minimum = f.fixed_integer(FixedScalar::I32, i128::from(i32::MIN));
+    let minus_one = f.fixed_integer(FixedScalar::I32, -1);
+    let remainder = f.folded_binary(Operator::Modulus, None, minimum, minus_one);
+    assert_eq!(
+        f.fixed_scalar_value(remainder),
+        FixedScalarValue::signed(FixedScalar::I32, 0).expect("0 fits I32"),
+        "MIN % -1 is zero even where the paired quotient cannot exist"
+    );
+
+    let minimum = f.fixed_integer(FixedScalar::I32, i128::from(i32::MIN));
+    let minus_one = f.fixed_integer(FixedScalar::I32, -1);
+    assert!(
+        matches!(
+            f.fold_binary(Operator::IntDivide, None, minimum, minus_one),
+            Ok(ConstantFoldOutcome::NotConstant(_))
+        ),
+        "MIN // -1 must stay a runtime operation so its fast trap remains"
+    );
+
+    let minimum = f.fixed_integer(FixedScalar::I32, i128::from(i32::MIN));
+    let minus_one = f.fixed_integer(FixedScalar::I32, -1);
+    let error = f
+        .fold_binary_required(Operator::IntDivide, None, minimum, minus_one)
+        .expect_err("a required const MIN // -1 has no value to publish");
+    assert_compile_time_error(
+        error,
+        CompileTimeEvaluationErrorReason::IntegerOverflow,
+        Some("//"),
+        &f.strings,
+    );
+
+    let dividend = f.fixed_integer(FixedScalar::U8, 7);
+    let zero = f.fixed_integer(FixedScalar::U8, 0);
+    assert!(
+        matches!(
+            f.fold_binary(Operator::IntDivide, None, dividend, zero),
+            Ok(ConstantFoldOutcome::NotConstant(_))
+        ),
+        "a fast zero divisor must stay a runtime operation"
+    );
+
+    let dividend = f.fixed_integer(FixedScalar::U8, 7);
+    let zero = f.fixed_integer(FixedScalar::U8, 0);
+    let error = f
+        .fold_binary_required(Operator::IntDivide, None, dividend, zero)
+        .expect_err("a required const zero divisor has no value to publish");
+    assert_compile_time_error(
+        error,
+        CompileTimeEvaluationErrorReason::DivideByZero,
+        None,
+        &f.strings,
+    );
+
+    let dividend = f.fixed_integer(FixedScalar::U8, 7);
+    let zero = f.fixed_integer(FixedScalar::U8, 0);
+    let error = f
+        .fold_binary_required(Operator::Modulus, None, dividend, zero)
+        .expect_err("a required const zero remainder divisor has no value to publish");
+    assert_compile_time_error(
+        error,
+        CompileTimeEvaluationErrorReason::DivideByZero,
+        None,
+        &f.strings,
+    );
+
+    let cases = [
+        (
+            "signed quotient truncates towards zero",
+            -7,
+            2,
+            FixedScalarValue::signed(FixedScalar::I8, -3).expect("-3 fits I8"),
+            Operator::IntDivide,
+        ),
+        (
+            "signed remainder keeps the dividend sign",
+            -7,
+            2,
+            FixedScalarValue::signed(FixedScalar::I8, -1).expect("-1 fits I8"),
+            Operator::Modulus,
+        ),
+        (
+            "unsigned quotient stays exact",
+            200,
+            3,
+            FixedScalarValue::unsigned(FixedScalar::U8, 66).expect("66 fits U8"),
+            Operator::IntDivide,
+        ),
+    ];
+    for (case, left, right, expected, operator) in cases {
+        let scalar = expected.scalar();
+        let lhs = f.fixed_integer(scalar, left);
+        let rhs = f.fixed_integer(scalar, right);
+        let folded = f.folded_binary(operator, None, lhs, rhs);
+        assert_eq!(f.fixed_scalar_value(folded), expected, "{case}");
+    }
+}
+
+#[test]
+fn fast_integer_power_rejects_a_signed_negative_exponent() {
+    let mut f = FoldFixture::new();
+    f.fast_math_active = true;
+    let base = f.fixed_integer(FixedScalar::I8, 2);
+    let negative = f.fixed_integer(FixedScalar::I8, -1);
+    assert!(
+        matches!(
+            f.fold_binary(Operator::Exponent, None, base, negative),
+            Ok(ConstantFoldOutcome::NotConstant(_))
+        ),
+        "a signed negative fast exponent must stay a runtime operation"
+    );
+
+    let base = f.fixed_integer(FixedScalar::I8, 2);
+    let negative = f.fixed_integer(FixedScalar::I8, -1);
+    let error = f
+        .fold_binary_required(Operator::Exponent, None, base, negative)
+        .expect_err("a required const negative exponent has no value to publish");
+    assert_compile_time_error(
+        error,
+        CompileTimeEvaluationErrorReason::InvalidExponent,
+        Some("^"),
+        &f.strings,
+    );
+}
+
+#[test]
+fn fast_float_arithmetic_rounds_per_operation_and_traps_non_finite() {
+    let mut f = FoldFixture::new();
+    f.fast_math_active = true;
+
+    // F16 has an 11-bit significand, so `2048 + 1` rounds back to `2048` before the subtraction.
+    let base = f.fixed_float(FixedScalar::F16, 2048.0);
+    let one = f.fixed_float(FixedScalar::F16, 1.0);
+    let sum = f.folded_binary(Operator::Add, None, base, one);
+    assert_eq!(
+        f.fixed_scalar_value(sum),
+        fixed_float_value(FixedScalar::F16, 2048.0),
+        "the addition rounds at F16 precision"
+    );
+    let base = f.fixed_float(FixedScalar::F16, 2048.0);
+    let difference = f.folded_binary(Operator::Subtract, None, sum, base);
+    assert_eq!(
+        f.fixed_scalar_value(difference),
+        fixed_float_value(FixedScalar::F16, 0.0),
+        "the subtraction sees the rounded sum"
+    );
+
+    let maximum = f.fixed_float(FixedScalar::F64, f64::MAX);
+    let two = f.fixed_float(FixedScalar::F64, 2.0);
+    assert!(
+        matches!(
+            f.fold_binary(Operator::Multiply, None, maximum, two),
+            Ok(ConstantFoldOutcome::NotConstant(_))
+        ),
+        "a non-finite fast float result must stay a runtime operation"
+    );
+
+    let maximum = f.fixed_float(FixedScalar::F64, f64::MAX);
+    let two = f.fixed_float(FixedScalar::F64, 2.0);
+    let error = f
+        .fold_binary_required(Operator::Multiply, None, maximum, two)
+        .expect_err("a required const non-finite float has no value to publish");
+    assert_compile_time_error(
+        error,
+        CompileTimeEvaluationErrorReason::FloatOverflow,
+        Some("*"),
+        &f.strings,
+    );
+
+    let one = f.fixed_float(FixedScalar::F64, 1.0);
+    let zero = f.fixed_float(FixedScalar::F64, 0.0);
+    assert!(
+        matches!(
+            f.fold_binary(Operator::Divide, None, one, zero),
+            Ok(ConstantFoldOutcome::NotConstant(_))
+        ),
+        "a fast float zero divisor must stay a runtime operation"
+    );
+
+    let one = f.fixed_float(FixedScalar::F64, 1.0);
+    let negative_zero = f.fixed_float(FixedScalar::F64, -0.0);
+    let error = f
+        .fold_binary_required(Operator::Modulus, None, one, negative_zero)
+        .expect_err("a required const signed-zero divisor has no value to publish");
+    assert_compile_time_error(
+        error,
+        CompileTimeEvaluationErrorReason::DivideByZero,
+        None,
+        &f.strings,
+    );
+
+    let left = f.fixed_float(FixedScalar::F64, 1.0);
+    let right = f.fixed_float(FixedScalar::F64, 2.0);
+    let quotient = f.folded_binary(Operator::Divide, None, left, right);
+    assert_eq!(
+        f.fixed_scalar_value(quotient),
+        fixed_float_value(FixedScalar::F64, 0.5),
+        "a finite fast division still folds"
+    );
+}
+
+#[test]
+fn dec_operations_stay_ordinary_under_fast_math() {
+    // `$fast_math` never selects a Dec domain, so the operation keeps ordinary exact folding.
+    let mut f = FoldFixture::new();
+    f.fast_math_active = true;
+    let lhs = f.number("1.5", NumericLiteralSign::Positive, 1);
+    let rhs = f.number("0.1", NumericLiteralSign::Positive, 1);
+    let root = f.binary(lhs, rhs, Operator::Add, None);
+    let view = f.builder.view(root).expect("the Dec sum is stored");
+    let ExpressionOperationView::NumericBinary { facts, .. } = view.operation() else {
+        panic!("the Dec sum should be a numeric binary operation");
+    };
+    let ResolvedOperationKind::Numeric(numeric) = facts.kind else {
+        panic!("the Dec sum should carry numeric facts");
+    };
+    assert_eq!(
+        numeric.semantics,
+        NumericSemantics::Ordinary,
+        "a Dec domain never enters fast mode"
+    );
+
+    let lhs = f.number("1.5", NumericLiteralSign::Positive, 1);
+    let rhs = f.number("0.1", NumericLiteralSign::Positive, 1);
+    let root = f.binary(lhs, rhs, Operator::Add, None);
+    let folded = expect_folded(f.fold(root).expect("the Dec sum should fold ordinally"));
+    assert!(matches!(
+        f.constant_payload(folded),
+        ConstValuePayload::Number(value) if value.coefficient().to_string() == "16"
+    ));
+}
+
+#[test]
+fn required_const_fast_wrapping_is_a_valid_constant() {
+    // Required-const folding accepts a wrapped fast result; only a fast operation that cannot
+    // return a value is an invalid constant.
+    let mut f = FoldFixture::new();
+    f.fast_math_active = true;
+    let lhs = f.fixed_integer(FixedScalar::I8, 127);
+    let rhs = f.fixed_integer(FixedScalar::I8, 1);
+    let outcome = f
+        .fold_binary_required(Operator::Add, None, lhs, rhs)
+        .expect("a wrapping fast constant is valid");
+    let folded = expect_folded(outcome);
+    assert_eq!(
+        f.fixed_scalar_value(folded),
+        FixedScalarValue::signed(FixedScalar::I8, -128).expect("-128 fits I8")
+    );
+}
+
+#[test]
+fn fast_mixed_signedness_arithmetic_uses_the_resolved_i16_domain() {
+    // `I8` with `U8` resolves to `I16`, so every accepted sum, difference and product keeps the
+    // widened domain. The power rows already cover where that domain can actually wrap.
+    let mut f = FoldFixture::new();
+    f.fast_math_active = true;
+    let cases = [
+        (
+            "I8 negative plus U8 maximum stays I16",
+            -128,
+            255,
+            Operator::Add,
+            FixedScalarValue::signed(FixedScalar::I16, 127).expect("127 fits I16"),
+        ),
+        (
+            "I8 maximum plus U8 maximum would overflow I8",
+            127,
+            255,
+            Operator::Add,
+            FixedScalarValue::signed(FixedScalar::I16, 382).expect("382 fits I16"),
+        ),
+        (
+            "I8 minimum minus U8 maximum stays I16",
+            -128,
+            255,
+            Operator::Subtract,
+            FixedScalarValue::signed(FixedScalar::I16, -383).expect("-383 fits I16"),
+        ),
+        (
+            "I8 maximum times U8 maximum stays I16",
+            127,
+            255,
+            Operator::Multiply,
+            FixedScalarValue::signed(FixedScalar::I16, 32_385).expect("32385 fits I16"),
+        ),
+        (
+            "I8 minimum times U8 maximum stays I16",
+            -128,
+            255,
+            Operator::Multiply,
+            FixedScalarValue::signed(FixedScalar::I16, -32_640).expect("-32640 fits I16"),
+        ),
+    ];
+    for (case, left, right, operator, expected) in cases {
+        let lhs = f.fixed_integer(FixedScalar::I8, left);
+        let rhs = f.fixed_integer(FixedScalar::U8, right);
+        let folded = f.folded_binary(operator, None, lhs, rhs);
+        let value = f.fixed_scalar_value(folded);
+        assert_eq!(value, expected, "{case}");
+        assert_eq!(
+            value.scalar(),
+            FixedScalar::I16,
+            "{case} must publish in the resolved common domain"
+        );
+    }
+}
+
+#[test]
+fn fast_real_division_uses_the_f64_domain() {
+    let mut f = FoldFixture::new();
+    f.fast_math_active = true;
+
+    let numerator = f.fixed_integer(FixedScalar::I8, 7);
+    let divisor = f.fixed_integer(FixedScalar::I8, 0);
+    assert!(
+        matches!(
+            f.fold_binary(Operator::Divide, None, numerator, divisor),
+            Ok(ConstantFoldOutcome::NotConstant(_))
+        ),
+        "a fast real-division zero divisor must stay a runtime operation"
+    );
+
+    let numerator = f.fixed_integer(FixedScalar::I8, 7);
+    let divisor = f.fixed_integer(FixedScalar::I8, 0);
+    let error = f
+        .fold_binary_required(Operator::Divide, None, numerator, divisor)
+        .expect_err("a required const real-division zero divisor has no value to publish");
+    assert_compile_time_error(
+        error,
+        CompileTimeEvaluationErrorReason::DivideByZero,
+        None,
+        &f.strings,
+    );
+
+    let numerator = f.fixed_integer(FixedScalar::I8, 7);
+    let divisor = f.fixed_integer(FixedScalar::I8, 2);
+    let quotient = f.folded_binary(Operator::Divide, None, numerator, divisor);
+    assert_eq!(
+        f.fixed_scalar_value(quotient),
+        fixed_float_value(FixedScalar::F64, 3.5),
+        "integer operands publish an F64 quotient"
+    );
+    assert_eq!(
+        f.fixed_scalar_value(quotient).scalar(),
+        FixedScalar::F64,
+        "real division keeps the F64 result domain"
+    );
+
+    let numerator = f.fixed_integer(FixedScalar::I32, i128::from(i32::MIN));
+    let divisor = f.fixed_integer(FixedScalar::I32, -1);
+    let quotient = f.folded_binary(Operator::Divide, None, numerator, divisor);
+    assert_eq!(
+        f.fixed_scalar_value(quotient),
+        fixed_float_value(FixedScalar::F64, 2_147_483_648.0),
+        "MIN / -1 has a finite real quotient"
+    );
+
+    let numerator = f.fixed_integer(FixedScalar::U64, i128::from(u64::MAX));
+    let divisor = f.fixed_integer(FixedScalar::U64, 2);
+    let quotient = f.folded_binary(Operator::Divide, None, numerator, divisor);
+    assert_eq!(
+        f.fixed_scalar_value(quotient),
+        fixed_float_value(FixedScalar::F64, 9_223_372_036_854_775_808.0),
+        "the wide unsigned operand rounds once into the F64 domain"
+    );
+}
+
+#[test]
+fn fast_float_preserves_negative_zero() {
+    let mut f = FoldFixture::new();
+    f.fast_math_active = true;
+
+    let negative_zero = f.fixed_float(FixedScalar::F64, -0.0);
+    let one = f.fixed_float(FixedScalar::F64, 1.0);
+    let product = f.folded_binary(Operator::Multiply, None, negative_zero, one);
+    let value = f.fixed_scalar_value(product);
+    assert_eq!(
+        value.as_f64().expect("the result is an F64").to_bits(),
+        (-0.0f64).to_bits(),
+        "multiplication preserves the signed zero bit pattern"
+    );
+
+    let zero = f.fixed_float(FixedScalar::F64, 0.0);
+    let root = f.unary(zero, Operator::Negate, None);
+    let negated = expect_folded(f.fold(root).expect("negating zero is exact"));
+    assert_eq!(
+        f.fixed_scalar_value(negated)
+            .as_f64()
+            .expect("the result is an F64")
+            .to_bits(),
+        (-0.0f64).to_bits(),
+        "negating positive zero produces negative zero"
+    );
+
+    let negative_zero = f.fixed_float(FixedScalar::F64, -0.0);
+    let root = f.unary(negative_zero, Operator::Negate, None);
+    let negated = expect_folded(f.fold(root).expect("negating negative zero is exact"));
+    assert_eq!(
+        f.fixed_scalar_value(negated)
+            .as_f64()
+            .expect("the result is an F64")
+            .to_bits(),
+        0.0f64.to_bits(),
+        "negating negative zero produces positive zero"
+    );
+}
+
+#[test]
+fn fast_float_power_rejects_a_nan_result() {
+    let mut f = FoldFixture::new();
+    f.fast_math_active = true;
+
+    let negative_base = f.fixed_float(FixedScalar::F64, -2.0);
+    let fractional_exponent = f.fixed_float(FixedScalar::F64, 0.5);
+    assert!(
+        matches!(
+            f.fold_binary(Operator::Exponent, None, negative_base, fractional_exponent),
+            Ok(ConstantFoldOutcome::NotConstant(_))
+        ),
+        "a negative base with a fractional exponent has no real value"
+    );
+
+    let negative_base = f.fixed_float(FixedScalar::F64, -2.0);
+    let fractional_exponent = f.fixed_float(FixedScalar::F64, 0.5);
+    let error = f
+        .fold_binary_required(Operator::Exponent, None, negative_base, fractional_exponent)
+        .expect_err("a required const NaN power has no value to publish");
+    assert_compile_time_error(
+        error,
+        CompileTimeEvaluationErrorReason::FloatOverflow,
+        Some("^"),
+        &f.strings,
+    );
+
+    let negative_base = f.fixed_float(FixedScalar::F64, -2.0);
+    let integer_exponent = f.fixed_float(FixedScalar::F64, 3.0);
+    let power = f.folded_binary(Operator::Exponent, None, negative_base, integer_exponent);
+    assert_eq!(
+        f.fixed_scalar_value(power),
+        fixed_float_value(FixedScalar::F64, -8.0),
+        "a negative base with a whole exponent stays real"
+    );
+}
+
+#[test]
+fn fast_required_trap_reports_the_authored_operator_span() {
+    // The fast trap diagnostic must point at the authored operator, not the expression root.
+    let mut f = FoldFixture::new();
+    f.fast_math_active = true;
+    let operator_span = marked_span(230);
+    let dividend = f.fixed_integer_at(FixedScalar::U8, 7, Some(marked_span(100)));
+    let zero = f.fixed_integer_at(FixedScalar::U8, 0, Some(marked_span(140)));
+    let error = f
+        .fold_binary_required(Operator::IntDivide, Some(operator_span), dividend, zero)
+        .expect_err("a required const zero divisor has no value to publish");
+    let ConstantFoldError::NumericFailure(diagnostic) = error else {
+        panic!("the fast trap must stay a numeric compile-time diagnostic");
+    };
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact.first().expect("the diagnostic is retained");
+    let facts = diagnostic
+        .family_view::<CompileTimeEvaluationErrorView>()
+        .expect("the diagnostic is a compile-time evaluation failure");
+    assert_eq!(facts.reason, CompileTimeEvaluationErrorReason::DivideByZero);
+    assert!(
+        matches!(
+            diagnostic.primary_site(),
+            SiteRef::Local(span) if span == operator_span
+        ),
+        "the trap must point at the authored operator span"
     );
 }
 

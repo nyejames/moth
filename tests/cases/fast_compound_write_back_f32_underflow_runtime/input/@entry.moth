@@ -1,0 +1,16 @@
+tiny ~F32 = 1.0
+huge F64 = 1e45
+$fast_math
+~tiny /= huge
+
+flushed ~F32 = 1.0
+enormous F64 = 1e300
+$fast_math
+~flushed /= enormous
+
+signed_zero ~F32 = 0.0
+negative_one F64 = -1.0
+$fast_math
+~signed_zero /= negative_one
+
+~[:tiny=[tiny] flushed=[flushed] zero=[signed_zero]]

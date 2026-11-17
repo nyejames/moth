@@ -1693,7 +1693,8 @@ fn classify_nodes(
                     )?;
                 }
                 if effect.is_none() {
-                    effect = classify_range_failure(range.domain, node.span, state);
+                    effect =
+                        classify_range_failure(range.domain, range.fast_math, node.span, state);
                 }
                 if effect.is_none() {
                     effect = classify_loop_body(body, template_ir_store, state)?;
@@ -1944,7 +1945,12 @@ fn classify_loop_header(
                 None => None,
             }
             .or(state.expression_builder.view(range.start)?.span());
-            Ok(classify_range_failure(range.domain, span, state))
+            Ok(classify_range_failure(
+                range.domain,
+                range.fast_math,
+                span,
+                state,
+            ))
         }
         TemplateLoopHeader::Collection { iterable, step, .. } => {
             if let Some(effect) = classify_expression(
@@ -1975,6 +1981,7 @@ fn classify_loop_header(
 
 fn classify_range_failure(
     domain: NumericScalar,
+    fast_math: bool,
     span: Option<SourceSpan>,
     state: &mut TraversalState<'_>,
 ) -> Option<EnclosingExitEffect> {
@@ -1983,10 +1990,18 @@ fn classify_range_failure(
     // ordinal increment overflows in both domains, and a float candidate only ends iteration:
     // it never raises `FloatNonFinite`.
     //
-    // Literal and omitted steps keep these contributors because HIR always emits the same guards:
-    // the classifier mirrors emitted work instead of proving operand values, exactly as `value + 1`
-    // stays potentially overflowing. A statically zero literal step never reaches this point
-    // because the header policy rejects it before classification.
+    // Under `$fast_math` every generated guard fails fatally instead: the ordinal overflow and
+    // the zero-step/no-progress guards are not recoverable `Error` contributors, so an exported
+    // no-slot function stays accepted and a private no-slot function gains no lane. Contributors
+    // from the authored header operands and the body are classified separately and keep their own
+    // mode.
+    if fast_math {
+        return None;
+    }
+    // Elsewhere, literal and omitted steps keep these contributors because HIR always emits the
+    // same guards: the classifier mirrors emitted work instead of proving operand values, exactly
+    // as `value + 1` stays potentially overflowing. A statically zero literal step never reaches
+    // this point because the header policy rejects it before classification.
     let codes: &'static [BuiltinErrorCode] = if domain.is_binary_float() {
         &[
             BuiltinErrorCode::IntOverflow,

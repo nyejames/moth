@@ -1,0 +1,8 @@
+@utils guard_pruned
+
+$safe_math
+caller |limit I32| -> Bool:
+    return guard_pruned(limit)
+;
+
+~[:done]

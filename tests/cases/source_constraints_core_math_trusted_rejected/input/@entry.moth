@@ -1,0 +1,13 @@
+@core/math sqrt
+
+$safe_math
+safe_sqrt |value F64| -> F64:
+    return sqrt(value)
+;
+
+$infallible
+strict_sqrt |value F64| -> F64:
+    return sqrt(value)
+;
+
+io.line([: [safe_sqrt(4.0)]])

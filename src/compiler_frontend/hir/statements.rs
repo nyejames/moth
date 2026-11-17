@@ -12,6 +12,7 @@
 //! during HIR lowering, and `ResolvedCastEvidence::GenericBound` is validation-only and must not
 //! reach HIR.
 
+use crate::compiler_frontend::datatypes::numeric_operators::NumericSemantics;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
@@ -20,7 +21,8 @@ use crate::compiler_frontend::hir::expressions::{
 };
 use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, LoopStepFailureCause, NumericFailureMode,
+    HirFastStoreConversion, HirNumericOp, HirNumericOperands, LoopStepFailureCause,
+    NumericFailureMode,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::source::SourceSpan;
@@ -142,7 +144,8 @@ pub enum HirStatementKind {
     ///      float) are semantic effects that must be visible to HIR validation and backend
     ///      lowering.
     ///
-    /// Trap and Infallible modes produce a scalar value; recoverable operations use `Invoke`.
+    /// `Fatal`, `Trap` and `Infallible` modes produce a scalar value; recoverable operations use
+    /// `Invoke`.
     NumericOp {
         /// The checked numeric operation (operator plus canonical numeric domain).
         op: HirNumericOp,
@@ -154,13 +157,43 @@ pub enum HirStatementKind {
         result: HirLocalDestination,
     },
 
+    /// Convert a fast compound-assignment arithmetic result into its target type before storing.
+    ///
+    /// WHAT: the implicit write-back of an operation whose arithmetic resolved
+    ///       `NumericSemantics::Fast`. Integer-to-integer destinations wrap to the destination low
+    ///       bits and signedness; float-to-integer truncates toward zero and traps when out of
+    ///       range; integer-to-float and float-to-float round at the destination precision and
+    ///       trap when non-finite.
+    /// WHY: this conversion is not an explicit `cast` and not the ordinary checked store
+    ///      conversion. Making it its own statement keeps it out of `Invoke`, out of the private
+    ///      failure lane and off ordinary checked-narrowing helpers, and places the trap before
+    ///      the store that consumes the result. The conversion alone selects the delivery
+    ///      (`HirFastStoreConversion::required_failure_mode`), so no statement field can disagree
+    ///      with the class.
+    FastStoreConversion {
+        /// Source arithmetic domain and destination target domain.
+        conversion: HirFastStoreConversion,
+        /// The arithmetic result being converted.
+        source: HirValueId,
+        /// Local that receives the converted destination value.
+        result: HirLocalDestination,
+    },
+
     /// Produce the failure selected by a language-defined loop-step guard.
     ///
     /// The enclosing CFG has established zero step or lack of progress.
     /// Recoverable loop-step failures use `Invoke` instead.
     LoopStepFailure {
         cause: LoopStepFailureCause,
-        failure_mode: NumericFailureMode,
+        /// Whether the owning loop selected `$fast_math`, so this guard is fast-delivered.
+        ///
+        /// WHAT: the one HIR fact that marks a generated range guard as evaluating under
+        ///       `$fast_math`, which is fast-use evidence for `$safe_math` verification.
+        /// WHY: verification must see a fast range guard even when the loop authors no arithmetic,
+        ///      and the mode belongs to the guard rather than a duplicated loop-level flag. The
+        ///      delivery follows from this fact (`NumericFailureMode::range_guard`), so the
+        ///      statement carries no second mode field.
+        semantics: NumericSemantics,
         result: HirLocalDestination,
     },
 

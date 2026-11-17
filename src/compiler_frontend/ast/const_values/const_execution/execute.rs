@@ -603,6 +603,7 @@ impl ConstInterpreter<'_> {
                 .map(|step| self.evaluate_range_bound(step, bindings))
                 .transpose()?,
             domain: range.domain,
+            fast_math: range.fast_math,
         })
     }
 

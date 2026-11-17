@@ -37,9 +37,12 @@ use crate::compiler_frontend::hir::functions::{
     HirFunction, HirFunctionOrigin, HirFunctionReturnContract,
 };
 use crate::compiler_frontend::hir::ids::{
-    BlockId, ChoiceId, FunctionId, HirNodeId, LocalId, RegionId,
+    BlockId, ChoiceId, FunctionId, HirNodeId, HirValueId, LocalId, RegionId,
 };
 use crate::compiler_frontend::hir::module::{HirChoice, HirModule};
+use crate::compiler_frontend::hir::numeric::{
+    HirFastStoreConversion, HirNumericOp, HirNumericOperands, NumericFailureMode,
+};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{
@@ -50,6 +53,25 @@ pub(super) use crate::compiler_frontend::tests::hir_fixture_support::{
     bool_expression, expression, fixed_scalar_expression, string_expression,
 };
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+/// Runs one JavaScript source string in Node and returns its standard output.
+///
+/// WHAT: one shared Node invocation for every JS runtime test; a non-zero exit or non-UTF-8
+///       output is a test failure.
+/// WHY: the backend tests execute emitted preludes and drivers through the same host contract, so
+///      the process invocation and its failure message must not be restated per test module.
+pub(super) fn run_javascript(source: &str) -> String {
+    let output = std::process::Command::new("node")
+        .args(["--eval", source])
+        .output()
+        .expect("Node.js is required for JavaScript runtime behavior tests");
+    assert!(
+        output.status.success(),
+        "Node.js runtime failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("Node.js output is UTF-8")
+}
 
 pub(super) fn statement(id: u32, kind: HirStatementKind) -> HirStatement {
     HirStatement {
@@ -460,38 +482,27 @@ pub(super) fn default_config() -> JsLoweringConfig {
     JsLoweringConfig::direct_js(false)
 }
 
-/// Builds and lowers a minimal module with one numeric operation statement.
+/// Builds and lowers a minimal module whose single statement defines local 0 as `result_type`.
 ///
-/// WHY: helper-demand tests need focused numeric-op fixtures, but the
-/// module/function/lowering setup is identical for every op. Callers name only
-/// the op, failure mode, operands, and result type.
-pub(super) fn lower_minimal_module_with_numeric_op(
-    op: crate::compiler_frontend::hir::numeric::HirNumericOp,
-    failure_mode: crate::compiler_frontend::hir::numeric::NumericFailureMode,
-    operands: crate::compiler_frontend::hir::numeric::HirNumericOperands,
-    result_type: TypeId,
+/// WHAT: takes the prepared expression store and the statement kind; the block, function, named
+///       result local and lowering configuration are identical for every caller.
+/// WHY: the numeric-operation and fast write-back fixtures differ only in their statement and
+///      result type, so one scaffold keeps their module setup from drifting apart.
+fn lower_minimal_module_with_single_definition(
+    type_environment: TypeEnvironment,
     expressions: HirExpressionStore,
+    statement_kind: HirStatementKind,
+    result_type: TypeId,
 ) -> String {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (type_environment, _) = build_type_environment();
     let region = RegionId(0);
-
-    let numeric_statement = statement(
-        1,
-        HirStatementKind::NumericOp {
-            op,
-            failure_mode,
-            operands,
-            result: HirLocalDestination::Define(LocalId(0)),
-        },
-    );
 
     let block = HirBlock {
         id: BlockId(0),
         region,
         locals: vec![local(0, result_type, region)],
-        statements: vec![numeric_statement],
+        statements: vec![statement(1, statement_kind)],
         terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
@@ -519,12 +530,67 @@ pub(super) fn lower_minimal_module_with_numeric_op(
         &module,
         &NumericProofs::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        default_config(),
         &type_environment,
         &path_fork.snapshot_table(),
     )
     .expect("JS lowering should succeed")
     .source
+}
+
+/// Builds and lowers a minimal module with one numeric operation statement.
+///
+/// WHY: helper-demand tests need focused numeric-op fixtures, but the
+/// module/function/lowering setup is identical for every op. Callers name only
+/// the op, failure mode, operands, and result type.
+pub(super) fn lower_minimal_module_with_numeric_op(
+    op: HirNumericOp,
+    failure_mode: NumericFailureMode,
+    operands: HirNumericOperands,
+    result_type: TypeId,
+    expressions: HirExpressionStore,
+) -> String {
+    let (type_environment, _) = build_type_environment();
+    lower_minimal_module_with_single_definition(
+        type_environment,
+        expressions,
+        HirStatementKind::NumericOp {
+            op,
+            failure_mode,
+            operands,
+            result: HirLocalDestination::Define(LocalId(0)),
+        },
+        result_type,
+    )
+}
+
+/// Builds and lowers a minimal module containing one fast compound write-back conversion.
+///
+/// WHAT: the fixture names the HIR conversion and its source expression; the module, function and
+///       lowering setup comes from the shared single-statement scaffold, and the conversion class
+///       alone selects delivery.
+/// WHY: the runtime helper tests must observe both the emitted conversion expression and the
+///      prelude that a reachable conversion demands, without duplicating a module scaffold.
+pub(super) fn lower_minimal_module_with_fast_store_conversion(
+    conversion: HirFastStoreConversion,
+    source_expression: impl FnOnce(&TypeIds, RegionId, &mut HirExpressionStore) -> HirValueId,
+) -> String {
+    let (type_environment, types) = build_type_environment();
+    let region = RegionId(0);
+    let mut expressions = HirExpressionStore::default();
+
+    let source = source_expression(&types, region, &mut expressions);
+    let result_type = conversion.target.type_id(&type_environment);
+    lower_minimal_module_with_single_definition(
+        type_environment,
+        expressions,
+        HirStatementKind::FastStoreConversion {
+            conversion,
+            source,
+            result: HirLocalDestination::Define(LocalId(0)),
+        },
+        result_type,
+    )
 }
 
 /// Emits the runtime cast helpers demanded by the given cast policies.

@@ -78,6 +78,9 @@ fn empty_summary() -> PublicCallSummary {
         parameters: Vec::new(),
         return_alias: FunctionReturnAliasSummary::Fresh,
         escapes_builtin_failure: false,
+        uses_fast_semantics: false,
+        may_trap: false,
+        may_fail: false,
     }
 }
 
@@ -866,5 +869,124 @@ fn equal_repeated_evidence_materialises_once() {
             .count(),
         1,
         "equal repeated evidence must materialise exactly once"
+    );
+}
+
+/// WHAT: two providers publishing the same callable origin must agree on every constraint bit.
+/// WHY: a stale provider contract that differs only in `uses_fast_semantics`, `may_trap` or
+///      `may_fail` would otherwise let provider order select the guarantee a consumer sees.
+#[test]
+fn disagreeing_provider_summary_constraint_bits_fail_deterministically() {
+    struct Widening {
+        name: &'static str,
+        apply: fn(&mut PublicCallSummary),
+    }
+
+    let module = provider_origin("shared");
+    let origin = function_origin(&module, "make_card");
+    let widenings = [
+        Widening {
+            name: "fast semantics",
+            apply: |summary| summary.uses_fast_semantics = true,
+        },
+        Widening {
+            name: "trap",
+            apply: |summary| summary.may_trap = true,
+        },
+        Widening {
+            name: "recoverable failure",
+            apply: |summary| summary.may_fail = true,
+        },
+    ];
+
+    for widening in widenings {
+        let mut stale = empty_summary();
+        (widening.apply)(&mut stale);
+        let current = provider_interface(
+            &module,
+            vec![function_record(&module, "make_card", 0)],
+            vec![ConcreteCallSummaryRecord {
+                origin: origin.clone(),
+                summary: empty_summary(),
+            }],
+            Vec::new(),
+        );
+        let refreshed = provider_interface(
+            &module,
+            vec![function_record(&module, "make_card", 0)],
+            vec![ConcreteCallSummaryRecord {
+                origin: origin.clone(),
+                summary: stale,
+            }],
+            Vec::new(),
+        );
+
+        let error =
+            SourceProviderDependencySet::new(vec![
+            SourceProviderDependency {
+                kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
+                    shell: DependencyShellId::new(SourceId::from_index(0), 0),
+                },
+                interface: &current,
+            },
+            SourceProviderDependency {
+                kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
+                    shell: DependencyShellId::new(SourceId::from_index(0), 1),
+                },
+                interface: &refreshed,
+            },
+        ])
+            .expect_err("providers must agree on every constraint bit");
+
+        assert!(
+            error
+                .message
+                .contains("disagrees with an equal-origin provider interface"),
+            "unexpected {} disagreement error: {}",
+            widening.name,
+            error.message
+        );
+    }
+}
+
+/// WHAT: a facade re-export copies the provider call summary without dropping constraint bits.
+/// WHY: cached consumers compare the facade interface, so a facade that reset a bit would keep
+///      stale invalidation evidence for the public callable it re-exports.
+#[test]
+fn facade_reexport_preserves_constraint_bits() {
+    let provider = provider_origin("provider");
+    let origin = function_origin(&provider, "compute");
+    let mut summary = empty_summary();
+    summary.uses_fast_semantics = true;
+    summary.may_trap = true;
+    summary.may_fail = true;
+    let provider_interface = provider_interface(
+        &provider,
+        vec![function_record(&provider, "compute", 0)],
+        vec![ConcreteCallSummaryRecord {
+            origin: origin.clone(),
+            summary: summary.clone(),
+        }],
+        Vec::new(),
+    );
+
+    let closed = close(
+        vec![ExportBinding::new(
+            provider_origin("facade"),
+            "compute".to_owned(),
+            OriginDeclarationId::Function(origin.clone()),
+        )],
+        vec![&provider_interface],
+    )
+    .expect("a facade re-export should close the provider callable");
+
+    let closed_summary = closed
+        .concrete_call_summaries
+        .iter()
+        .find(|record| record.origin == origin)
+        .expect("the re-exported callable summary must be published");
+    assert_eq!(
+        closed_summary.summary, summary,
+        "facade closure must preserve every constraint bit"
     );
 }

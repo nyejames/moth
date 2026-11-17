@@ -31,9 +31,9 @@ use crate::compiler_frontend::compiler_messages::{DiagnosticBag, ReservedNameOwn
 use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalConstantDef, ExternalConstantId, ExternalConstantValue,
-    ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings, ExternalPackageRegistry,
-    ExternalReturnAlias, ExternalSymbolId, ExternalSymbolPath, ExternalTypeDef, ExternalTypeId,
-    external_success_returns,
+    ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings, ExternalNumericContract,
+    ExternalPackageRegistry, ExternalReturnAlias, ExternalSymbolId, ExternalSymbolPath,
+    ExternalTypeDef, ExternalTypeId, external_success_returns,
 };
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::headers::binding_environment::{
@@ -106,6 +106,7 @@ fn empty_void_function(name: &str) -> ExternalFunctionDef {
             None,
         ),
         const_eval: None,
+        numeric_contract: ExternalNumericContract::Unknown,
         lowerings: ExternalFunctionLowerings::default(),
     }
 }
@@ -2299,6 +2300,9 @@ fn struct_provider_with_receiver_method() -> PublicSemanticInterface {
                 parameters: Vec::new(),
                 return_alias: FunctionReturnAliasSummary::Fresh,
                 escapes_builtin_failure: false,
+                uses_fast_semantics: false,
+                may_trap: false,
+                may_fail: false,
             },
         }],
     }
@@ -3479,11 +3483,17 @@ fn differing_provider_summaries_with_one_origin_fail_as_infrastructure_failure()
         parameters: Vec::new(),
         return_alias: FunctionReturnAliasSummary::Fresh,
         escapes_builtin_failure: false,
+        uses_fast_semantics: false,
+        may_trap: false,
+        may_fail: false,
     };
     let second = PublicCallSummary {
         parameters: Vec::new(),
         return_alias: FunctionReturnAliasSummary::Unknown,
         escapes_builtin_failure: false,
+        uses_fast_semantics: false,
+        may_trap: false,
+        may_fail: false,
     };
 
     let mut table = FxHashMap::default();

@@ -1,0 +1,11 @@
+$fast_math
+scale_i32 |target ~I32, divisor I32|:
+    ~target /= divisor
+;
+
+io.line([:before=[1]])
+
+value ~I32 = -2147483648
+minus_one I32 = -1
+scale_i32(~value, minus_one)
+io.line([:after=[value]])

@@ -1,0 +1,17 @@
+inner type T |value T| -> I32:
+    $fast_math
+    doubled I32 = 1 + 1
+    return doubled
+;
+
+outer type T |value T| -> I32:
+    return inner(value)
+;
+
+$safe_math
+caller |value I32| -> I32:
+    return outer(value)
+;
+
+result I32 = caller(2)
+io.line([:value=[result]])

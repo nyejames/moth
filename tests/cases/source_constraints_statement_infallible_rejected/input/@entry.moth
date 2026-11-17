@@ -1,0 +1,13 @@
+handler_trap |left I32, right I32| -> I32:
+    $infallible
+    value I32 = left // right catch then left - 1
+    return value
+;
+
+escapes |left I32, right I32| -> I32:
+    $infallible
+    value I32 = left // right
+    return value
+;
+
+~[:ok=1]

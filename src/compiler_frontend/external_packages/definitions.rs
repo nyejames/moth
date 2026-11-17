@@ -12,6 +12,54 @@ use super::symbol_path::ExternalSymbolPath;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use rustc_hash::FxHashMap;
 
+/// Closed numeric evidence registered for one opaque external callable.
+///
+/// WHAT: whether the provider contract certifies fast use, traps and recoverable failure, or
+///       leaves them unknown.
+/// WHY: a foreign signature cannot prove the absence of fast arithmetic or traps. Constraint
+///      verification therefore treats an unregistered callable as unknown evidence and accepts
+///      only explicit per-callable trust. Registration is Core-origin only and validated like
+///      constant evaluation; a package or function name never supplies trust.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ExternalNumericContract {
+    /// No registered evidence. Callers treat fast use and traps as unknown, not as certified
+    /// absence.
+    #[default]
+    Unknown,
+    /// Trusted closed evidence registered by a Core provider.
+    Trusted(TrustedExternalNumericContract),
+}
+
+/// The three numeric facts a trusted external callable contract may certify.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrustedExternalNumericContract {
+    /// Whether the callable selects fast numeric semantics internally.
+    pub uses_fast_semantics: bool,
+    /// Whether the callable can execute a Moth semantic trap.
+    pub may_trap: bool,
+    /// Whether the callable can return a recoverable error. Registration requires a fallible
+    /// return contract.
+    pub may_fail: bool,
+}
+
+/// Builder-friendly trusted numeric contract constructor.
+///
+/// WHAT: mirrors the `external_returns`/`external_never` helper shape for the trusted numeric
+///       facts.
+/// WHY: provider registrations should state the closed evidence at the registration site instead of
+///      constructing the nested struct literal by hand.
+pub const fn trusted_numeric_contract(
+    uses_fast_semantics: bool,
+    may_trap: bool,
+    may_fail: bool,
+) -> ExternalNumericContract {
+    ExternalNumericContract::Trusted(TrustedExternalNumericContract {
+        uses_fast_semantics,
+        may_trap,
+        may_fail,
+    })
+}
+
 /// Backend-specific lowering metadata for an external function.
 #[derive(Debug, Clone, Default)]
 pub struct ExternalFunctionLowerings {
@@ -270,6 +318,8 @@ pub struct ExternalFunctionDef {
     pub return_contract: ExternalFunctionReturnContract,
     /// Optional compiler-owned constant-evaluation operation.
     pub const_eval: Option<ExternalConstEvalOp>,
+    /// Registered closed numeric evidence; `Unknown` until a Core provider certifies it.
+    pub numeric_contract: ExternalNumericContract,
     /// Backend-specific lowering metadata.
     pub lowerings: ExternalFunctionLowerings,
 }
@@ -282,6 +332,7 @@ impl Clone for ExternalFunctionDef {
             parameters: self.parameters.clone(),
             return_contract: self.return_contract.clone(),
             const_eval: self.const_eval,
+            numeric_contract: self.numeric_contract,
             lowerings: self.lowerings.clone(),
         }
     }
@@ -540,6 +591,8 @@ pub struct ExternalFunctionSpec {
     pub return_contract: ExternalFunctionReturnContract,
     /// Optional compiler-owned constant-evaluation operation.
     pub const_eval: Option<ExternalConstEvalOp>,
+    /// Registered closed numeric evidence; defaults to `Unknown`.
+    pub numeric_contract: ExternalNumericContract,
     pub lowerings: ExternalFunctionLowerings,
 }
 
@@ -550,6 +603,7 @@ impl From<ExternalFunctionSpec> for ExternalFunctionDef {
             parameters: spec.parameters,
             return_contract: spec.return_contract,
             const_eval: spec.const_eval,
+            numeric_contract: spec.numeric_contract,
             lowerings: spec.lowerings,
         }
     }

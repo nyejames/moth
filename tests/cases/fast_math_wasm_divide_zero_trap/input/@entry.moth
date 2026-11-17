@@ -1,0 +1,10 @@
+-- `x // x` is not a total operation: the divisor still traps when it is zero, even though the
+-- operands are equal.
+$fast_math
+divide_i32 |left I32, right I32| -> I32:
+    return left // right
+;
+
+zero I32 = 0
+value = divide_i32(zero, zero)
+~[:value=[value]]

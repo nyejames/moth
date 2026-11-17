@@ -358,6 +358,13 @@ pub(crate) fn compact_label_message_text(
                 type_text(target_type)
             )
         }
+        DurableLabelMessage::ConstraintDirective => {
+            "this constraint's guarantee is not satisfied".to_owned()
+        }
+        DurableLabelMessage::ConstraintEvidence => {
+            "evidence against the guarantee is here".to_owned()
+        }
+        DurableLabelMessage::ConstraintCallHop => "the witness path calls through here".to_owned(),
     };
 
     Some(text)

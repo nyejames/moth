@@ -30,7 +30,9 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
-use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
+use crate::compiler_frontend::hir::terminators::{
+    HirFallibleOperation, HirTerminator, RuntimeFailureKind,
+};
 use crate::compiler_frontend::hir::validate_hir_module;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::process::Command;
@@ -216,7 +218,7 @@ fn trap_op(
     result: u32,
 ) -> HirStatementKind {
     HirStatementKind::NumericOp {
-        op: HirNumericOp { operator, domain },
+        op: HirNumericOp::ordinary(operator, domain),
         failure_mode: NumericFailureMode::Trap,
         operands,
         result: HirLocalDestination::Define(LocalId(result)),
@@ -499,10 +501,10 @@ fn proven_signed_zero_normalization_matches_retained_checks() {
     assert_proven_zero_normalization("zero_neg", |types, _environment, region, expressions| {
         (
             HirStatementKind::NumericOp {
-                op: HirNumericOp {
-                    operator: NumericOperator::Negate,
-                    domain: NumericScalar::Fixed(FixedScalar::I32),
-                },
+                op: HirNumericOp::ordinary(
+                    NumericOperator::Negate,
+                    NumericScalar::Fixed(FixedScalar::I32),
+                ),
                 failure_mode: NumericFailureMode::Trap,
                 operands: HirNumericOperands::Unary {
                     operand: i32_expression(0, types.i32, region, expressions),
@@ -557,10 +559,10 @@ fn proven_negative_literal_negation_matches_positive_number_literal() {
                 statements: vec![statement(
                     1,
                     HirStatementKind::NumericOp {
-                        op: HirNumericOp {
-                            operator: NumericOperator::Negate,
-                            domain: NumericScalar::Fixed(FixedScalar::I32),
-                        },
+                        op: HirNumericOp::ordinary(
+                            NumericOperator::Negate,
+                            NumericScalar::Fixed(FixedScalar::I32),
+                        ),
                         failure_mode: NumericFailureMode::Trap,
                         operands: HirNumericOperands::Unary {
                             operand: i32_expression(-5, int, region, expressions),
@@ -610,10 +612,10 @@ fn proven_negative_literal_negation_matches_positive_bigint_literal() {
                 statements: vec![statement(
                     1,
                     HirStatementKind::NumericOp {
-                        op: HirNumericOp {
-                            operator: NumericOperator::Negate,
-                            domain: NumericScalar::Fixed(FixedScalar::I64),
-                        },
+                        op: HirNumericOp::ordinary(
+                            NumericOperator::Negate,
+                            NumericScalar::Fixed(FixedScalar::I64),
+                        ),
                         failure_mode: NumericFailureMode::Trap,
                         operands: HirNumericOperands::Unary {
                             operand: fixed_const(
@@ -872,6 +874,7 @@ fn lower_recoverable_fixture(
             HirTerminator::RuntimeFailure {
                 message: "the deliberately rejected sibling unexpectedly succeeded".to_owned(),
                 cause: None,
+                kind: RuntimeFailureKind::NoMatchFallback,
             }
         },
     });
@@ -924,10 +927,10 @@ fn proven_invoke_elides_checks_and_preserves_success_abi() {
         vec![(
             2,
             HirFallibleOperation::NumericOp {
-                op: HirNumericOp {
-                    operator: NumericOperator::Add,
-                    domain: NumericScalar::Fixed(FixedScalar::I32),
-                },
+                op: HirNumericOp::ordinary(
+                    NumericOperator::Add,
+                    NumericScalar::Fixed(FixedScalar::I32),
+                ),
                 operands: binary_operands(
                     i32_expression(2, types.i32, region, expressions),
                     i32_expression(3, types.i32, region, expressions),
@@ -960,10 +963,10 @@ fn proven_invoke_with_unsafe_sibling_keeps_checked_family() {
                 (
                     (2 + index * 2) as u32,
                     HirFallibleOperation::NumericOp {
-                        op: HirNumericOp {
-                            operator: NumericOperator::Add,
-                            domain: NumericScalar::Fixed(FixedScalar::I32),
-                        },
+                        op: HirNumericOp::ordinary(
+                            NumericOperator::Add,
+                            NumericScalar::Fixed(FixedScalar::I32),
+                        ),
                         operands: binary_operands(
                             i32_expression(left, types.i32, region, expressions),
                             i32_expression(3, types.i32, region, expressions),

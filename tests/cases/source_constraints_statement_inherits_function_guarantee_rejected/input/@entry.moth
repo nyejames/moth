@@ -1,0 +1,12 @@
+$safe_math
+inherits_safe |value I32| -> I32:
+    $fast_math
+    result I32 = value + 1
+    return result
+;
+
+$infallible
+inherits_infallible |left I32, right I32| -> I32:
+    $fast_math
+    return left // right
+;

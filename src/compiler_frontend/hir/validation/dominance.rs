@@ -182,6 +182,10 @@ impl HirValidator<'_> {
                 }
                 self.validate_destination_reads(*result, defined)?;
             }
+            HirStatementKind::FastStoreConversion { source, result, .. } => {
+                expression(*source)?;
+                self.validate_destination_reads(*result, defined)?;
+            }
             HirStatementKind::LoopStepFailure { result, .. } => {
                 self.validate_destination_reads(*result, defined)?
             }
@@ -374,6 +378,7 @@ fn transfer_statement_definitions(statement: &HirStatementKind, defined: &mut De
             }
         }
         HirStatementKind::NumericOp { result, .. }
+        | HirStatementKind::FastStoreConversion { result, .. }
         | HirStatementKind::LoopStepFailure { result, .. }
         | HirStatementKind::FormatFloat { result, .. }
         | HirStatementKind::ValidateFloat { result, .. } => {

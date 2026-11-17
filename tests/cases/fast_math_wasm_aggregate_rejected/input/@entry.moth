@@ -1,0 +1,5 @@
+-- Fast mode changes no aggregate capability: the Wasm target rejects a non-empty collection with
+-- the same diagnostic it reports outside a fast statement.
+$fast_math
+names = {"a", "b"}
+~[:names]

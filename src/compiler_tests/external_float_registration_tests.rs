@@ -40,7 +40,7 @@ use crate::compiler_frontend::compiler_messages::render::terse::format_terse_dia
 use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalFunctionDef, ExternalFunctionLowerings, ExternalJsLowering,
-    ExternalReturnSlot, ExternalSignatureType,
+    ExternalNumericContract, ExternalReturnSlot, ExternalSignatureType,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -102,6 +102,7 @@ impl RawFixedF64Function {
                     .then_some(ExternalSignatureType::BuiltinError),
             ),
             const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
             lowerings: ExternalFunctionLowerings {
                 js: Some(ExternalJsLowering::RuntimeFunction(
                     self.js_helper.to_owned(),

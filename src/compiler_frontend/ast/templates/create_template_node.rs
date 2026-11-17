@@ -385,7 +385,8 @@ impl Template {
             .and_then(|entry| entry.outer_span)
             .or_else(|| Some(token_stream.current_span()));
         let mut construction_context =
-            TemplateConstructionContext::new(context.template_ir_store.clone(), construction_span);
+            TemplateConstructionContext::new(context.template_ir_store.clone(), construction_span)
+                .with_source_constraints(context.source_constraints());
 
         // ---------------------
         //  Parse template head

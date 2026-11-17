@@ -21,6 +21,7 @@ use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::source::SpanResolutionSources;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -99,7 +100,11 @@ fn classifies_entry_start_and_normal_functions() {
         crate::compiler_frontend::hir::functions::HirFunctionOriginLookup::default(),
         Default::default(),
     )
-    .build_hir_module(ast, &ExternalPackageRegistry::new())
+    .build_hir_module(
+        ast,
+        &ExternalPackageRegistry::new(),
+        SpanResolutionSources::empty(),
+    )
     .expect("HIR lowering should succeed");
     let module = lowering.hir_module;
 
@@ -171,7 +176,11 @@ fn lowers_exact_stable_origin_to_local_function_id() {
         lookup,
         Default::default(),
     )
-    .build_hir_module(ast, &ExternalPackageRegistry::new())
+    .build_hir_module(
+        ast,
+        &ExternalPackageRegistry::new(),
+        SpanResolutionSources::empty(),
+    )
     .expect("HIR lowering should retain the stable origin mapping")
     .hir_module;
 
@@ -269,7 +278,11 @@ fn rejects_unused_concrete_origin_seed() {
         lookup,
         Default::default(),
     )
-    .build_hir_module(ast, &ExternalPackageRegistry::new());
+    .build_hir_module(
+        ast,
+        &ExternalPackageRegistry::new(),
+        SpanResolutionSources::empty(),
+    );
 
     assert!(
         result.is_err(),
@@ -327,7 +340,11 @@ fn hir_validation_rejects_two_origins_for_one_local_function() {
         lookup,
         Default::default(),
     )
-    .build_hir_module(ast, &ExternalPackageRegistry::new())
+    .build_hir_module(
+        ast,
+        &ExternalPackageRegistry::new(),
+        SpanResolutionSources::empty(),
+    )
     .expect("valid lowering should succeed");
     let mut module = lowering.hir_module;
     let type_environment = lowering.type_environment;

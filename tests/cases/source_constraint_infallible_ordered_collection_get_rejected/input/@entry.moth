@@ -1,0 +1,5 @@
+$infallible
+first_or_zero |values {I32}| -> I32:
+    first I32 = values.get(0) catch then 0
+    return first
+;

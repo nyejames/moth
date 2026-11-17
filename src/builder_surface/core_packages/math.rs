@@ -7,7 +7,7 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::external_packages::{
     ExternalConstantDef, ExternalConstantValue, ExternalFunctionLowerings, ExternalFunctionSpec,
-    ExternalJsLowering, ExternalParameter, external_success_returns,
+    ExternalJsLowering, ExternalParameter, external_success_returns, trusted_numeric_contract,
 };
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
@@ -204,6 +204,11 @@ pub fn register_core_math_package(registry: &mut ExternalPackageRegistry) {
                         None,
                     ),
                     const_eval: None,
+                    // Every callable in this table takes F64 parameters and returns one F64, and
+                    // its JS `Math.*` lowering is total with no recoverable error channel. A
+                    // future callable that differs must state its own contract instead of relying
+                    // on this loop. Caller-side float validation remains a separate hazard.
+                    numeric_contract: trusted_numeric_contract(false, false, false),
                     lowerings: ExternalFunctionLowerings {
                         js: Some(ExternalJsLowering::InlineExpression(
                             function.js_lowering.to_owned(),

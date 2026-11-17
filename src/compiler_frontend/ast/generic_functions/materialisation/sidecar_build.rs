@@ -47,6 +47,7 @@ use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity,
 };
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::style_directives::{ConstraintDirectiveSpans, SourceConstraintSet};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -943,6 +944,10 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
             generic_parameter_owner: template.generic_parameter_owner.clone(),
             generic_parameter_list_id,
             signature,
+            // The generated evidence-method template carries no provider body here; its provider
+            // declaration remains the owner of the authored constraint set.
+            source_constraints: SourceConstraintSet::default(),
+            constraint_directive_spans: ConstraintDirectiveSpans::default(),
             body_tokens: None,
             declaration_span: template.declaration_span,
         },
@@ -1002,6 +1007,9 @@ pub(crate) fn bootstrap_call_summary_from_signature(
         parameters,
         return_alias: FunctionReturnAliasSummary::Fresh,
         escapes_builtin_failure: false,
+        uses_fast_semantics: false,
+        may_trap: false,
+        may_fail: false,
     }
 }
 

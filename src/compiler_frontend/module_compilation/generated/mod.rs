@@ -26,6 +26,7 @@
 // itself, so none of them is a crate-wide path. Only the test fixtures below are, because the
 // build-system boundary store tests build the same completed records.
 pub(in crate::compiler_frontend::module_compilation) mod artefacts;
+pub(in crate::compiler_frontend::module_compilation) mod constraint_convergence;
 pub(in crate::compiler_frontend::module_compilation) mod convergence;
 pub(in crate::compiler_frontend::module_compilation) mod known;
 pub(in crate::compiler_frontend::module_compilation) mod materialisation;
@@ -33,6 +34,8 @@ pub(in crate::compiler_frontend::module_compilation) mod never_proofs;
 pub(in crate::compiler_frontend::module_compilation) mod provider_materialisations;
 pub(in crate::compiler_frontend::module_compilation) mod requests;
 pub(in crate::compiler_frontend::module_compilation) mod transaction;
+
+pub(crate) use transaction::GeneratedFunctionTransaction;
 
 pub(crate) use artefacts::{
     CompletedGeneratedFunction, GeneratedFunctionDelta, GeneratedFunctionId,

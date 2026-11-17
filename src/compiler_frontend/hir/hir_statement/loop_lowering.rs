@@ -20,7 +20,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, NumericSemantics};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirLocal;
@@ -30,7 +30,8 @@ use crate::compiler_frontend::hir::hir_builder::{HirBuilder, LoopExitPolicy};
 use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
 use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, LoopStepFailureCause, NumericFailureMode,
+    GeneratedNumericDelivery, HirNumericOp, HirNumericOperands, LoopStepFailureCause,
+    NumericFailureMode,
 };
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
@@ -102,6 +103,35 @@ struct RangeLoopRuntime {
     blocks: RangeLoopBlocks,
     locals: RangeLoopLocals,
     types: RangeLoopTypes,
+}
+
+/// The delivery semantics of one range loop's generated guards and ordinal update.
+///
+/// WHAT: `Fast` when the header was authored under `$fast_math`, else `Ordinary`.
+/// WHY: range guards are generated, so they carry the owning loop statement's mode rather than a
+///      numeric operation's; one helper keeps the zero-step guard, the float stall guard and the
+///      ordinal update reading the same captured fact.
+fn range_guard_semantics(range: &RangeLoopSpec) -> NumericSemantics {
+    if range.fast_math {
+        NumericSemantics::Fast
+    } else {
+        NumericSemantics::Ordinary
+    }
+}
+
+/// How a range loop's generated ordinal update delivers its overflow.
+///
+/// WHAT: `Fatal` under `$fast_math`, else the enclosing handler and return-contract selection.
+/// WHY: D11 makes the generated ordinal increment overflow fatal under fast mode even though the
+///      increment keeps ordinary checked semantics — fast arithmetic would wrap, which would leave
+///      the loop stepping in place forever. `Fatal` (not `Trap`) keeps a private no-slot
+///      function's inferred lane from rewriting the overflow into a recoverable `Invoke`.
+fn range_ordinal_delivery(semantics: NumericSemantics) -> GeneratedNumericDelivery {
+    if semantics.is_fast() {
+        GeneratedNumericDelivery::Fatal
+    } else {
+        GeneratedNumericDelivery::Inherit
+    }
 }
 
 /// One evaluated loop step and the fixed type it keeps across both loop kinds.
@@ -378,11 +408,13 @@ impl<'a> HirBuilder<'a> {
             .map(|id| expressions.view(id))
             .transpose()?
             .and_then(|step| step.span());
+        let guard_semantics = range_guard_semantics(range);
         self.emit_loop_zero_step_guard(
             runtime.locals.step,
             runtime.blocks.step_zero_check,
             runtime.blocks.step_zero_failure,
             runtime.blocks.header_selector,
+            guard_semantics,
             span_ref,
             &step_span,
             "for.step.zero",
@@ -393,7 +425,13 @@ impl<'a> HirBuilder<'a> {
         let step_block_is_reachable =
             self.lower_range_loop_body_with_emitter(bindings, runtime, span_ref, &mut emit_body)?;
         if step_block_is_reachable {
-            self.emit_range_loop_step(runtime, range.end_kind, span_ref, &step_span)?;
+            self.emit_range_loop_step(
+                runtime,
+                range.end_kind,
+                guard_semantics,
+                span_ref,
+                &step_span,
+            )?;
         } else {
             self.discard_unreachable_range_step_blocks(blocks)?;
         }
@@ -678,6 +716,7 @@ impl<'a> HirBuilder<'a> {
         zero_check: BlockId,
         zero_failure: BlockId,
         non_zero_target: BlockId,
+        semantics: NumericSemantics,
         span_ref: &Option<SourceSpan>,
         step_span: &Option<SourceSpan>,
         zero_label: &str,
@@ -710,7 +749,12 @@ impl<'a> HirBuilder<'a> {
         self.log_control_flow_edge(zero_check, non_zero_target, non_zero_label);
 
         self.set_current_block(zero_failure)?;
-        self.emit_loop_step_failure(LoopStepFailureCause::ZeroStep, step_span)
+        self.emit_loop_step_failure(
+            LoopStepFailureCause::ZeroStep,
+            semantics,
+            step_span,
+            span_ref,
+        )
     }
 
     /// Records the loop direction once from the evaluated non-zero step.
@@ -956,6 +1000,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         runtime: RangeLoopRuntime,
         end_kind: RangeEndKind,
+        semantics: NumericSemantics,
         span_ref: &Option<SourceSpan>,
         step_span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
@@ -1076,7 +1121,12 @@ impl<'a> HirBuilder<'a> {
             )?;
 
             self.set_current_block(stall.failure)?;
-            self.emit_loop_step_failure(LoopStepFailureCause::NoProgress, step_span)?;
+            self.emit_loop_step_failure(
+                LoopStepFailureCause::NoProgress,
+                semantics,
+                step_span,
+                span_ref,
+            )?;
         }
 
         self.set_current_block(blocks.step_commit)?;
@@ -1116,9 +1166,14 @@ impl<'a> HirBuilder<'a> {
             HirNumericOp {
                 operator: NumericOperator::Add,
                 domain: NumericScalar::Fixed(FixedScalar::I32),
+                // The ordinal is generated bookkeeping, not authored arithmetic: under
+                // `$fast_math` its overflow must fail fatally (D11), so it keeps ordinary
+                // checked semantics and the caller forces fatal delivery.
+                semantics: NumericSemantics::Ordinary,
             },
             index_current,
             index_delta,
+            range_ordinal_delivery(semantics),
             span_ref,
         )?;
         // The candidate already proved the bound in the step direction, so the next iteration
@@ -1619,6 +1674,7 @@ impl<'a> HirBuilder<'a> {
             stepped_blocks.zero_check,
             stepped_blocks.zero_failure,
             stepped_blocks.empty_check,
+            NumericSemantics::Ordinary,
             span_ref,
             &step_span,
             "loop.collection.step.zero",
@@ -1709,6 +1765,7 @@ impl<'a> HirBuilder<'a> {
             HirNumericOp {
                 operator: NumericOperator::Subtract,
                 domain: NumericScalar::Fixed(FixedScalar::I32),
+                semantics: NumericSemantics::Ordinary,
             },
             NumericFailureMode::Infallible,
             HirNumericOperands::Binary {
@@ -1879,9 +1936,11 @@ impl<'a> HirBuilder<'a> {
             HirNumericOp {
                 operator: NumericOperator::Add,
                 domain: NumericScalar::Fixed(FixedScalar::I32),
+                semantics: NumericSemantics::Ordinary,
             },
             step_current,
             step_delta,
+            GeneratedNumericDelivery::Inherit,
             span_ref,
         )?;
         self.emit_jump_from_current_block(header, span_ref, "loop.collection.backedge")

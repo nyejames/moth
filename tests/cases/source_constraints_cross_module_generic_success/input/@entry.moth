@@ -1,0 +1,10 @@
+@utils identity as same, wrap as render
+
+$safe_math
+render_text || -> String:
+    return same("a")
+;
+
+$infallible
+number = render(42)
+~[:[render_text()] [number]]

@@ -1,0 +1,10 @@
+$fast_math
+scale |left F32, right F32| -> F32:
+    return left * right
+;
+
+io.line([:before=[1]])
+~[:staged=[1]]
+large F32 = 2.0e38
+value = scale(large, large)
+io.line([:after=[value]])

@@ -4,7 +4,9 @@
 //! WHY: JS is the stable near-term backend and needs deterministic lowering output.
 
 use crate::backends::js::JsModule;
-use crate::backends::js::numeric_carrier::JsNumericCarrier;
+use crate::backends::js::numeric_carrier::{
+    JsFastNumericLowering, JsFastStoreConversion, JsNumericCarrier,
+};
 use crate::backends::js::runtime::NumericRuntimeHelperUsage;
 use crate::backends::js::{ENTRY_FAILURE_NOTICE, JsFunctionEmissionPolicy, JsLoweringConfig};
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
@@ -139,6 +141,9 @@ impl<'hir> JsEmitter<'hir> {
                 && let Some(precision) = scalar.binary_float_precision()
             {
                 emitted_code_uses_numeric_helpers.require_float_formatter(precision);
+                // The demanded float-to-string cast helper consumes the formatter's carrier
+                // through the shared numeric trap helper.
+                emitted_code_uses_numeric_helpers.numeric_trap = true;
             }
         }
         self.emit_runtime_prelude(emitted_code_uses_maps, emitted_code_uses_numeric_helpers);
@@ -251,7 +256,16 @@ impl<'hir> JsEmitter<'hir> {
                 for statement in &block.statements {
                     match &statement.kind {
                         HirStatementKind::NumericOp { op, .. } => {
-                            self.collect_numeric_operation_helpers(*op, statement.id, &mut usage);
+                            self.collect_numeric_operation_helpers(
+                                *op,
+                                statement.id,
+                                true,
+                                &mut usage,
+                            )?;
+                        }
+                        HirStatementKind::FastStoreConversion { conversion, .. } => {
+                            JsFastStoreConversion::classify(*conversion)?
+                                .require_helpers(&mut usage);
                         }
                         HirStatementKind::FormatFloat { source, .. } => {
                             // The formatted source's own exact precision selects the formatter the
@@ -259,26 +273,36 @@ impl<'hir> JsEmitter<'hir> {
                             let (_scalar, precision) =
                                 self.float_source_scalar(*source, "FormatFloat");
                             usage.require_float_formatter(precision);
+                            usage.numeric_trap = true;
                         }
-                        HirStatementKind::ValidateFloat { .. } => usage.validate_float = true,
-                        HirStatementKind::LoopStepFailure { .. } => usage.loop_step_failure = true,
+                        HirStatementKind::ValidateFloat { .. } => {
+                            usage.validate_float = true;
+                            usage.numeric_trap = true;
+                        }
+                        // A checked loop guard consumes the trap carrier; a fast guard throws its
+                        // canonical cause directly and demands no helper.
+                        HirStatementKind::LoopStepFailure { semantics, .. }
+                            if !semantics.is_fast() =>
+                        {
+                            usage.numeric_trap = true;
+                        }
                         _ => {}
                     }
                 }
                 if let HirTerminator::Invoke { id, operation, .. } = &block.terminator {
                     match operation {
                         HirFallibleOperation::NumericOp { op, .. } => {
-                            self.collect_numeric_operation_helpers(*op, *id, &mut usage);
+                            self.collect_numeric_operation_helpers(*op, *id, false, &mut usage)?;
                         }
                         HirFallibleOperation::FormatFloat { source } => {
                             let (_, precision) = self.float_source_scalar(*source, "FormatFloat");
                             usage.require_float_formatter(precision);
                         }
                         HirFallibleOperation::ValidateFloat { .. } => usage.validate_float = true,
-                        HirFallibleOperation::LoopStepFailure { .. } => {
-                            usage.loop_step_failure = true;
-                        }
-                        HirFallibleOperation::Call { .. }
+                        // A loop-step Invoke reads the recoverable carrier directly, and a fast
+                        // guard throws without a carrier, so neither demands a runtime helper.
+                        HirFallibleOperation::LoopStepFailure { .. }
+                        | HirFallibleOperation::Call { .. }
                         | HirFallibleOperation::CastOp { .. }
                         | HirFallibleOperation::MapOp { .. } => {}
                     }
@@ -293,8 +317,16 @@ impl<'hir> JsEmitter<'hir> {
         &self,
         op: HirNumericOp,
         id: HirNodeId,
+        statement_delivery: bool,
         usage: &mut NumericRuntimeHelperUsage,
-    ) {
+    ) -> Result<(), InfrastructureFailure> {
+        // Fast arithmetic owns distinct helpers and expressions. It never uses the checked
+        // carrier family and its total operations need no runtime code at all.
+        if op.semantics.is_fast() {
+            JsFastNumericLowering::classify(op)?.require_helpers(usage);
+            return Ok(());
+        }
+
         let carrier = JsNumericCarrier::for_scalar(op.domain).unwrap_or_else(|| {
             crate::compiler_bug!(
                 CompilerStage::BackendLowering,
@@ -331,12 +363,22 @@ impl<'hir> JsEmitter<'hir> {
                     op.domain
                 ),
             }
+            // A checked binary-float Power op demands that precision's `pow` member together
+            // with the shared power helper it calls. No other operator emits a `pow` member.
+            match (op.operator, helper_family) {
+                (NumericOperator::Power, "float16") => usage.binary16_power = true,
+                (NumericOperator::Power, "float32") => usage.binary32_power = true,
+                (NumericOperator::Power, "float") => usage.binary64_power = true,
+                _ => {}
+            }
+            // A trap-delivered statement consumes the helper's recoverable carrier. An Invoke
+            // reads the carrier directly and needs no trap helper.
+            if statement_delivery {
+                usage.numeric_trap = true;
+            }
         }
-        if op.operator == NumericOperator::Power
-            && matches!(helper_family, "float16" | "float32" | "float")
-        {
-            usage.binary_float_power = true;
-        }
+
+        Ok(())
     }
 
     /// Returns true when any emitted reachable JS body can construct, store, copy, display, or
@@ -414,6 +456,10 @@ impl<'hir> JsEmitter<'hir> {
 
             HirStatementKind::NumericOp { operands, .. } => {
                 self.numeric_operands_use_maps(operands)
+            }
+
+            HirStatementKind::FastStoreConversion { source, .. } => {
+                self.expression_uses_maps(*source)
             }
 
             HirStatementKind::RangeCandidate {
@@ -620,6 +666,9 @@ fn collect_statement_cast_policies(
                 collect_expression_cast_policies(hir, *right, policies);
             }
         },
+        HirStatementKind::FastStoreConversion { source, .. } => {
+            collect_expression_cast_policies(hir, *source, policies);
+        }
         HirStatementKind::RangeCandidate {
             current, step, end, ..
         } => {

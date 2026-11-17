@@ -305,6 +305,18 @@ impl HirModule {
         self.side_table.remap_block_ids(&remap);
     }
 
+    /// Resolve one block through the dense post-construction block-id layout.
+    ///
+    /// WHAT: an indexed lookup that also proves the stored row owns `block_id`.
+    /// WHY: `compact_block_ids` renumbers blocks so `blocks[index].id == BlockId(index)`; every
+    ///      post-lane analysis and backend lowering needs that exact mapping, and the identity
+    ///      check keeps a stale or detached id from reading a different block.
+    pub fn block(&self, block_id: BlockId) -> Option<&HirBlock> {
+        self.blocks
+            .get(block_id.0 as usize)
+            .filter(|block| block.id == block_id)
+    }
+
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.expressions.remap_string_ids(remap);
 

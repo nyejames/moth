@@ -10,7 +10,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
 };
 use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
-use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, NumericSemantics};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
@@ -101,6 +101,7 @@ fn numeric_operator(
             left_conversion: None,
             right_conversion: None,
             discharged: true,
+            semantics: NumericSemantics::Ordinary,
         }),
         failure: None,
     })

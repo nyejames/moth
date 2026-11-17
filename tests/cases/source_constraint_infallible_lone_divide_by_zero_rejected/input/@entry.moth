@@ -1,0 +1,9 @@
+$fast_math $infallible
+remainder |left I32, right I32| -> I32:
+    return left % right
+;
+
+$fast_math $infallible
+unsigned_divide |left U32, right U32| -> U32:
+    return left // right
+;

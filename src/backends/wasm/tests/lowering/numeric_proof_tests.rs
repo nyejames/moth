@@ -182,7 +182,7 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
         HirStatement {
             id: statement_id,
             kind: HirStatementKind::NumericOp {
-                op: HirNumericOp { operator, domain },
+                op: HirNumericOp::ordinary(operator, domain),
                 failure_mode: NumericFailureMode::Trap,
                 operands: HirNumericOperands::Binary {
                     left: load_local(expressions, left, operand_type, region),
@@ -200,10 +200,10 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
                           operand_type: TypeId| HirStatement {
         id: statement_id,
         kind: HirStatementKind::NumericOp {
-            op: HirNumericOp {
-                operator: NumericOperator::Negate,
-                domain: NumericScalar::Fixed(FixedScalar::I32),
-            },
+            op: HirNumericOp::ordinary(
+                NumericOperator::Negate,
+                NumericScalar::Fixed(FixedScalar::I32),
+            ),
             failure_mode: NumericFailureMode::Trap,
             operands: HirNumericOperands::Unary {
                 operand: load_local(expressions, operand, operand_type, region),
@@ -219,10 +219,10 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
                                  exponent: i64| HirStatement {
         id: statement_id,
         kind: HirStatementKind::NumericOp {
-            op: HirNumericOp {
-                operator: NumericOperator::Power,
-                domain: NumericScalar::Fixed(FixedScalar::I32),
-            },
+            op: HirNumericOp::ordinary(
+                NumericOperator::Power,
+                NumericScalar::Fixed(FixedScalar::I32),
+            ),
             failure_mode: NumericFailureMode::Trap,
             operands: HirNumericOperands::Binary {
                 left: expression(

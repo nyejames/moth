@@ -39,7 +39,7 @@ const _: () = assert!(size_of::<ExtendedSpan>() == 8);
 /// [`SourceRecord`] carries no identity. [`SourceSpan`] is what a consumer crossing a source
 /// boundary must hold: it checks that two operands name the same source before joining them.
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LocalSpan(NonZeroU32);
 
 /// Exact byte range in one identified source.
@@ -47,8 +47,13 @@ pub struct LocalSpan(NonZeroU32);
 /// The source identity is what makes resolution checkable: a global span may only resolve through
 /// a resolver qualified for [`SourceSpan::source`], and every `*_with` operation rejects another
 /// pairing instead of silently reading a wrong table row.
+///
+/// The derived order is encoded identity order: source first, then the packed local word, not
+/// byte-offset order across sources. It stays start-major for the inline spans the tokenizer
+/// mints, and exists so a canonical evidence ledger can sort spans without a source resolver.
+/// Read byte offsets through a resolver instead.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceSpan {
     source: SourceId,
     local: LocalSpan,
@@ -144,11 +149,21 @@ pub enum SpanJoinError {
 /// keeps one exact resolution API while the owner lifecycle changes at the identity boundary.
 pub(crate) trait SourceSpanDatabase {
     fn source_record_for_span(&self, source: SourceId) -> &SourceRecord;
+
+    /// Resolve one loaded record without turning an absent source into a compiler bug.
+    ///
+    /// WHY: a projection over generated sidecar spans can see a donor source identity the
+    ///      requester's database does not own. That is ordinary absence, not corruption.
+    fn try_source_record_for_span(&self, source: SourceId) -> Option<&SourceRecord>;
 }
 
 impl SourceSpanDatabase for SourceDatabase {
     fn source_record_for_span(&self, source: SourceId) -> &SourceRecord {
         self.source_record(source)
+    }
+
+    fn try_source_record_for_span(&self, source: SourceId) -> Option<&SourceRecord> {
+        self.loaded_record(source)
     }
 }
 
@@ -156,11 +171,19 @@ impl SourceSpanDatabase for FrozenSourceDatabase {
     fn source_record_for_span(&self, source: SourceId) -> &SourceRecord {
         self.source_record(source)
     }
+
+    fn try_source_record_for_span(&self, source: SourceId) -> Option<&SourceRecord> {
+        self.loaded_record(source)
+    }
 }
 
 impl SourceSpanDatabase for FrozenIdentityContext {
     fn source_record_for_span(&self, source: SourceId) -> &SourceRecord {
         self.source_record(source)
+    }
+
+    fn try_source_record_for_span(&self, source: SourceId) -> Option<&SourceRecord> {
+        self.try_source_record(source)
     }
 }
 
@@ -175,6 +198,103 @@ fn record_resolver(
             .as_ref()
             .map(|table| table.entries.as_ref()),
         source_identity,
+    }
+}
+
+/// Whether `inner` lies inside the inclusive authored range `start..=end`.
+///
+/// WHAT: requires all three spans to name one source, resolves them through that source's
+///       record, and tests `start <= inner.start` and `inner.end <= end`.
+/// WHY: local span words are only meaningful in their own source, so a same-line range in one
+///      file must never match a witness in another. Absent or unloaded sources are a definite
+///      miss, not a compiler bug, because generated sidecars may carry donor-domain spans that
+///      the requester database does not own.
+pub(crate) fn span_within<S: SourceSpanDatabase>(
+    inner: SourceSpan,
+    start: SourceSpan,
+    end: SourceSpan,
+    sources: &S,
+) -> bool {
+    if inner.source() != start.source() || start.source() != end.source() {
+        return false;
+    }
+    let Some(record) = sources.try_source_record_for_span(inner.source()) else {
+        return false;
+    };
+    let resolver = record_resolver(record, Some(inner.source()));
+    let inner = inner.local().resolve_with(resolver);
+    let start = start.local().resolve_with(resolver);
+    let end = end.local().resolve_with(resolver);
+    start.start() <= inner.start() && inner.end() <= end.end()
+}
+
+/// Inline-only form of [`span_within`].
+///
+/// WHY: focused fixtures lower without a source database. Their short authored spans still
+///      resolve directly; a span stored in an extended row returns `None` so the caller keeps
+///      the evidence instead of guessing.
+pub(crate) fn inline_span_within(
+    inner: SourceSpan,
+    start: SourceSpan,
+    end: SourceSpan,
+) -> Option<bool> {
+    if inner.source() != start.source() || start.source() != end.source() {
+        return Some(false);
+    }
+    let inner = inner.local().inline_range()?;
+    let start = start.local().inline_range()?;
+    let end = end.local().inline_range()?;
+    Some(start.start() <= inner.start() && inner.end() <= end.end())
+}
+
+/// Source owners a span-projection pass can resolve authored spans against.
+///
+/// WHAT: an optional frozen donor domain and an optional live build database.
+/// WHY: base modules resolve through the live database; a materialised sidecar may carry spans
+///      from its declaring domain, whose frozen owner is the only sound resolver. The inline
+///      fallback covers focused fixtures that carry no database at all.
+pub(crate) struct SpanResolutionSources<'a> {
+    frozen: Option<&'a FrozenIdentityContext>,
+    live: Option<&'a SourceDatabase>,
+}
+
+impl<'a> SpanResolutionSources<'a> {
+    pub(crate) const fn new(
+        live: Option<&'a SourceDatabase>,
+        frozen: Option<&'a FrozenIdentityContext>,
+    ) -> Self {
+        Self { frozen, live }
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn empty() -> Self {
+        Self {
+            frozen: None,
+            live: None,
+        }
+    }
+
+    /// Whether the authored range covering `start..=end` contains `inner`.
+    ///
+    /// Tries the donor domain first, then the live build database, then inline resolution. A
+    /// miss in every owner means the evidence cannot be proven inactive and is therefore kept.
+    pub(crate) fn span_within(
+        &self,
+        inner: SourceSpan,
+        start: SourceSpan,
+        end: SourceSpan,
+    ) -> bool {
+        if let Some(frozen) = self.frozen
+            && span_within(inner, start, end, frozen)
+        {
+            return true;
+        }
+        if let Some(live) = self.live
+            && span_within(inner, start, end, live)
+        {
+            return true;
+        }
+        inline_span_within(inner, start, end).unwrap_or(false)
     }
 }
 

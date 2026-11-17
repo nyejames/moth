@@ -1,0 +1,10 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_contains = [
+    "source_constraints_folded_caught_call_success direct=",
+    "foldable=4 nested=3",
+]

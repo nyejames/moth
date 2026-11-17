@@ -1,0 +1,9 @@
+-- Fast mode does not widen Wasm support: an I8 arithmetic domain keeps the same precise
+-- checked-numeric capability rejection its ordinary counterpart has.
+$fast_math
+add_i8 |left I8, right I8| -> I8:
+    return left + right
+;
+
+value = add_i8(1, 2)
+~[:value=[value]]

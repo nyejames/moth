@@ -1,0 +1,6 @@
+$safe_math
+announce ||:
+    io.line("trusted")
+;
+
+announce()

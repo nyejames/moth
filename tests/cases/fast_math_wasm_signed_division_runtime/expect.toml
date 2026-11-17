@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "quotient=-1 remainder=-1 small=0 rem32=0 rem64=0"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "quotient=-1 remainder=-1 small=0 rem32=0 rem64=0"

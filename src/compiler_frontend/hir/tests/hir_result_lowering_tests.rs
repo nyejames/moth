@@ -1196,6 +1196,7 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
                 op: HirNumericOp {
                     operator: NumericOperator::Add,
                     domain: NumericScalar::Fixed(FixedScalar::I32),
+                    ..
                 },
                 ..
             },
@@ -1208,6 +1209,7 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
                 op: HirNumericOp {
                     operator: NumericOperator::Add,
                     domain: NumericScalar::Fixed(FixedScalar::I32),
+                    ..
                 },
                 ..
             }

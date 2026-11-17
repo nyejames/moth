@@ -1,0 +1,5 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0021"]
+message_contains = ["`$fast_math` is a source modifier and cannot appear in a template head"]

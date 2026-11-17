@@ -17,7 +17,7 @@ fn diagnostic_suggestions_are_limited_to_the_occurrence() {
 
     assert_eq!(
         registry.supported_directives_for_diagnostic(DirectiveOccurrence::Source),
-        "'$export', '$config', '$doc', '$todo'",
+        "'$export', '$config', '$doc', '$todo', '$fast_math', '$safe_math', '$infallible'",
         "a source position must not suggest template-only directives"
     );
     assert!(
@@ -90,6 +90,63 @@ fn export_and_config_are_source_modifiers() {
             "'${template_directive}' is not a source modifier"
         );
     }
+}
+
+#[test]
+fn lexical_constraint_directives_share_one_target_contract() {
+    let built_ins = StyleDirectiveRegistry::built_ins();
+
+    for (name, kind) in [
+        ("fast_math", SourceDirectiveKind::FastMath),
+        ("safe_math", SourceDirectiveKind::SafeMath),
+        ("infallible", SourceDirectiveKind::Infallible),
+    ] {
+        let directive = built_ins
+            .find(name)
+            .unwrap_or_else(|| panic!("missing '${name}' directive"));
+        assert!(directive.contexts.allows_source_modifier());
+        assert!(
+            !directive.contexts.allows_template_head(),
+            "'${name}' is a source-only modifier"
+        );
+        assert!(
+            matches!(
+                directive.kind,
+                StyleDirectiveKind::SourceModifier {
+                    target: SourceModifierTarget::SourceConstraint(attached),
+                    operand: SourceModifierOperand::None,
+                } if attached == kind
+            ),
+            "'${name}' must use the shared parameterless constraint target"
+        );
+    }
+}
+
+#[test]
+fn constraint_sets_union_and_report_their_active_modes() {
+    let all = SourceConstraintSet::default()
+        .with_directive(SourceDirectiveKind::FastMath)
+        .with_directive(SourceDirectiveKind::SafeMath)
+        .with_directive(SourceDirectiveKind::Infallible);
+    assert!(!all.is_empty());
+    assert!(all.fast_math_active());
+    assert!(all.safe_math_active());
+    assert!(all.infallible_active());
+
+    let docs_only = SourceConstraintSet::default()
+        .with_directive(SourceDirectiveKind::Doc)
+        .with_directive(SourceDirectiveKind::Todo);
+    assert!(
+        docs_only.is_empty(),
+        "metadata directives are not constraints"
+    );
+
+    let inherited = SourceConstraintSet::default()
+        .with_directive(SourceDirectiveKind::FastMath)
+        .union(SourceConstraintSet::default().with_directive(SourceDirectiveKind::SafeMath));
+    assert!(inherited.fast_math_active());
+    assert!(inherited.safe_math_active());
+    assert!(!inherited.infallible_active());
 }
 
 #[test]

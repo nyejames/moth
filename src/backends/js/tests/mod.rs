@@ -11,6 +11,8 @@ mod choices;
 mod control_flow;
 mod emission_policy;
 mod expressions;
+mod fast_numeric_runtime;
+mod fast_store_conversion_runtime;
 mod host;
 mod inline_expressions;
 mod io_input_runtime;

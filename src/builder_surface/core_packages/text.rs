@@ -11,7 +11,8 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::external_packages::{
     ExternalConstEvalOp, ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering,
-    ExternalParameter, TextConstEvalOp, external_success_returns,
+    ExternalNumericContract, ExternalParameter, TextConstEvalOp, external_success_returns,
+    trusted_numeric_contract,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
@@ -25,64 +26,79 @@ pub fn register_core_text_package(registry: &mut ExternalPackageRegistry) {
         access_kind: ExternalAccessKind::Shared,
     };
 
-    let text_functions: &[(
-        &'static str,
-        &'static str,
-        Vec<ExternalParameter>,
-        ExternalSignatureType,
-        TextConstEvalOp,
-    )] = &[
-        (
-            "length",
-            "__moth_text_length",
-            vec![text_param.clone()],
-            ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
-            TextConstEvalOp::Length,
-        ),
-        (
-            "is_empty",
-            "__moth_text_is_empty",
-            vec![text_param.clone()],
-            ExternalSignatureType::Abi(ExternalAbiType::Bool),
-            TextConstEvalOp::IsEmpty,
-        ),
-        (
-            "contains",
-            "__moth_text_contains",
-            vec![text_param.clone(), text_param.clone()],
-            ExternalSignatureType::Abi(ExternalAbiType::Bool),
-            TextConstEvalOp::Contains,
-        ),
-        (
-            "starts_with",
-            "__moth_text_starts_with",
-            vec![text_param.clone(), text_param.clone()],
-            ExternalSignatureType::Abi(ExternalAbiType::Bool),
-            TextConstEvalOp::StartsWith,
-        ),
-        (
-            "ends_with",
-            "__moth_text_ends_with",
-            vec![text_param.clone(), text_param],
-            ExternalSignatureType::Abi(ExternalAbiType::Bool),
-            TextConstEvalOp::EndsWith,
-        ),
+    struct TextFunctionSpec {
+        name: &'static str,
+        js_name: &'static str,
+        parameters: Vec<ExternalParameter>,
+        return_type: ExternalSignatureType,
+        const_eval: TextConstEvalOp,
+        /// Closed numeric evidence for this callable. Every registered text helper is total and
+        /// ordinary, so each row states the same contract explicitly.
+        numeric_contract: ExternalNumericContract,
+    }
+
+    let text_functions = [
+        TextFunctionSpec {
+            name: "length",
+            js_name: "__moth_text_length",
+            parameters: vec![text_param.clone()],
+            return_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
+            const_eval: TextConstEvalOp::Length,
+            // The helper's I32 carrier guard is unreachable for host-representable strings and is
+            // not a Moth trap or error channel.
+            numeric_contract: trusted_numeric_contract(false, false, false),
+        },
+        TextFunctionSpec {
+            name: "is_empty",
+            js_name: "__moth_text_is_empty",
+            parameters: vec![text_param.clone()],
+            return_type: ExternalSignatureType::Abi(ExternalAbiType::Bool),
+            const_eval: TextConstEvalOp::IsEmpty,
+            numeric_contract: trusted_numeric_contract(false, false, false),
+        },
+        TextFunctionSpec {
+            name: "contains",
+            js_name: "__moth_text_contains",
+            parameters: vec![text_param.clone(), text_param.clone()],
+            return_type: ExternalSignatureType::Abi(ExternalAbiType::Bool),
+            const_eval: TextConstEvalOp::Contains,
+            numeric_contract: trusted_numeric_contract(false, false, false),
+        },
+        TextFunctionSpec {
+            name: "starts_with",
+            js_name: "__moth_text_starts_with",
+            parameters: vec![text_param.clone(), text_param.clone()],
+            return_type: ExternalSignatureType::Abi(ExternalAbiType::Bool),
+            const_eval: TextConstEvalOp::StartsWith,
+            numeric_contract: trusted_numeric_contract(false, false, false),
+        },
+        TextFunctionSpec {
+            name: "ends_with",
+            js_name: "__moth_text_ends_with",
+            parameters: vec![text_param.clone(), text_param],
+            return_type: ExternalSignatureType::Abi(ExternalAbiType::Bool),
+            const_eval: TextConstEvalOp::EndsWith,
+            numeric_contract: trusted_numeric_contract(false, false, false),
+        },
     ];
 
-    for (name, js_name, parameters, return_type, const_eval_op) in text_functions {
+    for function in text_functions {
         registry
             .register_external_function(
                 package_id,
                 ExternalFunctionSpec {
-                    name: (*name).to_owned(),
-                    parameters: parameters.clone(),
+                    name: function.name.to_owned(),
+                    parameters: function.parameters,
                     return_contract: external_returns(
-                        external_success_returns(return_type.clone(), ExternalReturnAlias::Fresh),
+                        external_success_returns(function.return_type, ExternalReturnAlias::Fresh),
                         None,
                     ),
-                    const_eval: Some(ExternalConstEvalOp::Text(*const_eval_op)),
+                    const_eval: Some(ExternalConstEvalOp::Text(function.const_eval)),
+                    numeric_contract: function.numeric_contract,
                     lowerings: ExternalFunctionLowerings {
-                        js: Some(ExternalJsLowering::RuntimeFunction((*js_name).to_owned())),
+                        js: Some(ExternalJsLowering::RuntimeFunction(
+                            function.js_name.to_owned(),
+                        )),
                         wasm: None,
                     },
                 },

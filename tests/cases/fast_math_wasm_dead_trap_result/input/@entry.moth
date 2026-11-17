@@ -1,0 +1,11 @@
+-- A trapping result stays trapping even when no later statement reads it. Dead results are not a
+-- licence to erase possible traps.
+$fast_math
+divide_i32 |left I32, right I32| -> I32:
+    return left // right
+;
+
+seven I32 = 7
+zero I32 = 0
+unused = divide_i32(seven, zero)
+~[:after]

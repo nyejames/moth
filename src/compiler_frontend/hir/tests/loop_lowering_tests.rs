@@ -19,7 +19,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
-use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, NumericSemantics};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
@@ -83,6 +83,7 @@ fn range_loop_spec_with_domain(
         end_kind,
         step,
         domain,
+        fast_math: false,
     })
 }
 
@@ -699,10 +700,8 @@ fn range_loop_lowering_converts_bounds_but_keeps_the_step_type() {
     // The advance is the ordinal `I32` add. Nothing else may remain: the step keeps its own type,
     // so an injected signed-abs `Negate` or `Subtract` on it would also be `I32` and must be
     // rejected by exact operator identity, not merely by domain.
-    let ordinal_increment = HirNumericOp {
-        operator: NumericOperator::Add,
-        domain: NumericScalar::Fixed(FixedScalar::I32),
-    };
+    let ordinal_increment =
+        HirNumericOp::ordinary(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::I32));
     let numeric_ops: Vec<HirNumericOp> = module
         .blocks
         .iter()
@@ -1033,6 +1032,7 @@ fn lowers_range_loop_with_index_binding() {
                         HirNumericOp {
                             operator: NumericOperator::Add,
                             domain: NumericScalar::Fixed(FixedScalar::I32),
+                            ..
                         },
                     operands: HirNumericOperands::Binary { right, .. },
                     result: HirLocalDestination::Update(_),
@@ -1152,7 +1152,7 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
                 statement.kind,
                 HirStatementKind::LoopStepFailure {
                     cause: LoopStepFailureCause::ZeroStep,
-                    failure_mode: NumericFailureMode::Trap,
+                    semantics: NumericSemantics::Ordinary,
                     ..
                 }
             )),
@@ -1395,6 +1395,7 @@ fn stepped_collection_loop_seeds_by_sign_and_advances_with_one_range_candidate()
                     HirNumericOp {
                         operator: NumericOperator::Subtract,
                         domain: NumericScalar::Fixed(FixedScalar::I32),
+                        ..
                     },
                 operands: HirNumericOperands::Binary { left, right },
                 result: HirLocalDestination::Define(last),
@@ -1703,6 +1704,7 @@ fn recoverable_stepped_collection_loop_has_zero_step_edge_without_seed_overflow_
                         op: HirNumericOp {
                             operator: NumericOperator::Subtract,
                             domain: NumericScalar::Fixed(FixedScalar::I32),
+                            ..
                         },
                         ..
                     },
@@ -1726,6 +1728,7 @@ fn recoverable_stepped_collection_loop_has_zero_step_edge_without_seed_overflow_
                     HirNumericOp {
                         operator: NumericOperator::Subtract,
                         domain: NumericScalar::Fixed(FixedScalar::I32),
+                        ..
                     },
                 failure_mode,
                 ..

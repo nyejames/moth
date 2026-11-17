@@ -1,0 +1,32 @@
+totalish |value I32| -> I32, Error!:
+    return value
+;
+
+$fast_math
+direct_fast |value I32| -> I32:
+    $safe_math
+    result I32 = value + 1
+    return result
+;
+
+$fast_math
+dead_handler_fast |value I32| -> I32:
+    $safe_math
+    parsed I32 = totalish(value) catch |err|:
+        inner I32 = value + 1
+    then 0
+    ;
+    return parsed
+;
+
+$fast_math
+guarded |limit I32| -> I32:
+    seen ~= 0
+    $safe_math
+    loop 0 to limit:
+        ~seen = seen
+    ;
+    return seen
+;
+
+~[:ok=1]

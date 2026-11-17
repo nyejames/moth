@@ -1,0 +1,11 @@
+-- A generated range guard under `$fast_math` traps fatally instead of taking a recoverable
+-- Error edge, so the Wasm target accepts the loop and the zero step faults at runtime.
+start I32 = 0
+end I32 = 3
+zero_step I32 = 0
+count ~= 0
+$fast_math
+loop start to & end by zero_step |value|:
+    ~count += 1
+;
+~[:count=[count]]

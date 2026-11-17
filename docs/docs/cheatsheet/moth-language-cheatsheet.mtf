@@ -1149,6 +1149,14 @@ on one target is invalid. Comments may intervene, but a blank line breaks attach
 usually a template; `$doc` applies no implicit Markdown formatting. Source directives stop at the next outer source directive token, not at
 nested template-head directives. No directive uses a function-style argument list.
 
+`$fast_math`, `$safe_math` and `$infallible` are parameterless numeric constraints on a function or complete statement. Ordinary arithmetic
+stays checked. `$fast_math` selects portable fast fixed-integer and binary-float semantics, where numeric failure traps instead of taking an
+implicit recoverable `Error` edge. It never makes `cast`, comparisons, Dec or unrelated calls fast. `$safe_math` proves that no reachable
+computation uses fast semantics, including through calls and fast range guards. `$infallible` proves that no recoverable error escapes its
+boundary and no reachable Moth panic or trap runs. These guarantees never promise successful arithmetic, prove termination or cover resource
+exhaustion and external termination. `catch` never handles a trap.
+See @../directives/#constraints (Constraints) and @../../developer-docs/numeric-backend-contract (Numeric backend contract).
+
 An authored project-root `@config.moth` contains compile-time values and configuration. It uses ordinary named records for the project and the selected
 builder. Source imports, functions and runtime work belong in ordinary modules:
 

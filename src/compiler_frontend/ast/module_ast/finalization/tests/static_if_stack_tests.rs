@@ -26,6 +26,7 @@ fn deep_static_specialisation_uses_one_mib_stack() {
             let mut specializer = StaticIfSpecializer {
                 resolver,
                 inactive_generic_requests: Vec::new(),
+                inactive_constraint_regions: Vec::new(),
                 selection_count: 0,
                 current_function: None,
                 function_provenance: FxHashMap::default(),

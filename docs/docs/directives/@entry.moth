@@ -1,5 +1,6 @@
 @directives content as directives
 @directives-basic content as directives_basic
+@constraints content as constraints
 @docs_styles navbar,
     section,
     language_theme_head,
@@ -9,7 +10,7 @@
     init_docs_sidebar
 
 [$in title:["Directives"]]
-[$in description:["General compiler directives in Moth, including the template-head form, the source-modifier form, configuration, builder slots and shared operand rules."]]
+[$in description:["General compiler directives in Moth, including the template-head form, the source-modifier form, configuration, numeric constraints, builder slots and shared operand rules."]]
 [$in head:[language_theme_head]]
 
 [navbar]
@@ -36,6 +37,16 @@ init_docs_sidebar()!
         [$in advanced:[directives]]
 
         [directives_basic]
+    ]
+]
+
+[section:
+    [doc_level:
+        [$in key:constraints]
+        [$in title:Numeric constraints]
+        [$in advanced:[constraints]]
+
+        [$md: `$fast_math`, `$safe_math` and `$infallible` refine numeric behaviour on a function or complete statement. Ordinary checked arithmetic stays the default. Choose Advanced for placement, meanings, proof policy, external evidence and examples.]
     ]
 ]
 

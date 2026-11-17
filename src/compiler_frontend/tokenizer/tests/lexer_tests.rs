@@ -1740,7 +1740,7 @@ fn rejects_unknown_source_directive_with_source_suggestions() {
     );
     assert_eq!(
         string_table.resolve(facts.supported_directives),
-        "'$export', '$config', '$doc', '$todo'",
+        "'$export', '$config', '$doc', '$todo', '$fast_math', '$safe_math', '$infallible'",
         "source suggestions must include source modifiers but not template-only directives"
     );
 }

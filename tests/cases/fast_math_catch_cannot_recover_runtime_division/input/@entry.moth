@@ -1,0 +1,11 @@
+$fast_math
+zero || -> I32:
+    return 0
+;
+
+$fast_math
+value = 10 // zero() catch:
+    then -1
+;
+
+io.line([:catch-fallback=[value]])

@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "wrap=0 round=0.25 big=4611686018427387904 negative=-3"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "wrap=0 round=0.25 big=4611686018427387904 negative=-3"

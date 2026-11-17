@@ -1,0 +1,10 @@
+$fast_math
+quotient |dividend I32, divisor I32| -> I32:
+    return dividend // divisor
+;
+
+io.line([:before=[1]])
+ten I32 = 10
+zero I32 = 0
+value = quotient(ten, zero)
+io.line([:after=[value]])

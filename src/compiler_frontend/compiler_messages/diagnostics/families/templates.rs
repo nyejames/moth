@@ -79,6 +79,7 @@ unit_code! {
         DanglingModifier = 13,
         WrongTarget = 14,
         MissingSeparator = 15,
+        CompileTimeFunctionTarget = 16,
     }
 }
 
@@ -112,6 +113,9 @@ impl InvalidTemplateDirectiveCode {
             InvalidTemplateDirectiveReason::DuplicateModifier => (Self::DuplicateModifier, None),
             InvalidTemplateDirectiveReason::DanglingModifier => (Self::DanglingModifier, None),
             InvalidTemplateDirectiveReason::WrongTarget => (Self::WrongTarget, None),
+            InvalidTemplateDirectiveReason::CompileTimeFunctionTarget => {
+                (Self::CompileTimeFunctionTarget, None)
+            }
             InvalidTemplateDirectiveReason::MissingSeparator => (Self::MissingSeparator, None),
         }
     }
@@ -135,6 +139,9 @@ impl InvalidTemplateDirectiveCode {
             Self::DuplicateModifier => InvalidTemplateDirectiveReason::DuplicateModifier,
             Self::DanglingModifier => InvalidTemplateDirectiveReason::DanglingModifier,
             Self::WrongTarget => InvalidTemplateDirectiveReason::WrongTarget,
+            Self::CompileTimeFunctionTarget => {
+                InvalidTemplateDirectiveReason::CompileTimeFunctionTarget
+            }
             Self::MissingSeparator => InvalidTemplateDirectiveReason::MissingSeparator,
         }
     }

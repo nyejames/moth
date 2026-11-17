@@ -1,0 +1,4 @@
+square #|| -> I32:
+    $fast_math
+    return 1
+;

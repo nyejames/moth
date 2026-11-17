@@ -229,6 +229,16 @@ pub struct RangeLoopSpec {
     ///      the counter declaration and template copies reading one selected fact instead of each
     ///      re-deriving it from operand types.
     pub domain: NumericScalar,
+    /// Whether the loop statement's lexical scope selected `$fast_math`.
+    ///
+    /// WHAT: the mode captured at header construction for the loop's generated guards and ordinal
+    ///       update. It is not a numeric-operator mode: the range header itself, its authored
+    ///       bounds and its body keep their own resolved semantics.
+    /// WHY: HIR lowering must deliver a zero-step guard, a float no-progress guard and the generated
+    ///      ordinal increment as fatal traps under `$fast_math`, never as recoverable `Error` and
+    ///      never wrapping. Capturing it with the finished header survives deferred completion,
+    ///      which runs after the statement parser restored the enclosing scope's set.
+    pub fast_math: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -33,7 +33,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{SourceSpan, SpanResolutionSources};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -115,6 +115,7 @@ pub(crate) fn runtime_expr(
         &mut string_table,
         type_environment,
         &path_fork,
+        false,
     )
     .unwrap_or_else(|_| panic!("runtime fixture operators should resolve"));
     assert_eq!(resolved.type_id, type_id, "runtime fixture result type");
@@ -437,6 +438,10 @@ pub(crate) fn build_ast_with_choices(
         const_values,
         expressions,
         doc_fragments: vec![],
+        constraint_boundaries: vec![],
+        fast_operation_witnesses: vec![],
+        release_erased_call_sites: vec![],
+        constraint_pruned_regions: vec![],
         const_top_level_fragments: vec![],
         warnings: vec![],
         choice_definitions: choice_definitions
@@ -495,7 +500,7 @@ pub(crate) fn lower_ast_with_metadata(
         crate::compiler_frontend::hir::functions::HirFunctionOriginLookup::default(),
         Default::default(),
     )
-    .build_hir_module(ast, external_packages)
+    .build_hir_module(ast, external_packages, SpanResolutionSources::empty())
 }
 
 /// Assert that no block ends with a placeholder `Uninitialized` terminator.

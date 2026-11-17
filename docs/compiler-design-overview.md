@@ -346,9 +346,10 @@ A public interface contains the complete semantic facts observable by consumers:
 - detached stored-result effects and whole-domain kills
 - frontier-enabling retention effects and outcome-sensitive success/error effects
 - external-boundary classifications
+- summary-carried numeric constraint guarantees for fast use, semantic traps and escaping recoverable failure
 - project-context provenance for every affected exported fact
 
-Per-function calls, capabilities, resource uses and other backend-planning facts live in `ModuleLinkFacts`, not the semantic interface. Exported resources carry stable origins, never donor-local IDs, output paths, routes or rendered URLs. Receiver methods stay attached to their type's exported source surface and cannot be bound, aliased or re-exported independently.
+Per-function calls, capabilities, resource uses and other backend-planning facts live in `ModuleLinkFacts`, not the semantic interface. Constraint guarantees ride the existing call summary and its existing interface equality. They add no separate fingerprint domain. Exported resources carry stable origins, never donor-local IDs, output paths, routes or rendered URLs. Receiver methods stay attached to their type's exported source surface and cannot be bound, aliased or re-exported independently.
 
 ### Public-surface and package-export validation
 
@@ -649,6 +650,8 @@ Whole literals may initialise fixed integers, binary floats, `Byte` and `Dec` di
 The shared `moth-lexical` owner supplies spelling classification and destination-aware materialisation without a fixed `i32`/`f64` bottleneck. The compiler selects the destination and owns `TypeId` resolution, operator rules and semantic folding. Compile-time constants resolve at their declaration boundary. Config, direct-template and other synthetic single-file services finish the same exact types and defaults before returning; no unresolved body state escapes.
 
 Canonical numeric references own the full operator matrix. Each operation checks its result in its selected semantic type: equal fixed-type operands keep that type and an out-of-range result fails there rather than widening. Mixed types use the smallest supported common operand domain, with no 32-bit floor. Binary-float operations complete at their selected precision; every `F16` result is rounded and checked for finiteness before a later operation consumes it, even where an `F32` carrier performs the computation. Storage size and carrier width do not widen the semantic result. Comparison, explicit casts, assignment compatibility and operator selection remain separate decisions.
+
+Directive constraints select the semantic arithmetic mode for resolved fixed-integer and binary-float operations. Resolution records `Ordinary` or `Fast` on the completed operation for its lexical scope. A resolved Dec domain always uses `Ordinary`. Mode selection changes neither operand typing nor operator eligibility, and it stays separate from failure delivery and optional proofs. See the [constraints reference](docs/directives/constraints.mtf) for source placement and guarantees and the [numeric backend contract](developer-docs/numeric-backend-contract/numeric-backend-contract.mtf) for operator and backend rules.
 
 Result-type resolution retains each completed operator's canonical result, source operand domains,
 conversion boundaries and failure decision. Folding and HIR consume those facts rather than
@@ -1002,6 +1005,8 @@ An infallible `Call` statement carries its ordered arguments and zero, one or mu
 
 `Invoke` also carries fallible builtin casts, checked numeric operations, loop-step failures, float formatting, boundary float validation and already error-typed map get/set/remove operations. Its operation retains the exact policy, numeric domain and operands, while the terminator owns failure delivery. The original HIR node identity and source span follow the operation into the terminator so numeric proofs remain paired with that operation. Infallible map operations remain statements.
 
+A fast numeric trap uses terminating statement delivery. It never becomes a recoverable `Invoke` edge, a private-lane producer or an implicit-failure contributor.
+
 Successful returns carry ordered values. Error returns carry one error value. Zero success results remain valid for both infallible and fallible functions. There is no semantic `Result<Tuple<...>, Error>` carrier or hidden tuple/payload extraction path.
 
 Value-producing branches and catch recovery join individual slots through ordinary block/value targets. Propagation transfers the error channel without constructing an aggregate. Result-slot identity survives analysis, generated artefacts and public summaries. Backends may pack physical results only at the ABI boundary while preserving order, references and exactly-once evaluation.
@@ -1046,7 +1051,7 @@ The module artefact validator, not HIR validation, checks folded fragments and t
 
 - `moth-lexical` owns shared numeric leaf facts: spelling grammar and category, token-free direct materialisation into an explicit destination, precision-aware formatting, exact fixed scalar identities and borrowed decimal scale/text facts. It owns neither compiler type lookup nor a general numeric runtime.
 - `moth` owns semantic numeric typing, body-local receiving rules, promotion, constant evaluation and cast evidence. Its immutable Dec coefficients and exact arithmetic retain the compiler's `num-bigint`, `num-integer` and `num-traits` dependencies rather than moving them into either extracted crate.
-- HIR records the canonical exact numeric domain and operator. `NumericFailureMode` distinguishes trapping statements from semantically infallible statements. Recoverable operations use `Invoke` with an explicit failure edge selected by the enclosing handler or function contract. A backend never reconstructs delivery from a name or catch-eligibility marker.
+- HIR records the canonical exact numeric domain, operator and semantic mode (`Ordinary` or `Fast`). The mode stays separate from `NumericFailureMode` and `Invoke`, which own delivery, and resolution never selects `Fast` for a Dec domain. Delivery never reconstructs the mode from a name or trap eligibility. `NumericFailureMode` distinguishes trapping statements from semantically infallible statements. Recoverable operations use `Invoke` with an explicit failure edge selected by the enclosing handler or function contract. A backend never reconstructs delivery from a name or catch-eligibility marker.
 - Compile-time and runtime operations preserve the same selected-width checks and rounding boundaries. `Dec` applies its exact scale rule at each operation result. Each `F16` operation rounds and checks finiteness before its result feeds another operation, even if an `F32` carrier computes it.
 - The mixed integer domain contains the complete operand ranges, not every possible mathematical result. Equal integer types retain their width, so `U8 + U8 -> U8` may overflow; a mixed signed/unsigned pair uses the smallest signed width containing both ranges, with no 32-bit floor. The canonical operator reference owns the full table and its explicit exceptions.
 - Safety catch eligibility remains separate from actual operation failure. Proving an operation infallible does not remove authored eligibility, but adds no failure contributor or recoverable capability. Statically invalid selected-width work remains a diagnostic in every handler context.
@@ -1212,7 +1217,7 @@ Target validation precedes physical memory planning. A failed physical refinemen
 A lowerer receives only explicit validated inputs:
 
 - selected module/generated HIR and paired type environments
-- canonical exact numeric domains in selected HIR and stable call targets
+- canonical exact numeric domains and semantic modes in selected HIR, plus stable call targets
 - borrow/lifetime facts and exported summaries where needed as validation context
 - numeric-proof facts paired to the exact validated HIR for predicate elision only; they do not change source legality or mutate HIR
 - the variant's `ValidatedMemoryPlan`
@@ -1223,7 +1228,7 @@ A lowerer receives only explicit validated inputs:
 
 `ValidatedMemoryPlan` is the sole authority for aggregate layouts, memory strategies, cleanup, inferred/declared-region operations, REC and concrete ownership/count transitions. Source and generated functions follow the same handoff. Missing compiler-owned boundary classifications or required plan facts are compiler bugs, not invitations to infer a fallback.
 
-Lowerers implement language-owned operations with native instructions or helpers only when they preserve the full contract. They never load/parse source, rebuild visibility, infer generics, reconstruct traits, fold templates, interpret TIR, choose entry/route policy or write final project outputs. They cannot weaken numeric checks, finite-value validation, cast failure, map behaviour, error propagation or Wiring semantics. A target may elide a numeric predicate only when its paired proof establishes safety and the lowerer preserves evaluation order, failure semantics and required carriers.
+Lowerers implement language-owned operations with native instructions or helpers only when they preserve the full contract. They never load/parse source, rebuild visibility, infer generics, reconstruct traits, fold templates, interpret TIR, choose entry/route policy or write final project outputs. They cannot weaken numeric checks, finite-value validation, cast failure, map behaviour, error propagation or Wiring semantics. A target may elide a numeric predicate only when its paired proof establishes safety and the lowerer preserves evaluation order, failure semantics and required carriers. A lowerer consumes the selected numeric mode from validated HIR, preserves fast trap delivery and never reconstructs fast semantics from a proof table or target carrier.
 
 Lowerers consume `HirTerminator::NeverCall` and `HirFunctionReturnContract::Never`, not result absence. A Never function has a zero-result ABI. JavaScript emits the call exactly once, then throws `Moth \`-> !\` function returned unexpectedly`. External Never glue wrappers throw if the import returns. JavaScript lowering covers local, cross-module, generated and binding-backed Never targets. Current Wasm emits a result-less `call` followed by `unreachable` for targets that pass its ordinary call-target validation. Structured LIR must not invent Never from missing results.
 

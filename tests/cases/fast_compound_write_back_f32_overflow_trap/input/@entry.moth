@@ -1,0 +1,5 @@
+overflow ~F32 = 1.0
+tiny F64 = 1e-300
+$fast_math
+~overflow /= tiny
+~[:overflow=[overflow]]

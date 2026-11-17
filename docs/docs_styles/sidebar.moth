@@ -310,6 +310,7 @@ sidebar #= [$html:
             <p class="docs-sidebar__group" style="[sidebar_group_style]">Moth's design and internals</p>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]developer-docs/">Developer docs</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]developer-docs/compiler-design/">Compiler design</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]developer-docs/numeric-backend-contract/">Numeric backend contract</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]developer-docs/memory-management/">Memory management</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]developer-docs/style-guide/">Development standards</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/design-scope/">Design scope</a>

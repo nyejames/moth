@@ -15,7 +15,8 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalAccessKind, ExternalFunctionLowerings, ExternalFunctionSpec,
-    ExternalParameter, ExternalReturnSlot, ExternalSignatureType, external_returns,
+    ExternalNumericContract, ExternalParameter, ExternalReturnSlot, ExternalSignatureType,
+    external_returns,
 };
 use moth_host::{HostFunction, HostType};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
@@ -147,6 +148,7 @@ pub(super) fn external_function_spec(
                 .then_some(ExternalSignatureType::BuiltinError),
         ),
         const_eval: None,
+        numeric_contract: ExternalNumericContract::Unknown,
         lowerings: ExternalFunctionLowerings::default(),
     })
 }

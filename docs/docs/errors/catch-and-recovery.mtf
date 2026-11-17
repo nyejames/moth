@@ -2,6 +2,10 @@
 typed errors and recoverable implicit built-in failure. An eligible authored
 expression may also use a safety catch when no failure currently exists.
 
+A semantic trap is not a failure channel. A fast numeric trap under
+`$fast_math`, an assertion failure and a backend trap never enter a handler.
+See @../directives/#constraints (Constraints).
+
 ### Protected expression
 
 `catch` has lower precedence than ordinary operators. Parentheses around the

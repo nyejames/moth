@@ -655,6 +655,7 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
             end_kind: RangeEndKind::Exclusive,
             step: None,
             domain: NumericScalar::Fixed(FixedScalar::I32),
+            fast_math: false,
         }),
     };
     let inner_loop = builder.push_loop_node(range_header(None, 2), inner_body, None, None);

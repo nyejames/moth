@@ -82,10 +82,12 @@ pub enum HirTerminator {
     ///
     /// WHAT: keeps internal runtime safety stops distinct from source-authored assertions.
     /// WHY: range-loop runtime guards and exhaustive-match fallbacks are compiler lowering
-    ///      machinery, not the public `assert` statement surface.
+    ///      machinery, not the public `assert` statement surface. The producer sets `kind`, so
+    ///      constraint analysis never infers trap status from message text or block shape.
     RuntimeFailure {
         message: String,
         cause: Option<RuntimeFailureCause>,
+        kind: RuntimeFailureKind,
     },
 
     /// Assertion failure — unrecoverable runtime stop.
@@ -168,6 +170,9 @@ pub struct HirJumpArgument {
     pub destination: LocalId,
 }
 
+/// Message carried by a generated exhaustive-match fallback.
+pub(crate) const NO_MATCH_RUNTIME_FAILURE_MESSAGE: &str = "No match arm selected";
+
 /// Semantic origin retained until private failure lanes have been installed.
 ///
 /// WHY: implicit casts and compound write-backs retain the edge-local error independently of
@@ -176,6 +181,22 @@ pub struct HirJumpArgument {
 pub enum RuntimeFailureCause {
     StoreConversion { error: LocalId },
     AuthoredCastConversion { error: LocalId },
+}
+
+/// Producer-owned classification of one generated `RuntimeFailure`.
+///
+/// WHAT: states why lowering emitted the stop, in the terms the user contract uses.
+/// WHY: only real runtime traps may reject `$infallible`. A range guard's trailing stop is
+///      redundant with its `LoopStepFailure` statement and an exhaustive-match fallback is
+///      unreachable, so both must stay out of the trap walk without message or block heuristics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeFailureKind {
+    /// An unrecovered implicit cast or compound write-back. The failure is a real trap.
+    Conversion,
+    /// The structurally unreachable continuation of a range-loop guard failure.
+    RangeGuard,
+    /// The defensive stop behind an exhaustive match. No source match reaches it.
+    NoMatchFallback,
 }
 
 /// Evaluation fact retained with an assertion failure message.

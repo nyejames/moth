@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task by task. Track each task using its `- [ ]` checkboxes.
 
-**Status:** Queued. Begin after the constraints and fast arithmetic plan has merged and its permanent semantic contracts are published.
+**Status:** Next. The constraints and fast arithmetic contracts are delivered and published.
 
 **Goal:** Reduce checked-numeric runtime overhead and emitted JS noise by eliminating provably unnecessary success carriers, error branches and predicates, while preserving exact Moth results and all observable failure behaviour.
 
@@ -10,11 +10,11 @@
 
 **Tech stack:** Rust, existing numeric HIR, HTML-JS/HTML-Wasm, Node observer/integration tests and Moth benchmark harness.
 
-**Repository destination:** Add `docs/roadmap/plans/numeric-optimisation-plan.md`. This is plan **2 of 3**, sequenced after constraints/fast arithmetic and before a separately designed Core Math fast-counterparts item. It can be reviewed on its own after plan 1 publishes the final numeric backend contract.
+**Repository destination:** Add `docs/roadmap/plans/numeric-optimisation-plan.md`. This plan follows the delivered constraints and fast arithmetic work and precedes a separately designed Core Math fast-counterparts item. It starts from the published numeric backend contract.
 
 ## Global constraints
 
-- Read `AGENTS.md`, `index.md`, the canonical style/testing/validation guides, `docs/compiler-design-overview.md`, `docs/build-system-design.md` and the numeric backend contract published by plan 1. Work from the final merged implementation, not hard-coded assumptions about today's structure.
+- Read `AGENTS.md`, `index.md`, the canonical style/testing/validation guides, `docs/compiler-design-overview.md`, `docs/build-system-design.md` and the numeric backend contract published by the constraints and fast arithmetic work. Work from the final merged implementation, not hard-coded assumptions about today's structure.
 - **No language change.** Checked arithmetic stays checked, fast operators keep their defined wrapping/trap semantics and Dec stays ordinary even in fast scopes. This plan does not introduce new directives, accepted arithmetic pairs, Core Math functions, compiler-facing guarantees or public ABI changes.
 - **Source acceptance is independent of optimisation.** `numeric_operation_cannot_fail`, declared constraints, author-written catch eligibility, `Error!` signatures and public summaries continue to mean the same thing with the optimiser on or off.
 - A missing proof means use the existing checked path. Optional proofs never justify ignoring a semantic trap, an observable failure, a side effect, a numeric rounding boundary or a target capability restriction.
@@ -41,17 +41,17 @@ Out of scope: converting checked arithmetic into wrapping arithmetic, removing s
 
 ### Exact optimisation rules
 
-- HIR `NumericFailureMode::{Trap,Infallible}` describes the statement's failure delivery. `HirTerminator::Invoke` owns recoverable error edges. Plan 1 adds an arithmetic semantic mode. These remain independent. An infallible **fact** permits scalar lowering, not a new source mode.
+- HIR `NumericFailureMode::{Trap,Infallible}` describes the statement's failure delivery. `HirTerminator::Invoke` owns recoverable error edges. The delivered constraints work adds an arithmetic semantic mode. These remain independent. An infallible **fact** permits scalar lowering, not a new source mode.
 - Retain an Invoke's observable success/error protocol unless the backend locally proves the numeric error successor unreachable and can simplify it without invalidating source semantics, live handler work or the result-slot dominance rules. Keep a genuine external/result ABI carrier if its caller expects one.
 - `NumericProofs` may prove a checked operation or integer narrowing safe. A proof can eliminate a check and its helper for that exact operation, but not an upstream operand's failure, an earlier call's effects or a separate write-back conversion.
 - The table is optional and sparse. If a case is unproved, retain all required ordinary checks. Do not infer that `NumericFailureMode::Infallible` means every later implicit cast or range update is infallible.
 - Floating point has a distinct rule: finite unary negation is total, but float addition, subtraction, multiplication, division, remainder, power and precision conversions may need per-operation validation. Never eliminate those validations based only on a finite-input fact.
 - Dec add/subtract/negate are exact, multiplication still requires its documented half-even result rounding and division/remainder/power retain their actual error cases. Total Dec operations can return scalar coefficients without an artificial Result envelope. Do not change round-at-each-language-operation behaviour or treat Dec as fixed-width wrapping.
-- Fast numeric operations already follow plan 1's scalar/trap path. Avoid building another fast path here. Restrict proof-table predicates to the ordinary checked form unless a later separately approved proof has a demonstrated benefit and fully specified identity.
+- Fast numeric operations already follow the delivered fast scalar and trap path. Avoid building another fast path here. Restrict proof-table predicates to the ordinary checked form unless a later separately approved proof has a demonstrated benefit and fully specified identity.
 
 ## 2. Current owners to reuse
 
-The following files were verified on Moth's main branch when the plan was written. Reconfirm after plan 1 merges.
+The following files were verified on Moth's main branch when the plan was written. Reconfirm them before activation.
 
 - `src/compiler_frontend/datatypes/numeric_operators.rs`: `numeric_failure_codes` is the **single semantic fallibility classifier**. `numeric_operation_cannot_fail` proves bounded all-input integer cases for mandatory semantic use. Do not duplicate either classification in backend-local match trees.
 - `src/compiler_frontend/analysis/numeric_proofs/mod.rs`: one optional `NumericProofs` with `safe_operations` and `safe_narrowings`, keyed by `HirNodeId` and paired with exact validated HIR. Its current closed-interval, block-local last-written-local algorithm has no CFG predecessor propagation. Extend only for a named measured case and keep the invalidation rules.
@@ -66,7 +66,7 @@ The following files were verified on Moth's main branch when the plan was writte
 
 ### Task 0 - Baseline, fixtures and cost model
 
-- [ ] Activate against merged plan 1 and record its revision, compiler flags, supported JS/Wasm matrix and the permanent numeric contract. Start an isolated worktree or branch.
+- [ ] Activate against the delivered constraints and fast arithmetic work and record its revision, compiler flags, supported JS/Wasm matrix and the permanent numeric contract. Start an isolated worktree or branch.
 - [ ] Run `just validate` and the documented benchmark checks. Select a small, representative corpus: checked/proven-safe mixed-width integer chains, I64/U64 BigInt, simple Dec arithmetic, finite-float negation, real recoverable arithmetic failures, catch-heavy bodies and a no-numeric baseline. Record raw baseline runtime, generated JS size/helper count, allocations where practical and frontend time.
 - [ ] Trace generated code for each case through the present proof decision, JS helper selection and Wasm check mode. List actual wasted carriers or predicates, with a before sample. Prioritise measured hotspots instead of adding generic abstractions for hypothetical cases.
 

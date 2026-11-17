@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "largest=9223372036854774784 lowest=-9223372036854775808 biggest=18446744073709549568"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "largest=9223372036854774784 lowest=-9223372036854775808 biggest=18446744073709549568"

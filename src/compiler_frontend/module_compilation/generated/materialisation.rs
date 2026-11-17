@@ -503,7 +503,8 @@ fn materialise_generated_request<'build>(
     transaction.complete(
         request_id,
         summary,
-        GeneratedFunctionSidecar::new(request.identity.clone(), generated_module),
+        GeneratedFunctionSidecar::new(request.identity.clone(), generated_module)
+            .with_source_owner(declaring_source_identity_handle),
         generated_warnings,
     );
     Ok(())

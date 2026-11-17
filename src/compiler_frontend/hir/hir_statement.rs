@@ -209,15 +209,18 @@ impl<'a> HirBuilder<'a> {
 
     // WHAT: lowers a run of AST statements until a terminating control-flow edge is emitted.
     // WHY: once a block has an explicit terminator, later statements in the sequence are dead for
-    //      the current CFG path and must not be appended.
+    //      the current CFG path and must not be appended. They remain selected source, so their
+    //      calls and fast range guards are recorded as constraint evidence before the sequence
+    //      stops lowering.
     pub(crate) fn lower_statement_sequence(
         &mut self,
         expressions: &ExpressionStore,
         nodes: &[AstNode],
     ) -> Result<(), HirConstructionFailure> {
-        for node in nodes {
+        for (index, node) in nodes.iter().enumerate() {
             let current_block = self.current_block_id_or_error()?;
             if self.block_has_explicit_terminator(current_block)? {
+                self.record_skipped_statement_evidence(expressions, &nodes[index..])?;
                 break;
             }
 

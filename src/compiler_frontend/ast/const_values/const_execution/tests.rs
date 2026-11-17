@@ -465,6 +465,11 @@ fn release_call_replacement_inherits_candidate_provenance() {
             .contains_class(SyntheticInterfaceClass::ProjectContext),
         "the release replacement must inherit the candidate's transitive provenance"
     );
+    assert_eq!(
+        state.release_erased_calls,
+        vec![(callee, None, false)],
+        "release rewriting must record the erased call site for HIR constraint evidence"
+    );
 }
 
 /// An abandoned rewrite must not leave the catch handler it installed on the caller's budget.
@@ -744,6 +749,7 @@ fn nested_scalar_calls_execute_once_per_loop_iteration() {
         i32_type,
         Some(i32_type),
         &TypeEnvironment::default(),
+        false,
     ) else {
         panic!("the I32 addition resolves");
     };
@@ -789,6 +795,7 @@ fn nested_scalar_calls_execute_once_per_loop_iteration() {
                         end_kind: RangeEndKind::Exclusive,
                         step: None,
                         domain: NumericScalar::Fixed(FixedScalar::I32),
+                        fast_math: false,
                     }),
                     body: loop_body,
                     span: None,

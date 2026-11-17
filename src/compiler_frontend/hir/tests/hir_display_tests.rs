@@ -15,7 +15,7 @@ use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::hir::terminators::{
-    HirAssertionMessageEvaluation, HirJumpArgument, HirTerminator,
+    HirAssertionMessageEvaluation, HirJumpArgument, HirTerminator, RuntimeFailureKind,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -60,6 +60,7 @@ fn runtime_failure_message_display_escapes_debug_text() {
         &HirTerminator::RuntimeFailure {
             message: "quoted \"message\"\nnext".to_owned(),
             cause: None,
+            kind: RuntimeFailureKind::NoMatchFallback,
         },
         &HirExpressionStore::default(),
     );
