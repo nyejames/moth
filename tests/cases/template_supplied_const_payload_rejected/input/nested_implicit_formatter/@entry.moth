@@ -1,0 +1,8 @@
+items #= {1, 2}
+holder #= [$html:<b[$supplied note:[" note"]]></b>]
+outer #= [:
+    [holder:
+        [$in note:[loop items |x|:[x]]]
+    ]
+]
+[:[outer]]

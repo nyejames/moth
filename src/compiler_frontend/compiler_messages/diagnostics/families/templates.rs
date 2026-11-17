@@ -60,6 +60,7 @@ unit_code! {
         NamedInsertOutsideParentSlot = 8,
         DefaultSlotInChildDecorator = 9,
         PositionalSlotInChildDecorator = 10,
+        UnnamedSuppliedInChildDecorator = 11,
     }
 }
 
@@ -80,6 +81,9 @@ unit_code! {
         WrongTarget = 14,
         MissingSeparator = 15,
         CompileTimeFunctionTarget = 16,
+        InvalidSuppliedTarget = 17,
+        InvalidSuppliedDefault = 18,
+        MissingSuppliedBody = 19,
     }
 }
 
@@ -103,6 +107,15 @@ impl InvalidTemplateDirectiveCode {
             }
             InvalidTemplateDirectiveReason::InvalidSlotTarget => (Self::InvalidSlotTarget, None),
             InvalidTemplateDirectiveReason::InvalidSlotDefault => (Self::InvalidSlotDefault, None),
+            InvalidTemplateDirectiveReason::InvalidSuppliedTarget => {
+                (Self::InvalidSuppliedTarget, None)
+            }
+            InvalidTemplateDirectiveReason::InvalidSuppliedDefault => {
+                (Self::InvalidSuppliedDefault, None)
+            }
+            InvalidTemplateDirectiveReason::MissingSuppliedBody => {
+                (Self::MissingSuppliedBody, None)
+            }
             InvalidTemplateDirectiveReason::InvalidInsertTarget => {
                 (Self::InvalidInsertTarget, None)
             }
@@ -131,6 +144,9 @@ impl InvalidTemplateDirectiveCode {
             Self::UnexpectedArguments => InvalidTemplateDirectiveReason::UnexpectedArguments,
             Self::InvalidSlotTarget => InvalidTemplateDirectiveReason::InvalidSlotTarget,
             Self::InvalidSlotDefault => InvalidTemplateDirectiveReason::InvalidSlotDefault,
+            Self::InvalidSuppliedTarget => InvalidTemplateDirectiveReason::InvalidSuppliedTarget,
+            Self::InvalidSuppliedDefault => InvalidTemplateDirectiveReason::InvalidSuppliedDefault,
+            Self::MissingSuppliedBody => InvalidTemplateDirectiveReason::MissingSuppliedBody,
             Self::InvalidInsertTarget => InvalidTemplateDirectiveReason::InvalidInsertTarget,
             Self::InvalidChildDecoratorValue => {
                 InvalidTemplateDirectiveReason::InvalidChildDecoratorValue
@@ -265,6 +281,7 @@ unit_code! {
         MultipleFormatters = 1,
         DuplicateExclusiveDirective = 2,
         DiscardedCommentDirectiveMustBeOnlyMeaningfulItem = 3,
+        SuppliedDirectiveMustBeExclusive = 4,
         SlotDirectiveMustBeExclusive = 5,
     }
 }
@@ -280,6 +297,7 @@ unit_code! {
     impl TemplateHeadItemKind {
         Directive = 1,
         Expression = 2,
+        ControlFlow = 3,
     }
 }
 
@@ -307,12 +325,12 @@ impl FactCodec for OptTemplateHeadConflictFact {
                     "conflict owners use codes 1 and 2"
                 );
                 debug_assert!(
-                    (1..=2).contains(&conflict.incoming_kind.code()),
-                    "head item kinds use codes 1 and 2"
+                    (1..=3).contains(&conflict.incoming_kind.code()),
+                    "head item kinds use codes 1 to 3"
                 );
                 debug_assert!(
-                    (1..=2).contains(&conflict.earlier_kind.code()),
-                    "head item kinds use codes 1 and 2"
+                    (1..=3).contains(&conflict.earlier_kind.code()),
+                    "head item kinds use codes 1 to 3"
                 );
                 conflict.reason.code()
                     | ((conflict.owner.code() - 1) << 3)
@@ -383,6 +401,7 @@ unit_code! {
         BuilderRootSlotNotRegistered = 35,
         InvalidMarkdownSectionMarker = 36,
         DuplicateMarkdownSectionMarker = 37,
+        SuppliedGuardAcrossSkippedWrapper = 38,
     }
 }
 
@@ -523,6 +542,9 @@ impl InvalidTemplateStructureCode {
             InvalidTemplateStructureReason::DuplicateMarkdownSectionMarker { .. } => {
                 (Self::DuplicateMarkdownSectionMarker, None, None)
             }
+            InvalidTemplateStructureReason::SuppliedGuardAcrossSkippedWrapper => {
+                (Self::SuppliedGuardAcrossSkippedWrapper, None, None)
+            }
         }
     }
 
@@ -628,6 +650,9 @@ impl InvalidTemplateStructureCode {
             // The duplicate marker's earlier location is a label, not a fact word, so the
             // reason cannot be rebuilt from the compact record.
             Self::DuplicateMarkdownSectionMarker => return None,
+            Self::SuppliedGuardAcrossSkippedWrapper => {
+                InvalidTemplateStructureReason::SuppliedGuardAcrossSkippedWrapper
+            }
         })
     }
 }
@@ -833,6 +858,22 @@ pub(crate) fn note_outside_template_body(
 ) -> DiagnosticDraft {
     invalid_template_directive(
         Some(note_name),
+        InvalidTemplateDirectiveReason::WrongContext,
+        span,
+    )
+}
+
+/// Builds the `$supplied` placement diagnostic for a guard outside a template body.
+///
+/// WHAT: one constructor for every owner that rejects a parsed root guard at its directive.
+/// WHY: expression, statement and fragment owners each reject a misplaced guard, so the
+///      directive name and reason live here once instead of at every site.
+pub(crate) fn supplied_outside_template_body(
+    supplied_name: StringId,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    invalid_template_directive(
+        Some(supplied_name),
         InvalidTemplateDirectiveReason::WrongContext,
         span,
     )

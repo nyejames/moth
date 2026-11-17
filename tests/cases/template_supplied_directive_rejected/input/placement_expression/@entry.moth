@@ -1,0 +1,2 @@
+-- A `$supplied` directive is not a value expression.
+value = [$supplied title: hi]

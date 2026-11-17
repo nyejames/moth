@@ -128,6 +128,23 @@ impl<'store> TemplateIrBuilder<'store> {
         self.push_tir_slot_placeholder_node(placeholder, span)
     }
 
+    /// Pushes an unresolved `$supplied` guard node.
+    ///
+    /// WHAT: records the receiving slot key and the guard body node, which must be the
+    ///       `ChildTemplate` edge of the guard's own template.
+    /// WHY: tests exercise the TIR representation independently of parser emission.
+    pub(crate) fn push_supplied_guard_node(
+        &mut self,
+        key: SlotKey,
+        body: TemplateIrNodeId,
+        span: Option<SourceSpan>,
+    ) -> TemplateIrNodeId {
+        self.store.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::SuppliedGuard { key, body },
+            span,
+        ))
+    }
+
     pub(crate) fn push_slot_node_with_default(
         &mut self,
         key: SlotKey,

@@ -32,4 +32,5 @@ pub(crate) use schema::{
     apply_slot_wrapper_sets_to_deferred_fill, attach_conditional_wrapper_set,
     fill_direct_child_wrapper_names_into, fill_named_slots_in_wrapper_root,
     fill_named_slots_in_wrapper_template, fill_wrapper_tree_named_contexts,
+    resolve_supplied_guards_in_wrapper_tree,
 };

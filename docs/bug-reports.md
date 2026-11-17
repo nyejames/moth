@@ -115,3 +115,33 @@ A casual log of bugs and limitations found during other work and left for later 
 - Where: `DANGEROUS_WINDOWS_ROOTS` in `is_dangerous_system_path` (`src/build_system/output/manifest.rs`).
 - Observed: named Windows protected directories are compared only against their `C:` spelling, so a Windows installation on another drive leaves `D:\Windows`, `D:\Program Files` and `D:\Users` unprotected. Drive and share roots are still rejected by the structural rule.
 - Investigate: derive the protected roots from `SystemDrive` or `SystemRoot` rather than hard-coding `C:`, and keep the component comparison. This limitation predates the native-component safety work.
+
+### Wasm rejects a runtime fragment that renders an open const loop template
+
+- Found: `$supplied` directive work, 2026-11. Reproduced without `$supplied` on base `1c79842cf`.
+- Where: `wasm_numeric_rejection` in `src/backends/backend_feature_validation.rs` rejects the range loop's numeric operation because it is delivered by `Invoke`. The upstream lowering that turns an open const loop template into runtime loop code still needs identifying.
+- Observed: in this entry, `html` builds and `html_wasm` fails with `MOTH-RULE-0064` (`Backend 'Wasm' does not support recoverable numeric failure yet`) at the fragment. Applying the template as `[looped:[$in x:"*"]]` fails the same way. A loop body without `$slot` builds on both backends.
+
+  ```moth
+  looped #= [:<ul>[loop 0 to 2 |i|:[$slot x]]</ul>]
+  name = "Priya"
+  ~[:[name]|[looped]]
+  ```
+
+- Workaround: `template_supplied_nested_composition` renders its loop checks in a separate fragment, `~[:[loops]]`, whose const content folds before lowering.
+- Investigate: whether a const range loop with constant bounds should fold or lower without checked `Invoke` delivery. Otherwise, implement recoverable numeric failure on Wasm. Pin the entry above as an `html_wasm` success case once fixed.
+
+### Whitespace around a consumed `$in` helper is kept on both sides
+
+- Found: `$supplied` directive work, 2026-11. Reproduced without `$supplied` on base `1c79842cf`. Possibly intended, since authored body whitespace is otherwise preserved.
+- Where: loose-content grouping in `route_tir_fill_nodes_against_schema` (`src/compiler_frontend/ast/templates/tir/slot_composition/contributions.rs`). Its contract says body formatting whitespace around explicit inserts is not routed.
+- Observed: given `plain #= [$html:<button>[$slot][$slot note]</button>]`, the following fills render as shown.
+
+  | Fill | Output |
+  |---|---|
+  | `[plain: Go]` | `<button> Go</button>` |
+  | `[plain:[$in note:] Go]` | `<button> Go</button>` |
+  | `[plain: [$in note:] Go]` | `<button>  Go</button>` |
+
+  The space before the helper and the space after it both reach the default slot, so a common idiom yields a double space.
+- Investigate: decide whether inline spaces next to an `$in` helper count as formatting whitespace. If they do, drop them at routing. If not, document that the helper does not absorb adjacent spaces.

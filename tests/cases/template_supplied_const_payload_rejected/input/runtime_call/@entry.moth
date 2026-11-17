@@ -1,0 +1,6 @@
+probe |flag Bool| -> String:
+    return "tick"
+;
+holder #= [$html:<b[$supplied note:[" note"]]></b>]
+invalid #= [holder:[$in note:[probe(true)]]]
+[:[invalid]]

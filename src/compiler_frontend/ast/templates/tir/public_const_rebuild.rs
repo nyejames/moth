@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use super::ids::{TemplateIrId, TemplateIrNodeId};
 use super::node::{TemplateIr, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder};
 use super::overlays::TemplateViewContext;
-use super::refs::{TemplateTirReference, TemplateWrapperReference};
+use super::refs::{TemplateTirChildReference, TemplateTirReference, TemplateWrapperReference};
 use super::store::TemplateIrStore;
 use super::summary::summarize_existing_root;
 use super::view::TemplateTirPhase;
@@ -89,7 +89,7 @@ pub(crate) fn rebuild_const_template_reference(
             context: TemplateViewContext::default(),
         },
         span,
-        comment_directive_span: None,
+        body_only_directive_span: None,
     }))
 }
 
@@ -108,25 +108,7 @@ impl Rebuild<'_> {
         &mut self,
         template: &PublicConstTemplate,
     ) -> Result<TemplateIrId, ExpressionParseError> {
-        let mut children = Vec::with_capacity(template.pieces.len());
-        for piece in &template.pieces {
-            let node = match piece {
-                PublicConstTemplatePiece::Text(value) => self.text(value)?,
-                PublicConstTemplatePiece::Slot(slot) => {
-                    let placeholder = self.slot(slot)?;
-                    self.store.push_node(TemplateIrNode::new(
-                        TemplateIrNodeKind::Slot { placeholder },
-                        self.span,
-                    ))
-                }
-            };
-            children.push(node);
-        }
-
-        let root = self.store.push_node(TemplateIrNode::new(
-            TemplateIrNodeKind::Sequence { children },
-            self.span,
-        ));
+        let root = self.pieces_root(&template.pieces)?;
         let kind = match &template.kind {
             PublicConstTemplateKind::Wrapper => TemplateType::String,
             PublicConstTemplateKind::SlotInsert(key) => {
@@ -143,6 +125,78 @@ impl Rebuild<'_> {
         }
 
         Ok(self.store.push_template(template_ir))
+    }
+
+    /// Rebuilds one public piece list as a sequence root in this module's TIR.
+    fn pieces_root(
+        &mut self,
+        pieces: &[PublicConstTemplatePiece],
+    ) -> Result<TemplateIrNodeId, ExpressionParseError> {
+        let mut children = Vec::with_capacity(pieces.len());
+        for piece in pieces {
+            children.push(self.piece(piece)?);
+        }
+        Ok(self.store.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::Sequence { children },
+            self.span,
+        )))
+    }
+
+    fn piece(
+        &mut self,
+        piece: &PublicConstTemplatePiece,
+    ) -> Result<TemplateIrNodeId, ExpressionParseError> {
+        match piece {
+            PublicConstTemplatePiece::Text(value) => self.text(value),
+            PublicConstTemplatePiece::Slot(slot) => {
+                let placeholder = self.slot(slot)?;
+                Ok(self.store.push_node(TemplateIrNode::new(
+                    TemplateIrNodeKind::Slot { placeholder },
+                    self.span,
+                )))
+            }
+            PublicConstTemplatePiece::SuppliedGuard { key, body } => {
+                // A guard is unresolved composition, not rendered text: its body must stay a
+                // child-template edge so the consumer's application can select it when it
+                // routes content to the guard's key, and drop it structurally when it does not.
+                let body_template = self.guard_body(body)?;
+                let occurrence_id = self.store.next_child_template_occurrence_id();
+                let body_edge = self.store.push_node(TemplateIrNode::new(
+                    TemplateIrNodeKind::ChildTemplate {
+                        reference: TemplateTirChildReference::new(
+                            body_template,
+                            TemplateTirPhase::Finalized,
+                            TemplateViewContext::default(),
+                        ),
+                        occurrence_id,
+                    },
+                    self.span,
+                ));
+                Ok(self.store.push_node(TemplateIrNode::new(
+                    TemplateIrNodeKind::SuppliedGuard {
+                        key: slot_key(key, self.string_table),
+                        body: body_edge,
+                    },
+                    self.span,
+                )))
+            }
+        }
+    }
+
+    /// Rebuilds one guard body as its own structurally derived template.
+    fn guard_body(
+        &mut self,
+        pieces: &[PublicConstTemplatePiece],
+    ) -> Result<TemplateIrId, ExpressionParseError> {
+        let root = self.pieces_root(pieces)?;
+        let summary = summarize_existing_root(self.store, root)?;
+        Ok(self.store.push_template(TemplateIr::new(
+            root,
+            Style::default(),
+            TemplateType::String,
+            summary,
+            self.span,
+        )))
     }
 
     fn text(

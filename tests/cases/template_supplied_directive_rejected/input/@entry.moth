@@ -1,0 +1,3 @@
+-- Each subdirectory is a separate entry. Together they pin the user-facing
+-- placement, directive-shape and const-projection diagnostics for `$supplied`.
+[:<h1>Rejected</h1>]

@@ -15,9 +15,10 @@ use crate::compiler_frontend::style_directives::compatibility::{
 use crate::compiler_frontend::style_directives::specs::{
     CONFIG_DIRECTIVE_NAME, CoreStyleDirectiveKind, DOC_DIRECTIVE_NAME, EXPORT_DIRECTIVE_NAME,
     FAST_MATH_DIRECTIVE_NAME, INFALLIBLE_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME,
-    SAFE_MATH_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME, SourceDirectiveKind, SourceModifierOperand,
-    SourceModifierTarget, StyleDirectiveArgumentType, StyleDirectiveContexts,
-    StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveSpec, TODO_DIRECTIVE_NAME,
+    SAFE_MATH_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME, SUPPLIED_DIRECTIVE_NAME, SourceDirectiveKind,
+    SourceModifierOperand, SourceModifierTarget, StyleDirectiveArgumentType,
+    StyleDirectiveContexts, StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveSpec,
+    TODO_DIRECTIVE_NAME,
 };
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 
@@ -64,6 +65,36 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
                 conflict_reason: Some(TemplateHeadConflictReason::SlotDirectiveMustBeExclusive),
             },
             CoreStyleDirectiveKind::Slot,
+        ),
+        StyleDirectiveSpec::core(
+            SUPPLIED_DIRECTIVE_NAME,
+            TemplateBodyMode::Normal,
+            StyleDirectiveContexts::TEMPLATE_HEAD,
+            TemplateHeadCompatibility {
+                presence_tags: TemplateHeadTag::MEANINGFUL_ITEM
+                    | TemplateHeadTag::SUPPLIED_DIRECTIVE,
+                // A guard selects its own body, so only formatter directives may share the head.
+                required_absent_tags: TemplateHeadTag::EXPRESSION
+                    | TemplateHeadTag::SLOT_DIRECTIVE
+                    | TemplateHeadTag::IN_DIRECTIVE
+                    | TemplateHeadTag::COMMENT_DIRECTIVE
+                    | TemplateHeadTag::FRESH_DIRECTIVE
+                    | TemplateHeadTag::BEFORE_DIRECTIVE
+                    | TemplateHeadTag::AFTER_DIRECTIVE
+                    | TemplateHeadTag::SUPPLIED_DIRECTIVE
+                    | TemplateHeadTag::CONTROL_FLOW,
+                blocks_future_tags: TemplateHeadTag::EXPRESSION
+                    | TemplateHeadTag::SLOT_DIRECTIVE
+                    | TemplateHeadTag::IN_DIRECTIVE
+                    | TemplateHeadTag::COMMENT_DIRECTIVE
+                    | TemplateHeadTag::FRESH_DIRECTIVE
+                    | TemplateHeadTag::BEFORE_DIRECTIVE
+                    | TemplateHeadTag::AFTER_DIRECTIVE
+                    | TemplateHeadTag::SUPPLIED_DIRECTIVE
+                    | TemplateHeadTag::CONTROL_FLOW,
+                conflict_reason: Some(TemplateHeadConflictReason::SuppliedDirectiveMustBeExclusive),
+            },
+            CoreStyleDirectiveKind::Supplied,
         ),
         StyleDirectiveSpec::core(
             INSERT_DIRECTIVE_NAME,

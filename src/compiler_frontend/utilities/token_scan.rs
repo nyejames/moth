@@ -20,7 +20,9 @@ use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_binding_target_syntax;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::style_directives::{INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME};
+use crate::compiler_frontend::style_directives::{
+    INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME, SUPPLIED_DIRECTIVE_NAME,
+};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRangeError, TokenRef, TokenTag,
@@ -431,9 +433,10 @@ fn collect_match_payload_names(
     }
 }
 
-/// Whether the symbol at `index` is the static target name immediately after `$slot` or `$in`.
+/// Whether the symbol at `index` is the static target name immediately after `$slot`, `$supplied`
+/// or `$in`.
 ///
-/// WHY: slot and insert target names live in the receiving template's slot schema, not in
+/// WHY: slot, guard and insert target names live in the receiving template's slot schema, not in
 /// lexical value scope, so a constant with the same spelling is not a reference here. Only the
 /// target is skipped: default expressions and insert values continue through ordinary scanning.
 fn is_static_slot_target(
@@ -455,7 +458,9 @@ fn is_static_slot_target(
             TokenTag::STYLE_DIRECTIVE => {
                 return tokens.style_directive_name(candidate).is_some_and(|name| {
                     let name = string_table.resolve(name);
-                    name == SLOT_DIRECTIVE_NAME || name == INSERT_DIRECTIVE_NAME
+                    name == SLOT_DIRECTIVE_NAME
+                        || name == SUPPLIED_DIRECTIVE_NAME
+                        || name == INSERT_DIRECTIVE_NAME
                 });
             }
             _ => return false,

@@ -20,7 +20,8 @@ use super::super::slot_composition::contributions::route_tir_fill_nodes_against_
 use super::super::slot_composition::helpers::{children_of_node, root_node_id_for_template};
 use super::super::slot_composition::{
     TirSlotContributions, compose_tir_head_chain_from_root, compose_tir_head_chain_from_template,
-    fill_named_slot_placeholders_into, fill_named_slots_in_wrapper_template,
+    fill_named_slot_placeholders_into, fill_named_slots_in_wrapper_root,
+    fill_named_slots_in_wrapper_template,
 };
 use super::super::slot_layout::{
     TirSlotSchema, collect_tir_slot_layout, collect_tir_slot_layout_with_context,
@@ -63,6 +64,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::test_support::comp
 use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidTemplateSlotReason};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -101,9 +103,10 @@ fn build_single_slot_template(store: &mut TemplateIrStore, key: SlotKey) -> Temp
 fn build_slot_insert_template(
     store: &mut TemplateIrStore,
     target: SlotKey,
+    text: &str,
     string_table: &mut StringTable,
 ) -> TemplateIrId {
-    let text_id = string_table.intern("insert");
+    let text_id = string_table.intern(text);
     let byte_len = string_table.resolve(text_id).len();
 
     let mut builder = TemplateIrBuilder::new(store);
@@ -1129,8 +1132,12 @@ fn route_explicit_insert_to_each_target_slot_key() {
     // default and positional buckets untouched.
     {
         let wrapper = build_single_slot_template(&mut store, SlotKey::Named(name));
-        let insert_template =
-            build_slot_insert_template(&mut store, SlotKey::Named(name), &mut string_table);
+        let insert_template = build_slot_insert_template(
+            &mut store,
+            SlotKey::Named(name),
+            "insert",
+            &mut string_table,
+        );
         let insert_node = {
             let mut builder = TemplateIrBuilder::new(&mut store);
             builder.push_insert_contribution_node(insert_template, None)
@@ -1182,7 +1189,7 @@ fn route_explicit_insert_to_each_target_slot_key() {
     {
         let wrapper = build_single_slot_template(&mut store, SlotKey::Default);
         let insert_template =
-            build_slot_insert_template(&mut store, SlotKey::Default, &mut string_table);
+            build_slot_insert_template(&mut store, SlotKey::Default, "insert", &mut string_table);
         let insert_node = {
             let mut builder = TemplateIrBuilder::new(&mut store);
             builder.push_insert_contribution_node(insert_template, None)
@@ -1229,8 +1236,12 @@ fn route_explicit_insert_to_each_target_slot_key() {
     // wrapper, so it rejects that target.
     {
         let wrapper = build_single_slot_template(&mut store, SlotKey::Positional(0));
-        let insert_template =
-            build_slot_insert_template(&mut store, SlotKey::Positional(0), &mut string_table);
+        let insert_template = build_slot_insert_template(
+            &mut store,
+            SlotKey::Positional(0),
+            "insert",
+            &mut string_table,
+        );
         let insert_node = {
             let mut builder = TemplateIrBuilder::new(&mut store);
             builder.push_insert_contribution_node(insert_template, None)
@@ -1523,8 +1534,12 @@ fn unknown_insert_target_produces_diagnostic() {
 
     let mut store = TemplateIrStore::new();
     let wrapper = build_single_slot_template(&mut store, SlotKey::Default);
-    let insert_template =
-        build_slot_insert_template(&mut store, SlotKey::Named(unknown_name), &mut string_table);
+    let insert_template = build_slot_insert_template(
+        &mut store,
+        SlotKey::Named(unknown_name),
+        "insert",
+        &mut string_table,
+    );
 
     let mut builder = TemplateIrBuilder::new(&mut store);
     let insert_node = builder.push_insert_contribution_node(insert_template, None);
@@ -1575,8 +1590,12 @@ fn named_only_slots_discard_loose_whitespace_around_insert_contributions() {
 
     let mut store = TemplateIrStore::new();
     let wrapper = build_single_slot_template(&mut store, SlotKey::Named(name));
-    let insert_template =
-        build_slot_insert_template(&mut store, SlotKey::Named(name), &mut string_table);
+    let insert_template = build_slot_insert_template(
+        &mut store,
+        SlotKey::Named(name),
+        "insert",
+        &mut string_table,
+    );
 
     let leading_whitespace = build_text_node(
         &mut store,
@@ -1700,8 +1719,12 @@ fn mixed_explicit_inserts_and_loose_content_are_bucketed() {
     let wrapper =
         build_wrapper_with_slots(&mut store, vec![SlotKey::Named(name), SlotKey::Default]);
 
-    let insert_template =
-        build_slot_insert_template(&mut store, SlotKey::Named(name), &mut string_table);
+    let insert_template = build_slot_insert_template(
+        &mut store,
+        SlotKey::Named(name),
+        "insert",
+        &mut string_table,
+    );
 
     let mut builder = TemplateIrBuilder::new(&mut store);
     let insert_node = builder.push_insert_contribution_node(insert_template, None);
@@ -3012,8 +3035,12 @@ fn receiver_with_named_slots() {
     let wrapper = build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Named(name)]);
     let wrapper_node = build_child_template_node_for_template(&mut store, wrapper);
 
-    let insert_template =
-        build_slot_insert_template(&mut store, SlotKey::Named(name), &mut string_table);
+    let insert_template = build_slot_insert_template(
+        &mut store,
+        SlotKey::Named(name),
+        "insert",
+        &mut string_table,
+    );
     let insert_body = template_root_node_id(insert_template, &store);
     let mut builder = TemplateIrBuilder::new(&mut store);
     let insert_node = builder.push_insert_contribution_node(insert_template, None);
@@ -5081,4 +5108,787 @@ fn child_decorator_composite_exposes_one_default_slot_and_resolves_named_content
         resolved_layout.placeholders.is_empty(),
         "no unresolved placeholder may survive a named-content application"
     );
+}
+
+#[test]
+fn supplied_guard_schema_and_presence_by_key() {
+    let mut strings = StringTable::new();
+    let name = strings.intern("title");
+    let text = strings.intern("body");
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let values = ConstValueStore::default();
+    for key in [
+        SlotKey::Default,
+        SlotKey::Positional(1),
+        SlotKey::Named(name),
+    ] {
+        for presence in 0..3 {
+            let mut store = TemplateIrStore::new();
+            let (template, guard, body, contribution) = {
+                let mut builder = TemplateIrBuilder::new(&mut store);
+                let text_node = builder.push_text_node(text, 4, TemplateSegmentOrigin::Body, None);
+                let child = builder.finish_template(
+                    text_node,
+                    Style::default(),
+                    TemplateType::String,
+                    TemplateIrSummary::default(),
+                    None,
+                );
+                let body = builder.push_child_template_node(child, None);
+                let guard = builder.push_supplied_guard_node(key.clone(), body, None);
+                let template = builder.finish_template(
+                    guard,
+                    Style::default(),
+                    TemplateType::String,
+                    TemplateIrSummary::default(),
+                    None,
+                );
+                (template, guard, body, text_node)
+            };
+            let schema = collect_tir_slot_schema(&store, template).unwrap();
+            assert!(schema.has_any_slots());
+            assert!(schema.accepts_target(&key));
+            let mut routed = TirSlotContributions::default();
+            if presence > 0 {
+                routed.routed_targets.insert(key.clone());
+            }
+            if presence == 2 {
+                match &key {
+                    SlotKey::Default => routed.default_nodes.push(contribution),
+                    SlotKey::Named(name) => {
+                        routed.named_nodes.insert(*name, vec![contribution]);
+                    }
+                    SlotKey::Positional(index) => {
+                        routed.positional_nodes.insert(*index, vec![contribution]);
+                    }
+                }
+            }
+            let expanded = expand_tir_slot_placeholders(
+                &mut store,
+                &expressions,
+                &values,
+                template,
+                &routed,
+                &strings,
+            )
+            .unwrap();
+            if presence == 0 {
+                assert!(
+                    matches!(&store.get_node(expanded).unwrap().kind, TemplateIrNodeKind::Sequence { children } if children.is_empty())
+                );
+            } else {
+                assert_eq!(expanded, body);
+            }
+            let named = if presence == 0 {
+                FxHashMap::default()
+            } else {
+                FxHashMap::from_iter([(name, Vec::new())])
+            };
+            let filled = fill_named_slot_placeholders_into(
+                &mut store,
+                &expressions,
+                &values,
+                template,
+                &named,
+                &strings,
+            )
+            .unwrap();
+            match &key {
+                SlotKey::Named(_) => {
+                    let root = store.get_template(filled.unwrap()).unwrap().root;
+                    if presence == 0 {
+                        assert!(
+                            matches!(&store.get_node(root).unwrap().kind, TemplateIrNodeKind::Sequence { children } if children.is_empty())
+                        );
+                    } else {
+                        assert_eq!(root, body);
+                    }
+                }
+                _ => assert!(filled.is_none()),
+            }
+            let contexts =
+                super::super::slot_composition::schema::fill_wrapper_tree_named_contexts(
+                    &mut store,
+                    &expressions,
+                    &values,
+                    guard,
+                    &named,
+                    &strings,
+                )
+                .unwrap();
+            assert!(contexts.is_none());
+        }
+    }
+}
+
+#[test]
+fn supplied_guard_ignores_occurrence_default_and_expands_its_body() {
+    let mut strings = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let mut values = ConstValueStore::default();
+    let text = strings.intern("fallback");
+    let default = values
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Text(text)),
+            None,
+        )
+        .unwrap();
+    let (template, contribution) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let slot = builder.push_slot_node(SlotKey::Default, None);
+        let child = builder.finish_template(
+            slot,
+            Style::default(),
+            TemplateType::String,
+            slot_summary(1),
+            None,
+        );
+        let body = builder.push_child_template_node(child, None);
+        let guard = builder.push_supplied_guard_node(SlotKey::Default, body, None);
+        let sibling = builder.push_slot_node_with_default(SlotKey::Default, default, None);
+        let root = builder.push_sequence_node(vec![guard, sibling], None);
+        let template = builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            slot_summary(2),
+            None,
+        );
+        let contribution = builder.push_text_node(text, 8, TemplateSegmentOrigin::Body, None);
+        (template, contribution)
+    };
+    let absent = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &values,
+        template,
+        &TirSlotContributions::default(),
+        &strings,
+    )
+    .unwrap();
+    let TemplateIrNodeKind::Sequence { children } = &store.get_node(absent).unwrap().kind else {
+        panic!("sequence expected")
+    };
+    assert_eq!(children.len(), 1);
+    assert!(
+        matches!(&store.get_node(children[0]).unwrap().kind, TemplateIrNodeKind::Slot { placeholder } if placeholder.closed)
+    );
+    let mut routed = TirSlotContributions::default();
+    routed.extend_default_nodes(vec![contribution]);
+    let present = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &values,
+        template,
+        &routed,
+        &strings,
+    )
+    .unwrap();
+    let TemplateIrNodeKind::Sequence { children } = &store.get_node(present).unwrap().kind else {
+        panic!("sequence expected")
+    };
+    let TemplateIrNodeKind::ChildTemplate { reference, .. } =
+        &store.get_node(children[0]).unwrap().kind
+    else {
+        panic!("child expected")
+    };
+    let body_root = store.get_template(reference.root).unwrap().root;
+    assert!(
+        matches!(&store.get_node(body_root).unwrap().kind, TemplateIrNodeKind::Sequence { children } if children == &vec![contribution])
+    );
+}
+
+#[test]
+fn supplied_guard_discards_presence_only_payloads() {
+    let mut string_table = StringTable::new();
+    let flag_key = SlotKey::Named(string_table.intern("flag"));
+    let body_key = SlotKey::Named(string_table.intern("body"));
+
+    let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+
+    // The receiver tests `flag` only with `$supplied`; `body` keeps a real `$slot`
+    // occurrence, so only the flag payload may be discarded.
+    let guard_body = build_single_text_template(&mut store, &mut string_table, "guard body");
+    let guard_body_node = build_child_template_node_for_template(&mut store, guard_body);
+    let wrapper = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let guard = builder.push_supplied_guard_node(flag_key.clone(), guard_body_node, None);
+        let slot = builder.push_slot_node(body_key.clone(), None);
+        let root = builder.push_sequence_node(vec![guard, slot], None);
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            slot_summary(2),
+            None,
+        )
+    };
+
+    let discarded_insert = build_slot_insert_template(
+        &mut store,
+        flag_key.clone(),
+        "discarded payload",
+        &mut string_table,
+    );
+    let rendered_insert = build_slot_insert_template(
+        &mut store,
+        body_key.clone(),
+        "rendered payload",
+        &mut string_table,
+    );
+    let discarded_payload = template_root_node_id(discarded_insert, &store);
+    let rendered_payload = template_root_node_id(rendered_insert, &store);
+
+    let wrapper_node = build_child_template_node_for_template(&mut store, wrapper);
+    let discarded_insert_node =
+        build_child_template_node_for_template(&mut store, discarded_insert);
+    let rendered_insert_node = build_child_template_node_for_template(&mut store, rendered_insert);
+    let application = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let root = builder.push_sequence_node(
+            vec![wrapper_node, discarded_insert_node, rendered_insert_node],
+            None,
+        );
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary {
+                head_node_count: 1,
+                ..TemplateIrSummary::default()
+            },
+            None,
+        )
+    };
+
+    let layout = collect_tir_slot_layout(&store, wrapper).unwrap();
+    assert!(
+        !layout.schema.has_value_consumer(&flag_key),
+        "a guard-only key must not have a value consumer"
+    );
+    assert!(
+        layout.schema.has_value_consumer(&body_key),
+        "an ordinary `$slot` occurrence must have a value consumer"
+    );
+
+    let mut routed = route_tir_fill_nodes_against_schema(
+        &store,
+        &layout.schema,
+        &[discarded_insert_node, rendered_insert_node],
+        None,
+        &string_table,
+    )
+    .unwrap();
+    assert_eq!(
+        routed.nodes_for_slot(&flag_key),
+        &[discarded_payload],
+        "routing must still bucket the guard-only payload before composition discards it"
+    );
+    assert_eq!(routed.nodes_for_slot(&body_key), &[rendered_payload]);
+
+    let discarded = routed.discard_presence_only_payloads(&layout.schema);
+
+    assert_eq!(
+        discarded,
+        vec![discarded_payload],
+        "the discarded payload must be handed back for const validation"
+    );
+
+    assert!(
+        routed.slot_has_routed_presence(&flag_key),
+        "discarding the payload must keep the guard's routed presence"
+    );
+    assert!(
+        routed.nodes_for_slot(&flag_key).is_empty(),
+        "no contribution node may survive for a guard-only key"
+    );
+    assert_eq!(
+        routed.nodes_for_slot(&body_key),
+        &[rendered_payload],
+        "a value-consumed key keeps its routed payload"
+    );
+
+    let composed_root = compose_tir_head_chain_from_template(
+        &mut store,
+        &expressions,
+        &const_values,
+        application,
+        &string_table,
+        false,
+        None,
+    )
+    .expect("guard-only application should compose");
+
+    let mut texts = Vec::new();
+    let mut remaining_guards = 0;
+    let mut visited_templates = Vec::new();
+    collect_reachable_texts_and_guards(
+        &store,
+        composed_root,
+        &string_table,
+        &mut texts,
+        &mut remaining_guards,
+        &mut visited_templates,
+    );
+    assert_eq!(
+        texts,
+        ["guard body", "rendered payload"],
+        "only the guard body and the value-consumed payload may reach the composed tree"
+    );
+    assert_eq!(remaining_guards, 0, "composition must resolve the guard");
+}
+
+/// Builds a contribution template whose root only the runtime plan path can materialize.
+///
+/// WHAT: attaches a one-site runtime slot plan to the template root.
+/// WHY: runtime-path tests must not depend on expression fixtures; preparation already treats a
+///      runtime-plan tree as non-const, exactly like a runtime function call.
+fn build_runtime_contribution_template(
+    store: &mut TemplateIrStore,
+    string_table: &mut StringTable,
+) -> TemplateIrId {
+    let runtime_text = string_table.intern("runtime");
+    let runtime_text_len = string_table.resolve(runtime_text).len();
+    let render_root = {
+        let mut builder = TemplateIrBuilder::new(store);
+        builder.push_text_node(
+            runtime_text,
+            runtime_text_len,
+            TemplateSegmentOrigin::Body,
+            None,
+        )
+    };
+    let plan = store.push_slot_plan(TemplateSlotPlan {
+        contribution_sources: vec![],
+        slot_sites: vec![TemplateSlotSitePlan {
+            site: RuntimeSlotSiteId(0),
+            key: SlotKey::Default,
+            render_root,
+            span: None,
+        }],
+    });
+    let template = {
+        let mut builder = TemplateIrBuilder::new(store);
+        let site = builder.store.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::RuntimeSlotSite {
+                plan,
+                site: RuntimeSlotSiteId(0),
+            },
+            None,
+        ));
+        builder.finish_template(
+            site,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            None,
+        )
+    };
+    store
+        .attach_runtime_slot_plan(template, plan)
+        .expect("the runtime contribution plan should attach to its template");
+    template
+}
+
+/// Builds a non-const boolean expression for a runtime `if` selector.
+fn runtime_bool_expression(
+    expressions: &mut AstExpressionBuilder,
+    string_table: &mut StringTable,
+) -> ExprId {
+    let mut path_fork = PathInternerFork::empty();
+    let scope = path_fork
+        .try_intern_portable_path("main.moth", string_table)
+        .expect("test path fits");
+    let name = string_table.intern("runtime_flag");
+    let name = path_fork
+        .try_intern_child(scope, name)
+        .expect("test path fits");
+    expressions
+        .function_call_with_typed_arguments(name, Vec::new(), vec![builtin_type_ids::BOOL], None)
+        .expect("runtime selector expression should construct")
+        .id()
+}
+
+/// Builds an `$in disabled:` insert template carrying either an empty or a runtime `if` body.
+fn build_disabled_insert_template(
+    store: &mut TemplateIrStore,
+    string_table: &mut StringTable,
+    expressions: &mut AstExpressionBuilder,
+    runtime_if_body: bool,
+) -> TemplateIrId {
+    let disabled = string_table.intern("disabled");
+    let mut builder = TemplateIrBuilder::new(store);
+    let root = if runtime_if_body {
+        let selector =
+            TemplateBranchSelector::Bool(runtime_bool_expression(expressions, string_table));
+        let body = builder.push_sequence_node(vec![], None);
+        builder.push_conditional_node(selector, body, None)
+    } else {
+        builder.push_sequence_node(vec![], None)
+    };
+    builder.finish_template(
+        root,
+        Style::default(),
+        TemplateType::SlotInsert(SlotKey::Named(disabled)),
+        TemplateIrSummary::default(),
+        None,
+    )
+}
+
+/// Collects text nodes and unresolved guards reachable from one template root.
+fn collect_reachable_texts_and_guards(
+    store: &TemplateIrStore,
+    node_id: TemplateIrNodeId,
+    string_table: &StringTable,
+    texts: &mut Vec<String>,
+    guards: &mut usize,
+    visited_templates: &mut Vec<TemplateIrId>,
+) {
+    let Some(node) = store.get_node(node_id) else {
+        return;
+    };
+    match &node.kind {
+        TemplateIrNodeKind::Sequence { children } => {
+            for child_id in children {
+                collect_reachable_texts_and_guards(
+                    store,
+                    *child_id,
+                    string_table,
+                    texts,
+                    guards,
+                    visited_templates,
+                );
+            }
+        }
+        TemplateIrNodeKind::Text { text, .. } => {
+            texts.push(string_table.resolve(*text).to_owned());
+        }
+        TemplateIrNodeKind::SuppliedGuard { body, .. } => {
+            *guards += 1;
+            collect_reachable_texts_and_guards(
+                store,
+                *body,
+                string_table,
+                texts,
+                guards,
+                visited_templates,
+            );
+        }
+        TemplateIrNodeKind::ChildTemplate { reference, .. } => {
+            if visited_templates.contains(&reference.root) {
+                return;
+            }
+            visited_templates.push(reference.root);
+            if let Some(template) = store.get_template(reference.root) {
+                collect_reachable_texts_and_guards(
+                    store,
+                    template.root,
+                    string_table,
+                    texts,
+                    guards,
+                    visited_templates,
+                );
+            }
+        }
+        TemplateIrNodeKind::Conditional { body, .. } => {
+            collect_reachable_texts_and_guards(
+                store,
+                *body,
+                string_table,
+                texts,
+                guards,
+                visited_templates,
+            );
+        }
+        TemplateIrNodeKind::Loop {
+            body,
+            aggregate_wrapper,
+            ..
+        } => {
+            collect_reachable_texts_and_guards(
+                store,
+                *body,
+                string_table,
+                texts,
+                guards,
+                visited_templates,
+            );
+            if let Some(aggregate_wrapper_id) = aggregate_wrapper {
+                collect_reachable_texts_and_guards(
+                    store,
+                    *aggregate_wrapper_id,
+                    string_table,
+                    texts,
+                    guards,
+                    visited_templates,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn supplied_guard_resolves_on_runtime_plan_path_by_routed_presence() {
+    // 0 = no `$in disabled:`, 1 = explicit empty insert, 2 = insert with a runtime `if` body.
+    for presence in 0..3 {
+        let mut string_table = StringTable::new();
+        let mut expressions = AstExpressionBuilder::new().unwrap();
+        let const_values = ConstValueStore::default();
+        let mut store = TemplateIrStore::new();
+        let disabled = string_table.intern("disabled");
+        let open_text = string_table.intern("<button");
+        let close_text = string_table.intern(">");
+        let end_text = string_table.intern("</button>");
+        let guard_text = string_table.intern(" disabled");
+
+        let receiver = {
+            let mut builder = TemplateIrBuilder::new(&mut store);
+            let guard_text_node = builder.push_text_node(
+                guard_text,
+                " disabled".len(),
+                TemplateSegmentOrigin::Body,
+                None,
+            );
+            let guard_body = builder.finish_template(
+                guard_text_node,
+                Style::default(),
+                TemplateType::String,
+                TemplateIrSummary::default(),
+                None,
+            );
+            let guard_body_edge = builder.push_child_template_node_with_reference(
+                TemplateTirChildReference::new(
+                    guard_body,
+                    TemplateTirPhase::Composed,
+                    TemplateViewContext::default(),
+                ),
+                None,
+            );
+            let guard =
+                builder.push_supplied_guard_node(SlotKey::Named(disabled), guard_body_edge, None);
+            let open = builder.push_text_node(
+                open_text,
+                "<button".len(),
+                TemplateSegmentOrigin::Body,
+                None,
+            );
+            let close =
+                builder.push_text_node(close_text, ">".len(), TemplateSegmentOrigin::Body, None);
+            let end = builder.push_text_node(
+                end_text,
+                "</button>".len(),
+                TemplateSegmentOrigin::Body,
+                None,
+            );
+            let slot = builder.push_slot_node(SlotKey::Default, None);
+            let root = builder.push_sequence_node(vec![open, guard, close, slot, end], None);
+            builder.finish_template(
+                root,
+                Style::default(),
+                TemplateType::String,
+                slot_summary(2),
+                None,
+            )
+        };
+        let runtime_contribution =
+            build_runtime_contribution_template(&mut store, &mut string_table);
+        let insert = (presence > 0).then(|| {
+            build_disabled_insert_template(
+                &mut store,
+                &mut string_table,
+                &mut expressions,
+                presence == 2,
+            )
+        });
+        let caller_root = {
+            let mut builder = TemplateIrBuilder::new(&mut store);
+            let receiver_node = builder.push_child_template_node_with_reference(
+                TemplateTirChildReference::new(
+                    receiver,
+                    TemplateTirPhase::Composed,
+                    TemplateViewContext::default(),
+                ),
+                None,
+            );
+            let mut children = vec![receiver_node];
+            if let Some(insert_template) = insert {
+                children.push(builder.push_insert_contribution_node(insert_template, None));
+            }
+            children.push(builder.push_child_template_node_with_reference(
+                TemplateTirChildReference::new(
+                    runtime_contribution,
+                    TemplateTirPhase::Composed,
+                    TemplateViewContext::default(),
+                ),
+                None,
+            ));
+            builder.push_sequence_node(children, None)
+        };
+
+        let composed_root = compose_tir_head_chain_from_root(
+            &mut store,
+            &expressions,
+            &const_values,
+            caller_root,
+            1,
+            &string_table,
+            true,
+            None,
+        )
+        .expect("a runtime-receiving wrapper application should compose");
+        let composed_children =
+            children_of_node(&store, composed_root).expect("composed root children should resolve");
+        assert_eq!(composed_children.len(), 1);
+        let receiver_reference = expect_child_template_reference(composed_children[0], &store);
+        let derived = store
+            .get_template(receiver_reference.root)
+            .expect("the derived receiver template should exist");
+        assert!(
+            derived.runtime_slot_plan.is_some(),
+            "a runtime contribution must select the runtime plan path"
+        );
+
+        let mut texts = Vec::new();
+        let mut guards = 0;
+        let mut visited_templates = Vec::new();
+        collect_reachable_texts_and_guards(
+            &store,
+            derived.root,
+            &string_table,
+            &mut texts,
+            &mut guards,
+            &mut visited_templates,
+        );
+        let disabled_count = texts
+            .iter()
+            .filter(|text| text.as_str() == " disabled")
+            .count();
+        assert_eq!(
+            disabled_count,
+            usize::from(presence > 0),
+            "routed presence ({presence}) must select the guard body exactly once"
+        );
+        assert_eq!(
+            guards, 0,
+            "the runtime plan path must resolve every guard before copying the wrapper tree"
+        );
+    }
+}
+
+#[test]
+fn named_supplied_guard_resolves_when_a_runtime_wrapper_is_named_filled() {
+    // Both runtime wrapper owners end in the same NamedOnly fill: the conditional-wrapper
+    // marker path uses `fill_named_slots_in_wrapper_template`, while site planning's applied
+    // child wrappers use `fill_named_slots_in_wrapper_root` with an already-collected schema.
+    for fill_present in [false, true] {
+        for entry_point in 0..2 {
+            let mut string_table = StringTable::new();
+            let mut store = TemplateIrStore::new();
+            let expressions = AstExpressionBuilder::new().unwrap();
+            let const_values = ConstValueStore::default();
+            let title = string_table.intern("title");
+            let guard_text = string_table.intern(" title");
+
+            let wrapper = {
+                let mut builder = TemplateIrBuilder::new(&mut store);
+                let guard_text_node = builder.push_text_node(
+                    guard_text,
+                    " title".len(),
+                    TemplateSegmentOrigin::Body,
+                    None,
+                );
+                let guard_body = builder.finish_template(
+                    guard_text_node,
+                    Style::default(),
+                    TemplateType::String,
+                    TemplateIrSummary::default(),
+                    None,
+                );
+                let guard_body_edge = builder.push_child_template_node_with_reference(
+                    TemplateTirChildReference::new(
+                        guard_body,
+                        TemplateTirPhase::Composed,
+                        TemplateViewContext::default(),
+                    ),
+                    None,
+                );
+                let guard =
+                    builder.push_supplied_guard_node(SlotKey::Named(title), guard_body_edge, None);
+                let root = builder.push_sequence_node(vec![guard], None);
+                builder.finish_template(
+                    root,
+                    Style::default(),
+                    TemplateType::String,
+                    slot_summary(1),
+                    None,
+                )
+            };
+
+            let mut named_fill = FxHashMap::default();
+            if fill_present {
+                // Runtime marker propagation records presence; guard resolution only needs the name.
+                named_fill.insert(title, Vec::new());
+            }
+            let filled = if entry_point == 0 {
+                fill_named_slots_in_wrapper_template(
+                    &mut store,
+                    &expressions,
+                    &const_values,
+                    wrapper,
+                    &named_fill,
+                    &string_table,
+                )
+            } else {
+                let layout = collect_tir_slot_layout_with_context(
+                    &store,
+                    wrapper,
+                    TemplateViewContext::default(),
+                )
+                .expect("the wrapper layout should collect");
+                fill_named_slots_in_wrapper_root(
+                    &mut store,
+                    &expressions,
+                    &const_values,
+                    wrapper,
+                    &layout.schema,
+                    &named_fill,
+                    &string_table,
+                )
+            }
+            .expect("named wrapper fill should resolve the guard");
+            let filled_root = match filled {
+                Some(template_id) => template_root_node_id(template_id, &store),
+                None => template_root_node_id(wrapper, &store),
+            };
+
+            let mut texts = Vec::new();
+            let mut guards = 0;
+            let mut visited_templates = Vec::new();
+            collect_reachable_texts_and_guards(
+                &store,
+                filled_root,
+                &string_table,
+                &mut texts,
+                &mut guards,
+                &mut visited_templates,
+            );
+            assert_eq!(
+                texts
+                    .iter()
+                    .filter(|text| text.as_str() == " title")
+                    .count(),
+                usize::from(fill_present),
+                "a runtime-applied wrapper must resolve its named guard by the plan's named fill"
+            );
+            assert_eq!(
+                guards, 0,
+                "named wrapper fill (entry point {entry_point}) must not leave the guard unresolved"
+            );
+        }
+    }
 }

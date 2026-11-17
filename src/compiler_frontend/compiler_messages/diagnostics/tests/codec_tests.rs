@@ -324,20 +324,21 @@ fn template_head_conflict_codec_round_trips_every_reason_and_kind() {
     use TemplateHeadConflictOwner::{EarlierItem, IncomingItem};
     use TemplateHeadConflictReason::{
         DiscardedCommentDirectiveMustBeOnlyMeaningfulItem, DuplicateExclusiveDirective,
-        MultipleFormatters, SlotDirectiveMustBeExclusive,
+        MultipleFormatters, SlotDirectiveMustBeExclusive, SuppliedDirectiveMustBeExclusive,
     };
-    use TemplateHeadItemKind::{Directive, Expression};
+    use TemplateHeadItemKind::{ControlFlow, Directive, Expression};
 
     let reasons = [
         MultipleFormatters,
         DuplicateExclusiveDirective,
         DiscardedCommentDirectiveMustBeOnlyMeaningfulItem,
+        SuppliedDirectiveMustBeExclusive,
         SlotDirectiveMustBeExclusive,
     ];
     for reason in reasons {
         for owner in [EarlierItem, IncomingItem] {
-            for incoming_kind in [Directive, Expression] {
-                for earlier_kind in [Directive, Expression] {
+            for incoming_kind in [Directive, Expression, ControlFlow] {
+                for earlier_kind in [Directive, Expression, ControlFlow] {
                     let conflict = StoredTemplateHeadConflict {
                         reason,
                         owner,
@@ -377,8 +378,6 @@ fn template_head_conflict_codec_rejects_reserved_and_malformed_words() {
         ((1 << 4) | (1 << 6), "reason zero"),
         (6 | (1 << 4) | (1 << 6), "an unused reason code"),
         (7 | (1 << 4) | (1 << 6), "an unused reason code"),
-        (3 << 4 | 1 | (1 << 6), "an unused incoming item kind"),
-        (1 | (1 << 4) | (3 << 6), "an unused earlier item kind"),
         (1 | (1 << 4), "an absent earlier item kind"),
         (1 | (1 << 6), "an absent incoming item kind"),
     ] {

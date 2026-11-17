@@ -35,7 +35,7 @@ pub(crate) use source::{
 pub(crate) use specs::DirectiveOccurrence;
 pub(crate) use specs::{
     AFTER_DIRECTIVE_NAME, BEFORE_DIRECTIVE_NAME, ConstraintDirectiveSpans, INSERT_DIRECTIVE_NAME,
-    SLOT_DIRECTIVE_NAME, SourceConstraintSet, SourceDirectiveKind,
+    SLOT_DIRECTIVE_NAME, SUPPLIED_DIRECTIVE_NAME, SourceConstraintSet, SourceDirectiveKind,
     StatementSourceConstraintAttachment,
 };
 pub use specs::{

@@ -911,6 +911,12 @@ pub enum InvalidTemplateDirectiveReason {
     InvalidSlotTarget,
     /// `$slot ... = ...` received a default that is not a compile-time `String`.
     InvalidSlotDefault,
+    /// `$supplied` received an invalid target declaration.
+    InvalidSuppliedTarget,
+    /// `$supplied ... = ...` received a default assignment it does not accept.
+    InvalidSuppliedDefault,
+    /// `$supplied` reached the head boundary without its required `:` body.
+    MissingSuppliedBody,
     /// `$in` received an invalid slot name declaration.
     InvalidInsertTarget,
     /// `$before` or `$after` received a value that is not a compile-time
@@ -994,6 +1000,8 @@ pub enum TemplateHeadConflictReason {
     DiscardedCommentDirectiveMustBeOnlyMeaningfulItem,
     /// A slot declaration must be the only meaningful item in its template head.
     SlotDirectiveMustBeExclusive,
+    /// A `$supplied` guard may only share its template head with a formatter directive.
+    SuppliedDirectiveMustBeExclusive,
 }
 
 /// Which item declared the compatibility rule that rejected the pair.
@@ -1010,17 +1018,21 @@ pub enum TemplateHeadConflictOwner {
 pub enum TemplateHeadItemKind {
     Directive,
     Expression,
+    /// A trailing `if`/`loop` template control-flow suffix.
+    ControlFlow,
 }
 
 /// One meaningful template-head item as a diagnostic names it.
 ///
 /// Directive names stay interned identities; renderers add the `$` marker. Expressions cover
 /// every non-directive item the head grammar accepts (values, paths, `this`, literals and
-/// inlined template references).
+/// inlined template references). A control-flow suffix is named by kind, because the head holds
+/// no directive token or interned name for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TemplateHeadItemName {
     Directive(StringId),
     Expression,
+    ControlFlow,
 }
 
 impl TemplateHeadItemName {
@@ -1028,6 +1040,7 @@ impl TemplateHeadItemName {
         match self {
             Self::Directive(_) => TemplateHeadItemKind::Directive,
             Self::Expression => TemplateHeadItemKind::Expression,
+            Self::ControlFlow => TemplateHeadItemKind::ControlFlow,
         }
     }
 }
@@ -1050,8 +1063,8 @@ pub struct TemplateHeadConflict {
 impl TemplateHeadConflict {
     /// The interned directive names in family storage order: incoming, then earlier.
     ///
-    /// Expression items contribute no name. The stored conflict's kinds record which entries the
-    /// family string list holds.
+    /// Non-directive items contribute no name. The stored conflict's kinds record which entries
+    /// the family string list holds.
     pub(crate) fn head_item_names(self) -> Vec<StringId> {
         let mut names = Vec::with_capacity(2);
         if let TemplateHeadItemName::Directive(name) = self.incoming {
@@ -1124,6 +1137,9 @@ pub enum InvalidTemplateStructureReason {
     DuplicateMarkdownSectionMarker {
         earlier_span: Option<SourceSpan>,
     },
+    /// An unresolved `$supplied` guard would cross a wrapper that only applies when its
+    /// folded content emits output, so a public const-template projection cannot keep it.
+    SuppliedGuardAcrossSkippedWrapper,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1818,6 +1834,8 @@ pub enum InvalidTemplateSlotReason {
     DefaultSlotInChildDecorator,
     /// A `$before`/`$after` value contains a positional `$slot n`.
     PositionalSlotInChildDecorator,
+    /// A `$before`/`$after` value contains an unnamed or positional `$supplied`.
+    UnnamedSuppliedInChildDecorator,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

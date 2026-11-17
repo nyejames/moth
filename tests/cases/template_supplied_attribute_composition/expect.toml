@@ -1,0 +1,9 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "plain=<div></div>|styled=<div style=\"red\">body</div>|empty=<div style=\"\">body</div>|repeat=<div style=\"ab\">body</div>|pos=<a data-n=\"one\"></a>|pos0=<a></a>|flag0=<button>press</button>|flag1=<button disabled>press</button>|loose=<section data-filled></section>|loose0=<section></section>|probe0=|probe1=<b></b>"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "plain=<div></div>|styled=<div style=\"red\">body</div>|empty=<div style=\"\">body</div>|repeat=<div style=\"ab\">body</div>|pos=<a data-n=\"one\"></a>|pos0=<a></a>|flag0=<button>press</button>|flag1=<button disabled>press</button>|loose=<section data-filled></section>|loose0=<section></section>|probe0=|probe1=<b></b>"

@@ -7,7 +7,7 @@ fn supported_directives_for_diagnostic_uses_stable_registry_order() {
 
     assert_eq!(
         registry.supported_directives_for_diagnostic(DirectiveOccurrence::TemplateHead),
-        "'$before', '$after', '$fresh', '$slot', '$in', '$note', '$raw', '$md', '$html', '$css', '$escape_html', '$code'"
+        "'$before', '$after', '$fresh', '$slot', '$supplied', '$in', '$note', '$raw', '$md', '$html', '$css', '$escape_html', '$code'"
     );
 }
 

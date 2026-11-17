@@ -2789,3 +2789,96 @@ fn final_view_runtime_slot_application_requires_handoff() {
         TemplatePreparationOutcome::Runtime(_)
     ));
 }
+
+#[test]
+fn const_template_projection_retains_open_supplied_guard_body() -> Result<(), TemplateError> {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let disabled = string_table.intern("disabled");
+    let before = string_table.intern("before");
+    let guard_text = string_table.intern(" disabled");
+    let after = string_table.intern("after");
+
+    let template_id = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let before_node =
+            builder.push_text_node(before, "before".len(), TemplateSegmentOrigin::Body, None);
+        let guard_text_node = builder.push_text_node(
+            guard_text,
+            " disabled".len(),
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        let guard_body = builder.finish_template(
+            guard_text_node,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            None,
+        );
+        let guard_body_edge = builder.push_child_template_node_with_reference(
+            TemplateTirChildReference::new(
+                guard_body,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            ),
+            None,
+        );
+        let guard =
+            builder.push_supplied_guard_node(SlotKey::Named(disabled), guard_body_edge, None);
+        let after_node =
+            builder.push_text_node(after, "after".len(), TemplateSegmentOrigin::Body, None);
+        let root = builder.push_sequence_node(vec![before_node, guard, after_node], None);
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            None,
+        )
+    };
+
+    let view = TirView::with_minimum_phase(
+        &store,
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )?;
+    let prepared = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::ConstRequired,
+        None,
+    )?;
+    assert!(matches!(
+        prepared.outcome,
+        TemplatePreparationOutcome::Foldable
+    ));
+    let mut fold_context =
+        build_test_fold_context(&mut string_table, &mut expressions, &mut const_values);
+    let pattern = fold_prepared_const_template_pattern(prepared, view, &mut fold_context)?;
+
+    assert_eq!(
+        pattern.pieces,
+        vec![
+            FoldedConstTemplatePiece::Text("before".to_owned()),
+            FoldedConstTemplatePiece::SuppliedGuard {
+                key: SlotKey::Named(disabled),
+                body: vec![FoldedConstTemplatePiece::Text(" disabled".to_owned())],
+                span: None,
+            },
+            FoldedConstTemplatePiece::Text("after".to_owned()),
+        ],
+        "an unresolved guard must project its authored body as a composition boundary"
+    );
+    assert_eq!(
+        pattern.emission,
+        TemplateEmission::Output(ConstStringValue::Text(string_table.intern("beforeafter"))),
+        "an unresolved guard contributes no rendered output"
+    );
+    Ok(())
+}

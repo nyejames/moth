@@ -17,7 +17,7 @@ use crate::compiler_frontend::ast::numeric_construction::{
     NumericBindingId, NumericConstructionDomainId, StatementExpression,
 };
 use crate::compiler_frontend::ast::templates::template::{
-    SlotPlaceholder, Style, TemplateSegmentOrigin, TemplateType,
+    SlotKey, SlotPlaceholder, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
@@ -271,6 +271,45 @@ impl TemplateConstructionContext {
         };
 
         self.children.push(node_id);
+    }
+
+    /// Records one `$supplied` guard authored as a direct child of this body.
+    ///
+    /// WHAT: pairs the receiving slot key with a `ChildTemplate` edge to the guard's own
+    ///       template, and records that node at the current root position.
+    /// WHY: the key is a routing fact that only the parent body's schema owns, while the
+    ///      guard's own template owns its style and authored body. The guard template must not
+    ///      keep the parser-only `Supplied` kind, so rewrite it to an ordinary kind here; the
+    ///      key then exists only in the guard node.
+    pub(crate) fn record_supplied_guard(
+        &mut self,
+        key: SlotKey,
+        child_reference: &TemplateTirReference,
+        span: Option<SourceSpan>,
+    ) -> Result<(), InfrastructureFailure> {
+        let node_id = {
+            let mut store = self.store.borrow_mut();
+            store.set_template_kind(child_reference.root, TemplateType::StringFunction)?;
+            let occurrence_id = store.next_child_template_occurrence_id();
+            let body = store.push_node(TemplateIrNode::new(
+                TemplateIrNodeKind::ChildTemplate {
+                    reference: TemplateTirChildReference::new(
+                        child_reference.root,
+                        child_reference.phase,
+                        child_reference.context,
+                    ),
+                    occurrence_id,
+                },
+                span,
+            ));
+            store.push_node(TemplateIrNode::new(
+                TemplateIrNodeKind::SuppliedGuard { key, body },
+                span,
+            ))
+        };
+
+        self.children.push(node_id);
+        Ok(())
     }
 
     /// Records one insert-contribution marker at the current root position.

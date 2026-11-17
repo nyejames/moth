@@ -66,8 +66,9 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::module_compilation::AstRecoveryPolicy;
 use crate::compiler_frontend::style_directives::{
-    ConstraintDirectiveSpans, SourceConstraintSet, SourceDirectiveKind, SourceOperandFoldResources,
-    constraint_directive_spans, fold_source_directive_operand, source_constraints_from_annotations,
+    ConstraintDirectiveSpans, SUPPLIED_DIRECTIVE_NAME, SourceConstraintSet, SourceDirectiveKind,
+    SourceOperandFoldResources, constraint_directive_spans, fold_source_directive_operand,
+    source_constraints_from_annotations,
 };
 use std::sync::Arc;
 
@@ -1815,7 +1816,18 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         if matches!(root_kind, TemplateType::Comment) {
             let diagnostic = templates::note_outside_template_body(
                 string_table.intern("note"),
-                template.comment_directive_span.or(template.span),
+                template.body_only_directive_span.or(template.span),
+            );
+            return Err(self.diagnostic_messages(diagnostic, string_table));
+        }
+
+        // A `$supplied` guard is a child of a template body. A direct source fragment is not a
+        // body, so reject it before preparation can fold the guard's selected content as an
+        // ordinary root template.
+        if matches!(root_kind, TemplateType::Supplied(_)) {
+            let diagnostic = templates::supplied_outside_template_body(
+                string_table.intern(SUPPLIED_DIRECTIVE_NAME),
+                template.body_only_directive_span.or(template.span),
             );
             return Err(self.diagnostic_messages(diagnostic, string_table));
         }

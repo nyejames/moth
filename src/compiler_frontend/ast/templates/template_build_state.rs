@@ -36,12 +36,12 @@ pub(crate) struct TemplateBuildState {
     /// At most one entry: both edges are one composite wrapper so downstream
     /// wrapper sets, folding and runtime handoff see the same nesting.
     pub(crate) child_wrappers: Vec<TemplateWrapperReference>,
-    /// Authored `$note` token span when this template's kind is `Comment`.
+    /// Authored `$note` or `$supplied` token span when this template carries one.
     ///
     /// WHAT: parser-local copy of the directive location; `Template` keeps it durable.
     /// WHY: the durable template span starts at the opener, while the diagnostics that reject a
-    ///      note outside a template body report at the directive token.
-    pub(crate) comment_directive_span: Option<SourceSpan>,
+    ///      body-only directive outside a template body report at the directive token.
+    pub(crate) body_only_directive_span: Option<SourceSpan>,
 }
 
 impl TemplateBuildState {
@@ -53,7 +53,7 @@ impl TemplateBuildState {
             child_wrapper_before: None,
             child_wrapper_after: None,
             child_wrappers: vec![],
-            comment_directive_span: None,
+            body_only_directive_span: None,
         }
     }
 

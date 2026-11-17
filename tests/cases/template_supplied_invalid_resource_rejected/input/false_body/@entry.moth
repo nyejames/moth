@@ -1,0 +1,4 @@
+-- The guard's key is never addressed, so this body emits nothing; source
+-- validation must still resolve the asset path it names.
+hollow #= [$html:<div[$supplied icon:[" data-icon=\""][@assets/missing.svg]["\""]]></div>]
+~[hollow]

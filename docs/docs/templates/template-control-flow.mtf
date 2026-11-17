@@ -33,6 +33,11 @@ Runtime templates evaluate only the selected body. A false condition or absent
 option produces structural no-output. Template control flow has no `else` or
 `else if` form, and template loops have no `break` or `continue` controls.
 
+`$supplied` is not a runtime condition. It tests routed slot presence during
+composition and never inspects a value or a selected branch, so a routed insert
+inside a false runtime `if` still satisfies it. See
+@../templates/#template-directives (Template directives).
+
 For richer decisions in `.moth` code, choose a value with ordinary
 value-producing `if` and then interpolate it:
 

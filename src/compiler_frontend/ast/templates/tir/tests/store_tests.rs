@@ -9,7 +9,7 @@ use super::super::slot_plan::{
     TemplateSlotContributionSourcePlan, TemplateSlotPlan, TemplateSlotSitePlan,
     push_runtime_slot_contribution_source,
 };
-use super::super::store::{ControlFlowBodyKind, TemplateIrStore};
+use super::super::store::{ControlFlowBodyKind, DerivedTemplateMetadata, TemplateIrStore};
 use super::super::summary::TemplateIrSummary;
 use super::super::tir_node_is_control_flow_root;
 use super::super::view::TemplateTirPhase;
@@ -665,6 +665,22 @@ fn control_flow_lookup_recognizes_a_control_flow_marker() {
 }
 
 #[test]
+fn control_flow_lookup_recognizes_a_supplied_guard() {
+    let mut store = TemplateIrStore::new();
+    let body = empty_sequence(&mut store);
+    let guard =
+        TemplateIrBuilder::new(&mut store).push_supplied_guard_node(SlotKey::Default, body, None);
+
+    assert_eq!(
+        store
+            .control_flow_node_id_in_subtree(guard)
+            .expect("guard subtree lookup should succeed"),
+        Some(guard),
+        "a guard may emit nothing, so subtree consumers must see conditional output"
+    );
+}
+
+#[test]
 fn control_flow_classifier_recognizes_marker_rooted_child_template() {
     let mut store = TemplateIrStore::new();
     let plan = store.push_slot_plan(TemplateSlotPlan {
@@ -844,4 +860,38 @@ fn conditional_construction_allocates_one_selector_site_and_stores_its_body() {
     };
     assert_ne!(*selector_site_id, next_site_id);
     assert_eq!(*stored_body, body);
+}
+
+#[test]
+fn derived_versions_keep_presence_only_payload_obligations() {
+    // A formatted or copied version replaces its source's reference, so const preparation
+    // only ever sees the version. Losing the source's discarded payloads would let a
+    // const-invalid `$supplied` payload compile.
+    let mut store = TemplateIrStore::new();
+    let source = build_finalized_tir_template(&mut store);
+    let first_payload = empty_sequence(&mut store);
+    store.record_presence_only_payloads(source, &[first_payload]);
+
+    let new_root = empty_sequence(&mut store);
+    let derived = store
+        .push_structurally_derived_template(
+            source,
+            new_root,
+            DerivedTemplateMetadata::preserve_source(),
+        )
+        .expect("derivation should publish");
+    assert_eq!(store.presence_only_payloads(derived), &[first_payload]);
+
+    // A later application of the derived version keeps the inherited obligation first.
+    let second_payload = empty_sequence(&mut store);
+    store.record_presence_only_payloads(derived, &[second_payload]);
+    assert_eq!(
+        store.presence_only_payloads(derived),
+        &[first_payload, second_payload]
+    );
+    assert_eq!(
+        store.presence_only_payloads(source),
+        &[first_payload],
+        "recording on a version must not change its source"
+    );
 }

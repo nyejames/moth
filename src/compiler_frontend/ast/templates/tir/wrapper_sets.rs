@@ -487,7 +487,8 @@ fn collect_wrapper_contexts(
                 collect_wrapper_contexts(store, *child_id, inherited_wrapper_refs, contexts)?;
             }
         }
-        TemplateIrNodeKind::Conditional { body, .. } => {
+        TemplateIrNodeKind::Conditional { body, .. }
+        | TemplateIrNodeKind::SuppliedGuard { body, .. } => {
             collect_wrapper_contexts(store, *body, inherited_wrapper_refs, contexts)?;
         }
         TemplateIrNodeKind::Loop {

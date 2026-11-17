@@ -261,6 +261,11 @@ pub(super) fn compose_wrapper_application(
         }
     }
 
+    // A guard-only payload has no occurrence that can render it; drop it before deciding
+    // whether this application needs a runtime plan. The dropped nodes are kept beside the
+    // composed application so const preparation still validates them.
+    let presence_only_payloads = routed.discard_presence_only_payloads(&layout.schema);
+
     let needs_runtime = inputs.allow_runtime_plans
         && tir_contributions_need_runtime(
             &layout.schema,
@@ -325,6 +330,10 @@ pub(super) fn compose_wrapper_application(
 
         (composed_template_id, composed_context)
     };
+
+    if !presence_only_payloads.is_empty() {
+        store.record_presence_only_payloads(composed_template_id, &presence_only_payloads);
+    }
 
     Ok(TemplateWrapperReference::new(
         wrapper_reference.root,

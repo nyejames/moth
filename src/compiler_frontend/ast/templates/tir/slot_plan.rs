@@ -182,6 +182,19 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
         .clone();
 
     let converted = match node_kind {
+        // Composition resolves every guard against the receiving application's routed
+        // presence before an active plan exists: the runtime plan's guard pass fixes the
+        // wrapper tree, and constant expansion fixes the routed tree. A guard here means
+        // one of those passes skipped a tree that this conversion then reached, which is
+        // a compiler invariant violation rather than authored input.
+        TemplateIrNodeKind::SuppliedGuard { .. } => {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "TIR active-slot conversion encountered an unresolved supplied guard.",
+            )
+            .into());
+        }
+
         TemplateIrNodeKind::Slot { placeholder } => {
             if placeholder.closed {
                 return Ok(false);

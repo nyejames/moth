@@ -1,0 +1,2 @@
+-- A quoted key is not a slot target.
+holder = [:<p>[$supplied "title": x]</p>]

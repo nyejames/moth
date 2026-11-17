@@ -482,6 +482,9 @@ pub(crate) fn invalid_template_directive_message(
             "in" => {
                 "`$in` takes one bare slot name and no other value.\n                 Use `$in title: ...`; remove parentheses or an extra value.".to_owned()
             }
+            "supplied" => {
+                "`$supplied` takes one optional slot target followed by a `:` body.\n                 Use `$supplied: ...`, `$supplied title: ...`, or `$supplied 1: ...`; remove parentheses or the extra value.".to_owned()
+            }
             "before" => {
                 "`$before` takes exactly one bare compile-time operand.\n                 Write `$before [: <tr> ]`; remove parentheses or a second value.".to_owned()
             }
@@ -501,6 +504,15 @@ pub(crate) fn invalid_template_directive_message(
         }
         InvalidTemplateDirectiveReason::InvalidSlotDefault => {
             "A `$slot` default must be a compile-time `String` value.\n                 Use `$slot title = \"Untitled\"`.".to_owned()
+        }
+        InvalidTemplateDirectiveReason::InvalidSuppliedTarget => {
+            "`$supplied` accepts no target, a name, or a positive whole-number position.\n                 Use `$supplied: ...`, `$supplied title: ...`, or `$supplied 1: ...`.".to_owned()
+        }
+        InvalidTemplateDirectiveReason::InvalidSuppliedDefault => {
+            "`$supplied` does not accept a slot default. Remove the `= ...` assignment; the guard's body is selected by routed presence.".to_owned()
+        }
+        InvalidTemplateDirectiveReason::MissingSuppliedBody => {
+            "`$supplied` requires a `:` body. Add `: ...` after the directive.".to_owned()
         }
         InvalidTemplateDirectiveReason::InvalidInsertTarget => {
             "`$in` requires a slot name.\n                 Use `$in title: ...`.".to_owned()
@@ -531,6 +543,9 @@ pub(crate) fn invalid_template_directive_message(
             }
             "note" => {
                 "`$note` is only allowed as a child template in a template body. Use `--` for comments in Moth code.".to_owned()
+            }
+            "supplied" => {
+                "`$supplied` is only allowed as a child template in a template body. Write `[$supplied title: ...]` inside the template body.".to_owned()
             }
             _ => format!(
                 "Template directive '{name}' can only appear in a template head, not in source code."
@@ -593,7 +608,7 @@ pub(crate) fn render_invalid_template_directive(
     let reason = facts.reason.to_reason(facts.detail);
     let guidance = if facts.reason == InvalidTemplateDirectiveCode::UnknownDirective {
         vec![
-            "Known directives include `$md`, `$raw`, `$before`, `$after`, `$slot`, `$in`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, `$doc`, the `$export` and `$config` source modifiers, and the `$fast_math`, `$safe_math` and `$infallible` source constraints.".to_owned(),
+            "Known directives include `$md`, `$raw`, `$before`, `$after`, `$slot`, `$supplied`, `$in`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, `$doc`, the `$export` and `$config` source modifiers, and the `$fast_math`, `$safe_math` and `$infallible` source constraints.".to_owned(),
         ]
     } else {
         Vec::new()

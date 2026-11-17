@@ -1,0 +1,9 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "bare=<div></div>|outer=<div data-outer></div>|inner=<div></div>|both=<div data-outer data-inner></div>|fwd=<section>v<em data-x></em></section>|fwd0=<section><em data-x></em></section>|gpay=<b data-x><i>deep</i></b>|repeat=<b G>AB|AB</b>|dguard=<b G1 G2>C</b>|head=<p></p>|stored=<p></p>|filled=<p x></p>\nloop0=<ul></ul>|loop=<ul>**</ul>"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "bare=<div></div>|outer=<div data-outer></div>|inner=<div></div>|both=<div data-outer data-inner></div>|fwd=<section>v<em data-x></em></section>|fwd0=<section><em data-x></em></section>|gpay=<b data-x><i>deep</i></b>|repeat=<b G>AB|AB</b>|dguard=<b G1 G2>C</b>|head=<p></p>|stored=<p></p>|filled=<p x></p>\nloop0=<ul></ul>|loop=<ul>**</ul>"

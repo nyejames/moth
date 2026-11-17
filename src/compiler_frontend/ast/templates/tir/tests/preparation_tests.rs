@@ -485,7 +485,7 @@ fn preparation_reenters_nested_template_payload_authority() {
             context,
         },
         span: None,
-        comment_directive_span: None,
+        body_only_directive_span: None,
     };
     let outer_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -537,7 +537,7 @@ fn preparation_classifies_nested_value_cycle_as_runtime() {
             context,
         },
         span: None,
-        comment_directive_span: None,
+        body_only_directive_span: None,
     };
     {
         let mut builder = TemplateIrBuilder::new(&mut store);

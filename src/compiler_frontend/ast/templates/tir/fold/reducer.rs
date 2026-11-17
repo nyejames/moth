@@ -59,7 +59,7 @@ use super::estimate::{
 };
 use super::wrappers::{
     append_template_result_to_buffer, apply_wrapper_context_overlay_to_child_emission,
-    fold_conditional_child_wrappers_around_emission,
+    fold_conditional_child_wrappers_around_emission, reject_guard_across_skipped_child_wrappers,
 };
 /// Rejects `$in` helper templates at the exact fold boundary where
 /// they would otherwise render as ordinary string content.
@@ -138,16 +138,25 @@ pub(crate) struct FoldedConstTemplatePattern {
 
 /// One pre-coalesced piece in a const-template projection.
 ///
-/// WHAT: preserves authored text runs, module-local structural anchors and unresolved slot
-/// occurrences before projection groups non-slot runs into the shared owned string vocabulary.
-/// WHY: `Resource` and `SiteRoot` are hard boundaries for text coalescing, while `Slot` is a
-/// separate composition boundary that must remain visible to public const-template projection.
+/// WHAT: preserves authored text runs, module-local structural anchors, unresolved slot
+/// occurrences and unresolved `$supplied` guards before projection groups non-slot runs into
+/// the shared owned string vocabulary.
+/// WHY: `Resource` and `SiteRoot` are hard boundaries for text coalescing, while `Slot` and
+/// `SuppliedGuard` are separate composition boundaries that must remain visible to public
+/// const-template projection. A guard contributes no rendered output until an application
+/// routes content to its key, so it retains its body pieces instead of text. The span is the
+/// authored guard's own span so a projection that must refuse the guard can point at it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum FoldedConstTemplatePiece {
     Text(String),
     Resource(ResourceId),
     SiteRoot,
     Slot(SlotOccurrenceId),
+    SuppliedGuard {
+        key: SlotKey,
+        body: Vec<FoldedConstTemplatePiece>,
+        span: Option<SourceSpan>,
+    },
 }
 
 /// Charge one executed template loop iteration to the shared const-execution meter.
@@ -469,6 +478,15 @@ impl FoldOutputState {
                         pieces.push(FoldedConstTemplatePiece::Slot(*occurrence));
                     }
                 }
+                FoldedConstTemplatePiece::SuppliedGuard { key, body, span } => {
+                    if let Some(pieces) = &mut self.projection_pieces {
+                        pieces.push(FoldedConstTemplatePiece::SuppliedGuard {
+                            key: key.clone(),
+                            body: body.clone(),
+                            span: *span,
+                        });
+                    }
+                }
             }
         }
 
@@ -499,6 +517,26 @@ impl FoldOutputState {
         self.charge_piece()?;
         if let Some(pieces) = &mut self.projection_pieces {
             pieces.push(FoldedConstTemplatePiece::Slot(occurrence));
+        }
+        Ok(())
+    }
+
+    /// Append one unresolved `$supplied` guard this fold level originates.
+    ///
+    /// WHAT: retains the guard key and its already-folded body pieces without contributing
+    ///       output.
+    /// WHY: the application that imports or later applies this wrapper decides presence, so
+    ///      the projection must keep the body's composition structure. The body was folded
+    ///      and charged by its own fold level, so only this guard piece pays here.
+    pub(super) fn append_supplied_guard(
+        &mut self,
+        key: SlotKey,
+        body: Vec<FoldedConstTemplatePiece>,
+        span: Option<SourceSpan>,
+    ) -> Result<(), TemplateError> {
+        self.charge_piece()?;
+        if let Some(pieces) = &mut self.projection_pieces {
+            pieces.push(FoldedConstTemplatePiece::SuppliedGuard { key, body, span });
         }
         Ok(())
     }
@@ -811,6 +849,18 @@ fn fold_tir_template_with_view(
         projection_pieces,
         ..
     } = emission;
+
+    // The projection root republishes its own conditional wrapper set on the public template,
+    // so its skipped wrappers keep applying after rebuild. Every other template fold exists only
+    // inside this reducer, where a skipped wrapper around a guard would be silently lost.
+    reject_guard_across_skipped_child_wrappers(
+        &emission,
+        TirWrapperApplicationMode::IfChildEmits,
+        wrapper_references,
+        projection_pieces.as_deref(),
+        fold_input.projection_allowed_slot_insert_root == Some(template_id),
+    )?;
+
     let result = fold_conditional_child_wrappers_around_emission(
         wrapper_references,
         emission,
@@ -978,6 +1028,30 @@ pub(super) fn fold_tir_node_into_buffer(
             output_state.provenance.merge(&wrapped_emission.provenance);
 
             append_template_result_to_buffer(wrapped_emission, output_state, fold_context)
+        }
+
+        TemplateIrNodeKind::SuppliedGuard { key, body } => {
+            // Unresolved presence is false, so the guard contributes no output. A public
+            // projection must still retain the authored body: an exported or stored wrapper
+            // is applied again in the consumer, and that application owns the presence
+            // decision. Folding the body here keeps the projection on the canonical reducer
+            // instead of a second body walker.
+            if !fold_input.projection_enabled {
+                return Ok(());
+            }
+            let folded_body = fold_tir_node(*body, fold_context, fold_input, FoldInsertion::None)?;
+            // The retained body ships with the projection, so its provenance must reach the
+            // export-boundary checks like any other projected content.
+            output_state.provenance.merge(&folded_body.provenance);
+            if let Some(reason) = folded_body.refusal {
+                output_state.refusal = Some(reason);
+                return Ok(());
+            }
+            output_state.append_supplied_guard(
+                key.clone(),
+                folded_body.projection_pieces.unwrap_or_default(),
+                node.span,
+            )
         }
 
         TemplateIrNodeKind::Slot { placeholder } => {

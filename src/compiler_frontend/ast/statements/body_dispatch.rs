@@ -59,8 +59,8 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
-    ConstraintDirectiveSpans, SourceConstraintSet, SourceOperandFoldResources,
-    parse_statement_source_directive_run,
+    ConstraintDirectiveSpans, SUPPLIED_DIRECTIVE_NAME, SourceConstraintSet,
+    SourceOperandFoldResources, parse_statement_source_directive_run,
 };
 use crate::compiler_frontend::symbols::identifier_policy;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -122,10 +122,10 @@ fn statement_dispatch_error(diagnostic: DiagnosticDraft) -> ExpressionParseError
     diagnostic.into()
 }
 
-/// Parses one template that statement dispatch owns and rejects a root `$note`.
+/// Parses one template that statement dispatch owns and rejects a root body-only directive.
 ///
-/// WHAT: a `$note` belongs inside a template body, so a root note reports its placement error at
-///       the directive. Every other parsed template returns to the caller.
+/// WHAT: a `$note` or `$supplied` belongs inside a template body, so a root one reports its
+///       placement error at the directive. Every other parsed template returns to the caller.
 /// WHY: the parsed root kind is authoritative. A literal or identifier merely spelled `note` is
 ///      ordinary content, and only the template parser knows which directive the head holds.
 fn parse_statement_template(
@@ -149,27 +149,35 @@ fn parse_statement_template(
         string_table,
         path_fork,
     )?;
-    let is_comment = {
+    let placement_error = {
         let store = context.template_ir_store.borrow();
-        store
+        let template_ir = store
             .get_template(template.tir_reference.root)
-            .map(|template_ir| matches!(template_ir.kind, TemplateType::Comment))
             .ok_or_else(|| {
                 InfrastructureFailure::internal(
                     CompilerStage::AstConstruction,
                     "parsed statement template kind was missing from its module-local TIR store.",
                 )
-            })?
+            })?;
+        let directive_span = template.body_only_directive_span.or(template_span);
+        match template_ir.kind {
+            TemplateType::Comment => Some(templates::note_outside_template_body(
+                string_table.intern("note"),
+                directive_span,
+            )),
+            // A guard is a template-body child. A statement or `~[...]` fragment root never
+            // supplies the receiving application that owns its presence.
+            TemplateType::Supplied(_) => Some(templates::supplied_outside_template_body(
+                string_table.intern(SUPPLIED_DIRECTIVE_NAME),
+                directive_span,
+            )),
+            _ => None,
+        }
     };
-    if !is_comment {
-        return Ok(template);
+    match placement_error {
+        Some(diagnostic) => Err(statement_dispatch_error(diagnostic)),
+        None => Ok(template),
     }
-    Err(statement_dispatch_error(
-        templates::note_outside_template_body(
-            string_table.intern("note"),
-            template.comment_directive_span.or(template_span),
-        ),
-    ))
 }
 
 /// The signature colon that encloses a captured function body's statements.

@@ -44,7 +44,7 @@ to their contract. Parenthesized calls like `$name(...)` are invalid.
 `$export` and `$config` take no operand.
 
 Template-head directives include `$before`, `$after`, `$fresh`,
-`$slot`, `$in`, `$note`, `$raw`, `$md`, `$html`, `$css`,
+`$slot`, `$in`, `$supplied`, `$note`, `$raw`, `$md`, `$html`, `$css`,
 `$escape_html` and `$code`. Template heads use commas between items.
 Only `$note` discards comment content, and only as a child of a template body.
 

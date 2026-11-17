@@ -1,0 +1,121 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022", "MOTH-RULE-0053", "MOTH-SYNTAX-0022"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 1
+reason = "invalid_template_structure.template_loop_source_not_const"
+path = "input/default_slot/@entry.moth"
+line = 3
+column = 26
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 2
+reason = "invalid_template_structure.template_loop_source_not_const"
+path = "input/named_slot/@entry.moth"
+line = 3
+column = 36
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 3
+reason = "invalid_template_structure.template_loop_source_not_const"
+path = "input/nested_html_formatter/@entry.moth"
+line = 5
+column = 25
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 4
+reason = "invalid_template_structure.template_loop_source_not_const"
+path = "input/nested_implicit_formatter/@entry.moth"
+line = 5
+column = 25
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 5
+reason = "invalid_template_structure.template_loop_source_not_const"
+path = "input/positional_slot/@entry.moth"
+line = 3
+column = 26
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 1
+path = "input/runtime_call/@entry.moth"
+line = 5
+column = 31
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 6
+reason = "invalid_template_structure.template_loop_source_not_const"
+path = "input/two_payloads/@entry.moth"
+line = 7
+column = 25
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022", "MOTH-RULE-0053", "MOTH-SYNTAX-0022"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 1
+reason = "invalid_template_structure.template_loop_source_not_const"
+path = "input/default_slot/@entry.moth"
+line = 3
+column = 26
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 2
+reason = "invalid_template_structure.template_loop_source_not_const"
+path = "input/named_slot/@entry.moth"
+line = 3
+column = 36
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 3
+reason = "invalid_template_structure.template_loop_source_not_const"
+path = "input/nested_html_formatter/@entry.moth"
+line = 5
+column = 25
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 4
+reason = "invalid_template_structure.template_loop_source_not_const"
+path = "input/nested_implicit_formatter/@entry.moth"
+line = 5
+column = 25
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 5
+reason = "invalid_template_structure.template_loop_source_not_const"
+path = "input/positional_slot/@entry.moth"
+line = 3
+column = 26
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 1
+path = "input/runtime_call/@entry.moth"
+line = 5
+column = 31
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 6
+reason = "invalid_template_structure.template_loop_source_not_const"
+path = "input/two_payloads/@entry.moth"
+line = 7
+column = 25

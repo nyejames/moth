@@ -1,0 +1,39 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0063", "MOTH-RULE-0063"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0063"
+occurrence = 1
+reason = "invalid_compile_time_path.missing_target"
+path = "input/dropped_payload/@entry.moth"
+line = 4
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0063"
+occurrence = 2
+reason = "invalid_compile_time_path.missing_target"
+path = "input/false_body/@entry.moth"
+line = 3
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0063", "MOTH-RULE-0063"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0063"
+occurrence = 1
+reason = "invalid_compile_time_path.missing_target"
+path = "input/dropped_payload/@entry.moth"
+line = 4
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0063"
+occurrence = 2
+reason = "invalid_compile_time_path.missing_target"
+path = "input/false_body/@entry.moth"
+line = 3

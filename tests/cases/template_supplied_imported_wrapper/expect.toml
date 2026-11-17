@@ -1,0 +1,9 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "plain=<span>body</span>|labelled=<span title=\"Stored label\">body</span>|pp=<section><em></em></section>|pn=<section><em data-note>n</em></section>|ps=<section><em></em> data-shown</section>|pb=<section><em data-note>n</em> data-shown</section>|mp=<div></div>|mm=<div data-marks=\"xx\"></div>"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "plain=<span>body</span>|labelled=<span title=\"Stored label\">body</span>|pp=<section><em></em></section>|pn=<section><em data-note>n</em></section>|ps=<section><em></em> data-shown</section>|pb=<section><em data-note>n</em> data-shown</section>|mp=<div></div>|mm=<div data-marks=\"xx\"></div>"

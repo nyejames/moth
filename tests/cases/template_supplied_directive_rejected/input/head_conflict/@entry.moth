@@ -1,0 +1,2 @@
+-- Only a formatter directive may share a `$supplied` head.
+holder = [:<p>[$supplied title, $fresh: x]</p>]

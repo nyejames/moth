@@ -1,0 +1,10 @@
+-- Each subdirectory is a separate entry. A payload routed only to a `$supplied` key is
+-- never rendered, yet a const-required template still validates it as if it were.
+-- This entry pins the opposite edges: a discarded payload may read an enclosing const
+-- loop binding, and an application reused as a wrapper inside a loop keeps a valid
+-- discarded payload accepted.
+holder #= [$html:<b[$supplied note:[" note"]]>[$slot]</b>]
+looped #= [loop 0 to 2 |i|:[holder:[$in note:[i]]]]
+applied #= [holder:[$in note:"x"]]
+reused #= [$html:<div>[loop 0 to 2 |i|:[applied:[i]]]</div>]
+[:[looped][reused]]

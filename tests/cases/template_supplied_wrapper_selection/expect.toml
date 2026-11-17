@@ -1,0 +1,9 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "present=<li> tick</li><li>body</li>|absent=<li>body</li>|fresh=<li> tick</li>raw|fresh0=raw|child=<li><span data-mark>body</span></li>|child0=<li><span>body</span></li>|nested=<li> rowbody</li>|nested0=<li>body</li>|fp=<div>tick</div>|fa=<div></div>|cf=|dp=<li data-mark>body</li>|da=<li>body</li>|hc=|se=<li></li>"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "present=<li> tick</li><li>body</li>|absent=<li>body</li>|fresh=<li> tick</li>raw|fresh0=raw|child=<li><span data-mark>body</span></li>|child0=<li><span>body</span></li>|nested=<li> rowbody</li>|nested0=<li>body</li>|fp=<div>tick</div>|fa=<div></div>|cf=|dp=<li data-mark>body</li>|da=<li>body</li>|hc=|se=<li></li>"

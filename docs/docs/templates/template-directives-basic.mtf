@@ -18,6 +18,7 @@ Common directives include:
 
 - `$slot` for `$slot`, `$slot name` and `$slot 1` declarations
 - `$in name:` to fill one named slot
+- `$supplied name:` to render optional content from slot presence
 - `$before ...` and `$after ...` to wrap direct children
 - `$fresh` to skip one parent wrapper
 - `$md` for Moth Markdown

@@ -435,6 +435,9 @@ define_stable_reason_keys! {
         &InvalidTemplateDirectiveCode::UnexpectedArguments => "invalid_template_directive.unexpected_arguments",
         &InvalidTemplateDirectiveCode::InvalidSlotTarget => "invalid_template_directive.invalid_slot_target",
         &InvalidTemplateDirectiveCode::InvalidSlotDefault => "invalid_template_directive.invalid_slot_default",
+        &InvalidTemplateDirectiveCode::InvalidSuppliedTarget => "invalid_template_directive.invalid_supplied_target",
+        &InvalidTemplateDirectiveCode::InvalidSuppliedDefault => "invalid_template_directive.invalid_supplied_default",
+        &InvalidTemplateDirectiveCode::MissingSuppliedBody => "invalid_template_directive.missing_supplied_body",
         &InvalidTemplateDirectiveCode::InvalidInsertTarget => "invalid_template_directive.invalid_insert_target",
         &InvalidTemplateDirectiveCode::InvalidChildDecoratorValue => "invalid_template_directive.invalid_child_decorator_value",
         &InvalidTemplateDirectiveCode::WrongContext => "invalid_template_directive.wrong_context",
@@ -517,6 +520,7 @@ define_stable_reason_keys! {
         &InvalidTemplateStructureCode::BuilderRootSlotNotRegistered => "invalid_template_structure.builder_root_slot_not_registered",
         &InvalidTemplateStructureCode::InvalidMarkdownSectionMarker => "invalid_template_structure.invalid_markdown_section_marker",
         &InvalidTemplateStructureCode::DuplicateMarkdownSectionMarker => "invalid_template_structure.duplicate_markdown_section_marker",
+        &InvalidTemplateStructureCode::SuppliedGuardAcrossSkippedWrapper => "invalid_template_structure.supplied_guard_across_skipped_wrapper",
     },
 
     InvalidSignatureMemberReason => {
@@ -899,6 +903,7 @@ define_stable_reason_keys! {
     &InvalidTemplateSlotReason::SlotDefinitionOutsideTemplateBody => "invalid_template_slot.slot_definition_outside_template_body",
     &InvalidTemplateSlotReason::DefaultSlotInChildDecorator => "invalid_template_slot.default_slot_in_child_decorator",
     &InvalidTemplateSlotReason::PositionalSlotInChildDecorator => "invalid_template_slot.positional_slot_in_child_decorator",
+    &InvalidTemplateSlotReason::UnnamedSuppliedInChildDecorator => "invalid_template_slot.unnamed_supplied_in_child_decorator",
     },
 
     CompileTimeEvaluationErrorReason => {

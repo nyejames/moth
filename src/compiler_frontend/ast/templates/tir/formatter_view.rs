@@ -324,7 +324,9 @@ fn extract_formatter_child_fact(kind: &TemplateIrNodeKind) -> FormatterChildFact
             reference: *reference,
         },
         TemplateIrNodeKind::Sequence { children } => FormatterChildFact::Sequence(children.clone()),
-        TemplateIrNodeKind::Conditional { body, .. } => {
+        // A guard is not a conditional, but this traversal only needs its nested body.
+        TemplateIrNodeKind::Conditional { body, .. }
+        | TemplateIrNodeKind::SuppliedGuard { body, .. } => {
             FormatterChildFact::Conditional { body: *body }
         }
         TemplateIrNodeKind::Loop {

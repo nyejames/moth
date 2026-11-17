@@ -752,6 +752,10 @@ impl ReachableExpressionSiteWalk<'_> {
                 self.walk_template(store, *template, context)
             }
 
+            TemplateIrNodeKind::SuppliedGuard { body, .. } => {
+                self.walk_node(store, *body, context, record_sites)
+            }
+
             TemplateIrNodeKind::Slot { placeholder } => {
                 // Slot-owned wrappers are applied around the injected content by
                 // the same view that resolves this occurrence.
@@ -1246,6 +1250,8 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
                 *template,
                 Some(|view: &TirView<'store>| view.structural_helper(*template)),
             ),
+
+            TemplateIrNodeKind::SuppliedGuard { body, .. } => self.collect_node(store, *body),
 
             TemplateIrNodeKind::Text { .. }
             | TemplateIrNodeKind::Slot { .. }

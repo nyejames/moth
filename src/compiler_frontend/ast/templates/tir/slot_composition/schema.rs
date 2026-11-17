@@ -54,19 +54,25 @@ struct SlotFillServices<'a> {
 ///
 /// WHAT: `All` replaces every routed occurrence and fixes every unrouted one;
 ///       `NamedOnly` fills named occurrences and fixes named occurrences without
-///       content, leaving default and positional placeholders untouched; and
+///       content, leaving default and positional placeholders untouched;
 ///       `ContextOnly` leaves every placeholder in place while still resolving
-///       composition-owned child-edge wrapper contexts.
+///       composition-owned child-edge wrapper contexts; and `GuardsOnly` resolves
+///       `$supplied` guards against the same routing while leaving every slot and
+///       child-edge context untouched.
 /// WHY: a wrapper applied to a control-flow contribution must be composed before its
 ///       child output exists. Filling only the named slots keeps the wrapper's own loose
 ///       insertion point unresolved for the later conditional application. Runtime
 ///       injection supplies the named fills itself, so it needs only the nested
-///       child-edge contexts resolved before the wrapper tree is copied.
+///       child-edge contexts resolved before the wrapper tree is copied. A runtime slot
+///       plan copies the wrapper tree before the handoff store becomes read-only, so the
+///       guards in that tree are the one composition fact it must fix up front; slots stay
+///       open for the plan's own site planning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SlotExpansionScope {
     All,
     NamedOnly,
     ContextOnly,
+    GuardsOnly,
 }
 
 // Boundary ownership: a runtime slot plan treats its template as a leaf. Constant
@@ -156,6 +162,45 @@ pub(crate) fn expand_tir_slot_placeholders_into(
         &mut named_filled_wrapper_sets,
         &mut visiting_wrapper_sets,
         SlotExpansionScope::All,
+    )
+}
+
+/// Resolves the `$supplied` guards of one wrapper application before runtime planning.
+///
+/// WHAT: returns the wrapper root with every reachable guard replaced by its body when
+///       the application routed content to the guard's key, and by an empty sequence when
+///       it did not. Slots, child-edge wrapper contexts and nested template phases stay
+///       exactly as authored.
+/// WHY: a runtime slot plan copies the wrapper tree before the handoff store becomes
+///      read-only, so a guard left in that tree has no later resolution point. Presence is
+///      the receiving application's routing fact, which only this composition boundary
+///      owns, and the guard body is already a child-template edge the copied tree can
+///      render.
+pub(crate) fn resolve_supplied_guards_in_wrapper_tree(
+    store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+    wrapper_root: TemplateIrNodeId,
+    routed_contributions: &TirSlotContributions,
+    string_table: &StringTable,
+) -> SlotSchemaResult<TemplateIrNodeId> {
+    let mut named_filled_wrapper_sets = NamedFilledWrapperSetCache::default();
+    let mut visiting_wrapper_sets = FxHashSet::default();
+    let services = SlotFillServices {
+        expressions,
+        const_values,
+        string_table,
+    };
+
+    expand_tir_slot_placeholders_from_node(
+        store,
+        services,
+        wrapper_root,
+        routed_contributions,
+        &routed_contributions.named_nodes,
+        &mut named_filled_wrapper_sets,
+        &mut visiting_wrapper_sets,
+        SlotExpansionScope::GuardsOnly,
     )
 }
 
@@ -325,6 +370,50 @@ fn expand_tir_slot_placeholders_from_node(
             )))
         }
 
+        TemplateIrNodeKind::SuppliedGuard { key, body } => {
+            let presence = match scope {
+                SlotExpansionScope::All | SlotExpansionScope::GuardsOnly => {
+                    Some(routed_contributions.slot_has_routed_presence(key))
+                }
+                SlotExpansionScope::NamedOnly => match key {
+                    SlotKey::Named(name) => Some(named_fill.contains_key(name)),
+                    SlotKey::Default | SlotKey::Positional(_) => None,
+                },
+                SlotExpansionScope::ContextOnly => None,
+            };
+            if presence == Some(false) {
+                return Ok(store.push_node(TemplateIrNode::new(
+                    TemplateIrNodeKind::Sequence {
+                        children: Vec::new(),
+                    },
+                    node.span,
+                )));
+            }
+            let expanded = expand_tir_slot_placeholders_from_node(
+                store,
+                services,
+                *body,
+                routed_contributions,
+                named_fill,
+                named_filled_wrapper_sets,
+                visiting_wrapper_sets,
+                scope,
+            )?;
+            if presence == Some(true) {
+                return Ok(expanded);
+            }
+            if expanded == *body {
+                return Ok(node_id);
+            }
+            Ok(store.push_node(TemplateIrNode::new(
+                TemplateIrNodeKind::SuppliedGuard {
+                    key: key.clone(),
+                    body: expanded,
+                },
+                node.span,
+            )))
+        }
+
         TemplateIrNodeKind::Slot { placeholder } => {
             // A closed occurrence is fixed by the application that composed this
             // template. It must not accept this fill even when another open occurrence
@@ -338,7 +427,9 @@ fn expand_tir_slot_placeholders_from_node(
             // Routing owns presence, not content: an explicit empty contribution
             // suppresses the occurrence default even though it contributes no nodes.
             let (contribution_nodes, has_routed_presence) = match scope {
-                SlotExpansionScope::ContextOnly => return Ok(node_id),
+                SlotExpansionScope::ContextOnly | SlotExpansionScope::GuardsOnly => {
+                    return Ok(node_id);
+                }
                 SlotExpansionScope::All => (
                     routed_contributions.nodes_for_slot(&placeholder.key),
                     routed_contributions.slot_has_routed_presence(&placeholder.key),
@@ -470,14 +561,22 @@ fn expand_tir_slot_placeholders_from_node(
             // reference's wrapper-context overlay, not in the child's structural root,
             // so structural expansion cannot reach their named slots. The edge is
             // composition-owned: fill the same routed named content into the reference
-            // context while keeping the root, phase and occurrence identity.
-            let filled_context = fill_direct_child_wrapper_names_inner(
-                store,
-                services,
-                reference.context,
-                named_fill,
-                visiting_wrapper_sets,
-            )?;
+            // context while keeping the root, phase and occurrence identity. A
+            // guard-only pass has no routed named content to place, and the runtime
+            // plan resolves those names with its own markers afterwards, so it must
+            // leave the overlay exactly as authored.
+            let filled_context = match scope {
+                SlotExpansionScope::GuardsOnly => reference.context,
+                SlotExpansionScope::All
+                | SlotExpansionScope::NamedOnly
+                | SlotExpansionScope::ContextOnly => fill_direct_child_wrapper_names_inner(
+                    store,
+                    services,
+                    reference.context,
+                    named_fill,
+                    visiting_wrapper_sets,
+                )?,
+            };
 
             if expanded_child_root == child_root && filled_context == reference.context {
                 return Ok(node_id);
@@ -948,6 +1047,26 @@ fn fill_slot_wrapper_sets_from_node(
             Ok(Some(store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::Sequence {
                     children: filled_children,
+                },
+                span,
+            ))))
+        }
+
+        TemplateIrNodeKind::SuppliedGuard { key, body } => {
+            let Some(filled_body) = fill_slot_wrapper_sets_from_node(
+                store,
+                services,
+                body,
+                named_fill,
+                visiting_wrapper_sets,
+            )?
+            else {
+                return Ok(None);
+            };
+            Ok(Some(store.push_node(TemplateIrNode::new(
+                TemplateIrNodeKind::SuppliedGuard {
+                    key,
+                    body: filled_body,
                 },
                 span,
             ))))

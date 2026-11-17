@@ -585,7 +585,7 @@ fn nested_expression_walker_enters_same_store_template_view() {
                     context: TemplateViewContext::default(),
                 },
                 span: None,
-                comment_directive_span: None,
+                body_only_directive_span: None,
             },
             ValueMode::ImmutableOwned,
         )
@@ -693,7 +693,7 @@ fn template_with_reference(reference: TemplateTirReference) -> Template {
     Template {
         tir_reference: reference,
         span: None,
-        comment_directive_span: None,
+        body_only_directive_span: None,
     }
 }
 

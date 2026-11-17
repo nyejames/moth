@@ -567,6 +567,25 @@ fn copy_tir_node_with_active_slot_plan(
             Ok(node_id)
         }
 
+        TemplateIrNodeKind::SuppliedGuard { key, body } => {
+            // Keep the copied summary equal to `summarize_existing_root`: a guard makes
+            // output conditional, so derived fills must select output-conditioned wrappers.
+            copy_state.record_control_flow();
+            copy_state.enter_depth();
+            let body = copy_tir_node_with_active_slot_plan(
+                body,
+                active_slot_plan,
+                store,
+                copy_state,
+                identity_remap.as_deref_mut(),
+            )?;
+            copy_state.exit_depth();
+            Ok(store.push_node(TemplateIrNode::new(
+                TemplateIrNodeKind::SuppliedGuard { key, body },
+                span,
+            )))
+        }
+
         TemplateIrNodeKind::Conditional {
             selector,
             selector_site_id,

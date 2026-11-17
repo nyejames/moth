@@ -1,0 +1,4 @@
+items #= {1, 2}
+holder #= [$html:<b[$supplied 1:[" note"]]></b>]
+invalid #= [holder:[loop items |x|:[x]]]
+[:[invalid]]

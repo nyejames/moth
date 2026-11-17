@@ -288,15 +288,23 @@ pub(crate) enum PublicConstTemplateKind {
     SlotInsert(PublicTemplateSlotKey),
 }
 
-/// One authored text or structural run in an owned const-template projection.
+/// One authored text, structural run or unresolved composition boundary in an owned
+/// const-template projection.
 ///
-/// WHAT: carries one contiguous [`OwnedFoldedString`] run or one unresolved slot in authored order.
-/// WHY: grouping non-slot pieces lets plain text keep its fast path while structural runs reuse the
-/// one portable string vocabulary shared with public constants and runtime handoff.
+/// WHAT: carries one contiguous [`OwnedFoldedString`] run, one unresolved slot or one
+/// unresolved `$supplied` guard in authored order.
+/// WHY: grouping non-slot pieces lets plain text keep its fast path while structural runs reuse
+/// the one portable string vocabulary shared with public constants and runtime handoff. A guard
+/// keeps its authored body so a consumer that applies the wrapper again can resolve presence
+/// against its own routed contributions.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum PublicConstTemplatePiece {
     Text(OwnedFoldedString),
     Slot(PublicConstTemplateSlot),
+    SuppliedGuard {
+        key: PublicTemplateSlotKey,
+        body: Vec<PublicConstTemplatePiece>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

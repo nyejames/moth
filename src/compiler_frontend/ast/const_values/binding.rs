@@ -345,53 +345,14 @@ fn project_const_template_view(
     let kind = project_template_kind(&template.kind, fold_context.string_table)?;
     let pattern = fold_prepared_const_template_pattern(prepared, view.clone(), fold_context)?;
     let emission = pattern.emission;
-    let mut pieces = Vec::with_capacity(pattern.pieces.len());
-    let mut string_run = Vec::new();
-    let mut run_has_structural = false;
     let provenance = pattern.provenance.clone();
-    for piece in pattern.pieces {
-        match piece {
-            FoldedConstTemplatePiece::Text(text) => {
-                string_run.push(ConstStringPiece::Text(
-                    fold_context.string_table.intern(&text),
-                ));
-            }
-            FoldedConstTemplatePiece::Resource(resource) => {
-                string_run.push(ConstStringPiece::Resource(resource));
-                run_has_structural = true;
-            }
-            FoldedConstTemplatePiece::SiteRoot => {
-                string_run.push(ConstStringPiece::SiteRoot);
-                run_has_structural = true;
-            }
-            FoldedConstTemplatePiece::Slot(occurrence) => {
-                if let Some(text) = project_owned_string_run(
-                    &mut string_run,
-                    run_has_structural,
-                    module_resources,
-                    fold_context.string_table,
-                )? {
-                    pieces.push(PublicConstTemplatePiece::Text(text));
-                }
-                run_has_structural = false;
-                pieces.push(PublicConstTemplatePiece::Slot(project_slot(
-                    &view,
-                    occurrence,
-                    fold_context,
-                    visiting,
-                    module_resources,
-                )?));
-            }
-        }
-    }
-    if let Some(text) = project_owned_string_run(
-        &mut string_run,
-        run_has_structural,
+    let pieces = project_folded_pieces(
+        pattern.pieces,
+        &view,
+        fold_context,
+        visiting,
         module_resources,
-        fold_context.string_table,
-    )? {
-        pieces.push(PublicConstTemplatePiece::Text(text));
-    }
+    )?;
 
     let conditional_child_wrappers = project_wrapper_set(
         &view,
@@ -412,6 +373,109 @@ fn project_const_template_view(
         provenance,
     })
 }
+
+/// Projects one pre-coalesced fold piece list into the public composition vocabulary.
+///
+/// WHAT: groups text and structural runs into [`OwnedFoldedString`] values, projects each slot
+///       occurrence and recursively projects a guard body with its own run boundaries.
+/// WHY: a guard body is authored composition, not rendered text, so it must keep the same piece
+///      boundaries an application needs in order to resolve the guard again. Recursing here keeps
+///      slot and wrapper projection on one implementation for the outer template and every body.
+fn project_folded_pieces(
+    pieces: Vec<FoldedConstTemplatePiece>,
+    view: &TirView<'_>,
+    fold_context: &mut TirFoldContext<'_>,
+    visiting: &mut FxHashSet<TirViewIdentity>,
+    module_resources: Option<&ModuleResourceTable>,
+) -> Result<Vec<PublicConstTemplatePiece>, ConstValueStoreError> {
+    let mut projected = Vec::with_capacity(pieces.len());
+    let mut string_run = Vec::new();
+    let mut run_has_structural = false;
+
+    for piece in pieces {
+        match piece {
+            FoldedConstTemplatePiece::Text(text) => {
+                string_run.push(ConstStringPiece::Text(
+                    fold_context.string_table.intern(&text),
+                ));
+            }
+            FoldedConstTemplatePiece::Resource(resource) => {
+                string_run.push(ConstStringPiece::Resource(resource));
+                run_has_structural = true;
+            }
+            FoldedConstTemplatePiece::SiteRoot => {
+                string_run.push(ConstStringPiece::SiteRoot);
+                run_has_structural = true;
+            }
+            FoldedConstTemplatePiece::Slot(occurrence) => {
+                flush_projected_string_run(
+                    &mut string_run,
+                    run_has_structural,
+                    &mut projected,
+                    module_resources,
+                    fold_context.string_table,
+                )?;
+                run_has_structural = false;
+                projected.push(PublicConstTemplatePiece::Slot(project_slot(
+                    view,
+                    occurrence,
+                    fold_context,
+                    visiting,
+                    module_resources,
+                )?));
+            }
+            FoldedConstTemplatePiece::SuppliedGuard { key, body, .. } => {
+                flush_projected_string_run(
+                    &mut string_run,
+                    run_has_structural,
+                    &mut projected,
+                    module_resources,
+                    fold_context.string_table,
+                )?;
+                run_has_structural = false;
+                projected.push(PublicConstTemplatePiece::SuppliedGuard {
+                    key: project_slot_key(&key, fold_context.string_table),
+                    body: project_folded_pieces(
+                        body,
+                        view,
+                        fold_context,
+                        visiting,
+                        module_resources,
+                    )?,
+                });
+            }
+        }
+    }
+
+    flush_projected_string_run(
+        &mut string_run,
+        run_has_structural,
+        &mut projected,
+        module_resources,
+        fold_context.string_table,
+    )?;
+    Ok(projected)
+}
+
+/// Emits the pending text and structural run as one owned string piece.
+fn flush_projected_string_run(
+    string_run: &mut Vec<ConstStringPiece>,
+    run_has_structural: bool,
+    projected: &mut Vec<PublicConstTemplatePiece>,
+    module_resources: Option<&ModuleResourceTable>,
+    string_table: &StringTable,
+) -> Result<(), ConstValueStoreError> {
+    if let Some(text) = project_owned_string_run(
+        string_run,
+        run_has_structural,
+        module_resources,
+        string_table,
+    )? {
+        projected.push(PublicConstTemplatePiece::Text(text));
+    }
+    Ok(())
+}
+
 /// Intermediate owned projection of one exact template view.
 ///
 /// WHAT: keeps the public composition tree, folded structural emission and provenance together

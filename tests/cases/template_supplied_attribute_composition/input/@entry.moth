@@ -1,0 +1,24 @@
+-- A guard emits its authored attribute fragment once, and only when its key
+-- received a routed contribution. The case covers named, positional and default
+-- keys, repeated and empty fragments, and a guard whose payload no `$slot` renders.
+-- Each fragment carries its own whitespace.
+card #= [$html:<div[$supplied style:[" style=\""][$slot style]["\""]]>[$slot]</div>]
+button #= [$html:<button[$supplied disabled:[" disabled"]]>[$slot]</button>]
+link #= [$html:<a[$supplied 1:[" data-n=\""][$slot 1]["\""]]></a>]
+banner #= [$html:<section[$supplied:[" data-filled"]]></section>]
+probe #= [$before [:<b>], $after [:</b>]:[$supplied seen:]]
+
+plain = [card]
+styled = [card:[$in style:red]body]
+empty_style = [card:[$in style:]body]
+repeated = [card:[$in style:a][$in style:b]body]
+positional = [link:one]
+positional_absent = [link]
+flag_absent = [button:press]
+flag_present = [button:[$in disabled:]press]
+loose_guard = [banner:dropped]
+loose_guard_absent = [banner]
+probe_absent = [probe]
+probe_present = [probe:[$in seen:]]
+
+~[:plain=[plain]|styled=[styled]|empty=[empty_style]|repeat=[repeated]|pos=[positional]|pos0=[positional_absent]|flag0=[flag_absent]|flag1=[flag_present]|loose=[loose_guard]|loose0=[loose_guard_absent]|probe0=[probe_absent]|probe1=[probe_present]]

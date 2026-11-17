@@ -27,6 +27,14 @@ pub(crate) const TODO_DIRECTIVE_NAME: &str = "todo";
 /// record slot targets as constant references.
 pub(crate) const SLOT_DIRECTIVE_NAME: &str = "slot";
 
+/// The core `$supplied` directive name.
+///
+/// Its optional target names the same receiving slot key that `$slot` accepts. The directive
+/// selects its body from that key's routed presence, so the target is a slot identity rather
+/// than a lexical value. Header-stage initializer scans read the name from here so they do not
+/// record guard targets as constant references.
+pub(crate) const SUPPLIED_DIRECTIVE_NAME: &str = "supplied";
+
 /// The core `$in` directive name.
 ///
 /// Its required symbol target is a slot identity, not a lexical value. Header-stage
@@ -317,6 +325,7 @@ pub enum CoreStyleDirectiveKind {
     After,
     Fresh,
     Slot,
+    Supplied,
     In,
     Note,
     Raw,

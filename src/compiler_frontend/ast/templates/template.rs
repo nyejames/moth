@@ -82,6 +82,15 @@ pub enum TemplateType {
     /// nodes, then become structural slot placeholders in the parent parser TIR.
     SlotDefinition(SlotDeclaration),
 
+    /// `[$supplied key: ...]` parses as a dedicated conditional child template.
+    ///
+    /// WHAT: carries the receiving slot key from the head parser to the parent body
+    /// recorder, which pairs it with the guard's own template as a TIR `SuppliedGuard`.
+    /// WHY: the kind exists only while the guard is a child template awaiting its parent
+    /// body. The parent rewrites the guard's own template kind to an ordinary template kind,
+    /// so no kind-based consumer sees `Supplied` past parsing.
+    Supplied(SlotKey),
+
     /// `[$in name: ...]` helpers carry contribution content that only an
     /// immediate parent template can consume during slot composition.
     SlotInsert(SlotKey),
@@ -298,14 +307,15 @@ pub struct Template {
     /// Exact authored source range for this template, when available.
     pub span: Option<SourceSpan>,
 
-    /// Authored `$note` token span when this template is a discarded comment.
+    /// Authored `$note` or `$supplied` token span when this template carries one.
     ///
-    /// WHAT: keeps the directive location beside the durable template handle.
-    /// WHY: every diagnostic that rejects a note outside a template body reports at the authored
-    ///      directive, not at the template opener. Its consumers are the expression-position
-    ///      rejection, the direct source-fragment root rejection and the statement-position
-    ///      rejection used by both standalone templates and `~[...]` runtime fragments.
-    pub(crate) comment_directive_span: Option<SourceSpan>,
+    /// WHAT: keeps the placement-bearing directive location beside the durable template handle.
+    /// WHY: `$note` and `$supplied` are valid only as children of a template body, and every
+    ///      diagnostic that rejects one elsewhere reports at the authored directive, not at the
+    ///      template opener. Its consumers are the expression-position rejection, the direct
+    ///      source-fragment root rejection (const fragment and `~[...]` runtime fragment) and the
+    ///      statement-position rejection.
+    pub(crate) body_only_directive_span: Option<SourceSpan>,
 }
 
 impl Template {

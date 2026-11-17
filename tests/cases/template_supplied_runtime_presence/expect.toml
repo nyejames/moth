@@ -1,0 +1,9 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "false=<div style=\"\">body</div>|true=<div style=\"blue\">body</div>|loose=<p data-filled></p>|loose_if=<p data-filled></p>"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "false=<div style=\"\">body</div>|true=<div style=\"blue\">body</div>|loose=<p data-filled></p>|loose_if=<p data-filled></p>"

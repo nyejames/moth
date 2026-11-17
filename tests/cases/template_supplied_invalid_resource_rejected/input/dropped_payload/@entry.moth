@@ -1,0 +1,4 @@
+-- The payload is routed only to a `$supplied` key, so composition discards it;
+-- source validation must still resolve the asset path it names.
+drop #= [$html:<p[$supplied mark:[" marked"]]></p>]
+~[drop: [$in mark:[@assets/also_missing.svg]]]

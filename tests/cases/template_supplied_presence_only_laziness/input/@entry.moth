@@ -1,0 +1,12 @@
+-- A payload routed only to a `$supplied` key is never evaluated; an equivalent
+-- payload consumed by `[$slot]` is. `probe` traps when called, so the discarded
+-- payload must never reach it.
+quiet #= [$html:<i[$supplied tick:[" tick"]]>[$slot]</i>]
+loud #= [$html:<i>[$slot tick]</i>]
+
+probe |condition Bool| -> String:
+    assert(condition)
+    return "x"
+;
+
+~[:unused=[quiet:[$in tick:[probe(false)]]seen]|used=[loud:[$in tick:[probe(true)]]]]

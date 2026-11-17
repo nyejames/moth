@@ -1990,3 +1990,37 @@ fn copied_context_rebases_shared_site_across_nested_and_enclosing_scopes() {
         "the nested copy is also part of the enclosing scope's selection"
     );
 }
+
+#[test]
+fn copied_supplied_guard_records_control_flow_in_the_copy_summary() {
+    let mut store = TemplateIrStore::new();
+    let body = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Sequence { children: vec![] },
+        None,
+    ));
+    let guard = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::SuppliedGuard {
+            key: SlotKey::Default,
+            body,
+        },
+        None,
+    ));
+
+    let mut copy_state = TirCopyState::new();
+    let copied = copy_tir_subtree_with_active_slot_plan(guard, None, &mut store, &mut copy_state)
+        .expect("guard subtree copy should succeed");
+
+    assert!(
+        matches!(
+            store.get_node(copied).map(|node| &node.kind),
+            Some(TemplateIrNodeKind::SuppliedGuard { key: SlotKey::Default, body: copied_body })
+                if *copied_body != body
+        ),
+        "the copy must be a guard on the same key with its own body"
+    );
+    // Derived fills publish this summary, so it must match `summarize_existing_root`.
+    assert!(
+        copy_state.summary.has_control_flow(),
+        "a copied guard makes output conditional, like a recomputed guard summary"
+    );
+}

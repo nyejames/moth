@@ -1,0 +1,33 @@
+-- `$before` / `$after` and `$fresh` change which children a wrapper decorates;
+-- they never change routed presence. A selected guard body is an ordinary
+-- direct child, so it takes the wrapper and a false guard takes none.
+button #= [$before [:<li>], $after [:</li>]:[$supplied tick:[" tick"]][$slot]]
+list #= [$before [:<li>], $after [:</li>]:[$slot]]
+badge #= [:<span[$supplied mark:[" data-mark"]]>[$slot]</span>]
+nested #= [$before [:<li>], $after [:</li>]:[:[$supplied row:[" row"]][$slot]]]
+freshened #= [:<div>[$fresh:[$supplied tick:["tick"]]]</div>]
+decorated #= [$before [:<li[$supplied mark:[" data-mark"]]>], $after [:</li>]:[$slot]]
+hollow #= [:[$supplied x:[" x"]]]
+-- A selected empty guard body is selected-empty output, so the wrapper still applies.
+blank #= [:[$supplied x:][$slot y]]
+
+item_present = [button:[$in tick:t][:body]]
+item_absent = [button:[:body]]
+item_fresh = [button:[$in tick:t][$fresh:[:raw]]]
+item_fresh_absent = [button:[$fresh:[:raw]]]
+decorated_child = [list:[badge:[$in mark:m][:body]]]
+decorated_child_absent = [list:[badge:[:body]]]
+nested_present = [nested:[$in row:r]body]
+nested_absent = [nested:body]
+fresh_present = [freshened:[$in tick:t]]
+fresh_absent = [freshened]
+-- A false guard contributed into a decorated slot emits nothing and leaves no wrapper.
+contributed_false = [list:[$supplied x:[" data-x"]]]
+decorator_present = [decorated:[$in mark:m][:body]]
+decorator_absent = [decorated:[:body]]
+-- A child template whose only content is a false guard takes no wrapper, like a
+-- conditional child.
+guarded_child = [list:[hollow]]
+selected_empty = [list:[blank:[$in x:]]]
+
+~[:present=[item_present]|absent=[item_absent]|fresh=[item_fresh]|fresh0=[item_fresh_absent]|child=[decorated_child]|child0=[decorated_child_absent]|nested=[nested_present]|nested0=[nested_absent]|fp=[fresh_present]|fa=[fresh_absent]|cf=[contributed_false]|dp=[decorator_present]|da=[decorator_absent]|hc=[guarded_child]|se=[selected_empty]]

@@ -111,7 +111,7 @@ pub(super) fn estimate_tir_node_output_bytes(
         },
         TemplateIrNodeKind::ChildTemplate { .. }
         | TemplateIrNodeKind::DynamicExpression { .. } => Ok(0),
-        TemplateIrNodeKind::Slot { .. } => Ok(0),
+        TemplateIrNodeKind::Slot { .. } | TemplateIrNodeKind::SuppliedGuard { .. } => Ok(0),
         TemplateIrNodeKind::Conditional { .. }
         | TemplateIrNodeKind::Loop { .. }
         | TemplateIrNodeKind::InsertContribution { .. } => match mode {

@@ -234,14 +234,26 @@ fn append_owned_folded_string(union: &mut ResourceOriginUnion, string: &OwnedFol
 }
 
 fn append_public_const_template(union: &mut ResourceOriginUnion, template: &PublicConstTemplate) {
-    for piece in &template.pieces {
+    append_public_const_template_pieces(union, &template.pieces);
+    for wrapper in &template.conditional_child_wrappers {
+        append_public_const_template(union, wrapper);
+    }
+}
+
+fn append_public_const_template_pieces(
+    union: &mut ResourceOriginUnion,
+    pieces: &[PublicConstTemplatePiece],
+) {
+    for piece in pieces {
         match piece {
             PublicConstTemplatePiece::Text(string) => append_owned_folded_string(union, string),
             PublicConstTemplatePiece::Slot(slot) => append_public_const_template_slot(union, slot),
+            // The guard may be selected when a consumer applies the wrapper again, so its
+            // authored body resources belong to the constant's import set either way.
+            PublicConstTemplatePiece::SuppliedGuard { body, .. } => {
+                append_public_const_template_pieces(union, body);
+            }
         }
-    }
-    for wrapper in &template.conditional_child_wrappers {
-        append_public_const_template(union, wrapper);
     }
 }
 

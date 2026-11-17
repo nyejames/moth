@@ -91,13 +91,19 @@ pub(crate) struct TemplatePreparation {
 }
 
 /// Refreshes a parser-owned generic template kind from complete preparation facts.
+///
+/// Structural helper kinds (`$in`, `$slot`, `$supplied`) and a discarded `$note` keep their
+/// parser-assigned identity: their parent body owns what happens next.
 pub(crate) fn refresh_kind_from_preparation(
     kind: &mut TemplateType,
     facts: &TemplatePreparationFacts,
 ) {
     if matches!(
         *kind,
-        TemplateType::SlotInsert(_) | TemplateType::SlotDefinition(_) | TemplateType::Comment
+        TemplateType::SlotInsert(_)
+            | TemplateType::SlotDefinition(_)
+            | TemplateType::Supplied(_)
+            | TemplateType::Comment
     ) {
         return;
     }
@@ -531,6 +537,17 @@ impl PreparationWalk<'_> {
             };
             let mut facts = self.walk_node(root, view, loop_binding_paths, &node_role)?;
             facts.merge(runtime_slot_plan_facts);
+            // A presence-only payload never renders, but a const-required template still
+            // validates it as if it had been spliced: walk it under this application's view
+            // and loop bindings and keep only whether it is const-evaluable. Output facts stay
+            // with the rendered tree.
+            if matches!(self.mode, TemplatePreparationMode::ConstRequired) {
+                for &payload in store.presence_only_payloads(template_id) {
+                    let payload_facts =
+                        self.walk_node(payload, view, loop_binding_paths, &node_role)?;
+                    facts.const_evaluable &= payload_facts.const_evaluable;
+                }
+            }
             if conditional_wrapper_unresolved {
                 facts.has_unresolved_slots = true;
                 facts.has_unresolved_named_slots = true;
@@ -677,6 +694,17 @@ impl PreparationWalk<'_> {
                         })
                     {
                         facts.has_slot_insertions = true;
+                    }
+                    Ok(facts)
+                }
+
+                TemplateIrNodeKind::SuppliedGuard { key, body } => {
+                    let mut facts = self.walk_node(*body, view, loop_binding_paths, role)?;
+                    facts.has_unresolved_slots = true;
+                    facts.has_unfilled_slots = true;
+                    if matches!(key, SlotKey::Named(_)) {
+                        facts.has_unresolved_named_slots = true;
+                        facts.has_unfilled_named_slots = true;
                     }
                     Ok(facts)
                 }

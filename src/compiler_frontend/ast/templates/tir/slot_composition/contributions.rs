@@ -110,6 +110,48 @@ impl TirSlotContributions {
                 .unwrap_or(&[]),
         }
     }
+
+    /// Drops routed payloads for keys that only `$supplied` guards consume.
+    ///
+    /// WHAT: moves each routed key's node bucket out when the schema records no value
+    ///       consumer for it, keeping the key's routed presence, and returns the moved
+    ///       payload nodes in authored order.
+    /// WHY: a guard tests structural presence, so its body must still emit and later
+    ///      named-only fills must still see the slot was addressed. The payload has no
+    ///      occurrence that can render it, so splicing it into the composed tree or
+    ///      copying it into runtime sources would evaluate work whose output cannot
+    ///      appear. The caller keeps the returned nodes for const validation only. The
+    ///      named bucket keeps an empty entry because named-only fills treat an empty
+    ///      list as an explicit empty contribution, while a missing name means the slot
+    ///      was never addressed.
+    pub(crate) fn discard_presence_only_payloads(
+        &mut self,
+        schema: &TirSlotSchema,
+    ) -> Vec<TemplateIrNodeId> {
+        let mut discarded = Vec::new();
+        // Disjoint field borrows: presence is read while the payload buckets are drained.
+        for key in &self.routed_targets {
+            if schema.has_value_consumer(key) {
+                continue;
+            }
+            match key {
+                SlotKey::Default => discarded.append(&mut self.default_nodes),
+                SlotKey::Named(name) => {
+                    discarded.append(self.named_nodes.entry(*name).or_default());
+                }
+                SlotKey::Positional(index) => {
+                    if let Some(mut nodes) = self.positional_nodes.remove(index) {
+                        discarded.append(&mut nodes);
+                    }
+                }
+            }
+        }
+        // Keys come from a hash set, so their visit order is arbitrary. Node indices follow
+        // parse order, so sorting by index restores the authored order and keeps the first
+        // reported const diagnostic deterministic.
+        discarded.sort_unstable_by_key(|node| node.index());
+        discarded
+    }
 }
 
 /// Routes already-collected fill nodes against a wrapper schema.

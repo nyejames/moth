@@ -495,12 +495,15 @@ fn string_decorator_wrapper(
     ))
 }
 
-/// Rejects default and positional slot occurrences anywhere in a decorator value.
+/// Rejects default or positional `$slot` occurrences and unnamed or positional
+/// `$supplied` guards anywhere in a decorator value.
 ///
-/// Named occurrences are the value's only addressable interface: the composite
-/// wrapper owns the single implicit default insertion point for the direct
-/// child. Nested template values are part of the same authored wrapper, so the
-/// walk follows child-template references as well as control-flow bodies.
+/// Named keys are the value's only addressable interface: the composite wrapper
+/// owns the single implicit default insertion point for the direct child, so a
+/// default or positional guard would test that insertion point instead of a key
+/// the enclosing application can address. Nested template values are part of the
+/// same authored wrapper, so the walk follows child-template references, insert
+/// contributions and control-flow bodies.
 fn validate_named_only_slots(
     store: &TemplateIrStore,
     template_id: TemplateIrId,
@@ -560,6 +563,19 @@ fn validate_named_only_slots_in_node(
                     visited_nodes,
                 )?;
             }
+        }
+
+        TemplateIrNodeKind::SuppliedGuard { key, body } => {
+            if !matches!(key, SlotKey::Named(_)) {
+                return Err(templates::invalid_template_slot(
+                    InvalidTemplateSlotReason::UnnamedSuppliedInChildDecorator,
+                    None,
+                    None,
+                    node.span,
+                )
+                .into());
+            }
+            validate_named_only_slots_in_node(store, *body, visited_templates, visited_nodes)?;
         }
 
         TemplateIrNodeKind::Slot { placeholder } => match &placeholder.key {

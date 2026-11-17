@@ -665,9 +665,11 @@ fn before_directive_requires_operand() {
     );
 }
 
-#[test]
-fn decorator_value_rejects_default_slot_at_its_own_span() {
-    let source = "[$before [:<b>[$slot]</b>]: [: child]]";
+/// Parsed diagnostic bag and authored-span builder of one rejected decorator source.
+///
+/// WHY: the slot-rejection tests differ only in the source text and the facts they assert, so
+///      one helper keeps the parse-and-compact setup out of each assertion.
+fn parse_decorator_diagnostic(source: &str) -> (CompactDiagnosticBagForTest, ExtendedSpanBuilder) {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
@@ -697,8 +699,14 @@ fn decorator_value_rejects_default_slot_at_its_own_span() {
         &mut string_table,
         &mut path_fork,
     )
-    .expect_err("the default slot inside a decorator value must be rejected");
-    let error = expect_template_diagnostic(error);
+    .expect_err("decorator source should fail to parse");
+    (expect_template_diagnostic(error), span_builder)
+}
+
+#[test]
+fn decorator_value_rejects_default_slot_at_its_own_span() {
+    let source = "[$before [:<b>[$slot]</b>]: [: child]]";
+    let (error, span_builder) = parse_decorator_diagnostic(source);
     let first = error
         .first()
         .expect("default-slot diagnostic should compact to one record");
@@ -739,6 +747,47 @@ fn decorator_value_rejects_positional_slot() {
         error.contains("A `$before` or `$after` value may only contain named slots."),
         "unexpected positional-slot diagnostic: {error}"
     );
+}
+
+#[test]
+fn decorator_value_rejects_unnamed_supplied_guards() {
+    for source in [
+        "[$before [:[$supplied: marked]]: [: child]]",
+        "[$after [:[$supplied 1: marked]]: [: child]]",
+    ] {
+        let (diagnostic, span_builder) = parse_decorator_diagnostic(source);
+        let first = diagnostic
+            .first()
+            .expect("unnamed supplied guard should compact to one record");
+        assert_eq!(first.descriptor().code, "MOTH-RULE-0052");
+        let facts = first
+            .family_view::<InvalidTemplateSlotView>()
+            .expect("unnamed supplied guard should retain slot facts");
+        assert_eq!(
+            facts.reason,
+            InvalidTemplateSlotReason::UnnamedSuppliedInChildDecorator,
+            "unexpected decorator guard reason for {source}"
+        );
+        let SiteRef::Local(primary_span) = first.primary_site() else {
+            panic!("unnamed supplied rejection should keep its local authored span");
+        };
+        let range =
+            primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+        let guard_start = source
+            .find("[$supplied")
+            .expect("fixture authors one guard occurrence");
+        let guard_end = guard_start
+            + source[guard_start..]
+                .find(']')
+                .expect("guard occurrence closes with one bracket")
+            + 1;
+        assert!(
+            range.start() as usize >= guard_start && (range.end() as usize) <= guard_end,
+            "the diagnostic span {}..{} must stay inside the offending guard occurrence {guard_start}..{guard_end} for {source}",
+            range.start(),
+            range.end()
+        );
+    }
 }
 
 #[test]

@@ -892,6 +892,7 @@ Formatters apply to their own templates, and incompatible formatters can't share
 ]
 
 `$slot`, `$slot name` and `$slot 1` declare default, named and positional slots. Each occurrence may carry a `= <compile-time String>` default. `$in name:` fills one named slot. Names and positions are bare tokens, so `$in` has no String-expression or positional form.
+`$supplied name:` renders its body once when routing supplied that key, counts an explicitly empty insert, ignores occurrence defaults and never evaluates a payload that only guards consume. Its key uses the `$slot` named, positional and default targets, and only a formatter may share its head.
 A routed contribution, including an explicitly empty one, suppresses the occurrence default. Missing slots without a default render empty, repeated slots replay content, multiple named contributions concatenate and unassigned loose content is an error.
 An application with content closes its own unfilled defaults; a head-only reference stays open for later composition.
 `$before` and `$after` take one bare operand and wrap direct children with a compile-time String or constant template. Their values may contain named slots only, an explicit default or positional slot is rejected, Each directive may appear once per head. `$fresh` skips one parent wrapper. Structurally absent output produces no wrapper, while a selected empty String is wrapped.

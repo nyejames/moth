@@ -676,7 +676,7 @@ impl Template {
         let template = Template {
             tir_reference,
             span: construction_span,
-            comment_directive_span: build_state.comment_directive_span,
+            body_only_directive_span: build_state.body_only_directive_span,
         };
 
         if matches!(
@@ -752,13 +752,23 @@ fn apply_default_style_if_needed(
     parsed_head: &ParsedTemplateHead,
     default_style: Option<&Style>,
 ) {
-    if parsed_head.has_explicit_template_directive {
+    // A `$supplied` guard selects a body; it does not choose how that body is formatted.
+    // Its guard template therefore takes the ambient default style like an ordinary nested
+    // control-flow child, unless the head authored its own formatter or style directive.
+    let supplied_guard_uses_default_style = matches!(build_state.kind, TemplateType::Supplied(_))
+        && build_state.style.id.is_empty()
+        && build_state.style.formatter.is_none()
+        && build_state.style.body_whitespace_policy
+            == BodyWhitespacePolicy::DefaultTemplateBehavior
+        && !build_state.style.suppress_child_templates;
+
+    if parsed_head.has_explicit_template_directive && !supplied_guard_uses_default_style {
         return;
     }
 
     if !matches!(
         build_state.kind,
-        TemplateType::String | TemplateType::StringFunction
+        TemplateType::String | TemplateType::StringFunction | TemplateType::Supplied(_)
     ) {
         return;
     }

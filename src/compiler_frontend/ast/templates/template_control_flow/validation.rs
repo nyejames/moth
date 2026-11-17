@@ -110,6 +110,10 @@ fn validate_runtime_tir_view_node(
 ) -> Result<(), TemplateError> {
     let node = view.effective_node(node_ref)?;
     match &node.kind {
+        TemplateIrNodeKind::SuppliedGuard { body, .. } => {
+            validate_runtime_tir_view_node(view, *body, visiting)?;
+        }
+
         TemplateIrNodeKind::Conditional { body, .. } => {
             let body = *body;
             let node_span = node.span;
@@ -230,6 +234,10 @@ fn tir_view_subtree_first_escaped_insert(
     let node = view.effective_node(node_ref)?;
     let node_span = node.span;
     match &node.kind {
+        TemplateIrNodeKind::SuppliedGuard { body, .. } => {
+            tir_view_subtree_first_escaped_insert(view, *body, visiting)
+        }
+
         TemplateIrNodeKind::Slot { .. } => Ok(None),
 
         TemplateIrNodeKind::Sequence { children } => {

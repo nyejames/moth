@@ -1,0 +1,2 @@
+-- A guard has no slot default assignment.
+holder = [:<p>[$supplied title = "x": y]</p>]

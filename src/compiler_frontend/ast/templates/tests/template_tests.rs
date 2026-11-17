@@ -10,12 +10,13 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::source::line_index::{LineIndex, line_start_offsets};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    ast_error_primary_span, parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use rustc_hash::FxHashMap;
 
@@ -30,6 +31,64 @@ value = [$in style: color: red;]
         &failure,
         "MOTH-SYNTAX-0022",
         Some("invalid_template_structure.helper_outside_wrapper_slot"),
+    );
+}
+
+#[test]
+fn standalone_supplied_guard_value_is_rejected() {
+    let source = r#"
+value = [$supplied title: hi]
+"#;
+
+    let failure = parse_single_file_ast_diagnostic(source);
+    crate::compiler_frontend::tests::parse_support::assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.wrong_context"),
+    );
+}
+
+#[test]
+fn runtime_fragment_root_supplied_guard_is_rejected() {
+    let source = r#"
+~[$supplied title: hi]
+"#;
+
+    let failure = parse_single_file_ast_diagnostic(source);
+    crate::compiler_frontend::tests::parse_support::assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.wrong_context"),
+    );
+}
+
+#[test]
+fn entry_root_supplied_guard_fragment_is_rejected_at_the_directive() {
+    // A bare entry-file template is a const fragment, not a template body child, so its guard
+    // must be rejected during fragment folding instead of being folded as ordinary content.
+    let source = "[$supplied title: hi]";
+
+    let failure = parse_single_file_ast_diagnostic(source);
+    let diagnostic = crate::compiler_frontend::tests::parse_support::assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.wrong_context"),
+    );
+
+    let span = ast_error_primary_span(diagnostic)
+        .expect("entry-root placement should carry an authored source span");
+    assert_eq!(span.source(), SourceId::COMPILATION_ROOT);
+    // Tiny fixtures pack their spans inline, so an empty builder resolves the exact byte range.
+    let extended_spans = ExtendedSpanBuilder::new();
+    let range = span.resolve_with(extended_spans.resolver_for(SourceId::COMPILATION_ROOT));
+    let line_starts = line_start_offsets(source);
+    let position = LineIndex::new(source, &line_starts)
+        .position(range.start())
+        .expect("entry-root placement offset should resolve to a source position");
+    assert_eq!(
+        (position.line + 1, position.column + 1),
+        (1, 2),
+        "entry-root placement should point at the $supplied directive"
     );
 }
 

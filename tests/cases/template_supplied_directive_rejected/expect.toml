@@ -1,0 +1,137 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0021", "MOTH-SYNTAX-0021", "MOTH-SYNTAX-0021", "MOTH-SYNTAX-0021", "MOTH-SYNTAX-0021", "MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022"]
+message_contains = ["`$supplied` cannot be combined with `$fresh`. A `$supplied` directive may share a template head only with a formatter directive."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+occurrence = 1
+reason = "invalid_template_directive.invalid_supplied_default"
+path = "input/bad_default/@entry.moth"
+line = 2
+column = 32
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+occurrence = 2
+reason = "invalid_template_directive.invalid_supplied_target"
+path = "input/bad_target/@entry.moth"
+line = 2
+column = 26
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 1
+reason = "invalid_template_structure.incompatible_head_item"
+path = "input/head_conflict/@entry.moth"
+line = 2
+column = 33
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/head_conflict/@entry.moth"
+line = 2
+column = 16
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 2
+reason = "invalid_template_structure.supplied_guard_across_skipped_wrapper"
+path = "input/loop_wrapper/@entry.moth"
+line = 3
+column = 40
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+occurrence = 3
+reason = "invalid_template_directive.missing_supplied_body"
+path = "input/missing_body/@entry.moth"
+line = 2
+column = 16
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+occurrence = 4
+reason = "invalid_template_directive.wrong_context"
+path = "input/placement_expression/@entry.moth"
+line = 2
+column = 10
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+occurrence = 5
+reason = "invalid_template_directive.wrong_context"
+path = "input/placement_fragment/@entry.moth"
+line = 2
+column = 3
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0021", "MOTH-SYNTAX-0021", "MOTH-SYNTAX-0021", "MOTH-SYNTAX-0021", "MOTH-SYNTAX-0021", "MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022"]
+message_contains = ["`$supplied` cannot be combined with `$fresh`. A `$supplied` directive may share a template head only with a formatter directive."]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+occurrence = 1
+reason = "invalid_template_directive.invalid_supplied_default"
+path = "input/bad_default/@entry.moth"
+line = 2
+column = 32
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+occurrence = 2
+reason = "invalid_template_directive.invalid_supplied_target"
+path = "input/bad_target/@entry.moth"
+line = 2
+column = 26
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 1
+reason = "invalid_template_structure.incompatible_head_item"
+path = "input/head_conflict/@entry.moth"
+line = 2
+column = 33
+
+[[backends.html_wasm.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/head_conflict/@entry.moth"
+line = 2
+column = 16
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 2
+reason = "invalid_template_structure.supplied_guard_across_skipped_wrapper"
+path = "input/loop_wrapper/@entry.moth"
+line = 3
+column = 40
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+occurrence = 3
+reason = "invalid_template_directive.missing_supplied_body"
+path = "input/missing_body/@entry.moth"
+line = 2
+column = 16
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+occurrence = 4
+reason = "invalid_template_directive.wrong_context"
+path = "input/placement_expression/@entry.moth"
+line = 2
+column = 10
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+occurrence = 5
+reason = "invalid_template_directive.wrong_context"
+path = "input/placement_fragment/@entry.moth"
+line = 2
+column = 3

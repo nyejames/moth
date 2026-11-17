@@ -214,6 +214,25 @@ pub(crate) enum TemplateIrNodeKind {
     /// Structural slot placeholder awaiting composition.
     Slot { placeholder: TirSlotPlaceholder },
 
+    /// Unresolved presence guard authored by a `$supplied` directive.
+    ///
+    /// WHAT: pairs the receiving slot key with the authored guard body, a
+    /// [`TemplateIrNodeKind::ChildTemplate`] edge to a template that owns the
+    /// guard's style and formatter. Slot composition replaces the whole node with
+    /// the recursively expanded body when the key has routed presence, and with an
+    /// empty sequence when it does not.
+    /// WHY: presence is a routing fact owned by the receiving application, so the
+    /// guard must stay a slot-adjacent composition placeholder until that
+    /// application composes. It has no occurrence identity, closed flag or overlay:
+    /// a guard never survives resolution, never appears in an HIR/runtime handoff
+    /// payload, and is not a conditional or a value predicate. The body is present
+    /// so schema collection, validation, overlays and subtree copies see the
+    /// authored content exactly once.
+    SuppliedGuard {
+        key: SlotKey,
+        body: TemplateIrNodeId,
+    },
+
     /// Content contributed by an `$in` directive.
     InsertContribution { template: TemplateIrId },
 

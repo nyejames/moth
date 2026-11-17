@@ -537,7 +537,9 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                 TemplateType::SlotInsert(_) => {
                     record_parser_tir_insert_contribution(construction_context, &child_template);
                 }
-                TemplateType::Comment | TemplateType::SlotDefinition(_) => {}
+                TemplateType::Comment
+                | TemplateType::SlotDefinition(_)
+                | TemplateType::Supplied(_) => {}
                 _ => {
                     record_parser_tir_child_template(construction_context, &child_template);
                 }
@@ -552,6 +554,15 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
             }
 
             TemplateType::String | TemplateType::StringFunction | TemplateType::SlotInsert(_) => {}
+
+            TemplateType::Supplied(key) => {
+                construction_context.record_supplied_guard(
+                    key.to_owned(),
+                    &child_template.tir_reference,
+                    child_template.span,
+                )?;
+                return Ok(());
+            }
 
             TemplateType::SlotDefinition(slot_declaration) => {
                 let inherited_direct_child_wrappers = match input.inherited_wrappers {

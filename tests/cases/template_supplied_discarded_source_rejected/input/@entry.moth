@@ -1,0 +1,4 @@
+-- A payload dropped by presence-only routing is still fully type-checked.
+holder #= [$html:<b[$supplied note:[" note"]]></b>]
+invalid = [holder:[$in note:[1 + true]]]
+~[:[invalid]]

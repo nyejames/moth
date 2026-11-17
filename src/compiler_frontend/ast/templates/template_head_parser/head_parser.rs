@@ -65,7 +65,8 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
-    StyleDirectiveKind, StyleDirectiveSpec, TemplateHeadCompatibility, TemplateHeadTag,
+    SUPPLIED_DIRECTIVE_NAME, StyleDirectiveKind, StyleDirectiveSpec, TemplateHeadCompatibility,
+    TemplateHeadTag,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -147,8 +148,8 @@ impl Default for TemplateHeadState {
 }
 
 const _: () = assert!(
-    std::mem::size_of::<TemplateHeadState>() <= 512,
-    "template-head state stays a small stack value"
+    std::mem::size_of::<TemplateHeadState>() <= 768,
+    "template-head state stays a fixed stack value for the tag table"
 );
 
 impl TemplateHeadState {
@@ -172,6 +173,13 @@ impl TemplateHeadState {
         incoming
             .required_absent_tags
             .indices()
+            .filter_map(|index| self.first_present[index])
+            .min_by_key(|item| item.order)
+    }
+
+    /// The earliest item that carried one tag, for diagnostics that need its authored span.
+    fn first_present_item(&self, tag: TemplateHeadTag) -> Option<FirstPresentHeadItem> {
+        tag.indices()
             .filter_map(|index| self.first_present[index])
             .min_by_key(|item| item.order)
     }
@@ -278,6 +286,29 @@ fn apply_head_compatibility(
 
     state.seen_tags |= compatibility.presence_tags;
     state.blocked_future_tags |= compatibility.blocks_future_tags;
+}
+
+/// Finishes a head closed by `]` without a body.
+///
+/// A bodyless template is valid except for a `$supplied` guard, whose single body is part
+/// of the directive. Both head-close points (before an item and after one) share this check.
+fn close_bodyless_template_head(
+    head_state: &TemplateHeadState,
+    string_table: &mut StringTable,
+) -> TemplateHeadResult<ParsedTemplateHead> {
+    if let Some(supplied) = head_state.first_present_item(TemplateHeadTag::SUPPLIED_DIRECTIVE) {
+        return Err(templates::invalid_template_directive(
+            Some(string_table.intern(SUPPLIED_DIRECTIVE_NAME)),
+            InvalidTemplateDirectiveReason::MissingSuppliedBody,
+            Some(supplied.location),
+        )
+        .into());
+    }
+
+    Ok(parsed_template_head(
+        TemplateBodyParseMode::Normal,
+        head_state,
+    ))
 }
 
 fn parsed_template_head(
@@ -391,6 +422,7 @@ pub fn parse_template_head(
     let mut separator_state = TemplateHeadSeparatorState::ExpectItem;
     let mut head_state = TemplateHeadState::default();
     let meaningful_item_compatibility = TemplateHeadCompatibility::fully_compatible_meaningful();
+    let control_flow_compatibility = TemplateHeadCompatibility::control_flow_suffix();
     token_stream.advance();
 
     let mut last_known_span = Some(token_stream.current_span());
@@ -416,12 +448,10 @@ pub fn parse_template_head(
             .into());
         }
 
-        // A closing ] without a body is a valid empty template.
+        // A closing ] without a body is a valid empty template, except for a
+        // `$supplied` guard, whose one body is part of the directive.
         if token == TokenTag::TEMPLATE_CLOSE {
-            return Ok(parsed_template_head(
-                TemplateBodyParseMode::Normal,
-                &head_state,
-            ));
+            return close_bodyless_template_head(&head_state, string_table);
         }
 
         if token == TokenTag::START_TEMPLATE_BODY {
@@ -516,6 +546,12 @@ pub fn parse_template_head(
                     )
                     .into());
                 }
+                enforce_head_compatibility(
+                    &head_state,
+                    &control_flow_compatibility,
+                    TemplateHeadItemName::ControlFlow,
+                    token_stream.current_span(),
+                )?;
 
                 let body_mode = parse_if_suffix(
                     token_stream,
@@ -544,6 +580,12 @@ pub fn parse_template_head(
                     )
                     .into());
                 }
+                enforce_head_compatibility(
+                    &head_state,
+                    &control_flow_compatibility,
+                    TemplateHeadItemName::ControlFlow,
+                    token_stream.current_span(),
+                )?;
 
                 let body_mode = parse_loop_suffix(
                     token_stream,
@@ -1123,10 +1165,7 @@ pub fn parse_template_head(
         }
 
         if token_stream.current_tag() == TokenTag::TEMPLATE_CLOSE {
-            return Ok(parsed_template_head(
-                TemplateBodyParseMode::Normal,
-                &head_state,
-            ));
+            return close_bodyless_template_head(&head_state, string_table);
         }
 
         separator_state = TemplateHeadSeparatorState::ExpectSeparatorOrBody;

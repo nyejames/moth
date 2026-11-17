@@ -23,7 +23,10 @@ use crate::compiler_frontend::ast::templates::template_folding::{
     selected_option_capture_payload_with_provenance,
 };
 use crate::compiler_frontend::ast::templates::tir::ids::{ExpressionSiteId, TemplateIrNodeId};
-use crate::compiler_frontend::ast::templates::tir::node::TemplateLoopHeaderExpressionSites;
+use crate::compiler_frontend::ast::templates::tir::node::{
+    TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
+};
+use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
@@ -43,7 +46,7 @@ use super::reducer::{
     FoldInsertion, FoldOutputState, FoldTraversalInput, charge_template_iteration, fold_tir_node,
     fold_tir_node_into_buffer,
 };
-use super::wrappers::fold_tir_aggregate_wrapper;
+use super::wrappers::{fold_tir_aggregate_wrapper, reject_guard_across_skipped_wrapper};
 
 fn expression_provenance(expression: ExpressionView<'_>) -> SyntheticInterfaceProvenance {
     expression
@@ -816,6 +819,24 @@ pub(super) fn fold_tir_loop(
     }
 
     if !aggregate_state.emitted_output {
+        // A loop body can be composition-only (an unresolved guard): it renders nothing but
+        // its projection pieces still belong at the loop's authored position, or a projected
+        // wrapper would lose the nested guard. Slots mark emitted output, so only pieces that
+        // deliberately avoid output reach this arm.
+        //
+        // A loop wrapper with head content is applied only when the loop emits output, so
+        // promoting the guard past it would rebuild the loop without that content. The public
+        // piece vocabulary cannot express the condition, so refuse instead of publishing. A
+        // marker-only wrapper adds nothing, so skipping it already matches applying it.
+        if let Some(wrapper_node_id) = aggregate_wrapper
+            && !aggregate_wrapper_is_marker_only(store, wrapper_node_id)
+            && let Some(pieces) = aggregate_state.projection_pieces.as_deref()
+        {
+            reject_guard_across_skipped_wrapper(pieces)?;
+        }
+        if output_state.projection_pieces.is_some() {
+            output_state.append_pieces(aggregate_state.projection_pieces.as_deref())?;
+        }
         return Ok(());
     }
 
@@ -842,6 +863,22 @@ pub(super) fn fold_tir_loop(
         fold_context,
         fold_input,
     )
+}
+
+/// Returns whether a loop aggregate wrapper adds nothing around the aggregate output.
+///
+/// WHAT: true when the wrapper is the `AggregateOutput` marker, possibly under single-child
+///       sequences left by head-chain composition.
+/// WHY: a loop without head content still owns a wrapper subtree; refusing guards through it
+///      would reject ordinary `[loop ...: [$supplied ...]]` receivers for no lost output.
+fn aggregate_wrapper_is_marker_only(store: &TemplateIrStore, wrapper: TemplateIrNodeId) -> bool {
+    match store.get_node(wrapper).map(|node| &node.kind) {
+        Some(TemplateIrNodeKind::AggregateOutput) => true,
+        Some(TemplateIrNodeKind::Sequence { children }) => {
+            matches!(children.as_slice(), [only] if aggregate_wrapper_is_marker_only(store, *only))
+        }
+        _ => false,
+    }
 }
 
 fn fold_tir_loop_iteration(

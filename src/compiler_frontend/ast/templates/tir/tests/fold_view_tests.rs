@@ -1569,7 +1569,7 @@ fn fold_dynamic_ast_template_with_missing_root_authority() -> TemplateError {
                 context,
             },
             span: None,
-            comment_directive_span: None,
+            body_only_directive_span: None,
         };
 
         let nested_expression = expressions
@@ -1697,5 +1697,46 @@ fn prepared_fold_increments_phase1_attribution_counters() {
         test_read_ast_counter(AstCounter::TirViewFoldOverlayEmpty),
         2,
         "every fold attributes its overlay shape"
+    );
+}
+
+#[test]
+fn unresolved_supplied_guard_emits_nothing() {
+    let mut strings = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut values = ConstValueStore::default();
+    let mut store = TemplateIrStore::new();
+    let text = strings.intern("hidden");
+    let template = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let node = builder.push_text_node(text, 6, TemplateSegmentOrigin::Body, None);
+        let child = builder.finish_template(
+            node,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            None,
+        );
+        let body = builder.push_child_template_node(child, None);
+        let guard = builder.push_supplied_guard_node(SlotKey::Default, body, None);
+        builder.finish_template(
+            guard,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            None,
+        )
+    };
+    let view = TirView::new(
+        &store,
+        template,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )
+    .unwrap();
+    let mut context = fold_context(&mut strings, &mut expressions, &mut values);
+    assert_eq!(
+        fold_prepared_view(&view, &mut context).unwrap(),
+        TemplateEmission::NoOutput
     );
 }

@@ -55,7 +55,7 @@ fn slot_template(store: &mut TemplateIrStore) -> Template {
             context: TemplateViewContext::default(),
         },
         span: None,
-        comment_directive_span: None,
+        body_only_directive_span: None,
     }
 }
 

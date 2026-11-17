@@ -1,0 +1,2 @@
+-- A guard always owns an explicit body.
+holder = [:<p>[$supplied title]</p>]

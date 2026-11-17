@@ -1,0 +1,4 @@
+-- Each subdirectory is its own entry. Both reach a missing asset from a source
+-- position the composed tree may drop: a discarded payload and a false guard
+-- body. Compilation must still reject the path.
+[:<h1>Rejected</h1>]

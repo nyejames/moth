@@ -1,0 +1,11 @@
+-- Two invalid discarded payloads: the first authored one is reported, whatever the
+-- order of the guards or their keys.
+items #= {1, 2}
+holder #= [$html:<b[$supplied zeta:[" z"]][$supplied alpha:[" a"]]></b>]
+invalid #= [$html:
+    [holder:
+        [$in zeta:[loop items |x|:[x]]]
+        [$in alpha:[loop items |y|:[y]]]
+    ]
+]
+[:[invalid]]

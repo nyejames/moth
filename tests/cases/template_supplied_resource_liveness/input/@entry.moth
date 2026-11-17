@@ -1,0 +1,11 @@
+-- Resource emission follows the emitted tree: a resource inside a selected guard
+-- body is emitted, while one in a false guard body or a discarded payload is not.
+probe #= [$html:<div[$supplied icon:[" data-icon=\""][$slot icon]["\""]]></div>]
+hollow #= [$html:<div[$supplied icon:[" data-icon=\""][@assets/hidden.svg]["\""]]></div>]
+drop #= [$html:<p[$supplied mark:[" marked"]]></p>]
+
+shown = [probe: [$in icon:[@assets/shown.svg]]]
+hidden = [hollow]
+discarded = [drop: [$in mark:[@assets/dropped.svg]]]
+
+~[:shown=[shown]|hidden=[hidden]|discarded=[discarded]]

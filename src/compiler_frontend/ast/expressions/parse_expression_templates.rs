@@ -24,6 +24,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::InvalidTemplateSlotReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::style_directives::SUPPLIED_DIRECTIVE_NAME;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -172,7 +173,15 @@ pub(super) fn parse_template_expression(
         // A `$note` is a discarded child of a template body, never a value or a skip marker.
         TemplateType::Comment => Err(templates::note_outside_template_body(
             string_table.intern("note"),
-            template.comment_directive_span.or(template_span),
+            template.body_only_directive_span.or(template_span),
+        )
+        .into()),
+
+        // A `$supplied` guard is a body child, never a value: its presence belongs to the
+        // receiving application, which an expression position never provides.
+        TemplateType::Supplied(_) => Err(templates::supplied_outside_template_body(
+            string_table.intern(SUPPLIED_DIRECTIVE_NAME),
+            template.body_only_directive_span.or(template_span),
         )
         .into()),
 

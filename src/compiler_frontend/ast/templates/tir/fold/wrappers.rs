@@ -16,6 +16,8 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -79,6 +81,16 @@ pub(super) fn apply_wrapper_context_overlay_to_child_emission(
         )
     })?;
 
+    // An occurrence overlay is not part of any public template shape, so its skipped wrappers
+    // cannot be rebuilt. Refuse before the projection promotes a guard out of them.
+    reject_guard_across_skipped_child_wrappers(
+        &emission,
+        context.application_mode,
+        &wrapper_set.wrappers,
+        projection_pieces.as_deref(),
+        false,
+    )?;
+
     fold_conditional_child_wrappers_around_emission(
         &wrapper_set.wrappers,
         emission,
@@ -88,6 +100,61 @@ pub(super) fn apply_wrapper_context_overlay_to_child_emission(
         fold_context,
         fold_input,
     )
+}
+
+/// Rejects a projection that would carry an unresolved guard across a skipped wrapper.
+///
+/// WHAT: finds the first unresolved `$supplied` guard piece and returns the template-structure
+///       diagnostic at that guard's authored span.
+/// WHY: a skipped wrapper is one that applies only when the folded content emits output. An
+///      unresolved guard emits nothing at compile time but can emit after the rebuilt template
+///      is applied, so promoting it would rebuild content without the wrapper that the original
+///      template would have applied. The public piece vocabulary cannot express that condition,
+///      so refusing the projection keeps the compiled interface truthful.
+pub(super) fn reject_guard_across_skipped_wrapper(
+    pieces: &[FoldedConstTemplatePiece],
+) -> Result<(), TemplateError> {
+    let guard_span = pieces.iter().find_map(|piece| match piece {
+        FoldedConstTemplatePiece::SuppliedGuard { span, .. } => Some(*span),
+        _ => None,
+    });
+    let Some(span) = guard_span else {
+        return Ok(());
+    };
+    Err(templates::invalid_template_structure(
+        InvalidTemplateStructureReason::SuppliedGuardAcrossSkippedWrapper,
+        span,
+    )
+    .into())
+}
+
+/// Rejects a child occurrence whose wrappers are skipped for no output while its projection
+/// still carries an unresolved guard.
+///
+/// WHAT: applies [`reject_guard_across_skipped_wrapper`] only when structural no-output skips a
+///       non-empty `IfChildEmits` wrapper set that this fold cannot publish.
+/// WHY: a template's own conditional wrapper set is republished as its public
+///      `conditional_child_wrappers`, so those wrappers keep applying after rebuild. Inherited
+///      occurrence overlays and nested child wrapper sets exist only inside this fold, so a
+///      guard they would have wrapped cannot be projected truthfully.
+pub(super) fn reject_guard_across_skipped_child_wrappers(
+    emission: &TemplateEmission,
+    application_mode: TirWrapperApplicationMode,
+    wrapper_references: &[TemplateWrapperReference],
+    projection_pieces: Option<&[FoldedConstTemplatePiece]>,
+    wrappers_are_projected: bool,
+) -> Result<(), TemplateError> {
+    if wrappers_are_projected
+        || !matches!(application_mode, TirWrapperApplicationMode::IfChildEmits)
+        || wrapper_references.is_empty()
+        || !matches!(emission, TemplateEmission::NoOutput)
+    {
+        return Ok(());
+    }
+    let Some(pieces) = projection_pieces else {
+        return Ok(());
+    };
+    reject_guard_across_skipped_wrapper(pieces)
 }
 
 /// Appends a child-template result to the caller's output buffer.
@@ -108,7 +175,18 @@ pub(super) fn append_template_result_to_buffer(
     }
 
     match emission {
-        TemplateEmission::NoOutput => Ok(()),
+        TemplateEmission::NoOutput => {
+            // A child can render nothing while still owning composition structure: an
+            // unresolved `$supplied` guard contributes no output but must stay in a public
+            // projection, or a rebuilt/imported wrapper would lose the guard and the slot
+            // declaration it carries. Slots mark emitted output, so this arm preserves the
+            // structural pieces that deliberately do not. The producing fold level already
+            // charged them, so appending does not charge again.
+            if output_state.projection_pieces.is_some() {
+                output_state.append_pieces(projection_pieces.as_deref())?;
+            }
+            Ok(())
+        }
         TemplateEmission::Output(output) => {
             if output_state.projection_pieces.is_some() {
                 output_state.append_pieces(projection_pieces.as_deref())?;

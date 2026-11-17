@@ -29,8 +29,6 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Sequenced work
 
-- [Template `$supplied` presence guard](./plans/template-supplied-directive-plan.md) - Queued after Constraints and fast arithmetic: Add a structural, slot-declaring presence guard that conditionally renders once using existing TIR routing. Preserve lazy runtime semantics without extending slot-value inspection or backend lowering.
-
 - [Numeric optimisation](./plans/numeric-optimisation-plan.md) - Remove redundant numeric result carriers, error branches and runtime checks through existing proof and backend-lowering systems. Preserve source semantics and measure performance improvements before extending the optimiser.
 
 - [Core Math fast counterparts](./plans/core-math-fast-counterparts-plan.md) - Queued after numeric optimisation: Evaluate and implement a small, benchmark-justified set of explicit `fast_*` Core Math helpers, including the distinct `fast_hypot` algorithm. Reuse trusted package contracts and existing lowering machinery without changing ordinary Math.

@@ -14,6 +14,9 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     UnexpectedTokenShape, UnexpectedTokenView,
 };
@@ -24,7 +27,9 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use std::sync::Arc;
 
-fn parse_template_diagnostic(source: &str) -> CompactDiagnosticBagForTest {
+/// Parses one template source that must fail and keeps the span builder that owns its
+/// authored spans.
+fn parse_template_diagnostic(source: &str) -> (CompactDiagnosticBagForTest, ExtendedSpanBuilder) {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
@@ -44,7 +49,7 @@ fn parse_template_diagnostic(source: &str) -> CompactDiagnosticBagForTest {
         .expect("template opener position must remain in the canonical range");
     let context = new_constant_context(source_path, &path_fork);
 
-    expect_template_diagnostic(
+    let diagnostic = expect_template_diagnostic(
         Template::new(
             &mut token_stream,
             source_path,
@@ -56,7 +61,8 @@ fn parse_template_diagnostic(source: &str) -> CompactDiagnosticBagForTest {
             &mut path_fork,
         )
         .expect_err("template source should fail to parse"),
-    )
+    );
+    (diagnostic, span_builder)
 }
 
 fn parse_template_diagnostic_with_replaced_body_token(
@@ -151,8 +157,139 @@ fn unexpected_template_body_token_retains_exact_primary_span() {
 
 #[test]
 fn slot_definition_with_body_is_rejected() {
-    let diagnostic = parse_template_diagnostic("[$slot: body]");
+    let (diagnostic, _) = parse_template_diagnostic("[$slot: body]");
 
     assert_invalid_template_structure(&diagnostic, InvalidTemplateStructureReason::SlotInHead);
     assert_span_is_meaningful(&diagnostic);
+}
+
+/// Asserts the compact directive diagnostic, its stable code, and the exact
+/// authored byte range its primary span covers.
+fn assert_supplied_directive_diagnostic(
+    source: &str,
+    expected_reason: InvalidTemplateDirectiveCode,
+    expected_span_text: &str,
+) -> (u32, u32) {
+    let (diagnostic, span_builder) = parse_template_diagnostic(source);
+    let view = diagnostic
+        .first()
+        .expect("supplied directive diagnostic should compact to one record");
+    assert_eq!(view.descriptor().code, "MOTH-SYNTAX-0021");
+    let facts = view
+        .family_view::<InvalidTemplateDirectiveView>()
+        .expect("supplied directive diagnostic should retain typed directive facts");
+    assert_eq!(
+        facts.reason, expected_reason,
+        "unexpected supplied directive reason for {source}"
+    );
+    let SiteRef::Local(primary_span) = view.primary_site() else {
+        panic!("supplied directive diagnostic should retain a local source span");
+    };
+    assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    let expected_start = source
+        .find(expected_span_text)
+        .expect("expected diagnostic text should occur in the source");
+    assert_eq!(
+        range.start(),
+        expected_start as u32,
+        "supplied directive diagnostic should start at the offending source"
+    );
+    assert_eq!(
+        range.end(),
+        (expected_start + expected_span_text.len()) as u32,
+        "supplied directive diagnostic should end after the offending source"
+    );
+    (range.start(), range.end())
+}
+
+#[test]
+fn supplied_directive_rejects_a_quoted_key() {
+    assert_supplied_directive_diagnostic(
+        "[:[$supplied \"title\": body]]",
+        InvalidTemplateDirectiveCode::InvalidSuppliedTarget,
+        "\"title\"",
+    );
+}
+
+#[test]
+fn supplied_directive_rejects_a_zero_position() {
+    assert_supplied_directive_diagnostic(
+        "[:[$supplied 0: body]]",
+        InvalidTemplateDirectiveCode::InvalidSuppliedTarget,
+        "0",
+    );
+}
+
+#[test]
+fn supplied_directive_rejects_a_fractional_position() {
+    assert_supplied_directive_diagnostic(
+        "[:[$supplied 1.5: body]]",
+        InvalidTemplateDirectiveCode::InvalidSuppliedTarget,
+        "1.5",
+    );
+}
+
+#[test]
+fn supplied_directive_rejects_a_slot_default_assignment() {
+    assert_supplied_directive_diagnostic(
+        "[:[$supplied title = \"x\": body]]",
+        InvalidTemplateDirectiveCode::InvalidSuppliedDefault,
+        "=",
+    );
+}
+
+#[test]
+fn supplied_directive_rejects_a_missing_body() {
+    assert_supplied_directive_diagnostic(
+        "[:[$supplied title]]",
+        InvalidTemplateDirectiveCode::MissingSuppliedBody,
+        "$supplied",
+    );
+}
+
+#[test]
+fn supplied_directive_rejects_the_parenthesised_form() {
+    assert_supplied_directive_diagnostic(
+        "[:[$supplied(title): body]]",
+        InvalidTemplateDirectiveCode::UnexpectedArguments,
+        "(",
+    );
+}
+
+#[test]
+fn supplied_directive_rejects_an_extra_operand() {
+    assert_supplied_directive_diagnostic(
+        "[:[$supplied title \"x\": body]]",
+        InvalidTemplateDirectiveCode::UnexpectedArguments,
+        "\"x\"",
+    );
+}
+
+#[test]
+fn supplied_directive_is_rejected_in_a_slot_default_expression() {
+    let (start, end) = assert_supplied_directive_diagnostic(
+        "[:[$slot x = [$supplied title: hi]]]",
+        InvalidTemplateDirectiveCode::WrongContext,
+        "$supplied",
+    );
+    assert_eq!(
+        (start, end),
+        (14, 23),
+        "slot-default placement should point at the $supplied directive"
+    );
+}
+
+#[test]
+fn supplied_directive_is_rejected_in_a_child_decorator_value() {
+    let (start, end) = assert_supplied_directive_diagnostic(
+        "[:[$before [$supplied title: hi]: body]]",
+        InvalidTemplateDirectiveCode::WrongContext,
+        "$supplied",
+    );
+    assert_eq!(
+        (start, end),
+        (12, 21),
+        "child-decorator placement should point at the $supplied directive"
+    );
 }

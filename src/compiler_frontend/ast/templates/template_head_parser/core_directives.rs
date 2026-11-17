@@ -35,7 +35,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::style_directives::{
     AFTER_DIRECTIVE_NAME, BEFORE_DIRECTIVE_NAME, CoreStyleDirectiveKind, INSERT_DIRECTIVE_NAME,
-    SLOT_DIRECTIVE_NAME, StyleDirectiveKind,
+    SLOT_DIRECTIVE_NAME, SUPPLIED_DIRECTIVE_NAME, StyleDirectiveKind,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -97,6 +97,18 @@ pub(super) fn maybe_parse_structural_helper_directive(
         return Ok(true);
     }
 
+    if matches!(
+        directive_kind,
+        StyleDirectiveKind::Core(CoreStyleDirectiveKind::Supplied)
+    ) {
+        let directive_span = token_stream.current_span();
+        let supplied_name = string_table.intern(SUPPLIED_DIRECTIVE_NAME);
+        let key = parse_supplied_declaration(supplied_name, token_stream, string_table)?;
+        build_state.kind = TemplateType::Supplied(key);
+        build_state.body_only_directive_span = Some(directive_span);
+        return Ok(true);
+    }
+
     let decorator_edge = match directive_kind {
         StyleDirectiveKind::Core(CoreStyleDirectiveKind::Before) => ChildDecoratorEdge::Before,
         StyleDirectiveKind::Core(CoreStyleDirectiveKind::After) => ChildDecoratorEdge::After,
@@ -142,41 +154,12 @@ pub(crate) fn parse_slot_declaration(
 ) -> CoreDirectiveResult<SlotDeclaration> {
     reject_parenthesized_slot_syntax(directive_name, token_stream)?;
 
-    let key = match token_stream.current_tag() {
-        TokenTag::SYMBOL => {
-            let name = token_stream
-                .current_string_id_in(string_table)?
-                .ok_or_else(|| {
-                    InfrastructureFailure::internal(
-                        CompilerStage::AstConstruction,
-                        "slot name token had no string payload",
-                    )
-                })?;
-            token_stream.advance();
-            SlotKey::Named(name)
-        }
-
-        TokenTag::NUMERIC_LITERAL => {
-            let position = positive_slot_position(directive_name, token_stream, string_table)?;
-            token_stream.advance();
-            SlotKey::Positional(position)
-        }
-
-        TokenTag::ASSIGN
-        | TokenTag::TEMPLATE_CLOSE
-        | TokenTag::START_TEMPLATE_BODY
-        | TokenTag::COMMA
-        | TokenTag::EOF => SlotKey::Default,
-
-        _ => {
-            return Err(templates::invalid_template_directive(
-                Some(directive_name),
-                InvalidTemplateDirectiveReason::InvalidSlotTarget,
-                Some(token_stream.current_span()),
-            )
-            .into());
-        }
-    };
+    let key = parse_slot_target_key(
+        directive_name,
+        token_stream,
+        string_table,
+        InvalidTemplateDirectiveReason::InvalidSlotTarget,
+    )?;
 
     token_stream.skip_newlines();
     let default = if token_stream.current_tag() == TokenTag::ASSIGN {
@@ -214,6 +197,108 @@ pub(crate) fn parse_slot_declaration(
     reject_slot_body(token_stream)?;
 
     Ok(SlotDeclaration::new(key, default))
+}
+
+/// Parses `$supplied`'s optional slot target.
+///
+/// The caller leaves the cursor on the directive token. A successful return
+/// leaves it on a head boundary the head parser owns: the `:` body marker, a
+/// comma before another head item, the closing `]`, end of file, or a control-flow
+/// suffix. `$supplied` never opens a body here, and it accepts no default.
+///
+/// WHAT: reuses `$slot`'s target grammar through [`parse_slot_target_key`].
+/// WHY: both directives target one receiving slot key, so a second key parser
+/// would let their accepted forms drift apart.
+fn parse_supplied_declaration(
+    directive_name: StringId,
+    token_stream: &mut AstCursor<'_>,
+    string_table: &mut StringTable,
+) -> CoreDirectiveResult<SlotKey> {
+    reject_parenthesized_slot_syntax(directive_name, token_stream)?;
+
+    let key = parse_slot_target_key(
+        directive_name,
+        token_stream,
+        string_table,
+        InvalidTemplateDirectiveReason::InvalidSuppliedTarget,
+    )?;
+
+    token_stream.skip_newlines();
+    match token_stream.current_tag() {
+        // The head parser owns these boundaries. A missing body is reported when the
+        // head closes without reaching `:`, so a following formatter can still share
+        // the head, and a control-flow suffix keeps its own head-conflict diagnostic.
+        TokenTag::START_TEMPLATE_BODY
+        | TokenTag::COMMA
+        | TokenTag::TEMPLATE_CLOSE
+        | TokenTag::IF
+        | TokenTag::LOOP
+        | TokenTag::EOF => Ok(key),
+
+        TokenTag::ASSIGN => Err(templates::invalid_template_directive(
+            Some(directive_name),
+            InvalidTemplateDirectiveReason::InvalidSuppliedDefault,
+            Some(token_stream.current_span()),
+        )
+        .into()),
+
+        _ => Err(templates::invalid_template_directive(
+            Some(directive_name),
+            InvalidTemplateDirectiveReason::UnexpectedArguments,
+            Some(token_stream.current_span()),
+        )
+        .into()),
+    }
+}
+
+/// Parses one slot target key shared by `$slot` and `$supplied`.
+///
+/// The caller has advanced past the directive token and rejected the removed
+/// parenthesized forms. A successful return leaves the cursor after the key.
+fn parse_slot_target_key(
+    directive_name: StringId,
+    token_stream: &mut AstCursor<'_>,
+    string_table: &mut StringTable,
+    invalid_target_reason: InvalidTemplateDirectiveReason,
+) -> CoreDirectiveResult<SlotKey> {
+    match token_stream.current_tag() {
+        TokenTag::SYMBOL => {
+            let name = token_stream
+                .current_string_id_in(string_table)?
+                .ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "slot name token had no string payload",
+                    )
+                })?;
+            token_stream.advance();
+            Ok(SlotKey::Named(name))
+        }
+
+        TokenTag::NUMERIC_LITERAL => {
+            let position = positive_slot_position(
+                directive_name,
+                token_stream,
+                string_table,
+                invalid_target_reason,
+            )?;
+            token_stream.advance();
+            Ok(SlotKey::Positional(position))
+        }
+
+        TokenTag::ASSIGN
+        | TokenTag::TEMPLATE_CLOSE
+        | TokenTag::START_TEMPLATE_BODY
+        | TokenTag::COMMA
+        | TokenTag::EOF => Ok(SlotKey::Default),
+
+        _ => Err(templates::invalid_template_directive(
+            Some(directive_name),
+            invalid_target_reason,
+            Some(token_stream.current_span()),
+        )
+        .into()),
+    }
 }
 
 /// Parses the required symbol target of `$in name`.
@@ -388,6 +473,7 @@ fn positive_slot_position(
     directive_name: StringId,
     token_stream: &AstCursor<'_>,
     string_table: &mut StringTable,
+    invalid_target_reason: InvalidTemplateDirectiveReason,
 ) -> CoreDirectiveResult<usize> {
     let literal = token_stream
         .current_numeric_literal_in(string_table)?
@@ -415,7 +501,7 @@ fn positive_slot_position(
         Some(position) => Ok(position),
         None => Err(templates::invalid_template_directive(
             Some(directive_name),
-            InvalidTemplateDirectiveReason::InvalidSlotTarget,
+            invalid_target_reason,
             Some(token_stream.current_span()),
         )
         .into()),
@@ -475,10 +561,11 @@ pub(super) fn parse_core_style_directive(
             reject_directive_operand(directive_name_id, token_stream)?;
             build_state.kind = TemplateType::Comment;
             build_state.style = Style::default();
-            build_state.comment_directive_span = Some(directive_span);
+            build_state.body_only_directive_span = Some(directive_span);
         }
 
         CoreStyleDirectiveKind::Slot
+        | CoreStyleDirectiveKind::Supplied
         | CoreStyleDirectiveKind::In
         | CoreStyleDirectiveKind::Before
         | CoreStyleDirectiveKind::After => {

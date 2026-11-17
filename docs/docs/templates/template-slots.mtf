@@ -118,6 +118,29 @@ filled by `$in`.
 - Formatting-only body whitespace around named inserts is not a loose contribution;
   an explicitly supplied empty or whitespace String remains a contribution.
 
+### Presence guards
+
+`$supplied` tests whether routing supplied a key. It never reads the stored or
+rendered value. The directive syntax and head restrictions live on the template
+directives page (see @../templates/#template-directives (Template directives)).
+Presence follows these rules:
+
+- a guard is true when at least one contribution routes to its key in the
+  receiving application, including an explicitly empty `$in`
+- occurrence defaults and fallback text never satisfy a guard
+- a guard alone declares its key, so the receiver accepts matching `$in`
+  contributions without a `$slot` occurrence
+- a head-only application with no fill emits nothing for its guards
+- a routed contribution whose runtime `if` branch emits nothing still counts
+- one true guard emits one body, however many contributions arrived
+- a guard inside an `$in` body or loose contribution tests the keys of the
+  application that authors that content, like a `$slot` in the same position
+
+When every consumer of a key is a `$supplied` guard, the compiler validates the
+routed payload and skips its evaluation. It still reports a type error,
+const-required violation or missing resource path. A key that also has a `$slot`
+occurrence keeps ordinary evaluation and output.
+
 ### Builder root slots
 
 A builder can register named destinations for direct top-level const inserts.

@@ -166,7 +166,7 @@ pub(crate) use slot_composition::{
     compose_tir_head_chain_from_root, compose_tir_head_chain_from_template,
     fill_direct_child_wrapper_names_into, fill_named_slots_in_wrapper_root,
     fill_named_slots_in_wrapper_template, fill_wrapper_tree_named_contexts,
-    stored_insert_contribution_templates,
+    resolve_supplied_guards_in_wrapper_tree, stored_insert_contribution_templates,
 };
 
 pub(crate) use construction_context::TemplateConstructionContext;

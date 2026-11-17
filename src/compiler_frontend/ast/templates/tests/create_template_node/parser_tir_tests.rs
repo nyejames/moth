@@ -12,14 +12,14 @@ use crate::compiler_frontend::ast::templates::template_head_parser::{
 };
 use crate::compiler_frontend::ast::templates::template_render_units::install_formatted_tir_reference_for_linear_template;
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIrBuilder, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrSummary, TemplateTirPhase,
-    TemplateTirReference, TemplateViewContext,
+    TemplateIrBuilder, TemplateIrId, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrSummary,
+    TemplateTirPhase, TemplateTirReference, TemplateViewContext,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::cell::RefCell;
@@ -332,6 +332,9 @@ fn tir_subtree_contains_aggregate_output(
         TemplateIrNodeKind::Sequence { children } => children
             .iter()
             .any(|child_id| tir_subtree_contains_aggregate_output(*child_id, store)),
+        TemplateIrNodeKind::SuppliedGuard { body, .. } => {
+            tir_subtree_contains_aggregate_output(*body, store)
+        }
         TemplateIrNodeKind::Text { .. } | TemplateIrNodeKind::DynamicExpression { .. } => false,
         other => panic!("unexpected node in aggregate wrapper subtree: {other:?}"),
     }
@@ -1050,7 +1053,7 @@ fn build_template_with_direct_tir_root(
             context,
         },
         span,
-        comment_directive_span: None,
+        body_only_directive_span: None,
     }
 }
 
@@ -2516,4 +2519,546 @@ fn linear_template_preserves_sequence_root_shape() {
         ),
         "linear template should finalize with a Sequence root"
     );
+}
+
+/// Reads the one parser-TIR `SuppliedGuard` child of a guard-only template body.
+fn parser_tir_supplied_guard(
+    template: &Template,
+    store: &TemplateIrStore,
+) -> (SlotKey, TemplateIrNodeId) {
+    let children = tir_root_child_ids(template, store);
+    assert_eq!(
+        children.len(),
+        1,
+        "a guard-only body should record exactly one child"
+    );
+    match &store
+        .get_node(children[0])
+        .expect("parser TIR guard node should exist")
+        .kind
+    {
+        TemplateIrNodeKind::SuppliedGuard { key, body } => (key.clone(), *body),
+        other => panic!("expected parser TIR SuppliedGuard node, found {other:?}"),
+    }
+}
+
+/// Reads the `ChildTemplate` edge a guard owns as its body.
+fn parser_tir_guard_body_reference(
+    body: TemplateIrNodeId,
+    store: &TemplateIrStore,
+) -> TemplateIrId {
+    match &store
+        .get_node(body)
+        .expect("guard body edge should exist")
+        .kind
+    {
+        TemplateIrNodeKind::ChildTemplate { reference, .. } => reference.root,
+        other => panic!("expected a ChildTemplate guard body edge, found {other:?}"),
+    }
+}
+
+/// Reads the text of a guard's own template root.
+fn parser_tir_guard_body_text(
+    guard_template_id: TemplateIrId,
+    store: &TemplateIrStore,
+    string_table: &StringTable,
+) -> String {
+    let guard_template = store
+        .get_template(guard_template_id)
+        .expect("guard template should exist");
+    assert!(
+        !matches!(guard_template.kind, TemplateType::Supplied(_)),
+        "a guard's own template must keep an ordinary kind past the parent body"
+    );
+    let children = match &store
+        .get_node(guard_template.root)
+        .expect("guard template root should exist")
+        .kind
+    {
+        TemplateIrNodeKind::Sequence { children } => children.to_owned(),
+        other => panic!("expected a guard template Sequence root, found {other:?}"),
+    };
+    assert_eq!(children.len(), 1, "guard body should hold one root child");
+    parser_tir_text(children[0], store, string_table)
+}
+
+#[test]
+fn parser_tir_records_named_supplied_guard() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let (template, store) = parse_template(
+        "[:[$supplied title: disabled]]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+        &mut expression_builder,
+        &mut const_values,
+    );
+    let store = store.borrow();
+
+    let (key, body) = parser_tir_supplied_guard(&template, &store);
+    let expected_name = string_table.intern("title");
+    assert_eq!(key, SlotKey::Named(expected_name));
+    let reference = parser_tir_guard_body_reference(body, &store);
+    assert_eq!(
+        parser_tir_guard_body_text(reference, &store, &string_table),
+        " disabled"
+    );
+}
+
+#[test]
+fn parser_tir_records_positional_supplied_guard() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let (template, store) = parse_template(
+        "[:[$supplied 1: one]]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+        &mut expression_builder,
+        &mut const_values,
+    );
+    let store = store.borrow();
+
+    let (key, body) = parser_tir_supplied_guard(&template, &store);
+    assert_eq!(key, SlotKey::Positional(1));
+    let reference = parser_tir_guard_body_reference(body, &store);
+    assert_eq!(
+        parser_tir_guard_body_text(reference, &store, &string_table),
+        " one"
+    );
+}
+
+#[test]
+fn parser_tir_records_default_supplied_guard() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let (template, store) = parse_template(
+        "[:[$supplied: any]]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+        &mut expression_builder,
+        &mut const_values,
+    );
+    let store = store.borrow();
+
+    let (key, body) = parser_tir_supplied_guard(&template, &store);
+    assert_eq!(key, SlotKey::Default);
+    let reference = parser_tir_guard_body_reference(body, &store);
+    assert_eq!(
+        parser_tir_guard_body_text(reference, &store, &string_table),
+        " any"
+    );
+}
+
+#[test]
+fn parser_tir_supplied_guard_keeps_authored_formatter() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let (template, store) = parse_template(
+        "[:[$html, $supplied title:[\"<i>x</i>\"]]]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+        &mut expression_builder,
+        &mut const_values,
+    );
+    let store = store.borrow();
+
+    let (key, body) = parser_tir_supplied_guard(&template, &store);
+    assert_eq!(key, SlotKey::Named(string_table.intern("title")));
+    let guard_template_id = parser_tir_guard_body_reference(body, &store);
+    let guard_template = store
+        .get_template(guard_template_id)
+        .expect("guard template should exist");
+    assert_eq!(
+        guard_template.style.id, "html",
+        "the formatter sharing a guard head must format the guard body"
+    );
+}
+
+#[test]
+fn unresolved_supplied_guard_folds_to_no_output() {
+    assert_eq!(
+        folded_template_output("[:<button[$supplied disabled:[\" disabled\"]]>[$slot]</button>]"),
+        "<button></button>",
+        "an unresolved guard must not emit its wrappers or content"
+    );
+}
+
+/// One composed source-level wrapper application plus the owners that inspect or fold it.
+///
+/// WHAT: pairs the parsed application template and its exact scope context with the string,
+///       expression and constant owners that produced it.
+/// WHY: folding only needs the text, but guard-placement tests must read the composed TIR that
+///      lives behind the same context, so one setup serves both without a second parser path.
+struct ComposedWrapperApplicationFixture {
+    template: Template,
+    context: ScopeContext,
+    string_table: StringTable,
+    expression_builder: AstExpressionBuilder,
+    const_values: ConstValueStore,
+}
+
+/// Declares `wrapper_source` as `wrapper` and parses `application_source` around it.
+///
+/// WHAT: mirrors an authored `wrapper #= [...]` declaration followed by an
+///       application `[wrapper: ...]` in one module.
+/// WHY: source-level guard resolution needs the real wrapper-composition path,
+///      not a hand-built TIR fixture.
+fn composed_wrapper_application_fixture(
+    wrapper_source: &str,
+    application_source: &str,
+) -> ComposedWrapperApplicationFixture {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
+
+    let scope = path_fork
+        .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
+        .expect("test path fits");
+    let wrapper_name = string_table.intern("wrapper");
+    let wrapper_path = path_fork
+        .try_intern_child(scope, wrapper_name)
+        .expect("test path fits");
+
+    let wrapper_file_tokens = template_tokens_from_source(
+        wrapper_source,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let wrapper_source_path = wrapper_file_tokens.source_path;
+    let wrapper_context = new_constant_context(wrapper_source_path, &path_fork)
+        .with_template_ir_store(Rc::clone(&shared_store));
+    let canonical_owner = wrapper_file_tokens.canonical_owner();
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut wrapper_tokens = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    wrapper_tokens
+        .set_position(wrapper_file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let wrapper = Template::new(
+        &mut wrapper_tokens,
+        wrapper_source_path,
+        &wrapper_context,
+        &mut expression_builder,
+        &mut const_values,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("supplied wrapper declaration should parse");
+    let wrapper_value = expression_builder
+        .template(wrapper, ValueMode::ImmutableOwned)
+        .expect("wrapper template should convert to an expression")
+        .id();
+    let declaration = make_test_variable(wrapper_path, wrapper_value, &expression_builder);
+
+    let application_file_tokens = template_tokens_from_source(
+        application_source,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let application_source_path = application_file_tokens.source_path;
+    let application_context =
+        constant_template_context(&application_source_path, &[declaration], &path_fork)
+            .with_template_ir_store(Rc::clone(&shared_store));
+    let canonical_owner = application_file_tokens.canonical_owner();
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut application_tokens = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    application_tokens
+        .set_position(application_file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let template = Template::new(
+        &mut application_tokens,
+        application_source_path,
+        &application_context,
+        &mut expression_builder,
+        &mut const_values,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("supplied wrapper application should parse");
+
+    ComposedWrapperApplicationFixture {
+        template,
+        context: application_context,
+        string_table,
+        expression_builder,
+        const_values,
+    }
+}
+
+/// Folds one composed wrapper application to its rendered text.
+fn folded_wrapper_application(wrapper_source: &str, application_source: &str) -> String {
+    let ComposedWrapperApplicationFixture {
+        template,
+        context,
+        mut string_table,
+        mut expression_builder,
+        mut const_values,
+    } = composed_wrapper_application_fixture(wrapper_source, application_source);
+
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
+    string_table.resolve(folded).to_owned()
+}
+
+#[test]
+fn supplied_guard_resolves_when_head_referenced_wrapper_is_applied() {
+    let rendered = folded_wrapper_application(
+        "[:<button[$supplied disabled:[\" disabled\"]]>[$slot]</button>]",
+        "[wrapper:[$in disabled:] Go]",
+    );
+
+    assert_eq!(
+        rendered, "<button disabled> Go</button>",
+        "a present guard must emit its body once before the slot content"
+    );
+    assert_eq!(
+        rendered.matches(" disabled").count(),
+        1,
+        "one guard occurrence emits its body once"
+    );
+}
+
+#[test]
+fn supplied_guard_stays_absent_without_contribution() {
+    let rendered = folded_wrapper_application(
+        "[:<button[$supplied disabled:[\" disabled\"]]>[$slot]</button>]",
+        "[wrapper:Go]",
+    );
+
+    assert_eq!(
+        rendered, "<button>Go</button>",
+        "an absent guard must emit nothing"
+    );
+}
+
+#[test]
+fn supplied_guard_emits_body_once_for_repeated_contributions() {
+    let rendered = folded_wrapper_application(
+        "[:<button[$supplied disabled:[\" disabled\"]]>[$slot]</button>]",
+        "[wrapper:[$in disabled:][$in disabled:] Go]",
+    );
+
+    assert_eq!(
+        rendered, "<button disabled> Go</button>",
+        "the body emits once regardless of contribution count"
+    );
+}
+
+#[test]
+fn supplied_guard_keeps_named_slot_concatenation() {
+    let rendered = folded_wrapper_application(
+        "[:<b[$supplied disabled:[\" disabled\"]]>[$slot disabled]</b>]",
+        "[wrapper:[$in disabled:X][$in disabled:Y]]",
+    );
+
+    assert_eq!(
+        rendered, "<b disabled>XY</b>",
+        "ordinary named-slot occurrences keep concatenating contributions"
+    );
+}
+
+#[test]
+fn supplied_guard_positional_key_tracks_loose_content() {
+    let rendered =
+        folded_wrapper_application("[:<p[$supplied 1:[\" one\"]]></p>]", "[wrapper: body]");
+
+    assert_eq!(
+        rendered, "<p one></p>",
+        "loose content routes presence to a positional guard key"
+    );
+}
+
+#[test]
+fn supplied_guard_default_key_tracks_loose_content() {
+    let rendered =
+        folded_wrapper_application("[:<p[$supplied:[\" any\"]]></p>]", "[wrapper: body]");
+
+    assert_eq!(
+        rendered, "<p any></p>",
+        "loose content routes presence to a default guard key"
+    );
+}
+
+/// Counts unresolved guard nodes and open slot occurrences for one key in a composed tree.
+///
+/// WHAT: walks the composed TIR through sequences, child templates, insert contributions,
+///       conditional and loop bodies and guard bodies.
+/// WHY: a guard authored in contribution content must not be resolved by the receiver it fills,
+///      and rendered output cannot show that difference because both an unresolved guard and an
+///      unfilled slot emit nothing.
+fn unresolved_composition_counts(
+    template: &Template,
+    context: &ScopeContext,
+    key: StringId,
+) -> (usize, usize) {
+    fn walk(
+        store: &TemplateIrStore,
+        node_id: TemplateIrNodeId,
+        key: StringId,
+        guards: &mut usize,
+        slots: &mut usize,
+        visited_templates: &mut Vec<TemplateIrId>,
+    ) {
+        let Some(node) = store.get_node(node_id) else {
+            return;
+        };
+        match &node.kind {
+            TemplateIrNodeKind::SuppliedGuard {
+                key: guard_key,
+                body,
+            } => {
+                if *guard_key == SlotKey::Named(key) {
+                    *guards += 1;
+                }
+                walk(store, *body, key, guards, slots, visited_templates);
+            }
+            TemplateIrNodeKind::Slot { placeholder } => {
+                if !placeholder.closed && placeholder.key == SlotKey::Named(key) {
+                    *slots += 1;
+                }
+            }
+            TemplateIrNodeKind::Sequence { children } => {
+                for child_id in children {
+                    walk(store, *child_id, key, guards, slots, visited_templates);
+                }
+            }
+            TemplateIrNodeKind::ChildTemplate { reference, .. } => {
+                if visited_templates.contains(&reference.root) {
+                    return;
+                }
+                visited_templates.push(reference.root);
+                if let Some(child) = store.get_template(reference.root) {
+                    walk(store, child.root, key, guards, slots, visited_templates);
+                }
+            }
+            TemplateIrNodeKind::InsertContribution { template } => {
+                if let Some(contribution) = store.get_template(*template) {
+                    walk(
+                        store,
+                        contribution.root,
+                        key,
+                        guards,
+                        slots,
+                        visited_templates,
+                    );
+                }
+            }
+            TemplateIrNodeKind::Conditional { body, .. } => {
+                walk(store, *body, key, guards, slots, visited_templates);
+            }
+            TemplateIrNodeKind::Loop {
+                body,
+                aggregate_wrapper,
+                ..
+            } => {
+                walk(store, *body, key, guards, slots, visited_templates);
+                if let Some(wrapper_id) = aggregate_wrapper {
+                    walk(store, *wrapper_id, key, guards, slots, visited_templates);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let store = context.template_ir_store.borrow();
+    let mut guards = 0;
+    let mut slots = 0;
+    let mut visited_templates = Vec::new();
+    if let Some(template_ir) = store.get_template(template.tir_reference.root) {
+        walk(
+            &store,
+            template_ir.root,
+            key,
+            &mut guards,
+            &mut slots,
+            &mut visited_templates,
+        );
+    }
+    (guards, slots)
+}
+
+#[test]
+fn supplied_guard_in_contribution_body_mirrors_slot_reachability() {
+    // The receiver declares `disabled` and the application routes it, but the guard and the
+    // slot are authored inside the contribution body. Contribution content belongs to the
+    // enclosing composition, so neither may be resolved by the receiver that it fills.
+    let wrapper = "[:<div data-x=\"[$slot disabled]\">[$slot]</div>]";
+    let guard_insert = "[wrapper:[$in disabled: [$supplied disabled:GUARD]]]";
+    let slot_insert = "[wrapper:[$in disabled: [$slot disabled]]]";
+    let guard_loose = "[wrapper:[$in disabled:][$supplied disabled:GUARD]]";
+    let slot_loose = "[wrapper:[$in disabled:][$slot disabled]]";
+
+    for (guard_source, slot_source, placement) in [
+        (guard_insert, slot_insert, "insert body"),
+        (guard_loose, slot_loose, "loose contribution"),
+    ] {
+        let mut guard_fixture = composed_wrapper_application_fixture(wrapper, guard_source);
+        let guard_key = guard_fixture.string_table.intern("disabled");
+        let (guard_count, guard_slots) = unresolved_composition_counts(
+            &guard_fixture.template,
+            &guard_fixture.context,
+            guard_key,
+        );
+        assert_eq!(
+            (guard_count, guard_slots),
+            (1, 0),
+            "a guard in a {placement} must stay unresolved for the enclosing composition even \
+             when the receiver routed its key"
+        );
+
+        let mut slot_fixture = composed_wrapper_application_fixture(wrapper, slot_source);
+        let slot_key = slot_fixture.string_table.intern("disabled");
+        let (slot_guards, slot_count) =
+            unresolved_composition_counts(&slot_fixture.template, &slot_fixture.context, slot_key);
+        assert_eq!(
+            (slot_guards, slot_count),
+            (0, 0),
+            "a slot authored in a {placement} is a declaration, not receiver content, so the \
+             receiver must not splice or fill it"
+        );
+
+        let guard_rendered = folded_wrapper_application(wrapper, guard_source);
+        let slot_rendered = folded_wrapper_application(wrapper, slot_source);
+        assert_eq!(
+            guard_rendered, slot_rendered,
+            "a guard in a {placement} must render exactly like a slot in the same position"
+        );
+        assert!(
+            !guard_rendered.contains("GUARD"),
+            "the receiver's routed presence must not select a contribution-authored guard body"
+        );
+    }
 }

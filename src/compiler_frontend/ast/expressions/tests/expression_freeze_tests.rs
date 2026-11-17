@@ -79,7 +79,7 @@ fn template(builder: &mut AstExpressionBuilder) -> OwnedExpr {
                     context: TemplateViewContext::default(),
                 },
                 span: None,
-                comment_directive_span: None,
+                body_only_directive_span: None,
             },
             None,
         )

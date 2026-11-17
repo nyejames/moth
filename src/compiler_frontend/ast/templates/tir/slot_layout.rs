@@ -62,6 +62,28 @@ pub(crate) struct TirSlotSchema {
     ///      planning, so planners use this fact to keep applications without
     ///      inherited wrapper contexts free of named-marker nodes and context fills.
     pub(crate) has_inherited_wrapper_contexts: bool,
+    /// Whether the layout saw an unresolved `$supplied` guard in this wrapper tree.
+    ///
+    /// WHAT: set by the same structural walk that records slot targets, including guards
+    ///       nested in child templates, conditionals, loops and other guard bodies.
+    /// WHY: runtime slot planning must fix guard presence before it copies the tree, but the
+    ///      common application declares no guard and should not pay for a whole-tree guard
+    ///      walk. The layout the planner already collected owns the fact, so deciding whether
+    ///      the walk has work never needs a second scan. Inherited child-edge decorator
+    ///      overlays are excluded here because their guards are resolved by named wrapper
+    ///      fill, not by the runtime guard pass.
+    pub(crate) has_supplied_guards: bool,
+    /// Slot keys that at least one non-guard occurrence consumes as a value.
+    ///
+    /// WHAT: records every key an open `$slot` occurrence renders as a value, including
+    ///       occurrences inside decorator wrappers and inherited child-edge overlays.
+    /// WHY: composition may discard the payload routed to a key whose only consumers are
+    ///      `$supplied` guards. Those guards still test routed presence, but no occurrence
+    ///      can render the payload, so it must not be spliced, copied into runtime sources
+    ///      or evaluated, and it must not by itself make the application runtime. Recording
+    ///      the fact in the layout walk reuses the one schema traversal instead of
+    ///      rescanning the tree at the composition boundary.
+    pub(crate) value_consumed_keys: FxHashSet<SlotKey>,
 }
 
 impl TirSlotSchema {
@@ -151,6 +173,19 @@ impl TirSlotSchema {
                 self.positional_slots.insert(*index);
             }
         }
+    }
+
+    /// Records that a non-guard occurrence consumes this key's contribution value.
+    pub(crate) fn record_value_consumer(&mut self, key: &SlotKey) {
+        self.value_consumed_keys.insert(key.clone());
+    }
+
+    /// Returns whether some non-guard occurrence consumes this key's value.
+    ///
+    /// A key declared only by `$supplied` guards has no value consumer: routing decides
+    /// its presence, but no occurrence renders its payload.
+    pub(crate) fn has_value_consumer(&self, key: &SlotKey) -> bool {
+        self.value_consumed_keys.contains(key)
     }
 }
 
@@ -357,9 +392,26 @@ fn collect_from_node(
             Ok(())
         }
 
+        TemplateIrNodeKind::SuppliedGuard { key, body } => {
+            schema.has_supplied_guards = true;
+            schema.record_key(key);
+            collect_from_node(
+                store,
+                *body,
+                schema,
+                placeholders,
+                visiting_nodes,
+                visiting_templates,
+                visited_wrappers,
+            )
+        }
+
         TemplateIrNodeKind::Slot { placeholder } => {
             if !placeholder.closed {
                 schema.record_key(&placeholder.key);
+                // A slot occurrence renders its routed content, so the key keeps its
+                // payload even when a guard tests the same key.
+                schema.record_value_consumer(&placeholder.key);
 
                 // A wrapper set applied at this placeholder is part of the slot's receiving
                 // interface. Its named slots are addressable by the enclosing application and
@@ -688,10 +740,20 @@ fn collect_named_slots_from_node(
             Ok(())
         }
 
+        TemplateIrNodeKind::SuppliedGuard { key, body } => {
+            if let SlotKey::Named(name) = key {
+                schema.named_slots.insert(*name);
+            }
+            collect_named_slots_from_node(store, *body, schema, visiting_nodes, visited_wrappers)
+        }
+
         TemplateIrNodeKind::Slot { placeholder } => {
             if !placeholder.closed {
                 if let SlotKey::Named(name) = &placeholder.key {
                     schema.named_slots.insert(*name);
+                    // A decorator occurrence replays the receiving application's named
+                    // content, so a named key addressed through it keeps its payload.
+                    schema.record_value_consumer(&SlotKey::Named(*name));
                 }
                 collect_wrapper_named_slots(
                     store,

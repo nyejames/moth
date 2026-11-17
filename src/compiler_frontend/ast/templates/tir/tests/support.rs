@@ -159,6 +159,8 @@ fn child_node_ids(kind: &TemplateIrNodeKind) -> Vec<TemplateIrNodeId> {
     match kind {
         TemplateIrNodeKind::Sequence { children } => children.clone(),
 
+        TemplateIrNodeKind::SuppliedGuard { body, .. } => vec![*body],
+
         TemplateIrNodeKind::Conditional { body, .. } => vec![*body],
 
         TemplateIrNodeKind::Loop {
@@ -548,6 +550,10 @@ where
                 self.mutator
                     .mutate_expression_payload(self.expressions, expression)?;
                 Ok(Vec::new())
+            }
+
+            TemplateIrNodeKind::SuppliedGuard { body, .. } => {
+                Ok(vec![TirExpressionWalkChild::Node(*body)])
             }
 
             TemplateIrNodeKind::Conditional { selector, body, .. } => {

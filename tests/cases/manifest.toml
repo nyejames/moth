@@ -7267,6 +7267,90 @@ contract = "language.templates.style_unknown_directive_rejected"
 role = "primary"
 
 [[case]]
+id = "template_supplied_attribute_composition"
+path = "template_supplied_attribute_composition"
+tags = ["integration", "templates", "slots", "supplied"]
+contract = "language.templates.supplied_attribute_composition"
+role = "primary"
+
+[[case]]
+id = "template_supplied_const_payload_rejected"
+path = "template_supplied_const_payload_rejected"
+tags = ["integration", "templates", "slots", "supplied", "diagnostics"]
+contract = "language.templates.supplied_const_payload_rejected"
+role = "primary"
+
+[[case]]
+id = "template_supplied_discarded_source_rejected"
+path = "template_supplied_discarded_source_rejected"
+tags = ["integration", "templates", "slots", "supplied", "diagnostics"]
+contract = "language.templates.supplied_discarded_source_rejected"
+role = "primary"
+
+[[case]]
+id = "template_supplied_imported_wrapper"
+path = "template_supplied_imported_wrapper"
+tags = ["integration", "templates", "slots", "supplied", "imports"]
+contract = "language.templates.supplied_imported_wrapper"
+role = "primary"
+
+[[case]]
+id = "template_supplied_invalid_resource_rejected"
+path = "template_supplied_invalid_resource_rejected"
+tags = ["integration", "templates", "slots", "supplied", "resources", "diagnostics"]
+contract = "language.templates.supplied_invalid_resource_rejected"
+role = "primary"
+
+[[case]]
+id = "template_supplied_presence_only_laziness"
+path = "template_supplied_presence_only_laziness"
+tags = ["integration", "templates", "slots", "supplied", "runtime"]
+contract = "language.templates.supplied_presence_only_laziness"
+role = "primary"
+
+[[case]]
+id = "template_supplied_resource_liveness"
+path = "template_supplied_resource_liveness"
+tags = ["integration", "templates", "slots", "supplied", "resources"]
+contract = "language.templates.supplied_resource_liveness"
+role = "primary"
+
+[[case]]
+id = "template_supplied_runtime_presence"
+path = "template_supplied_runtime_presence"
+tags = ["integration", "templates", "slots", "supplied", "runtime"]
+contract = "language.templates.supplied_runtime_presence"
+role = "primary"
+
+[[case]]
+id = "template_supplied_directive_rejected"
+path = "template_supplied_directive_rejected"
+tags = ["integration", "templates", "slots", "supplied", "diagnostics"]
+contract = "language.templates.supplied_directive_rejected"
+role = "primary"
+
+[[case]]
+id = "template_supplied_nested_composition"
+path = "template_supplied_nested_composition"
+tags = ["integration", "templates", "slots", "supplied"]
+contract = "language.templates.supplied_nested_composition"
+role = "primary"
+
+[[case]]
+id = "template_supplied_unknown_insert_rejected"
+path = "template_supplied_unknown_insert_rejected"
+tags = ["integration", "templates", "slots", "supplied", "diagnostics"]
+contract = "language.templates.supplied_unknown_insert_rejected"
+role = "primary"
+
+[[case]]
+id = "template_supplied_wrapper_selection"
+path = "template_supplied_wrapper_selection"
+tags = ["integration", "templates", "slots", "supplied"]
+contract = "language.templates.supplied_wrapper_selection"
+role = "primary"
+
+[[case]]
 id = "template_unclosed_head_rejected"
 path = "template_unclosed_head_rejected"
 tags = ["integration","templates","diagnostics"]

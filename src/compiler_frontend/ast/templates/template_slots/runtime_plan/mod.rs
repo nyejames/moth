@@ -22,6 +22,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     copy_tir_subtree_with_active_slot_plan_and_retained_wrapper_context,
     fill_direct_child_wrapper_names_into, fill_wrapper_tree_named_contexts,
     push_runtime_slot_contribution_source, record_tir_copy_counters,
+    resolve_supplied_guards_in_wrapper_tree,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -78,6 +79,26 @@ pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runti
 
     let templates_before = store.template_count();
     let nodes_before = store.node_count();
+
+    // Resolve `$supplied` guards against this application's routed presence before the
+    // wrapper tree is copied. The plan expresses contribution sources and sites, never a
+    // presence test, and the handoff store is read-only after publication, so the
+    // receiving application's routing fact must be applied here. A present guard keeps its
+    // authored body; an absent one contributes the established structural no-output. The
+    // layout that routed this application already proves whether any guard exists, so the
+    // common guard-free application pays no extra walk.
+    let wrapper_root = if schema.has_supplied_guards {
+        resolve_supplied_guards_in_wrapper_tree(
+            store,
+            expressions,
+            const_values,
+            wrapper_root,
+            routed,
+            services.string_table,
+        )?
+    } else {
+        wrapper_root
+    };
 
     let mut copy_state = TirCopyState::new();
     let mut scratch_copy_state = TirCopyState::new();

@@ -1219,6 +1219,24 @@ fn duplicate_insert_directives_are_rejected_in_one_head() {
 }
 
 #[test]
+fn supplied_directive_rejects_a_slot_default() {
+    let error = template_parse_error("[$supplied title = \"x\": body]");
+    assert!(
+        error.contains("`$supplied` does not accept a slot default."),
+        "unexpected supplied-default reason: {error}"
+    );
+}
+
+#[test]
+fn supplied_directive_requires_a_body() {
+    let error = template_parse_error("[$supplied title]");
+    assert!(
+        error.contains("`$supplied` requires a `:` body."),
+        "unexpected supplied-body reason: {error}"
+    );
+}
+
+#[test]
 fn frontend_formatter_directives_are_exclusive_per_template_head() {
     let style_directives = frontend_test_style_directives();
     let error =

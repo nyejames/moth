@@ -22,9 +22,14 @@ impl TemplateHeadTag {
     pub const RAW_DIRECTIVE: Self = Self(1 << 7);
     pub const CODE_DIRECTIVE: Self = Self(1 << 8);
     pub const AFTER_DIRECTIVE: Self = Self(1 << 9);
+    /// A non-directive meaningful item: a value, literal, path, `this` or inlined template.
+    pub const EXPRESSION: Self = Self(1 << 10);
+    pub const SUPPLIED_DIRECTIVE: Self = Self(1 << 11);
+    /// A trailing `if`/`loop` template control-flow suffix.
+    pub const CONTROL_FLOW: Self = Self(1 << 12);
 
     /// How many one-bit tag slots exist. Every declared tag constant uses one index below this.
-    pub const SLOT_COUNT: usize = 10;
+    pub const SLOT_COUNT: usize = 13;
 
     pub const fn empty() -> Self {
         Self(0)
@@ -53,7 +58,10 @@ const _: () = assert!(
             | TemplateHeadTag::AFTER_DIRECTIVE.0
             | TemplateHeadTag::FRESH_DIRECTIVE.0
             | TemplateHeadTag::RAW_DIRECTIVE.0
-            | TemplateHeadTag::CODE_DIRECTIVE.0)
+            | TemplateHeadTag::CODE_DIRECTIVE.0
+            | TemplateHeadTag::EXPRESSION.0
+            | TemplateHeadTag::SUPPLIED_DIRECTIVE.0
+            | TemplateHeadTag::CONTROL_FLOW.0)
             .checked_shr(TemplateHeadTag::SLOT_COUNT as u32),
         Some(0)
     ),
@@ -96,7 +104,21 @@ pub struct TemplateHeadCompatibility {
 impl TemplateHeadCompatibility {
     pub fn fully_compatible_meaningful() -> Self {
         Self {
-            presence_tags: TemplateHeadTag::MEANINGFUL_ITEM,
+            presence_tags: TemplateHeadTag::MEANINGFUL_ITEM | TemplateHeadTag::EXPRESSION,
+            required_absent_tags: TemplateHeadTag::empty(),
+            blocks_future_tags: TemplateHeadTag::empty(),
+            conflict_reason: None,
+        }
+    }
+
+    /// The trailing `if`/`loop` suffix as a head item for compatibility checks.
+    ///
+    /// WHAT: an item whose presence is only [`TemplateHeadTag::CONTROL_FLOW`].
+    /// WHY: a suffix is not a value or a directive, but an earlier directive may still forbid
+    ///      combining with it, and the conflict renderer must name what arrived.
+    pub fn control_flow_suffix() -> Self {
+        Self {
+            presence_tags: TemplateHeadTag::CONTROL_FLOW,
             required_absent_tags: TemplateHeadTag::empty(),
             blocks_future_tags: TemplateHeadTag::empty(),
             conflict_reason: None,

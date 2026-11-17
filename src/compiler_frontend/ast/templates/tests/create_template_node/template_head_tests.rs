@@ -244,7 +244,7 @@ fn template_head_expression_preserves_infrastructure_failure() {
             context: TemplateViewContext::default(),
         },
         span: None,
-        comment_directive_span: None,
+        body_only_directive_span: None,
     };
     let stale_value = expression_builder
         .template(stale_template, ValueMode::ImmutableOwned)
@@ -1196,4 +1196,219 @@ fn truncated_template_body_reports_missing_closing_bracket() {
 #[test]
 fn unclosed_nested_template_labels_its_own_opening() {
     assert_truncated_template("[: a [: b", (5, 6));
+}
+
+#[test]
+fn supplied_directive_shares_head_with_a_formatter() {
+    // The guards stay unresolved here, so each accepted head folds to no output; the
+    // assertion is that both head orders parse with a formatter directive present.
+    assert_eq!(
+        folded_template_output("[:[$html, $supplied title:[\" x\"]]]"),
+        ""
+    );
+    assert_eq!(
+        folded_template_output("[:[$supplied title, $html:[\" x\"]]]"),
+        ""
+    );
+}
+
+#[test]
+fn supplied_directive_rejects_a_preceding_head_expression() {
+    let style_directives = frontend_test_style_directives();
+    let (diagnostic, string_table, _) =
+        parse_template_failure("[\"x\", $supplied title: body]", &style_directives);
+    let view = diagnostic
+        .first()
+        .expect("supplied head conflict should compact to one record");
+    let facts = view
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("supplied head conflict should retain typed structure facts");
+    let conflict = facts
+        .head_conflict
+        .expect("supplied head conflict should retain its typed conflict");
+    assert_eq!(
+        conflict.reason,
+        TemplateHeadConflictReason::SuppliedDirectiveMustBeExclusive
+    );
+    assert_eq!(conflict.owner, TemplateHeadConflictOwner::IncomingItem);
+    assert_eq!(conflict.incoming_kind, TemplateHeadItemKind::Directive);
+    assert_eq!(conflict.earlier_kind, TemplateHeadItemKind::Expression);
+    assert_eq!(
+        rendered_diagnostic_message(&diagnostic, &string_table),
+        "`$supplied` cannot be combined with an expression. A `$supplied` directive may share a template head only with a formatter directive."
+    );
+}
+
+#[test]
+fn supplied_directive_rejects_an_earlier_slot_directive() {
+    let style_directives = frontend_test_style_directives();
+    let (diagnostic, _string_table, _) =
+        parse_template_failure("[$slot 1, $supplied title: body]", &style_directives);
+    let view = diagnostic
+        .first()
+        .expect("slot and supplied conflict should compact to one record");
+    let facts = view
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("slot and supplied conflict should retain typed structure facts");
+    let conflict = facts
+        .head_conflict
+        .expect("slot and supplied conflict should retain its typed conflict");
+    assert_eq!(
+        conflict.reason,
+        TemplateHeadConflictReason::SlotDirectiveMustBeExclusive,
+        "the slot directive owns its exclusivity rule"
+    );
+}
+
+#[test]
+fn supplied_directive_blocks_a_later_slot_directive() {
+    let style_directives = frontend_test_style_directives();
+    let (diagnostic, string_table, _) =
+        parse_template_failure("[$supplied title, $slot 1: body]", &style_directives);
+    let view = diagnostic
+        .first()
+        .expect("supplied and slot conflict should compact to one record");
+    let facts = view
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("supplied and slot conflict should retain typed structure facts");
+    let conflict = facts
+        .head_conflict
+        .expect("supplied and slot conflict should retain its typed conflict");
+    assert_eq!(
+        conflict.reason,
+        TemplateHeadConflictReason::SuppliedDirectiveMustBeExclusive
+    );
+    assert_eq!(conflict.owner, TemplateHeadConflictOwner::EarlierItem);
+    assert_eq!(conflict.incoming_kind, TemplateHeadItemKind::Directive);
+    assert_eq!(conflict.earlier_kind, TemplateHeadItemKind::Directive);
+    assert_eq!(
+        rendered_diagnostic_message(&diagnostic, &string_table),
+        "`$supplied` cannot be combined with `$slot`. A `$supplied` directive may share a template head only with a formatter directive."
+    );
+}
+
+#[test]
+fn supplied_directive_conflicts_with_insert_directives_in_both_orders() {
+    let style_directives = frontend_test_style_directives();
+    let (diagnostic, _, _) =
+        parse_template_failure("[$in x, $supplied title: body]", &style_directives);
+    let facts = diagnostic
+        .first()
+        .expect("insert before supplied should compact to one record")
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("insert before supplied should retain typed structure facts");
+    assert_eq!(
+        facts
+            .head_conflict
+            .expect("insert before supplied should retain its conflict")
+            .reason,
+        TemplateHeadConflictReason::SuppliedDirectiveMustBeExclusive
+    );
+
+    let (diagnostic, _, _) =
+        parse_template_failure("[$supplied title, $in x: body]", &style_directives);
+    let facts = diagnostic
+        .first()
+        .expect("supplied before insert should compact to one record")
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("supplied before insert should retain typed structure facts");
+    assert_eq!(
+        facts
+            .head_conflict
+            .expect("supplied before insert should retain its conflict")
+            .reason,
+        TemplateHeadConflictReason::SuppliedDirectiveMustBeExclusive
+    );
+}
+
+#[test]
+fn supplied_directive_conflicts_with_fresh_and_before_directives() {
+    let style_directives = frontend_test_style_directives();
+    for source in [
+        "[$fresh, $supplied title: body]",
+        "[$before [:<b>], $supplied title: body]",
+    ] {
+        let (diagnostic, _, _) = parse_template_failure(source, &style_directives);
+        let facts = diagnostic
+            .first()
+            .unwrap_or_else(|| panic!("{source} should compact to one record"))
+            .family_view::<InvalidTemplateStructureView>()
+            .unwrap_or_else(|| panic!("{source} should retain typed structure facts"));
+        assert_eq!(
+            facts
+                .head_conflict
+                .unwrap_or_else(|| panic!("{source} should retain its conflict"))
+                .reason,
+            TemplateHeadConflictReason::SuppliedDirectiveMustBeExclusive,
+            "unexpected conflict reason for {source}"
+        );
+    }
+}
+
+#[test]
+fn repeated_supplied_directive_uses_duplicate_wording() {
+    let style_directives = frontend_test_style_directives();
+    let (diagnostic, string_table, _) =
+        parse_template_failure("[$supplied title, $supplied 1: body]", &style_directives);
+    let view = diagnostic
+        .first()
+        .expect("duplicate supplied directive should compact to one record");
+    let facts = view
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("duplicate supplied directive should retain typed structure facts");
+    assert_eq!(
+        facts
+            .head_conflict
+            .expect("duplicate supplied should retain its typed conflict")
+            .reason,
+        TemplateHeadConflictReason::SuppliedDirectiveMustBeExclusive
+    );
+    assert_eq!(
+        rendered_diagnostic_message(&diagnostic, &string_table),
+        "`$supplied` cannot appear more than once in a template head."
+    );
+}
+
+#[test]
+fn supplied_directive_rejects_a_control_flow_suffix() {
+    let style_directives = frontend_test_style_directives();
+    let (diagnostic, string_table, _) =
+        parse_template_failure("[$supplied title, if true: body]", &style_directives);
+    let view = diagnostic
+        .first()
+        .expect("supplied if suffix should compact to one record");
+    let facts = view
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("supplied if suffix should retain typed structure facts");
+    let conflict = facts
+        .head_conflict
+        .expect("supplied if suffix should retain its typed conflict");
+    assert_eq!(
+        conflict.reason,
+        TemplateHeadConflictReason::SuppliedDirectiveMustBeExclusive
+    );
+    assert_eq!(conflict.owner, TemplateHeadConflictOwner::EarlierItem);
+    assert_eq!(conflict.incoming_kind, TemplateHeadItemKind::ControlFlow);
+    assert_eq!(conflict.earlier_kind, TemplateHeadItemKind::Directive);
+    assert_eq!(
+        rendered_diagnostic_message(&diagnostic, &string_table),
+        "`$supplied` cannot be combined with a template control-flow suffix. A `$supplied` directive may share a template head only with a formatter directive."
+    );
+
+    let (diagnostic, _, _) = parse_template_failure(
+        "[$supplied title, loop 0 to 3 |i|: body]",
+        &style_directives,
+    );
+    let facts = diagnostic
+        .first()
+        .expect("supplied loop suffix should compact to one record")
+        .family_view::<InvalidTemplateStructureView>()
+        .expect("supplied loop suffix should retain typed structure facts");
+    assert_eq!(
+        facts
+            .head_conflict
+            .expect("supplied loop suffix should retain its conflict")
+            .reason,
+        TemplateHeadConflictReason::SuppliedDirectiveMustBeExclusive
+    );
 }

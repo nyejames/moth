@@ -1,0 +1,23 @@
+-- Routing presence is structural: an insert whose runtime branch emits nothing
+-- still satisfies the guard. The attribute-fragment and loose-payload paths must
+-- agree on that fact.
+panel #= [$html:<div[$supplied style:[" style=\""][$slot style]["\""]]>[$slot]</div>]
+strip #= [$html:<p[$supplied:[" data-filled"]]></p>]
+
+identity |value String| -> String:
+    return value
+;
+
+probe |value Bool| -> Bool:
+    return value
+;
+
+absent_branch = probe(false)
+present_branch = probe(true)
+
+false_branch = [panel:[$in style:[if absent_branch:red]]body]
+true_branch = [panel:[$in style:[if present_branch:blue]]body]
+loose_runtime = [strip:[identity("x")]]
+loose_false_if = [strip:[if absent_branch:x]]
+
+~[:false=[false_branch]|true=[true_branch]|loose=[loose_runtime]|loose_if=[loose_false_if]]

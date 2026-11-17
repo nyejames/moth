@@ -1,0 +1,3 @@
+badge #= [$html:<span[$supplied label:[" title=\""][$slot label]["\""]]>[$slot]</span>]
+panel #= [:<section>[:<em[$supplied note:[" data-note"]]>[$slot note]</em>][if true:[$supplied shown:[" data-shown"]]]</section>]
+marks #= [:<div[$supplied seeded:[" data-marks=\""][loop 0 to 2 |i|:x]["\""]]></div>]

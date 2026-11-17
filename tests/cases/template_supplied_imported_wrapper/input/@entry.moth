@@ -1,0 +1,20 @@
+-- The imported wrapper guards and renders the same key. A payload passed as a
+-- stored `$in` template must still reach the slot, while the guard only tests
+-- that the imported wrapper's key was addressed. Guards in nested children and
+-- in const control flow, and guard bodies that use const control flow, all
+-- survive the public constant rebuild.
+@helpers badge
+@helpers panel
+@helpers marks
+
+stored_label #= [$in label:Stored label]
+
+plain = [badge:body]
+labelled = [badge:[stored_label]body]
+panel_plain = [panel]
+panel_note = [panel:[$in note:n]]
+panel_shown = [panel:[$in shown:]]
+panel_both = [panel:[$in note:n][$in shown:]]
+marks_plain = [marks]
+marks_present = [marks:[$in seeded:]]
+~[:plain=[plain]|labelled=[labelled]|pp=[panel_plain]|pn=[panel_note]|ps=[panel_shown]|pb=[panel_both]|mp=[marks_plain]|mm=[marks_present]]

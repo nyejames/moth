@@ -62,6 +62,9 @@ pub(crate) fn invalid_template_slot_message(
         InvalidTemplateSlotReason::PositionalSlotInChildDecorator => {
             "A `$before` or `$after` value may only contain named slots. A positional `[$slot n]` would add another child insertion point; use `[$slot name]` instead.".to_string()
         }
+        InvalidTemplateSlotReason::UnnamedSuppliedInChildDecorator => {
+            "A `$before` or `$after` value may only test a named slot key. An unnamed `[$supplied]` or positional `[$supplied n]` would test the decorator's own child insertion point instead of a key the enclosing application can address; use `[$supplied name: ...]` instead.".to_string()
+        }
     }
 }
 
@@ -440,7 +443,9 @@ fn unsupported_template_head_type_message(type_name: &str) -> String {
 }
 
 /// Names one side of a rejected head-item pair: a directive with its `$` marker, or `an
-/// expression` for a non-directive head item.
+/// expression` when the item stores no directive name.
+///
+/// Control-flow items never reach this helper: the caller names them by kind.
 fn template_head_item_display(
     name: Option<StringId>,
     string_table: &dyn StringTableResolver,
@@ -465,10 +470,16 @@ fn incompatible_template_head_item_message(
                 .next()
                 .expect("a directive conflict item stores its interned name"),
         ),
-        TemplateHeadItemKind::Expression => None,
+        TemplateHeadItemKind::Expression | TemplateHeadItemKind::ControlFlow => None,
     };
-    let incoming = template_head_item_display(next_name(conflict.incoming_kind), string_table);
-    let earlier = template_head_item_display(next_name(conflict.earlier_kind), string_table);
+    let mut display = |kind: TemplateHeadItemKind| {
+        if kind == TemplateHeadItemKind::ControlFlow {
+            return "a template control-flow suffix".to_owned();
+        }
+        template_head_item_display(next_name(kind), string_table)
+    };
+    let incoming = display(conflict.incoming_kind);
+    let earlier = display(conflict.earlier_kind);
 
     let (subject, other) = match conflict.owner {
         TemplateHeadConflictOwner::EarlierItem => (&earlier, &incoming),
@@ -502,6 +513,9 @@ fn incompatible_template_head_item_message(
         ),
         TemplateHeadConflictReason::SlotDirectiveMustBeExclusive => format!(
             "{subject} cannot be combined with {other} because a slot declaration must be the template head's only meaningful item."
+        ),
+        TemplateHeadConflictReason::SuppliedDirectiveMustBeExclusive => format!(
+            "{subject} cannot be combined with {other}. A `$supplied` directive may share a template head only with a formatter directive."
         ),
     }
 }
@@ -635,6 +649,9 @@ pub(crate) fn invalid_template_structure_message(reason: InvalidTemplateStructur
         }
         InvalidTemplateStructureReason::DuplicateMarkdownSectionMarker { .. } => {
             "This Markdown block already has a section marker.".to_string()
+        }
+        InvalidTemplateStructureReason::SuppliedGuardAcrossSkippedWrapper => {
+            "A compile-time template cannot export this unresolved `$supplied` guard: its guarded content produces no compile-time output, so the wrapper that applies only when that content emits output is dropped from the projection. Keep the guard outside output-conditioned wrappers.".to_string()
         }
     }
 }

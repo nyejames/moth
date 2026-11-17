@@ -76,6 +76,13 @@ pub(crate) struct TemplateWrapperSet {
     pub(crate) wrappers: Vec<TemplateWrapperReference>,
 }
 
+/// Half-open range of one template's entries in `presence_only_payload_nodes`.
+#[derive(Clone, Copy, Debug)]
+struct PresenceOnlyPayloadRange {
+    start: usize,
+    end: usize,
+}
+
 // -------------------------
 //  Template IR Store
 // -------------------------
@@ -133,6 +140,19 @@ pub(crate) struct TemplateIrStore {
     ///      name is not recoverable from the node or its helper. Diagnostics that reject an
     ///      escaped insert name the authored constant instead of the helper definition.
     insert_contribution_names: FxHashMap<TemplateIrNodeId, StringId>,
+    /// Routed payloads a composed wrapper application dropped because only `$supplied`
+    /// guards consume their keys.
+    ///
+    /// WHAT: maps one template to its range of discarded payload nodes in
+    ///       `presence_only_payload_nodes`. Every derived version of a template shares
+    ///       its source's range.
+    /// WHY: the payload never renders, so it stays out of the composed tree, yet a
+    ///      const-required template must still validate it. Const preparation reads the
+    ///      payload here with the walked template's view and loop bindings; nothing else
+    ///      consumes it, so it never reaches folding, runtime planning or HIR. A derived
+    ///      version replaces its source's reference, so it must keep the obligation.
+    presence_only_payloads: FxHashMap<TemplateIrId, PresenceOnlyPayloadRange>,
+    presence_only_payload_nodes: Vec<TemplateIrNodeId>,
 }
 
 impl TemplateIrStore {
@@ -156,6 +176,8 @@ impl TemplateIrStore {
             retained_collection_headers: Vec::new(),
             rebuilt_const_template_roots: FxHashMap::default(),
             insert_contribution_names: FxHashMap::default(),
+            presence_only_payloads: FxHashMap::default(),
+            presence_only_payload_nodes: Vec::new(),
         }
     }
 
@@ -186,6 +208,8 @@ impl TemplateIrStore {
             retained_collection_headers: Vec::new(),
             rebuilt_const_template_roots: FxHashMap::default(),
             insert_contribution_names: FxHashMap::default(),
+            presence_only_payloads: FxHashMap::default(),
+            presence_only_payload_nodes: Vec::new(),
         }
     }
 
@@ -309,7 +333,7 @@ impl TemplateIrStore {
         self.validate_derived_publication(source, new_root)?;
         let summary = summarize_existing_root(self, new_root)?;
         let derived = self.derived_template(source, new_root, summary, metadata)?;
-        Ok(self.push_template(derived))
+        Ok(self.publish_derived_template(source, derived))
     }
 
     /// Versions an existing store-owned template around a new structural root
@@ -332,7 +356,7 @@ impl TemplateIrStore {
     ) -> Result<TemplateIrId, InfrastructureFailure> {
         self.validate_derived_publication(source, new_root)?;
         let derived = self.derived_template(source, new_root, summary, metadata)?;
-        Ok(self.push_template(derived))
+        Ok(self.publish_derived_template(source, derived))
     }
 
     /// Versions an existing template as a runtime-slot application.
@@ -360,7 +384,7 @@ impl TemplateIrStore {
         let summary = summarize_runtime_slot_representation(self, new_root, plan)?;
         let mut derived = self.derived_template(source, new_root, summary, metadata)?;
         derived.runtime_slot_plan = None;
-        let template_id = self.push_template(derived);
+        let template_id = self.publish_derived_template(source, derived);
         self.attach_runtime_slot_plan(template_id, plan)?;
         Ok(template_id)
     }
@@ -424,6 +448,23 @@ impl TemplateIrStore {
             conditional_child_wrapper_set: source_template.conditional_child_wrapper_set,
             runtime_slot_plan: source_template.runtime_slot_plan,
         })
+    }
+
+    /// Publishes one derived version and carries its source's template-level side facts.
+    ///
+    /// WHAT: pushes the version, then gives it the source's presence-only payload range.
+    /// WHY: every derivation path publishes here, so a formatted, copied or composed
+    ///      version cannot silently drop a const-validation obligation its source owed.
+    fn publish_derived_template(
+        &mut self,
+        source: TemplateIrId,
+        derived: TemplateIr,
+    ) -> TemplateIrId {
+        let template_id = self.push_template(derived);
+        if let Some(range) = self.presence_only_payloads.get(&source).copied() {
+            self.presence_only_payloads.insert(template_id, range);
+        }
+        template_id
     }
 
     pub(crate) fn set_template_kind(
@@ -505,6 +546,37 @@ impl TemplateIrStore {
     /// Returns the authored name recorded for one insert contribution node.
     pub(crate) fn insert_contribution_name(&self, node_id: TemplateIrNodeId) -> Option<StringId> {
         self.insert_contribution_names.get(&node_id).copied()
+    }
+
+    /// Records the payload nodes one composed application discarded as presence-only.
+    ///
+    /// The application keeps any payloads its wrapper version already owed, followed by
+    /// the new ones, so one walk covers both in a deterministic order.
+    pub(crate) fn record_presence_only_payloads(
+        &mut self,
+        template: TemplateIrId,
+        payloads: &[TemplateIrNodeId],
+    ) {
+        let start = self.presence_only_payload_nodes.len();
+        if let Some(inherited) = self.presence_only_payloads.get(&template).copied() {
+            self.presence_only_payload_nodes
+                .extend_from_within(inherited.start..inherited.end);
+        }
+        self.presence_only_payload_nodes.extend_from_slice(payloads);
+        let range = PresenceOnlyPayloadRange {
+            start,
+            end: self.presence_only_payload_nodes.len(),
+        };
+        self.presence_only_payloads.insert(template, range);
+    }
+
+    /// Returns the presence-only payload nodes one template owes const validation for.
+    pub(crate) fn presence_only_payloads(&self, template: TemplateIrId) -> &[TemplateIrNodeId] {
+        self.presence_only_payloads
+            .get(&template)
+            .map_or(&[], |range| {
+                &self.presence_only_payload_nodes[range.start..range.end]
+            })
     }
 
     pub(crate) fn push_wrapper_set(

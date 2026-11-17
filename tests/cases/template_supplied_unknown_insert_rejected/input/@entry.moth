@@ -1,0 +1,6 @@
+-- The guard alone declares `title`, so this receiver accepts that insert target;
+-- a misspelt insert must still be diagnosed as an unknown target on it. The
+-- matching positive insert is owned by the attribute-composition case.
+guard_only #= [:<p[$supplied title:[" data-x"]]></p>]
+wrong = [guard_only:[$in typo:x]]
+~[:wrong=[wrong]]

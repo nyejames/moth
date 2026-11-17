@@ -1,0 +1,2 @@
+-- A runtime fragment root is not a template body child.
+~[$supplied title: hi]

@@ -42,8 +42,9 @@ pub struct AstConstTopLevelFragment {
 ///
 /// WHAT: carries the already-folded string value and its validated builder destination.
 /// WHY: fragment collection pairs these two facts with the header's authored span and runtime
-///      insertion index; folding produces nothing else a const fragment needs. A root `$note`
-///      never reaches this record because placement validation rejects it before folding.
+///      insertion index; folding produces nothing else a const fragment needs. Root `$note` and
+///      `$supplied` templates never reach this record because placement validation rejects them
+///      before folding.
 pub(crate) struct FoldedConstTemplateResult {
     pub(crate) value: ConstStringValue,
     pub(crate) destination: ConstFragmentDestination,

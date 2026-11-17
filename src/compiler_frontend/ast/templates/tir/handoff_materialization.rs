@@ -546,6 +546,14 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 })
             }
 
+            // An unresolved guard has no routed presence, so it never emits at runtime.
+            // Composition replaces a selected guard with its body before handoff, so a guard
+            // reaching this materializer can only mean the absent case.
+            TemplateIrNodeKind::SuppliedGuard { .. } => Ok(OwnedRuntimeTemplateNode::Sequence {
+                children: Vec::new(),
+                span: node.span,
+            }),
+
             TemplateIrNodeKind::Slot { placeholder } => {
                 let occurrence_closed = placeholder.closed;
 

@@ -134,6 +134,9 @@ fn walk_node<'expressions>(
             )?)?;
             walk_node(view, *body, expressions, visitor, visited)?;
         }
+        TemplateIrNodeKind::SuppliedGuard { body, .. } => {
+            walk_node(view, *body, expressions, visitor, visited)?;
+        }
         TemplateIrNodeKind::Loop {
             header,
             header_sites,

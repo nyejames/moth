@@ -7,7 +7,7 @@ use super::super::view::TemplateTirPhase;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::template::{
-    Style, TemplateSegmentOrigin, TemplateType,
+    SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotContributionSourceId;
 use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
@@ -120,6 +120,29 @@ fn control_flow_contribution_marker_recompute_records_control_flow() {
     assert!(
         recomputed.has_control_flow(),
         "a marker's summary must preserve the conditional emission class of its source"
+    );
+}
+
+#[test]
+fn supplied_guard_recompute_records_control_flow() {
+    let mut store = TemplateIrStore::new();
+    let body = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Sequence { children: vec![] },
+        None,
+    ));
+    let guard = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::SuppliedGuard {
+            key: SlotKey::Default,
+            body,
+        },
+        None,
+    ));
+
+    let recomputed = summarize_existing_root(&store, guard).expect("a guard root has no cycle");
+
+    assert!(
+        recomputed.has_control_flow(),
+        "a guard may emit nothing, so its summary must record control flow"
     );
 }
 

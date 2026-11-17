@@ -1,0 +1,19 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "shown=<div data-icon=\"./assets/shown.svg\"></div>|hidden=<div></div>|discarded=<p marked></p>"
+artifacts_must_not_exist = ["assets/hidden.svg", "assets/dropped.svg"]
+
+[[backends.html.artifact_assertions]]
+path = "assets/shown.svg"
+kind = "binary"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "shown=<div data-icon=\"./assets/shown.svg\"></div>|hidden=<div></div>|discarded=<p marked></p>"
+artifacts_must_not_exist = ["assets/hidden.svg", "assets/dropped.svg"]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "assets/shown.svg"
+kind = "binary"

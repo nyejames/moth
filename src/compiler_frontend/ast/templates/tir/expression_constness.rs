@@ -301,6 +301,9 @@ impl StructuralConstness<'_> {
                 }
                 Ok(true)
             }
+            TemplateIrNodeKind::SuppliedGuard { body, .. } => {
+                self.tree(*body, bindings, standalone)
+            }
             TemplateIrNodeKind::Text { .. }
             | TemplateIrNodeKind::Slot { .. }
             | TemplateIrNodeKind::AggregateOutput => Ok(true),

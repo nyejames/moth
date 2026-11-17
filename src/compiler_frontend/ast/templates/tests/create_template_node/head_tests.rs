@@ -86,7 +86,7 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
             context: TemplateViewContext::default(),
         },
         span: None,
-        comment_directive_span: None,
+        body_only_directive_span: None,
     };
     let declaration = {
         let value = expression_builder
@@ -253,7 +253,7 @@ fn const_required_option_capture_template_with_direct_tir(
             context,
         },
         span: None,
-        comment_directive_span: None,
+        body_only_directive_span: None,
     }
 }
 
@@ -462,7 +462,7 @@ fn parse_runtime_template_without_validation(
     let template = Template {
         tir_reference,
         span,
-        comment_directive_span: None,
+        body_only_directive_span: None,
     };
 
     (template, context, string_table)
@@ -874,6 +874,17 @@ fn collect_static_tir_fragments(
             }
         }
 
+        TemplateIrNodeKind::SuppliedGuard { body, .. } => {
+            collect_static_tir_fragments(
+                *body,
+                store,
+                string_table,
+                expression_builder,
+                const_values,
+                output,
+            );
+        }
+
         TemplateIrNodeKind::Conditional { body, .. } => {
             collect_static_tir_fragments(
                 *body,
@@ -937,6 +948,8 @@ fn tir_subtree_contains_slot(
     };
 
     match &node.kind {
+        TemplateIrNodeKind::SuppliedGuard { .. } => true,
+
         TemplateIrNodeKind::Slot { .. } => true,
 
         TemplateIrNodeKind::Sequence { children } => children

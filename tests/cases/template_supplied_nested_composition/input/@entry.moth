@@ -1,0 +1,38 @@
+-- One receiving schema owns nested, forwarded, repeated and head-only guard
+-- occurrences. Each output key isolates one composition path.
+nested #= [:<div[$supplied outer:[" data-outer"][$supplied inner:[" data-inner"]]]>[$slot]</div>]
+
+inner #= [:<em[$supplied x:[" data-x"]]>[$slot]</em>]
+forwarder #= [:<section>[$slot x][inner:[$in x:[$slot x]]]</section>]
+guarded #= [:<b[$supplied x:[" data-x"]]>[$slot x]</b>]
+payload #= [:<i>[$slot]</i>]
+
+repeated #= [:<b[$supplied x:[" G"]]>[$slot x]|[$slot x]</b>]
+double_guard #= [:<b[$supplied x:[" G1"]][$supplied x:[" G2"]]>[$slot x]</b>]
+-- Each const loop iteration owns its guard occurrence; a guard-only body stays absent.
+looped #= [:<ul>[loop 0 to 2 |i|:[$supplied x:["*"]]]</ul>]
+-- Constant-held and rendered in its own fragment: a busy runtime fragment re-expands open
+-- loop templates, which the Wasm backend cannot lower yet for any slot, not just guards.
+loops #= [:loop0=[looped]|loop=[looped:[$in x:]]]
+
+open #= [:<p[$supplied x:[" x"]]>[$slot]</p>]
+-- A constant-held application must compose its guards exactly like the direct one.
+stored_open = [open]
+
+bare = [nested]
+outer_only = [nested:[$in outer:o]]
+inner_only = [nested:[$in inner:i]]
+both = [nested:[$in outer:o][$in inner:i]]
+forwarded = [forwarder:[$in x:v]]
+-- The forwarding insert always routes presence, so the inner guard selects an
+-- empty body even when the outer `$slot x` renders nothing.
+forwarded_absent = [forwarder]
+guarded_payload = [guarded:[$in x:[payload:deep]]]
+repeated_slots = [repeated:[$in x:A][$in x:B]]
+two_guards = [double_guard:[$in x:C]]
+head_only = [open]
+head_only_stored = [stored_open]
+head_only_filled = [open:[$in x:]]
+
+~[:bare=[bare]|outer=[outer_only]|inner=[inner_only]|both=[both]|fwd=[forwarded]|fwd0=[forwarded_absent]|gpay=[guarded_payload]|repeat=[repeated_slots]|dguard=[two_guards]|head=[head_only]|stored=[head_only_stored]|filled=[head_only_filled]]
+~[:[loops]]

@@ -327,6 +327,21 @@ fn accumulate_nodes(
                 summary.record_slot();
             }
 
+            TemplateIrNodeKind::SuppliedGuard { body, .. } => {
+                // A guard may emit nothing, so a child template whose output contains one
+                // must take output-conditioned wrappers rather than unconditional ones.
+                summary.record_control_flow();
+                accumulate_nodes(
+                    store,
+                    std::slice::from_ref(body),
+                    child_depth(depth)?,
+                    summary,
+                    visiting_nodes,
+                    visiting_templates,
+                    completed_templates,
+                )?;
+            }
+
             TemplateIrNodeKind::InsertContribution { .. } => {
                 summary.record_insert_contribution();
             }

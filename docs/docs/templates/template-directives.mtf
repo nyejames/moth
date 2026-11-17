@@ -41,6 +41,15 @@ builder extension point, so availability never depends on the selected builder:
 - can appear only once per head
 - a routed contribution, including an explicitly empty one, suppresses that slot occurrence's default
 
+`$supplied`, `$supplied name`, `$supplied 1`:
+
+- renders its body once when routing supplied its key
+- declares the key when no `$slot` occurrence does, so a guard can act as a presence-only flag
+- requires a `:` body, accepts no default and has no `else` form
+- accepts only a formatter directive beside it in the head
+- is valid only as a child template inside a template body, never as a value
+  expression, statement template, fragment root or directive operand
+
 `$note`:
 
 - discards its balanced body without evaluating it or producing output
@@ -55,6 +64,61 @@ builder extension point, so availability never depends on the selected builder:
 `$md`:
 
 - applies Moth Markdown formatting
+
+### Presence guards
+
+`$supplied` turns slot presence into optional output. Its key uses the same
+target grammar as `$slot`: a bare name, a positive position or no key for the
+default slot. Two guards cover an optional attribute and a presence-only boolean:
+
+[codeblock, $code "moth":
+    card #= [$html:
+        <div[$supplied style:[" style=\""][$slot style]["\""]]>[$slot]</div>
+    ]
+    button #= [$html:
+        <button[$supplied disabled:[" disabled"]]>[$slot]</button>
+    ]
+
+    plain = [card]
+    styled = [card:[$in style:red]body]
+    empty_style = [card:[$in style:]body]
+    press = [button:press]
+    disabled = [button:[$in disabled:]press]
+]
+
+`plain` renders `<div></div>` and `styled` renders
+`<div style="red">body</div>`. The guard adds no leading space or escaping, so
+the body supplies the space. `empty_style` renders `<div style="">body</div>`,
+while `press` and `disabled` render `<button>press</button>` and
+`<button disabled>press</button>`.
+
+The body emits once per guard occurrence, however many contributions arrived. A
+false guard produces structural no output, so its content and wrappers never
+reach the result. A selected guard with an empty body is selected output, so a
+`$before` or `$after` wrapper still applies. Multiple guard occurrences for one
+key each emit their own body.
+
+A guard with no key declares the default key. A template can accept an insert for
+a key that only a guard declares:
+
+[codeblock, $code "moth":
+    panel #= [:<section[$supplied tone:[" data-tone"]]></section>]
+    [panel:[$in tone:quiet]]
+]
+
+Presence comes from routing, not from rendered content. An explicitly empty
+contribution counts, while occurrence defaults and fallback text never satisfy a
+guard. A routed contribution whose runtime branch emits nothing still counts.
+When no `$slot` occurrence consumes the key, the compiler validates the routed
+payload and skips its evaluation. See @../templates/#template-slots (Template
+slots) for those routing and liveness rules.
+
+Stored and exported constant templates keep an unresolved guard through
+projection and rebuild. The compiler rejects a guard that would cross an
+output-conditioned wrapper, such as a conditional child wrapper or head content
+placed before a loop in the same template head, because the rebuilt constant
+cannot preserve when that wrapper applies. A guard in a plain loop body is fine.
+Keep such a guard outside that wrapper.
 
 ### Builder-root inserts
 
@@ -137,6 +201,10 @@ Put the extra content in the surrounding template body instead:
         <section>prefix[$slot]</section>
     ]
 ]
+
+A `$supplied` guard accepts one formatter directive beside it in its head, and
+nothing else. The compiler rejects an expression, another directive or a
+control-flow suffix in that head.
 
 Each template head can contain at most one formatter. `$md`, `$raw`, `$html`,
 `$css`, `$escape_html` and `$code` each decide how the body is formatted, so

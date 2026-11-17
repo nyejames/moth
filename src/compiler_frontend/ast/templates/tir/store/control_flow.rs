@@ -16,7 +16,7 @@ pub(crate) enum ControlFlowBodyKind {
 }
 
 impl TemplateIrStore {
-    /// Recursively searches a TIR subtree for the template-owned control-flow node.
+    /// Recursively searches a TIR subtree for the node that owns conditional output.
     ///
     /// A runtime contribution marker whose source emits only through template
     /// control flow reports itself: the marker is the control-flow owner at that
@@ -62,6 +62,10 @@ impl TemplateIrStore {
             TemplateIrNodeKind::Conditional { .. } | TemplateIrNodeKind::Loop { .. } => {
                 Ok(Some(node_id))
             }
+
+            // A guard's output is conditional on routed presence, so a containing child
+            // template must take output-conditioned wrappers like a conditional child.
+            TemplateIrNodeKind::SuppliedGuard { .. } => Ok(Some(node_id)),
 
             // A retained control-flow position owns the control-flow tree before body-root
             // completion installs the `Loop`/`Conditional` node into it.
