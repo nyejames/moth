@@ -179,7 +179,9 @@ impl ConvergenceModel {
             ConvergenceNodeId(0),
             base_public_origins,
             base_private_identities,
-            base.direct_call_targets(),
+            base.direct_call_targets()
+                .into_iter()
+                .map(|(_, target)| target),
         );
         for (identity, link_facts) in generated {
             let caller = ids_by_generated[identity];
@@ -190,7 +192,10 @@ impl ConvergenceModel {
                 caller,
                 base_public_origins,
                 base_private_identities,
-                link_facts.direct_call_targets(),
+                link_facts
+                    .direct_call_targets()
+                    .into_iter()
+                    .map(|(_, target)| target),
             );
         }
 
@@ -300,8 +305,14 @@ impl ConvergenceModel {
             .collect()
     }
 
-    /// Keep summary-dependent source checks in the existing dependency model, including work
-    /// that has no runtime edge. Validation edges alone do not imply execution or escaping failure.
+    /// Keep every summary-dependent failure check in the existing dependency model.
+    ///
+    /// WHAT: adds each node's runtime failure contributors and deferred catch candidates as
+    ///       summary dependencies, including work that has no runtime call edge; assertion-message
+    ///       calls tolerate an absent summary and are projected only when one exists.
+    /// WHY: a runtime contributor's activity is decided by its callee's exact summary, so summary
+    ///      availability must hold before convergence and the caller must be rescheduled when the
+    ///      summary changes. A dependency edge alone does not imply execution or escaping failure.
     fn include_deferred_validation_dependencies(
         &mut self,
         base: &HirModule,
@@ -316,10 +327,26 @@ impl ConvergenceModel {
                     &transaction.sidecar_mut(identity).module.executable.hir,
                 ),
             };
-            // An absent assertion-only summary diagnoses after convergence, rather than becoming
-            // an invented false summary or an executable generated-call dependency.
-            targets.retain(|(_, target)| {
-                !matches!(target, CallTarget::Generated(identity) if transaction.summary(identity).is_none())
+            // Exact summary availability is independent of whether HIR lowered the call. A
+            // retained runtime contributor or deferred catch candidate cannot diagnose around an
+            // absent summary, so its generated target must have one installed even when a
+            // release-folded terminator removed the call. Assertion-only calls keep the existing
+            // tolerance: an absent summary diagnoses after convergence instead of inventing a
+            // false executable dependency.
+            targets.retain(|target| {
+                let CallTarget::Generated(identity) = &target.target else {
+                    return true;
+                };
+                if transaction.summary(identity).is_some() {
+                    return true;
+                }
+                if matches!(target.summary_requirement, SummaryRequirement::Required) {
+                    crate::compiler_bug!(
+                        CompilerStage::ProjectBuildAssembly,
+                        "retained failure contributor has no materialised generated summary for {identity:?}"
+                    );
+                }
+                false
             });
             add_model_edges(
                 &mut self.callers,
@@ -328,7 +355,7 @@ impl ConvergenceModel {
                 ConvergenceNodeId(index),
                 base_public_origins,
                 Some(base_private_identities),
-                targets,
+                targets.into_iter().map(|target| target.target),
             );
         }
         for record in &mut self.nodes {
@@ -346,19 +373,50 @@ impl ConvergenceModel {
     }
 }
 
-fn deferred_validation_call_targets(hir: &HirModule) -> Vec<(FunctionId, CallTarget)> {
+/// Whether convergence must find a materialised summary for one collected call target.
+///
+/// WHAT: runtime contributors and catch candidates require an exact summary; assertion-message
+///       calls use one only when it already exists.
+/// WHY: naming the two cases keeps collection and availability filtering from depending on an
+///      opaque boolean literal.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SummaryRequirement {
+    Required,
+    Tolerated,
+}
+
+struct DeferredValidationTarget {
+    target: CallTarget,
+    summary_requirement: SummaryRequirement,
+}
+
+/// Call targets whose summaries convergence needs before it can judge failure.
+///
+/// WHAT: runtime contributors and deferred catch candidates require a materialised summary, while
+///       assertion-message calls keep the existing tolerance for an absent one.
+/// WHY: the first two decide an escaping-failure verdict; the third only validates an inert
+///      message and must not invent a runtime dependency just to make its validation possible.
+fn deferred_validation_call_targets(hir: &HirModule) -> Vec<DeferredValidationTarget> {
     let mut targets = Vec::new();
-    for (function, facts) in &hir.function_failure_facts {
-        let contributors = facts.assertion_message_calls.iter().chain(
-            facts
-                .deferred_custom_catches
-                .iter()
-                .flat_map(|check| &check.candidates),
-        );
-        for contributor in contributors {
-            if let HirBuiltinFailureSource::Call(target) = &contributor.source {
-                targets.push((*function, target.clone()));
+    let mut push = |contributor: &HirBuiltinFailureContributor, summary_requirement| {
+        if let HirBuiltinFailureSource::Call(target) = &contributor.source {
+            targets.push(DeferredValidationTarget {
+                target: target.clone(),
+                summary_requirement,
+            });
+        }
+    };
+    for facts in hir.function_failure_facts.values() {
+        for contributor in &facts.contributors {
+            push(contributor, SummaryRequirement::Required);
+        }
+        for check in &facts.deferred_custom_catches {
+            for candidate in &check.candidates {
+                push(candidate, SummaryRequirement::Required);
             }
+        }
+        for contributor in &facts.assertion_message_calls {
+            push(contributor, SummaryRequirement::Tolerated);
         }
     }
     targets
@@ -371,9 +429,9 @@ fn add_model_edges(
     caller: ConvergenceNodeId,
     base_public_origins: &FxHashSet<OriginFunctionId>,
     base_private_identities: Option<&FxHashSet<ModulePrivateExecutableIdentity>>,
-    targets: Vec<(crate::compiler_frontend::hir::ids::FunctionId, CallTarget)>,
+    targets: impl IntoIterator<Item = CallTarget>,
 ) {
-    for (_, target) in targets {
+    for target in targets {
         let callee = match target {
             CallTarget::Local(_) | CallTarget::External(_) => None,
             CallTarget::CrossModule(origin) => {

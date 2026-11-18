@@ -1,0 +1,14 @@
+$fast_math
+fast_op |value I32| -> I32:
+    return value + 1
+;
+
+$safe_math
+probe |value I32| -> I32:
+    loop false:
+        marker I32 = fast_op(value)
+    ;
+    return 0
+;
+
+~[: [probe(1)]]

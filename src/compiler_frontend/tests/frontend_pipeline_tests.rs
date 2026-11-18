@@ -5667,6 +5667,105 @@ fn implicit_failure_same_module_cross_file_call_keeps_canonical_private_failure_
 }
 
 #[test]
+fn dead_statement_tail_keeps_selected_call_evidence_without_failure_contributors() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@entry.moth",
+            "failing |value I32| -> I32:\n    marker I32 = value + 1\n    return marker\n;\n\
+             probe |value I32| -> I32:\n    live I32 = failing(value)\n    return live\n\
+             dead I32 = failing(value)\n    return dead\n;\n\
+             dead_only |value I32| -> I32:\n    return 0\n    unused I32 = value + 1\n\
+             loop 0 to value:\n        marker = 0\n    ;\n    return unused\n;\n\
+             ~[: probe=[probe(1)] dead=[dead_only(1)] ]\n",
+        )],
+        "src/@entry.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+
+    let ast = project.ast();
+    let call_span = |view: ExpressionView<'_>| {
+        let ExpressionOperationView::Call(call) = view.operation() else {
+            panic!("expected a source call initializer");
+        };
+        call.metadata().span
+    };
+    let probe_body = named_function_body(&project, &ast, "probe");
+    let live_call_span = call_span(initializer(&ast, &probe_body[0]));
+    let dead_call_span = call_span(initializer(&ast, &probe_body[2]));
+    assert_ne!(live_call_span, dead_call_span);
+
+    let hir = project.hir();
+    let function_id = |name: &str| {
+        hir.functions
+            .iter()
+            .find(|function| {
+                hir.side_table
+                    .function_name_path(function.id)
+                    .and_then(|path| project.frontend.path_fork.component(path))
+                    .is_some_and(|component| {
+                        project.frontend.string_table.resolve(component) == name
+                    })
+            })
+            .unwrap_or_else(|| panic!("the module should lower {name}"))
+            .id
+    };
+    let failing = function_id("failing");
+    let probe = function_id("probe");
+    let dead_only = function_id("dead_only");
+    let facts = &hir.function_failure_facts[&probe];
+
+    // Both the live and dead statements select the callee for constraint evidence.
+    let failing_sites = facts
+        .constraint
+        .selected_call_sites
+        .iter()
+        .filter(|site| matches!(site.target, CallTarget::Local(target) if target == failing))
+        .map(|site| site.span)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        failing_sites.len(),
+        2,
+        "both the live and the dead call must stay in selected evidence: {failing_sites:?}"
+    );
+    assert!(failing_sites.contains(&live_call_span));
+    assert!(failing_sites.contains(&dead_call_span));
+
+    // Only the live call can execute. A target-only filter would also drop it.
+    let [contributor] = facts.contributors.as_slice() else {
+        panic!(
+            "the live call must be the only executable contributor: {:?}",
+            facts.contributors
+        );
+    };
+    assert!(matches!(
+        contributor.source,
+        HirBuiltinFailureSource::Call(CallTarget::Local(target)) if target == failing
+    ));
+    assert_eq!(contributor.span, live_call_span);
+    assert_ne!(contributor.span, dead_call_span);
+
+    // Dead arithmetic and a dead range loop are equally non-executable.
+    let dead_only_facts = &hir.function_failure_facts[&dead_only];
+    assert!(
+        dead_only_facts.contributors.is_empty(),
+        "dead arithmetic and range steps must project no executable contributor: {:?}",
+        dead_only_facts.contributors
+    );
+
+    let mut report = project
+        .frontend
+        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .expect("the dead statement tail must pass borrow validation");
+    crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
+        &hir,
+        &mut report,
+    );
+    assert!(report.analysis.public_call_summaries[&failing].escapes_builtin_failure);
+    assert!(report.analysis.public_call_summaries[&probe].escapes_builtin_failure);
+    assert!(!report.analysis.public_call_summaries[&dead_only].escapes_builtin_failure);
+}
+
+#[test]
 fn const_expression_failure_publishes_no_partial_ast() {
     let mut project = FrontendProject::new(
         &[(

@@ -1,0 +1,15 @@
+$export
+marker || -> I32:
+    return 1
+;
+
+failing |value I32| -> I32:
+    return value + 1
+;
+
+$export
+probe type T |value T| -> I32:
+    return 0
+    result = [:[failing(1)]]
+    return 1
+;

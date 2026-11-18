@@ -1,0 +1,19 @@
+flaky type T |value I32, witness T| -> I32:
+    marker I32 = value + 1
+    return marker
+;
+
+clamp |value I32| -> I32:
+    if value > 10:
+        return 10
+    ;
+    return value
+;
+
+probe || -> I32:
+    return 4
+    dead I32 = flaky(1, 2)
+    return dead
+;
+
+~[: clamp=[clamp(12)] probe=[probe()] ]

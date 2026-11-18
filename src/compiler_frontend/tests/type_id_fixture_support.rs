@@ -20,6 +20,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::expressions::expression_types::{
     ConstRecordState, FallibleExpressionHandling, FallibleHandling,
 };
+use crate::compiler_frontend::ast::expressions::failure_classification::AstBuiltinFailureSummaries;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -37,6 +38,7 @@ use crate::compiler_frontend::source::{SourceSpan, SpanResolutionSources};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
+use rustc_hash::FxHashSet;
 
 // ---------------------------------------------------------------------------
 // Choice definition helper used by build_ast_with_choices
@@ -431,6 +433,17 @@ pub(crate) fn build_ast_with_choices(
     let expressions = builder
         .freeze(&mut nodes)
         .expect("completed fixture expression store");
+    // HIR projects the same pre-fold facts production finalization retains.
+    let template_ir_store = crate::compiler_frontend::ast::templates::tir::TemplateIrStore::new();
+    let authored_dead_failure_spans = FxHashSet::default();
+    let pre_fold_failure_facts = AstBuiltinFailureSummaries::compute(
+        &[&nodes],
+        &template_ir_store,
+        &expressions,
+        &authored_dead_failure_spans,
+    )
+    .expect("fixture failure facts")
+    .into_function_facts();
 
     Ast {
         synthesizes_entry_start: true,
@@ -441,6 +454,8 @@ pub(crate) fn build_ast_with_choices(
         constraint_boundaries: vec![],
         fast_operation_witnesses: vec![],
         release_erased_call_sites: vec![],
+        authored_dead_failure_spans,
+        pre_fold_failure_facts,
         constraint_pruned_regions: vec![],
         const_top_level_fragments: vec![],
         warnings: vec![],

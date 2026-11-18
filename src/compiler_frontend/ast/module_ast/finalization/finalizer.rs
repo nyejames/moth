@@ -28,6 +28,7 @@ use crate::compiler_frontend::ast::generic_functions::{
 };
 use crate::compiler_frontend::ast::statements::control_flow_exits::{
     ControlFlowExitSummary, analyze_control_flow_exits_with_never_targets,
+    collect_authored_dead_failure_spans,
 };
 use crate::compiler_frontend::ast::statements::terminality::{
     NeverProofNode, never_proof_cycle, terminality_policy_for_signature,
@@ -89,6 +90,20 @@ pub(in crate::compiler_frontend::ast) struct AstFinalizer<'context, 'services> {
 pub(in crate::compiler_frontend::ast) enum MaterialisationContextRetention {
     Always,
     ForDeferredRequests,
+}
+
+/// Pre-fold facts one builtin-failure boundary pass reads.
+///
+/// WHAT: dormant generic template bodies, completed concrete nodes, the infallible cast contracts
+///       the pass must discharge, and whether assertion-validation requests exist.
+/// WHY: grouping the two differently-sourced node groups keeps them named at the call site. The
+///      pass reads summaries that finalization computed once and also retains for HIR, so release
+///      folding cannot change either verdict.
+struct BuiltinFailureBoundaryInput<'a> {
+    generic_template_bodies: &'a [AstNode],
+    concrete_nodes: &'a [AstNode],
+    infallible_cast_evidence: &'a FxHashMap<PathId, InfallibleCastEvidenceContract>,
+    has_assertion_validation_candidates: bool,
 }
 
 impl ExpressionFreezeRoots for Vec<AstNode> {
@@ -368,14 +383,56 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             .deferred_generic_requests
             .iter()
             .any(|slot| matches!(slot, GenericRequestSlot::AssertionValidation(_)));
+        // Semantic failure liveness is fixed before release folding, which can erase a call or a
+        // whole tail. Computing it once here lets HIR apply the same pre-fold set to its post-fold
+        // AST, so release verdicts match debug.
+        let mut authored_dead_failure_spans = FxHashSet::default();
+        {
+            let template_ir_store = self.context.template_ir_store.borrow();
+            for group in [&emitted.validated_generic_template_bodies, &emitted.ast] {
+                collect_authored_dead_failure_spans(
+                    group,
+                    &self.context.expression_builder,
+                    &template_ir_store,
+                    &self.context.const_values,
+                    &mut authored_dead_failure_spans,
+                )
+                .map_err(|error| self.error_messages(error, &mut emitted.warnings, string_table))?;
+            }
+        }
+        let builtin_failure_summaries = {
+            // Completed AST contains owned runtime handoffs, never unresolved TIR references.
+            let template_ir_store = self.context.template_ir_store.borrow();
+            AstBuiltinFailureSummaries::compute(
+                &[&emitted.validated_generic_template_bodies, &emitted.ast],
+                &template_ir_store,
+                &self.context.expression_builder,
+                &authored_dead_failure_spans,
+            )
+            .map_err(|error| self.error_messages(error, &mut emitted.warnings, string_table))?
+        };
         let assertion_validation_paths = self.validate_generic_builtin_failure_boundaries(
-            &emitted.validated_generic_template_bodies,
-            &emitted.ast,
-            &infallible_cast_evidence,
-            has_assertion_validation_candidates,
+            &builtin_failure_summaries,
+            BuiltinFailureBoundaryInput {
+                generic_template_bodies: &emitted.validated_generic_template_bodies,
+                concrete_nodes: &emitted.ast,
+                infallible_cast_evidence: &infallible_cast_evidence,
+                has_assertion_validation_candidates,
+            },
             &mut emitted.warnings,
             string_table,
         )?;
+        // Contributor facts are fixed pre-fold and projected by HIR later. Retaining them here is
+        // what keeps release erasure from adding, removing or reordering a failure fact. Dormant
+        // generic template identities have no HIR function and are never read again, so only the
+        // concrete functions in the emitted AST keep their facts.
+        let concrete_identities = emitted
+            .ast
+            .iter()
+            .filter_map(AstNode::function_identity)
+            .collect::<FxHashSet<_>>();
+        let mut pre_fold_failure_facts = builtin_failure_summaries.into_function_facts();
+        pre_fold_failure_facts.retain(|identity, _| concrete_identities.contains(identity));
         let committed_generic_requests = specialization
             .commit_generic_requests(
                 std::mem::take(&mut emitted.deferred_generic_requests),
@@ -617,6 +674,8 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 constraint_boundaries,
                 fast_operation_witnesses,
                 release_erased_call_sites,
+                authored_dead_failure_spans,
+                pre_fold_failure_facts,
                 constraint_pruned_regions,
                 synthesizes_entry_start,
                 const_top_level_fragments,
@@ -819,14 +878,18 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
     /// still undergo HIR convergence independently of these retained template verdicts.
     fn validate_generic_builtin_failure_boundaries(
         &self,
-        nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
-        concrete_nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
-        infallible_cast_evidence: &FxHashMap<PathId, InfallibleCastEvidenceContract>,
-        has_assertion_validation_candidates: bool,
+        summaries: &AstBuiltinFailureSummaries,
+        input: BuiltinFailureBoundaryInput<'_>,
         warnings: &mut Vec<DiagnosticDraft>,
         string_table: &mut StringTable,
     ) -> Result<FxHashSet<PathId>, PreparedFailure> {
-        if nodes.is_empty() && !has_assertion_validation_candidates {
+        let BuiltinFailureBoundaryInput {
+            generic_template_bodies,
+            concrete_nodes,
+            infallible_cast_evidence,
+            has_assertion_validation_candidates,
+        } = input;
+        if generic_template_bodies.is_empty() && !has_assertion_validation_candidates {
             return Ok(FxHashSet::default());
         }
 
@@ -836,14 +899,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             .type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
                 CanonicalBuiltinType::Error,
             ));
-        let template_ir_store = self.context.template_ir_store.borrow();
-        let summaries = AstBuiltinFailureSummaries::compute(
-            &[nodes, concrete_nodes],
-            &template_ir_store,
-            &self.context.expression_builder,
-        )
-        .map_err(|error| self.error_messages(error, warnings, string_table))?;
-        for node in nodes {
+        for node in generic_template_bodies {
             let signature = match &node.kind {
                 NodeKind::Function(_, signature, _) | NodeKind::EntryStart(signature, _) => {
                     signature

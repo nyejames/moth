@@ -158,6 +158,7 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExpressionStore,
 };
+use crate::compiler_frontend::ast::expressions::failure_classification::PendingFunctionFailureFacts;
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::emission::AstEmitter;
 use crate::compiler_frontend::ast::module_ast::environment::{
@@ -200,6 +201,7 @@ use crate::compiler_frontend::traits::evidence::environment::InfallibleCastEvide
 use crate::timing_scope_attributed;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -404,6 +406,30 @@ pub struct Ast {
     ///      visible to HIR projection without retaining the erased expression tree or disabling a
     ///      profitable fold. It is empty in debug builds because no call is erased there.
     pub(crate) release_erased_call_sites: Vec<AstReleaseErasedCallSite>,
+
+    /// Failure-producing spans in authored statement tails that cannot be reached.
+    ///
+    /// WHAT: exact authored spans of statements, expressions and failure contributors that the
+    ///       pre-fold control-flow analysis marks unreachable in every build profile.
+    /// WHY: failure facts must not depend on optional release folding. A tail that only release
+    ///      folding makes unreachable (such as a folded assertion condition) is absent here, so the
+    ///      semantic contributor filter keeps it in every profile. This set decides authored
+    ///      liveness for release-erased-call evidence; failure contributors themselves are
+    ///      projected from [`Self::pre_fold_failure_facts`].
+    pub(crate) authored_dead_failure_spans: FxHashSet<SourceSpan>,
+
+    /// Pre-fold failure facts for every concrete callable in `nodes`, keyed by callable identity.
+    ///
+    /// WHAT: the implicit contributors, deferred custom catches and assertion-message calls the
+    ///       AST classifier decided before release folding, already filtered by
+    ///       [`Self::authored_dead_failure_spans`]. Each body's contributor lists keep authored
+    ///       order; the map itself is only a lookup. Dormant generic-template identities are
+    ///       dropped because HIR never reads them.
+    /// WHY: release folding must not add, remove or reorder failure facts. Finalization always
+    ///      computes these facts, even when no dormant template needs boundary validation, and HIR
+    ///      projects them instead of reclassifying the post-fold AST, so debug and release publish
+    ///      the same contributors and the same witness order.
+    pub(crate) pre_fold_failure_facts: HashMap<AstFunctionIdentity, PendingFunctionFailureFacts>,
 
     /// Inactive static-`if` branches, retained so HIR projection can drop their evidence rows.
     ///

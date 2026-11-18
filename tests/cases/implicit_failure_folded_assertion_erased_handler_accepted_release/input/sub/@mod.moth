@@ -1,0 +1,15 @@
+always_false || -> Bool:
+    return false
+;
+
+risky |value I32| -> I32:
+    return value + 1
+;
+
+$export
+probe |value I32| -> I64:
+    assert(always_false())
+    $infallible
+    wide I64 = cast value catch then cast risky(1)
+    return wide
+;

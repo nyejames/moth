@@ -21360,3 +21360,185 @@ path = "source_constraints_exported_annotation_unused_rejected"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "exports"]
 contract = "language.directives.exported_annotations_are_verified_without_a_caller"
 role = "primary"
+
+[[case]]
+id = "implicit_failure_dead_call_after_return_accepted"
+path = "implicit_failure_dead_call_after_return_accepted"
+tags = ["integration", "language", "numeric", "results", "runtime", "generics"]
+contract = "language.results.dead_statement_tail_contributes_no_implicit_failure"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_dead_call_after_return_accepted_release"
+path = "implicit_failure_dead_call_after_return_accepted_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "generics", "release"]
+contract = "language.results.dead_statement_tail_contributes_no_implicit_failure"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_function_infallible_dead_call_after_return_accepted"
+path = "source_constraints_function_infallible_dead_call_after_return_accepted"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "functions", "generics"]
+contract = "language.directives.function_infallible_ignores_dead_failure_tail"
+role = "primary"
+
+[[case]]
+id = "source_constraints_function_infallible_dead_call_after_return_accepted_release"
+path = "source_constraints_function_infallible_dead_call_after_return_accepted_release"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "functions", "generics", "release"]
+contract = "language.directives.function_infallible_ignores_dead_failure_tail"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_function_safe_math_dead_call_after_return_rejected"
+path = "source_constraints_function_safe_math_dead_call_after_return_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "generics"]
+contract = "language.directives.function_safe_math_sees_selected_fast_use_after_a_terminator"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_dead_template_payload_accepted"
+path = "implicit_failure_dead_template_payload_accepted"
+tags = ["integration", "language", "results", "runtime", "generics", "templates"]
+contract = "language.results.dead_template_payload_in_dormant_generic_contributes_no_implicit_failure"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_dead_template_payload_accepted_release"
+path = "implicit_failure_dead_template_payload_accepted_release"
+tags = ["integration", "language", "results", "runtime", "generics", "templates", "release"]
+contract = "language.results.dead_template_payload_in_dormant_generic_contributes_no_implicit_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_false_loop_body_accepted"
+path = "implicit_failure_folded_false_loop_body_accepted"
+tags = ["integration", "language", "numeric", "results", "runtime", "generics", "loops"]
+contract = "language.results.folded_false_loop_body_contributes_no_implicit_failure"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_folded_false_loop_body_accepted_release"
+path = "implicit_failure_folded_false_loop_body_accepted_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "generics", "loops", "release"]
+contract = "language.results.folded_false_loop_body_contributes_no_implicit_failure"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_function_safe_math_folded_false_loop_rejected"
+path = "source_constraints_function_safe_math_folded_false_loop_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "loops"]
+contract = "language.directives.function_safe_math_sees_selected_fast_use_in_folded_false_loop"
+role = "primary"
+
+[[case]]
+id = "source_constraints_function_infallible_folded_false_loop_accepted"
+path = "source_constraints_function_infallible_folded_false_loop_accepted"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "functions", "loops"]
+contract = "language.directives.function_infallible_ignores_folded_false_loop_failure_body"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_dead_arithmetic_and_range_after_return_closed_boundary_accepted"
+path = "implicit_failure_dead_arithmetic_and_range_after_return_closed_boundary_accepted"
+tags = ["integration", "language", "numeric", "results", "runtime", "exports"]
+contract = "language.results.dead_statement_tail_contributes_no_implicit_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_assertion_checked_rejected"
+path = "implicit_failure_folded_assertion_checked_rejected"
+tags = ["integration", "language", "numeric", "results", "exports", "assertions"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_folded_assertion_checked_release_rejected"
+path = "implicit_failure_folded_assertion_checked_release_rejected"
+tags = ["integration", "language", "numeric", "results", "exports", "assertions", "release"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_assertion_generated_call_rejected"
+path = "implicit_failure_folded_assertion_generated_call_rejected"
+tags = ["integration", "language", "numeric", "results", "exports", "assertions", "generics"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_assertion_generated_call_release_rejected"
+path = "implicit_failure_folded_assertion_generated_call_release_rejected"
+tags = ["integration", "language", "numeric", "results", "exports", "assertions", "generics", "release"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_dead_catch_generated_candidate_accepted"
+path = "implicit_failure_dead_catch_generated_candidate_accepted"
+tags = ["integration", "language", "numeric", "results", "runtime", "generics"]
+contract = "language.results.dead_statement_tail_contributes_no_implicit_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_dead_catch_generated_candidate_accepted_release"
+path = "implicit_failure_dead_catch_generated_candidate_accepted_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "generics", "release"]
+contract = "language.results.dead_statement_tail_contributes_no_implicit_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_release_erased_call_liveness_rejected"
+path = "implicit_failure_release_erased_call_liveness_rejected"
+tags = ["integration", "language", "numeric", "results", "exports", "assertions"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_release_erased_call_liveness_release_rejected"
+path = "implicit_failure_release_erased_call_liveness_release_rejected"
+tags = ["integration", "language", "numeric", "results", "exports", "assertions", "release"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_erased_handler_contributor_accepted"
+path = "implicit_failure_erased_handler_contributor_accepted"
+tags = ["integration", "language", "numeric", "results", "runtime", "exports"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_erased_handler_contributor_accepted_release"
+path = "implicit_failure_erased_handler_contributor_accepted_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "exports", "release"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_assertion_erased_handler_accepted"
+path = "implicit_failure_folded_assertion_erased_handler_accepted"
+tags = ["integration", "language", "numeric", "results", "runtime", "exports", "assertions"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_assertion_erased_handler_accepted_release"
+path = "implicit_failure_folded_assertion_erased_handler_accepted_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "exports", "assertions", "release"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_erased_call_witness_order_rejected"
+path = "implicit_failure_erased_call_witness_order_rejected"
+tags = ["integration", "language", "numeric", "diagnostics", "results", "exports"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_erased_call_witness_order_release_rejected"
+path = "implicit_failure_erased_call_witness_order_release_rejected"
+tags = ["integration", "language", "numeric", "diagnostics", "results", "exports", "release"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"

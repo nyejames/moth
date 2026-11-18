@@ -1,12 +1,14 @@
 //! Selected evidence from AST code that HIR lowering intentionally omits.
 //!
 //! WHAT: walks the retained AST of skipped catch handlers and statements after a terminator,
-//!       recording every selected call site and `$fast_math` range guard in the owner's evidence.
+//!       recording every selected call site and `$fast_math` range guard in the owner's evidence,
+//!       plus the expression-root spans of statically pruned catch handlers, which the
+//!       erased-call liveness split reads.
 //! WHY: constraint verification treats fast selection as a property of selected source, not of
 //!      liveness. Lowering omits statically infallible handlers and dead statements after a
 //!      terminator, so the ordinary HIR scan cannot see the calls and range guards they still
 //!      select. Recording at the skip point keeps the lowering optimisations without losing the
-//!      evidence.
+//!      evidence, and the root spans keep a release-erased call dead when its handler cannot run.
 //!
 //! The expression walk owns calls and nested value blocks; the statement walk owns `-> !` calls
 //! and range guards. Each nested value block is visited through its expression edge, so the two
@@ -39,37 +41,54 @@ impl<'a> HirBuilder<'a> {
         let FallibleHandling::Handler { body, .. } = handler else {
             return Ok(());
         };
+        self.record_pruned_handler_root_spans(store, body)?;
         self.record_skipped_statement_evidence(store, body)
+    }
+
+    /// Remembers the authored roots of a statically pruned catch-handler body.
+    ///
+    /// WHAT: one span per retained expression root in a handler that HIR never lowers because the
+    ///       protected value is statically infallible.
+    /// WHY: the erased-call liveness split must see that a release-erased call stood in a handler
+    ///      that cannot execute. Authored dead tails use `Ast::authored_dead_failure_spans`
+    ///      instead, because a post-fold lowering skip there may depend on release folding.
+    fn record_pruned_handler_root_spans(
+        &mut self,
+        store: &ExpressionStore,
+        nodes: &[AstNode],
+    ) -> Result<(), HirConstructionFailure> {
+        let function = self.current_function_id_or_error()?;
+        for node in nodes {
+            node.visit_expression_ids(&mut |id| {
+                if let Ok(view) = store.view(id)
+                    && let Some(span) = view.span()
+                {
+                    self.skipped_source_evidence
+                        .entry(function)
+                        .or_default()
+                        .record_pruned_handler_span(span);
+                }
+            });
+        }
+        Ok(())
     }
 
     /// Records evidence from selected statements that the CFG never receives.
     ///
     /// WHAT: walks a skipped handler body or the statements remaining after a terminator.
     /// WHY: both skip paths omit selected source for the same optimisation reason, so one walker
-    ///      owns their call sites and fast range-guard witnesses.
+    ///      owns their call sites and fast range-guard witnesses. A dead tail after a terminator
+    ///      records no root spans for itself: its liveness comes from the pre-fold AST set, never
+    ///      from a post-fold lowering skip. A statically infallible catch nested in that tail still
+    ///      records its pruned-handler roots, because debug lowering would have pruned it too.
     pub(in crate::compiler_frontend::hir) fn record_skipped_statement_evidence(
         &mut self,
         store: &ExpressionStore,
         nodes: &[AstNode],
     ) -> Result<(), HirConstructionFailure> {
         let generation = self.skipped_source_walk.begin_walk();
-        let skipped_function = self.current_function_id_or_error()?;
         for node in nodes {
-            node.visit_expression_ids(&mut |id| {
-                self.skipped_source_walk.push_root(id);
-                // Release folding may already have replaced a call below this root with a
-                // constant, so the skipped walk can no longer record the call itself. Keeping the
-                // root's authored span lets projection recognise an erased call that stood in
-                // skipped source and withhold its liveness-conditioned trap/failure evidence.
-                if let Ok(view) = store.view(id)
-                    && let Some(span) = view.span()
-                {
-                    self.skipped_source_evidence
-                        .entry(skipped_function)
-                        .or_default()
-                        .record_skipped_span(span);
-                }
-            });
+            node.visit_expression_ids(&mut |id| self.skipped_source_walk.push_root(id));
         }
         self.record_skipped_statement_nodes(nodes)?;
         while let Some(id) = self.skipped_source_walk.pop_root() {
@@ -91,7 +110,7 @@ impl<'a> HirBuilder<'a> {
                     self.record_skipped_call_site(function, target, metadata.span);
                 }
                 ExpressionOperationView::ValueBlock(block) => {
-                    self.record_skipped_value_block_nodes(block)?;
+                    self.record_skipped_value_block_nodes(store, block)?;
                 }
                 _ => {}
             }
@@ -155,6 +174,7 @@ impl<'a> HirBuilder<'a> {
 
     fn record_skipped_value_block_nodes(
         &mut self,
+        store: &ExpressionStore,
         block: &ValueBlock,
     ) -> Result<(), HirConstructionFailure> {
         match block {
@@ -173,7 +193,20 @@ impl<'a> HirBuilder<'a> {
                 Ok(())
             }
             ValueBlock::Catch(block) => match &block.handler {
-                FallibleHandling::Handler { body, .. } => self.record_skipped_statement_nodes(body),
+                FallibleHandling::Handler { body, .. } => {
+                    // A skipped tail can still contain a catch whose protected value is
+                    // statically infallible. Debug lowering would record that handler as pruned;
+                    // the skipped walk must do the same regardless of why the tail was skipped, so
+                    // an erased call inside the handler is not counted as live evidence.
+                    let statically_infallible = store
+                        .view(block.handled_value)?
+                        .failure_facts()
+                        .is_some_and(|facts| facts.is_statically_infallible_catch());
+                    if statically_infallible {
+                        self.record_pruned_handler_root_spans(store, body)?;
+                    }
+                    self.record_skipped_statement_nodes(body)
+                }
                 FallibleHandling::Propagate => Ok(()),
             },
         }

@@ -2,18 +2,20 @@
 //!
 //! Summary convergence reads direct unhandled producers and resolved call targets here, without
 //! retaining expression trees or changing the existing runtime HIR failure delivery. Failure
-//! contributors come from the typed AST bodies, and the constraint evidence comes from the
+//! contributors come from the pre-fold typed AST facts with authored-unreachable tails removed;
+//! release erasure neither adds, removes nor reorders one. Constraint evidence comes from the
 //! authored boundaries plus the selected HIR, including the call sites and fast-use witnesses of
-//! skipped catch handlers and statements after a terminator. Both are captured during HIR
-//! construction while the typed AST bodies still exist, so verification can read this record after
-//! they are gone.
+//! skipped catch handlers and statements after a terminator. Failure facts are classified before
+//! release folding and projected onto HIR call targets during construction; constraint evidence is
+//! captured then, while the typed AST bodies still exist, so verification can read this record
+//! after they are gone.
 
 use crate::compiler_frontend::ast::AstConstraintStatementSpan;
 use crate::compiler_frontend::ast::expressions::failure_facts::FailureWitnessSite;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{SourceSpan, SpanResolutionSources};
 use crate::compiler_frontend::style_directives::{ConstraintDirectiveSpans, SourceConstraintSet};
 use crate::compiler_frontend::traits::evidence::environment::InfallibleCastEvidenceContract;
 
@@ -125,28 +127,29 @@ impl HirSelectedCallSiteLedger {
 /// Evidence from selected AST code that HIR lowering deliberately omits.
 ///
 /// WHAT: the selected call sites and fast-use witnesses of skipped catch handlers and statements
-///       after a terminator.
+///       after a terminator, plus the authored expression-root spans of statically pruned catch
+///       handlers, which the erased-call liveness split reads.
 /// WHY: those statements have no HIR blocks, but they are still selected source: their calls
 ///      select a callee's fast semantics and a `$fast_math` loop selects a fast range guard.
 ///      One per-function accumulator keeps both evidence classes on the skip path, and projection
 ///      applies the same inactive-static-branch filter as the authored evidence ledger.
 ///
-/// The sites stay in recorded order and keep duplicate rows: projection merges them into a
-/// [`HirSelectedCallSiteLedger`], which drops duplicate `(target, span)` rows while keeping the
-/// first occurrence, so deduplicating here as well would repeat the same hash probe on the skip
-/// path without changing the projected fact.
+/// The sites stay in recorded order. Projection merges them into a
+/// [`HirSelectedCallSiteLedger`] beside the live sites, which keeps the first occurrence of any
+/// row both sets share.
 #[derive(Debug, Default)]
 pub(crate) struct HirSkippedSourceEvidence {
     call_sites: Vec<HirSelectedCallSite>,
     fast_use: Vec<HirFastUseWitness>,
-    /// Authored spans of the expression roots this skip path did not lower.
+    /// Authored root spans of statically pruned catch-handler bodies.
     ///
-    /// WHAT: one span per skipped statement expression root, in recorded order.
-    /// WHY: release folding erases a call before HIR, leaving a constant whose evidence cannot
-    ///      say whether the enclosing statement was skipped. Containing an erased call span in
-    ///      one of these ranges recovers the debug build's live/skipped split for trap and
-    ///      escaping-failure evidence.
-    skipped_spans: Vec<SourceSpan>,
+    /// WHAT: one span per retained expression root in a handler that HIR never lowers because
+    ///       the protected value is statically infallible.
+    /// WHY: release folding can erase a call before HIR lowering, leaving only its constant row.
+    ///      The erased-call liveness split must still recognise that the call stood in a handler
+    ///      that cannot execute. Authored dead tails use `Ast::authored_dead_failure_spans`
+    ///      instead, because a post-fold lowering skip there may depend on release folding.
+    pruned_handler_spans: Vec<SourceSpan>,
 }
 
 impl HirSkippedSourceEvidence {
@@ -162,8 +165,22 @@ impl HirSkippedSourceEvidence {
         self.fast_use.push(HirFastUseWitness { provenance, span });
     }
 
-    pub(crate) fn record_skipped_span(&mut self, span: SourceSpan) {
-        self.skipped_spans.push(span);
+    pub(crate) fn record_pruned_handler_span(&mut self, span: SourceSpan) {
+        self.pruned_handler_spans.push(span);
+    }
+
+    /// Reports whether one authored site belongs to a statically pruned catch-handler body.
+    ///
+    /// WHY: a release-erased call inside such a handler cannot execute in either profile, so it
+    ///      contributes no liveness-conditioned constraint evidence.
+    pub(crate) fn contains_pruned_handler_span(
+        &self,
+        span: SourceSpan,
+        sources: &SpanResolutionSources<'_>,
+    ) -> bool {
+        self.pruned_handler_spans
+            .iter()
+            .any(|pruned| sources.span_within(span, *pruned, *pruned))
     }
 
     pub(crate) fn call_sites(&self) -> std::slice::Iter<'_, HirSelectedCallSite> {
@@ -172,10 +189,6 @@ impl HirSkippedSourceEvidence {
 
     pub(crate) fn fast_use(&self) -> &[HirFastUseWitness] {
         &self.fast_use
-    }
-
-    pub(crate) fn skipped_spans(&self) -> &[SourceSpan] {
-        &self.skipped_spans
     }
 }
 

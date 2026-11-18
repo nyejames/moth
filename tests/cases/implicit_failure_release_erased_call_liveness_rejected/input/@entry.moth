@@ -1,0 +1,3 @@
+@sub probe
+result I64 = cast probe(1) catch then 0
+~[: [result]]

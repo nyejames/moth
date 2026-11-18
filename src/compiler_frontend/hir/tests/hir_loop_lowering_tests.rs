@@ -7,9 +7,12 @@
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
-use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOp,
+};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -29,9 +32,22 @@ fn lowers_while_to_header_body_exit_shape() {
 
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
-    let condition = builder
+    // A `LogicalNot` row is not a `Constant`/`Reference`, so the shared constant authority does
+    // not fold this loop condition. It also lowers in place, keeping the runtime header block
+    // stable for the shape assertions rather than inserting short-circuit blocks.
+    let operand = builder
         .bool(&mut constants, false, None, ValueMode::ImmutableOwned)
-        .expect("test literal fits expression store")
+        .expect("test literal fits expression store");
+    let condition = builder
+        .append_expression(
+            ExpressionOp::LogicalNot {
+                operand: builder.own(operand.id()),
+            },
+            None,
+            builtin_type_ids::BOOL,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("test logical condition fits expression store")
         .id();
     let body_value = builder
         .fixed_scalar(

@@ -20,12 +20,18 @@
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness, NodeKind};
 use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    ExprId, ExpressionOperationView, ExpressionStore,
+    AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionStore, ExpressionView,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
+use crate::compiler_frontend::ast::templates::tir::{
+    TemplateIrStore, TemplateTirReference, TirView, walk_tir_view_expression_payloads,
+};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use rustc_hash::FxHashSet;
 
 /// Independent facts about every reachable exit from a statement sequence.
 ///
@@ -636,6 +642,414 @@ fn finite_loop_exits(
     summary.can_fall_through = true;
     summary.produces_value = false;
     summary
+}
+
+/// Collects failure-producer spans in statement tails that authored control flow cannot reach.
+///
+/// WHAT: walks every statement sequence in `nodes` in authored order through the same exit
+///       summary that owns terminality, and records the exact authored spans of statements,
+///       expressions and failure contributors in the first unreachable tail of each sequence.
+/// WHY: semantic failure facts must not depend on optional release folding. This runs before
+///      release folding, so a condition that only folding proves terminal (an ordinary call in
+///      an assertion) stays a possible fallthrough here, while an authored return, `-> !` call,
+///      loop exit or statically false condition stops the sequence in every build profile.
+///      Consumers filter only contributors recorded here, never source omitted by a post-fold
+///      lowering decision.
+///
+/// One scratch owns the exit analysis and a depth-indexed pool of expression walks. The pool keeps
+/// allocations across statements and lets a nested sequence or value block run while its ancestor's
+/// walk still owns its stack.
+pub(crate) fn collect_authored_dead_failure_spans(
+    nodes: &[AstNode],
+    expressions: &AstExpressionBuilder,
+    template_ir_store: &TemplateIrStore,
+    constants: &ConstValueStore,
+    dead_spans: &mut FxHashSet<SourceSpan>,
+) -> Result<(), InfrastructureFailure> {
+    let owners = DeadSpanOwners {
+        expressions,
+        template_ir_store,
+        constants,
+    };
+    let mut scratch = DeadSpanScratch::default();
+    collect_sequence_dead_spans(nodes, &owners, dead_spans, &mut scratch, 0);
+    match scratch.error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+struct DeadSpanOwners<'a> {
+    expressions: &'a AstExpressionBuilder,
+    template_ir_store: &'a TemplateIrStore,
+    constants: &'a ConstValueStore,
+}
+
+#[derive(Default)]
+struct DeadSpanScratch {
+    exit: ControlFlowExitScratch,
+    walks: Vec<ExpressionWalkScratch>,
+    error: Option<InfrastructureFailure>,
+}
+
+/// One reusable expression worklist. Every entry is cleared before reuse; the pool index is the
+/// structural depth, so an active ancestor walk is never overwritten by its nested sequence.
+#[derive(Default)]
+struct ExpressionWalkScratch {
+    pending: Vec<ExprId>,
+    visited: FxHashSet<ExprId>,
+    visited_templates: FxHashSet<TemplateTirReference>,
+}
+
+impl DeadSpanScratch {
+    fn take_expression_walk(&mut self, depth: usize) -> ExpressionWalkScratch {
+        while self.walks.len() <= depth {
+            self.walks.push(ExpressionWalkScratch::default());
+        }
+        let mut walk = std::mem::take(&mut self.walks[depth]);
+        walk.pending.clear();
+        walk.visited.clear();
+        walk.visited_templates.clear();
+        walk
+    }
+
+    fn put_expression_walk(&mut self, depth: usize, walk: ExpressionWalkScratch) {
+        self.walks[depth] = walk;
+    }
+
+    fn record_error(&mut self, error: InfrastructureFailure) {
+        self.error.get_or_insert(error);
+    }
+}
+
+fn collect_sequence_dead_spans(
+    nodes: &[AstNode],
+    owners: &DeadSpanOwners<'_>,
+    dead_spans: &mut FxHashSet<SourceSpan>,
+    scratch: &mut DeadSpanScratch,
+    depth: usize,
+) {
+    let mut summary = ControlFlowExitSummary::FALLS_THROUGH;
+
+    for (index, node) in nodes.iter().enumerate() {
+        if !summary.can_fall_through {
+            for dead_node in &nodes[index..] {
+                record_dead_node_spans(dead_node, owners, dead_spans, scratch, depth);
+            }
+            return;
+        }
+
+        collect_live_node_dead_tails(node, owners, dead_spans, scratch, depth);
+        summary = summary.then_sequence(statement_exits(
+            node,
+            owners.expressions.store(),
+            owners.constants,
+            &mut scratch.exit,
+        ));
+    }
+}
+
+/// Finds dead tails nested inside a reachable statement's bodies and value blocks.
+fn collect_live_node_dead_tails(
+    node: &AstNode,
+    owners: &DeadSpanOwners<'_>,
+    dead_spans: &mut FxHashSet<SourceSpan>,
+    scratch: &mut DeadSpanScratch,
+    depth: usize,
+) {
+    match &node.kind {
+        NodeKind::Function(_, _, body)
+        | NodeKind::EntryStart(_, body)
+        | NodeKind::LexicalScope { body } => {
+            collect_sequence_dead_spans(body, owners, dead_spans, scratch, depth + 1);
+        }
+        NodeKind::If(_, then_body, else_body, _) => {
+            collect_sequence_dead_spans(then_body, owners, dead_spans, scratch, depth + 1);
+            if let Some(else_body) = else_body {
+                collect_sequence_dead_spans(else_body, owners, dead_spans, scratch, depth + 1);
+            }
+        }
+        NodeKind::Match { arms, default, .. } => {
+            for arm in arms {
+                collect_sequence_dead_spans(&arm.body, owners, dead_spans, scratch, depth + 1);
+            }
+            if let Some(default) = default {
+                collect_sequence_dead_spans(default, owners, dead_spans, scratch, depth + 1);
+            }
+        }
+        NodeKind::RangeLoop { body, .. } | NodeKind::CollectionLoop { body, .. } => {
+            collect_sequence_dead_spans(body, owners, dead_spans, scratch, depth + 1);
+        }
+        NodeKind::WhileLoop(condition, body) => {
+            // A pre-fold folded-false condition never runs the body. The body is authored-dead in
+            // every profile, consistently with `while_loop_exits`; a condition that only release
+            // folding makes false is not folded by this constant store and stays reachable here.
+            if folded_bool_condition(*condition, owners.expressions.store(), owners.constants)
+                == Some(false)
+            {
+                for dead_node in body {
+                    record_dead_node_spans(dead_node, owners, dead_spans, scratch, depth);
+                }
+            } else {
+                collect_sequence_dead_spans(body, owners, dead_spans, scratch, depth + 1);
+            }
+        }
+        _ => {}
+    }
+
+    let mut walk = scratch.take_expression_walk(depth);
+    node.visit_immediate_expression_ids(&mut |expression| walk.pending.push(expression));
+    collect_live_expression_tails(&mut walk, owners, dead_spans, scratch, depth);
+    scratch.put_expression_walk(depth, walk);
+}
+
+/// Walks reachable expressions once, looking only for value blocks with dead inner tails.
+///
+/// WHAT: `walk.pending` carries the statement's immediate expression roots. A value block pushes
+///       only its header expressions; its bodies are analysed by the statement walk that owns them.
+/// WHY: following a value block's children as well would walk the same body again at every
+///      nesting level, which is exponential in value-block depth. The pool slot keeps the walk
+///      linear in expression size without allocating per statement.
+fn collect_live_expression_tails(
+    walk: &mut ExpressionWalkScratch,
+    owners: &DeadSpanOwners<'_>,
+    dead_spans: &mut FxHashSet<SourceSpan>,
+    scratch: &mut DeadSpanScratch,
+    depth: usize,
+) {
+    while let Some(expression) = walk.pending.pop() {
+        if !walk.visited.insert(expression) {
+            continue;
+        }
+        let Ok(view) = owners.expressions.store().view(expression) else {
+            continue;
+        };
+        if let ExpressionOperationView::ValueBlock(block) = view.operation() {
+            collect_value_block_sequence_dead_tails(block, owners, dead_spans, scratch, depth + 1);
+            push_value_block_headers(block, &mut walk.pending);
+        } else {
+            let _ = view.visit_child_ids(&mut |child| walk.pending.push(child));
+        }
+    }
+}
+
+/// Queues the expressions a value block evaluates outside its statement bodies.
+fn push_value_block_headers(block: &ValueBlock, pending: &mut Vec<ExprId>) {
+    match block {
+        ValueBlock::If(value_if) => pending.push(value_if.condition),
+        ValueBlock::LexicalScope(_) => {}
+        ValueBlock::Match(value_match) => {
+            pending.push(value_match.scrutinee);
+            for arm in &value_match.arms {
+                if let Some(guard) = arm.guard {
+                    pending.push(guard);
+                }
+                arm.pattern
+                    .visit_expression_ids(&mut |expression| pending.push(expression));
+            }
+        }
+        ValueBlock::Catch(value_catch) => pending.push(value_catch.handled_value),
+    }
+}
+
+fn collect_value_block_sequence_dead_tails(
+    block: &ValueBlock,
+    owners: &DeadSpanOwners<'_>,
+    dead_spans: &mut FxHashSet<SourceSpan>,
+    scratch: &mut DeadSpanScratch,
+    depth: usize,
+) {
+    match block {
+        ValueBlock::If(value_if) => {
+            collect_sequence_dead_spans(&value_if.then_body, owners, dead_spans, scratch, depth);
+            collect_sequence_dead_spans(&value_if.else_body, owners, dead_spans, scratch, depth);
+        }
+        ValueBlock::LexicalScope(scope) => {
+            collect_sequence_dead_spans(&scope.body, owners, dead_spans, scratch, depth);
+        }
+        ValueBlock::Match(value_match) => {
+            for arm in &value_match.arms {
+                collect_sequence_dead_spans(&arm.body, owners, dead_spans, scratch, depth);
+            }
+            if let Some(default) = &value_match.default {
+                collect_sequence_dead_spans(default, owners, dead_spans, scratch, depth);
+            }
+        }
+        ValueBlock::Catch(value_catch) => {
+            if let FallibleHandling::Handler { body, .. } = &value_catch.handler {
+                collect_sequence_dead_spans(body, owners, dead_spans, scratch, depth);
+            }
+        }
+    }
+}
+
+/// Records every authored span inside a statement the sequence cannot reach.
+fn record_dead_node_spans(
+    node: &AstNode,
+    owners: &DeadSpanOwners<'_>,
+    dead_spans: &mut FxHashSet<SourceSpan>,
+    scratch: &mut DeadSpanScratch,
+    depth: usize,
+) {
+    // A nested declaration is compiled as its own callable; the enclosing dead tail does not
+    // make its body unreachable.
+    if matches!(
+        &node.kind,
+        NodeKind::Function(_, _, _) | NodeKind::EntryStart(_, _)
+    ) {
+        return;
+    }
+
+    if let Some(span) = node.span {
+        dead_spans.insert(span);
+    }
+    let mut walk = scratch.take_expression_walk(depth);
+    node.visit_immediate_expression_ids(&mut |expression| walk.pending.push(expression));
+    record_dead_expression_spans(&mut walk, owners, dead_spans, scratch, depth);
+    scratch.put_expression_walk(depth, walk);
+
+    match &node.kind {
+        NodeKind::If(_, then_body, else_body, _) => {
+            for dead_node in then_body {
+                record_dead_node_spans(dead_node, owners, dead_spans, scratch, depth);
+            }
+            if let Some(else_body) = else_body {
+                for dead_node in else_body {
+                    record_dead_node_spans(dead_node, owners, dead_spans, scratch, depth);
+                }
+            }
+        }
+        NodeKind::Match { arms, default, .. } => {
+            for arm in arms {
+                for dead_node in &arm.body {
+                    record_dead_node_spans(dead_node, owners, dead_spans, scratch, depth);
+                }
+            }
+            if let Some(default) = default {
+                for dead_node in default {
+                    record_dead_node_spans(dead_node, owners, dead_spans, scratch, depth);
+                }
+            }
+        }
+        NodeKind::LexicalScope { body }
+        | NodeKind::RangeLoop { body, .. }
+        | NodeKind::CollectionLoop { body, .. }
+        | NodeKind::WhileLoop(_, body) => {
+            for dead_node in body {
+                record_dead_node_spans(dead_node, owners, dead_spans, scratch, depth);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Records every authored span inside one dead statement's expression graph.
+///
+/// A value block records its statement bodies as dead and queues only its header expressions, so
+/// nested bodies are visited once instead of once per ancestor. Template payloads are expanded the
+/// same way the failure classifier expands them, because `visit_child_ids` owns no template edges.
+/// The depth-indexed scratch pool keeps one stack and visited set per active walk.
+fn record_dead_expression_spans(
+    walk: &mut ExpressionWalkScratch,
+    owners: &DeadSpanOwners<'_>,
+    dead_spans: &mut FxHashSet<SourceSpan>,
+    scratch: &mut DeadSpanScratch,
+    depth: usize,
+) {
+    while let Some(expression) = walk.pending.pop() {
+        if !walk.visited.insert(expression) {
+            continue;
+        }
+        let Ok(view) = owners.expressions.store().view(expression) else {
+            continue;
+        };
+        if let Some(span) = view.span() {
+            dead_spans.insert(span);
+        }
+        if let Some(facts) = view.failure_facts() {
+            for contributor in &facts.implicit {
+                if let Some(span) = contributor.span {
+                    dead_spans.insert(span);
+                }
+            }
+        }
+        match view.operation() {
+            ExpressionOperationView::ValueBlock(block) => {
+                record_dead_value_block_statements(block, owners, dead_spans, scratch, depth);
+                push_value_block_headers(block, &mut walk.pending);
+            }
+            ExpressionOperationView::Template(template) => {
+                if !walk.visited_templates.insert(template.tir_reference) {
+                    continue;
+                }
+                let reference = template.tir_reference;
+                match TirView::new(
+                    owners.template_ir_store,
+                    reference.root,
+                    reference.phase,
+                    reference.context,
+                ) {
+                    Ok(tir_view) => {
+                        let mut visit = |nested: ExpressionView<'_>| {
+                            walk.pending.push(nested.id());
+                            Ok(())
+                        };
+                        if let Err(error) = walk_tir_view_expression_payloads(
+                            &tir_view,
+                            owners.expressions,
+                            &mut visit,
+                        ) {
+                            scratch.record_error(error);
+                        }
+                    }
+                    Err(error) => scratch.record_error(error),
+                }
+            }
+            _ => {
+                let _ = view.visit_child_ids(&mut |child| walk.pending.push(child));
+            }
+        }
+    }
+}
+
+fn record_dead_value_block_statements(
+    block: &ValueBlock,
+    owners: &DeadSpanOwners<'_>,
+    dead_spans: &mut FxHashSet<SourceSpan>,
+    scratch: &mut DeadSpanScratch,
+    depth: usize,
+) {
+    match block {
+        ValueBlock::If(value_if) => {
+            for dead_node in value_if.then_body.iter().chain(&value_if.else_body) {
+                record_dead_node_spans(dead_node, owners, dead_spans, scratch, depth + 1);
+            }
+        }
+        ValueBlock::LexicalScope(scope) => {
+            for dead_node in &scope.body {
+                record_dead_node_spans(dead_node, owners, dead_spans, scratch, depth + 1);
+            }
+        }
+        ValueBlock::Match(value_match) => {
+            for arm in &value_match.arms {
+                for dead_node in &arm.body {
+                    record_dead_node_spans(dead_node, owners, dead_spans, scratch, depth + 1);
+                }
+            }
+            if let Some(default) = &value_match.default {
+                for dead_node in default {
+                    record_dead_node_spans(dead_node, owners, dead_spans, scratch, depth + 1);
+                }
+            }
+        }
+        ValueBlock::Catch(value_catch) => {
+            if let FallibleHandling::Handler { body, .. } = &value_catch.handler {
+                for dead_node in body {
+                    record_dead_node_spans(dead_node, owners, dead_spans, scratch, depth + 1);
+                }
+            }
+        }
+    }
 }
 
 fn folded_bool_condition(

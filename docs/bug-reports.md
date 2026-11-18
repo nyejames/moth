@@ -4,13 +4,6 @@ A casual log of bugs and limitations found during other work and left for later 
 
 ## Open
 
-### Unreachable generic call after return crashes summary convergence
-
-- Found: Constraints branch implementation and independent merge review, 2026-11.
-- Where: `call_escapes_builtin_failure` / `retained_call_summary` in `src/compiler_frontend/module_compilation/generated/convergence.rs` (around line 1080).
-- Observed: a generic call after an unconditional return is unreachable, but summary convergence still looks for its exact callable summary and raises a compiler bug: `implicit builtin failure contributor has no exact call summary for ...`. The implementation agent reproduced the crash on original base `d80f56343` without any constraint directives, so it predates `$safe_math` and `$infallible`.
-- Investigate: preserve the unreachable-call repro as a compiler test, trace how its builtin failure contributor survives without an exact summary and either exclude dead contributors at their owner or ensure the mandatory summary is available before convergence. Keep selected-source fast-use accounting distinct from liveness-conditioned failure propagation. User-authored unreachable code must not trigger an infrastructure failure.
-
 ### Mutable local passed by `~` gets an invalid parameter effect summary
 
 - Found: Constraints branch implementation and independent merge review, 2026-11.

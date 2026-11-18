@@ -55,6 +55,7 @@ use crate::compiler_frontend::instrumentation::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use rustc_hash::FxHashSet;
 
 /// A classifier binds roots in their issuing phase or frozen AST owner. TIR is only
 /// readable in the phase case; frozen payloads have already become neutral handoffs.
@@ -305,6 +306,8 @@ fn pending_function_failure_facts_with_call_summaries(
 /// WHAT: classifies bodies once and closes their stable escaping-call edges with a worklist.
 ///       Only catch executability consumes provisional callee activity. Those queries retain
 ///       reverse dependencies and batch affected bodies after stable activation has drained.
+///       Finalization consumes the classified facts into `Ast::pre_fold_failure_facts` after
+///       dormant-boundary validation, so HIR projects exactly this authored-order decision.
 /// WHY: known bodies begin at the lattice bottom, so origin-free recursion stays infallible.
 ///      Unknown callees remain conservative. Unrelated bodies and summary-insensitive call
 ///      chains never reopen their AST, while dormant handler validation retains its scope.
@@ -319,6 +322,7 @@ impl AstBuiltinFailureSummaries {
         node_groups: &[&[AstNode]],
         template_ir_store: &TemplateIrStore,
         expression_builder: impl Into<FailureClassificationExpressions<'a>>,
+        authored_dead_failure_spans: &FxHashSet<SourceSpan>,
     ) -> Result<Self, InfrastructureFailure> {
         let expression_builder = expression_builder.into();
         let mut bodies = HashMap::new();
@@ -358,7 +362,7 @@ impl AstBuiltinFailureSummaries {
             batch.sort_unstable();
             for identity in batch {
                 let dependencies = RefCell::new(HashSet::new());
-                let facts = pending_function_failure_facts_with_call_summaries(
+                let mut facts = pending_function_failure_facts_with_call_summaries(
                     bodies[&identity],
                     template_ir_store,
                     &active,
@@ -366,6 +370,7 @@ impl AstBuiltinFailureSummaries {
                     &dependencies,
                     expression_builder,
                 )?;
+                retain_authored_live_failure_facts(&mut facts, authored_dead_failure_spans);
                 for dependency in dependencies.into_inner() {
                     classification_dependants
                         .entry(dependency)
@@ -429,6 +434,16 @@ impl AstBuiltinFailureSummaries {
         identity: AstFunctionIdentity,
     ) -> Option<&PendingFunctionFailureFacts> {
         self.functions.get(&identity)
+    }
+
+    /// Consumes the summaries into the per-callable facts retained on `Ast::pre_fold_failure_facts`.
+    ///
+    /// WHY: HIR must project the exact pre-fold contributor order and handler liveness that the
+    ///      classifier decided, rather than reclassifying a release-folded AST.
+    pub(crate) fn into_function_facts(
+        self,
+    ) -> HashMap<AstFunctionIdentity, PendingFunctionFailureFacts> {
+        self.functions
     }
 
     pub(crate) fn is_active(&self, contributor: &ImplicitFailureContributor) -> bool {
@@ -555,6 +570,40 @@ impl AstBuiltinFailureSummaries {
         let witness = self.search_witness(contributor, &mut entered);
         (witness, entered.len())
     }
+}
+
+/// Drops failure facts recorded in authored statement tails that cannot execute.
+///
+/// WHAT: filters implicit contributors and deferred catch candidates whose authored span lies in
+///       an unreachable tail.
+/// WHY: the classifier walks retained bodies, including dead tails, so returned expressions and
+///      declared witnesses keep their authored order. Semantic liveness is a separate pre-fold
+///      fact, so filtering afterwards keeps one classification pass for both live and dead source
+///      without making the traversal itself liveness-aware.
+fn retain_authored_live_failure_facts(
+    facts: &mut PendingFunctionFailureFacts,
+    authored_dead_failure_spans: &FxHashSet<SourceSpan>,
+) {
+    // A `None` span is compiler-synthesised and always stays live.
+    facts.body.implicit.retain(|contributor| {
+        !contributor
+            .span
+            .is_some_and(|span| authored_dead_failure_spans.contains(&span))
+    });
+    // A check whose candidates all sit in an authored dead tail can never fire. Dropping it keeps
+    // its generated calls out of summary dependencies and dead-code diagnostics. A check that
+    // authored no candidates still owns its eligibility verdict.
+    facts.body.deferred_custom_catches.retain_mut(|check| {
+        if check.candidates.is_empty() {
+            return true;
+        }
+        check.candidates.retain(|candidate| {
+            !candidate
+                .span
+                .is_some_and(|span| authored_dead_failure_spans.contains(&span))
+        });
+        !check.candidates.is_empty()
+    });
 }
 
 /// An explicit exit inside protected work still targets the function, never the catch.
