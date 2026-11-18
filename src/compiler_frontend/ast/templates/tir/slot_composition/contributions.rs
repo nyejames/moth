@@ -291,11 +291,10 @@ pub(crate) fn route_tir_fill_nodes_against_schema(
     // When that run is only body formatting whitespace, it would otherwise merge
     // backward into the meaningful text before the insert and render an extra
     // space. Classify it here while the insert boundary is still known.
-    if let Some(run_start) = loose_run_start_after_insert {
-        if tir_nodes_are_body_whitespace_only_text(&loose_nodes[run_start..], store, string_table)?
-        {
-            loose_nodes.truncate(run_start);
-        }
+    if let Some(run_start) = loose_run_start_after_insert
+        && tir_nodes_are_body_whitespace_only_text(&loose_nodes[run_start..], store, string_table)?
+    {
+        loose_nodes.truncate(run_start);
     }
 
     // Route loose content to positional slots first, then to the default slot.
