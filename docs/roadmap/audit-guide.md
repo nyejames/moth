@@ -1,21 +1,21 @@
 # Codebase Audit Guide
 
-This document owns the rules for running a structured codebase audit: what to audit, how to record it, and what an audit may and may not change.
+This document owns the scope, evidence, recording and preservation rules for structured codebase audits.
 
-An audit is an **explicitly invoked** activity. It is not the Slice review in [AGENTS.md](../../AGENTS.md), which every non-trivial change ends with. The Slice review needs no scope, produces no report and never writes here. Do not block one on the other.
+An audit is **explicitly invoked**. The Slice review in [AGENTS.md](../../AGENTS.md) is a separate check at the end of every non-trivial change. It needs no audit scope or report and does not record coverage. Neither activity blocks the other.
 
-Focused checklists live under [audit-kinds](./audit-kinds/README.md). Every audit records coverage in the [audit log](./audit-log.md). **Correctness audits** record bugs in [bug reports](../bug-reports.md) and need no separate report. Other kinds use formal reports under [audits](./audits/README.md), with unresolved work in [open findings](./open-audit-findings.md) and resolution history in the [completed audits log](./completed_audits_log.md).
+Focused checklists live under [audit-kinds](./audit-kinds/README.md). Every audit records coverage in the [audit log](./audit-log.md). **Correctness** records findings in [bug reports](../bug-reports.md). Other kinds use [formal reports](./audits/README.md), [open findings](./open-audit-findings.md) and the [completed audits log](./completed_audits_log.md).
 
-Any audit may also log an unrelated issue in `docs/bug-reports.md` without opening another audit or extending its coverage. The bug log is a lightweight investigation queue, not a second formal findings index.
+All tasks may log concrete incidental issues in the same bug queue. It is an investigation queue, not a second formal findings index.
 
 ## What an audit is for
 
-Two things, in this order:
+An audit has two outputs, in this order:
 
 1. **Produce useful findings** - concrete, evidenced problems a later task can fix.
 2. **Record what was audited, where and when** - so the next audit can find the stale and never-reviewed code instead of re-reading what was just covered.
 
-The second is why the audit log exists. An audit that finds nothing is still worth running and still records its coverage.
+A clean audit still records its coverage.
 
 ## Read before starting
 
@@ -55,9 +55,9 @@ If you cannot cover the whole area, cover part of it and say which part. A parti
 
 ### 1. Select the recording lane
 
-For **Correctness**, use the lightweight lane: inspect the area, log bugs in `docs/bug-reports.md` and record coverage directly in `audit-log.md`. Do not reserve an `AUD-####`, create a report or add entries to the formal open-findings and completed-audits logs. Coordinate overlapping runs with active agents since no report reservation exists.
+For **Correctness**, log findings in `docs/bug-reports.md` and coverage in `audit-log.md`. Do not reserve an `AUD-####` or use formal reports and indices. Coordinate overlapping runs with active agents since no report reservation exists.
 
-For **every other kind**, reserve the next unused `AUD-####` across both report folders. Create a report under `audits/open_audits/` from the [report skeleton](./audits/README.md) and add it under `Audits in progress` in [open findings](./open-audit-findings.md). Reserve before inspecting so concurrent formal runs collide visibly.
+For **every other kind**, reserve the next unused `AUD-####` across both report folders. Create a report under `audits/open_audits/` from the [report skeleton](./audits/README.md) and add it under `Audits in progress` in [open findings](./open-audit-findings.md). Reserve before inspecting so concurrent runs collide visibly.
 
 ### 2. Establish the baseline
 
@@ -86,7 +86,7 @@ Preference alone is not a finding. Claims of faster execution or lower memory us
 
 **Other kinds:** use the formal report schema. Each finding needs the problem, concrete evidence, the counter-explanation tested, the contract or cost it violates, the root owner and a suggested correction. Route an out-of-kind discovery through the incidental issue rule below.
 
-**A suggested correction does not authorise anything.** Formal findings require triage before implementation. Bug-log entries require independent investigation before their fix scope is chosen.
+**A suggested correction does not authorise a fix.** Formal findings require triage. Bug-log entries require investigation and a separately chosen fix scope.
 
 ### 6. Close the run
 
@@ -97,14 +97,14 @@ Preference alone is not a finding. Claims of faster execution or lower memory us
 
 ## Incidental discoveries in any task
 
-An audit can expose a plausible bug, documentation gap, duplicated path, test weakness or efficiency concern unrelated to its chosen kind or area. **Record the lead in `docs/bug-reports.md` and continue the original audit.** Other implementation and review tasks may use the same queue. Do not discard an observation merely because it falls outside the current scope.
+Any task can expose a plausible bug, documentation gap, duplicated path, test weakness or efficiency concern outside its scope. **Record a concrete lead in `docs/bug-reports.md` and continue the original work.**
 
 - Check for an existing entry first. Name the relevant code or document, what looked wrong and a concrete starting point for verification.
 - Distinguish reproduced defects from unconfirmed suspicions. A brief, accurate lead is enough. Do not require full audit-level proof or an `AUD-####` report before recording it.
 - Do not expand the current audit, claim coverage for another kind or fix the unrelated issue during this run.
 - Do not fill the queue with ungrounded preferences or search hits. Record a specific observable concern, inconsistency or suspicious execution path.
 
-The next task investigating the entry establishes the evidence, design authority and fix scope. If that work becomes a formal audit, its own report and coverage rules apply. Avoid tracking the same unresolved root cause independently in both queues.
+The next investigation establishes the evidence, authority and fix scope. If a formal audit takes up the lead, link its report and remove or resolve the queue entry so one unresolved root cause has one active tracker.
 
 ## What an audit may change
 
@@ -126,7 +126,7 @@ When two canonical documents conflict, record the exact conflict and route it to
 
 **Deferred is not broken.** Check the progress matrix before filing anything as a defect. Absence of deferred work is not a finding; accidental exposure of it may be.
 
-**Do not change tests to fit a finding.** A non-test audit that notices a separate test or documentation problem records an incidental lead in `docs/bug-reports.md`. A focused Tests or Documentation audit follows its own formal findings process. Do not edit tests or canonical prose under another kind.
+**Do not change tests to fit a finding.** Record unrelated test or documentation problems in `docs/bug-reports.md`. Focused Tests and Documentation audits use formal findings. An audit of any kind does not edit tests or canonical prose.
 
 ## Preservation contract
 
@@ -147,7 +147,7 @@ Do not accept a fix that keeps the replaced path alive behind a wrapper, suppres
 
 ## Formal findings and resolution
 
-This lifecycle applies to kinds that create `AUD-####` reports. Correctness bugs and incidental leads instead follow the lightweight queue in `docs/bug-reports.md`. Investigate and verify those entries before fixing them, then remove each entry in the commit that resolves it. Git history retains the removed text. Historical correctness reports keep their existing IDs and archives without migration.
+This lifecycle applies to kinds that create `AUD-####` reports. Correctness bugs and incidental leads follow `docs/bug-reports.md`: investigate before fixing, then remove resolved entries in their fix commits. Git retains the history. Historical Correctness reports keep their IDs and archives.
 
 ```text
 candidate -> accepted -> fixed -> closed

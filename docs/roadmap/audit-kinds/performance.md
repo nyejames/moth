@@ -1,14 +1,14 @@
 # Performance
 
-Find compiler work that costs unnecessary time, allocations or memory. Combine reproducible measurement with direct inspection of algorithms, data flow and Rust ownership. Prefer **removing work and simplifying existing code** over building faster but more complex mechanisms.
+Find unnecessary compiler time, allocations and memory use through measurement and inspection of algorithms, data flow and Rust ownership. Prefer **removing work and simplifying code** over adding complex optimisations.
 
 Follow the [audit guide](../audit-guide.md) for formal findings, coverage and allowed writes. Use the [validation guide](../../developer-docs/style-guide/validation.mtf) and current `justfile` as the authority for benchmark commands and build settings. Record unrelated defects or unconfirmed leads in [`docs/bug-reports.md`](../../bug-reports.md) without expanding audit coverage.
 
 ## Two kinds of useful findings
 
-**Measured performance finding:** show a real cost or regression with a workload, metric, baseline, repeated observations and attribution to an owning implementation. Explain what improvement should be measured after a future fix. A profile alone does not establish that a proposed fix helps.
+**Measured performance finding:** show a cost or regression with a workload, metric, baseline, repeated observations and an owning implementation. State how a later fix should be measured. A profile alone cannot prove a proposed change helps.
 
-**Structural efficiency finding:** demonstrate avoidable work or ownership friction, such as a redundant traversal, unnecessary clone or temporary allocation, even when its impact falls below reliable measurement. Explain why the work is unnecessary and how removing it simplifies the current implementation. Label it **unmeasured** and make no speed or memory saving claim. A suspicious `.clone()` without an ownership trace remains an investigation lead, not a finding.
+**Structural efficiency finding:** demonstrate avoidable work, such as a redundant traversal, unnecessary clone or temporary allocation. Explain why removing it simplifies the implementation. Label the impact **unmeasured** without claiming savings. A suspicious `.clone()` without an ownership trace is only a lead.
 
 Both categories must preserve semantics, diagnostics, determinism and stage ownership. The evidence required to **accept a correction** depends on whether it removes complexity or introduces more of it. See [Acceptance thresholds](#acceptance-thresholds).
 
@@ -23,13 +23,13 @@ Start with a specific question such as "why does frontend time grow disproportio
 
 ## 2. Use Moth's non-recording tools
 
-Choose the narrowest useful route from the current `justfile`:
+Choose the narrowest relevant command from the current `justfile`:
 
 - `just bench-ci` runs a bounded non-recording sanity set after standard-case preflight.
 - `just bench-check` runs the full CLI benchmark check without recording history.
 - `just bench-frontend-check` runs the full frontend benchmark check without recording history.
 - `just bench-scaling` checks declared scaling series and growth budgets.
-- `just bench-validate` preflights all benchmark manifest cases and builds a release compiler. It is not a cheap substitute for correctness validation.
+- `just bench-validate` preflights benchmark cases and builds a release compiler. It does not replace correctness validation.
 - `just bench-data-layout-check` covers the non-recording data-layout benchmark lane when representation size or memory matters.
 - `just profile-case <case>` profiles a selected benchmark case. `just profile` and their `-symbolicated` variants cover broader profiling selection.
 - `just profile-build` builds with profiling symbols, frame pointers and detailed timers.
@@ -48,7 +48,7 @@ CLI benchmarks use the release compiler. Frontend and scaling measurements run i
 - Compare controlled input sizes before asserting scaling behaviour. Name the dimension growing: files, tokens, modules, graph edges, symbols, generic instances, IR nodes, diagnostics or reachable functions.
 - Treat one noisy run or a percentage change within normal variance as inconclusive. Record a plausible lead without presenting it as a measured regression.
 
-Measurement identifies cost, not correctness. A faster result that skips validation or work required by the contract is invalid.
+Measurements identify cost, not correctness. Skipping required work invalidates a faster result.
 
 ## 4. Attribute the work to its owner
 
@@ -66,7 +66,7 @@ Use Samply or the repository's profiling workflow for CPU attribution where avai
 
 ## 5. Hunt for avoidable work
 
-Inspect both measured hotspots and nearby opportunities to simplify without adding structure.
+Inspect measured hotspots and nearby opportunities for simpler data flow.
 
 ### Algorithms and repeated passes
 
@@ -88,7 +88,7 @@ Show the repeated execution path. Derive likely complexity in the actual growing
 - `Arc`, `Rc` or other shared-ownership machinery introduced for convenience rather than a real lifetime requirement.
 - Diagnostic prose or path text allocated early instead of carrying interned and typed facts to rendering.
 
-Trace every candidate's ownership and lifetime. A clone may be necessary to preserve independent ownership, allow mutation or keep a published snapshot alive. Replacing one clone with tangled lifetimes, synchronisation or a new abstraction can make the code worse. The goal is simpler data flow, not zero clones.
+Trace ownership and lifetimes. Clones may preserve independent mutation or a published snapshot. Avoid exchanging one copy for tangled lifetimes, synchronisation or another abstraction.
 
 ### Layout, lookups and concurrency
 
@@ -124,7 +124,7 @@ Require convincing, repeatable benchmark evidence before recommending a new cach
 
 If a more complex solution provides only a speculative or marginal win, retain the simpler design. A benchmark improvement alone does not override an architectural invariant.
 
-For either class, later implementation still needs the relevant correctness and documentation gates. State which measurements would detect unacceptable regressions and what evidence would change the recommendation.
+Both classes still require appropriate correctness and documentation gates. Name the checks that could overturn the recommendation.
 
 ## Evidence, coverage and staleness
 

@@ -1,8 +1,8 @@
 # Redundancy
 
-Find code, state, work and structure that Moth no longer needs or maintains in more places than necessary. Examine whether the current design could be **smaller, more direct and easier to change** by deleting code, consolidating ownership or simplifying a handoff.
+Find code, state, work and structure that Moth no longer needs or maintains in too many places. Look for a **smaller, more direct design** through deletion, single ownership or simpler handoffs.
 
-Be strict about code bloat, especially patterns introduced by incremental agent-driven changes. Be equally strict about false positives: similar code is not necessarily duplicate responsibility and fewer lines are not necessarily simpler. Follow the [audit guide](../audit-guide.md) for formal reports, evidence and coverage. Log unrelated issues in [`docs/bug-reports.md`](../../bug-reports.md) and return to the chosen scope.
+Scrutinise bloat left by incremental agent-driven changes, but reject false positives: similar code may serve distinct contracts and fewer lines may be harder to follow. Follow the [audit guide](../audit-guide.md) for formal reports and coverage. Log incidental issues in [`docs/bug-reports.md`](../../bug-reports.md).
 
 ## 1. Map the current design before judging it
 
@@ -18,7 +18,7 @@ Ask: **Where should a developer change this behaviour once?** Follow actual call
 
 ## 2. Hunt for code that should disappear
 
-Search beyond the most recently changed file. Inspect adjacent callers, tests and earlier owners for residual code after migrations or fixes.
+Search beyond the changed file. Inspect callers, tests and earlier owners for leftovers from migrations or fixes.
 
 ### Obsolete and unreachable paths
 
@@ -32,10 +32,10 @@ Named migration bridges are legitimate only when an accepted plan owns their pur
 
 ### Unnecessary behaviour or scaffolding
 
-- Does a function, field, helper, type or module have a concrete present-day responsibility?
+- Does each function, field, helper, type or module have a present-day responsibility?
 - Could a caller perform one obvious operation directly without losing a meaningful name or boundary?
 - Are there speculative extension points, unused options, unused genericity or configurable policies for a single supported behaviour?
-- Can two staged transformations collapse into one existing operation without retaining both intermediate forms?
+- Can two transformations become one operation without retaining both intermediate forms?
 - Can a removed feature take its parser exceptions, validators, diagnostic reasons, fixtures and documentation branches with it?
 
 **Deletion comes first** when nothing current depends on the path. Do not replace obsolete code with a new shim.
@@ -52,7 +52,7 @@ Search for near-duplicate functions, validators, normalisers, predicates, sortin
 - Does each consumer repeat a traversal, sorting pass, lookup or conversion because an earlier owner does not publish the needed fact?
 - Can a shared diagnostic or validation reason be constructed once with typed facts instead of duplicating prose and matching rules?
 
-For each candidate, compare inputs, outputs, side effects, errors, source ownership, ID domains, ordering, lifetimes and target capabilities. Record the maintenance cost: coordinated edits, semantic drift risk, ambiguous ownership or unnecessary execution. Do not label similar text as duplicate until equivalent responsibility is established.
+Compare inputs, outputs, side effects, errors, owners, ID domains, ordering, lifetimes and target capabilities. Establish equivalent responsibility and its cost, such as coordinated edits, semantic drift or repeated work, before calling similar text redundant.
 
 ## 4. Challenge abstraction and indirection
 
@@ -85,7 +85,7 @@ Incremental fixes often leave every previous layer intact. Look specifically for
 - A dense chain of conversions, clones and builder calls compensates for an unnecessarily indirect API.
 - A large new framework appears where one explicit local operation would satisfy the current use case.
 
-These are **search triggers**, not automatic findings. For example, an extra validation may defend a genuine trust boundary and a copy may preserve an essential lifetime. Trace the requirement before classifying either as redundant.
+These are **search triggers**, not findings. An extra validation may protect a trust boundary and a copy may preserve a necessary lifetime. Trace the requirement first.
 
 ## 6. Look for simpler Rust and module structure
 
@@ -99,7 +99,7 @@ Review code presentation where complexity stems from unnecessary structure rathe
 - Do test helpers and fixture builders duplicate production setup or each other without improving isolation or coverage?
 - Would moving a genuinely shared responsibility to its existing owner let two implementations and their tests disappear?
 
-Follow the [codebase style guide](../../developer-docs/style-guide/style-guide.mtf). Prefer data-oriented, explicit ownership to broad utility modules. A style problem without structural redundancy belongs to Style. A measured cost belongs to Performance. When investigating copies, do not claim speedups without measurements.
+Follow the [codebase style guide](../../developer-docs/style-guide/style-guide.mtf). Prefer explicit ownership over broad utility modules. Route readability-only problems to Style and measured costs to Performance. Do not claim speedups without measurement.
 
 ## 7. Evaluate the reason to keep each candidate
 
@@ -125,7 +125,7 @@ Choose a concrete disposition for each serious candidate:
 5. **Restructure data flow:** publish the producer's owned fact once instead of adding another helper or repeated traversal.
 6. **Split responsibility:** extract genuinely separate ownership into a focused module, not a broad utility layer.
 
-Prefer deletion and direct data flow. Show which existing functions, paths or representations disappear and which invariants remain. A recommendation that adds more structure than it removes needs a stronger current requirement than a recommendation that makes the code smaller and clearer.
+Prefer deletion and direct data flow. Identify what disappears and which invariants remain. Added structure needs a stronger current justification than a simplification.
 
 ## Findings, coverage and staleness
 

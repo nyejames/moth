@@ -1,10 +1,10 @@
 # Correctness
 
-Find cases where the compiler accepts, rejects, transforms, schedules or publishes data differently from Moth's accepted contract. Audit the whole relevant path, including failures and cross-stage handoffs, not only the most visible implementation.
+Find cases where the compiler accepts, rejects, transforms, schedules or publishes data contrary to Moth's accepted contract. Trace the relevant path, including failures and cross-stage handoffs.
 
-Follow the [audit guide](../audit-guide.md). **Correctness bugs go directly to [`docs/bug-reports.md`](../../bug-reports.md)** and audit coverage goes to the [audit log](../audit-log.md). Do not create a formal `AUD-####` report. Incidental issues outside this kind or area use the same bug queue without extending coverage.
+Follow the [audit guide](../audit-guide.md). Record findings in [`docs/bug-reports.md`](../../bug-reports.md) and coverage in the [audit log](../audit-log.md), without a formal `AUD-####` report. Incidental issues use the same queue without extending coverage.
 
-**Evidence bar:** a confirmed bug needs a violated contract or enforced invariant and a concrete input, execution path or state trace that violates it. Record a credible unproven risk as an explicitly labelled investigation lead, not a demonstrated bug. Design preferences, unsupported assumptions and missing deferred features are not correctness findings.
+**Evidence bar:** a confirmed bug needs a violated contract or invariant and a concrete input or state trace demonstrating it. Label credible but unproven risks as investigation leads. Preferences and missing deferred features are not defects.
 
 ## 1. Establish what must happen
 
@@ -13,7 +13,7 @@ Start from canonical documentation and the [progress matrix](../../docs/progress
 - Which inputs are valid, what outputs or effects they require and what must be rejected.
 - Which compiler stage validates each rule, produces each fact and owns each failure.
 - Which consumers depend on the fact and what they may assume after validation.
-- Which identities, ordering, immutability, lifetime and publication guarantees apply.
+- Which identity, ordering, immutability, lifetime and publication guarantees apply.
 - Which behaviour differs legitimately by target, builder or command and which must remain identical.
 
 Separate accepted design from current support and implementation. A feature that remains deferred is not a defect, but accepting an unsupported operation or violating a supported boundary can be. Existing tests establish the executable baseline, not permission to contradict the design.
@@ -28,10 +28,10 @@ Follow an input or state transition from its producer through the consumers that
 - Can a transformation lose an error edge, source origin, result slot, identity, ownership constraint or required ordering?
 - Do CLI, tooling, direct compiler services and builders enter the same validation owner where the contract requires parity?
 
-Inspect only the boundaries relevant to the chosen area:
+Use the relevant architectural boundaries to focus the trace:
 
 - **Stage 0:** source discovery, project and package graphs, preparation scheduling and publication, not source semantics.
-- **Preparation and AST:** tokenization and declaration-shell parsing run once. AST owns semantic resolution, folding, generic requests and AST-local TIR. Later stages do not reparse source or reconstruct an earlier owner's meaning.
+- **Preparation and AST:** tokenization and declaration-shell parsing run once. AST owns semantic resolution, folding, generic requests and AST-local TIR. Later stages do not reconstruct earlier semantic meaning.
 - **HIR and analyses:** HIR carries validated backend-facing semantics. Borrow, lifetime and memory analyses consume owned facts and side tables without silently rewriting the language contract.
 - **Targets and outputs:** target validation precedes lowering. Backends implement validated semantics rather than reconsidering source legality. Build and link planning consume compiler facts rather than rediscovering AST or source structure.
 
@@ -48,7 +48,7 @@ For each important rule, compare the nearest valid and invalid cases. Vary only 
 - **Capabilities:** supported versus unavailable target features, different builders and relevant `check`, `build` and `dev` paths.
 - **Host inputs:** native paths, platform-specific names, non-UTF-8 components, invalid resources and operational failures where the area touches them.
 
-Use existing focused tests and safe reproductions to distinguish a real difference from an imagined one. Do not change production code, tests or fixtures during an audit. If a minimal permanent regression test is needed, record it as the next step in the bug entry.
+Use focused tests and safe reproductions to verify differences. Audit runs do not edit production code, tests or fixtures. Record needed regression coverage in the bug entry.
 
 ## 4. Check state and identity invariants
 
@@ -87,7 +87,7 @@ Where the audited area runs more than once or in parallel, check:
 - Iterative worklists reach a justified fixed point and terminate. A silent iteration cap or premature convergence is suspicious.
 - Reuse invalidates on changed providers, config, target capabilities, semantic fingerprints and layout requirements. Process-local IDs and host paths do not accidentally become persistent identities.
 
-A missing cache or slower algorithm is not automatically a correctness defect. Incorrect cache reuse, skipped validation and nondeterministic semantic output are.
+A missing cache is not a correctness defect. Incorrect reuse, skipped validation and nondeterministic semantic output are.
 
 ## 7. Challenge and record discoveries
 
@@ -101,7 +101,7 @@ Before logging a confirmed bug:
 4. Check existing bug reports, active plans and historical findings for the same root cause.
 5. Name the owning boundary and a focused reproduction or regression check for later work.
 
-Write one concise `docs/bug-reports.md` entry per root cause. Use its flexible `Found`, `Where`, `Observed` and `Investigate` pattern when useful, adding a small repro or source trace when available. Say **unconfirmed** if the path has not been demonstrated. Do not turn a test assertion gap or stylistic concern into a confirmed semantic defect without evidence.
+Write one concise `docs/bug-reports.md` entry per root cause. Use `Found`, `Where`, `Observed` and `Investigate` where helpful, adding a reproduction or trace if available. Label unproven paths **unconfirmed**. A missing test or stylistic concern is not proof of a semantic defect.
 
 Record complete or partial coverage in `audit-log.md`, with the audited revision and exact exclusions for a partial run. Describe what was genuinely inspected, not merely searched. A clean audit still records coverage. A later fix verifies the behaviour and removes the bug entry in its resolving commit.
 
