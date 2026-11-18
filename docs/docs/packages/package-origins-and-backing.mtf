@@ -15,8 +15,11 @@ Backing describes implementation:
 
 - **MothSource**: one or more Moth modules resolved through the source package registry.
 - **ExternalBinding**: typed functions, constants and opaque types implemented outside Moth.
+- **HostBinding**: native Rust host functions described by typed descriptors registered through the builder SDK.
 
 Backing is semantic, not a file-format choice. Precompiling or emitting a `MothSource` package as Wasm keeps it `MothSource`. Imported WIT components are `ExternalBinding` packages.
+
+`ExternalBinding` and `HostBinding` packages are both binding-backed. A backend lowers or provides every `ExternalBinding` symbol itself. A `HostBinding` package is supplied by the native host registered with the builder. Only reachable functions from `HostBinding` packages contribute native host import requirements.
 
 [table:
     [th:
@@ -29,6 +32,7 @@ Backing is semantic, not a file-format choice. Precompiling or emitting a `MothS
     [td: [:`@builder/web/site`] [: Builder] [: MothSource]]
     [td: [:`@core/collections`, `@core/io`, `@core/math`, `@core/text`, `@core/random`, `@core/time`] [: Core] [: ExternalBinding]]
     [td: [:`@builder/web/canvas`, `@builder/web/graphics`, `@builder/web/page`] [: Builder] [: ExternalBinding]]
+    [td: [: A builder SDK host package such as `@builder/game/platform`] [: Builder] [: HostBinding]]
     [td: [: Scoped `@package.moth` support package] [: ProjectLocal] [: MothSource]]
     [td: [: Project-root `@package.moth` facade] [: ProjectLocal] [: MothSource]]
     [td: [: Annotated project-local `.js` file] [: ProjectLocal] [: ExternalBinding]]
@@ -91,3 +95,4 @@ There is no remote fetching, lockfile or version resolution yet. Use `@package.m
 - For project-local packages see @#project-local-packages (Project-local packages).
 - For dependency path families see @#dependency-paths (Dependency paths).
 - For Core package API details see @./core (Core packages).
+- For builder SDK host packages see @../../developer-docs/project-builders/#packages-and-rust-host-functions (Host packages).

@@ -46,13 +46,6 @@ A casual log of bugs and limitations found during other work and left for later 
 - Observed: a selected `@entry.moth` or `@mod.moth` builds a `ProjectModuleGraph` and project namespaces only to validate reserved-root claims, then discards them. The registered-prefix collision probe for an ordinary selected file can list the same parent directories again for each registered source package prefix. Both are bounded and small today.
 - Investigate: reuse the namespaces later stages build for bounded selections, and group prefixes by shared parent components in the probe. Measure before changing.
 
-### User-facing package backing docs omit `HostBinding`
-
-- Found: Core/Builder package namespace and config filename work, 2026-11.
-- Where: `docs/docs/packages/package-origins-and-backing.mtf` (backing list and example table).
-- Observed: code has three backings (`MothSource`, `ExternalBinding`, `HostBinding`) and `docs/build-system-design.md` now lists all three. The user-facing package reference still lists only `MothSource` and `ExternalBinding`, so builder SDK host packages have no documented backing.
-- Investigate: add `HostBinding` with a builder SDK host package example, matching `Package classification` in `docs/build-system-design.md`.
-
 ### Scaffold `cd` instruction is not shell-quoted
 
 - Found: portable path display hardening inventory, 2026-11.
