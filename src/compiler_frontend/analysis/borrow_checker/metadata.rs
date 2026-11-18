@@ -290,6 +290,11 @@ impl<'a> BorrowChecker<'a> {
         }
 
         let mut mutation_positions = FxHashSet::default();
+        let mut record_parameter_mutation = |root: &LocalId| {
+            if let Some(position) = parameter_positions.get(root) {
+                mutation_positions.insert(*position);
+            }
+        };
         for block_id in reachable_blocks {
             let block = self.block_by_id_or_error(*block_id, function.id)?;
             for statement in &block.statements {
@@ -303,16 +308,16 @@ impl<'a> BorrowChecker<'a> {
                     ));
                 };
 
-                let mut mutates_parameter = |root: &LocalId| {
-                    if let Some(position) = parameter_positions.get(root) {
-                        mutation_positions.insert(*position);
-                    }
-                };
-
                 match &statement.kind {
-                    HirStatementKind::Write { .. } => {
+                    // Only a write to an existing place mutates a parameter. HIR validation keeps
+                    // definitions off parameter locals, so a definition from a parameter records
+                    // only the exclusive access needed to issue a mutation-capable alias.
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::AssignPlace(_),
+                        ..
+                    } => {
                         for root in &statement_fact.mutable_roots {
-                            mutates_parameter(root);
+                            record_parameter_mutation(root);
                         }
                     }
                     HirStatementKind::Call { target, args, .. } => {
@@ -334,7 +339,7 @@ impl<'a> BorrowChecker<'a> {
                                 ));
                             };
                             for root in &argument_fact.roots {
-                                mutates_parameter(root);
+                                record_parameter_mutation(root);
                             }
                         }
                     }
@@ -350,7 +355,7 @@ impl<'a> BorrowChecker<'a> {
                             ));
                         };
                         for root in &receiver_fact.roots {
-                            mutates_parameter(root);
+                            record_parameter_mutation(root);
                         }
                     }
                     _ => {}
@@ -375,9 +380,7 @@ impl<'a> BorrowChecker<'a> {
                         ));
                     };
                     for root in &fact.roots {
-                        if let Some(position) = parameter_positions.get(root) {
-                            mutation_positions.insert(*position);
-                        }
+                        record_parameter_mutation(root);
                     }
                 }
             }
@@ -394,9 +397,7 @@ impl<'a> BorrowChecker<'a> {
                 };
                 // Map keys and stored values are borrowed inputs, not mutated parameters.
                 for root in &fact.roots {
-                    if let Some(position) = parameter_positions.get(root) {
-                        mutation_positions.insert(*position);
-                    }
+                    record_parameter_mutation(root);
                 }
             }
         }

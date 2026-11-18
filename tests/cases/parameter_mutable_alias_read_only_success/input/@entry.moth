@@ -1,0 +1,18 @@
+-- Reading through a mutable alias of a mutable parameter and from an explicit copy is
+-- accepted. Neither declaration writes its source parameter, so the public call summaries
+-- stay read-only.
+
+read_through_alias |divisor ~I32| -> I32:
+    n ~I32 = divisor
+    return n
+;
+
+read_copy |source I32| -> I32:
+    snapshot ~I32 = copy source
+    return snapshot
+;
+
+three ~= 3
+first = read_through_alias(~three)
+second = read_copy(4)
+io.line([:parameter_mutable_alias_read_only_success first=[first] second=[second]])

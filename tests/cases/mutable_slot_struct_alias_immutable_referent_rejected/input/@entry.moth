@@ -1,0 +1,22 @@
+-- A mutable slot whose stored struct value aliases an immutable allocation cannot be
+-- passed by `~` to a callee that writes a field. The callee would write through to storage
+-- the immutable `original` binding still owns.
+
+Point = |
+    x I32,
+|
+Holder = |
+    point Point,
+|
+identity |value Point| -> Point:
+    return value
+;
+set_x |point ~Point|:
+    ~point.x = 99
+;
+original = Point(1)
+holder = Holder(original)
+slot ~= Point(0)
+~slot = identity(original)
+set_x(~slot)
+io.line([: mutable_slot_struct x=[holder.point.x]])

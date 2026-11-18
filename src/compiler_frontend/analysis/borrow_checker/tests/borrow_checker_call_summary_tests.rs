@@ -502,6 +502,88 @@ mutator(shared, ~mutable)
     );
 }
 
+#[test]
+fn parameter_alias_definition_does_not_publish_a_parameter_write() {
+    // Issuing a mutation-capable alias records an exclusive access on the source parameter.
+    // A definition cannot write the parameter, so the summary must stay read-only even when the
+    // parameter is mutable and the alias is the only thing that touches it.
+    let source = r#"reader |divisor ~I32| -> I32:
+    n ~I32 = divisor
+    return n
+;"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let entry_path = path_fork
+        .try_intern_portable_path("@entry.moth", &mut string_table)
+        .expect("test entry path fits");
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("reading through a mutable alias of a mutable parameter should validate");
+
+    let reader_name = path_fork
+        .try_intern_child(entry_path, string_table.intern("reader"))
+        .expect("test path fits");
+    let reader_id = hir
+        .functions
+        .iter()
+        .find(|function| {
+            hir.side_table
+                .function_name_path(function.id)
+                .is_some_and(|path| path == reader_name)
+        })
+        .expect("reader function should lower to HIR")
+        .id;
+    let summary = report
+        .analysis
+        .public_call_summaries
+        .get(&reader_id)
+        .expect("reader should have a retained call summary");
+
+    assert_eq!(
+        summary.parameters[0].access,
+        PublicCallParameterAccess::Mutable
+    );
+    assert_eq!(
+        summary.parameters[0].mutation,
+        PublicCallMutationEffect::NoWrite
+    );
+    assert_eq!(
+        summary.parameters[0].transfer_effect,
+        PublicCallTransferEffect::MayConsume
+    );
+}
+
+#[test]
+fn mutable_parameter_rejects_alias_of_immutable_parameter_at_final_use() {
+    // The callee's mutable parameter needs a mutable root even when the alias has no later use,
+    // because an inferred transfer moves cleanup responsibility without granting mutation.
+    let source = r#"consume |value ~I32|:
+;
+
+forward |divisor I32|:
+    n ~I32 = divisor
+    consume(~n)
+;"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
+    let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect_err(
+            "a final-use mutable alias of an immutable parameter cannot grant mutable access",
+        );
+    assert_invalid_mutable_access_reason(error, InvalidMutableAccessReason::ImmutablePlace);
+}
+
 fn local_call_mutation_summary_in_order(
     callee_body: &str,
     callee_declared_first: bool,

@@ -6,19 +6,12 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 ## Open
 
-### Mutable local passed by `~` gets an invalid parameter effect summary
-
-- Found: Constraints branch implementation and independent merge review, 2026-11.
-- Where: `validate_parameter_summary` in `src/compiler_frontend/public_call_summary.rs` (around line 263), with the upstream mutation/transfer summary producer still to identify.
-- Observed: copy an immutable function parameter to a mutable local, then pass that local to another function through `~`. Compilation fails with `MOTH-INFRA-0001` and an `invalid effect combination` message instead of accepting the legal access or producing a source diagnostic. The implementation agent reproduced it on original base `d80f56343` and referenced a temporary probe at `tmp/probes-t3/p90`, which is not a durable test fixture.
-- Investigate: first commit a minimal repro under `tests/cases/`, then follow the parameter's declared access, mutation effect and transfer effect to find the first inconsistent producer. Preserve the `Shared` versus `Mutable` summary invariants and fix the producer rather than weakening the validator to accept invalid combinations.
-
 ### A symlink alias into a `@config.moth` directory bypasses its exclusion
 
-- Found: reserved config directory fix, 2026-11. Traced, not reproduced.
-- Where: `SourceTreeSkipPolicy::canonical_directory_is_skipped` in `src/build_system/create_project_modules/source_tree_index.rs` and `authored_directory_exclusion` in `file_reference_resolution.rs`.
-- Observed: discovery skips a `@config.moth` directory only by its listed name, and the resolvers reject it only by authored components. A visible alias such as `src/alias -> src/@config.moth` is traversed and indexed under its canonical path, and `@alias/notes.mtf` can resolve into the excluded subtree. Hidden `_` directories have canonical-ancestry checks in both places for this case. Separately, dependency clauses that enter a `@config.moth` directory are rejected but the message says the import names `@config.moth` itself.
-- Investigate: whether the config directory exclusion should match the hidden-subtree rule in canonical ancestry. If so, add it to the skip policy and both resolvers' canonical checks with a Unix symlink test.
+- Found: reserved config directory fix, 2026-11. Reproduced with throwaway Unix symlink tests, 2026-11.
+- Where: `SourceTreeSkipPolicy::canonical_directory_is_skipped` in `src/build_system/create_project_modules/source_tree_index.rs` and `authored_directory_exclusion` in `file_reference_resolution.rs`. The dependency-clause message is `direct_special_file_import_message` in `src/compiler_frontend/compiler_messages/render/payload.rs`, reached through `dependency_path_references_config_file` in `module_namespace.rs`, which matches any path component.
+- Observed: discovery skips a `@config.moth` directory only by its listed name, and the resolvers reject it only by authored components. With `src/alias -> src/@config.moth`, discovery indexes `@config.moth/notes.mtf` under the alias, and `alias/logo.png` resolves as a resource. Hidden `_` directories have canonical-ancestry checks in both places for this case. Canonical docs (`docs/build-system-design.md`, `project-layout.mtf`, `module-roots.mtf`) define `@config.moth` only as a reserved filename that is inert when nested. No doc makes a config-named directory an excluded subtree. The directory skip came from `37102dfc4` without a doc change. Separately, dependency clauses that enter a `@config.moth` directory are rejected, but the message says the import names `@config.moth` itself.
+- Investigate: decide the rule. Either document a config-named directory as an excluded subtree and extend the hidden-ancestry predicate to return the applicable reason in discovery and both resolvers, or delete the undocumented directory skip and the config branch of `authored_directory_exclusion`. Then reword the message for a non-final component.
 
 ### Damaged package set classification is path-only
 
@@ -69,3 +62,53 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 - Workaround: `template_supplied_nested_composition` renders its loop checks in a separate fragment, `~[:[loops]]`, whose const content folds before lowering.
 - Investigate: whether a const range loop with constant bounds should fold or lower without checked `Invoke` delivery. Otherwise, implement recoverable numeric failure on Wasm. Pin the entry above as an `html_wasm` success case once fixed.
+
+### Receiver mutation through a `catch`-joined slot changes an immutable parameter's element
+
+- Found: mutable `~` summary fix soundness review, 2026-11. Reproduced by probe on `bug-fixes` HEAD (`tmp/probes-mt/m12_nested_get_receiver_push`, not a durable fixture). Silent miscompile.
+- Where: alias-root tracking through `catch` result joins in `src/compiler_frontend/analysis/borrow_checker/transfer/`; root cause not traced.
+- Observed: the program below compiles on both profiles and prints `m12 len=2`. The immutable `inner` changes through the immutable `rows` parameter. The alias roots of `rows.get(0)` appear to be lost at the `catch` join, so `~slot.push(4)` sees no immutable root.
+
+  ```moth
+  mutate_param |rows {{I32}}|:
+      slot ~{I32} = {0}
+      ~slot = rows.get(0) catch:
+          then {7}
+      ;
+      ~slot.push(4)
+  ;
+  inner {I32} = {1}
+  data {{I32}} = {inner}
+  mutate_param(data)
+  io.line([: m12 len=[inner.length()]])
+  ```
+
+- Investigate: commit the program as a rejected case expecting `MOTH-BORROW-0007`, then find where the `catch` join drops the success value's roots.
+
+### Branch-joined slot passed by `~` gets an invalid parameter effect summary
+
+- Found: mutable `~` summary fix soundness review, 2026-11. Reproduced by probe on `bug-fixes` HEAD (`tmp/probes-mt/m03_branch_join_callee_push`).
+- Where: call-argument mutability checks in `src/compiler_frontend/analysis/borrow_checker/transfer/access/statement.rs` and summary publication in `finalize_public_call_summary_effects` (`analysis/borrow_checker/metadata.rs`).
+- Observed: `mutate_param |items {I32}, flag Bool|` assigns `~slot = identity(items)` in one `if` arm and `~slot = {9}` in the other, then calls `add_one(~slot)`, which pushes. Compilation fails with `MOTH-INFRA-0001` (shared parameter summarised as `Writes`) instead of `MOTH-BORROW-0007`. The straight-line shape is rejected correctly.
+- Investigate: why the join's merged roots skip the mutable-root requirement that the straight-line path enforces.
+
+### Mutable scalar slot holding an immutable value's provenance is rejected by `~`
+
+- Found: mutable `~` summary fix review, 2026-11. Confirmed conservative over-rejection on HEAD.
+- Where: `roots_for_place` / `effective_roots` in `src/compiler_frontend/analysis/borrow_checker/transfer/access.rs`, consumed by `check_call_mutable_borrow` and `check_call_may_consume`.
+- Observed: with immutable `original = 5`, mutable `slot ~= 0`, `~slot = identity(original)` and then `set_two(~slot)` (which only does `~value = 2`) is rejected with `MOTH-BORROW-0007` on `original`. A definite slot storing a produced value reports only the value's provenance roots, so the check targets `original` rather than the slot's own cell.
+- Investigate: an attempted waiver for definite slots was unsound for aggregates. Collections, maps and structs share their allocation, so a callee could mutate the immutable original in place. Any relaxation must be limited to types with no in-place mutation surface and must keep the aggregate shapes rejected (see the regression cases added with the `~` summary fix).
+
+### Mutable alias declarations accept an immutable source
+
+- Found: mutable `~` summary fix review, 2026-11. Design conflict between canonical docs and implementation.
+- Where: definition path `check_mutable_access` with `require_root_mutable: false` in `src/compiler_frontend/analysis/borrow_checker/transfer/access.rs`. The docs are `docs/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf` (source of a mutable alias "must permit mutation") and `docs/docs/memory/copy-and-exclusive-access.mtf` (alias created "when `source` is an eligible mutable place").
+- Observed: `alias ~= data` and `n ~I32 = divisor` compile when `data` or `divisor` is immutable. Writes and `~` arguments through the alias are rejected later. Committed success cases depend on this: `branch_reborrow_after_last_use`, `consistent_borrow_outcomes`, `consistent_ownership_outcomes` and `path_dependent_reborrow`. `live_shared_alias_blocks_mutable_rebinding` expects the conflict reason rather than `immutable_place`.
+- Investigate: decide whether declaration requires a mutable source, as the docs say, or whether the docs should describe deferred rejection at first mutation. Then align the cases.
+
+### `~slot = parameter` rebind publishes a parameter write
+
+- Found: mutable `~` summary fix review, 2026-11. Confirmed imprecision. No caller rejection was found.
+- Where: `finalize_public_call_summary_effects` in `src/compiler_frontend/analysis/borrow_checker/metadata.rs`.
+- Observed: an `AssignPlace` slot rebind records the incoming referent root as a statement-level exclusive access in `mutable_roots`. A `Mutable` parameter that is only aliased this way is published as `Writes`, and callers can inherit the false `Writes` transitively.
+- Investigate: publish actual written roots separately from exclusive-access roots.

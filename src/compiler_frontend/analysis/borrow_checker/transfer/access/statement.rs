@@ -935,9 +935,12 @@ fn check_call_may_consume(
                 actor_index_hint,
                 current_order: input.current_order,
             };
+            // Inferred transfer moves cleanup responsibility, never mutation authority. The
+            // callee's declared access mode still decides whether the argument's root must be
+            // mutable, exactly as the non-transfer mutable borrow check requires.
             let transfer_policy = MutableAccessPolicy {
                 allow_prior_shared: false,
-                require_root_mutable: false,
+                require_root_mutable: matches!(fallback_effect, ArgEffect::MutableBorrow),
                 strict_move_exclusivity: true,
                 alias_exclusivity: AliasExclusivity::All,
             };

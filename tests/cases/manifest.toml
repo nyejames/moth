@@ -4754,6 +4754,34 @@ contract = "language.bindings.mutable_update_alias_immutable_referent_rejected"
 role = "primary"
 
 [[case]]
+id = "parameter_mutable_alias_argument_rejected"
+path = "parameter_mutable_alias_argument_rejected"
+tags = ["integration", "borrows", "diagnostics", "functions"]
+contract = "language.bindings.mutable_argument_alias_immutable_referent_rejected"
+role = "primary"
+
+[[case]]
+id = "parameter_mutable_alias_read_only_success"
+path = "parameter_mutable_alias_read_only_success"
+tags = ["integration", "borrows", "functions"]
+contract = "language.bindings.parameter_alias_and_copy_read_success"
+role = "primary"
+
+[[case]]
+id = "mutable_slot_aggregate_alias_immutable_referent_rejected"
+path = "mutable_slot_aggregate_alias_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics"]
+contract = "language.bindings.mutable_slot_aggregate_alias_immutable_referent_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_slot_struct_alias_immutable_referent_rejected"
+path = "mutable_slot_struct_alias_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics"]
+contract = "language.bindings.mutable_slot_struct_alias_immutable_referent_rejected"
+role = "primary"
+
+[[case]]
 id = "mutable_alias_live_blocks_whole_binding_write"
 path = "mutable_alias_live_blocks_whole_binding_write"
 tags = ["integration", "borrows", "diagnostics"]
