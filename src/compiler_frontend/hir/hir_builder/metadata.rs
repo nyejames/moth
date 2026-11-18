@@ -7,6 +7,7 @@
 //! metadata result boundary, not stored on `HirModule`.
 
 use crate::compiler_frontend::ast::Ast;
+use crate::compiler_frontend::ast::AstFastOperationSource;
 use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, NodeKind};
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
 use crate::compiler_frontend::ast::expressions::failure_facts::{
@@ -343,12 +344,18 @@ impl<'a> HirBuilder<'a> {
             if is_pruned(witness.function, witness.scope, witness.span) {
                 continue;
             }
+            let provenance = match witness.source {
+                AstFastOperationSource::AuthoredArithmetic => {
+                    HirFastUseProvenance::AuthoredArithmetic
+                }
+                AstFastOperationSource::RangeOrdinal => HirFastUseProvenance::RangeGuard,
+            };
             evidence
                 .entry(function_id)
                 .or_default()
                 .fast_use
                 .push(HirFastUseWitness {
-                    provenance: HirFastUseProvenance::AuthoredArithmetic,
+                    provenance,
                     span: witness.span,
                 });
         }
@@ -431,15 +438,12 @@ impl<'a> HirBuilder<'a> {
                     continue;
                 }
                 let target = self.resolve_call_target_or_error(&site.target)?;
-                // An erased call is dead only when authored control flow cannot reach it, or when
-                // it stood in a statically pruned catch handler. A release-folded assertion
-                // terminal is not authored liveness; reading that post-fold skip would make
-                // constraint verdicts differ from debug. The producer guarantees an authored
-                // span, so authored liveness is decidable for every row.
-                let live = !ast.authored_dead_failure_spans.contains(&site.span)
-                    && skipped_source.is_none_or(|skipped| {
-                        !skipped.contains_pruned_handler_span(site.span, span_sources)
-                    });
+                // The release producer already skipped every authored-dead statement root, so a
+                // recorded row was reachable when it was folded. Only a statically pruned catch
+                // handler can still make an erased row unreachable, and that skip is authored too.
+                let live = skipped_source.is_none_or(|skipped| {
+                    !skipped.contains_pruned_handler_span(site.span, span_sources)
+                });
                 if live {
                     insert_live_erased_site_in_source_order(
                         &mut live_erased_call_sites,

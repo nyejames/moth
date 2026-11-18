@@ -41,13 +41,6 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: validation accepts spaces, Unicode and `%` in the `origin` setting. Emitted URLs use the authored spelling verbatim, so a browser requests `/caf%C3%A9/...` for origin `/café` and the dev server's literal prefix match returns 404. It is undefined whether an authored `%20` is already encoded text or a literal percent.
 - Investigate: choose one rule, either restrict origin segments to URL-safe characters or treat the authored origin as decoded text and encode it on emission. Apply the same rule to the dev server prefix match and add loopback coverage.
 
-### Skipped range evidence can over-select an ordinal update inside a pruned catch
-
-- Found: Wasm open const loop fix review, 2026-11. Unverified lead, not reproduced.
-- Where: `record_skipped_statement_nodes` in `src/compiler_frontend/hir/hir_expression/constraint_evidence.rs` decides whether a skipped range emits its ordinal update with `analyze_control_flow_exits`. Lowering decides it from HIR CFG edges to the step block in `loop_lowering.rs`.
-- Observed: HIR prunes a statically infallible `catch` handler, but the AST exit analysis still counts a `continue` inside that handler. A skipped `$fast_math` range that binds an ordinal and reaches its step block only through such a `continue` would be recorded as a `RangeGuard` that the live lowering does not emit. The skipped copy could then falsely reject `$safe_math`. The error only over-selects and never hides a live trap.
-- Investigate: try to reproduce this. If it reproduces, let the AST exit analysis skip handlers that HIR proves unreachable.
-
 ### Receiver mutation through a `catch`-joined slot changes an immutable parameter's element
 
 - Found: mutable `~` summary fix soundness review, 2026-11. Reproduced by probe on `bug-fixes` HEAD (`tmp/probes-mt/m12_nested_get_receiver_push`, not a durable fixture). Silent miscompile.

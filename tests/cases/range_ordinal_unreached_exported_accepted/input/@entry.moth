@@ -1,0 +1,3 @@
+@probe first_value
+
+~[: [first_value(3)]]

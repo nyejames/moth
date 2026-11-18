@@ -1,0 +1,30 @@
+calm |value I32| -> I32:
+    return value
+;
+
+-- The protected comparison and both calls are infallible, so HIR lowers the handler only as
+-- skipped evidence. Its `continue` never reaches the step block, and the body's `return` leaves
+-- first, so the ordinal update is not emitted and the exported no-slot function stays accepted.
+$export
+probe |limit I32| -> I32:
+    loop 0 to limit |value, index|:
+        result Bool = calm(1) < calm(2) catch |error|:
+            continue
+        ;
+        return 0
+    ;
+    return 0
+;
+
+-- The same body shape after a terminator exercises the skipped-source walker: it must apply the
+-- same pruned-handler rule instead of recording a fast range guard the live loop would not emit.
+$fast_math $safe_math
+skipped_probe |limit I32| -> I32:
+    return 0
+    loop 0 to limit |value, index|:
+        result Bool = calm(1) < calm(2) catch |error|:
+            continue
+        ;
+        return 0
+    ;
+;

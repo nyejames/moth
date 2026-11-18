@@ -21152,13 +21152,6 @@ contract = "language.directives.safe_math_rejects_direct_fast_use"
 role = "primary"
 
 [[case]]
-id = "source_constraints_safe_math_dead_unstepped_range_accepted"
-path = "source_constraints_safe_math_dead_unstepped_range_accepted"
-tags = ["integration", "directives", "numeric", "constraints"]
-contract = "language.directives.safe_math_accepts_skipped_unstepped_range"
-role = "primary"
-
-[[case]]
 id = "source_constraints_safe_math_fast_range_ordinal_rejected"
 path = "source_constraints_safe_math_fast_range_ordinal_rejected"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
@@ -21170,6 +21163,20 @@ id = "source_constraints_safe_math_fast_range_ordinal_rejected_release"
 path = "source_constraints_safe_math_fast_range_ordinal_rejected_release"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "release"]
 contract = "language.directives.safe_math_rejects_fast_range_ordinal_trap"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_safe_math_assertion_folded_ordinal_rejected"
+path = "source_constraints_safe_math_assertion_folded_ordinal_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
+contract = "language.directives.safe_math_rejects_release_folded_fast_range_ordinal"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_assertion_folded_ordinal_rejected_release"
+path = "source_constraints_safe_math_assertion_folded_ordinal_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "release"]
+contract = "language.directives.safe_math_rejects_release_folded_fast_range_ordinal"
 role = "boundary"
 
 [[case]]
@@ -21185,6 +21192,20 @@ path = "source_constraints_safe_math_range_ordinal_unreached_accepted_release"
 tags = ["integration", "directives", "numeric", "constraints", "release"]
 contract = "language.directives.safe_math_accepts_unreached_range_ordinal"
 role = "boundary"
+
+[[case]]
+id = "range_ordinal_unreached_exported_accepted"
+path = "range_ordinal_unreached_exported_accepted"
+tags = ["integration", "numeric"]
+contract = "language.loops.range_ordinal_update_omitted_when_body_exits"
+role = "primary"
+
+[[case]]
+id = "range_ordinal_unreached_pruned_handler_accepted"
+path = "range_ordinal_unreached_pruned_handler_accepted"
+tags = ["integration", "directives", "numeric"]
+contract = "language.loops.range_ordinal_update_omitted_for_pruned_handler"
+role = "primary"
 
 [[case]]
 id = "source_constraints_safe_math_rejected"
@@ -21639,4 +21660,46 @@ id = "implicit_failure_erased_call_witness_order_release_rejected"
 path = "implicit_failure_erased_call_witness_order_release_rejected"
 tags = ["integration", "language", "numeric", "diagnostics", "results", "exports", "release"]
 contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_const_template_dead_use_cross_function_rejected"
+path = "implicit_failure_const_template_dead_use_cross_function_rejected"
+tags = ["integration", "language", "results", "diagnostics", "functions", "templates"]
+contract = "language.results.const_template_dead_use_does_not_hide_live_failure"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_const_template_dead_use_cross_function_release_rejected"
+path = "implicit_failure_const_template_dead_use_cross_function_release_rejected"
+tags = ["integration", "language", "results", "diagnostics", "functions", "templates", "release"]
+contract = "language.results.const_template_dead_use_does_not_hide_live_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_const_template_dead_use_same_function_rejected"
+path = "implicit_failure_const_template_dead_use_same_function_rejected"
+tags = ["integration", "language", "results", "diagnostics", "functions", "templates"]
+contract = "language.results.const_template_dead_use_does_not_hide_live_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_const_template_dead_use_same_function_release_rejected"
+path = "implicit_failure_const_template_dead_use_same_function_release_rejected"
+tags = ["integration", "language", "results", "diagnostics", "functions", "templates", "release"]
+contract = "language.results.const_template_dead_use_does_not_hide_live_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_erased_handler_break_dead_template_accepted"
+path = "implicit_failure_erased_handler_break_dead_template_accepted"
+tags = ["integration", "language", "results", "diagnostics", "functions", "templates"]
+contract = "language.results.erased_handler_break_does_not_keep_omitted_tail_live"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_erased_handler_break_dead_template_release_accepted"
+path = "implicit_failure_erased_handler_break_dead_template_release_accepted"
+tags = ["integration", "language", "results", "diagnostics", "functions", "templates", "release"]
+contract = "language.results.erased_handler_break_does_not_keep_omitted_tail_live"
 role = "boundary"

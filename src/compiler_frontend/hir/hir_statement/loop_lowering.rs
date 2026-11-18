@@ -237,9 +237,9 @@ impl<'a> HirBuilder<'a> {
         span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         // A folded-false statement loop never enters its body in any profile. Skipping the body
-        // here keeps HIR consistent with the pre-fold authored-dead span filter, so a failing call
-        // in the body neither demands a private failure lane nor reaches the CFG. Its selected call
-        // and fast-use evidence still needs recording, exactly like a skipped catch handler.
+        // here mirrors the pre-fold classifier and release speculation, so a failing call in the
+        // body neither demands a private failure lane nor reaches the CFG. Its selected call and
+        // fast-use evidence still needs recording, exactly like a skipped catch handler.
         if self.expression_constant_bool(condition) == Some(false) {
             self.record_skipped_statement_evidence(expressions, body)?;
             return Ok(());

@@ -32,6 +32,7 @@
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::AstConstraintBoundary;
 use crate::compiler_frontend::ast::AstDocFragment;
+use crate::compiler_frontend::ast::AstFastOperationSource;
 use crate::compiler_frontend::ast::AstFastOperationWitness;
 use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, Declaration};
 use crate::compiler_frontend::ast::const_values::const_execution::ConstFunctionExecutable;
@@ -1425,11 +1426,11 @@ impl ScopeContext {
     ///       when the resolved operation selected fast semantics.
     /// WHY: this runs at expression-resolution time, so the evidence exists before the operation
     ///      can fold away or become dead. Recording is one push per selection: deferred numeric
-    ///      completion can resolve an authored fragment again, and the ledger's single drain-time
-    ///      normalisation removes those repeats without a membership scan on every record. Only an
-    ///      authored callable body can own executable fast arithmetic; a scope without a callable
-    ///      identity (declaration shells, struct defaults) records nothing because no `$safe_math`
-    ///      boundary can reach it.
+    ///      completion can resolve an authored fragment again, and the ledger's single
+    ///      finalization-time normalisation removes those repeats without a membership scan on
+    ///      every record. Only an authored callable body can own executable fast arithmetic; a
+    ///      scope without a callable identity (declaration shells, struct defaults) records
+    ///      nothing because no `$safe_math` boundary can reach it.
     pub(crate) fn record_fast_operation_witness(&self, span: Option<SourceSpan>) {
         let Some(function) = self.constraint_function else {
             return;
@@ -1438,6 +1439,7 @@ impl ScopeContext {
             function,
             scope: self.scope,
             span,
+            source: AstFastOperationSource::AuthoredArithmetic,
         };
         self.fast_operation_witnesses.borrow_mut().push(witness);
     }

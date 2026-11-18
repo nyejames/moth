@@ -14,12 +14,14 @@ use super::super::scope_context::{ContextKind, ScopeContext};
 use super::normalize_ast::{TemplateNormalizationError, discard_inactive_assertion_messages};
 use super::static_if_specialization::{StaticIfCandidate, StaticIfSpecialization};
 use crate::compiler_frontend::FrontendBuildProfile;
+use crate::compiler_frontend::ast::ConstValueStore;
 use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::const_execution::rewrite_release_calls;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStoreError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    ExprId, ExpressionFreezeRoots, PlaceId,
+    ExprId, ExpressionFreezeRoots, ExpressionOperationView, ExpressionStore, PlaceId,
 };
+use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
 use crate::compiler_frontend::ast::expressions::failure_classification::AstBuiltinFailureSummaries;
 use crate::compiler_frontend::ast::expressions::failure_facts::ImplicitFailureSource;
 use crate::compiler_frontend::ast::generic_functions::{
@@ -28,16 +30,17 @@ use crate::compiler_frontend::ast::generic_functions::{
 };
 use crate::compiler_frontend::ast::statements::control_flow_exits::{
     ControlFlowExitSummary, analyze_control_flow_exits_with_never_targets,
-    collect_authored_dead_failure_spans,
+    push_value_block_headers, range_ordinal_update_is_emitted,
 };
 use crate::compiler_frontend::ast::statements::terminality::{
     NeverProofNode, never_proof_cycle, terminality_policy_for_signature,
     validate_function_body_terminality, validate_function_body_terminality_with_exits,
 };
+use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::top_level_templates::collect_const_top_level_fragments;
 use crate::compiler_frontend::ast::{
-    Ast, AstBuildResult, AstChoiceDefinition, AstPublicInterfaceProjectionInput,
-    normalize_fast_operation_witnesses,
+    Ast, AstBuildResult, AstChoiceDefinition, AstFastOperationSource, AstFastOperationWitness,
+    AstPublicInterfaceProjectionInput, normalize_fast_operation_witnesses,
 };
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
 use crate::compiler_frontend::canonical_type_identity::{
@@ -168,10 +171,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         let doc_fragments = std::mem::take(&mut emitted.doc_fragments);
         // Constraint boundaries stay in authored attachment order for later verification.
         let constraint_boundaries = std::mem::take(&mut emitted.constraint_boundaries);
-        // Selected fast operations are deduplicated and canonically ordered as the ledger leaves
-        // the emitter, so recording stays one push per selected operation.
         let mut fast_operation_witnesses = std::mem::take(&mut emitted.fast_operation_witnesses);
-        normalize_fast_operation_witnesses(&mut fast_operation_witnesses);
 
         // ----------------------------
         //  Collect const top-level fragments
@@ -383,31 +383,42 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             .deferred_generic_requests
             .iter()
             .any(|slot| matches!(slot, GenericRequestSlot::AssertionValidation(_)));
-        // Semantic failure liveness is fixed before release folding, which can erase a call or a
-        // whole tail. Computing it once here lets HIR apply the same pre-fold set to its post-fold
-        // AST, so release verdicts match debug.
-        let mut authored_dead_failure_spans = FxHashSet::default();
+        // Constraint evidence is selected before release folding. A fitted assertion inside a loop
+        // body can make the step block unreachable only after folding; the authored body still
+        // reaches it, and both build profiles must reject the same fast ordinal. Record the
+        // ordinal row on the existing pre-fold fast-operation ledger; retained HIR adds the same
+        // `(provenance, span)` row in debug builds and dedup collapses it.
+        //
+        // This is the ledger's single normalization point: recording stays one push per selected
+        // operation and duplicates or unordered rows are resolved once, after every emitter and
+        // this pre-fold walk have contributed.
         {
-            let template_ir_store = self.context.template_ir_store.borrow();
-            for group in [&emitted.validated_generic_template_bodies, &emitted.ast] {
-                collect_authored_dead_failure_spans(
-                    group,
-                    &self.context.expression_builder,
-                    &template_ir_store,
-                    &self.context.const_values,
-                    &mut authored_dead_failure_spans,
-                )
-                .map_err(|error| self.error_messages(error, &mut emitted.warnings, string_table))?;
-            }
+            let expressions = self.context.expression_builder.store();
+            record_pre_fold_range_ordinal_witnesses(
+                &emitted.validated_generic_template_bodies,
+                expressions,
+                &self.context.const_values,
+                &mut fast_operation_witnesses,
+            );
+            record_pre_fold_range_ordinal_witnesses(
+                &emitted.ast,
+                expressions,
+                &self.context.const_values,
+                &mut fast_operation_witnesses,
+            );
+            normalize_fast_operation_witnesses(&mut fast_operation_witnesses);
         }
+        // Semantic failure facts are fixed before release folding, which can erase a call or a
+        // whole tail. The classifier decides authored reachability per statement occurrence, so
+        // HIR projects the same contributors in both build profiles.
         let builtin_failure_summaries = {
             // Completed AST contains owned runtime handoffs, never unresolved TIR references.
             let template_ir_store = self.context.template_ir_store.borrow();
             AstBuiltinFailureSummaries::compute(
                 &[&emitted.validated_generic_template_bodies, &emitted.ast],
                 &template_ir_store,
+                &self.context.const_values,
                 &self.context.expression_builder,
-                &authored_dead_failure_spans,
             )
             .map_err(|error| self.error_messages(error, &mut emitted.warnings, string_table))?
         };
@@ -674,7 +685,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 constraint_boundaries,
                 fast_operation_witnesses,
                 release_erased_call_sites,
-                authored_dead_failure_spans,
                 pre_fold_failure_facts,
                 constraint_pruned_regions,
                 synthesizes_entry_start,
@@ -1220,5 +1230,161 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         }
 
         choice_definitions
+    }
+}
+
+/// Records range-ordinal rows on the pre-fold fast-operation ledger.
+///
+/// WHAT: walks each callable body's authored statement tree and records one row per `$fast_math`
+///       range loop whose header binds the ordinal and whose body reaches the step block.
+/// WHY: release folding can prove an authored assertion false and discard the step block before
+///      HIR. The ordinal update is still selected source, so the pre-fold ledger keeps the same
+///      row in debug and release; retained HIR adds a duplicate row in debug that dedup removes.
+fn record_pre_fold_range_ordinal_witnesses(
+    nodes: &[AstNode],
+    expressions: &ExpressionStore,
+    constants: &ConstValueStore,
+    witnesses: &mut Vec<AstFastOperationWitness>,
+) {
+    for node in nodes {
+        let body = match &node.kind {
+            NodeKind::Function(_, _, body) | NodeKind::EntryStart(_, body) => body,
+            _ => continue,
+        };
+        let Some(function) = node.function_identity() else {
+            continue;
+        };
+        RangeOrdinalWalk {
+            function,
+            expressions,
+            constants,
+            witnesses: &mut *witnesses,
+            visited: FxHashSet::default(),
+        }
+        .record_body(body);
+    }
+}
+
+/// One callable's pre-fold ordinal walk.
+///
+/// WHAT: owns the single expression-visited set for one callable and the statement/expression
+///       traversal state.
+/// WHY: a value-producing block owns statement bodies and the completed-expression edge
+///      convention also flattens those bodies into its expression ids. Walking a body structurally
+///      and enumerating the same value block's flattened expression ids would re-walk each nested
+///      subtree once per level. One visited set per callable, structural descent into owned
+///      bodies, and only the block's dispatch roots keeps the traversal linear.
+struct RangeOrdinalWalk<'a> {
+    function: AstFunctionIdentity,
+    expressions: &'a ExpressionStore,
+    constants: &'a ConstValueStore,
+    witnesses: &'a mut Vec<AstFastOperationWitness>,
+    visited: FxHashSet<ExprId>,
+}
+
+impl<'a> RangeOrdinalWalk<'a> {
+    /// Recurses through one callable body and its expression-owned statement bodies.
+    fn record_body(&mut self, body: &[AstNode]) {
+        let mut expression_roots = Vec::new();
+        for node in body {
+            match &node.kind {
+                NodeKind::RangeLoop {
+                    bindings,
+                    range,
+                    body: loop_body,
+                } => {
+                    if range.fast_math
+                        && range_ordinal_update_is_emitted(
+                            bindings,
+                            loop_body,
+                            self.expressions,
+                            Some(self.constants),
+                        )
+                        && let Some(span) = node.span
+                    {
+                        self.witnesses.push(AstFastOperationWitness {
+                            function: self.function,
+                            scope: PathId::ROOT,
+                            span: Some(span),
+                            source: AstFastOperationSource::RangeOrdinal,
+                        });
+                    }
+                    self.record_body(loop_body);
+                }
+                NodeKind::If(_, then_body, else_body, _) => {
+                    self.record_body(then_body);
+                    if let Some(else_body) = else_body {
+                        self.record_body(else_body);
+                    }
+                }
+                NodeKind::Match { arms, default, .. } => {
+                    for arm in arms {
+                        self.record_body(&arm.body);
+                    }
+                    if let Some(default) = default {
+                        self.record_body(default);
+                    }
+                }
+                NodeKind::LexicalScope { body }
+                | NodeKind::Function(_, _, body)
+                | NodeKind::EntryStart(_, body) => {
+                    self.record_body(body);
+                }
+                NodeKind::CollectionLoop { body, .. } | NodeKind::WhileLoop(_, body) => {
+                    self.record_body(body);
+                }
+                _ => {}
+            }
+            node.visit_immediate_expression_ids(&mut |id| expression_roots.push(id));
+        }
+        self.record_expression_roots(expression_roots);
+    }
+
+    /// Visits one callable's expression graph through its single shared `visited` set.
+    fn record_expression_roots(&mut self, roots: Vec<ExprId>) {
+        let expressions = self.expressions;
+        let mut pending = roots;
+        while let Some(id) = pending.pop() {
+            if !self.visited.insert(id) {
+                continue;
+            }
+            let Ok(view) = expressions.view(id) else {
+                continue;
+            };
+            if let ExpressionOperationView::ValueBlock(block) = view.operation() {
+                push_value_block_headers(block, &mut pending);
+                self.record_value_block(block);
+            } else {
+                // A view that cannot enumerate its children contributes no further work; the
+                // sibling expression walkers treat the same store error as a dead end.
+                let _ = view.visit_child_ids(&mut |child| pending.push(child));
+            }
+        }
+    }
+
+    /// Recurses into the statement bodies one value block owns.
+    fn record_value_block(&mut self, block: &ValueBlock) {
+        match block {
+            ValueBlock::If(value_if) => {
+                self.record_body(&value_if.then_body);
+                self.record_body(&value_if.else_body);
+            }
+            ValueBlock::LexicalScope(scope) => {
+                self.record_body(&scope.body);
+            }
+            ValueBlock::Match(value_match) => {
+                for arm in &value_match.arms {
+                    self.record_body(&arm.body);
+                }
+                if let Some(default) = &value_match.default {
+                    self.record_body(default);
+                }
+            }
+            ValueBlock::Catch(value_catch) => {
+                if let FallibleHandling::Handler { body, .. } = &value_catch.handler {
+                    self.record_body(body);
+                }
+            }
+        }
     }
 }

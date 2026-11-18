@@ -60,8 +60,8 @@ pub(crate) struct HirConstraintEvidence {
     /// Selected call sites erased by release folding whose statement HIR actually lowered.
     ///
     /// WHAT: the live subset of release-erased calls with the failure containment debug lowering
-    ///       preserved, as opposed to calls from source that HIR skipped after a terminator or in
-    ///       a statically infallible handler.
+    ///       preserved, as opposed to calls from source that HIR skipped because a statically
+    ///       infallible catch handler cannot execute.
     /// WHY: `selected_call_sites` intentionally carries fast-use evidence without regard to
     ///      liveness, because fast selection is not a liveness property. A callee's trap or
     ///      escaping-failure hazard is liveness-conditioned, though, so `$infallible` may only
@@ -89,8 +89,8 @@ pub(crate) struct HirSelectedCallSite {
 ///       failure.
 /// WHY: an erased call retains its trap hazard, but only an escaping call widens `may_fail`.
 ///      Reusing [`HirSelectedCallSite`] would force every selected-site producer to carry a
-///      containment bit it cannot know. The span is required because liveness was already decided
-///      from the authored span by the producer; a spanless consumer would have to guess.
+///      containment bit it cannot know. The span is required because the pruned-handler liveness
+///      split matches it; the release producer never folds an authored-dead call.
 #[derive(Clone, Debug)]
 pub(crate) struct HirLiveErasedCallSite {
     pub(crate) target: CallTarget,
@@ -148,8 +148,8 @@ pub(crate) struct HirSkippedSourceEvidence {
     ///       the protected value is statically infallible.
     /// WHY: release folding can erase a call before HIR lowering, leaving only its constant row.
     ///      The erased-call liveness split must still recognise that the call stood in a handler
-    ///      that cannot execute. Authored dead tails use `Ast::authored_dead_failure_spans`
-    ///      instead, because a post-fold lowering skip there may depend on release folding.
+    ///      that cannot execute. The release producer never folds an authored-dead statement, so
+    ///      this span split covers only statically pruned handler bodies.
     pruned_handler_spans: Vec<SourceSpan>,
 }
 

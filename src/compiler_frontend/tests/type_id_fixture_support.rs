@@ -38,7 +38,6 @@ use crate::compiler_frontend::source::{SourceSpan, SpanResolutionSources};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
-use rustc_hash::FxHashSet;
 
 // ---------------------------------------------------------------------------
 // Choice definition helper used by build_ast_with_choices
@@ -435,12 +434,11 @@ pub(crate) fn build_ast_with_choices(
         .expect("completed fixture expression store");
     // HIR projects the same pre-fold facts production finalization retains.
     let template_ir_store = crate::compiler_frontend::ast::templates::tir::TemplateIrStore::new();
-    let authored_dead_failure_spans = FxHashSet::default();
     let pre_fold_failure_facts = AstBuiltinFailureSummaries::compute(
         &[&nodes],
         &template_ir_store,
+        &const_values,
         &expressions,
-        &authored_dead_failure_spans,
     )
     .expect("fixture failure facts")
     .into_function_facts();
@@ -454,7 +452,6 @@ pub(crate) fn build_ast_with_choices(
         constraint_boundaries: vec![],
         fast_operation_witnesses: vec![],
         release_erased_call_sites: vec![],
-        authored_dead_failure_spans,
         pre_fold_failure_facts,
         constraint_pruned_regions: vec![],
         const_top_level_fragments: vec![],

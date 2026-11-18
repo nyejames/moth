@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use crate::compiler_frontend::ast::ast_nodes::{
     AstFunctionIdentity, AstNode, Declaration, NodeKind,
 };
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionStore, ExpressionView,
     PlaceProjectionView,
@@ -28,6 +29,10 @@ use crate::compiler_frontend::ast::expressions::failure_facts::{
     ExpressionFailureFacts, FailureDisposition, FailureSummary, ImplicitFailureContributor,
     ImplicitFailureContributorSummary, ImplicitFailureSource, WitnessCandidates,
     retain_bounded_witness_hops,
+};
+use crate::compiler_frontend::ast::statements::control_flow_exits::{
+    ControlFlowExitScratch, ControlFlowExitSummary, folded_bool_condition,
+    range_ordinal_update_is_emitted, statement_exits,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
@@ -55,7 +60,6 @@ use crate::compiler_frontend::instrumentation::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use rustc_hash::FxHashSet;
 
 /// A classifier binds roots in their issuing phase or frozen AST owner. TIR is only
 /// readable in the phase case; frozen payloads have already become neutral handoffs.
@@ -97,6 +101,13 @@ impl<'a> FailureClassificationExpressions<'a> {
             ));
         }
         Ok(())
+    }
+
+    fn store(self) -> &'a ExpressionStore {
+        match self {
+            Self::Building(owner) => owner.store(),
+            Self::Frozen(owner) => owner,
+        }
     }
 
     fn builder(self) -> Result<&'a AstExpressionBuilder, InfrastructureFailure> {
@@ -278,6 +289,7 @@ fn pending_function_failure_facts_with_call_summaries(
     active_private_calls: &HashSet<PathId>,
     known_function_paths: &HashSet<PathId>,
     summary_dependencies: &RefCell<HashSet<PathId>>,
+    constants: &ConstValueStore,
     expression_builder: FailureClassificationExpressions<'_>,
 ) -> Result<PendingFunctionFailureFacts, InfrastructureFailure> {
     increment_ast_counter(AstCounter::FailureSummaryBodiesClassified);
@@ -286,6 +298,7 @@ fn pending_function_failure_facts_with_call_summaries(
         TraversalPurpose::FunctionProjection(PendingFunctionFailureFacts::default()),
         expression_builder,
     )
+    .with_constants(constants)
     .with_call_summaries(
         active_private_calls,
         known_function_paths,
@@ -321,8 +334,8 @@ impl AstBuiltinFailureSummaries {
     pub(crate) fn compute<'a>(
         node_groups: &[&[AstNode]],
         template_ir_store: &TemplateIrStore,
+        constants: &ConstValueStore,
         expression_builder: impl Into<FailureClassificationExpressions<'a>>,
-        authored_dead_failure_spans: &FxHashSet<SourceSpan>,
     ) -> Result<Self, InfrastructureFailure> {
         let expression_builder = expression_builder.into();
         let mut bodies = HashMap::new();
@@ -362,15 +375,15 @@ impl AstBuiltinFailureSummaries {
             batch.sort_unstable();
             for identity in batch {
                 let dependencies = RefCell::new(HashSet::new());
-                let mut facts = pending_function_failure_facts_with_call_summaries(
+                let facts = pending_function_failure_facts_with_call_summaries(
                     bodies[&identity],
                     template_ir_store,
                     &active,
                     &known_functions,
                     &dependencies,
+                    constants,
                     expression_builder,
                 )?;
-                retain_authored_live_failure_facts(&mut facts, authored_dead_failure_spans);
                 for dependency in dependencies.into_inner() {
                     classification_dependants
                         .entry(dependency)
@@ -572,40 +585,6 @@ impl AstBuiltinFailureSummaries {
     }
 }
 
-/// Drops failure facts recorded in authored statement tails that cannot execute.
-///
-/// WHAT: filters implicit contributors and deferred catch candidates whose authored span lies in
-///       an unreachable tail.
-/// WHY: the classifier walks retained bodies, including dead tails, so returned expressions and
-///      declared witnesses keep their authored order. Semantic liveness is a separate pre-fold
-///      fact, so filtering afterwards keeps one classification pass for both live and dead source
-///      without making the traversal itself liveness-aware.
-fn retain_authored_live_failure_facts(
-    facts: &mut PendingFunctionFailureFacts,
-    authored_dead_failure_spans: &FxHashSet<SourceSpan>,
-) {
-    // A `None` span is compiler-synthesised and always stays live.
-    facts.body.implicit.retain(|contributor| {
-        !contributor
-            .span
-            .is_some_and(|span| authored_dead_failure_spans.contains(&span))
-    });
-    // A check whose candidates all sit in an authored dead tail can never fire. Dropping it keeps
-    // its generated calls out of summary dependencies and dead-code diagnostics. A check that
-    // authored no candidates still owns its eligibility verdict.
-    facts.body.deferred_custom_catches.retain_mut(|check| {
-        if check.candidates.is_empty() {
-            return true;
-        }
-        check.candidates.retain(|candidate| {
-            !candidate
-                .span
-                .is_some_and(|span| authored_dead_failure_spans.contains(&span))
-        });
-        !check.candidates.is_empty()
-    });
-}
-
 /// An explicit exit inside protected work still targets the function, never the catch.
 pub(crate) fn explicit_propagation_catch_diagnostic<'a>(
     expression: ExpressionView<'_>,
@@ -658,6 +637,21 @@ struct TraversalState<'a> {
     summary_dependencies: Option<&'a RefCell<HashSet<PathId>>>,
     typed_error_seen: bool,
     expression_steps: Vec<ExpressionStep<'a>>,
+    /// Folded values used to decide emitted control flow when the caller supplies them.
+    ///
+    /// WHY: parse-time projection can run before the enclosing owner has a constant store. The
+    /// emitted-work range rule then treats dynamic conditions conservatively; the finalized
+    /// function projection supplies the real store so its facts match lowering exactly.
+    constants: Option<&'a ConstValueStore>,
+    /// Reused exit-analysis worklist for emitted statement reachability.
+    ///
+    /// WHY: the projection walks every statement sequence, so one worklist keeps its expression
+    ///      buffer across statements instead of growing and dropping a fresh one per summary.
+    ///      Nested sequences each run to completion before the next summary, so a single buffer is
+    ///      safe. It skips statically infallible catch handlers because HIR lowers them only as
+    ///      skipped evidence, so their control transfers cannot keep a tail reachable that
+    ///      lowering omits.
+    exit_scratch: ControlFlowExitScratch,
 }
 
 impl<'a> TraversalState<'a> {
@@ -676,7 +670,34 @@ impl<'a> TraversalState<'a> {
             summary_dependencies: None,
             typed_error_seen: false,
             expression_steps: Vec::new(),
+            constants: None,
+            exit_scratch: ControlFlowExitScratch::for_emitted_work(),
         }
+    }
+
+    /// Supplies the folded values emitted-work predicates use to mirror lowering.
+    fn with_constants(mut self, constants: &'a ConstValueStore) -> Self {
+        self.constants = Some(constants);
+        self
+    }
+
+    /// Reads the pre-fold value of one condition, when the caller supplied folded values.
+    fn folded_condition(&self, condition: ExprId) -> Option<bool> {
+        folded_bool_condition(condition, self.expression_builder.store(), self.constants?)
+    }
+
+    /// Summarises one statement's authored exits when reachability is decidable.
+    ///
+    /// WHY: only the finalized function projection supplies folded values. Without them, the
+    ///      parse-time projections keep the conservative walk that classifies every statement.
+    fn statement_summary(&mut self, statement: &AstNode) -> Option<ControlFlowExitSummary> {
+        let constants = self.constants?;
+        Some(statement_exits(
+            statement,
+            self.expression_builder.store(),
+            constants,
+            &mut self.exit_scratch,
+        ))
     }
 
     fn with_call_summaries(
@@ -691,19 +712,18 @@ impl<'a> TraversalState<'a> {
         self
     }
 
+    /// Clones this traversal's immutable configuration under a different purpose.
+    ///
+    /// WHY: candidate collection reuses the enclosing expression builder, call summaries and
+    ///      folded values while it walks one expression, but it must start with fresh traversal
+    ///      state so nested results cannot leak into the enclosing projection.
     fn with_purpose(&self, purpose: TraversalPurpose) -> TraversalState<'a> {
-        TraversalState {
-            purpose,
-            expression_builder: self.expression_builder,
-            loop_depth: 0,
-            visited_templates: HashSet::new(),
-            protected_failure_depth: 0,
-            active_private_calls: self.active_private_calls,
-            known_function_paths: self.known_function_paths,
-            summary_dependencies: self.summary_dependencies,
-            typed_error_seen: false,
-            expression_steps: Vec::new(),
-        }
+        let mut state = TraversalState::new(purpose, self.expression_builder);
+        state.active_private_calls = self.active_private_calls;
+        state.known_function_paths = self.known_function_paths;
+        state.summary_dependencies = self.summary_dependencies;
+        state.constants = self.constants;
+        state
     }
 
     fn private_call_may_fail(&self, path: PathId) -> bool {
@@ -1619,12 +1639,166 @@ fn classify_declarations(
     Ok(None)
 }
 
+/// Collects assertion-message private-call obligations from statements lowering will omit.
+///
+/// WHAT: walks the inactive region iteratively, statement by statement, and keeps only the
+///       `assertion_message_calls` that convergence validates. It never classifies executable
+///       expressions, exits, custom catches or witnesses, and it registers no call-summary
+///       dependencies, so dead catches cause no extra convergence passes.
+/// WHY: the parser defers private-call checking for assertion messages, so convergence must
+///      still diagnose a fallible message in an authored-dead tail or folded-false loop body.
+///      A fresh recursive projection per later `return` would overflow the stack and go
+///      quadratic on a long flat tail with no source nesting.
+fn collect_inactive_assertion_message_calls(
+    nodes: &[AstNode],
+    template_ir_store: &TemplateIrStore,
+    state: &mut TraversalState<'_>,
+) -> Result<(), InfrastructureFailure> {
+    if !matches!(&state.purpose, TraversalPurpose::FunctionProjection(_)) {
+        return Ok(());
+    }
+    enum WalkTask<'a> {
+        Body(&'a [AstNode]),
+        Node(&'a AstNode),
+        Expression(ExprId),
+    }
+
+    /// Queues one statement's immediate expression roots in authored order.
+    fn push_expression_roots<'a>(node: &'a AstNode, tasks: &mut Vec<WalkTask<'a>>) {
+        let mut roots = Vec::new();
+        node.visit_immediate_expression_ids(&mut |expression| roots.push(expression));
+        for expression in roots.into_iter().rev() {
+            tasks.push(WalkTask::Expression(expression));
+        }
+    }
+
+    let mut obligations = Vec::new();
+    let mut tasks = vec![WalkTask::Body(nodes)];
+    while let Some(task) = tasks.pop() {
+        match task {
+            WalkTask::Body(body) => {
+                for node in body.iter().rev() {
+                    tasks.push(WalkTask::Node(node));
+                }
+            }
+            WalkTask::Node(node) => match &node.kind {
+                NodeKind::Assert { message, .. } => {
+                    let message_facts = collect_expression_failure_facts(
+                        state.expression_builder.view(*message)?,
+                        template_ir_store,
+                        state.expression_builder,
+                    )?;
+                    obligations.extend(message_facts.implicit.into_iter().filter(|contributor| {
+                        matches!(contributor.source, ImplicitFailureSource::PrivateCall(_))
+                    }));
+                    push_expression_roots(node, &mut tasks);
+                }
+                // A nested declaration is its own callable; this dead region does not make its
+                // body unreachable, and its obligations are classified with that body.
+                NodeKind::Function(_, _, _) | NodeKind::EntryStart(_, _) => {}
+                NodeKind::If(_, then_body, else_body, _) => {
+                    // Tasks pop in reverse push order, so queue else first: the then body runs
+                    // where the statement sits, before the enclosing sequence resumes.
+                    if let Some(else_body) = else_body.as_deref() {
+                        tasks.push(WalkTask::Body(else_body));
+                    }
+                    tasks.push(WalkTask::Body(then_body));
+                    push_expression_roots(node, &mut tasks);
+                }
+                NodeKind::Match {
+                    scrutinee,
+                    arms,
+                    default,
+                    ..
+                } => {
+                    if let Some(default) = default.as_deref() {
+                        tasks.push(WalkTask::Body(default));
+                    }
+                    for arm in arms.iter().rev() {
+                        tasks.push(WalkTask::Body(&arm.body));
+                        if let Some(guard) = arm.guard {
+                            tasks.push(WalkTask::Expression(guard));
+                        }
+                    }
+                    tasks.push(WalkTask::Expression(*scrutinee));
+                }
+                NodeKind::RangeLoop { body, .. }
+                | NodeKind::CollectionLoop { body, .. }
+                | NodeKind::WhileLoop(_, body)
+                | NodeKind::LexicalScope { body } => {
+                    tasks.push(WalkTask::Body(body));
+                    push_expression_roots(node, &mut tasks);
+                }
+                _ => push_expression_roots(node, &mut tasks),
+            },
+            // Reach assertions inside value-block statement bodies at the expression's authored
+            // position. Header expressions are queued before the bodies they guard.
+            WalkTask::Expression(expression) => {
+                let view = state.expression_builder.view(expression)?;
+                if let ExpressionOperationView::ValueBlock(block) = view.operation() {
+                    match block {
+                        ValueBlock::If(value_if) => {
+                            tasks.push(WalkTask::Body(&value_if.else_body));
+                            tasks.push(WalkTask::Body(&value_if.then_body));
+                            tasks.push(WalkTask::Expression(value_if.condition));
+                        }
+                        ValueBlock::LexicalScope(scope) => {
+                            tasks.push(WalkTask::Body(&scope.body));
+                        }
+                        ValueBlock::Match(value_match) => {
+                            if let Some(default) = value_match.default.as_deref() {
+                                tasks.push(WalkTask::Body(default));
+                            }
+                            for arm in value_match.arms.iter().rev() {
+                                tasks.push(WalkTask::Body(&arm.body));
+                                if let Some(guard) = arm.guard {
+                                    tasks.push(WalkTask::Expression(guard));
+                                }
+                            }
+                            tasks.push(WalkTask::Expression(value_match.scrutinee));
+                        }
+                        ValueBlock::Catch(value_catch) => {
+                            if let FallibleHandling::Handler { body, .. } = &value_catch.handler {
+                                tasks.push(WalkTask::Body(body));
+                            }
+                            tasks.push(WalkTask::Expression(value_catch.handled_value));
+                        }
+                    }
+                } else {
+                    let mut children = Vec::new();
+                    view.visit_child_ids(&mut |child| children.push(child))?;
+                    for child in children.into_iter().rev() {
+                        tasks.push(WalkTask::Expression(child));
+                    }
+                }
+            }
+        }
+    }
+
+    let TraversalPurpose::FunctionProjection(facts) = &mut state.purpose else {
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "active function projection retains its purpose"
+        );
+    };
+    facts.assertion_message_calls.extend(obligations);
+    Ok(())
+}
+
 fn classify_nodes(
     nodes: &[AstNode],
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
 ) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
-    for node in nodes {
+    let mut summary = ControlFlowExitSummary::FALLS_THROUGH;
+    for (index, node) in nodes.iter().enumerate() {
+        // Authored-dead tails cannot contribute executable failure facts in any build profile.
+        // Assertion-message calls are deferred parse-time obligations, so convergence must still
+        // see them from this region.
+        if !summary.can_fall_through {
+            collect_inactive_assertion_message_calls(&nodes[index..], template_ir_store, state)?;
+            break;
+        }
         let effect = match &node.kind {
             NodeKind::Return(values) if !state.classifies_exits() => {
                 classify_expressions(values, template_ir_store, state)?
@@ -1746,10 +1920,16 @@ fn classify_nodes(
                     )?;
                 }
                 if effect.is_none() {
+                    let ordinal_update_is_emitted = range_ordinal_update_is_emitted(
+                        bindings,
+                        body,
+                        state.expression_builder.store(),
+                        state.constants,
+                    );
                     effect = classify_range_failure(
                         range.domain,
                         range.fast_math,
-                        bindings.index.is_some(),
+                        ordinal_update_is_emitted,
                         range.step.is_some(),
                         node.span,
                         state,
@@ -1790,12 +1970,24 @@ fn classify_nodes(
                 }
                 effect
             }
-            NodeKind::WhileLoop(condition, body) => classify_expression(
-                state.expression_builder.view(*condition)?,
-                template_ir_store,
-                state,
-            )?
-            .or(classify_loop_body(body, template_ir_store, state)?),
+            NodeKind::WhileLoop(condition, body) => {
+                let effect = classify_expression(
+                    state.expression_builder.view(*condition)?,
+                    template_ir_store,
+                    state,
+                )?;
+                if effect.is_some() {
+                    effect
+                } else if state.folded_condition(*condition) == Some(false) {
+                    // A pre-fold folded-false statement loop never runs its body in any profile.
+                    // HIR lowering omits the body and records its selected evidence instead, but
+                    // a deferred assertion-message obligation still needs validation.
+                    collect_inactive_assertion_message_calls(body, template_ir_store, state)?;
+                    None
+                } else {
+                    classify_loop_body(body, template_ir_store, state)?
+                }
+            }
             NodeKind::VariableDeclaration(declaration) => match declaration.value.initializer() {
                 Some(initializer) => classify_expression(
                     state.expression_builder.view(initializer)?,
@@ -1858,6 +2050,9 @@ fn classify_nodes(
         };
         if effect.is_some() {
             return Ok(effect);
+        }
+        if let Some(statement) = state.statement_summary(node) {
+            summary = summary.then_sequence(statement);
         }
     }
     Ok(None)
@@ -2004,6 +2199,10 @@ fn classify_loop_header(
                 None => None,
             }
             .or(state.expression_builder.view(range.start)?.span());
+            // Template loop bodies are owned TIR handoffs, not AST statement sequences, so this
+            // pre-HIR classifier cannot run the emitted-work body exit rule. A bound ordinal keeps
+            // the checked update HIR emits for a render body; statement loops use the shared
+            // `range_ordinal_update_is_emitted` owner at their own call site.
             Ok(classify_range_failure(
                 range.domain,
                 range.fast_math,
@@ -2043,15 +2242,16 @@ fn classify_loop_header(
 fn classify_range_failure(
     domain: NumericScalar,
     fast_math: bool,
-    has_index_binding: bool,
+    emits_ordinal_update: bool,
     has_explicit_step: bool,
     span: Option<SourceSpan>,
     state: &mut TraversalState<'_>,
 ) -> Option<EnclosingExitEffect> {
-    // Range loops fail on their generated guards: an `I32` ordinal overflow only when the header
-    // binds the ordinal, zero step (306) only when the header authors a step, and no progress
-    // (307) whenever a binary-float candidate can round back onto the current value. A float
-    // candidate that passes the endpoint only ends iteration: it never raises `FloatNonFinite`.
+    // Range loops fail on their generated guards: an `I32` ordinal overflow only when lowering
+    // emits the ordinal update, zero step (306) only when the header authors a step, and no
+    // progress (307) whenever a binary-float candidate can round back onto the current value. A
+    // float candidate that passes the endpoint only ends iteration: it never raises
+    // `FloatNonFinite`.
     //
     // Under `$fast_math` every generated guard fails fatally instead: these are not recoverable
     // `Error` contributors, so an exported no-slot function stays accepted and a private no-slot
@@ -2061,20 +2261,20 @@ fn classify_range_failure(
         return None;
     }
     // The classifier mirrors emitted work rather than proving operand values: an implicit `+1`
-    // step needs no zero guard and an unbound ordinal needs no update, exactly as HIR lowerers
-    // emit them. A statically zero literal step never reaches this point because the header
-    // policy rejects it before classification.
+    // step needs no zero guard and an ordinal the step block never reaches needs no update,
+    // exactly as HIR lowerers emit them. A statically zero literal step never reaches this point
+    // because the header policy rejects it before classification.
     use BuiltinErrorCode::{IntOverflow, InvalidLoopStep, RangeStepNoProgress};
 
     let codes: &'static [BuiltinErrorCode] = if domain.is_binary_float() {
-        match (has_index_binding, has_explicit_step) {
+        match (emits_ordinal_update, has_explicit_step) {
             (true, true) => &[IntOverflow, InvalidLoopStep, RangeStepNoProgress],
             (true, false) => &[IntOverflow, RangeStepNoProgress],
             (false, true) => &[InvalidLoopStep, RangeStepNoProgress],
             (false, false) => &[RangeStepNoProgress],
         }
     } else {
-        match (has_index_binding, has_explicit_step) {
+        match (emits_ordinal_update, has_explicit_step) {
             (true, true) => &[IntOverflow, InvalidLoopStep],
             (true, false) => &[IntOverflow],
             (false, true) => &[InvalidLoopStep],

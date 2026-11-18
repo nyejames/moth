@@ -4138,6 +4138,96 @@ fn implicit_failure_assertion_message_rejects_inferred_call_even_when_inactive()
 }
 
 #[test]
+fn implicit_failure_assertion_message_rejects_inferred_call_in_unreachable_code() {
+    for (shape, source) in [
+        (
+            "unconditional return",
+            "message |left I32, right I32| -> String:\n    value = left * right\n    return [value]\n;\n\
+             validate |left I32, right I32|:\n\
+                 return\n\
+                 assert(true, message(left, right))\n\
+             ;\n",
+        ),
+        (
+            "folded-false loop body",
+            "message |left I32, right I32| -> String:\n    value = left * right\n    return [value]\n;\n\
+             validate |left I32, right I32|:\n\
+                 loop false:\n\
+                     assert(true, message(left, right))\n\
+                 ;\n\
+             ;\n",
+        ),
+    ] {
+        for build_profile in [FrontendBuildProfile::Dev, FrontendBuildProfile::Release] {
+            let mut project = FrontendProject::new(
+                &[("src/@entry.moth", source)],
+                "src/@entry.moth",
+                StyleDirectiveRegistry::built_ins(),
+            )
+            .with_build_profile(build_profile);
+            let messages = project
+                .failure_contract_boundary_result()
+                .expect_diagnosed(shape);
+            assert_fallible_reason(
+                &messages,
+                InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
+            );
+        }
+    }
+}
+
+#[test]
+fn inactive_assertion_message_obligations_report_the_first_authored_message() {
+    let source = "message_a |left I32, right I32| -> String:\n    value = left * right\n    return [value]\n;\n\
+                  message_b |left I32, right I32| -> String:\n    value = left * right\n    return [value]\n;\n\
+                  validate |left I32, right I32, ready Bool|:\n\
+                      return\n\
+                      if ready:\n\
+                          assert(true, message_a(left, right))\n\
+                      ;\n\
+                      assert(true, message_b(left, right))\n\
+                  ;\n";
+    let mut project = failure_project(source);
+    let failure = project
+        .failure_contract_boundary_result()
+        .expect_diagnosed("inactive assertion messages still reach convergence");
+    assert_fallible_reason(
+        &failure,
+        InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
+    );
+    let diagnostic = single_ast_error_view(&failure);
+    let span = diagnostic_primary_span(diagnostic).expect("message call span");
+    let range = span
+        .local()
+        .inline_range()
+        .expect("fixture messages sit in inline spans");
+    let first = source
+        .find("message_a(left, right)")
+        .expect("first message call") as u32;
+    let second = source
+        .find("message_b(left, right)")
+        .expect("second message call") as u32;
+    assert_eq!(
+        range.start(),
+        first,
+        "the nested message before the enclosing sequence resumes must be reported first"
+    );
+    assert!(
+        range.end() <= second,
+        "the diagnostic must not point at the later message"
+    );
+}
+
+#[test]
+fn inactive_assertion_message_walk_handles_long_flat_dead_tails() {
+    // Each later `return` used to spawn another throwaway projection over the remaining suffix.
+    // This flat tail has no source nesting but is deep enough to overflow the compiler stack.
+    let dead_returns = "    return\n".repeat(20_000);
+    let mut project = failure_project(&format!("validate ||:\n    return\n{dead_returns};\n"));
+    let _ = project.ast();
+}
+
+#[test]
 fn implicit_failure_assertion_message_rejects_template_range_runtime_step() {
     let mut project = failure_project(
         "validate |ready Bool, step I32|:\n\
@@ -5774,7 +5864,7 @@ fn dead_statement_tail_keeps_selected_call_evidence_without_failure_contributors
 }
 
 #[test]
-fn release_erased_nested_dead_call_keeps_selected_evidence_without_liveness() {
+fn release_keeps_authored_dead_nested_call_as_skipped_evidence() {
     let source = "assert_positive |value I32| -> I32:\n    assert(value > 0)\n    return value\n;\n\
                   $infallible\n\
                   probe |value I32| -> I32:\n    return 4\n\
@@ -5812,22 +5902,17 @@ fn release_erased_nested_dead_call_keeps_selected_evidence_without_liveness() {
         "debug builds erase no call"
     );
 
-    // Release folds exactly that nested call and records its own span, not the statement root.
-    // The entry's live call to `probe` is also foldable, so select the nested row by its span.
+    // Release speculation leaves every authored-dead statement unfolded. The nested call keeps
+    // its runtime expression, so the entry's live call to `probe` is the only foldable site and
+    // the dead call never reaches the erased-call ledger.
     let release_ast = release.ast();
     assert!(
         release_ast
             .release_erased_call_sites
             .iter()
-            .any(|site| site.span == authored_call_span),
-        "release should erase the nested dead call at {authored_call_span:?}: {:?}",
+            .all(|site| site.span != authored_call_span),
+        "release must not erase the authored-dead call at {authored_call_span:?}: {:?}",
         release_ast.release_erased_call_sites
-    );
-    assert!(
-        release_ast
-            .authored_dead_failure_spans
-            .contains(&authored_call_span),
-        "authored liveness must place the nested call in the dead statement tail"
     );
 
     let hir = release
@@ -5840,14 +5925,14 @@ fn release_erased_nested_dead_call_keeps_selected_evidence_without_liveness() {
         "a dead nested call must not project a live erased site: {:?}",
         facts.constraint.live_erased_call_sites
     );
-    let erased_selected = facts
+    let skipped_selected = facts
         .constraint
         .selected_call_sites
         .iter()
         .filter(|site| site.span == Some(authored_call_span))
         .count();
     assert_eq!(
-        erased_selected, 1,
+        skipped_selected, 1,
         "the dead call must still contribute selected fast-use evidence exactly once"
     );
     assert!(

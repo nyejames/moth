@@ -1,0 +1,11 @@
+looped #= [:<ul>[loop 0 to 2 |i, n|:[$slot x][n]]</ul>]
+
+$export
+live_user |value I32| -> String:
+    loop true:
+        converted I64 = cast value catch:
+            break
+        ;
+    ;
+    return [looped:[$in x: [value]]]
+;

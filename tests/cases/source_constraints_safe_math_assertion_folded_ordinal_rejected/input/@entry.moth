@@ -1,0 +1,16 @@
+-- The authored body reaches the loop's step block, so the generated ordinal update is selected
+-- source even though release folding later proves the assertion false. Both build profiles must
+-- reject the fast ordinal under `$safe_math`; the pre-fold fast-operation ledger keeps the row.
+always_false || -> Bool:
+    return false
+;
+
+$fast_math $safe_math
+asserted_ordinal |limit I32| -> I32:
+    loop 0 to limit |value, index|:
+        assert(always_false())
+    ;
+    return 0
+;
+
+~[:done]

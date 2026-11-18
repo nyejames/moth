@@ -286,8 +286,8 @@ fn range_loop_step_failures_follow_the_header_operand_evaluation() {
     let summaries = AstBuiltinFailureSummaries::compute(
         &[&ast.nodes],
         &TemplateIrStore::new(),
+        &ast.const_values,
         &ast.expressions,
-        &Default::default(),
     )
     .expect("fixture summaries converge");
     let witness = summaries.witness(
@@ -302,16 +302,18 @@ fn range_loop_step_failures_follow_the_header_operand_evaluation() {
 
 #[test]
 fn range_loop_generated_failures_follow_the_emitted_checks() {
-    // WHAT: the ordinal overflow exists only when the header binds the ordinal, and the zero-step
-    //       failure only when the header authors a step.
+    // WHAT: the ordinal overflow exists only when the header binds the ordinal and the body can
+    //       reach the step block, and the zero-step failure only when the header authors a step.
     // WHY: HIR does not emit an unobservable ordinal update or an impossible zero guard for the
-    //      implicit `+1` step. Failure facts must mirror emitted work, so an unbound and unstepped
-    //      loop stays infallible while each observable check contributes its own code.
+    //      implicit `+1` step. Failure facts must mirror emitted work, so an unbound, unstepped or
+    //      always-returning loop stays infallible while each observable check contributes its own
+    //      code.
     let (ast, path_fork, string_table) = parse_single_file_ast(
         "plain |start I32, finish I32| -> I32:\n    loop start to finish:\n    ;\n    return 0\n;\n\
          stepped |start I32, finish I32, step I32| -> I32:\n    loop start to finish by step:\n    ;\n    return 0\n;\n\
          ordinal |start I32, finish I32| -> I32:\n    loop start to finish |value, index|:\n    ;\n    return 0\n;\n\
-         both |start I32, finish I32, step I32| -> I32:\n    loop start to finish by step |value, index|:\n    ;\n    return 0\n;\n",
+         both |start I32, finish I32, step I32| -> I32:\n    loop start to finish by step |value, index|:\n    ;\n    return 0\n;\n\
+         returned |start I32, finish I32| -> I32:\n    loop start to finish |value, index|:\n        return index\n    ;\n    return 0\n;\n",
     );
     for (name, expected) in [
         ("plain", &[][..]),
@@ -324,6 +326,7 @@ fn range_loop_generated_failures_follow_the_emitted_checks() {
                 BuiltinErrorCode::InvalidLoopStep,
             ][..],
         ),
+        ("returned", &[][..]),
     ] {
         let facts = pending_function_failure_facts(
             function_body_by_name(&ast, &path_fork, &string_table, name),
@@ -533,8 +536,8 @@ fn inactive_assertion_keeps_private_call_facts_after_ast_release() {
     let summaries = AstBuiltinFailureSummaries::compute(
         &[&ast.nodes],
         &TemplateIrStore::new(),
+        &ast.const_values,
         &ast.expressions,
-        &Default::default(),
     )
     .expect("source facts retain the pending concrete message call");
     drop(ast);
@@ -586,8 +589,8 @@ fn deferred_custom_catch_keeps_typed_locations_and_candidates_after_ast_release(
         let summaries = AstBuiltinFailureSummaries::compute(
             &[&ast.nodes],
             &TemplateIrStore::new(),
+            &ast.const_values,
             &ast.expressions,
-            &Default::default(),
         )
         .expect("source facts retain the pending concrete operand call");
 
@@ -827,8 +830,8 @@ fn failure_witness_prefers_only_the_same_compound_updates_writeback_through_priv
         let summaries = AstBuiltinFailureSummaries::compute(
             &[&ast.nodes],
             &TemplateIrStore::new(),
+            &ast.const_values,
             &ast.expressions,
-            &Default::default(),
         )
         .expect("fixture summaries converge");
         let bump = function_body_by_name(&ast, &path_fork, &string_table, "bump");
@@ -885,8 +888,8 @@ fn recursive_witness_skips_back_edge_before_later_numeric_origin() {
         let summaries = AstBuiltinFailureSummaries::compute(
             &[&ast.nodes],
             &TemplateIrStore::new(),
+            &ast.const_values,
             &ast.expressions,
-            &Default::default(),
         )
         .expect("fixture summaries converge");
         let boundary = function_body_by_name(&ast, &path_fork, &string_table, "boundary");
@@ -961,8 +964,8 @@ fn origin_free_recursion_stays_free_of_recoverable_numeric_failure() {
     let summaries = AstBuiltinFailureSummaries::compute(
         &[&ast.nodes],
         &TemplateIrStore::new(),
+        &ast.const_values,
         &ast.expressions,
-        &Default::default(),
     )
     .expect("fixture summaries converge");
     let boundary = function_body_by_name(&ast, &path_fork, &string_table, "boundary");
@@ -988,8 +991,8 @@ fn unavailable_call_before_numeric_origin_stops_at_the_visible_leaf() {
     let summaries = AstBuiltinFailureSummaries::compute(
         &[&ast.nodes],
         &TemplateIrStore::new(),
+        &ast.const_values,
         &ast.expressions,
-        &Default::default(),
     )
     .expect("fixture summaries converge");
     let helper = function_body_by_name(&ast, &path_fork, &string_table, "helper");
@@ -1028,8 +1031,8 @@ fn recursive_back_edge_before_compound_update_keeps_writeback_origin() {
     let summaries = AstBuiltinFailureSummaries::compute(
         &[&ast.nodes],
         &TemplateIrStore::new(),
+        &ast.const_values,
         &ast.expressions,
-        &Default::default(),
     )
     .expect("fixture summaries converge");
     let boundary = function_body_by_name(&ast, &path_fork, &string_table, "boundary");
@@ -1087,8 +1090,8 @@ fn mutually_recursive_component_with_late_origin_expands_each_body_once() {
     let summaries = AstBuiltinFailureSummaries::compute(
         &[&ast.nodes],
         &TemplateIrStore::new(),
+        &ast.const_values,
         &ast.expressions,
-        &Default::default(),
     )
     .expect("fixture summaries converge");
     let boundary = function_body_by_name(&ast, &path_fork, &string_table, "boundary");
@@ -1298,8 +1301,8 @@ fn generic_failure_chain_classification_visits_are_linear_in_authored_bodies() {
                 let summaries = AstBuiltinFailureSummaries::compute(
                     &[&ast.nodes],
                     &TemplateIrStore::new(),
+                    &ast.const_values,
                     &ast.expressions,
-                    &Default::default(),
                 )
                 .expect("chain summaries converge");
                 let boundary = function_body_by_name(&ast, &path_fork, &string_table, "step_0");
@@ -1338,8 +1341,8 @@ fn summary_convergence_keeps_nested_handler_origins_outside_protected_scopes() {
     let summaries = AstBuiltinFailureSummaries::compute(
         &[&ast.nodes],
         &TemplateIrStore::new(),
+        &ast.const_values,
         &ast.expressions,
-        &Default::default(),
     )
     .expect("nested handler summaries converge");
     let NodeKind::Function(path, ..) =
@@ -1388,8 +1391,8 @@ fn infallible_protected_work_retains_validation_without_executable_handler_failu
     let summaries = AstBuiltinFailureSummaries::compute(
         &[&ast.nodes],
         &TemplateIrStore::new(),
+        &ast.const_values,
         &ast.expressions,
-        &Default::default(),
     )
     .expect("infallible protected work converges");
     let NodeKind::Function(path, ..) =
@@ -1432,8 +1435,8 @@ fn catch_dependencies_batch_activation_before_reclassifying_the_consumer() {
         let summaries = AstBuiltinFailureSummaries::compute(
             &[&ast.nodes],
             &TemplateIrStore::new(),
+            &ast.const_values,
             &ast.expressions,
-            &Default::default(),
         )
         .expect("dependent catch summaries converge");
         let visits = test_read_ast_counter(AstCounter::FailureSummaryBodiesClassified);
@@ -1671,8 +1674,8 @@ fn collection_loop_step_failure_follows_the_header_operand_evaluation() {
     let summaries = AstBuiltinFailureSummaries::compute(
         &[&ast.nodes],
         &TemplateIrStore::new(),
+        &ast.const_values,
         &ast.expressions,
-        &Default::default(),
     )
     .expect("fixture summaries converge");
     let build_facts = pending_function_failure_facts(

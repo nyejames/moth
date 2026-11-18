@@ -304,9 +304,23 @@ pub(crate) struct AstConstraintPrunedRegion {
     pub(crate) end: SourceSpan,
 }
 
+/// What selected one fast numeric operation recorded in the pre-fold ledger.
+///
+/// WHAT: distinguishes authored arithmetic from a range loop's generated ordinal update.
+/// WHY: both are fast numeric work that `$safe_math` must see, but they project to different
+///      `HirFastUseProvenance` values. Keeping the source on the existing ledger row lets the
+///      pre-fold evidence channel carry both without inventing a second ledger.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum AstFastOperationSource {
+    /// An authored expression resolved with fast semantics.
+    AuthoredArithmetic,
+    /// A range loop's checked ordinal update, selected from authored body reachability.
+    RangeOrdinal,
+}
+
 /// One selected fast numeric operation recorded while resolving an authored expression.
 ///
-/// WHAT: the callable that owns the operation and the authored operator span, and nothing else.
+/// WHAT: the callable that owns the operation, the authored operator span, and what selected it.
 /// WHY: `$safe_math` must still see a fast use after constant folding or dead-result elimination
 ///      removes the executable operation. Resolution records the selection before either
 ///      optimisation runs, so this sparse evidence outlives the node it describes. One record per
@@ -314,8 +328,9 @@ pub(crate) struct AstConstraintPrunedRegion {
 ///      to the expression graph, and the owning callable lets a later verifier attribute the use
 ///      without re-reading directives or lexical scopes.
 ///
-/// The derived order is the ledger's canonical order: owning callable, lexical scope, then
-/// operator span, with the entry body first and an absent span before any real one.
+/// The derived order is the ledger's canonical order: owning callable, lexical scope, operator
+/// span, then what selected the operation, with the entry body first and an absent span before
+/// any real one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct AstFastOperationWitness {
     /// The callable body whose authored expression selected fast arithmetic.
@@ -327,16 +342,18 @@ pub(crate) struct AstFastOperationWitness {
     pub(crate) scope: PathId,
     /// The authored operator span; `None` for a synthetic operation without source text.
     pub(crate) span: Option<SourceSpan>,
+    /// What selected the fast operation.
+    pub(crate) source: AstFastOperationSource,
 }
 
-/// Canonicalises a drained fast-operation witness ledger.
+/// Canonicalises a fast-operation witness ledger.
 ///
 /// WHAT: sorts by [`AstFastOperationWitness`]'s order and drops duplicate rows.
 /// WHY: recording is one push per selected operation, so an expression resolved twice by deferred
 ///      completion would otherwise carry two rows for one authored operation. Normalising once
-///      here, where the ledger leaves the emitter, keeps the recorder allocation-free per
-///      selection and replaces a linear membership scan per record with a single sort at the
-///      drain point.
+///      after every producer has contributed, rather than at each record, keeps the recorder
+///      allocation-free per selection and replaces a linear membership scan per record with a
+///      single sort.
 pub(crate) fn normalize_fast_operation_witnesses(witnesses: &mut Vec<AstFastOperationWitness>) {
     witnesses.sort_unstable();
     witnesses.dedup();
@@ -350,8 +367,9 @@ pub(crate) fn normalize_fast_operation_witnesses(witnesses: &mut Vec<AstFastOper
 ///      summary bits and fast-use witness must reach the caller exactly as they do in a debug build
 ///      that keeps the call. HIR projects each row through the same call-target mapping and
 ///      inactive-static-branch filter as authored and skipped call evidence. The span is mandatory
-///      because HIR decides erased-call liveness from authored liveness by exact span membership;
-///      the release producer declines to erase a spanless call instead.
+///      because every projected row carries its authored call site, and the pruned-handler
+///      liveness split matches that span; the release producer declines to erase a spanless call
+///      instead. Authored-dead statements are never folded, so every recorded row is authored-live.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct AstReleaseErasedCallSite {
     /// The callable body whose expression release speculation folded.
@@ -392,12 +410,14 @@ pub struct Ast {
 
     /// Selected fast numeric operations, in canonical ledger order.
     ///
-    /// WHAT: one sparse record per authored fast operation, kept from resolution through folding
+    /// WHAT: one sparse record per selected fast operation, kept from resolution through folding
     ///       and dead-result elimination.
     /// WHY: `$safe_math` and `$infallible` verification run after optimisation, so evidence of a
     ///      selected fast operation cannot live on the (possibly folded) expression node. The
-    ///      ledger is recorded beside the executable AST, ordered and deduplicated once on drain,
-    ///      then projected per function into HIR constraint evidence before the AST is dropped.
+    ///      ledger is recorded beside the executable AST and ordered and deduplicated once in
+    ///      finalization after every producer, including the pre-fold range-ordinal walk, has
+    ///      contributed. HIR then projects it per function into constraint evidence before the AST
+    ///      is dropped.
     pub(crate) fast_operation_witnesses: Vec<AstFastOperationWitness>,
 
     /// Selected ordinary calls erased by release constant folding, in recording order.
@@ -409,24 +429,13 @@ pub struct Ast {
     ///      profitable fold. It is empty in debug builds because no call is erased there.
     pub(crate) release_erased_call_sites: Vec<AstReleaseErasedCallSite>,
 
-    /// Failure-producing spans in authored statement tails that cannot be reached.
-    ///
-    /// WHAT: exact authored spans of statements, expressions and failure contributors that the
-    ///       pre-fold control-flow analysis marks unreachable in every build profile.
-    /// WHY: failure facts must not depend on optional release folding. A tail that only release
-    ///      folding makes unreachable (such as a folded assertion condition) is absent here, so the
-    ///      semantic contributor filter keeps it in every profile. This set decides authored
-    ///      liveness for release-erased-call evidence; failure contributors themselves are
-    ///      projected from [`Self::pre_fold_failure_facts`].
-    pub(crate) authored_dead_failure_spans: FxHashSet<SourceSpan>,
-
     /// Pre-fold failure facts for every concrete callable in `nodes`, keyed by callable identity.
     ///
     /// WHAT: the implicit contributors, deferred custom catches and assertion-message calls the
-    ///       AST classifier decided before release folding, already filtered by
-    ///       [`Self::authored_dead_failure_spans`]. Each body's contributor lists keep authored
-    ///       order; the map itself is only a lookup. Dormant generic-template identities are
-    ///       dropped because HIR never reads them.
+    ///       AST classifier decided before release folding. The classifier already skipped
+    ///       authored-dead statement tails per occurrence, so each body's contributor lists keep
+    ///       authored order and the map itself is only a lookup. Dormant generic-template
+    ///       identities are dropped because HIR never reads them.
     /// WHY: release folding must not add, remove or reorder failure facts. Finalization always
     ///      computes these facts, even when no dormant template needs boundary validation, and HIR
     ///      projects them instead of reclassifying the post-fold AST, so debug and release publish

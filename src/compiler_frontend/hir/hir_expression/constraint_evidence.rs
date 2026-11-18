@@ -19,7 +19,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     ExpressionOperationView, ExpressionStore, ResolvedCallableTarget,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
-use crate::compiler_frontend::ast::statements::control_flow_exits::analyze_control_flow_exits;
+use crate::compiler_frontend::ast::statements::control_flow_exits::range_ordinal_update_is_emitted;
 use crate::compiler_frontend::ast::statements::never_call::{NeverCall, NeverCallTarget};
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -51,8 +51,8 @@ impl<'a> HirBuilder<'a> {
     /// WHAT: one span per retained expression root in a handler that HIR never lowers because the
     ///       protected value is statically infallible.
     /// WHY: the erased-call liveness split must see that a release-erased call stood in a handler
-    ///      that cannot execute. Authored dead tails use `Ast::authored_dead_failure_spans`
-    ///      instead, because a post-fold lowering skip there may depend on release folding.
+    ///      that cannot execute. The release producer never folds an authored-dead statement, so
+    ///      this is the only liveness split a recorded erased row still needs.
     fn record_pruned_handler_root_spans(
         &mut self,
         store: &ExpressionStore,
@@ -78,10 +78,10 @@ impl<'a> HirBuilder<'a> {
     ///
     /// WHAT: walks a skipped handler body or the statements remaining after a terminator.
     /// WHY: both skip paths omit selected source for the same optimisation reason, so one walker
-    ///      owns their call sites and fast range-guard witnesses. A dead tail after a terminator
-    ///      records no root spans for itself: its liveness comes from the pre-fold AST set, never
-    ///      from a post-fold lowering skip. A statically infallible catch nested in that tail still
-    ///      records its pruned-handler roots, because debug lowering would have pruned it too.
+    ///      owns their call sites and fast range-guard witnesses. The release producer never folds
+    ///      an authored-dead statement, so a dead tail has no erased row whose liveness this skip
+    ///      could decide. A statically infallible catch nested in a skipped tail still records its
+    ///      pruned-handler roots, because debug lowering would have pruned it too.
     pub(in crate::compiler_frontend::hir) fn record_skipped_statement_evidence(
         &mut self,
         store: &ExpressionStore,
@@ -145,11 +145,12 @@ impl<'a> HirBuilder<'a> {
                     // generated ordinal update, when the body can neither fall through nor
                     // `continue`; a skipped copy must not record a trap a live copy never runs.
                     if range.fast_math {
-                        let ordinal_update_is_emitted = bindings.index.is_some() && {
-                            let exits =
-                                analyze_control_flow_exits(body, store, &self.module_const_values);
-                            exits.can_fall_through || exits.continues_current_loop
-                        };
+                        let ordinal_update_is_emitted = range_ordinal_update_is_emitted(
+                            bindings,
+                            body,
+                            store,
+                            Some(&self.module_const_values),
+                        );
                         if range.has_generated_range_check(ordinal_update_is_emitted) {
                             let function = self.current_function_id_or_error()?;
                             self.record_skipped_fast_use(

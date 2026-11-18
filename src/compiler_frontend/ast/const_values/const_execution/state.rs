@@ -109,8 +109,9 @@ pub(super) struct ExecutionState {
     ///      caller drains these rows and attributes them to the node it is rewriting. Executing a
     ///      prepared candidate runs nested walks in `InterpretedBody` mode, which do not record;
     ///      a callee's internal folds therefore cannot be misattributed to its caller. The span is
-    ///      required because HIR decides erased-call liveness by matching it against authored
-    ///      dead and pruned-handler ranges; release speculation declines a spanless call instead.
+    ///      required because every evidence row carries its authored call site and the pruned
+    ///      handler liveness split matches that span; release speculation declines a spanless call
+    ///      instead. Authored-dead statement roots are never folded, so every row is authored-live.
     pub(super) release_erased_calls: Vec<(PathId, SourceSpan, bool)>,
     /// Catch handler currently available to collection failures.
     ///

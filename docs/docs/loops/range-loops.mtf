@@ -127,11 +127,13 @@ keeps its full magnitude.
 The `I32` ordinal uses a checked integer update, so its own overflow remains an
 implicit failure. Only a header that binds the optional second name owns an
 ordinal, and the update is emitted only when the body can reach the step block
-by falling through or executing `continue`. A body that always leaves the loop
-with `break` or `return` keeps no ordinal update and cannot fail on one. Under
-`$fast_math` an emitted ordinal update traps instead of returning through a
-failure lane, and that fatal delivery counts as fast range evidence for
-`$safe_math` even when the loop authors no step.
+by falling through or executing `continue`. A `continue` inside a statically
+infallible catch handler is lowered only as skipped evidence and does not reach
+the step block. A body that always leaves the loop with `break` or `return`
+keeps no ordinal update and cannot fail on one. Under `$fast_math` an emitted
+ordinal update traps instead of returning through a failure lane, and that fatal
+delivery counts as fast range evidence for `$safe_math` even when the loop
+authors no step.
 
 [codeblock, $code "moth":
     near_max U8 = 254
