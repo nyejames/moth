@@ -1,140 +1,142 @@
 # Redundancy
 
-Find duplicated ownership, repeated work, obsolete paths and abstractions whose
-cost exceeds their value.
+Find code, state, work and structure that Moth no longer needs or maintains in more places than necessary. Examine whether the current design could be **smaller, more direct and easier to change** by deleting code, consolidating ownership or simplifying a handoff.
 
-Follow the [audit guide](../audit-guide.md) for selection, allowed writes,
-findings and coverage. This checklist owns what to inspect and the evidence
-needed for a Redundancy finding.
+Be strict about code bloat, especially patterns introduced by incremental agent-driven changes. Be equally strict about false positives: similar code is not necessarily duplicate responsibility and fewer lines are not necessarily simpler. Follow the [audit guide](../audit-guide.md) for formal reports, evidence and coverage. Log unrelated issues in [`docs/bug-reports.md`](../../bug-reports.md) and return to the chosen scope.
 
-## When this kind fits
+## 1. Map the current design before judging it
 
-Use Redundancy when equivalent responsibilities have several owners, work is
-repeated without a justified boundary, or a retained path no longer serves the
-current design.
+Read the area's entry points, principal types and `mod.rs` documentation. Trace producers, consumers and current public APIs. Establish:
 
-A measured time or memory problem belongs to Performance. A violated semantic
-contract belongs to Correctness. Unclear code within an otherwise sound owner
-belongs to Style. Independent test-quality and documentation defects belong
-to their respective kinds. Follow the audit guide when a discovery crosses
-those boundaries.
+- What the area owns, what it excludes and where its outputs go.
+- Which data is authoritative, derived, cached, copied or target-specific.
+- Which paths remain supported and which accepted plans are actively replacing them.
+- Which callers, registrations, tests, features and target variants still exercise each path.
+- Which existing helper or subsystem already owns a similar rule.
 
-## 1. Establish the current owner
+Ask: **Where should a developer change this behaviour once?** Follow actual call graphs and data flow, not just filenames or similar identifiers. Several wrappers may reach one owner, while one shared helper may still cause every caller to repeat the same expensive work.
 
-Start at the area's entry points. Identify the inputs, outputs and facts it
-owns, then trace its producers and consumers. Distinguish authoritative data
-from derived indexes, cached views and target-specific representations.
+## 2. Hunt for code that should disappear
 
-Check current support and active work. Record which path is current, which is
-being replaced and whether a retained path has a concrete remaining consumer.
-An accepted migration boundary needs its own assessment rather than an
-assumption that every temporary representation is already obsolete.
+Search beyond the most recently changed file. Inspect adjacent callers, tests and earlier owners for residual code after migrations or fixes.
 
-The question is: where should a change to this behaviour be made once?
+### Obsolete and unreachable paths
 
-## 2. Find all implementations and callers
+- Do old entry points, forwarding wrappers, aliases, adapters or re-exports remain after callers moved to a newer API?
+- Can a branch, enum variant, configuration field or fallback still be reached through any supported command, feature or target?
+- Does a compatibility layer preserve a superseded interface despite Moth's pre-release policy?
+- Did a finished migration leave parallel data types, temporary registries, stale helpers, old fixtures or dead comments behind?
+- Does a defensive special case exist solely to keep an obsolete implementation path working?
 
-Search the owner and adjacent paths for equivalent work, old API names,
-forwarders, re-exports, target variants, test helpers and registrations.
-Follow indirection to the implementation before counting separate owners.
+Named migration bridges are legitimate only when an accepted plan owns their purpose and exact deletion point. No call sites found by text search is a lead, not proof of unreachability. Follow registration, generated dispatch, feature gates and indirect callers before recommending deletion.
 
-Compare the actual call graph, not the number of names. Several names may
-reach one implementation. One shared function may still repeat work each
-time a consumer calls it.
+### Unnecessary behaviour or scaffolding
 
-Inspect these four classes where they apply:
+- Does a function, field, helper, type or module have a concrete present-day responsibility?
+- Could a caller perform one obvious operation directly without losing a meaningful name or boundary?
+- Are there speculative extension points, unused options, unused genericity or configurable policies for a single supported behaviour?
+- Can two staged transformations collapse into one existing operation without retaining both intermediate forms?
+- Can a removed feature take its parser exceptions, validators, diagnostic reasons, fixtures and documentation branches with it?
 
-- **Repeated logic or work.** Copied validators, normalisers and state machines,
-  repeated sorting, reparsing, resolution or traversal over the same inputs.
-- **Duplicated state.** Parallel registries, independently mutable summaries,
-  copied public surfaces and old and new records kept as competing authorities.
-- **Obsolete paths.** Unreachable fallbacks, replaced APIs, compatibility shims,
-  stale variants and target paths with no current consumer.
-- **Unearned layers.** Forwarders, adapters, contexts, traits and registries that
-  add navigation or state without enforcing a useful contract.
+**Deletion comes first** when nothing current depends on the path. Do not replace obsolete code with a new shim.
 
-For semantic work, trace whether consumers use the owning stage's result or
-reconstruct it from source, syntax, an earlier IR or rendered output.
+## 3. Find duplicated ownership and repeated logic
 
-## 3. Prove equivalence or obsolescence
+Search for near-duplicate functions, validators, normalisers, predicates, sorting, traversal, serialisation, diagnostics and state transitions. Compare what the paths actually do.
 
-For suspected duplication, compare inputs, outputs, side effects, failure
-behaviour, ordering, identity domain, lifetime and ownership. Explain whether
-target or lifecycle differences require separate implementations.
+- Does one semantic rule get checked or reconstructed independently in two compiler stages?
+- Does a consumer rescan source, reparse syntax or infer a fact that its producer already owns?
+- Are there overlapping helpers with unclear responsibility, including local utilities that duplicate a nearby subsystem's API?
+- Do multiple call sites copy the same multi-step policy, perhaps with slightly different failure, ordering or fallback behaviour?
+- Are there separately maintained representations of the same source of truth, such as parallel registries, summaries or flags?
+- Does each consumer repeat a traversal, sorting pass, lookup or conversion because an earlier owner does not publish the needed fact?
+- Can a shared diagnostic or validation reason be constructed once with typed facts instead of duplicating prose and matching rules?
 
-Name the maintenance cost. For example, one rule requires coordinated edits
-in two owners, an independently mutable copy can drift, or a consumer has to
-reconstruct a fact that should have crossed a handoff explicitly.
+For each candidate, compare inputs, outputs, side effects, errors, source ownership, ID domains, ordering, lifetimes and target capabilities. Record the maintenance cost: coordinated edits, semantic drift risk, ambiguous ownership or unnecessary execution. Do not label similar text as duplicate until equivalent responsibility is established.
 
-For a deletion candidate, trace callers and registrations, relevant feature
-and target gates, tests and active plans. A text search with no direct caller
-is a lead, not proof that a path is unused.
+## 4. Challenge abstraction and indirection
 
-For repeated work, show the repeated execution path. Measurement is needed for
-a performance claim, but an evidenced ownership or maintenance defect does
-not need an invented timing estimate.
+An abstraction earns its place when it names a meaningful operation, establishes ownership or an invariant, shares substantial identical behaviour, or makes a current path easier to understand.
 
-## 4. Test the reason to keep it
+Actively investigate:
 
-Look for a real benefit before recommending removal or sharing:
+- **Thin forwarders:** helpers that rename an operation or immediately delegate without adding useful context.
+- **Wrapper types and adapters:** layers that only translate between equivalent shapes or shuttle one field around.
+- **Broad context objects:** containers that hide unrelated parameters, mixed lifetimes or dependencies behind a convenient name.
+- **Premature traits and generics:** abstractions introduced for hypothetical reuse, two superficially similar callers or a single implementation.
+- **Over-structured builders:** multi-step construction for values that could be built directly without violating validation or ownership.
+- **Boolean-heavy APIs:** combinations of flags that encode implicit states, require coupled conditions or exist to share code that should remain separate.
+- **Scattered logic:** a coherent operation split across tiny helpers or modules whose navigation costs outweigh the separation.
+- **Mixed-responsibility modules:** one file orchestrates unrelated stages or owns concepts that change for different reasons.
 
-- Distinct ID domains, capabilities or invariants may justify small wrappers.
-- Target-specific lowering may look similar while having different semantics.
-- Derived indexes and immutable snapshots may serve different access patterns
-  or lifetimes without becoming competing authorities.
-- Independent test or oracle logic may deliberately avoid sharing the
-  production implementation so it can expose a common-mode defect.
-- A narrow local repetition may be clearer than a policy-heavy shared helper.
+Ask what would actually disappear if the abstraction were removed. Count new branches, conversions, context passing, lifetime coupling, navigation and duplicated state in any proposed replacement. A single-use helper may still be valuable when it clearly names a stage or isolates a real invariant.
 
-For each serious candidate, record the strongest reason to retain the current
-shape and the evidence that supports or defeats that reason. Useful retained
-distinctions belong in the report's checked-and-clean summary.
+## 5. Inspect agent-driven accumulation patterns
 
-## 5. Recommend the simplest coherent correction
+Incremental fixes often leave every previous layer intact. Look specifically for these sequences, tracing when and why they arose:
 
-Consider deletion first when a path is obsolete. For equivalent behaviour,
-prefer one existing owner with direct consumers. Use a local helper when the
-behaviour is local. Change a handoff when repetition exists because the owner
-fails to publish a fact its consumers need.
+- A bug fix adds another validator or fallback while the original owner remains unchanged.
+- New data fields mirror values already stored in a different representation, requiring updates at several sites.
+- A new helper duplicates an existing one because the implementation searched only its immediate file.
+- An adapter conceals a poor boundary instead of moving the needed fact to the correct producer.
+- Several branches handle variants separately even though their difference could be expressed once as data.
+- An exceptional case persists after the rule or feature that required it was removed.
+- One long function is split into many pass-through functions without clarifying ownership or control flow.
+- A dense chain of conversions, clones and builder calls compensates for an unnecessarily indirect API.
+- A large new framework appears where one explicit local operation would satisfy the current use case.
 
-Compare the whole resulting path. Include any new configuration, branching,
-conversion, lifetime coupling and navigation introduced by consolidation.
-Fewer lines alone do not establish an improvement.
+These are **search triggers**, not automatic findings. For example, an extra validation may defend a genuine trust boundary and a copy may preserve an essential lifetime. Trace the requirement before classifying either as redundant.
 
-Keep data ownership explicit. A shared table, immutable result or narrow
-policy value may remove repetition more clearly than another layer of
-behavioural indirection. Avoid broad utility modules or generic frameworks
-without a real shared responsibility.
+## 6. Look for simpler Rust and module structure
 
-Give each serious candidate a verdict: retain with a reason, delete,
-consolidate locally, use one common owner or restructure the handoff. A
-suggested correction remains subject to the audit guide's triage rules.
+Review code presentation where complexity stems from unnecessary structure rather than merely formatting:
 
-## Evidence for a finding
+- Could a straightforward loop or named sequence replace nested iterators, stateful closures or deeply chained builders?
+- Could an existing enum, typed range or narrow state record eliminate boolean coupling or independently mutable fields?
+- Does repeated owned-to-borrowed conversion or cloning result from an API that should accept borrowed data or transfer ownership directly?
+- Do temporary collections, adapter records or general-purpose registries exist only to pass values to the next step?
+- Are files divided by real responsibility, or does the layout force readers through many trivial modules?
+- Do test helpers and fixture builders duplicate production setup or each other without improving isolation or coverage?
+- Would moving a genuinely shared responsibility to its existing owner let two implementations and their tests disappear?
 
-Use the common report schema and include the relevant kind-specific proof:
+Follow the [codebase style guide](../../developer-docs/style-guide/style-guide.mtf). Prefer data-oriented, explicit ownership to broad utility modules. A style problem without structural redundancy belongs to Style. A measured cost belongs to Performance. When investigating copies, do not claim speedups without measurements.
 
-- The implementations, representations or paths compared and their callers.
-- Their shared responsibility, or the reason a path is obsolete or unnecessary.
-- The concrete maintenance or ownership cost.
-- The strongest reason to keep the current shape and why it does not justify
-  that cost.
-- The proposed owner, required retained distinctions and verification needed
-  for a later correction.
+## 7. Evaluate the reason to keep each candidate
 
-One root cause can cover several occurrences. Split findings when the owners
-or independently actionable corrections differ, not merely because several
-files contain the pattern.
+Test the strongest counter-explanation before recommending consolidation:
 
-## Coverage and staleness
+- Similar target lowering may require different capabilities, failure behaviour or representations.
+- Small wrappers may protect distinct ID domains, lifetimes or invariants.
+- Immutable snapshots and derived indexes may serve different access patterns without becoming competing authorities.
+- Independent test or oracle code may intentionally duplicate an algorithm to catch common-mode defects.
+- A short local repetition may be clearer than a policy-heavy helper or shared framework.
+- An active migration may temporarily require two forms with an explicit deletion milestone.
 
-Record which owners, callers, target variants and relevant feature paths were
-inspected. Separate context reading from audited coverage. A search inventory
-alone does not establish completeness.
+Separate **similar appearance** from **equivalent semantics**. If retention wins, explain why, especially for candidates that initially looked like strong findings. Do not force an abstraction for cosmetic deduplication.
 
-Mark coverage partial when a relevant implementation, consumer or gated path
-remains uninspected. Record a major checklist section as not applicable only
-when the area's structure makes it irrelevant.
+## 8. Recommend the smallest coherent correction
 
-Coverage becomes stale when the area's ownership, important APIs, principal
-data structures, passes or producer-consumer handoffs change materially.
+Choose a concrete disposition for each serious candidate:
+
+1. **Delete:** remove obsolete code, registrations, tests and associated scaffolding.
+2. **Keep local:** retain intentional small repetition with a documented distinction.
+3. **Consolidate locally:** share identical behaviour inside the existing subsystem.
+4. **Move to the owner:** make both callers consume one existing authoritative implementation.
+5. **Restructure data flow:** publish the producer's owned fact once instead of adding another helper or repeated traversal.
+6. **Split responsibility:** extract genuinely separate ownership into a focused module, not a broad utility layer.
+
+Prefer deletion and direct data flow. Show which existing functions, paths or representations disappear and which invariants remain. A recommendation that adds more structure than it removes needs a stronger current requirement than a recommendation that makes the code smaller and clearer.
+
+## Findings, coverage and staleness
+
+For each formal Redundancy finding, provide:
+
+- Exact paths, implementations and relevant callers or consumers inspected.
+- Proof of shared responsibility, unnecessary structure or genuine obsolescence.
+- Concrete maintenance, ownership or execution cost, without invented performance numbers.
+- Strongest reason to retain the design and why it fails.
+- Proposed disposition, existing owner, deletions, preserved distinctions and verification needed.
+
+Group occurrences with one root cause. Split findings when fixes have independent owners. Prioritise removal of competing semantic owners and high-drift duplication over small cosmetic savings. Record checked-and-clean distinctions, target gates and exclusions so later auditors can trust coverage.
+
+Coverage becomes stale when an area's ownership, current APIs, principal structures, passes or producer-consumer handoffs change materially. An unrelated issue discovered during inspection belongs in `docs/bug-reports.md` and does not count as coverage for its kind.
