@@ -2095,7 +2095,7 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
              return bump(amount)\n;\n\
          walk |start I32, end I32| -> I32:\n\
              seen ~I32 = 0\n\
-             loop start to & end |value|:\n\
+             loop start to & end by 1 |value, ordinal|:\n\
                  ~seen = copy value\n\
              ;\n\
              return seen\n;\n\

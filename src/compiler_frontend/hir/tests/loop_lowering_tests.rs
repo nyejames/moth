@@ -89,7 +89,8 @@ fn range_loop_spec_with_domain(
 
 /// The stable destination blocks of one lowered range loop.
 struct RangeLoopCfg {
-    step_zero_check: BlockId,
+    /// Absent when the header has no authored step, whose implicit `+1` needs no zero guard.
+    step_zero_check: Option<BlockId>,
     header_selector: BlockId,
     body: BlockId,
     step: BlockId,
@@ -98,23 +99,29 @@ struct RangeLoopCfg {
 
 /// Walks the range-loop CFG from the entry block.
 ///
-/// WHY: the zero guard selects the direction-recording header selector, which then branches by
-///      `step > 0`. Reading the shape through the terminators keeps the test independent of block
-///      allocation order while still pinning the edges that own loop semantics.
-fn range_loop_cfg_blocks(module: &HirModule) -> RangeLoopCfg {
+/// WHY: the direction-recording header selector branches by `step > 0`, and an authored step
+///      inserts the zero guard immediately before it. Reading the shape through the terminators
+///      keeps the test independent of block allocation order while still pinning the edges that
+///      own loop semantics.
+fn range_loop_cfg_blocks(module: &HirModule, has_zero_guard: bool) -> RangeLoopCfg {
     let start = &module.functions[module
         .start_function
         .expect("normal test module should have start")
         .0 as usize];
     let entry_block = &module.blocks[start.entry.0 as usize];
-    let step_zero_check = match entry_block.terminator {
+    let entry_target = match entry_block.terminator {
         HirTerminator::Jump { target, .. } => target,
-        _ => panic!("expected entry jump to range step-zero-check"),
+        _ => panic!("expected an entry jump into the range loop"),
     };
 
-    let header_selector = match module.blocks[step_zero_check.0 as usize].terminator {
-        HirTerminator::If { else_block, .. } => else_block,
-        _ => panic!("expected zero-check branch"),
+    let (step_zero_check, header_selector) = if has_zero_guard {
+        let header_selector = match module.blocks[entry_target.0 as usize].terminator {
+            HirTerminator::If { else_block, .. } => else_block,
+            _ => panic!("expected zero-check branch"),
+        };
+        (Some(entry_target), header_selector)
+    } else {
+        (None, entry_target)
     };
 
     let header_ascending = match module.blocks[header_selector.0 as usize].terminator {
@@ -577,10 +584,10 @@ fn lowers_range_loop_with_new_syntax() {
     )
     .expect("range loop lowering should succeed");
 
-    // The CFG walk pins the zero guard, direction selector and body edges. The loop is the last
-    // statement in the start function, so its exit returns; candidate production and spans are
-    // owned by the dedicated range tests.
-    let cfg = range_loop_cfg_blocks(&module);
+    // The CFG walk pins the direction selector and body edges. The loop is the last statement in
+    // the start function, so its exit returns; candidate production and spans are owned by the
+    // dedicated range tests.
+    let cfg = range_loop_cfg_blocks(&module, false);
     assert!(matches!(
         module.blocks[cfg.exit.0 as usize].terminator,
         HirTerminator::Return(_)
@@ -592,7 +599,7 @@ fn lowers_range_loop_with_new_syntax() {
 ///
 /// WHAT: pins a `U8` counter domain over `I32` bounds and an `I32` `by -1` step, then asserts the
 ///       bounds gain counter-domain casts, the step operand on `RangeCandidate` stays `I32`, and
-///       the only checked numeric operation left is the `I32` ordinal increment.
+///       the header binds no ordinal, so no checked ordinal update is emitted.
 /// WHY: the header selects the counter from its bounds, but a signed step is independent of that
 ///      counter. Re-deriving or coercing the step to the counter would silently lose direction and
 ///      magnitude, and any checked counter arithmetic would reintroduce the out-of-domain
@@ -697,11 +704,9 @@ fn range_loop_lowering_converts_bounds_but_keeps_the_step_type() {
         other => panic!("expected a step local load, got {other:?}"),
     }
 
-    // The advance is the ordinal `I32` add. Nothing else may remain: the step keeps its own type,
-    // so an injected signed-abs `Negate` or `Subtract` on it would also be `I32` and must be
-    // rejected by exact operator identity, not merely by domain.
-    let ordinal_increment =
-        HirNumericOp::ordinary(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::I32));
+    // The header binds no ordinal, so nothing can observe one and the checked `I32` increment is
+    // omitted. An injected signed-abs `Negate` or `Subtract` on the step would also be `I32`, so
+    // exact absence is the assertion, not merely a domain check.
     let numeric_ops: Vec<HirNumericOp> = module
         .blocks
         .iter()
@@ -712,17 +717,16 @@ fn range_loop_lowering_converts_bounds_but_keeps_the_step_type() {
         })
         .collect();
     assert!(
-        numeric_ops.contains(&ordinal_increment),
-        "the I32 ordinal increment must remain"
-    );
-    assert!(
-        numeric_ops.iter().all(|op| *op == ordinal_increment),
-        "only the I32 ordinal increment may remain, got {numeric_ops:?}"
+        numeric_ops.is_empty(),
+        "an unbound ordinal must not emit a checked I32 increment, got {numeric_ops:?}"
     );
 
     // The zero guard runs first and tests the step, never the bounds.
-    let cfg = range_loop_cfg_blocks(&module);
-    let zero_condition = match module.blocks[cfg.step_zero_check.0 as usize].terminator {
+    let cfg = range_loop_cfg_blocks(&module, true);
+    let zero_check = cfg
+        .step_zero_check
+        .expect("an authored step keeps the zero-step guard");
+    let zero_condition = match module.blocks[zero_check.0 as usize].terminator {
         HirTerminator::If { condition, .. } => condition,
         _ => panic!("expected the zero-step guard"),
     };
@@ -779,7 +783,7 @@ fn inclusive_range_loop_exits_before_the_candidate() {
         None,
     );
 
-    let cfg = range_loop_cfg_blocks(&module);
+    let cfg = range_loop_cfg_blocks(&module, false);
     let (endpoint_exit, candidate_block) = match module.blocks[cfg.step.0 as usize].terminator {
         HirTerminator::If {
             then_block,
@@ -926,11 +930,26 @@ fn lowers_range_loop_without_user_bindings() {
     )
     .expect("range loop lowering without user bindings should succeed");
 
-    let cfg = range_loop_cfg_blocks(&module);
+    let cfg = range_loop_cfg_blocks(&module, false);
     let body_locals = &module.blocks[cfg.body.0 as usize].locals;
     assert!(
         body_locals.is_empty(),
         "binding-less range loops should not allocate user binding locals"
+    );
+    assert!(
+        cfg.step_zero_check.is_none(),
+        "an implicit `+1` step needs no zero-step guard"
+    );
+    assert!(
+        module
+            .blocks
+            .iter()
+            .flat_map(|block| block.statements.iter())
+            .all(|statement| !matches!(
+                statement.kind,
+                HirStatementKind::NumericOp { .. } | HirStatementKind::LoopStepFailure { .. }
+            )),
+        "a range loop with no ordinal binding and no authored step has no generated failure producer"
     );
 }
 
@@ -1003,7 +1022,7 @@ fn lowers_range_loop_with_index_binding() {
     )
     .expect("range loop lowering with index should succeed");
 
-    let cfg = range_loop_cfg_blocks(&module);
+    let cfg = range_loop_cfg_blocks(&module, false);
     let body_statements = &module.blocks[cfg.body.0 as usize].statements;
     let binding_definition_count = body_statements
         .iter()
@@ -1137,9 +1156,12 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
     )
     .expect("dynamic-step range loop lowering should succeed");
 
-    let cfg = range_loop_cfg_blocks(&module);
+    let cfg = range_loop_cfg_blocks(&module, true);
+    let zero_check = cfg
+        .step_zero_check
+        .expect("a dynamic step keeps the runtime zero-step guard");
 
-    let panic_block = match module.blocks[cfg.step_zero_check.0 as usize].terminator {
+    let panic_block = match module.blocks[zero_check.0 as usize].terminator {
         HirTerminator::If { then_block, .. } => then_block,
         _ => panic!("expected runtime zero-check branch"),
     };
@@ -2129,7 +2151,7 @@ fn lowers_range_loop_user_bindings_as_immutable_locals() {
     )
     .expect("range loop lowering should succeed");
 
-    let cfg = range_loop_cfg_blocks(&module);
+    let cfg = range_loop_cfg_blocks(&module, false);
     let body_locals = &module.blocks[cfg.body.0 as usize].locals;
     assert!(
         !body_locals.is_empty() && body_locals.iter().all(|local| !local.mutable),

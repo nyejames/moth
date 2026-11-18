@@ -260,7 +260,7 @@ fn a_generated_fast_range_guard_is_a_witness_without_authored_arithmetic() {
 $fast_math
 guarded_range || -> I32:
     value ~= 0
-    loop 0 to 3 |item|:
+    loop 0 to 3 by 1 |item|:
         ~value = item
     ;
     return value
@@ -295,11 +295,11 @@ guarded_range || -> I32:
     );
     let guard_span = facts.constraint.fast_use[0]
         .span
-        .expect("the generated guard is attributed to its authored loop header");
+        .expect("the generated guard is attributed to its authored step position");
     assert_eq!(
         source_text(source, guard_span),
-        "loop",
-        "the guard belongs to the loop statement/header, not to its first body statement"
+        "1",
+        "the guard is attributed to the authored step position, not to its first body statement"
     );
 }
 
@@ -425,7 +425,7 @@ fn skipped_handler_range_guard_is_selected_evidence() {
 $fast_math
 literal_handler || -> I32:
     result I32 = 10 // 2 catch |error|:
-        loop 0 to 3:
+        loop 0 to 3 by 1:
             io.line(\"x\")
         ;
         return 0
@@ -463,7 +463,7 @@ $fast_math $safe_math
 dead_after_return |limit I32| -> I32:
     return 0
     value I32 = witness(1)
-    loop 0 to limit:
+    loop 0 to limit by 1:
         io.line(\"x\")
     ;
 ;
@@ -492,5 +492,34 @@ dead_after_return |limit I32| -> I32:
         source_text(source, span),
         "loop",
         "the skipped guard is attributed to the loop header it belongs to"
+    );
+}
+
+#[test]
+fn skipped_range_without_generated_checks_selects_no_guard_evidence() {
+    // WHAT: a `$fast_math` loop after a terminator, with no authored step and no ordinal binding.
+    // WHY: lowering emits no zero guard, no float no-progress guard and no ordinal update for this
+    //      shape, and the skipped-source walker must use the same rule. Recording a guard here
+    //      would reject `$safe_math` for a loop that is accepted when it is live.
+    let source = "\
+$fast_math
+dead_unstepped |limit I32| -> I32:
+    return 0
+    loop 0 to limit:
+        io.line(\"x\")
+    ;
+;
+";
+    let (hir, path_fork, string_table) = lower_source(source);
+    let facts = facts_by_name(&hir, &path_fork, &string_table, "dead_unstepped");
+
+    assert!(
+        !facts
+            .constraint
+            .fast_use
+            .iter()
+            .any(|witness| witness.provenance == HirFastUseProvenance::RangeGuard),
+        "a skipped loop with no generated range check must select no guard: {:?}",
+        facts.constraint.fast_use
     );
 }

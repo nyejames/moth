@@ -12,7 +12,6 @@ diagnostic_codes = [
     "MOTH-RULE-0091",
     "MOTH-RULE-0091",
     "MOTH-RULE-0091",
-    "MOTH-RULE-0091",
 ]
 
 [[backends.html.diagnostic_assertions]]
@@ -46,13 +45,6 @@ line = 33
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0091"
 occurrence = 8
-reason = "invalid_source_constraint.trap_range_guard"
-path = "input/@entry.moth"
-line = 38
-
-[[backends.html.diagnostic_assertions]]
-code = "MOTH-RULE-0091"
-occurrence = 9
 reason = "invalid_source_constraint.escaping_error"
 path = "input/@entry.moth"
 line = 54

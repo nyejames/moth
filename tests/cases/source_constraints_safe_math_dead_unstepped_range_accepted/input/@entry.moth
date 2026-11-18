@@ -1,0 +1,9 @@
+-- A range loop after a terminator cannot execute. This header has no authored step and no
+-- ordinal binding, so lowering emits no generated range check; the skipped-source evidence
+-- walker must not select a fast range guard for a shape that is accepted when it is live.
+$fast_math $safe_math
+dead_unstepped |limit I32| -> I32:
+    return 0
+    loop 0 to limit:
+    ;
+;

@@ -211,10 +211,11 @@ fn arithmetic_codes_exclude_boundary_and_format_invariants() {
 fn range_loop_failure_codes_follow_the_counter_domain() {
     // Float ranges never raise `FloatNonFinite`: an out-of-range or non-finite candidate ends
     // iteration. Both domains still overflow the checked `I32` ordinal increment and reject a
-    // zero step; only the float candidate can also stall after rounding.
+    // zero step; only the float candidate can also stall after rounding. Both loops bind the
+    // ordinal and author a step, so every generated guard exists.
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "float_range |start F32, end F32, step F32|:\n    loop start to end by step:\n    ;\n;\n\
-         int_range |start U64, end U64, step I64|:\n    loop start to end by step:\n    ;\n;\n",
+        "float_range |start F32, end F32, step F32|:\n    loop start to end by step |value, ordinal|:\n    ;\n;\n\
+         int_range |start U64, end U64, step I64|:\n    loop start to end by step |value, ordinal|:\n    ;\n;\n",
     );
     for (name, expected) in [
         (
@@ -276,10 +277,8 @@ fn range_loop_step_failures_follow_the_header_operand_evaluation() {
     let guard_failure = &facts.body.implicit[1];
     assert_eq!(
         guard_failure.codes,
-        &[
-            BuiltinErrorCode::IntOverflow,
-            BuiltinErrorCode::InvalidLoopStep,
-        ]
+        &[BuiltinErrorCode::InvalidLoopStep],
+        "the loop binds no ordinal, so only the authored step's zero guard contributes"
     );
     assert_eq!(guard_failure.span, Some(loop_span));
 
@@ -299,6 +298,54 @@ fn range_loop_step_failures_follow_the_header_operand_evaluation() {
     assert_eq!(witness.origin, BuiltinFailureOriginKind::Operation);
     assert_eq!(witness.origin_span, start_failure.span);
     assert_ne!(witness.origin_span, Some(loop_span));
+}
+
+#[test]
+fn range_loop_generated_failures_follow_the_emitted_checks() {
+    // WHAT: the ordinal overflow exists only when the header binds the ordinal, and the zero-step
+    //       failure only when the header authors a step.
+    // WHY: HIR does not emit an unobservable ordinal update or an impossible zero guard for the
+    //      implicit `+1` step. Failure facts must mirror emitted work, so an unbound and unstepped
+    //      loop stays infallible while each observable check contributes its own code.
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "plain |start I32, finish I32| -> I32:\n    loop start to finish:\n    ;\n    return 0\n;\n\
+         stepped |start I32, finish I32, step I32| -> I32:\n    loop start to finish by step:\n    ;\n    return 0\n;\n\
+         ordinal |start I32, finish I32| -> I32:\n    loop start to finish |value, index|:\n    ;\n    return 0\n;\n\
+         both |start I32, finish I32, step I32| -> I32:\n    loop start to finish by step |value, index|:\n    ;\n    return 0\n;\n",
+    );
+    for (name, expected) in [
+        ("plain", &[][..]),
+        ("stepped", &[BuiltinErrorCode::InvalidLoopStep][..]),
+        ("ordinal", &[BuiltinErrorCode::IntOverflow][..]),
+        (
+            "both",
+            &[
+                BuiltinErrorCode::IntOverflow,
+                BuiltinErrorCode::InvalidLoopStep,
+            ][..],
+        ),
+    ] {
+        let facts = pending_function_failure_facts(
+            function_body_by_name(&ast, &path_fork, &string_table, name),
+            &TemplateIrStore::new(),
+            &ast.expressions,
+        )
+        .expect("range loop facts resolve");
+        if expected.is_empty() {
+            assert!(
+                facts.body.implicit.is_empty(),
+                "{name}: no generated check exists, so none may contribute"
+            );
+        } else {
+            assert_eq!(facts.body.implicit.len(), 1, "{name}");
+            assert_eq!(facts.body.implicit[0].codes, expected, "{name}");
+            assert_eq!(
+                facts.body.implicit[0].source,
+                ImplicitFailureSource::NumericOperation,
+                "{name}"
+            );
+        }
+    }
 }
 
 #[test]

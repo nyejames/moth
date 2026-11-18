@@ -28,6 +28,7 @@ use crate::compiler_frontend::hir::failure_facts::{
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirStableFunctionOrigin};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
+use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::hir::utils::{collect_reachable_blocks, for_each_terminator_target};
@@ -533,6 +534,19 @@ impl<'a> HirBuilder<'a> {
                 HirStatementKind::NumericOp { op, .. } if op.semantics.is_fast() => {
                     fast_use.push(HirFastUseWitness {
                         provenance: HirFastUseProvenance::AuthoredArithmetic,
+                        span: statement.span,
+                    });
+                }
+                // A generated `$fast_math` range ordinal keeps ordinary checked semantics (so it
+                // never wraps) but delivers its overflow fatally. Fast authored operations hit
+                // the arm above, so a fatal operation here is the generated ordinal; it must still
+                // count as fast range evidence or `$safe_math` accepts a trapping loop.
+                HirStatementKind::NumericOp {
+                    failure_mode: NumericFailureMode::Fatal,
+                    ..
+                } => {
+                    fast_use.push(HirFastUseWitness {
+                        provenance: HirFastUseProvenance::RangeGuard,
                         span: statement.span,
                     });
                 }

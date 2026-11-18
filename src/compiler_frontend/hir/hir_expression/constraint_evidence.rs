@@ -19,6 +19,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     ExpressionOperationView, ExpressionStore, ResolvedCallableTarget,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
+use crate::compiler_frontend::ast::statements::control_flow_exits::analyze_control_flow_exits;
 use crate::compiler_frontend::ast::statements::never_call::{NeverCall, NeverCallTarget};
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -90,7 +91,7 @@ impl<'a> HirBuilder<'a> {
         for node in nodes {
             node.visit_expression_ids(&mut |id| self.skipped_source_walk.push_root(id));
         }
-        self.record_skipped_statement_nodes(nodes)?;
+        self.record_skipped_statement_nodes(store, nodes)?;
         while let Some(id) = self.skipped_source_walk.pop_root() {
             if !self.skipped_source_walk.visit_once(id, generation) {
                 continue;
@@ -128,43 +129,59 @@ impl<'a> HirBuilder<'a> {
     ///      traversal owner.
     fn record_skipped_statement_nodes(
         &mut self,
+        store: &ExpressionStore,
         nodes: &[AstNode],
     ) -> Result<(), HirConstructionFailure> {
         for node in nodes {
             match &node.kind {
                 NodeKind::NeverCall(call) => self.record_skipped_never_call(call)?,
-                NodeKind::RangeLoop { range, body, .. } => {
+                NodeKind::RangeLoop {
+                    bindings,
+                    range,
+                    body,
+                } => {
+                    // Mirror lowering exactly: a `$fast_math` loop selects range evidence only for
+                    // the checks lowering emits. Lowering drops the step block, and with it the
+                    // generated ordinal update, when the body can neither fall through nor
+                    // `continue`; a skipped copy must not record a trap a live copy never runs.
                     if range.fast_math {
-                        let function = self.current_function_id_or_error()?;
-                        self.record_skipped_fast_use(
-                            function,
-                            HirFastUseProvenance::RangeGuard,
-                            node.span,
-                        );
+                        let ordinal_update_is_emitted = bindings.index.is_some() && {
+                            let exits =
+                                analyze_control_flow_exits(body, store, &self.module_const_values);
+                            exits.can_fall_through || exits.continues_current_loop
+                        };
+                        if range.has_generated_range_check(ordinal_update_is_emitted) {
+                            let function = self.current_function_id_or_error()?;
+                            self.record_skipped_fast_use(
+                                function,
+                                HirFastUseProvenance::RangeGuard,
+                                node.span,
+                            );
+                        }
                     }
-                    self.record_skipped_statement_nodes(body)?;
+                    self.record_skipped_statement_nodes(store, body)?;
                 }
                 NodeKind::If(_, then_body, else_body, _) => {
-                    self.record_skipped_statement_nodes(then_body)?;
+                    self.record_skipped_statement_nodes(store, then_body)?;
                     if let Some(else_body) = else_body {
-                        self.record_skipped_statement_nodes(else_body)?;
+                        self.record_skipped_statement_nodes(store, else_body)?;
                     }
                 }
                 NodeKind::Match { arms, default, .. } => {
                     for arm in arms {
-                        self.record_skipped_statement_nodes(&arm.body)?;
+                        self.record_skipped_statement_nodes(store, &arm.body)?;
                     }
                     if let Some(default) = default {
-                        self.record_skipped_statement_nodes(default)?;
+                        self.record_skipped_statement_nodes(store, default)?;
                     }
                 }
                 NodeKind::LexicalScope { body }
                 | NodeKind::Function(_, _, body)
                 | NodeKind::EntryStart(_, body) => {
-                    self.record_skipped_statement_nodes(body)?;
+                    self.record_skipped_statement_nodes(store, body)?;
                 }
                 NodeKind::CollectionLoop { body, .. } | NodeKind::WhileLoop(_, body) => {
-                    self.record_skipped_statement_nodes(body)?;
+                    self.record_skipped_statement_nodes(store, body)?;
                 }
                 _ => {}
             }
@@ -179,16 +196,18 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<(), HirConstructionFailure> {
         match block {
             ValueBlock::If(block) => {
-                self.record_skipped_statement_nodes(&block.then_body)?;
-                self.record_skipped_statement_nodes(&block.else_body)
+                self.record_skipped_statement_nodes(store, &block.then_body)?;
+                self.record_skipped_statement_nodes(store, &block.else_body)
             }
-            ValueBlock::LexicalScope(block) => self.record_skipped_statement_nodes(&block.body),
+            ValueBlock::LexicalScope(block) => {
+                self.record_skipped_statement_nodes(store, &block.body)
+            }
             ValueBlock::Match(block) => {
                 for arm in &block.arms {
-                    self.record_skipped_statement_nodes(&arm.body)?;
+                    self.record_skipped_statement_nodes(store, &arm.body)?;
                 }
                 if let Some(default) = &block.default {
-                    self.record_skipped_statement_nodes(default)?;
+                    self.record_skipped_statement_nodes(store, default)?;
                 }
                 Ok(())
             }
@@ -205,7 +224,7 @@ impl<'a> HirBuilder<'a> {
                     if statically_infallible {
                         self.record_pruned_handler_root_spans(store, body)?;
                     }
-                    self.record_skipped_statement_nodes(body)
+                    self.record_skipped_statement_nodes(store, body)
                 }
                 FallibleHandling::Propagate => Ok(()),
             },

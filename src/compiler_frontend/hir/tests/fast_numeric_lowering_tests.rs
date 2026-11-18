@@ -304,7 +304,7 @@ zero_step || -> I32:
 ;
 
 $fast_math
-loop 0 to 3 by zero_step() |item|:
+loop 0 to 3 by zero_step() |item, ordinal|:
     marker = item
 ;
 ";

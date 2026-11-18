@@ -593,6 +593,12 @@ fn retained_fast_operation_witness(
                 HirStatementKind::NumericOp { op, .. } if op.semantics.is_fast() => {
                     HirFastUseProvenance::AuthoredArithmetic
                 }
+                // The generated `$fast_math` ordinal keeps ordinary checked semantics but a fatal
+                // delivery; an authored fast operation matched above, so this is the ordinal.
+                HirStatementKind::NumericOp {
+                    failure_mode: NumericFailureMode::Fatal,
+                    ..
+                } => HirFastUseProvenance::RangeGuard,
                 HirStatementKind::LoopStepFailure { semantics, .. } if semantics.is_fast() => {
                     HirFastUseProvenance::RangeGuard
                 }

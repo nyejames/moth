@@ -7008,6 +7008,13 @@ contract = "language.templates.runtime_loop_slot_application"
 role = "primary"
 
 [[case]]
+id = "template_runtime_const_range_loop"
+path = "template_runtime_const_range_loop"
+tags = ["integration","templates","loops","wasm"]
+contract = "language.templates.runtime_const_range_loop"
+role = "primary"
+
+[[case]]
 id = "template_runtime_nested_child_edge_named_slot"
 path = "template_runtime_nested_child_edge_named_slot"
 tags = ["integration","templates","slots"]
@@ -21138,6 +21145,41 @@ contract = "language.directives.safe_math_rejects_direct_fast_use"
 role = "primary"
 
 [[case]]
+id = "source_constraints_safe_math_dead_unstepped_range_accepted"
+path = "source_constraints_safe_math_dead_unstepped_range_accepted"
+tags = ["integration", "directives", "numeric", "constraints"]
+contract = "language.directives.safe_math_accepts_skipped_unstepped_range"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_fast_range_ordinal_rejected"
+path = "source_constraints_safe_math_fast_range_ordinal_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
+contract = "language.directives.safe_math_rejects_fast_range_ordinal_trap"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_fast_range_ordinal_rejected_release"
+path = "source_constraints_safe_math_fast_range_ordinal_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "release"]
+contract = "language.directives.safe_math_rejects_fast_range_ordinal_trap"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_safe_math_range_ordinal_unreached_accepted"
+path = "source_constraints_safe_math_range_ordinal_unreached_accepted"
+tags = ["integration", "directives", "numeric", "constraints"]
+contract = "language.directives.safe_math_accepts_unreached_range_ordinal"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_range_ordinal_unreached_accepted_release"
+path = "source_constraints_safe_math_range_ordinal_unreached_accepted_release"
+tags = ["integration", "directives", "numeric", "constraints", "release"]
+contract = "language.directives.safe_math_accepts_unreached_range_ordinal"
+role = "boundary"
+
+[[case]]
 id = "source_constraints_safe_math_rejected"
 path = "source_constraints_safe_math_rejected"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
@@ -21338,6 +21380,13 @@ id = "source_constraints_statement_safe_math_second_call_rejected"
 path = "source_constraints_statement_safe_math_second_call_rejected"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "statements"]
 contract = "language.directives.statement_safe_math_checks_every_call_site"
+role = "primary"
+
+[[case]]
+id = "source_constraints_statement_safe_math_fast_range_ordinal_rejected"
+path = "source_constraints_statement_safe_math_fast_range_ordinal_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "statements"]
+contract = "language.directives.statement_safe_math_rejects_fast_range_ordinal_trap"
 role = "primary"
 
 [[case]]

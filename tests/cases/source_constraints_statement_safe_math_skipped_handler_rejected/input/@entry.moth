@@ -48,7 +48,7 @@ ordered_guard_skipped |value I32, limit I32| -> Bool:
     result = calm_early(value) < calm_early(1) catch |error|:
         seen ~= 0
         $fast_math
-        loop 0 to limit:
+        loop 0 to limit by 1:
             ~seen = seen
         ;
         return seen > 0
@@ -61,7 +61,7 @@ literal_guard_skipped |limit I32| -> I32:
     result I32 = 10 // 2 catch |error|:
         seen ~= 0
         $fast_math
-        loop 0 to limit:
+        loop 0 to limit by 1:
             ~seen = seen
         ;
         return seen

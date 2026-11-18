@@ -1716,7 +1716,11 @@ fn classify_nodes(
                 effect
             }
             NodeKind::LexicalScope { body } => classify_nodes(body, template_ir_store, state)?,
-            NodeKind::RangeLoop { range, body, .. } => {
+            NodeKind::RangeLoop {
+                bindings,
+                range,
+                body,
+            } => {
                 // The header operands are evaluated before the zero-step guard. Registering the
                 // synthesized step failures last keeps the first failure witness at the earliest
                 // reachable contributor instead of the later guard.
@@ -1742,8 +1746,14 @@ fn classify_nodes(
                     )?;
                 }
                 if effect.is_none() {
-                    effect =
-                        classify_range_failure(range.domain, range.fast_math, node.span, state);
+                    effect = classify_range_failure(
+                        range.domain,
+                        range.fast_math,
+                        bindings.index.is_some(),
+                        range.step.is_some(),
+                        node.span,
+                        state,
+                    );
                 }
                 if effect.is_none() {
                     effect = classify_loop_body(body, template_ir_store, state)?;
@@ -1963,7 +1973,7 @@ fn classify_loop_header(
             template_ir_store,
             state,
         ),
-        TemplateLoopHeader::Range { range, .. } => {
+        TemplateLoopHeader::Range { bindings, range } => {
             // The header operands are evaluated before the zero-step guard, so their
             // contributors keep priority over the synthesized step failures.
             if let Some(effect) = classify_expression(
@@ -1997,6 +2007,8 @@ fn classify_loop_header(
             Ok(classify_range_failure(
                 range.domain,
                 range.fast_math,
+                bindings.index.is_some(),
+                range.step.is_some(),
                 span,
                 state,
             ))
@@ -2031,37 +2043,43 @@ fn classify_loop_header(
 fn classify_range_failure(
     domain: NumericScalar,
     fast_math: bool,
+    has_index_binding: bool,
+    has_explicit_step: bool,
     span: Option<SourceSpan>,
     state: &mut TraversalState<'_>,
 ) -> Option<EnclosingExitEffect> {
-    // Range loops fail on overflow plus their step guards: zero step (306) in every domain and
-    // no progress (307) when floating rounding leaves the candidate unchanged. The checked `I32`
-    // ordinal increment overflows in both domains, and a float candidate only ends iteration:
-    // it never raises `FloatNonFinite`.
+    // Range loops fail on their generated guards: an `I32` ordinal overflow only when the header
+    // binds the ordinal, zero step (306) only when the header authors a step, and no progress
+    // (307) whenever a binary-float candidate can round back onto the current value. A float
+    // candidate that passes the endpoint only ends iteration: it never raises `FloatNonFinite`.
     //
-    // Under `$fast_math` every generated guard fails fatally instead: the ordinal overflow and
-    // the zero-step/no-progress guards are not recoverable `Error` contributors, so an exported
-    // no-slot function stays accepted and a private no-slot function gains no lane. Contributors
-    // from the authored header operands and the body are classified separately and keep their own
-    // mode.
+    // Under `$fast_math` every generated guard fails fatally instead: these are not recoverable
+    // `Error` contributors, so an exported no-slot function stays accepted and a private no-slot
+    // function gains no lane. Contributors from the authored header operands and the body are
+    // classified separately and keep their own mode.
     if fast_math {
         return None;
     }
-    // Elsewhere, literal and omitted steps keep these contributors because HIR always emits the
-    // same guards: the classifier mirrors emitted work instead of proving operand values, exactly
-    // as `value + 1` stays potentially overflowing. A statically zero literal step never reaches
-    // this point because the header policy rejects it before classification.
+    // The classifier mirrors emitted work rather than proving operand values: an implicit `+1`
+    // step needs no zero guard and an unbound ordinal needs no update, exactly as HIR lowerers
+    // emit them. A statically zero literal step never reaches this point because the header
+    // policy rejects it before classification.
+    use BuiltinErrorCode::{IntOverflow, InvalidLoopStep, RangeStepNoProgress};
+
     let codes: &'static [BuiltinErrorCode] = if domain.is_binary_float() {
-        &[
-            BuiltinErrorCode::IntOverflow,
-            BuiltinErrorCode::InvalidLoopStep,
-            BuiltinErrorCode::RangeStepNoProgress,
-        ]
+        match (has_index_binding, has_explicit_step) {
+            (true, true) => &[IntOverflow, InvalidLoopStep, RangeStepNoProgress],
+            (true, false) => &[IntOverflow, RangeStepNoProgress],
+            (false, true) => &[InvalidLoopStep, RangeStepNoProgress],
+            (false, false) => &[RangeStepNoProgress],
+        }
     } else {
-        &[
-            BuiltinErrorCode::IntOverflow,
-            BuiltinErrorCode::InvalidLoopStep,
-        ]
+        match (has_index_binding, has_explicit_step) {
+            (true, true) => &[IntOverflow, InvalidLoopStep],
+            (true, false) => &[IntOverflow],
+            (false, true) => &[InvalidLoopStep],
+            (false, false) => return None,
+        }
     };
     classify_numeric_step_failure(codes, span, state)
 }

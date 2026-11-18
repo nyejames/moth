@@ -1,0 +1,14 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "Priya|<ul></ul>\n<ul>\"*\"\"*\"</ul>"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "Priya|<ul></ul>\n<ul>\"*\"\"*\"</ul>"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "page.wasm"
+kind = "wasm"
+validate_wasm = true

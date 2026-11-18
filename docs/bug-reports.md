@@ -41,20 +41,12 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: validation accepts spaces, Unicode and `%` in the `origin` setting. Emitted URLs use the authored spelling verbatim, so a browser requests `/caf%C3%A9/...` for origin `/café` and the dev server's literal prefix match returns 404. It is undefined whether an authored `%20` is already encoded text or a literal percent.
 - Investigate: choose one rule, either restrict origin segments to URL-safe characters or treat the authored origin as decoded text and encode it on emission. Apply the same rule to the dev server prefix match and add loopback coverage.
 
-### Wasm rejects a runtime fragment that renders an open const loop template
+### Skipped range evidence can over-select an ordinal update inside a pruned catch
 
-- Found: `$supplied` directive work, 2026-11. Reproduced without `$supplied` on base `1c79842cf`.
-- Where: `wasm_numeric_rejection` in `src/backends/backend_feature_validation.rs` rejects the range loop's numeric operation because it is delivered by `Invoke`. The upstream lowering that turns an open const loop template into runtime loop code still needs identifying.
-- Observed: in this entry, `html` builds and `html_wasm` fails with `MOTH-RULE-0064` (`Backend 'Wasm' does not support recoverable numeric failure yet`) at the fragment. Applying the template as `[looped:[$in x:"*"]]` fails the same way. A loop body without `$slot` builds on both backends.
-
-  ```moth
-  looped #= [:<ul>[loop 0 to 2 |i|:[$slot x]]</ul>]
-  name = "Priya"
-  ~[:[name]|[looped]]
-  ```
-
-- Workaround: `template_supplied_nested_composition` renders its loop checks in a separate fragment, `~[:[loops]]`, whose const content folds before lowering.
-- Investigate: whether a const range loop with constant bounds should fold or lower without checked `Invoke` delivery. Otherwise, implement recoverable numeric failure on Wasm. Pin the entry above as an `html_wasm` success case once fixed.
+- Found: Wasm open const loop fix review, 2026-11. Unverified lead, not reproduced.
+- Where: `record_skipped_statement_nodes` in `src/compiler_frontend/hir/hir_expression/constraint_evidence.rs` decides whether a skipped range emits its ordinal update with `analyze_control_flow_exits`. Lowering decides it from HIR CFG edges to the step block in `loop_lowering.rs`.
+- Observed: HIR prunes a statically infallible `catch` handler, but the AST exit analysis still counts a `continue` inside that handler. A skipped `$fast_math` range that binds an ordinal and reaches its step block only through such a `continue` would be recorded as a `RangeGuard` that the live lowering does not emit. The skipped copy could then falsely reject `$safe_math`. The error only over-selects and never hides a live trap.
+- Investigate: try to reproduce this. If it reproduces, let the AST exit analysis skip handlers that HIR proves unreachable.
 
 ### Receiver mutation through a `catch`-joined slot changes an immutable parameter's element
 

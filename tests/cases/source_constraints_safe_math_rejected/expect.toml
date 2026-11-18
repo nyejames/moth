@@ -13,8 +13,6 @@ diagnostic_codes = [
     "MOTH-RULE-0091",
     "MOTH-RULE-0091",
     "MOTH-RULE-0091",
-    "MOTH-RULE-0091",
-    "MOTH-RULE-0091",
 ]
 
 [[backends.html.diagnostic_assertions]]
@@ -81,25 +79,6 @@ code = "MOTH-RULE-0091"
 occurrence = 6
 reason = "invalid_source_constraint.fast_range_guard"
 path = "input/@entry.moth"
-line = 47
-
-[[backends.html.diagnostic_assertions]]
-code = "MOTH-RULE-0091"
-occurrence = 7
-reason = "invalid_source_constraint.fast_range_guard"
-path = "input/@entry.moth"
-line = 56
-
-[[backends.html.diagnostic_assertions.secondary_labels]]
-occurrence = 1
-path = "input/@entry.moth"
-line = 60
-
-[[backends.html.diagnostic_assertions]]
-code = "MOTH-RULE-0091"
-occurrence = 8
-reason = "invalid_source_constraint.fast_range_guard"
-path = "input/@entry.moth"
 line = 68
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
@@ -109,7 +88,7 @@ line = 71
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0091"
-occurrence = 9
+occurrence = 7
 reason = "invalid_source_constraint.fast_operation"
 path = "input/@entry.moth"
 line = 76
@@ -126,7 +105,7 @@ line = 3
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0091"
-occurrence = 10
+occurrence = 8
 reason = "invalid_source_constraint.fast_operation"
 path = "input/@entry.moth"
 line = 83
@@ -138,7 +117,7 @@ line = 86
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0091"
-occurrence = 11
+occurrence = 9
 reason = "invalid_source_constraint.fast_operation"
 path = "input/@entry.moth"
 line = 90
