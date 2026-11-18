@@ -74,13 +74,6 @@ A casual log of bugs and limitations found during other work and left for later 
 - Observed: validation accepts spaces, Unicode and `%` in the `origin` setting. Emitted URLs use the authored spelling verbatim, so a browser requests `/caf%C3%A9/...` for origin `/café` and the dev server's literal prefix match returns 404. It is undefined whether an authored `%20` is already encoded text or a literal percent.
 - Investigate: choose one rule, either restrict origin segments to URL-safe characters or treat the authored origin as decoded text and encode it on emission. Apply the same rule to the dev server prefix match and add loopback coverage.
 
-### Windows root-relative in-memory template names fail as internal errors
-
-- Found: portable path display hardening MTF input review, 2026-11.
-- Where: `validate_in_memory_source_name` and in-memory `Sources` handling in `src/projects/html_project/moth_template/input.rs`.
-- Observed: on Windows `Path::is_relative` reports `/docs/x.mtf` as relative, so the name passes input validation and later fails as an internal logical-path failure instead of a typed input failure.
-- Investigate: classify a leading `/` without a drive prefix explicitly and reject or accept it with the typed input lane on every host.
-
 ### Direct Moth template sources reject a non-UTF-8 ancestor above the source root
 
 - Found: portable path display hardening final integration review, 2026-11.

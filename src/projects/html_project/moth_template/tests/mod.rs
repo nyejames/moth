@@ -11,6 +11,7 @@ use crate::build_system::create_project_modules::resource_inputs::{
 use crate::compiler_frontend::compiler_errors::{
     CompilationOutcome, CompilationResult, InfrastructureErrors, InfrastructureFailureKind,
 };
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::DuplicateMothTemplateInputPathView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
@@ -525,29 +526,83 @@ fn same_tree_in_two_checkouts_matches_origins_and_output_paths() {
 }
 
 #[test]
-fn mixed_relative_and_absolute_in_memory_paths_are_diagnosed() {
+fn mixed_relative_and_rooted_in_memory_paths_are_diagnosed() {
     let temp_dir = temp_project(&[]);
-    let mut string_table = StringTable::new();
+    let absolute_display_path =
+        PathBuf::from(portable_path_text(temp_dir.path().join("absolute.mtf")));
 
+    // Absolute and root-relative names share one rooted classification even where a host calls
+    // only one of them absolute.
+    for (second_path, second_name) in [
+        (absolute_display_path, "absolute.mtf"),
+        (PathBuf::from("/docs/rooted.mtf"), "rooted.mtf"),
+    ] {
+        let messages = expect_diagnosed(
+            compile_moth_template(
+                MothTemplateInput::Sources(vec![
+                    MothTemplateSource {
+                        display_path: PathBuf::from("memory/intro.mtf"),
+                        source_text: "first".to_owned(),
+                    },
+                    MothTemplateSource {
+                        // Rooted in-memory names follow the portable spelling contract too: only
+                        // the host prefix and root are native, the remainder uses `/`.
+                        display_path: second_path,
+                        source_text: "second".to_owned(),
+                    },
+                ]),
+                &mut StringTable::new(),
+            ),
+            "mixed relative and rooted display paths have one portable basis",
+        );
+
+        assert_eq!(messages.counts().errors, 1);
+        assert_eq!(
+            messages
+                .iter()
+                .map(|(_, view)| view.descriptor().code)
+                .collect::<Vec<_>>(),
+            ["MOTH-IMPORT-0029"],
+        );
+        let rendered = format_terse_diagnostic_reports(&messages).join("\n");
+        assert!(
+            rendered.contains("memory/intro.mtf"),
+            "the diagnostic should render its first actual input path: {rendered}",
+        );
+        assert!(
+            rendered.contains(second_name),
+            "the diagnostic should render its second actual input path: {rendered}",
+        );
+    }
+}
+
+// Unix absolute names always share the root directory, so only Windows path parsing can build a
+// three-input request whose leading components differ: a drive prefix and the root directory are
+// distinct first components.
+#[cfg(windows)]
+#[test]
+fn no_common_ancestor_diagnostic_names_the_conflicting_input() {
+    // The third input empties the shared directory prefix. The diagnostic must name the basis
+    // and the input that eliminated it, not an earlier pair that still shares a directory.
     let messages = expect_diagnosed(
         compile_moth_template(
             MothTemplateInput::Sources(vec![
                 MothTemplateSource {
-                    display_path: PathBuf::from("memory/intro.mtf"),
+                    display_path: PathBuf::from("/docs/a.mtf"),
                     source_text: "first".to_owned(),
                 },
                 MothTemplateSource {
-                    // Absolute in-memory names follow the portable spelling contract too: only
-                    // the host prefix and root are native, the remainder uses `/`.
-                    display_path: PathBuf::from(portable_path_text(
-                        temp_dir.path().join("absolute.mtf"),
-                    )),
+                    display_path: PathBuf::from("/docs/b.mtf"),
                     source_text: "second".to_owned(),
                 },
+                MothTemplateSource {
+                    display_path: PathBuf::from("C:/docs/c.mtf"),
+                    source_text: "third".to_owned(),
+                },
             ]),
-            &mut string_table,
+            &mut StringTable::new(),
         ),
-        "mixed relative and absolute display paths have one portable basis",
+        "a request whose third input eliminates the shared ancestor should be diagnosed",
     );
 
     assert_eq!(messages.counts().errors, 1);
@@ -560,12 +615,16 @@ fn mixed_relative_and_absolute_in_memory_paths_are_diagnosed() {
     );
     let rendered = format_terse_diagnostic_reports(&messages).join("\n");
     assert!(
-        rendered.contains("memory/intro.mtf"),
-        "the diagnostic should render its first actual input path: {rendered}",
+        rendered.contains("a.mtf"),
+        "the diagnostic should render the basis input: {rendered}",
     );
     assert!(
-        rendered.contains("absolute.mtf"),
-        "the diagnostic should render its second actual input path: {rendered}",
+        rendered.contains("c.mtf"),
+        "the diagnostic should render the conflicting input, not an earlier pair: {rendered}",
+    );
+    assert!(
+        !rendered.contains("b.mtf"),
+        "the diagnostic must not pair two inputs that still share a directory: {rendered}",
     );
 }
 
@@ -1368,6 +1427,163 @@ fn absolute_in_memory_display_paths_keep_their_display_identity() {
         ],
         "the common display ancestor should yield request-relative names",
     );
+}
+
+#[test]
+fn prefixless_rooted_in_memory_display_paths_keep_their_display_identity() {
+    // A leading `/` without a drive prefix is rooted on every host, so Windows must derive the
+    // same request-relative names Unix already does instead of treating the name as relative.
+    let first = PathBuf::from("/docs/intro.mtf");
+    let second = PathBuf::from("/docs/guide.mtf");
+
+    let output = compile_ok(MothTemplateInput::Sources(vec![
+        MothTemplateSource {
+            display_path: first.clone(),
+            source_text: "# Intro".to_owned(),
+        },
+        MothTemplateSource {
+            display_path: second.clone(),
+            source_text: "# Guide".to_owned(),
+        },
+    ]));
+
+    assert_eq!(
+        output
+            .documents
+            .iter()
+            .map(|document| (
+                document.source_path.clone(),
+                document.relative_path.clone(),
+                document.content.as_str(),
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (first, Some(PathBuf::from("intro.mtf")), "<h1>Intro</h1>"),
+            (second, Some(PathBuf::from("guide.mtf")), "<h1>Guide</h1>"),
+        ],
+        "rooted display paths should keep their identity and use the common ancestor",
+    );
+}
+
+#[test]
+fn in_memory_names_without_a_file_component_are_rejected_as_input() {
+    let display_path = PathBuf::from("/");
+
+    let errors = expect_infrastructure_failure(
+        MothTemplateInput::Sources(vec![MothTemplateSource {
+            display_path: display_path.clone(),
+            source_text: "# Root".to_owned(),
+        }]),
+        "a bare root in-memory display path",
+    );
+
+    assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(errors.primary.stage, CompilerStage::SourceLoading);
+    assert_eq!(
+        errors.primary.host_path.as_deref(),
+        Some(display_path.as_path()),
+        "the rejected input name should be reported exactly as supplied",
+    );
+    assert!(
+        errors.primary.message.contains("no source file component"),
+        "the rejection should explain the missing source identity: {}",
+        errors.primary.message,
+    );
+}
+
+// Windows alone parses `C:docs/intro.mtf` as a drive prefix without a root. Such a name has no
+// portable identity, so it must be rejected as input instead of reaching the relative branch and
+// failing later as an internal logical-path error.
+#[cfg(windows)]
+#[test]
+fn drive_relative_in_memory_names_are_rejected_as_input() {
+    let display_path = PathBuf::from("C:docs/intro.mtf");
+
+    let errors = expect_infrastructure_failure(
+        MothTemplateInput::Sources(vec![MothTemplateSource {
+            display_path: display_path.clone(),
+            source_text: "# Intro".to_owned(),
+        }]),
+        "a drive-relative in-memory display path",
+    );
+
+    assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(errors.primary.stage, CompilerStage::SourceLoading);
+    assert_eq!(
+        errors.primary.host_path.as_deref(),
+        Some(display_path.as_path()),
+        "the rejected input name should be reported exactly as supplied",
+    );
+    assert!(
+        errors
+            .primary
+            .message
+            .contains("drive prefix without a root"),
+        "the rejection should explain the missing portable basis: {}",
+        errors.primary.message,
+    );
+}
+
+// Windows parses `\C:guide.mtf` as a root plus a normal component because a drive prefix is only
+// recognised at the start of the path. The common-ancestor rule then exposes `C:guide.mtf` as
+// the relative identity, which Windows parses as drive-relative.
+#[cfg(windows)]
+#[test]
+fn rooted_in_memory_names_whose_suffix_is_drive_relative_are_rejected_as_input() {
+    let display_path = PathBuf::from(r"\C:guide.mtf");
+
+    let errors = expect_infrastructure_failure(
+        MothTemplateInput::Sources(vec![MothTemplateSource {
+            display_path: display_path.clone(),
+            source_text: "# Guide".to_owned(),
+        }]),
+        "a rooted in-memory name whose relative suffix is drive-relative",
+    );
+
+    assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(errors.primary.stage, CompilerStage::SourceLoading);
+    assert_eq!(
+        errors.primary.host_path.as_deref(),
+        Some(display_path.as_path()),
+        "the rejection should name the original input, not the derived suffix",
+    );
+    assert!(
+        errors.primary.message.contains("drive prefix"),
+        "the rejection should explain the drive-relative suffix: {}",
+        errors.primary.message,
+    );
+}
+
+// Windows parses `//server/share` as a UNC prefix with an implicit root and no source file
+// component. Its implicit root occupies no bytes of the spelling, so offset arithmetic used to
+// panic while locating the portable suffix.
+#[cfg(windows)]
+#[test]
+fn bare_unc_in_memory_names_are_rejected_as_input() {
+    for display_path in ["//server/share", r"\\server\share"] {
+        let display_path = PathBuf::from(display_path);
+
+        let errors = expect_infrastructure_failure(
+            MothTemplateInput::Sources(vec![MothTemplateSource {
+                display_path: display_path.clone(),
+                source_text: "# Share".to_owned(),
+            }]),
+            "a bare UNC share in-memory display path",
+        );
+
+        assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+        assert_eq!(errors.primary.stage, CompilerStage::SourceLoading);
+        assert_eq!(
+            errors.primary.host_path.as_deref(),
+            Some(display_path.as_path()),
+            "the rejected input name should be reported exactly as supplied",
+        );
+        assert!(
+            errors.primary.message.contains("no source file component"),
+            "the rejection should explain the missing source identity: {}",
+            errors.primary.message,
+        );
+    }
 }
 
 #[test]

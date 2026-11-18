@@ -33,9 +33,14 @@ pub(crate) struct MothTemplateSource {
     /// The caller's in-memory logical source name.
     ///
     /// This is a portable identity, not a file to open: components must be UTF-8 and the only
-    /// separator is `/`. A relative name must not contain a backslash at all. An absolute name
-    /// may spell only its prefix and root natively; everything after them must still use `/`.
-    /// Filesystem inputs carry canonical native paths instead.
+    /// separator is `/`. A relative name must not contain a backslash at all. A rooted name,
+    /// whether absolute or root-relative such as `/docs/intro.mtf`, may spell only its prefix
+    /// and root natively; everything after them must still use `/` and must not begin with a
+    /// drive prefix once the root is stripped. Rootedness is `Path::has_root`, so a root without
+    /// a drive prefix is a rooted identity on every host and follows the same common-ancestor
+    /// rule as an absolute name. A name with no portable basis, such as a drive prefix without a
+    /// root or a bare root or UNC share with no file component, is rejected as input. Filesystem
+    /// inputs carry canonical native paths instead.
     pub(crate) display_path: PathBuf,
     pub(crate) source_text: String,
 }
@@ -111,12 +116,14 @@ fn collect_directory_units(
     Ok(units)
 }
 
-/// Give every file-list unit its request-relative identity relative to the files' longest common
-/// ancestor directory.
+/// Give every unit its request-relative identity under the request's longest common ancestor
+/// directory.
 ///
-/// Distinct directories under that ancestor yield distinct module origins, so same-named
-/// resources in different documents cannot collide. One file's relative path is its file name,
-/// which keeps the entry-root empty module path correct for a single-file request.
+/// File-list units and rooted in-memory display paths share this rule. Distinct directories under
+/// that ancestor yield distinct module origins, so same-named resources in different documents
+/// cannot collide. One input's relative path is its file name, which keeps the entry-root empty
+/// module path correct for a single-input request. An input that eliminates the shared ancestor
+/// is diagnosed against the basis, so the failure names the input that removed the shared basis.
 fn assign_common_ancestor_relative_paths(
     units: &mut [MothTemplateSourceUnit],
     string_table: &mut StringTable,
@@ -126,16 +133,18 @@ fn assign_common_ancestor_relative_paths(
         return Ok(());
     }
 
-    let Some(ancestor) =
-        common_ancestor_directory(units.iter().map(|unit| unit.source_path.as_path()))
-    else {
-        return Err(no_common_ancestor_failure(
-            &units[0].source_path,
-            &units[1].source_path,
-            string_table,
-            path_fork,
-        ));
-    };
+    let ancestor =
+        match common_ancestor_directory(units.iter().map(|unit| unit.source_path.as_path())) {
+            Ok(ancestor) => ancestor,
+            Err(conflicting_path) => {
+                return Err(no_common_ancestor_failure(
+                    &units[0].source_path,
+                    conflicting_path,
+                    string_table,
+                    path_fork,
+                ));
+            }
+        };
 
     for unit in units.iter_mut() {
         unit.relative_path = Some(relative_path_under(&ancestor, &unit.source_path).to_path_buf());
@@ -146,10 +155,11 @@ fn assign_common_ancestor_relative_paths(
 
 /// Give every in-memory unit the request's portable display identity.
 ///
-/// Relative display paths are portable identities directly. Absolute display paths fall back to
-/// the common-ancestor rule on the display paths. A request mixing relative and absolute display
-/// paths has no shared portable basis, so it is diagnosed instead of minting colliding empty
-/// module origins.
+/// Relative display paths are portable identities directly. Rooted display paths fall back to
+/// the common-ancestor rule on the display paths. Rootedness is `Path::has_root`, not
+/// `Path::is_absolute`: Windows parses `/docs/x.mtf` as rooted but not absolute, and it must
+/// classify exactly as Unix does. A request mixing rooted and relative display paths has no
+/// shared portable basis, so it is diagnosed instead of minting colliding empty module origins.
 fn assign_in_memory_relative_paths(
     units: &mut [MothTemplateSourceUnit],
     string_table: &mut StringTable,
@@ -159,10 +169,10 @@ fn assign_in_memory_relative_paths(
         return Ok(());
     }
 
-    let basis_is_relative = units[0].source_path.is_relative();
+    let basis_is_rooted = units[0].source_path.has_root();
     if let Some(mixed_index) = units
         .iter()
-        .position(|unit| unit.source_path.is_relative() != basis_is_relative)
+        .position(|unit| unit.source_path.has_root() != basis_is_rooted)
     {
         return Err(no_common_ancestor_failure(
             &units[0].source_path,
@@ -172,7 +182,7 @@ fn assign_in_memory_relative_paths(
         ));
     }
 
-    if basis_is_relative {
+    if !basis_is_rooted {
         for unit in units.iter_mut() {
             unit.relative_path = Some(unit.source_path.clone());
         }
@@ -180,43 +190,65 @@ fn assign_in_memory_relative_paths(
         return Ok(());
     }
 
-    // An absolute display path is no portable identity by itself; the display paths' common
+    // A rooted display path is no portable identity by itself; the display paths' common
     // ancestor directory plays the same role a request root plays for file inputs.
-    let Some(ancestor) =
-        common_ancestor_directory(units.iter().map(|unit| unit.source_path.as_path()))
-    else {
-        return Err(no_common_ancestor_failure(
-            &units[0].source_path,
-            &units[1].source_path,
-            string_table,
-            path_fork,
-        ));
-    };
+    assign_common_ancestor_relative_paths(units, string_table, path_fork)?;
+    reject_derived_drive_relative_paths(units)
+}
 
-    for unit in units.iter_mut() {
-        unit.relative_path = Some(relative_path_under(&ancestor, &unit.source_path).to_path_buf());
+/// Reject in-memory identities whose derived relative path is drive-relative on this host.
+///
+/// Stripping a root can expose a drive-looking first component: `\C:guide.mtf` yields the
+/// relative spelling `C:guide.mtf`, which Windows parses as a drive-relative path. Module origin
+/// derivation would then reject its `C:` parent internally, so the original input name is
+/// rejected here instead.
+fn reject_derived_drive_relative_paths(
+    units: &[MothTemplateSourceUnit],
+) -> Result<(), PreparedFailure> {
+    for unit in units {
+        let Some(relative_path) = unit.relative_path.as_deref() else {
+            continue;
+        };
+        let has_drive_prefix = matches!(
+            relative_path.components().next(),
+            Some(Component::Prefix(_))
+        );
+        if !has_drive_prefix {
+            continue;
+        }
+
+        return Err(InfrastructureFailure::filesystem(
+            CompilerStage::SourceLoading,
+            &unit.source_path,
+            format!(
+                "Moth template source name {:?} yields the relative name {relative_path:?} with \
+                 a drive prefix; an in-memory name must keep a portable relative suffix.",
+                unit.source_path
+            ),
+        )
+        .into());
     }
 
     Ok(())
 }
 
-/// The longest shared directory of the given paths, or `None` when they share none.
+/// The longest shared directory of the given paths, or the first path that shares none.
 ///
 /// Each path's file component is excluded: two sibling files share their parent directory,
 /// while files whose leading components differ (for example files on separate Windows drives)
-/// share no ancestor directory at all.
-fn common_ancestor_directory<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Option<PathBuf> {
-    let mut component_prefixes = paths.into_iter().map(|path| {
-        let mut components: Vec<&std::ffi::OsStr> = path
-            .components()
-            .map(|component| component.as_os_str())
-            .collect();
-        components.pop();
-        components
-    });
+/// share no ancestor directory. An input that empties the shared prefix is returned because the
+/// request diagnostic must name the input that eliminated the shared basis. An empty input set
+/// yields the empty path.
+fn common_ancestor_directory<'a>(
+    mut paths: impl Iterator<Item = &'a Path>,
+) -> Result<PathBuf, &'a Path> {
+    let Some(basis) = paths.next() else {
+        return Ok(PathBuf::new());
+    };
 
-    let mut shared = component_prefixes.next()?;
-    for components in component_prefixes {
+    let mut shared = directory_components(basis);
+    for path in paths {
+        let components = directory_components(path);
         let shared_length = shared
             .iter()
             .zip(components.iter())
@@ -225,11 +257,21 @@ fn common_ancestor_directory<'a>(paths: impl IntoIterator<Item = &'a Path>) -> O
         shared.truncate(shared_length);
 
         if shared.is_empty() {
-            return None;
+            return Err(path);
         }
     }
 
-    Some(shared.into_iter().collect())
+    Ok(shared.into_iter().collect())
+}
+
+/// The directory components of one input, excluding its file component.
+fn directory_components(path: &Path) -> Vec<&std::ffi::OsStr> {
+    let mut components: Vec<&std::ffi::OsStr> = path
+        .components()
+        .map(|component| component.as_os_str())
+        .collect();
+    components.pop();
+    components
 }
 
 /// Reject a request whose inputs cannot derive portable module identities.
@@ -264,30 +306,59 @@ fn no_common_ancestor_failure(
 /// Validate one user-supplied in-memory source name against the portable-name contract.
 ///
 /// In-memory display paths are logical identities, not files to open. Portable names separate
-/// components with `/`: a relative name must not contain a backslash at all, and an absolute name
-/// may spell only its prefix and root natively. A backslash anywhere else would change the
-/// identity once host parsing or downstream URL conversion reads it as a separator. UTF-8
+/// components with `/`: a relative name must not contain a backslash at all, and a rooted name
+/// may spell only its prefix and root natively. Rootedness is `Path::has_root`, so Windows treats
+/// a leading `/` as the root exactly as Unix does. A backslash anywhere else would change the
+/// identity once host parsing or downstream URL conversion reads it as a separator. A drive
+/// prefix without a root has no portable basis and is rejected here rather than reaching the
+/// relative branch and failing later as an internal logical-path error. A name with no file
+/// component below its root, such as a bare UNC share, is likewise rejected as input. UTF-8
 /// validation belongs to `validate_source_path_identities`, which sees every input path.
 fn validate_in_memory_source_name(display_path: &Path) -> Result<(), PreparedFailure> {
+    // A drive prefix without a root names a path relative to a drive's current directory, which
+    // has no portable meaning. Only Windows parses a drive prefix, so this spelling is rejected
+    // there and remains an ordinary relative name on other hosts.
+    let has_drive_prefix = matches!(display_path.components().next(), Some(Component::Prefix(_)));
+    if has_drive_prefix && !display_path.has_root() {
+        return Err(InfrastructureFailure::filesystem(
+            CompilerStage::SourceLoading,
+            display_path,
+            format!(
+                "Moth template source name {display_path:?} has a drive prefix without a root; \
+                 in-memory names must be relative or rooted."
+            ),
+        )
+        .into());
+    }
+
+    let remainder = path_after_native_structure(display_path);
+
     // A non-UTF-8 spelling cannot be compared as portable text; the shared identity validation
     // reports it through the typed source-path failure before duplicate handling.
-    let Some(spelling) = display_path.to_str() else {
+    let Some(spelling) = remainder.to_str() else {
         return Ok(());
     };
 
-    // Prefix and root spellings are structural host syntax only for an absolute name. A
-    // root-relative Windows name has no prefix and stays a relative in-memory identity.
-    let structural_prefix_len = if display_path.is_absolute() {
-        display_path
-            .components()
-            .take_while(|component| matches!(component, Component::Prefix(_) | Component::RootDir))
-            .map(|component| component.as_os_str().len())
-            .sum::<usize>()
-    } else {
-        0
-    };
+    // A name with nothing after its prefix and root has no source identity: `//server/share`
+    // spells only a UNC prefix and its implicit root, while `/` and `C:\` spell only a root. The
+    // implicit root occupies no bytes of the spelling, so this must be rejected before any
+    // offset arithmetic and before module-root derivation.
+    if spelling.is_empty() {
+        return Err(InfrastructureFailure::filesystem(
+            CompilerStage::SourceLoading,
+            display_path,
+            format!(
+                "Moth template source name {display_path:?} has no source file component; \
+                 in-memory names must name a file below their root."
+            ),
+        )
+        .into());
+    }
 
-    if spelling[structural_prefix_len..].contains('\\') {
+    // Prefix and root spellings are structural host syntax only before the portable remainder.
+    // A root-relative name has a root even where the host does not call it absolute, so its root
+    // still counts as structural syntax.
+    if spelling.contains('\\') {
         return Err(InfrastructureFailure::filesystem(
             CompilerStage::SourceLoading,
             display_path,
@@ -300,6 +371,24 @@ fn validate_in_memory_source_name(display_path: &Path) -> Result<(), PreparedFai
     }
 
     Ok(())
+}
+
+/// The spelling left after the native prefix and root components.
+///
+/// A component-length sum cannot locate this boundary: a non-verbatim UNC share reports an
+/// implicit `RootDir` component that occupies no bytes of the spelling.
+fn path_after_native_structure(path: &Path) -> &Path {
+    let structural_components = path
+        .components()
+        .take_while(|component| matches!(component, Component::Prefix(_) | Component::RootDir))
+        .count();
+
+    let mut components = path.components();
+    for _ in 0..structural_components {
+        components.next();
+    }
+
+    components.as_path()
 }
 
 /// Validate every source path through the typed UTF-8 identity lane.
