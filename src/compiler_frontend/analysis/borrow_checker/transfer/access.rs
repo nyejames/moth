@@ -400,6 +400,7 @@ fn transfer_assign_target(
             };
             let write_roots =
                 check_local_update_access(&mut check, local_index, &local_state, rhs_is_fresh)?;
+            tracker.record_write(&write_roots);
 
             if is_direct_self_update {
                 // The ordinary write check above covers this place. Rebinding it to itself adds
@@ -510,6 +511,7 @@ fn transfer_assign_target(
                 span,
                 &transfer_context.diagnostics,
             )?;
+            tracker.record_write(&roots);
             let mut check = AccessCheckContext {
                 context: transfer_context,
                 layout,

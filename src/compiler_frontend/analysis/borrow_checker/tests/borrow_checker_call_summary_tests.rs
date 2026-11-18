@@ -674,6 +674,20 @@ fn local_mutation_summary_propagates_writes_order_independently() {
 }
 
 #[test]
+fn slot_rebind_of_mutable_parameter_publishes_no_write() {
+    // The slot rebind reads `input` to acquire a mutation-capable alias of it. That exclusive
+    // access must not be published as a write, nor inherited by callers through the wrapper.
+    for callee_declared_first in [true, false] {
+        let (mutator_mutation, wrapper_mutation) = local_call_mutation_summary_in_order(
+            "    slot ~I32 = 0\n    ~slot = input",
+            callee_declared_first,
+        );
+        assert_eq!(mutator_mutation, PublicCallMutationEffect::NoWrite);
+        assert_eq!(wrapper_mutation, PublicCallMutationEffect::NoWrite);
+    }
+}
+
+#[test]
 fn public_call_summary_map_set_only_writes_receiver_parameter() {
     let source = r#"mutate |scores ~{String = String}, key String, value String|:
 ~scores.set(key, value) catch:

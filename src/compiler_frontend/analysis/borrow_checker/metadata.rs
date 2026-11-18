@@ -310,13 +310,14 @@ impl<'a> BorrowChecker<'a> {
 
                 match &statement.kind {
                     // Only a write to an existing place mutates a parameter. HIR validation keeps
-                    // definitions off parameter locals, so a definition from a parameter records
-                    // only the exclusive access needed to issue a mutation-capable alias.
+                    // definitions off parameter locals. `written_roots` excludes roots accessed
+                    // exclusively to issue a mutation-capable alias, so a slot rebind does not
+                    // publish a write to its source.
                     HirStatementKind::Write {
                         target: HirWriteTarget::AssignPlace(_),
                         ..
                     } => {
-                        for root in &statement_fact.mutable_roots {
+                        for root in &statement_fact.written_roots {
                             record_parameter_mutation(root);
                         }
                     }

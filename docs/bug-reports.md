@@ -84,13 +84,6 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: `alias ~= data` and `n ~I32 = divisor` compile when `data` or `divisor` is immutable. Writes and `~` arguments through the alias are rejected later. Committed success cases depend on this: `branch_reborrow_after_last_use`, `consistent_borrow_outcomes`, `consistent_ownership_outcomes` and `path_dependent_reborrow`. `live_shared_alias_blocks_mutable_rebinding` expects the conflict reason rather than `immutable_place`. Related: `~total = n`, where `n` is the immutable loop ordinal, is rejected with `MOTH-BORROW-0007` on both base and HEAD. Check that this rejection matches whichever rule is chosen.
 - Investigate: decide whether declaration requires a mutable source, as the docs say, or whether the docs should describe deferred rejection at first mutation. Then align the cases.
 
-### `~slot = parameter` rebind publishes a parameter write
-
-- Found: mutable `~` summary fix review, 2026-11. Confirmed imprecision. No caller rejection was found.
-- Where: `finalize_public_call_summary_effects` in `src/compiler_frontend/analysis/borrow_checker/metadata.rs`.
-- Observed: an `AssignPlace` slot rebind records the incoming referent root as a statement-level exclusive access in `mutable_roots`. A `Mutable` parameter that is only aliased this way is published as `Writes`, and callers can inherit the false `Writes` transitively.
-- Investigate: publish actual written roots separately from exclusive-access roots.
-
 ### A private helper's template range loop crashes an exported caller with no error slot
 
 - Found: bug-fix branch final audit, 2026-11. Reproduced on base `49714f1b8` and on `bug-fixes`.

@@ -20,6 +20,8 @@ pub(super) struct StatementAccessTracker {
     root_access_span: Vec<Option<SourceSpan>>,
     pub(super) shared_roots: RootSet,
     pub(super) mutable_roots: RootSet,
+    /// Roots whose storage this statement writes, separate from roots it accesses exclusively.
+    pub(super) written_roots: RootSet,
 }
 
 impl StatementAccessTracker {
@@ -29,6 +31,7 @@ impl StatementAccessTracker {
             root_access_span: vec![None; root_count],
             shared_roots: RootSet::empty(root_count),
             mutable_roots: RootSet::empty(root_count),
+            written_roots: RootSet::empty(root_count),
         }
     }
 
@@ -73,6 +76,14 @@ impl StatementAccessTracker {
             (None, AccessKind::Shared) => *entry = Some(AccessKind::Shared),
             (Some(AccessKind::Shared), AccessKind::Shared) => {}
         }
+    }
+
+    /// Records roots whose storage the statement actually writes.
+    ///
+    /// WHY: `record` collects every exclusive access, including the incoming referent of a
+    /// mutation-capable alias rebind. Mutation summaries need the smaller actual write set.
+    pub(super) fn record_write(&mut self, roots: &RootSet) {
+        self.written_roots.union_with(roots);
     }
 }
 

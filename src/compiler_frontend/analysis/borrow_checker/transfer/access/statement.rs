@@ -419,6 +419,7 @@ pub(crate) fn transfer_statement(
     let statement_fact = StatementBorrowFact {
         shared_roots: roots_to_local_ids(layout, &tracker.shared_roots),
         mutable_roots: roots_to_local_ids(layout, &tracker.mutable_roots),
+        written_roots: roots_to_local_ids(layout, &tracker.written_roots),
         conflicts_checked: stats.conflicts_checked - conflicts_before,
     };
     stats.statement_facts.push((statement.id, statement_fact));
