@@ -254,6 +254,12 @@ These five likely failures require dedicated tests in their owning phases, not j
 - [ ] Record commands, results, known limits and reviewed test coverage in the implementation PR handoff. Stop and request Nye's decision if a remaining issue would change the accepted language contract rather than guessing.
 - [ ] On completion, **delete this plan and remove its roadmap bullet in the same finishing commit**, following `docs/roadmap/roadmap.md`. The permanent docs and matrices retain the delivered design and any accepted deferred work. Core Math fast counterparts then become the next sequenced roadmap item.
 
+**Phase 5 mandatory gate**
+
+- [ ] Review the final code and documentation diff against every accepted design constraint. Confirm the independent correctness audit, stage ownership audit, redundancy/style-guide review and diagnostic/test review are complete and every finding is resolved or explicitly logged.
+- [ ] Confirm the documentation check, documentation release build, final targeted tests, `just validate` and `just validate-full` passed on the same final tree, with command output recorded. Re-run any invalidated gate after further changes.
+- [ ] Verify there is no existing-package API migration, missing matrix or permanent-doc update, generated source edit or unfinished deferred-work note. Complete the Slice review before the finishing commit and implementation handoff.
+
 **Final acceptance criteria**
 
 - [ ] `$export` without a path works exactly as before, while `$export @forms` and `$export @forms/validation` publish explicit declarations and direct-selection reexports under those paths.
