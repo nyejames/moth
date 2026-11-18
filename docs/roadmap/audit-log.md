@@ -88,4 +88,4 @@ AUD-0004 measured 771 of 791 production `.rs` files as having no owner under the
 - `src/backends/**` - JS and Wasm lowering, backend feature validation
 - `src/build_system/**` outside `create_project_modules/`
 - `src/projects/**`
-- `docs/roadmap/**` outside `docs.audit_framework` - plans, the roadmap and benchmark records
+- `docs/roadmap/**` - plans, the roadmap, benchmark records and the audit framework

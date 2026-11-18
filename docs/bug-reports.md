@@ -11,7 +11,7 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Found: reserved config directory fix, 2026-11. Reproduced with throwaway Unix symlink tests, 2026-11.
 - Where: `SourceTreeSkipPolicy::canonical_directory_is_skipped` in `src/build_system/create_project_modules/source_tree_index.rs` and `authored_directory_exclusion` in `file_reference_resolution.rs`. The dependency-clause message is `direct_special_file_import_message` in `src/compiler_frontend/compiler_messages/render/payload.rs`, reached through `dependency_path_references_config_file` in `module_namespace.rs`, which matches any path component.
 - Observed: discovery skips a `@config.moth` directory only by its listed name, and the resolvers reject it only by authored components. With `src/alias -> src/@config.moth`, discovery indexes `@config.moth/notes.mtf` under the alias, and `alias/logo.png` resolves as a resource. Hidden `_` directories have canonical-ancestry checks in both places for this case. Canonical docs (`docs/build-system-design.md`, `project-layout.mtf`, `module-roots.mtf`) define `@config.moth` only as a reserved filename that is inert when nested. No doc makes a config-named directory an excluded subtree. The directory skip came from `37102dfc4` without a doc change. Separately, dependency clauses that enter a `@config.moth` directory are rejected, but the message says the import names `@config.moth` itself.
-- Investigate: decide the rule. Either document a config-named directory as an excluded subtree and extend the hidden-ancestry predicate to return the applicable reason in discovery and both resolvers, or delete the undocumented directory skip and the config branch of `authored_directory_exclusion`. Then reword the message for a non-final component.
+- Investigate: decide the rule. Either document a config-named directory as an excluded subtree and extend the hidden-ancestry predicate to return the applicable reason in discovery and both resolvers, or delete the undocumented directory skip and the config branch of `authored_directory_exclusion`. Then reword the message for a non-final component. The user-visible reason `ReservedConfigDirectory` (stable key `invalid_compile_time_path.reserved_config_directory`, added in `1c387b7ec`) follows whichever rule is chosen. Document it with the subtree rule, or delete it with the skip.
 
 ### Damaged package set classification is path-only
 
@@ -88,7 +88,7 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 - Found: mutable `~` summary fix review, 2026-11. Design conflict between canonical docs and implementation.
 - Where: definition path `check_mutable_access` with `require_root_mutable: false` in `src/compiler_frontend/analysis/borrow_checker/transfer/access.rs`. The docs are `docs/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf` (source of a mutable alias "must permit mutation") and `docs/docs/memory/copy-and-exclusive-access.mtf` (alias created "when `source` is an eligible mutable place").
-- Observed: `alias ~= data` and `n ~I32 = divisor` compile when `data` or `divisor` is immutable. Writes and `~` arguments through the alias are rejected later. Committed success cases depend on this: `branch_reborrow_after_last_use`, `consistent_borrow_outcomes`, `consistent_ownership_outcomes` and `path_dependent_reborrow`. `live_shared_alias_blocks_mutable_rebinding` expects the conflict reason rather than `immutable_place`.
+- Observed: `alias ~= data` and `n ~I32 = divisor` compile when `data` or `divisor` is immutable. Writes and `~` arguments through the alias are rejected later. Committed success cases depend on this: `branch_reborrow_after_last_use`, `consistent_borrow_outcomes`, `consistent_ownership_outcomes` and `path_dependent_reborrow`. `live_shared_alias_blocks_mutable_rebinding` expects the conflict reason rather than `immutable_place`. Related: `~total = n`, where `n` is the immutable loop ordinal, is rejected with `MOTH-BORROW-0007` on both base and HEAD. Check that this rejection matches whichever rule is chosen.
 - Investigate: decide whether declaration requires a mutable source, as the docs say, or whether the docs should describe deferred rejection at first mutation. Then align the cases.
 
 ### `~slot = parameter` rebind publishes a parameter write
@@ -97,3 +97,10 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Where: `finalize_public_call_summary_effects` in `src/compiler_frontend/analysis/borrow_checker/metadata.rs`.
 - Observed: an `AssignPlace` slot rebind records the incoming referent root as a statement-level exclusive access in `mutable_roots`. A `Mutable` parameter that is only aliased this way is published as `Writes`, and callers can inherit the false `Writes` transitively.
 - Investigate: publish actual written roots separately from exclusive-access roots.
+
+### A private helper's template range loop crashes an exported caller with no error slot
+
+- Found: bug-fix branch final audit, 2026-11. Reproduced on base `49714f1b8` and on `bug-fixes`.
+- Where: private implicit failure propagation into exported functions, which raises the `MOTH-INFRA-0001` "private implicit failure reached a function with no Error! slot and no internal lane" invariant. The exact owner has not been traced.
+- Observed: an exported function with no error slot calls a private helper that renders a runtime template range loop (`[loop 0 to count by 1 |i|:…]`). Compilation fails with `MOTH-INFRA-0001` instead of the authored `MOTH-RULE-0051`.
+- Investigate: find where the template loop's step failure escapes private-lane classification, and add a rejected case expecting `MOTH-RULE-0051`.
