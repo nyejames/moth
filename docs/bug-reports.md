@@ -147,3 +147,10 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
   The space before the helper and the space after it both reach the default slot, so a common idiom yields a double space.
 - Investigate: decide whether inline spaces next to an `$in` helper count as formatting whitespace. If they do, drop them at routing. If not, document that the helper does not absorb adjacent spaces.
+
+### JS emitter rebuilds a block lookup map that dense HIR already provides
+
+- Found: AUD-0022 numeric proof redundancy audit, 2026-11. Unmeasured efficiency and redundancy lead outside that audit's area.
+- Where: `JsEmitter::new` in `src/backends/js/emitter.rs` builds `blocks_by_id: HashMap<BlockId, &HirBlock>` over every module block, and `block_by_id` in `src/backends/js/lookups.rs` reads it. `HirModule::block` in `src/compiler_frontend/hir/module.rs` already offers an identity-checked dense lookup, relying on the `compact_block_ids` invariant that analyses such as `analysis/numeric_proofs` depend on.
+- Observed: every JS lowering, including each linked module, hashes all blocks into a second lookup structure. Every reachability, cycle, branch-inspection, demand-scan and emission visit then goes through that map.
+- Investigate: confirm that every HIR reaching `lower_hir_to_js` has passed `compact_block_ids`, including hand-built backend test fixtures. If it has, replace the map with `HirModule::block` and keep the typed infrastructure failure for a missing block.

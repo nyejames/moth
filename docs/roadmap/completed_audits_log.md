@@ -29,9 +29,16 @@ Historical formal audit resolutions and the index of reports with no outstanding
 - [AUD-0019: Function body parsing](./audits/closed_audits/AUD-0019-function-body-parsing.md)
 - [AUD-0020: Backend feature validation](./audits/closed_audits/AUD-0020-backend-feature-validation.md)
 - [AUD-0021: Constraint selected-evidence correctness](./audits/closed_audits/AUD-0021-constraints-selected-evidence-correctness.md)
+- [AUD-0023: Numeric proof side-table performance](./audits/closed_audits/AUD-0023-numeric-proofs-performance.md)
 
 ## Resolution records
 
+- AUD-0023 completed without findings at `e49a166e8`. Sampled `moth check` and HTML-JS
+  `moth build` on generated `narrow-chains` workloads of up to 4,096 operations per chain. The
+  proof analysis took at most about 0.06% of samples and JS lowering at most 0.7%. Analysis
+  during `check` and on discarded generated sidecars were rejected as unmeasured and
+  non-simplifying. Coverage is partial: HTML-Wasm was not measured and no allocation probes ran.
+  `cargo test -q -p moth --lib numeric_proof` passed. See [AUD-0023](./audits/closed_audits/AUD-0023-numeric-proofs-performance.md).
 - AUD-0021 completed without demonstrated in-scope findings at `abc903852`. Reviewed generated
   witness resolution, per-guarantee and per-source-domain labels, release-folded call evidence,
   skipped-code classification and caught-call handling. The implementation handover reported
