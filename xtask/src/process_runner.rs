@@ -13,6 +13,7 @@
 //! - Parsing benchmark protocol output (see `benchmark_status.rs` and `bench_observations.rs`)
 //! - Orchestration of preflight and measured iterations (see `bench.rs`)
 
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
@@ -50,7 +51,7 @@ pub struct ProcessRun {
 /// * `moth_path` - Path to the moth binary (e.g., target/release/moth)
 /// * `current_directory` - Canonical repository root for resolving manifest paths
 /// * `command` - The subcommand to execute (e.g., "check", "build")
-/// * `args` - Arguments to pass to the subcommand
+/// * `args` - Native arguments to pass to the subcommand
 ///
 /// # Returns
 ///
@@ -59,7 +60,7 @@ pub fn run_moth_command(
     moth_path: &Path,
     current_directory: &Path,
     command: &str,
-    args: &[String],
+    args: &[OsString],
 ) -> Result<ProcessRun, String> {
     let start = Instant::now();
 

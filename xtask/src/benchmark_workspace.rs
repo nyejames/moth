@@ -15,6 +15,7 @@
 //! succeed before repository verification or persistence. Drop remains a
 //! best-effort emergency cleanup and can never define success.
 
+use std::ffi::OsString;
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 
@@ -244,7 +245,7 @@ impl BenchmarkExecutionWorkspace {
                 // validated against the repository root during manifest load.
                 let absolute_entry = manifest.repository_root.join(&workload.entry);
 
-                (case_directory, absolute_entry.display().to_string())
+                (case_directory, absolute_entry.into_os_string())
             }
             BenchmarkEntryKind::Directory => {
                 if *command == CliBenchmarkCommand::Build {
@@ -259,14 +260,14 @@ impl BenchmarkExecutionWorkspace {
 
                 (
                     manifest.repository_root.clone(),
-                    workload.entry.display().to_string(),
+                    workload.entry.as_os_str().to_os_string(),
                 )
             }
         };
 
         let mut invocation_args = Vec::with_capacity(args.len() + 1);
         invocation_args.push(entry_argument);
-        invocation_args.extend(args.iter().cloned());
+        invocation_args.extend(args.iter().map(OsString::from));
 
         Ok(CliBenchmarkInvocation {
             command: *command,

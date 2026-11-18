@@ -1148,8 +1148,6 @@ fn format_top_drift_item(
             DriftCaseInput {
                 identity: case.identity.clone(),
                 case_id: case.case_id.clone(),
-                command: case.command.clone(),
-                args: case.args.clone(),
                 stage_timings: case.stage_timings.clone(),
                 counters: case.counters.clone(),
                 hot_functions,

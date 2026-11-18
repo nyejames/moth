@@ -27,6 +27,7 @@ use std::fs;
 
 use crate::bench_time::BenchmarkTimestamp;
 use crate::bench_types::BenchmarkMetric;
+use crate::command_line::markdown_command_block;
 use moth::benchmarking::{
     TIMING_FRONTEND_AST_TOTAL_NAME, TIMING_FRONTEND_BORROW_INITIAL_NAME, TIMING_FRONTEND_HIR_NAME,
     TIMING_FRONTEND_ORDER_DECLARATIONS_NAME, TIMING_FRONTEND_PREPARE_NAME, timing_metric_label,
@@ -85,8 +86,8 @@ pub(crate) struct RootProfileHotspots {
 pub(crate) struct RootCaseHotspots {
     pub(crate) case_id: String,
     pub(crate) timing_schema_version: u32,
-    pub(crate) command: String,
-    pub(crate) args: Vec<String>,
+    /// POSIX-shell-quoted command line recorded for this case.
+    pub(crate) posix_shell_command_line: String,
     pub(crate) observation_wall_ms: f64,
     pub(crate) top_stage_timings: Vec<BenchmarkMetric>,
     pub(crate) top_counters: Vec<BenchmarkMetric>,
@@ -125,7 +126,7 @@ pub(crate) struct BucketSummaryEntry {
 // ---------------------------------------------------------------------------
 
 /// Current format version for summary artifacts.
-const SUMMARY_FORMAT_VERSION: u32 = 3;
+const SUMMARY_FORMAT_VERSION: u32 = 4;
 
 /// Maximum number of stage timings to show in root summary case entries.
 const ROOT_TOP_STAGES: usize = 3;
@@ -342,8 +343,7 @@ fn build_root_case_hotspots(data: &CaseSummaryData<'_>) -> RootCaseHotspots {
     RootCaseHotspots {
         case_id: obs.case_id.clone(),
         timing_schema_version: obs.observations.timing_schema_version,
-        command: obs.command.clone(),
-        args: obs.command_args.clone(),
+        posix_shell_command_line: obs.posix_shell_command_line(),
         observation_wall_ms: round_2dp(obs.wall_ms),
         top_stage_timings: stages,
         top_counters: counters,
@@ -393,9 +393,6 @@ fn format_root_hotspots_json(root: &RootProfileHotspots) -> Result<String, Strin
         .cases
         .iter()
         .map(|case| {
-            let args_json: Vec<serde_json::Value> =
-                case.args.iter().map(|a| serde_json::json!(a)).collect();
-
             let stages_json: Vec<serde_json::Value> = case
                 .top_stage_timings
                 .iter()
@@ -439,8 +436,7 @@ fn format_root_hotspots_json(root: &RootProfileHotspots) -> Result<String, Strin
             serde_json::json!({
                 "case_id": case.case_id,
                 "timing_schema_version": case.timing_schema_version,
-                "command": case.command,
-                "args": args_json,
+                "posix_shell_command_line": case.posix_shell_command_line,
                 "observation_wall_ms": case.observation_wall_ms,
                 "top_stage_timings": stages_json,
                 "top_counters": counters_json,
@@ -543,11 +539,10 @@ fn append_agent_case_entry(lines: &mut Vec<String>, data: &CaseSummaryData<'_>, 
     lines.push(String::new());
 
     // Command
-    lines.push(format!(
-        "- Command: `{} {}`",
-        obs.command,
-        obs.command_args.join(" ")
-    ));
+    lines.push("POSIX shell command:".to_string());
+    lines.push(String::new());
+    lines.push(markdown_command_block(&obs.posix_shell_command_line()));
+    lines.push(String::new());
 
     lines.push(format!("- Wall: ~{:.0}ms", obs.wall_ms));
 
@@ -614,11 +609,10 @@ fn format_enriched_case_summary(data: &CaseSummaryData<'_>, run_paths: &ProfileR
     // Header
     lines.push(format!("# {}", obs.case_id));
     lines.push(String::new());
-    lines.push(format!(
-        "Command: `{} {}`",
-        obs.command,
-        obs.command_args.join(" ")
-    ));
+    lines.push("POSIX shell command:".to_string());
+    lines.push(String::new());
+    lines.push(markdown_command_block(&obs.posix_shell_command_line()));
+    lines.push(String::new());
     lines.push(format!("Group: {}", obs.group_name));
     lines.push(format!("Filter: {}", filter.display_label()));
     lines.push(format!(

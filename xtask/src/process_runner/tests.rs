@@ -1,4 +1,5 @@
 use super::*;
+use std::ffi::OsString;
 use std::fs;
 use tempfile::tempdir;
 
@@ -90,7 +91,7 @@ fn test_run_moth_command_success() {
         &mock_moth,
         temp_dir.path(),
         "check",
-        &["test.moth".to_string()],
+        &[OsString::from("test.moth")],
     );
 
     assert!(result.is_ok());
@@ -117,7 +118,7 @@ fn test_run_moth_command_failure() {
         &mock_moth,
         temp_dir.path(),
         "check",
-        &["test.moth".to_string()],
+        &[OsString::from("test.moth")],
     )
     .expect("mock command should execute");
 
@@ -177,7 +178,7 @@ fn test_run_moth_command_nonexistent() {
         &nonexistent,
         temp_dir.path(),
         "check",
-        &["test.moth".to_string()],
+        &[OsString::from("test.moth")],
     );
 
     assert!(result.is_err());

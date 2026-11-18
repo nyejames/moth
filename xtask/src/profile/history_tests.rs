@@ -138,8 +138,6 @@ fn drift_input(case: &HistoryCaseRecord) -> DriftCaseInput {
     DriftCaseInput {
         case_id: case.case_id.clone(),
         identity: case.identity.clone(),
-        command: case.command.clone(),
-        args: case.args.clone(),
         stage_timings: case.stage_timings.clone(),
         counters: case.counters.clone(),
         hot_functions: case

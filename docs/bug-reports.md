@@ -48,13 +48,6 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: the printed next-step command interpolates the native display spelling with no quoting. Spaces, quotes and shell metacharacters break or alter the pasted command. Control characters pass through to the terminal and a non-UTF-8 directory prints a lossy path that cannot address the directory.
 - Investigate: a CLI-owned shell quoting operation with a stated POSIX and Windows contract, control-character handling and no runnable command for an unrepresentable path. Portable path display is the wrong operation here.
 
-### Benchmark invocations pass display text as child arguments
-
-- Found: portable path display hardening inventory, 2026-11.
-- Where: `xtask/src/benchmark_workspace.rs` (`absolute_entry.display().to_string()`, `workload.entry.display().to_string()`) feeding `CliBenchmarkInvocation.args: Vec<String>` and `process_runner.rs`. Related display-only quoting in `xtask/src/profile/runner.rs` (`format_command_line`, `shell_display_arg`).
-- Observed: a non-UTF-8 repository or entry path becomes U+FFFD text, so the compiler is launched against a different path. The recorded profile command quotes only empty or whitespace-bearing arguments.
-- Investigate: keep the entry argument as `PathBuf`/`OsString` through `Command::arg`. Quote recorded command lines completely or label them as non-runnable.
-
 ### HTML `origin` has no URL encoding contract
 
 - Found: portable path display hardening dev-server URL review, 2026-11.

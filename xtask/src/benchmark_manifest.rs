@@ -9,6 +9,7 @@
 use crate::bench_types::BenchmarkGroup;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::io;
@@ -158,10 +159,13 @@ pub(crate) enum BenchmarkExpectation {
 }
 
 /// Resolved CLI arguments for one manifest case.
+///
+/// Arguments stay native from resolution to `Command::arg`: an entry path is
+/// an exact `OsString`, never its display or lossy text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CliBenchmarkInvocation {
     pub(crate) command: CliBenchmarkCommand,
-    pub(crate) args: Vec<String>,
+    pub(crate) args: Vec<OsString>,
     pub(crate) current_directory: PathBuf,
 }
 

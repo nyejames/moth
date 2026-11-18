@@ -183,7 +183,7 @@ pub fn find_comparable_previous<'a>(
 /// Compute drift between the current profiling data and a previous record.
 ///
 /// WHAT: Compares each current case against its matching previous case
-/// (matched by case ID, command, and args). Applies function, stage,
+/// (matched by stable authored case ID). Applies function, stage,
 /// and counter drift thresholds to identify significant movements.
 ///
 /// WHY: Conservative thresholds avoid surfacing sampling noise. The
@@ -394,12 +394,6 @@ pub struct DriftCaseInput {
     pub case_id: String,
     /// Typed measurement identity from the current run.
     pub identity: crate::bench_types::BenchmarkMeasurementIdentity,
-    /// The command executed (descriptive fact, not comparison authority).
-    #[expect(dead_code)]
-    pub command: String,
-    /// Arguments passed to the command (descriptive fact, not comparison authority).
-    #[expect(dead_code)]
-    pub args: Vec<String>,
     /// Stage timings from the observation pass.
     pub stage_timings: Vec<BenchmarkMetric>,
     /// Counters from the observation pass.

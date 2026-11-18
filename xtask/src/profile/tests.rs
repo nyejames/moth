@@ -214,7 +214,7 @@ fn observation_and_samply_receive_one_resolved_invocation() {
     // The Samply pass uses invocation.current_directory, invocation.command
     // and invocation.args. Both must come from the same resolved invocation.
     assert_eq!(invocation.command, CliBenchmarkCommand::Check);
-    assert!(invocation.args[0].ends_with("fixture.moth"));
+    assert!(Path::new(&invocation.args[0]).ends_with("fixture.moth"));
     assert_eq!(invocation.args[1], "--terse");
     assert!(
         invocation

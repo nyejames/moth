@@ -82,8 +82,6 @@ fn test_current_increased() -> DriftCaseInput {
     DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
         identity: test_identity(),
-        command: "check".to_string(),
-        args: vec!["foo.moth".to_string()],
         stage_timings: vec![
             BenchmarkMetric {
                 name: "frontend.ast.total".to_string(),
@@ -120,8 +118,6 @@ fn test_current_decreased() -> DriftCaseInput {
     DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
         identity: test_identity(),
-        command: "check".to_string(),
-        args: vec!["foo.moth".to_string()],
         stage_timings: vec![
             BenchmarkMetric {
                 name: "frontend.ast.total".to_string(),
@@ -158,8 +154,6 @@ fn test_current_noise() -> DriftCaseInput {
     DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
         identity: test_identity(),
-        command: "check".to_string(),
-        args: vec!["foo.moth".to_string()],
         stage_timings: vec![BenchmarkMetric {
             name: "frontend.ast.total".to_string(),
             value: 505.0,
@@ -246,8 +240,6 @@ fn low_sample_count_function_is_ignored() {
     let current = vec![DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
         identity: test_identity(),
-        command: "check".to_string(),
-        args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
         counters: vec![],
         hot_functions: vec![DriftHotFunction {
@@ -276,8 +268,6 @@ fn share_only_drift_when_wall_moves_opposite() {
     let current = vec![DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
         identity: test_identity(),
-        command: "check".to_string(),
-        args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
         counters: vec![],
         hot_functions: vec![DriftHotFunction {
@@ -394,8 +384,6 @@ fn significant_counter_increase_detected() {
     let current = vec![DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
         identity: test_identity(),
-        command: "check".to_string(),
-        args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
         counters: vec![BenchmarkMetric {
             name: "token_count".to_string(),
@@ -423,8 +411,6 @@ fn tiny_absolute_counter_is_noise_even_if_percentage_large() {
     let current = vec![DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
         identity: test_identity(),
-        command: "check".to_string(),
-        args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
         counters: vec![BenchmarkMetric {
             name: "tiny_counter".to_string(),
@@ -788,8 +774,6 @@ fn no_comparable_case_produces_empty_report() {
     let current = vec![DriftCaseInput {
         case_id: "nonexistent_case".to_string(),
         identity: test_identity(),
-        command: "check".to_string(),
-        args: vec!["missing.moth".to_string()],
         stage_timings: vec![],
         counters: vec![],
         hot_functions: vec![],
@@ -814,8 +798,6 @@ fn function_only_in_current_is_ignored() {
     let current = vec![DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
         identity: test_identity(),
-        command: "check".to_string(),
-        args: vec!["foo.moth".to_string()],
         stage_timings: vec![],
         counters: vec![],
         hot_functions: vec![DriftHotFunction {

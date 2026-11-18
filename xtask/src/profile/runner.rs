@@ -23,7 +23,9 @@
 //! - Artifact directory layout (see `artifacts.rs`)
 //! - Profile JSON parsing or hotspot extraction (see `parse.rs` and `hotspots.rs`)
 
+use crate::command_line::posix_shell_command_line;
 use flate2::read::GzDecoder;
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -83,8 +85,8 @@ pub(crate) struct SamplyRunInput {
     pub(crate) current_directory: PathBuf,
     /// The moth subcommand (e.g., "check", "build").
     pub(crate) command: String,
-    /// Arguments to the subcommand.
-    pub(crate) args: Vec<String>,
+    /// Native arguments to the subcommand.
+    pub(crate) args: Vec<OsString>,
     /// Output path for the Samply profile (typically `profile.json.gz`).
     pub(crate) output_path: PathBuf,
     /// Optional sampling rate in Hz; `None` uses Samply's default.
@@ -113,7 +115,7 @@ pub(crate) struct ProfileProcessRun {
     pub(crate) stdout: String,
     /// Captured Samply stderr.
     pub(crate) stderr: String,
-    /// Display form of the Samply command that was executed.
+    /// POSIX-shell-quoted form of the Samply command that was executed.
     pub(crate) command_line: String,
     /// Path where the profile was written.
     ///
@@ -228,11 +230,15 @@ pub(crate) fn build_samply_command(input: &SamplyRunInput) -> Command {
 pub(crate) fn run_samply(input: &SamplyRunInput) -> Result<ProfileProcessRun, String> {
     let start = Instant::now();
     let mut command = build_samply_command(input);
-    let command_line = format_command_line(&command);
+    let command_line = posix_shell_command_line(
+        command.get_current_dir().map(Path::as_os_str),
+        command.get_program(),
+        command.get_args(),
+    );
 
     let output = command.output().map_err(|e| {
         format!(
-            "Failed to spawn Samply.\nCommand: {}\nError: {}",
+            "Failed to spawn Samply.\nCommand (POSIX shell): {}\nError: {}",
             command_line, e
         )
     })?;
@@ -257,7 +263,7 @@ pub(crate) fn run_samply(input: &SamplyRunInput) -> Result<ProfileProcessRun, St
     if !input.output_path.exists() {
         return Err(format!(
             "Samply exited successfully but the profile file was not created at '{}'.\n\
-             Command: {}\n\
+             Command (POSIX shell): {}\n\
              Samply stderr: {}",
             input.output_path.display(),
             command_line,
@@ -277,22 +283,6 @@ pub(crate) fn run_samply(input: &SamplyRunInput) -> Result<ProfileProcessRun, St
         output_path: input.output_path.clone(),
         presymbolication_flag: input.presymbolication_flag,
     })
-}
-
-fn format_command_line(command: &Command) -> String {
-    std::iter::once(command.get_program())
-        .chain(command.get_args())
-        .map(|arg| shell_display_arg(arg.to_string_lossy().as_ref()))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn shell_display_arg(arg: &str) -> String {
-    if arg.is_empty() || arg.chars().any(char::is_whitespace) {
-        format!("'{}'", arg.replace('\'', "'\\''"))
-    } else {
-        arg.to_string()
-    }
 }
 
 /// Peek the first non-whitespace byte of a gzip-compressed profile file.

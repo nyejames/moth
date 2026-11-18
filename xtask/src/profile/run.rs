@@ -28,6 +28,7 @@ use crate::benchmark_manifest::{BenchmarkCase, BenchmarkManifest, BenchmarkRunne
 use crate::benchmark_repository::verify_after_operation;
 use crate::benchmark_run::PreparedBenchmarkRun;
 use crate::benchmark_workspace::{BenchmarkExecutionWorkspace, finalise_workspace};
+use crate::command_line::recorded_argument;
 use crate::compiler_binary::{CompilerBinary, build_profiling_compiler_with_timers};
 use std::collections::HashMap;
 
@@ -241,8 +242,6 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
                     drift_cases.push(DriftCaseInput {
                         case_id: observation.case_id.clone(),
                         identity,
-                        command: observation.command.clone(),
-                        args: observation.command_args.clone(),
                         stage_timings: observation.observations.stage_timings.clone(),
                         counters: observation.observations.counters.clone(),
                         hot_functions,
@@ -313,7 +312,11 @@ pub(crate) fn run_profile_benchmarks(options: ProfileOptions) -> Result<(), Stri
                 identity,
                 group_name: observation.group_name.clone(),
                 command: observation.command.clone(),
-                args: observation.command_args.clone(),
+                args: observation
+                    .command_args
+                    .iter()
+                    .map(|argument| recorded_argument(argument))
+                    .collect(),
                 observation_wall_ms: observation.wall_ms,
                 sample_count: hotspots.total_sample_count,
                 sample_weight: hotspots.total_sample_weight,
@@ -514,7 +517,7 @@ pub(crate) fn collect_profile_run(
                 "samply_failed",
             );
             return Err(format!(
-                "Samply recording failed for case '{}'.\n                 Command: {}\n                 Observation artifacts were written under '{}' before Samply failed.\n                 {}\n                 Stdout: {}\n                 Stderr: {}",
+                "Samply recording failed for case '{}'.\n                 Command (POSIX shell): {}\n                 Observation artifacts were written under '{}' before Samply failed.\n                 {}\n                 Stdout: {}\n                 Stderr: {}",
                 case.id,
                 samply_run.command_line,
                 case_paths.case_dir.display(),
@@ -569,8 +572,7 @@ pub(crate) fn collect_profile_run(
                 .identity_for(&prepared.manifest, case)
                 .map_err(|error| error.to_string())?,
             group_name: case.group_name.persistence_spelling().to_string(),
-            command: invocation.command.as_str().to_owned(),
-            args: invocation.args.clone(),
+            posix_shell_command_line: observation.posix_shell_command_line(),
             observation_wall_ms: observation.wall_ms,
             profile_path: format!("cases/{}/profile.json.gz", case.id),
             stdout_path: format!("cases/{}/stdout.log", case.id),

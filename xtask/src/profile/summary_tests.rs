@@ -9,6 +9,8 @@ use crate::profile::hotspots::{
 };
 use crate::profile::observations::ProfileObservation;
 use crate::profile::options::ProfileFilterMode;
+use std::ffi::OsString;
+use std::path::PathBuf;
 
 // ---------------------------------------------------------------------------
 //  Test helpers
@@ -24,7 +26,9 @@ fn make_observation(
         case_id: case_id.to_string(),
         group_name: "test".to_string(),
         command: "check".to_string(),
-        command_args: vec!["test.moth".to_string()],
+        command_args: vec![OsString::from("test.moth")],
+        moth_path: PathBuf::from("/repo/target/profiling/moth"),
+        current_directory: PathBuf::from("/repo"),
         wall_ms,
         observations: BenchmarkCaseObservations {
             timing_schema_version: 2,
@@ -439,6 +443,8 @@ fn agent_summary_contains_case_id() {
     assert!(md.contains("Timing schema: 2"));
     assert!(md.contains("~500ms"));
     assert!(md.contains("Top stage: AST ~300ms"));
+    assert!(md.contains("POSIX shell command:"));
+    assert!(md.contains("```\ncd /repo && /repo/target/profiling/moth check test.moth\n```"));
     assert!(!md.contains("frontend.ast.total"));
 }
 
@@ -538,6 +544,8 @@ fn enriched_case_summary_includes_hotspots_and_samply_command() {
     let md = format_enriched_case_summary(&data, &run_paths);
     assert!(md.contains("test_case"));
     assert!(md.contains("Timing schema: 2"));
+    assert!(md.contains("POSIX shell command:"));
+    assert!(md.contains("```\ncd /repo && /repo/target/profiling/moth check test.moth\n```"));
     assert!(md.contains("Sample count: 1000"));
     assert!(md.contains("- AST: ~800ms"));
     assert!(!md.contains("frontend.ast.total"));

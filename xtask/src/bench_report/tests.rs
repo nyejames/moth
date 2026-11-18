@@ -772,8 +772,6 @@ fn format_top_drift_item_shows_drift_when_comparable_previous_exists() {
     let drift_cases = vec![crate::profile::drift::DriftCaseInput {
         case_id: "check_foo_bst".to_string(),
         identity: test_identity(),
-        command: "check".to_string(),
-        args: vec!["foo.moth".to_string()],
         stage_timings: vec![BenchmarkMetric {
             name: "frontend.ast.total".to_string(),
             value: 900.0,
