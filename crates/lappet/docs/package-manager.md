@@ -99,11 +99,16 @@ They keep canonical Core meanings and reserved names, including `io`. This
 never grants permission to acquire Core-dependent packages through the official
 manager. Perfect API coverage and Wasmtime presence are not certification.
 
-The official builder catalogue and its trust mechanism need a reviewed design.
-A public Rust setter, free-form builder name or package metadata claim must not
-be sufficient to select the official admission path. Extending the official set
-requires an explicit Moth project decision, Core conformance evidence and a
-published support matrix.
+The official build/CLI distribution owns a maintained, trusted first-party
+builder catalogue. Managed-package admission receives the certified environment
+from that trusted selection path, never from a public Rust setter, free-form
+builder name, package metadata or a claimed set of installed bindings. The
+existing reserved builder identities protect output ownership. They are not
+certification tokens and their spelling is not an admission test. Extending the
+certified set requires an explicit Moth project decision, complete applicable
+Core conformance evidence and a published capability/support matrix. The
+internal catalogue representation and its build-system handoff belong to the
+implementation checkpoint.
 
 The compiler still validates local code against the actual selected builder.
 Manual dependency arrangements are outside the manager's admission guarantee,

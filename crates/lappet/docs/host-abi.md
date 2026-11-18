@@ -39,6 +39,15 @@ Any mismatch rejects the instance before guest code runs. Lappet never installs
 an unrequested import, a default stub or a trapping placeholder. An implementation
 for a binding the artefact doesn't import is unused, not an error.
 
+`moth-host` describes required opaque resource parameters with their canonical
+semantic type identity and shared or exclusive access mode. It also records a
+host-only context requirement and its access mode separately from Moth parameter
+slots. The compiler's existing descriptor conversion table and preflight remain
+the single validation path. Rust-local `TypeId` checks the actual resource or
+context object at runtime but is not an artefact identity, manifest type or
+substitute for compiler-produced semantic identity. Neither Lappet nor a macro
+adds a parallel type registry.
+
 ## Converting values
 
 The adapter reads every argument through the descriptor's canonical type, never
@@ -77,7 +86,9 @@ protocol itself is defined by the native host ABI.
 - By default an entry holds at most 16 MiB and one instance holds at most 64 MiB
   of live staged text. `InstanceLimits::max_staged_entry_bytes` and
   `InstanceLimits::max_staged_live_bytes` set these limits for an instance.
-  Exceeding a limit is a host fault, not a Moth error.
+  The native ABI's maximum text length of `i32::MAX` bytes applies regardless
+  of how high either configurable limit is set. Exceeding a limit is a host
+  fault, not a Moth error.
 - A take removes its entry. A failed take is a boundary fault.
 - Lappet tracks live tickets so it can fault when the guest enters another
   import, or the outermost entry returns, with a ticket outstanding.
@@ -164,10 +175,33 @@ performed is never rolled back.
 
 ## Calling Moth exports
 
-Lappet calls only exports listed in the manifest, and only when no guest call is
-active on that instance. Each call follows the native host ABI's call-scope
-protocol and its fault rules. The Rust-facing call API, including several
-ordered success slots, is later runtime design.
+Lappet exposes a selected export only through a handle validated against the
+compiler's manifest. The Rust call interface accepts checked values for the
+manifest's ordered parameter types and returns checked values for its ordered
+success slots. A Rust tuple may group multiple returned slots. A declared
+builtin Moth `Error!` keeps its message and code and is separate from the
+runtime error channel. No raw Wasm function, carrier-level call API or second
+semantic signature declaration becomes part of the public embedding API.
+
+A selected call enters only when no guest call is active on the instance and
+follows the native host ABI's full call-scope protocol. A compiler-produced
+host-callable artefact must have no implicit Wasm start function. Lappet checks
+that requirement during manifest validation, before instantiation. The builder
+owns when each selected function runs.
+
+Returned Moth strings are copied into independently owned Rust storage before
+scope close. Apply an explicit per-result byte bound before allocating the copy,
+in addition to checking the ABI's `i32::MAX` length ceiling, span validity and
+UTF-8. Excessive or malformed guest output is a boundary fault and quarantines
+the instance. The adapter implementation checkpoint must approve a concrete
+default and any configuration surface for the smaller operational bound. It
+must not copy unbounded guest memory while that limit remains undecided.
+
+The current fixture-only scope driver accepts one raw string and reports status
+`1` without reading the builtin error record. Replace that path with the
+manifest-driven adapter when it is delivered, rather than exposing or
+maintaining a second public calling convention. Report malformed status,
+span length, span bounds and UTF-8 as the appropriate distinct boundary facts.
 
 Lappet also implements the reserved `assertion_failed` helper once the
 compiler freezes its signature. It reports a guest trap.
