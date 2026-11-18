@@ -1,8 +1,8 @@
--- Reading through a mutable alias of a mutable parameter and from an explicit copy is
--- accepted. Neither declaration writes its source parameter, so the public call summaries
--- stay read-only.
+-- Reading through a mutable alias declared from an immutable parameter records an exclusive
+-- access on that parameter without writing it, so the public summary stays read-only. An
+-- explicit copy is independent and also leaves its source parameter unwritten.
 
-read_through_alias |divisor ~I32| -> I32:
+read_through_alias |divisor I32| -> I32:
     n ~I32 = divisor
     return n
 ;
@@ -12,7 +12,7 @@ read_copy |source I32| -> I32:
     return snapshot
 ;
 
-three ~= 3
-first = read_through_alias(~three)
+three = 3
+first = read_through_alias(three)
 second = read_copy(4)
 io.line([:parameter_mutable_alias_read_only_success first=[first] second=[second]])

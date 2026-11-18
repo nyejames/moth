@@ -70,13 +70,6 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 - Investigate: commit the program as a rejected case expecting `MOTH-BORROW-0007`, then find where the `catch` join drops the success value's roots.
 
-### Branch-joined slot passed by `~` gets an invalid parameter effect summary
-
-- Found: mutable `~` summary fix soundness review, 2026-11. Reproduced by probe on `bug-fixes` HEAD (`tmp/probes-mt/m03_branch_join_callee_push`).
-- Where: call-argument mutability checks in `src/compiler_frontend/analysis/borrow_checker/transfer/access/statement.rs` and summary publication in `finalize_public_call_summary_effects` (`analysis/borrow_checker/metadata.rs`).
-- Observed: `mutate_param |items {I32}, flag Bool|` assigns `~slot = identity(items)` in one `if` arm and `~slot = {9}` in the other, then calls `add_one(~slot)`, which pushes. Compilation fails with `MOTH-INFRA-0001` (shared parameter summarised as `Writes`) instead of `MOTH-BORROW-0007`. The straight-line shape is rejected correctly.
-- Investigate: why the join's merged roots skip the mutable-root requirement that the straight-line path enforces.
-
 ### Mutable scalar slot holding an immutable value's provenance is rejected by `~`
 
 - Found: mutable `~` summary fix review, 2026-11. Confirmed conservative over-rejection on HEAD.

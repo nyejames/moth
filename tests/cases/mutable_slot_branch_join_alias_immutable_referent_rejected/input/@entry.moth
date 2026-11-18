@@ -1,0 +1,22 @@
+-- A branch join must not hide that a mutable slot's stored aggregate aliases an immutable
+-- allocation. The joined slot cannot be passed by `~` to a callee that may mutate that
+-- allocation, even when the other incoming path stores a fresh aggregate.
+
+identity |value {I32}| -> {I32}:
+    return value
+;
+add_one |items ~{I32}|:
+    ~items.push(4)
+;
+mutate_param |items {I32}, flag Bool|:
+    slot ~{I32} = {0}
+    if flag:
+        ~slot = identity(items)
+    else
+        ~slot = {9}
+    ;
+    add_one(~slot)
+;
+data {I32} = {1, 2, 3}
+mutate_param(data, true)
+io.line([: mutable_slot_branch_join out=[data.length()]])

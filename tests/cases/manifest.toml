@@ -4782,6 +4782,13 @@ contract = "language.bindings.mutable_slot_struct_alias_immutable_referent_rejec
 role = "primary"
 
 [[case]]
+id = "mutable_slot_branch_join_alias_immutable_referent_rejected"
+path = "mutable_slot_branch_join_alias_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics"]
+contract = "language.bindings.mutable_slot_branch_join_alias_immutable_referent_rejected"
+role = "primary"
+
+[[case]]
 id = "mutable_alias_live_blocks_whole_binding_write"
 path = "mutable_alias_live_blocks_whole_binding_write"
 tags = ["integration", "borrows", "diagnostics"]
