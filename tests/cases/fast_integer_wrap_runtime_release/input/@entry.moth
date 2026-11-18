@@ -1,0 +1,152 @@
+$fast_math
+add_i8 |left I8, right I8| -> I8:
+    return left + right
+;
+
+$fast_math
+mul_i8 |left I8, right I8| -> I8:
+    return left * right
+;
+
+$fast_math
+neg_i8 |value I8| -> I8:
+    return -value
+;
+
+$fast_math
+sub_u16 |left U16, right U16| -> U16:
+    return left - right
+;
+
+$fast_math
+mul_i32 |left I32, right I32| -> I32:
+    return left * right
+;
+
+$fast_math
+mul_u32 |left U32, right U32| -> U32:
+    return left * right
+;
+
+$fast_math
+quotient_i32 |dividend I32, divisor I32| -> I32:
+    return dividend // divisor
+;
+
+$fast_math
+remainder_i32 |dividend I32, divisor I32| -> I32:
+    return dividend % divisor
+;
+
+$fast_math
+add_i64 |left I64, right I64| -> I64:
+    return left + right
+;
+
+$fast_math
+mul_u64 |left U64, right U64| -> U64:
+    return left * right
+;
+
+$fast_math
+pow_i32 |base I32, exponent I32| -> I32:
+    return base ^ exponent
+;
+
+$fast_math
+pow_u32 |base U32, exponent U32| -> U32:
+    return base ^ exponent
+;
+
+$fast_math
+mixed_i8_u8 |left I8, right U8| -> I16:
+    return left + right
+;
+
+$fast_math
+real_divide |dividend I32, divisor I32| -> F64:
+    return dividend / divisor
+;
+
+format_i8 |value I8| -> String:
+    return cast value
+;
+
+format_i16 |value I16| -> String:
+    return cast value
+;
+
+format_i32 |value I32| -> String:
+    return cast value
+;
+
+format_i64 |value I64| -> String:
+    return cast value
+;
+
+format_u16 |value U16| -> String:
+    return cast value
+;
+
+format_u32 |value U32| -> String:
+    return cast value
+;
+
+format_u64 |value U64| -> String:
+    return cast value
+;
+
+format_f64 |value F64| -> String:
+    return cast value
+;
+
+add_left_i8 I8 = 127
+add_right_i8 I8 = 1
+mul_left_i8 I8 = 127
+mul_right_i8 I8 = 127
+neg_value_i8 I8 = -128
+sub_left_u16 U16 = 0
+sub_right_u16 U16 = 1
+mul_left_i32 I32 = 2147483647
+mul_right_i32 I32 = 2
+mul_left_u32 U32 = 4294967295
+mul_right_u32 U32 = 4294967295
+quotient_dividend I32 = -7
+quotient_divisor I32 = 2
+remainder_dividend I32 = -7
+remainder_divisor I32 = 3
+minimum_i32 I32 = -2147483648
+minus_one_i32 I32 = -1
+add_left_i64 I64 = 9223372036854775807
+add_right_i64 I64 = 1
+mul_left_u64 U64 = 18446744073709551615
+mul_right_u64 U64 = 2
+pow_base_i32 I32 = 2
+pow_exponent_i32 I32 = 31
+pow_base_u32 U32 = 2
+pow_exponent_u32 U32 = 32
+mixed_left_i8 I8 = 127
+mixed_right_u8 U8 = 255
+real_dividend I32 = -7
+real_divisor I32 = 2
+real_minimum I32 = -2147483648
+real_minus_one I32 = -1
+
+wrapped_add_i8 = format_i8(add_i8(add_left_i8, add_right_i8))
+wrapped_mul_i8 = format_i8(mul_i8(mul_left_i8, mul_right_i8))
+wrapped_neg_i8 = format_i8(neg_i8(neg_value_i8))
+wrapped_sub_u16 = format_u16(sub_u16(sub_left_u16, sub_right_u16))
+wrapped_mul_i32 = format_i32(mul_i32(mul_left_i32, mul_right_i32))
+wrapped_mul_u32 = format_u32(mul_u32(mul_left_u32, mul_right_u32))
+truncated_quotient = format_i32(quotient_i32(quotient_dividend, quotient_divisor))
+signed_remainder = format_i32(remainder_i32(remainder_dividend, remainder_divisor))
+minimum_remainder = format_i32(remainder_i32(minimum_i32, minus_one_i32))
+wrapped_add_i64 = format_i64(add_i64(add_left_i64, add_right_i64))
+wrapped_mul_u64 = format_u64(mul_u64(mul_left_u64, mul_right_u64))
+wrapped_pow_i32 = format_i32(pow_i32(pow_base_i32, pow_exponent_i32))
+wrapped_pow_u32 = format_u32(pow_u32(pow_base_u32, pow_exponent_u32))
+narrow_mixed = format_i16(mixed_i8_u8(mixed_left_i8, mixed_right_u8))
+real_quotient = format_f64(real_divide(real_dividend, real_divisor))
+real_minimum_quotient = format_f64(real_divide(real_minimum, real_minus_one))
+
+~[:wrap i8=[wrapped_add_i8]/[wrapped_mul_i8]/[wrapped_neg_i8] u16=[wrapped_sub_u16] i32=[wrapped_mul_i32] u32=[wrapped_mul_u32] quotient=[truncated_quotient] remainder=[signed_remainder]/[minimum_remainder] i64=[wrapped_add_i64] u64=[wrapped_mul_u64] power=[wrapped_pow_i32]/[wrapped_pow_u32] mixed=[narrow_mixed] real=[real_quotient]/[real_minimum_quotient]]

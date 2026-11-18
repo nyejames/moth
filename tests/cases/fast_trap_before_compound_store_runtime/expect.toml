@@ -1,7 +1,11 @@
 entry = "."
 
+# A Dec write-back stays ordinary: its effectful RHS is observed, the implicit conversion failure
+# leaves the target at 100 and the RHS call count at 1, and no store is committed. The fast integer
+# division then traps after its own RHS effect, so the trap cannot be hoisted above that effect.
+# That trap is fatal and ends the run: `after` never executes.
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "before=7"
+rendered_output_exact = "before=7\ndec-rhs=1\nconverted=100 calls=1 code=242 result=0\ntrap-rhs=1"
 runtime_error_contains = ["Division by zero"]

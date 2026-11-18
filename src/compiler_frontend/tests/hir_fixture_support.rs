@@ -39,7 +39,20 @@ pub(crate) fn lower_hir(
     path_fork: &mut PathInternerFork,
     external_packages: &ExternalPackageRegistry,
 ) -> HirModule {
-    let lowering = lower_module(
+    lower_hir_result(ast, string_table, path_fork, external_packages).hir_module
+}
+
+/// Lowers one parsed fixture and keeps the paired type environment.
+///
+/// WHY: backend tests that consume real source need the exact environment the producer lowered
+///      against, rather than reconstructing one from HIR node types.
+pub(crate) fn lower_hir_result(
+    ast: Ast,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+    external_packages: &ExternalPackageRegistry,
+) -> crate::compiler_frontend::module_metadata::HirLoweringResult {
+    lower_module(
         ast,
         string_table,
         path_fork,
@@ -48,8 +61,7 @@ pub(crate) fn lower_hir(
         Default::default(),
         external_packages,
     )
-    .expect("HIR lowering should succeed");
-    lowering.hir_module
+    .expect("HIR lowering should succeed")
 }
 
 /// Builds a malformed raw-template expression for HIR boundary invariant tests.

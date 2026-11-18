@@ -29,9 +29,7 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Sequenced work
 
-- [Numeric optimisation](./plans/numeric-optimisation-plan.md) - Remove redundant numeric result carriers, error branches and runtime checks through existing proof and backend-lowering systems. Preserve source semantics and measure performance improvements before extending the optimiser.
-
-- [Core Math fast counterparts](./plans/core-math-fast-counterparts-plan.md) - Queued after numeric optimisation: Evaluate and implement a small, benchmark-justified set of explicit `fast_*` Core Math helpers, including the distinct `fast_hypot` algorithm. Reuse trusted package contracts and existing lowering machinery without changing ordinary Math.
+- [Core Math fast counterparts](./plans/core-math-fast-counterparts-plan.md) - Queued next: Evaluate and implement a small, benchmark-justified set of explicit `fast_*` Core Math helpers, including the distinct `fast_hypot` algorithm. Reuse trusted package contracts and existing lowering machinery without changing ordinary Math.
 
 - [Const-function evaluation foundation and semantics](./plans/const-functions-evaluation-foundation-and-semantics-plan.md) - Queued after Core Math fast counterparts: Reuse direct typed-expression value evaluation, reduce redundant interpreter rewriting, then add match, multi-return/multi-bind and immutable const receiver methods. Investigate stepped collection loops conditionally and benchmark package-style helpers. Work may pause at each completed phase.
 

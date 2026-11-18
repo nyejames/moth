@@ -5,7 +5,9 @@ use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
 use crate::compiler_frontend::datatypes::CallableReturnShape;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, NumericSemantics};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -22,7 +24,9 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::hir::validate_hir_module;
+use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use moth_lexical::numeric::grammar::NumericLiteralSign;
 
 #[test]
 fn trap_mode_loop_step_failure_lowers_to_fatal_throw() {
@@ -1282,15 +1286,31 @@ fn invoke_return_blocks(
 fn lower_returned_operation(
     operation: HirFallibleOperation,
     result_type: TypeId,
+    expressions: HirExpressionStore,
+) -> LoweredEntry {
+    let (type_environment, types) = build_type_environment();
+    lower_returned_operation_in_environment(
+        operation,
+        result_type,
+        expressions,
+        type_environment,
+        types.error,
+    )
+}
+
+fn lower_returned_operation_in_environment(
+    operation: HirFallibleOperation,
+    result_type: TypeId,
     mut expressions: HirExpressionStore,
+    type_environment: TypeEnvironment,
+    error_type: TypeId,
 ) -> LoweredEntry {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (type_environment, types) = build_type_environment();
     let blocks = invoke_return_blocks(
         operation,
         result_type,
-        types.error,
+        error_type,
         vec![],
         0,
         &mut expressions,
@@ -1301,7 +1321,7 @@ fn lower_returned_operation(
         params: vec![],
         return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
             vec![result_type],
-            Some(types.error),
+            Some(error_type),
         )),
     };
     let module = build_module(
@@ -1334,6 +1354,462 @@ fn lower_returned_operation(
             .expect("the D15 fixture carries its entry function name"),
         source: lowered.source,
     }
+}
+
+/// Builds and lowers one NumericOp statement whose result is the entry's scalar return value.
+///
+/// WHAT: the entry returns the statement result directly, without a fallible ABI envelope, so a
+///       Node driver observes the exact emitted value and carrier representation.
+/// WHY: total numeric operations no longer call a helper, so only executing the lowered statement
+///      proves that Dec coefficients, half-even rounding and signed float zero are unchanged.
+fn lower_statement_scalar_result(
+    failure_mode: NumericFailureMode,
+    build: impl FnOnce(
+        &mut TypeEnvironment,
+        RegionId,
+        &mut HirExpressionStore,
+    ) -> (HirNumericOp, HirNumericOperands, TypeId),
+) -> ScalarEntry {
+    let (mut type_environment, _) = build_type_environment();
+    let region = RegionId(0);
+    let mut expressions = HirExpressionStore::default();
+    let (op, operands, result_type) = build(&mut type_environment, region, &mut expressions);
+    lower_returned_scalar_entry(
+        type_environment,
+        expressions,
+        HirStatementKind::NumericOp {
+            op,
+            failure_mode,
+            operands,
+            result: HirLocalDestination::Define(LocalId(0)),
+        },
+        result_type,
+    )
+}
+
+/// Executes one scalar-returning entry and renders the driver expression.
+fn run_scalar_result(entry: &ScalarEntry, render: &str) -> String {
+    let mut script = entry.source.clone();
+    script.push_str(&format!(
+        "\nconst value = {}();\nconsole.log({render});\n",
+        entry.function_name
+    ));
+    run_javascript(&script)
+}
+
+/// One Dec expression written as normalized decimal text and a sign.
+type DecOperand = (&'static str, bool);
+
+/// Builds one exact Dec literal in the caller's already-interned Number domain.
+fn dec_expression(
+    (text, negative): DecOperand,
+    scale: NumberScale,
+    ty: TypeId,
+    region: RegionId,
+    expressions: &mut HirExpressionStore,
+) -> HirValueId {
+    let sign = if negative {
+        NumericLiteralSign::Negative
+    } else {
+        NumericLiteralSign::Positive
+    };
+    let value = NumberValue::from_normalized(text, sign, scale)
+        .expect("test Dec operand fits its requested scale");
+    expression(
+        HirExpressionKind::Number(value),
+        ty,
+        region,
+        ValueKind::Const,
+        expressions,
+    )
+}
+
+/// Builds and lowers one ordinary Dec statement over exact literals at `scale`.
+///
+/// WHAT: `right` selects the binary operand pair or a unary operand, and both operands are built
+///       in the caller's already-interned Number domain.
+/// WHY: the total-operation tests vary only operator, delivery and operand pair, so one fixture
+///      keeps their HIR shape and scalar return shape identical.
+fn lower_dec_statement(
+    failure_mode: NumericFailureMode,
+    operator: NumericOperator,
+    scale: NumberScale,
+    left: DecOperand,
+    right: Option<DecOperand>,
+) -> ScalarEntry {
+    lower_statement_scalar_result(failure_mode, |environment, region, expressions| {
+        let number_type = environment.intern_number(scale);
+        let operands = match right {
+            Some(right) => HirNumericOperands::Binary {
+                left: dec_expression(left, scale, number_type, region, expressions),
+                right: dec_expression(right, scale, number_type, region, expressions),
+            },
+            None => HirNumericOperands::Unary {
+                operand: dec_expression(left, scale, number_type, region, expressions),
+            },
+        };
+        (
+            HirNumericOp::ordinary(operator, NumericScalar::Number(scale)),
+            operands,
+            number_type,
+        )
+    })
+}
+
+/// Total Dec add, subtract, negate and multiply emit exact BigInt coefficients with no carrier.
+///
+/// WHAT: runs both `Trap` and `Infallible` statement delivery over runtime-shaped operands and
+///       observes the generated coefficient and `bigint` carrier at a positive and a zero scale.
+/// WHY: a carrier keeping `{ tag: "ok" }` or a positive-scale multiply that skipped the shared
+///      half-even kernel would return a wrong value, while a scale-zero multiply is exact
+///      coefficient arithmetic and must not demand that kernel. A deleted helper reference would
+///      fail in Node.
+#[test]
+fn total_dec_operations_lower_to_exact_scalar_coefficients() {
+    let scale_two = NumberScale::new(2).expect("scale two is valid");
+    let cases = [
+        (
+            scale_two,
+            NumericOperator::Add,
+            ("0.05", false),
+            Some(("0.50", false)),
+            "55",
+            "__moth_binding((5n + 50n))",
+        ),
+        (
+            scale_two,
+            NumericOperator::Subtract,
+            ("0.15", false),
+            Some(("0.50", false)),
+            "-35",
+            "__moth_binding((15n - 50n))",
+        ),
+        (
+            scale_two,
+            NumericOperator::Negate,
+            ("0.05", false),
+            None,
+            "-5",
+            "__moth_binding((-(5n)))",
+        ),
+        (
+            scale_two,
+            NumericOperator::Multiply,
+            ("0.05", false),
+            Some(("0.50", false)),
+            "2",
+            "__moth_binding(__moth_number_round_half_even((5n * 50n), 100n))",
+        ),
+        (
+            scale_two,
+            NumericOperator::Multiply,
+            ("0.15", false),
+            Some(("0.50", false)),
+            "8",
+            "__moth_binding(__moth_number_round_half_even((15n * 50n), 100n))",
+        ),
+        (
+            scale_two,
+            NumericOperator::Multiply,
+            ("0.05", true),
+            Some(("0.50", false)),
+            "-2",
+            "__moth_binding(__moth_number_round_half_even((-5n * 50n), 100n))",
+        ),
+        (
+            scale_two,
+            NumericOperator::Multiply,
+            ("0.15", true),
+            Some(("0.50", false)),
+            "-8",
+            "__moth_binding(__moth_number_round_half_even((-15n * 50n), 100n))",
+        ),
+        (
+            NumberScale::ZERO,
+            NumericOperator::Multiply,
+            ("5", false),
+            Some(("50", false)),
+            "250",
+            "__moth_binding((5n * 50n))",
+        ),
+        (
+            NumberScale::ZERO,
+            NumericOperator::Multiply,
+            ("5", true),
+            Some(("50", false)),
+            "-250",
+            "__moth_binding((-5n * 50n))",
+        ),
+    ];
+
+    for (scale, operator, left, right, expected_coefficient, expected_expression) in cases {
+        for failure_mode in [NumericFailureMode::Trap, NumericFailureMode::Infallible] {
+            let entry = lower_dec_statement(failure_mode, operator, scale, left, right);
+
+            assert!(
+                entry.source.contains(expected_expression),
+                "{operator:?} at scale {} in {failure_mode:?} delivery must lower to \
+                 {expected_expression}:\n{}",
+                scale.get(),
+                entry.source
+            );
+            assert!(
+                !entry.source.contains("__moth_numeric_trap("),
+                "{operator:?} in {failure_mode:?} delivery must not consume a numeric carrier"
+            );
+            for deleted in [
+                "function __moth_number_add(",
+                "function __moth_number_sub(",
+                "function __moth_number_mul(",
+                "function __moth_number_neg(",
+            ] {
+                assert!(
+                    !entry.source.contains(deleted),
+                    "{operator:?} must not emit the deleted helper {deleted}"
+                );
+            }
+            let expects_kernel = operator == NumericOperator::Multiply && scale.get() > 0;
+            assert_eq!(
+                entry
+                    .source
+                    .contains("function __moth_number_round_half_even("),
+                expects_kernel,
+                "{operator:?} at scale {} kernel demand is wrong",
+                scale.get()
+            );
+
+            assert_eq!(
+                run_scalar_result(&entry, "typeof value + \":\" + String(value)").trim(),
+                format!("bigint:{expected_coefficient}"),
+                "{operator:?} at scale {} in {failure_mode:?} delivery must keep an exact BigInt \
+                 coefficient",
+                scale.get()
+            );
+        }
+    }
+}
+
+/// Total Dec negation keeps coefficients beyond Number's exact integer range.
+///
+/// WHAT: negates a scale-zero coefficient far beyond 2^53 and observes the exact BigInt value.
+/// WHY: the removed checked negation helper covered this magnitude; the scalar path must not
+///      widen through a JS Number or normalise the sign incorrectly when the carrier is BigInt.
+#[test]
+fn total_dec_negation_keeps_large_coefficients_exact() {
+    let scale = NumberScale::ZERO;
+    let coefficient = "123456789012345678901234567890";
+    let entry = lower_dec_statement(
+        NumericFailureMode::Trap,
+        NumericOperator::Negate,
+        scale,
+        (coefficient, false),
+        None,
+    );
+
+    assert!(
+        entry
+            .source
+            .contains("__moth_binding((-(123456789012345678901234567890n)))"),
+        "large-coefficient negation must stay exact BigInt arithmetic:\n{}",
+        entry.source
+    );
+    assert!(!entry.source.contains("__moth_numeric_trap("));
+    assert_eq!(
+        run_scalar_result(&entry, "typeof value + \":\" + String(value)").trim(),
+        "bigint:-123456789012345678901234567890"
+    );
+}
+
+/// Total binary-float negation emits one scalar, keeps signed zero and demands no float family.
+#[test]
+fn total_float_negation_lowers_to_scalar_and_preserves_signed_zero() {
+    let cases = [
+        (FixedScalar::F64, 0.0_f64, "(-(0))", "-0"),
+        (FixedScalar::F64, 1.5, "(-(1.5))", "-1.5"),
+        (FixedScalar::F32, 0.0, "Math.fround(-(0))", "-0"),
+        (FixedScalar::F32, 1.5, "Math.fround(-(1.5))", "-1.5"),
+        (FixedScalar::F16, 0.0, "Math.f16round(-(0))", "-0"),
+        (FixedScalar::F16, 1.5, "Math.f16round(-(1.5))", "-1.5"),
+    ];
+
+    for (scalar, input, expected_expression, expected_value) in cases {
+        let ty = builtin_type_ids::fixed_scalar(scalar);
+        for failure_mode in [NumericFailureMode::Trap, NumericFailureMode::Infallible] {
+            let entry = lower_statement_scalar_result(failure_mode, |_, region, expressions| {
+                let value = FixedScalarValue::binary_float(scalar, input)
+                    .expect("test binary float fits its declared precision");
+                let operand = fixed_scalar_expression(value, ty, region, expressions);
+                (
+                    HirNumericOp::ordinary(NumericOperator::Negate, NumericScalar::Fixed(scalar)),
+                    HirNumericOperands::Unary { operand },
+                    ty,
+                )
+            });
+
+            assert!(
+                entry
+                    .source
+                    .contains(&format!("__moth_binding({expected_expression})")),
+                "{scalar:?} negation in {failure_mode:?} delivery must lower to {expected_expression}:\n{}",
+                entry.source
+            );
+            assert!(
+                !entry.source.contains("__moth_numeric_trap("),
+                "{scalar:?} negation in {failure_mode:?} delivery must not consume a numeric carrier"
+            );
+            for family in ["float", "float32", "float16"] {
+                for operation in ["add", "sub", "mul", "div", "mod", "pow", "neg"] {
+                    let helper = format!("function __moth_{family}_{operation}(");
+                    assert!(
+                        !entry.source.contains(&helper),
+                        "{scalar:?} negation must not emit the checked helper {helper}"
+                    );
+                }
+            }
+
+            assert_eq!(
+                run_scalar_result(
+                    &entry,
+                    "typeof value + \":\" + (Object.is(value, -0) ? \"-0\" : String(value))"
+                )
+                .trim(),
+                format!("number:{expected_value}"),
+                "{scalar:?} negation in {failure_mode:?} delivery must preserve the exact value and signed zero"
+            );
+        }
+    }
+}
+
+/// Total operations store their scalar success without a failure edge.
+///
+/// WHAT: drives Dec multiply and F64 negation through a fallible entry and observes the scalar
+///       value, BigInt/Number carrier and signed zero from the returned ABI envelope.
+/// WHY: the Invoke path must not read `.value` from a scalar, stage a capture temp, demand a trap
+///      helper, or retain a dead `if (true)` branch and error block for an operation that cannot
+///      fail; the entry's declared `Error!` return envelope stays unchanged.
+#[test]
+fn total_operations_transfer_scalar_success_without_a_failure_edge() {
+    let scale = NumberScale::new(2).expect("scale two is valid");
+    let (mut type_environment, types) = build_type_environment();
+    let number_type = type_environment.intern_number(scale);
+    let region = RegionId(0);
+    let mut expressions = HirExpressionStore::default();
+    let left = dec_expression(
+        ("0.05", false),
+        scale,
+        number_type,
+        region,
+        &mut expressions,
+    );
+    let right = dec_expression(
+        ("0.50", false),
+        scale,
+        number_type,
+        region,
+        &mut expressions,
+    );
+    let entry = lower_returned_operation_in_environment(
+        HirFallibleOperation::NumericOp {
+            op: HirNumericOp::ordinary(NumericOperator::Multiply, NumericScalar::Number(scale)),
+            operands: HirNumericOperands::Binary { left, right },
+        },
+        number_type,
+        expressions,
+        type_environment,
+        types.error,
+    );
+    assert!(
+        !entry.source.contains("function __moth_number_mul("),
+        "a total Dec multiply must not emit the deleted multiply helper"
+    );
+    assert!(
+        !entry.source.contains("__moth_numeric_trap("),
+        "a total Dec Invoke must store its scalar directly"
+    );
+    assert!(
+        entry
+            .source
+            .contains("__moth_number_round_half_even((5n * 50n), 100n)"),
+        "a total Dec multiply must call the shared half-even kernel"
+    );
+    assert!(
+        entry
+            .source
+            .contains("= __moth_binding(__moth_number_round_half_even((5n * 50n), 100n));"),
+        "the Dec Invoke must store the scalar expression directly in its success slot"
+    );
+    assert!(
+        !entry.source.contains("const __invoke_result_"),
+        "a total numeric Invoke must not stage its scalar through a capture temp"
+    );
+    assert!(
+        !entry.source.contains(".tag === \"ok\""),
+        "a total numeric Invoke must not test its scalar result as a carrier"
+    );
+    assert!(
+        !entry.source.contains("if (true)"),
+        "a total numeric Invoke must not emit a dead success conditional"
+    );
+    assert!(
+        !entry.source.contains("tag: \"err\", value: __moth_read("),
+        "a total numeric Invoke's failure block must not be emitted:\n{}",
+        entry.source
+    );
+    assert!(
+        entry.source.contains("return { tag: \"ok\", value:"),
+        "the entry's declared Error! return envelope must remain"
+    );
+    assert_eq!(
+        run_returned_numeric_op(&entry).trim(),
+        "value:2:signedZero=false"
+    );
+
+    let f64_ty = builtin_type_ids::fixed_scalar(FixedScalar::F64);
+    let mut float_expressions = HirExpressionStore::default();
+    let entry = lower_returned_numeric_op(
+        HirNumericOp::ordinary(
+            NumericOperator::Negate,
+            NumericScalar::Fixed(FixedScalar::F64),
+        ),
+        HirNumericOperands::Unary {
+            operand: f64_expression(0.0, f64_ty, region, &mut float_expressions),
+        },
+        f64_ty,
+        float_expressions,
+    );
+    assert!(
+        !entry.source.contains("function __moth_float_neg("),
+        "a total F64 negation must not emit the deleted checked negation helper"
+    );
+    assert!(
+        !entry.source.contains("__moth_numeric_trap("),
+        "a total F64 Invoke must store its scalar directly"
+    );
+    assert!(
+        entry.source.contains("= __moth_binding((-(0)));"),
+        "the F64 Invoke must store the scalar negation expression directly"
+    );
+    assert!(
+        !entry.source.contains(".tag === \"ok\""),
+        "a total numeric Invoke must not test its scalar result as a carrier"
+    );
+    assert!(
+        !entry.source.contains("if (true)"),
+        "a total numeric Invoke must not emit a dead success conditional"
+    );
+    assert!(
+        !entry.source.contains("tag: \"err\", value: __moth_read("),
+        "a total numeric Invoke's failure block must not be emitted:\n{}",
+        entry.source
+    );
+    assert!(
+        entry.source.contains("return { tag: \"ok\", value:"),
+        "the entry's declared Error! return envelope must remain"
+    );
+    assert_eq!(
+        run_returned_numeric_op(&entry).trim(),
+        "value:0:signedZero=true"
+    );
 }
 
 /// The recovered outcome one emitted operation must report.

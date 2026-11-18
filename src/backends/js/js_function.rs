@@ -4,6 +4,7 @@
 //! Cyclic or unsupported control flow retains the dispatcher fallback.
 
 use crate::backends::js::JsEmitter;
+use crate::backends::js::js_statement::PreparedInvoke;
 use crate::compiler_frontend::compiler_messages::{
     CompilerStage, compiler_errors::InfrastructureFailure,
 };
@@ -11,7 +12,6 @@ use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, HirValueId};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
 use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
-use crate::compiler_frontend::hir::utils::terminator_targets;
 use std::collections::HashSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +30,7 @@ impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_function(
         &mut self,
         function: &HirFunction,
+        live_blocks: &[BlockId],
     ) -> Result<(), InfrastructureFailure> {
         let function_name = self.function_name(function.id)?.to_owned();
 
@@ -46,8 +47,8 @@ impl<'hir> JsEmitter<'hir> {
 
         self.indent += 1;
 
-        let reachable_blocks = self.collect_reachable_blocks(function.entry)?;
-        self.emit_function_local_declarations(function, &reachable_blocks)?;
+        let declaration_blocks = self.collect_declaration_blocks(function.entry)?;
+        self.emit_function_local_declarations(function, &declaration_blocks)?;
         self.emit_parameter_binding_setup(function)?;
 
         let strategy = self.choose_control_flow_strategy(function)?;
@@ -55,7 +56,7 @@ impl<'hir> JsEmitter<'hir> {
         let emit_body_result = match strategy {
             ControlFlowStrategy::Structured => self.emit_structured_function_body(function),
             ControlFlowStrategy::Dispatcher => {
-                self.emit_dispatcher_for_function(function, &reachable_blocks)
+                self.emit_dispatcher_for_function(function, live_blocks)
             }
         };
         self.current_function = None;
@@ -67,15 +68,22 @@ impl<'hir> JsEmitter<'hir> {
         Ok(())
     }
 
+    /// Reserve one `let` per non-parameter local declared by the function's CFG blocks.
+    ///
+    /// WHAT: `declaration_blocks` is the unpruned reachable set, so a local declared in a block
+    ///       whose only incoming edge is a pruned Invoke failure edge still gets its name.
+    /// WHY: HIR validation only checks same-function ownership, so a pruned block's declaration
+    ///      can be the only one for a slot that live success emission writes. An unused `let` is
+    ///      harmless; a missing one is a runtime `ReferenceError`.
     fn emit_function_local_declarations(
         &mut self,
         function: &HirFunction,
-        reachable_blocks: &[BlockId],
+        declaration_blocks: &[BlockId],
     ) -> Result<(), InfrastructureFailure> {
         let parameter_set = function.params.iter().copied().collect::<HashSet<_>>();
         let mut local_ids = Vec::new();
 
-        for block_id in reachable_blocks {
+        for block_id in declaration_blocks {
             let block = self.block_by_id(*block_id)?;
             for local in &block.locals {
                 if !parameter_set.contains(&local.id) {
@@ -94,7 +102,7 @@ impl<'hir> JsEmitter<'hir> {
             self.emit_line(&format!("let {local_name};"));
         }
 
-        if !reachable_blocks.is_empty() || !function.params.is_empty() {
+        if !declaration_blocks.is_empty() || !function.params.is_empty() {
             self.emit_line("");
         }
 
@@ -205,10 +213,16 @@ impl<'hir> JsEmitter<'hir> {
             visiting.insert(block_id);
 
             let block = emitter.block_by_id(block_id)?;
-            for successor in terminator_targets(&block.terminator) {
-                if dfs(emitter, successor, visiting, visited)? {
-                    return Ok(true);
+            let mut cycle = false;
+            emitter.for_each_live_terminator_target(&block.terminator, |successor| {
+                if cycle {
+                    return Ok(());
                 }
+                cycle = dfs(emitter, successor, visiting, visited)?;
+                Ok(())
+            })?;
+            if cycle {
+                return Ok(true);
             }
 
             visiting.remove(&block_id);
@@ -350,6 +364,25 @@ impl<'hir> JsEmitter<'hir> {
         };
         let success_block = *success_block;
         let error_block = *error_block;
+        let prepared = self.prepare_invoke(*id, operation, success_results, *error_result)?;
+        let PreparedInvoke::Captured { value: captured } = prepared else {
+            // A scalar numeric or proven-narrowing Invoke always takes its success edge and
+            // `prepare_invoke` has already stored its value. An enclosing branch still owns the
+            // join, so continue along that branch line until the join. Otherwise the
+            // continuation is the rest of the function and is emitted whole. Skipping
+            // `inspect_branch_termination` here also keeps a chain of scalar Invokes linear
+            // instead of re-inspecting the same suffix per Invoke.
+            if expected_merge_target.is_some() {
+                return self.emit_branch_block(
+                    success_block,
+                    expected_merge_target,
+                    emitted_blocks,
+                );
+            }
+            self.emit_structured_block(success_block, emitted_blocks)?;
+            return Ok(BranchTermination::Terminated);
+        };
+
         let mut branch_blocks = HashSet::new();
         let success_termination =
             self.inspect_branch_termination(success_block, &mut branch_blocks)?;
@@ -365,17 +398,10 @@ impl<'hir> JsEmitter<'hir> {
                 "JavaScript backend: Invoke unexpected merge",
             ));
         }
-        let (captured, proven) =
-            self.prepare_invoke(*id, operation, success_results, *error_result)?;
-        let condition = if proven {
-            "true".to_owned()
-        } else {
-            format!("{captured}.tag === \"ok\"")
-        };
 
-        self.emit_line(&format!("if ({condition}) {{"));
+        self.emit_line(&format!("if ({captured}.tag === \"ok\") {{"));
         self.indent += 1;
-        self.emit_invoke_success_transfer(&captured, proven, success_results)?;
+        self.emit_invoke_success_transfer(&captured, success_results)?;
         self.emit_branch_block(success_block, merge_target, emitted_blocks)?;
         self.indent -= 1;
 
@@ -581,23 +607,25 @@ impl<'hir> JsEmitter<'hir> {
             HirTerminator::Jump { target, .. } => Ok(BranchTermination::Jump(*target)),
 
             HirTerminator::If {
-                then_block: success_block,
-                else_block: error_block,
+                then_block,
+                else_block,
                 ..
-            }
-            | HirTerminator::Invoke {
-                success: success_block,
-                failure: error_block,
+            } => self.inspect_branch_pair(*then_block, *else_block, branch_blocks),
+
+            HirTerminator::Invoke {
+                id,
+                operation,
+                success,
+                failure,
                 ..
             } => {
-                let success_termination =
-                    self.inspect_branch_termination(*success_block, branch_blocks)?;
-                let error_termination =
-                    self.inspect_branch_termination(*error_block, branch_blocks)?;
-                Ok(
-                    Self::resolve_branch_merge_target(success_termination, error_termination)?
-                        .map_or(BranchTermination::Terminated, BranchTermination::Jump),
-                )
+                // A scalar numeric Invoke always takes its success edge, so its handler is not a
+                // live branch body. The liveness owner decides that, never this match.
+                if self.invoke_failure_edge_is_live(*id, operation)? {
+                    self.inspect_branch_pair(*success, *failure, branch_blocks)
+                } else {
+                    self.inspect_branch_termination(*success, branch_blocks)
+                }
             }
 
             HirTerminator::Return(_)
@@ -617,6 +645,26 @@ impl<'hir> JsEmitter<'hir> {
                 "JavaScript backend: branch terminator is unsupported for structured lowering",
             )),
         }
+    }
+
+    /// Resolve the join shared by both arms of one live branch.
+    ///
+    /// WHAT: inspects both arm bodies in the caller's ownership set, then reduces their
+    ///       terminations to the merge target the enclosing conditional emits after its arms.
+    /// WHY: `If` and a live-failure `Invoke` resolve their join identically, so one helper keeps
+    ///      the two terminator arms from drifting apart.
+    fn inspect_branch_pair(
+        &self,
+        then_block: BlockId,
+        else_block: BlockId,
+        branch_blocks: &mut HashSet<BlockId>,
+    ) -> Result<BranchTermination, InfrastructureFailure> {
+        let then_termination = self.inspect_branch_termination(then_block, branch_blocks)?;
+        let else_termination = self.inspect_branch_termination(else_block, branch_blocks)?;
+        Ok(
+            Self::resolve_branch_merge_target(then_termination, else_termination)?
+                .map_or(BranchTermination::Terminated, BranchTermination::Jump),
+        )
     }
 
     fn resolve_branch_merge_target(

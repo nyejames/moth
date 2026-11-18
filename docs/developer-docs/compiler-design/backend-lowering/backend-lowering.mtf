@@ -104,18 +104,37 @@ The JS backend speaks host values and functions. It leans on the host GC for rea
 
 `greet` in JavaScript form preserves Moth contracts. A more permissive JS
 primitive cannot weaken checked arithmetic, finite `F16`/`F32`/`F64` values
-or error propagation. Each float operation rounds and checks finiteness at
-its selected precision before a later operation consumes it.
+or error propagation. Each rounding float operation rounds and checks
+finiteness at its selected precision before a later operation consumes it.
+Negation cannot round or overflow, so it preserves an already-finite value
+without a check.
 
-`NumericProofs` lets JS replace a proven-safe checked integer operation with
-native carrier arithmetic and omit only impossible checks. For a proven
-narrowing it omits only the range predicate. Operands still lower once, in
-source order. Check elision stays independent of failure delivery. Recoverable
-operations retain their success branch and `{tag, value}` carrier. Narrowings
-retain their Number/BigInt conversion and success carrier. JavaScript's
-exact-integer `Number` carrier canonicalises zero to `+0`, while BigInt
-operations remain exact. `Dec`, binary floats, `Byte` and `Power` receive
-no integer-proof elision.
+One classifier in `numeric_carrier.rs` selects each numeric operation's JS
+lowering: fast, scalar total, proven integer or checked helper. Statement
+lowering and the runtime-helper demand scan both use it. An ordinary operation
+whose shared failure-code set is empty is total: binary-float negation and `Dec`
+add, subtract, negate and multiply emit scalar expressions. Positive-scale
+`Dec` multiply rounds through the same half-even kernel as the fallible `Dec`
+helpers; `Dec0` multiply is an exact BigInt product.
+
+A proven integer operation lowers to native carrier arithmetic. Proof comes
+from either an `Infallible` statement mode, whose HIR producer has already
+established totality (operand-range discharge or a dominating guard), or a
+`NumericProofs` fact. A proven narrowing omits only the range predicate and
+stores the converted Number/BigInt scalar. Operands still lower once, in
+source order. Checked operations retain their `{tag, value}` carrier.
+JavaScript's exact-integer `Number` carrier canonicalises zero to `+0`, while
+BigInt operations remain exact. `Dec`, binary floats, `Byte` and `Power`
+receive no integer-proof elision.
+
+A numeric operation or narrowing `Invoke` whose lowering is scalar cannot take
+its failure edge. One live-edge owner in `reachability.rs` prunes that edge for
+reachability, cycle detection, structured-region inspection and helper demand,
+using the same proof query as lowering. Emission stores the scalar into the
+sole success slot and transfers success unconditionally, and dead handler
+blocks and their exclusive helpers disappear. Local declarations still cover
+the unpruned CFG. A declared `Error!` return ABI is unchanged, and a handler
+reached through another live edge stays.
 
 Emitted `F16` values call native `Math.f16round`, so JavaScript hosts executing
 `F16` code provide it built in. The Node integration harness requires Node 24
@@ -181,7 +200,7 @@ Borrow facts, last-use facts and validated lifetime topology stay upstream input
 
 What the lowerer emits follows the plan exactly. Where the plan chose a GC-native representation, planned ownership-specific operations may be absent from the target encoding. Where it chose affine, inferred-region, declared-region or REC handling, the lowerer emits what the plan says and nothing more.
 
-Numeric proof elision is independent of failure delivery. Wasm marks a proven statement with explicit `ProvenSafe`; it does not infer safety from missing scratch. The emitter uses native integer opcodes and omits only the proven-impossible predicates while preserving the operation's required success and failure continuations. `Power` remains checked. A proven-safe 32-bit multiply needs no widened check-only product scratch, and a destination that aliases an input needs no temporary because the opcode reads its inputs before `local.set`.
+Numeric proof elision is independent of failure delivery. Wasm marks an ordinary supported integer statement with explicit `ProvenSafe` when the statement is `Infallible` (its HIR producer already established totality) or has a `NumericProofs` fact. It does not infer safety from missing scratch. The emitter uses native integer opcodes and omits only the proven-impossible predicates while preserving the operation's required success and failure continuations. `Power` remains checked. A proven-safe 32-bit multiply needs no widened check-only product scratch, and a destination that aliases an input needs no temporary because the opcode reads its inputs before `local.set`. Checked float negation keeps its finite check because exported entry points accept unvalidated host floats.
 
 Each target consumes only the proof classes its lowerer supports. Missing proof
 retains checks, and proof elision never grants a missing cast, decimal or

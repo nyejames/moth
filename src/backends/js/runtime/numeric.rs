@@ -1,18 +1,21 @@
 //! Numeric helpers for the JavaScript runtime.
 //!
-//! WHAT: emits carrier-parameterised bounded integer and binary-float operation families, exact
-//!       scale-generic Number coefficient operations, exact-precision binary-float boundary
-//!       validation, canonical binary-float-to-String formatting for HTML-JS, fast scalar
-//!       arithmetic with fatal traps, and the total or trapping conversions a fast compound
-//!       write-back performs.
+//! WHAT: emits carrier-parameterised bounded integer and binary-float operation families, the
+//!       shared exact `Dec` half-even kernel and its fallible coefficient operations,
+//!       exact-precision binary-float boundary validation, canonical binary-float-to-String
+//!       formatting for HTML-JS, fast scalar arithmetic with fatal traps, and the total or
+//!       trapping conversions a fast compound write-back performs.
 //! WHY: HIR numeric statements already own operator domains and failure modes; this runtime only
 //!      enforces each selected domain's exact semantics at its operation boundary.
 //!
 //! Every checked helper returns `{ tag, value }`. Trap-mode lowering extracts the success value or
-//! throws, while builtin `Error!` lowering keeps the carrier for normal HIR recovery. Fast
-//! arithmetic never builds a carrier: total operations return the width-normalised scalar, and
-//! trapping helpers throw the canonical fatal message directly. The fast write-back helpers
-//! follow the same rule, so a fast trap can never be consumed as a Moth `Error`.
+//! throws, while builtin `Error!` lowering keeps the carrier for normal HIR recovery. Total
+//! ordinary operations (`Dec` add/subtract/negate/multiply and binary-float negation) lower to
+//! inline scalar expressions and own no helper; `Dec` multiplication calls the same half-even
+//! kernel its fallible division and power family uses. Fast arithmetic never builds a carrier:
+//! total operations return the width-normalised scalar, and trapping helpers throw the canonical
+//! fatal message directly. The fast write-back helpers follow the same rule, so a fast trap can
+//! never be consumed as a Moth `Error`.
 
 use std::collections::HashSet;
 
@@ -38,7 +41,7 @@ enum NumericHelperDelivery {
 }
 
 impl<'hir> JsEmitter<'hir> {
-    /// Emits only numeric helper families used by reachable HIR and cast statements.
+    /// Emits only numeric helper families used by emitted HIR and cast statements.
     ///
     /// `emitted` carries the helper names the cast group already emitted, so a fast write-back
     /// that shares the exact BigInt rounding helper never duplicates it in the prelude.
@@ -63,8 +66,15 @@ impl<'hir> JsEmitter<'hir> {
             self.emit_integer_helpers("bigint", true);
         }
 
+        // The fallible family's division and power members call the kernel, so family emission
+        // implies the kernel even when only integer division or remainder was reachable. A total
+        // multiply demands the kernel without any fallible member.
+        if usage.number_round_half_even || usage.number_decimal_ops {
+            self.emit_number_round_half_even_helper();
+        }
+
         if usage.number_decimal_ops {
-            self.emit_number_helpers();
+            self.emit_number_fallible_helpers();
         }
 
         if usage.binary16_ops {
@@ -277,14 +287,14 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
     }
 
-    /// Emits exact Number coefficient arithmetic with one half-even result rounding boundary.
+    /// Emits the shared exact half-even quotient kernel for `Dec` coefficient arithmetic.
     ///
     /// Scale factors arrive as compile-time BigInt literals from validated HIR, so ordinary
-    /// arithmetic never rebuilds a factor or routes a coefficient/exponent through JS Number.
-    fn emit_number_helpers(&mut self) {
-        let divide_by_zero = self.error_result_call(BuiltinErrorCode::DivideByZero);
-        let invalid_exponent = self.error_result_call(BuiltinErrorCode::InvalidExponent);
-
+    /// arithmetic never rebuilds a factor or routes a coefficient through JS Number. Positive-scale
+    /// total multiplication and the fallible division/power family both round through this one
+    /// kernel, so their results cannot diverge; a scale-zero multiply renders the exact product
+    /// and never calls it.
+    fn emit_number_round_half_even_helper(&mut self) {
         self.emit_line("function __moth_number_round_half_even(numerator, denominator) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (denominator === 1n) return numerator;");
@@ -310,29 +320,16 @@ impl<'hir> JsEmitter<'hir> {
         });
         self.emit_line("}");
         self.emit_line("");
+    }
 
-        self.emit_line("function __moth_number_add(a, b) {");
-        self.with_indent(|emitter| {
-            emitter.emit_line("return { tag: \"ok\", value: a + b };");
-        });
-        self.emit_line("}");
-        self.emit_line("");
-
-        self.emit_line("function __moth_number_sub(a, b) {");
-        self.with_indent(|emitter| {
-            emitter.emit_line("return { tag: \"ok\", value: a - b };");
-        });
-        self.emit_line("}");
-        self.emit_line("");
-
-        self.emit_line("function __moth_number_mul(a, b, scaleFactor) {");
-        self.with_indent(|emitter| {
-            emitter.emit_line(
-                "return { tag: \"ok\", value: __moth_number_round_half_even(a * b, scaleFactor) };",
-            );
-        });
-        self.emit_line("}");
-        self.emit_line("");
+    /// Emits the fallible `Dec` coefficient operations that retain a recoverable carrier.
+    ///
+    /// WHY: total add, subtract, negate and multiply lower inline and own no helper. Division,
+    ///      integer division, remainder and power keep their real zero-divisor and exponent
+    ///      failure edges, so only they are emitted here.
+    fn emit_number_fallible_helpers(&mut self) {
+        let divide_by_zero = self.error_result_call(BuiltinErrorCode::DivideByZero);
+        let invalid_exponent = self.error_result_call(BuiltinErrorCode::InvalidExponent);
 
         self.emit_line("function __moth_number_div(a, b, scaleFactor) {");
         self.with_indent(|emitter| {
@@ -396,13 +393,6 @@ impl<'hir> JsEmitter<'hir> {
             emitter.emit_line(
                 "return { tag: \"ok\", value: __moth_number_round_half_even(numerator, denominator) };",
             );
-        });
-        self.emit_line("}");
-        self.emit_line("");
-
-        self.emit_line("function __moth_number_neg(a) {");
-        self.with_indent(|emitter| {
-            emitter.emit_line("return { tag: \"ok\", value: -a };");
         });
         self.emit_line("}");
         self.emit_line("");
@@ -816,25 +806,6 @@ impl<'hir> JsEmitter<'hir> {
                     emitter.emit_line(&format!("const result = {round}({expression});"));
                 } else {
                     emitter.emit_line(&format!("const result = {expression};"));
-                }
-                emitter.emit_line("if (!Number.isFinite(result)) {");
-                emitter.with_indent(|em| emit_failure(em, BuiltinErrorCode::FloatNonFinite));
-                emitter.emit_line("}");
-                emitter.emit_line(success_line);
-            });
-            self.emit_line("}");
-            self.emit_line("");
-        }
-
-        // Fast binary-float negation is total and lowers inline, so only the checked family
-        // owns a negation helper that reports a non-finite carrier.
-        if delivery == NumericHelperDelivery::CheckedCarrier {
-            self.emit_line(&format!("function __moth_{family}_neg(a) {{"));
-            self.with_indent(|emitter| {
-                if let Some(round) = round {
-                    emitter.emit_line(&format!("const result = {round}(-a);"));
-                } else {
-                    emitter.emit_line("const result = -a;");
                 }
                 emitter.emit_line("if (!Number.isFinite(result)) {");
                 emitter.with_indent(|em| emit_failure(em, BuiltinErrorCode::FloatNonFinite));

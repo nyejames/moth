@@ -1,0 +1,16 @@
+entry = "."
+
+# Release must keep fast fixed-integer arithmetic wrapping at every semantic width on
+# both backends. The operands are function parameters, so no caller can constant-fold
+# the operations away.
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = "i32=-2147483648 u32=0 u64=0 sub=9223372036854775807 mul32=1 mul64=1 neg=-2147483648 pow32=-808182895 pow64=12157665459056928801"
+
+[backends.html_wasm]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = "i32=-2147483648 u32=0 u64=0 sub=9223372036854775807 mul32=1 mul64=1 neg=-2147483648 pow32=-808182895 pow64=12157665459056928801"

@@ -1,0 +1,10 @@
+entry = "."
+
+# Release must keep the fast division trap at the operation, after the earlier
+# io output has been observed and before the following line can run.
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = "before=1"
+runtime_error_contains = ["Division by zero"]

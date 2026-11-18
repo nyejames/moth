@@ -1,0 +1,22 @@
+-- A declared `Error!` boundary forwards a checked division failure through postfix `!` to the
+-- entry's builtin `Error!` contract. The mixed-width U8 + I8 addition is an `Infallible`
+-- mandatory-discharge statement, not an Invoke. The recovering division call's Invoke terminates
+-- its HIR block: the success continuation computes the width and return, while the failure edge
+-- carries the builtin Error to start. A staged runtime fragment before the escaping call must stay
+-- unpublished.
+
+divide |dividend I32, divisor I32| -> I32, Error!:
+    return dividend // divisor
+;
+
+forward |dividend I32, divisor I32, left U8, right I8| -> I32, Error!:
+    widened I16 = left + right
+    quotient I32 = divide(dividend, divisor)!
+    width I32 = cast widened
+    return quotient + width
+;
+
+ok = forward(7, 2, 200, 100)!
+~[:staged [ok]]
+escaped = forward(ok, 0, 200, 100)!
+~[:after=[escaped]]

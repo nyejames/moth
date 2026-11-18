@@ -320,6 +320,12 @@ modular products and width-normalised `BigInt` for 64-bit operations. Number
 multiplication followed by truncation loses low bits for some `U32` inputs.
 Never publish an out-of-range fixed-width value.
 
+One classifier in `numeric_carrier.rs` chooses fast, scalar, proven or checked
+lowering and the matching helper demand. Ordinary operations with an empty
+failure-code set, proven integer operations and proven integer narrowings emit
+scalar values with no recoverable carrier. Their `Invoke` failure edges are not
+emitted.
+
 An ordinary or Dec-only module must not import fast helpers. Supported Dec
 operations inside a fast scope still use checked and handled paths.
 

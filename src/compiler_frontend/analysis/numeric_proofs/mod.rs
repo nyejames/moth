@@ -12,11 +12,29 @@
 //!
 //! Facts are closed integer intervals over `i128`, seeded from `NumericScalar::integer_range`
 //! (including exact `U64`), fixed-scalar literals and infallible integer cast expressions.
-//! `Byte`, binary floats and exact `Dec` never prove. Blocks are walked
-//! independently with one last-written-local interval cache: state resets at every block entry,
-//! and every write, call or unknown statement drops the cache. There is no predecessor
-//! dataflow, fixpoint, refinement or HIR mutation. Checked `i128` endpoint arithmetic that
-//! cannot represent an intermediate means no proof, never wrapping.
+//! `Byte`, binary floats and exact `Dec` never prove. Blocks are otherwise walked independently
+//! with one last-written-local interval cache, and every write, call or unknown statement drops
+//! the cache.
+//!
+//! One bounded predecessor fact crosses a block edge. When an `Invoke` whose operation is a
+//! proven integer `NumericOp` or a proven integer narrowing has exactly one success result, and
+//! its success block has exactly one incoming CFG edge over every terminator target and is not a
+//! function entry, that block's walk starts with the result local at the operation's conservative
+//! enclosing result interval. The block is entered only through that edge, the edge transfer writes
+//! exactly that local with the proven interval, and nothing executes before the block's first
+//! statement.
+//! Seeds are consumed when their block is walked, and a block already visited in dense block
+//! order never receives one. Everything else still starts from no value-specific fact: several
+//! predecessors, a loop header, no fact travels on a failure edge, an unproven operation or a seed
+//! recorded after the block's walk. There is no general predecessor dataflow, fixpoint,
+//! refinement, join or HIR mutation. Checked `i128` endpoint arithmetic that cannot represent an
+//! intermediate means no proof, never wrapping.
+//!
+//! Fast-semantics operations never publish an operation fact: the table is the ordinary
+//! checked-operation contract, and both scalar backends select fast delivery before consulting
+//! it. A proven fast statement's result interval still enters the single-local cache, because a
+//! fast result whose checked mathematical interval fits the result domain cannot wrap and is
+//! therefore the mathematical value.
 //!
 //! ## Identity contract
 //!
@@ -25,7 +43,7 @@
 //! is computed inside the compiler services after HIR validation, before publication, and is
 //! consumed only together with that same executable's HIR.
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -35,11 +53,12 @@ use crate::compiler_frontend::datatypes::numeric_operators::negation_domain;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
-use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId};
+use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{HirNumericOp, HirNumericOperands};
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
+use crate::compiler_frontend::hir::utils::for_each_terminator_target;
 
 #[cfg(test)]
 mod tests;
@@ -55,7 +74,9 @@ type Interval = (i128, i128);
 ///      degrades to fully checked behaviour.
 #[derive(Debug, Default)]
 pub(crate) struct NumericProofs {
-    /// `NumericOp` statement or Invoke ids whose relevant failures are impossible.
+    /// Ordinary checked `NumericOp` statement or Invoke ids whose relevant failures are
+    /// impossible. Fast-semantics operations never publish here; their result interval only feeds
+    /// the analysis cache.
     safe_operations: FxHashSet<HirNodeId>,
     /// Fallible integer-to-integer `NumericConversion` Invoke ids whose range predicates
     /// can never fail.
@@ -78,25 +99,33 @@ impl NumericProofs {
 
 /// Computes the conservative proof table for one validated HIR module.
 ///
-/// WHAT: walks every block independently, deriving closed intervals from each statement's
-///       exact numeric domains for checked integer operations and fallible integer narrowings.
+/// WHAT: walks every block in `hir.blocks` order, deriving closed intervals from each
+///       statement's exact numeric domains for checked integer operations and fallible integer
+///       narrowings. A proven Invoke supplies its sole success block's entry interval.
 /// WHY: base and generated sidecar compilation each call this once after HIR validation and
-///      before publication, so every executable carries its own paired table.
+///      before publication, so every executable carries its own paired table. Post-compaction
+///      block ids are dense, so the incoming-edge table can index by `BlockId.0`.
 pub(crate) fn analyse_numeric_proofs(
     hir: &HirModule,
     environment: &TypeEnvironment,
 ) -> NumericProofs {
+    let incoming_edges = count_incoming_edges(hir);
     let mut analyser = BlockAnalyser {
         environment,
         expressions: &hir.expressions,
+        incoming_edges: &incoming_edges,
+        seeds: FxHashMap::default(),
         cache: None,
+        current_block: 0,
         facts: NumericProofs::default(),
     };
 
-    // Blocks are walked independently: value-specific state resets at every block entry,
-    // including joins and loop headers. No predecessor state is ever consulted.
-    for block in &hir.blocks {
-        analyser.cache = None;
+    // Blocks are walked once in module order. A block with several predecessors, a loop
+    // header or no usable incoming fact starts with no value-specific state, so value facts
+    // still reset at every such entry. Each seed is consumed by its own block's walk.
+    for (block_index, block) in hir.blocks.iter().enumerate() {
+        analyser.current_block = block_index;
+        analyser.cache = analyser.seeds.remove(&block.id);
         for statement in &block.statements {
             analyser.visit_statement(statement);
         }
@@ -106,12 +135,64 @@ pub(crate) fn analyse_numeric_proofs(
     analyser.facts
 }
 
-/// One block walk's conservative state.
+/// Incoming-edge facts for one block's seed eligibility.
+///
+/// WHY: seeding needs both facts together. A second terminator edge can deliver a different
+///      value, and a callable starts its entry block without executing any edge transfer.
+#[derive(Clone, Copy)]
+struct IncomingEdgeFacts {
+    /// Terminator edges targeting the block, counted through every terminator kind.
+    count: u32,
+    /// A callable starts this block directly rather than through a terminator edge.
+    callable_entry: bool,
+}
+
+/// Counts incoming CFG edges for every dense post-compaction block id.
+///
+/// WHAT: one pass over every terminator target, including both Invoke edges, match arms,
+///       conditional branches, jumps, breaks and continues, then flags every function entry.
+/// WHY: seeding requires the successor to have no other way in, so the count must use the same
+///      complete target set the rest of the compiler walks rather than selected edge kinds.
+///      Dense post-compaction ids make the block index the block id.
+fn count_incoming_edges(hir: &HirModule) -> Vec<IncomingEdgeFacts> {
+    let mut incoming_edges = vec![
+        IncomingEdgeFacts {
+            count: 0,
+            callable_entry: false,
+        };
+        hir.blocks.len()
+    ];
+    for block in &hir.blocks {
+        for_each_terminator_target(&block.terminator, |target| {
+            // Dense post-compaction ids make the index the block id. An out-of-range target can
+            // only come from a malformed fixture, so it is ignored rather than panicking.
+            if let Some(edges) = incoming_edges.get_mut(target.0 as usize) {
+                edges.count = edges.count.saturating_add(1);
+            }
+        });
+    }
+    for function in &hir.functions {
+        if let Some(edges) = incoming_edges.get_mut(function.entry.0 as usize) {
+            edges.callable_entry = true;
+        }
+    }
+    incoming_edges
+}
+
+/// One module analysis pass's conservative state.
 struct BlockAnalyser<'a> {
     environment: &'a TypeEnvironment,
     expressions: &'a HirExpressionStore,
+    /// Incoming-edge facts indexed by dense post-compaction block id.
+    incoming_edges: &'a [IncomingEdgeFacts],
+    /// Conservative enclosing entry intervals recorded by proven Invokes for their sole success
+    /// blocks. Each seed is consumed by its block's walk; a seed recorded after that walk is
+    /// discarded instead of retained.
+    seeds: FxHashMap<BlockId, (LocalId, Interval)>,
     /// The single last-written-local interval cache. `None` means no value-specific fact.
     cache: Option<(LocalId, Interval)>,
+    /// Dense index of the block currently being walked, used to reject late seeds.
+    current_block: usize,
     facts: NumericProofs,
 }
 
@@ -152,7 +233,14 @@ impl BlockAnalyser<'_> {
             } => {
                 // Operand facts are derived before any invalidation.
                 if let Some(result_interval) = self.prove_operation(op, operands) {
-                    self.facts.safe_operations.insert(statement.id);
+                    // Fast delivery is chosen by both scalar backends before the proof table, so
+                    // a fast statement never publishes an operation fact. Its conservative
+                    // enclosing result interval still feeds the one-entry cache: a proven interval
+                    // fits the result domain, so the fast result cannot wrap and equals the
+                    // mathematical result.
+                    if !op.semantics.is_fast() {
+                        self.facts.safe_operations.insert(statement.id);
+                    }
                     // Statement operations write scalar results directly.
                     self.cache = Some((result.local(), result_interval));
                     return;
@@ -169,30 +257,56 @@ impl BlockAnalyser<'_> {
     }
 
     fn visit_terminator(&mut self, terminator: &HirTerminator) {
-        let HirTerminator::Invoke { id, operation, .. } = terminator else {
+        let HirTerminator::Invoke {
+            id,
+            operation,
+            success,
+            success_results,
+            ..
+        } = terminator
+        else {
             return;
         };
         // Read operand facts from this block before the edge transfer. A proof discharges
         // only the runtime predicate, never the failure edge or successor-local definitions.
-        match operation {
+        let result_interval = match operation {
             HirFallibleOperation::NumericOp { op, operands } => {
-                if self.prove_operation(op, operands).is_some() {
+                let interval = self.prove_operation(op, operands);
+                if interval.is_some() && !op.semantics.is_fast() {
                     self.facts.safe_operations.insert(*id);
                 }
+                interval
             }
             HirFallibleOperation::CastOp { policy, source } => {
-                if let Some(interval) = self.expression_interval(*source)
-                    && self.cast_narrowing_is_provable(policy, interval)
-                {
-                    self.facts.safe_narrowings.insert(*id);
+                let interval = self.expression_interval(*source);
+                match interval {
+                    Some(interval) if self.cast_narrowing_is_provable(policy, interval) => {
+                        self.facts.safe_narrowings.insert(*id);
+                        Some(interval)
+                    }
+                    _ => None,
                 }
             }
-            _ => {}
+            _ => None,
+        };
+        // A sole success edge is the only way into its block, so the transfer's single result
+        // local carries the proven interval when that block's walk starts. Another edge, a
+        // callable entry, several success results or a block already walked before this Invoke
+        // cannot establish that state; a later walk never revisits it.
+        if let Some(interval) = result_interval
+            && let [result] = success_results.as_slice()
+            && let Some(edges) = self.incoming_edges.get(success.0 as usize)
+            && edges.count == 1
+            && !edges.callable_entry
+            && success.0 as usize > self.current_block
+        {
+            self.seeds.insert(*success, (*result, interval));
         }
         self.cache = None;
     }
 
-    /// Proves one checked numeric operation safe, returning its exact result interval.
+    /// Proves one checked numeric operation safe, returning a conservative enclosing result
+    /// interval.
     ///
     /// `Power` never proves, and every non-integer domain (binary floats, exact
     /// `Dec`) stays checked. The returned interval must fit the operation domain, which is

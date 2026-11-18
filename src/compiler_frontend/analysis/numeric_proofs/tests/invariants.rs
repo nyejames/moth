@@ -16,7 +16,7 @@ use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTy
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::number::NumberValue;
-use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, NumericSemantics};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
@@ -332,7 +332,17 @@ impl ProofFixture {
     /// Assembles the module from `(locals, statements, terminator)` block specs and pairs it
     /// with the environment. Block 0 is the entry of the single local function.
     fn finish(
+        self,
+        blocks: Vec<(Vec<HirLocal>, Vec<HirStatement>, HirTerminator)>,
+    ) -> (HirModule, TypeEnvironment) {
+        self.finish_with_params(Vec::new(), blocks)
+    }
+
+    /// Finishes a fixture with an explicit parameter list, so a test can depend on a real
+    /// parameter local rather than only on a local whose type happens to be parameter-shaped.
+    fn finish_with_params(
         mut self,
+        params: Vec<LocalId>,
         blocks: Vec<(Vec<HirLocal>, Vec<HirStatement>, HirTerminator)>,
     ) -> (HirModule, TypeEnvironment) {
         for (index, (locals, statements, terminator)) in blocks.into_iter().enumerate() {
@@ -348,7 +358,7 @@ impl ProofFixture {
         self.module.functions.push(HirFunction {
             id: FunctionId(0),
             entry: BlockId(0),
-            params: vec![],
+            params,
             return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
                 [],
                 None,
@@ -438,6 +448,55 @@ fn proven_trap_results_retain_their_exact_intervals() {
 
     assert!(proofs.integer_operation_is_safe(first_id));
     assert!(proofs.integer_operation_is_safe(second_id));
+}
+
+#[test]
+fn fast_statement_publishes_no_fact_but_keeps_its_result_interval() {
+    let mut fixture = ProofFixture::new();
+    let int = fixture.int();
+    let (fast_sum, checked_result) = (LocalId(0), LocalId(1));
+    // The fast statement's checked mathematical interval [4, 4] is contained in I32, so it may
+    // seed the cache; it must never publish an operation fact because the table is the ordinary
+    // checked contract and fast delivery is selected before any proof lookup.
+    let left = fixture.int_literal(2, int);
+    let right = fixture.int_literal(2, int);
+    let fast = fixture.numeric_op(
+        HirNumericOp {
+            operator: NumericOperator::Add,
+            domain: NumericScalar::Fixed(FixedScalar::I32),
+            semantics: NumericSemantics::Fast,
+        },
+        binary(left, right),
+        HirLocalDestination::Define(fast_sum),
+        NumericFailureMode::Infallible,
+    );
+    let fast_id = fast.id;
+    let fast_load = fixture.load(fast_sum, int);
+    let one = fixture.int_literal(1, int);
+    let checked = fixture.numeric_op(
+        int_op(NumericOperator::Add),
+        binary(fast_load, one),
+        HirLocalDestination::Define(checked_result),
+        NumericFailureMode::Trap,
+    );
+    let checked_id = checked.id;
+    let terminator = fixture.return_unit();
+    let (module, environment) = fixture.finish(vec![(
+        vec![declared(fast_sum, int), declared(checked_result, int)],
+        vec![fast, checked],
+        terminator,
+    )]);
+
+    let proofs = analyse_numeric_proofs(&module, &environment);
+
+    assert!(
+        !proofs.integer_operation_is_safe(fast_id),
+        "a fast statement must never publish an ordinary checked-operation fact"
+    );
+    assert!(
+        proofs.integer_operation_is_safe(checked_id),
+        "the proven fast result interval is still a sound cache fact for later checked work"
+    );
 }
 
 #[test]
@@ -753,6 +812,75 @@ fn u64_interval_arithmetic_is_exact_at_the_domain_edge() {
 
     assert!(proofs.integer_operation_is_safe(exact_id));
     assert!(!proofs.integer_operation_is_safe(overflow_id));
+}
+
+#[test]
+fn u32_product_whose_low_word_wraps_never_proves() {
+    let mut fixture = ProofFixture::new();
+    let uint = fixture.uint();
+    let (x, product) = (LocalId(0), LocalId(1));
+    // x = 65536: x * x is exactly 2^32, so a wrapping low-word product would read as zero and
+    // "fit" U32, while the exact product overflows the domain.
+    let literal = fixture.uint_literal(65_536, uint);
+    let write = fixture.define_local(x, literal);
+    let left = fixture.load(x, uint);
+    let right = fixture.load(x, uint);
+    let operation = fixture.numeric_op(
+        uint_op(NumericOperator::Multiply),
+        binary(left, right),
+        HirLocalDestination::Define(product),
+        NumericFailureMode::Trap,
+    );
+    let operation_id = operation.id;
+    let terminator = fixture.return_unit();
+    let (module, environment) = fixture.finish(vec![(
+        vec![declared(x, uint), declared(product, uint)],
+        vec![write, operation],
+        terminator,
+    )]);
+
+    let proofs = analyse_numeric_proofs(&module, &environment);
+
+    assert!(
+        !proofs.integer_operation_is_safe(operation_id),
+        "a low-word-wrapping U32 product must never prove from its wrapped value"
+    );
+}
+
+#[test]
+fn discharged_statement_mode_is_not_a_proof_entry() {
+    let mut fixture = ProofFixture::new();
+    let i16_type = fixture.fixed(FixedScalar::I16);
+    let (left, right, sum) = (LocalId(0), LocalId(1), LocalId(2));
+    // The frontend records `Infallible` when operand type ranges already discharged the
+    // operation. The optional table sees only unconstrained I16 loads with no interval fact, so it
+    // must stay empty: statement discharge is not a proof-table fact.
+    let left_load = fixture.load(left, i16_type);
+    let right_load = fixture.load(right, i16_type);
+    let operation = fixture.numeric_op(
+        fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::I16)),
+        binary(left_load, right_load),
+        HirLocalDestination::Define(sum),
+        NumericFailureMode::Infallible,
+    );
+    let operation_id = operation.id;
+    let terminator = fixture.return_unit();
+    let (module, environment) = fixture.finish(vec![(
+        vec![
+            declared(left, i16_type),
+            declared(right, i16_type),
+            declared(sum, i16_type),
+        ],
+        vec![operation],
+        terminator,
+    )]);
+
+    let proofs = analyse_numeric_proofs(&module, &environment);
+
+    assert!(
+        !proofs.integer_operation_is_safe(operation_id),
+        "operand-range discharge is a statement mode, not an optional proof entry"
+    );
 }
 
 #[test]
@@ -1207,67 +1335,760 @@ fn projection_writes_invalidate_the_cached_interval() {
 }
 
 #[test]
-fn invoke_proofs_do_not_propagate_intervals_to_successors() {
+fn unproven_invoke_does_not_seed_its_success_block() {
     let mut fixture = ProofFixture::new();
-    let int = fixture.int();
+    let u32_type = fixture.fixed(FixedScalar::U32);
     let error_type = fixture.error_type();
-    let (source, result, error, sum) = (LocalId(0), LocalId(1), LocalId(2), LocalId(3));
-    let literal = fixture.int_literal(3, int);
-    let write = fixture.define_local(source, literal);
-    let left = fixture.load(source, int);
-    let right = fixture.int_literal(1, int);
-    let (id, invoke) = fixture.invoke(
+    let (value, result, quotient, error) = (LocalId(0), LocalId(1), LocalId(2), LocalId(3));
+    // A real U32 parameter starts with only its canonical full-range bound, so value + 1 leaves
+    // the U32 domain and the first Invoke cannot prove.
+    let value_load = fixture.load(value, u32_type);
+    let one = fixture.unsigned_literal(FixedScalar::U32, 1);
+    let (add_id, add_invoke) = fixture.invoke(
         HirFallibleOperation::NumericOp {
-            op: int_op(NumericOperator::Add),
-            operands: binary(left, right),
+            op: fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U32)),
+            operands: binary(value_load, one),
         },
         result,
         error,
         BlockId(1),
+        BlockId(3),
+    );
+    // The canonical U32 result range includes zero, so the division may divide by zero and
+    // stays unproven. An unchecked sum interval [1, U32::MAX + 1] excludes zero and would
+    // wrongly prove this follow-up, which is exactly the leak this test detects.
+    let one = fixture.unsigned_literal(FixedScalar::U32, 1);
+    let result_load = fixture.load(result, u32_type);
+    let (divide_id, divide_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: fixed_op(
+                NumericOperator::IntegerDivide,
+                NumericScalar::Fixed(FixedScalar::U32),
+            ),
+            operands: binary(one, result_load),
+        },
+        quotient,
+        error,
+        BlockId(2),
+        BlockId(3),
+    );
+    let return_block = fixture.return_unit();
+    let (module, environment) = fixture.finish_with_params(
+        vec![value],
+        vec![
+            (
+                vec![
+                    declared(value, u32_type),
+                    declared(result, u32_type),
+                    declared(quotient, u32_type),
+                    declared(error, error_type),
+                ],
+                vec![],
+                add_invoke,
+            ),
+            (vec![], vec![], divide_invoke),
+            (vec![], vec![], return_block.clone()),
+            (vec![], vec![], return_block),
+        ],
+    );
+    let proofs = analyse_numeric_proofs(&module, &environment);
+    assert!(!proofs.integer_operation_is_safe(add_id));
+    assert!(!proofs.integer_operation_is_safe(divide_id));
+}
+
+// ---------------------------------------------------------------------------
+//  Invoke success seeding
+// ---------------------------------------------------------------------------
+
+#[test]
+fn proven_invoke_seeds_its_sole_success_block() {
+    let mut fixture = ProofFixture::new();
+    let i16_type = fixture.fixed(FixedScalar::I16);
+    let int = fixture.int();
+    let error_type = fixture.error_type();
+    let (source, product, sum, error) = (LocalId(0), LocalId(1), LocalId(2), LocalId(3));
+
+    // product = wide(source I16 -> I32) * 3 proves as [-98304, 98301].
+    let source_value = fixture.load(source, i16_type);
+    let widened = fixture.cast_expression(
+        source_value,
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Fixed(FixedScalar::I16),
+            target: NumericScalar::Fixed(FixedScalar::I32),
+        },
+        int,
+    );
+    let three = fixture.int_literal(3, int);
+    let (first_id, first_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Multiply),
+            operands: binary(widened, three),
+        },
+        product,
+        error,
+        BlockId(1),
+        BlockId(3),
+    );
+
+    // The sole success block reads the seeded product interval, so + 7 proves.
+    let product_load = fixture.load(product, int);
+    let seven = fixture.int_literal(7, int);
+    let (second_id, second_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(product_load, seven),
+        },
+        sum,
+        error,
+        BlockId(2),
+        BlockId(3),
+    );
+    let return_block = fixture.return_unit();
+
+    let (module, environment) = fixture.finish_with_params(
+        vec![source],
+        vec![
+            (
+                vec![
+                    declared(source, i16_type),
+                    declared(product, int),
+                    declared(sum, int),
+                    declared(error, error_type),
+                ],
+                vec![],
+                first_invoke,
+            ),
+            (vec![], vec![], second_invoke),
+            (vec![], vec![], return_block.clone()),
+            (vec![], vec![], return_block),
+        ],
+    );
+    validate_hir_module(&module, &environment, &ExternalPackageRegistry::new())
+        .expect("seeded Invoke fixture must be valid HIR");
+
+    let proofs = analyse_numeric_proofs(&module, &environment);
+
+    assert!(proofs.integer_operation_is_safe(first_id));
+    assert!(proofs.integer_operation_is_safe(second_id));
+}
+
+#[test]
+fn proven_remainder_invoke_seeds_a_narrowing_cast_invoke() {
+    let mut fixture = ProofFixture::new();
+    let i16_type = fixture.fixed(FixedScalar::I16);
+    let i8_type = fixture.fixed(FixedScalar::I8);
+    let int = fixture.int();
+    let error_type = fixture.error_type();
+    let (source, remainder, narrowed, error, narrowed_sum) =
+        (LocalId(0), LocalId(1), LocalId(2), LocalId(3), LocalId(4));
+
+    let source_value = fixture.load(source, i16_type);
+    let widened = fixture.cast_expression(
+        source_value,
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Fixed(FixedScalar::I16),
+            target: NumericScalar::Fixed(FixedScalar::I32),
+        },
+        int,
+    );
+    let hundred = fixture.int_literal(100, int);
+    let (remainder_id, remainder_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: fixed_op(
+                NumericOperator::Remainder,
+                NumericScalar::Fixed(FixedScalar::I32),
+            ),
+            operands: binary(widened, hundred),
+        },
+        remainder,
+        error,
+        BlockId(1),
+        BlockId(4),
+    );
+
+    // A remainder by 100 stays inside [-99, 99], so the seeded narrowing to I8 proves.
+    let remainder_load = fixture.load(remainder, int);
+    let (narrowing_id, narrowing_invoke) = fixture.invoke(
+        HirFallibleOperation::CastOp {
+            policy: BuiltinCastPolicyId::NumericConversion {
+                source: NumericScalar::Fixed(FixedScalar::I32),
+                target: NumericScalar::Fixed(FixedScalar::I8),
+            },
+            source: remainder_load,
+        },
+        narrowed,
+        error,
+        BlockId(2),
+        BlockId(4),
+    );
+    // The narrowing's success block adds 28. The seeded [-99, 99] yields [-71, 127], which
+    // fits I8, while the full I8 range overflows. Returning no interval for the proven cast
+    // therefore leaves this operation unproven.
+    let narrowed_load = fixture.load(narrowed, i8_type);
+    let twenty_eight = fixture.signed_literal(FixedScalar::I8, 28);
+    let (narrow_sum_id, narrow_sum_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::I8)),
+            operands: binary(narrowed_load, twenty_eight),
+        },
+        narrowed_sum,
+        error,
+        BlockId(3),
+        BlockId(4),
+    );
+    let return_block = fixture.return_unit();
+
+    let (module, environment) = fixture.finish_with_params(
+        vec![source],
+        vec![
+            (
+                vec![
+                    declared(source, i16_type),
+                    declared(remainder, int),
+                    declared(narrowed, i8_type),
+                    declared(narrowed_sum, i8_type),
+                    declared(error, error_type),
+                ],
+                vec![],
+                remainder_invoke,
+            ),
+            (vec![], vec![], narrowing_invoke),
+            (vec![], vec![], narrow_sum_invoke),
+            (vec![], vec![], return_block.clone()),
+            (vec![], vec![], return_block),
+        ],
+    );
+    validate_hir_module(&module, &environment, &ExternalPackageRegistry::new())
+        .expect("narrowing seed fixture must be valid HIR");
+
+    let proofs = analyse_numeric_proofs(&module, &environment);
+
+    assert!(proofs.integer_operation_is_safe(remainder_id));
+    assert!(proofs.integer_narrowing_is_safe(narrowing_id));
+    assert!(proofs.integer_operation_is_safe(narrow_sum_id));
+}
+
+#[test]
+fn success_block_with_two_predecessors_is_not_seeded() {
+    let mut fixture = ProofFixture::new();
+    let int = fixture.int();
+    let error_type = fixture.error_type();
+    let (product, sum, error) = (LocalId(0), LocalId(1), LocalId(2));
+
+    let two = fixture.int_literal(2, int);
+    let also_two = fixture.int_literal(2, int);
+    let (first_id, first_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(two, also_two),
+        },
+        product,
+        error,
+        BlockId(1),
+        BlockId(4),
+    );
+    let product_load = fixture.load(product, int);
+    let seven = fixture.int_literal(7, int);
+    let (second_id, second_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(product_load, seven),
+        },
+        sum,
+        error,
+        BlockId(2),
+        BlockId(4),
+    );
+    let return_block = fixture.return_unit();
+
+    let (module, environment) = fixture.finish(vec![
+        (
+            vec![
+                declared(product, int),
+                declared(sum, int),
+                declared(error, error_type),
+            ],
+            vec![],
+            first_invoke,
+        ),
+        (vec![], vec![], second_invoke),
+        (vec![], vec![], return_block.clone()),
+        // A second edge into the first Invoke's success block disqualifies the seed.
+        (vec![], vec![], jump(BlockId(1))),
+        (vec![], vec![], return_block),
+    ]);
+
+    let proofs = analyse_numeric_proofs(&module, &environment);
+
+    assert!(proofs.integer_operation_is_safe(first_id));
+    assert!(!proofs.integer_operation_is_safe(second_id));
+}
+
+#[test]
+fn call_in_the_success_block_invalidates_the_seed() {
+    let mut fixture = ProofFixture::new();
+    let int = fixture.int();
+    let error_type = fixture.error_type();
+    let (product, sum, error) = (LocalId(0), LocalId(1), LocalId(2));
+
+    let two = fixture.int_literal(2, int);
+    let also_two = fixture.int_literal(2, int);
+    let (_, first_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(two, also_two),
+        },
+        product,
+        error,
+        BlockId(1),
+        BlockId(3),
+    );
+    let product_load = fixture.load(product, int);
+    let seven = fixture.int_literal(7, int);
+    let (second_id, second_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(product_load, seven),
+        },
+        sum,
+        error,
+        BlockId(2),
+        BlockId(3),
+    );
+    let call = fixture.call();
+    let return_block = fixture.return_unit();
+
+    let (module, environment) = fixture.finish(vec![
+        (
+            vec![
+                declared(product, int),
+                declared(sum, int),
+                declared(error, error_type),
+            ],
+            vec![],
+            first_invoke,
+        ),
+        (vec![], vec![call], second_invoke),
+        (vec![], vec![], return_block.clone()),
+        (vec![], vec![], return_block),
+    ]);
+
+    let proofs = analyse_numeric_proofs(&module, &environment);
+
+    assert!(!proofs.integer_operation_is_safe(second_id));
+}
+
+#[test]
+fn write_in_the_success_block_invalidates_the_seed() {
+    let mut fixture = ProofFixture::new();
+    let int = fixture.int();
+    let error_type = fixture.error_type();
+    let (product, sum, error, other) = (LocalId(0), LocalId(1), LocalId(2), LocalId(3));
+
+    let two = fixture.int_literal(2, int);
+    let also_two = fixture.int_literal(2, int);
+    let (_, first_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(two, also_two),
+        },
+        product,
+        error,
+        BlockId(1),
+        BlockId(3),
+    );
+    let product_load = fixture.load(product, int);
+    let seven = fixture.int_literal(7, int);
+    let (second_id, second_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(product_load, seven),
+        },
+        sum,
+        error,
+        BlockId(2),
+        BlockId(3),
+    );
+    let one = fixture.int_literal(1, int);
+    let write = fixture.define_local(other, one);
+    let return_block = fixture.return_unit();
+
+    let (module, environment) = fixture.finish(vec![
+        (
+            vec![
+                declared(product, int),
+                declared(sum, int),
+                declared(error, error_type),
+                declared(other, int),
+            ],
+            vec![],
+            first_invoke,
+        ),
+        (vec![], vec![write], second_invoke),
+        (vec![], vec![], return_block.clone()),
+        (vec![], vec![], return_block),
+    ]);
+
+    let proofs = analyse_numeric_proofs(&module, &environment);
+
+    assert!(!proofs.integer_operation_is_safe(second_id));
+}
+
+#[test]
+fn loop_header_success_block_is_not_seeded() {
+    let mut fixture = ProofFixture::new();
+    let int = fixture.int();
+    let error_type = fixture.error_type();
+    let (product, sum, error) = (LocalId(0), LocalId(1), LocalId(2));
+
+    let two = fixture.int_literal(2, int);
+    let also_two = fixture.int_literal(2, int);
+    let (_, first_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(two, also_two),
+        },
+        product,
+        error,
+        BlockId(1),
         BlockId(2),
     );
-    let left = fixture.load(result, int);
-    let right = fixture.load(result, int);
+    let product_load = fixture.load(product, int);
+    let seven = fixture.int_literal(7, int);
     let follow_up = fixture.numeric_op(
         int_op(NumericOperator::Add),
-        binary(left, right),
+        binary(product_load, seven),
         HirLocalDestination::Define(sum),
         NumericFailureMode::Trap,
     );
     let follow_up_id = follow_up.id;
+
     let (module, environment) = fixture.finish(vec![
         (
             vec![
-                declared(source, int),
-                declared(result, int),
-                declared(error, error_type),
+                declared(product, int),
                 declared(sum, int),
+                declared(error, error_type),
             ],
-            vec![write],
-            invoke,
-        ),
-        (
             vec![],
-            vec![follow_up],
-            HirTerminator::Return(HirValueRange::empty()),
+            first_invoke,
         ),
+        // The success block jumps back to itself, so it has two predecessors and cannot seed.
+        (vec![], vec![follow_up], jump(BlockId(1))),
         (
             vec![],
             vec![],
             HirTerminator::Return(HirValueRange::empty()),
         ),
     ]);
+
     let proofs = analyse_numeric_proofs(&module, &environment);
-    assert!(proofs.integer_operation_is_safe(id));
+
     assert!(!proofs.integer_operation_is_safe(follow_up_id));
-    assert!(matches!(
-        &module.blocks[0].terminator,
-        HirTerminator::Invoke {
-            success: BlockId(1),
-            failure: BlockId(2),
-            ..
-        }
-    ));
+}
+
+#[test]
+fn seeded_follow_up_that_overflows_the_domain_keeps_its_check() {
+    let mut fixture = ProofFixture::new();
+    let i16_type = fixture.fixed(FixedScalar::I16);
+    let int = fixture.int();
+    let error_type = fixture.error_type();
+    let (source, near_max, sum, error) = (LocalId(0), LocalId(1), LocalId(2), LocalId(3));
+
+    let source_value = fixture.load(source, i16_type);
+    let widened = fixture.cast_expression(
+        source_value,
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Fixed(FixedScalar::I16),
+            target: NumericScalar::Fixed(FixedScalar::I32),
+        },
+        int,
+    );
+    let ceiling = fixture.int_literal(2_147_450_880, int);
+    let (first_id, first_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(widened, ceiling),
+        },
+        near_max,
+        error,
+        BlockId(1),
+        BlockId(3),
+    );
+    let near_max_load = fixture.load(near_max, int);
+    let overflow_step = fixture.int_literal(1_000, int);
+    let (second_id, second_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(near_max_load, overflow_step),
+        },
+        sum,
+        error,
+        BlockId(2),
+        BlockId(3),
+    );
+    let return_block = fixture.return_unit();
+
+    let (module, environment) = fixture.finish_with_params(
+        vec![source],
+        vec![
+            (
+                vec![
+                    declared(source, i16_type),
+                    declared(near_max, int),
+                    declared(sum, int),
+                    declared(error, error_type),
+                ],
+                vec![],
+                first_invoke,
+            ),
+            (vec![], vec![], second_invoke),
+            (vec![], vec![], return_block.clone()),
+            (vec![], vec![], return_block),
+        ],
+    );
+    validate_hir_module(&module, &environment, &ExternalPackageRegistry::new())
+        .expect("overflowing seed fixture must be valid HIR");
+
+    let proofs = analyse_numeric_proofs(&module, &environment);
+
+    assert!(proofs.integer_operation_is_safe(first_id));
+    assert!(!proofs.integer_operation_is_safe(second_id));
+}
+
+#[test]
+fn seeded_u64_follow_up_whose_product_overflows_i128_keeps_its_check() {
+    let mut fixture = ProofFixture::new();
+    let u64_type = fixture.fixed(FixedScalar::U64);
+    let error_type = fixture.error_type();
+    let (near_max, product, error) = (LocalId(0), LocalId(1), LocalId(2));
+
+    let maximum = fixture.unsigned_literal(FixedScalar::U64, u64::MAX);
+    let zero = fixture.unsigned_literal(FixedScalar::U64, 0);
+    let (first_id, first_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U64)),
+            operands: binary(maximum, zero),
+        },
+        near_max,
+        error,
+        BlockId(1),
+        BlockId(3),
+    );
+    let left = fixture.load(near_max, u64_type);
+    let right = fixture.load(near_max, u64_type);
+    let (second_id, second_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: fixed_op(
+                NumericOperator::Multiply,
+                NumericScalar::Fixed(FixedScalar::U64),
+            ),
+            operands: binary(left, right),
+        },
+        product,
+        error,
+        BlockId(2),
+        BlockId(3),
+    );
+    let return_block = fixture.return_unit();
+
+    let (module, environment) = fixture.finish(vec![
+        (
+            vec![
+                declared(near_max, u64_type),
+                declared(product, u64_type),
+                declared(error, error_type),
+            ],
+            vec![],
+            first_invoke,
+        ),
+        (vec![], vec![], second_invoke),
+        (vec![], vec![], return_block.clone()),
+        (vec![], vec![], return_block),
+    ]);
+
+    let proofs = analyse_numeric_proofs(&module, &environment);
+
+    assert!(proofs.integer_operation_is_safe(first_id));
+    assert!(!proofs.integer_operation_is_safe(second_id));
+}
+
+#[test]
+fn failure_edge_does_not_seed_its_block() {
+    let mut fixture = ProofFixture::new();
+    let int = fixture.int();
+    let error_type = fixture.error_type();
+    let (product, sum, error) = (LocalId(0), LocalId(1), LocalId(2));
+
+    let two = fixture.int_literal(2, int);
+    let also_two = fixture.int_literal(2, int);
+    let (first_id, first_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(two, also_two),
+        },
+        product,
+        error,
+        BlockId(1),
+        BlockId(2),
+    );
+    // The success slot is not defined on this edge. A wrongly seeded failure edge is the only
+    // way the follow-up could prove, so the conservative miss is the contract under test.
+    let product_load = fixture.load(product, int);
+    let seven = fixture.int_literal(7, int);
+    let (second_id, second_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(product_load, seven),
+        },
+        sum,
+        error,
+        BlockId(3),
+        BlockId(4),
+    );
+    let return_block = fixture.return_unit();
+
+    let (module, environment) = fixture.finish(vec![
+        (
+            vec![
+                declared(product, int),
+                declared(sum, int),
+                declared(error, error_type),
+            ],
+            vec![],
+            first_invoke,
+        ),
+        (vec![], vec![], return_block.clone()),
+        (vec![], vec![], second_invoke),
+        (vec![], vec![], return_block.clone()),
+        (vec![], vec![], return_block),
+    ]);
+
+    let proofs = analyse_numeric_proofs(&module, &environment);
+
+    assert!(proofs.integer_operation_is_safe(first_id));
+    assert!(!proofs.integer_operation_is_safe(second_id));
+}
+
+#[test]
+fn success_block_visited_before_its_predecessor_is_not_seeded() {
+    let mut fixture = ProofFixture::new();
+    let int = fixture.int();
+    let error_type = fixture.error_type();
+    let (product, sum, error) = (LocalId(0), LocalId(1), LocalId(2));
+
+    let two = fixture.int_literal(2, int);
+    let also_two = fixture.int_literal(2, int);
+    let (first_id, first_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(two, also_two),
+        },
+        product,
+        error,
+        BlockId(1),
+        BlockId(4),
+    );
+    let product_load = fixture.load(product, int);
+    let seven = fixture.int_literal(7, int);
+    let (second_id, second_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(product_load, seven),
+        },
+        sum,
+        error,
+        BlockId(3),
+        BlockId(4),
+    );
+    let return_block = fixture.return_unit();
+
+    // Block 1 is the Invoke's sole success target but is walked before block 2, whose
+    // terminator produces the seed. A later seed is unused, never a reason to revisit.
+    let (module, environment) = fixture.finish(vec![
+        (vec![], vec![], jump(BlockId(2))),
+        (vec![], vec![], second_invoke),
+        (
+            vec![
+                declared(product, int),
+                declared(sum, int),
+                declared(error, error_type),
+            ],
+            vec![],
+            first_invoke,
+        ),
+        (vec![], vec![], return_block.clone()),
+        (vec![], vec![], return_block),
+    ]);
+
+    let proofs = analyse_numeric_proofs(&module, &environment);
+
+    assert!(proofs.integer_operation_is_safe(first_id));
+    assert!(!proofs.integer_operation_is_safe(second_id));
+}
+
+#[test]
+fn success_block_that_is_a_function_entry_is_not_seeded() {
+    let mut fixture = ProofFixture::new();
+    let int = fixture.int();
+    let error_type = fixture.error_type();
+    let (product, sum, error) = (LocalId(0), LocalId(1), LocalId(2));
+
+    let two = fixture.int_literal(2, int);
+    let also_two = fixture.int_literal(2, int);
+    let (first_id, first_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(two, also_two),
+        },
+        product,
+        error,
+        BlockId(1),
+        BlockId(3),
+    );
+    let product_load = fixture.load(product, int);
+    let seven = fixture.int_literal(7, int);
+    let (second_id, second_invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(product_load, seven),
+        },
+        sum,
+        error,
+        BlockId(2),
+        BlockId(3),
+    );
+    let return_block = fixture.return_unit();
+
+    let (mut module, environment) = fixture.finish(vec![
+        (
+            vec![
+                declared(product, int),
+                declared(sum, int),
+                declared(error, error_type),
+            ],
+            vec![],
+            first_invoke,
+        ),
+        (vec![], vec![], second_invoke),
+        (vec![], vec![], return_block.clone()),
+        (vec![], vec![], return_block),
+    ]);
+    // A callee enters its entry block without executing the Invoke's edge transfer.
+    module.functions.push(HirFunction {
+        id: FunctionId(1),
+        entry: BlockId(1),
+        params: vec![],
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [],
+            None,
+        )),
+    });
+
+    let proofs = analyse_numeric_proofs(&module, &environment);
+
+    assert!(proofs.integer_operation_is_safe(first_id));
+    assert!(!proofs.integer_operation_is_safe(second_id));
 }
 
 // ---------------------------------------------------------------------------

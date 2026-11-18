@@ -1,0 +1,73 @@
+-- Fast fixed-integer arithmetic wraps at every semantic width. Operands are runtime parameters so
+-- no caller can constant-fold the operation away.
+$fast_math
+add_i32 |left I32, right I32| -> I32:
+    return left + right
+;
+
+$fast_math
+add_u32 |left U32, right U32| -> U32:
+    return left + right
+;
+
+$fast_math
+add_u64 |left U64, right U64| -> U64:
+    return left + right
+;
+
+$fast_math
+subtract_i64 |left I64, right I64| -> I64:
+    return left - right
+;
+
+$fast_math
+multiply_u32 |left U32, right U32| -> U32:
+    return left * right
+;
+
+$fast_math
+multiply_i64 |left I64, right I64| -> I64:
+    return left * right
+;
+
+$fast_math
+negate_i32 |value I32| -> I32:
+    return -value
+;
+
+$fast_math
+power_i32 |base I32, exponent I32| -> I32:
+    return base ^ exponent
+;
+
+$fast_math
+power_u64 |base U64, exponent U64| -> U64:
+    return base ^ exponent
+;
+
+i32_max I32 = 2147483647
+u32_max U32 = 4294967295
+u64_max U64 = 18446744073709551615
+i64_max I64 = 9223372036854775807
+i64_min I64 = -9223372036854775808
+i32_min I32 = -2147483648
+one_i32 I32 = 1
+one_u32 U32 = 1
+one_u64 U64 = 1
+one_i64 I64 = 1
+three I32 = 3
+twenty I32 = 20
+three_u64 U64 = 3
+forty_u64 U64 = 40
+
+wrapped_i32 = add_i32(i32_max, one_i32)
+wrapped_u32 = add_u32(u32_max, one_u32)
+wrapped_u64 = add_u64(u64_max, one_u64)
+wrapped_i64 = subtract_i64(i64_min, one_i64)
+product_u32 = multiply_u32(u32_max, u32_max)
+product_i64 = multiply_i64(i64_max, i64_max)
+negated_min = negate_i32(i32_min)
+modular_i32 = power_i32(three, twenty)
+modular_u64 = power_u64(three_u64, forty_u64)
+
+~[:i32=[wrapped_i32] u32=[wrapped_u32] u64=[wrapped_u64] sub=[wrapped_i64] mul32=[product_u32] mul64=[product_i64] neg=[negated_min] pow32=[modular_i32] pow64=[modular_u64]]

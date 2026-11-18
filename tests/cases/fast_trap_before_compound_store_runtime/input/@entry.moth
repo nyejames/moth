@@ -1,10 +1,42 @@
+-- Both profiles must keep both compound-store boundaries. A Dec write-back stays ordinary: its
+-- effectful RHS returns successfully, the implicit store conversion fails after that effect, and
+-- the target keeps its previous value. The fast integer division then traps after its own RHS
+-- effect, so the trap cannot be hoisted above it.
+next_dec |calls ~I32, value Dec1| -> Dec1:
+    ~calls += 1
+    io.line([:dec-rhs=[calls]])
+    return value
+;
+
+add_dec_to_i8 |target ~I8, calls ~I32, value Dec1| -> I8, Error!:
+    ~target += next_dec(~calls, value)
+    return target
+;
+
+next_int |calls ~I32, divisor I32| -> I32:
+    ~calls += 1
+    io.line([:trap-rhs=[calls]])
+    return divisor
+;
+
 $fast_math
-accumulate |target ~I32, divisor I32|:
-    ~target += 10 // divisor
+accumulate |target ~I32, calls ~I32, divisor I32|:
+    ~target += 10 // next_int(~calls, divisor)
 ;
 
 io.line([:before=[7]])
+
+converted_target ~I8 = 100
+converted_calls ~I32 = 0
+converted_code ~U32 = 0
+converted_result = add_dec_to_i8(~converted_target, ~converted_calls, 40.0) catch |converted_error|:
+    ~converted_code = converted_error.code
+    then 0
+;
+io.line([:converted=[converted_target] calls=[converted_calls] code=[converted_code] result=[converted_result]])
+
 target ~I32 = 7
+calls ~I32 = 0
 zero I32 = 0
-accumulate(~target, zero)
+accumulate(~target, ~calls, zero)
 io.line([:after=[target]])

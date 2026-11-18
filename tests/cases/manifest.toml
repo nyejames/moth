@@ -15671,6 +15671,20 @@ contract = "language.numbers.uncaught_checked_failure_reaches_entry_error"
 role = "primary"
 
 [[case]]
+id = "numeric_error_bang_propagation_entry_error_runtime"
+path = "numeric_error_bang_propagation_entry_error_runtime"
+tags = ["integration", "numeric", "runtime", "errors", "entry-error", "html-wasm"]
+contract = "language.numeric.error_bang_propagation_escapes_to_entry"
+role = "primary"
+
+[[case]]
+id = "numeric_error_bang_propagation_entry_error_release"
+path = "numeric_error_bang_propagation_entry_error_release"
+tags = ["integration", "numeric", "runtime", "errors", "entry-error", "release", "html-wasm"]
+contract = "language.numeric.error_bang_propagation_escapes_to_entry"
+role = "backend"
+
+[[case]]
 id = "number_int64_power_fastpaths_runtime"
 path = "number_int64_power_fastpaths_runtime"
 tags = ["integration", "language", "numeric", "number", "runtime", "int64", "float32"]
@@ -15762,9 +15776,30 @@ contract = "language.numeric.bounded_integer_proofs_runtime"
 role = "boundary"
 
 [[case]]
+id = "numeric_bounded_proofs_retained_entry_error_runtime_release"
+path = "numeric_bounded_proofs_retained_entry_error_runtime_release"
+tags = ["integration", "numeric", "runtime", "entry-error", "release", "html-wasm"]
+contract = "language.numeric.bounded_integer_proofs_runtime"
+role = "backend"
+
+[[case]]
 id = "numeric_bounded_proofs_error_recovery_runtime"
 path = "numeric_bounded_proofs_error_recovery_runtime"
 tags = ["integration", "numeric", "runtime", "errors", "casts", "html-wasm"]
+contract = "language.numeric.bounded_integer_proofs_runtime"
+role = "boundary"
+
+[[case]]
+id = "numeric_scalar_invoke_dead_edges_runtime"
+path = "numeric_scalar_invoke_dead_edges_runtime"
+tags = ["integration", "numeric", "runtime", "errors", "html-wasm"]
+contract = "language.numeric.bounded_integer_proofs_runtime"
+role = "boundary"
+
+[[case]]
+id = "numeric_scalar_invoke_dead_edges_release"
+path = "numeric_scalar_invoke_dead_edges_release"
+tags = ["integration", "numeric", "runtime", "errors", "html-wasm", "release"]
 contract = "language.numeric.bounded_integer_proofs_runtime"
 role = "boundary"
 
@@ -20829,6 +20864,13 @@ contract = "language.directives.fast_math_integer_arithmetic_wraps_at_the_result
 role = "primary"
 
 [[case]]
+id = "fast_integer_wrap_runtime_release"
+path = "fast_integer_wrap_runtime_release"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "release", "html"]
+contract = "language.directives.fast_math_integer_arithmetic_wraps_at_the_result_width"
+role = "backend"
+
+[[case]]
 id = "fast_remainder_min_by_minus_one_runtime"
 path = "fast_remainder_min_by_minus_one_runtime"
 tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html"]
@@ -20843,11 +20885,25 @@ contract = "language.directives.fast_math_integer_division_traps_after_prior_io"
 role = "primary"
 
 [[case]]
+id = "fast_integer_division_trap_after_io_runtime_release"
+path = "fast_integer_division_trap_after_io_runtime_release"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "release", "html"]
+contract = "language.directives.fast_math_integer_division_traps_after_prior_io"
+role = "backend"
+
+[[case]]
 id = "fast_trap_before_compound_store_runtime"
 path = "fast_trap_before_compound_store_runtime"
 tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html", "mutation"]
 contract = "language.directives.fast_math_trap_before_a_compound_store_keeps_prior_io"
 role = "primary"
+
+[[case]]
+id = "fast_trap_before_compound_store_runtime_release"
+path = "fast_trap_before_compound_store_runtime_release"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "release", "html", "mutation"]
+contract = "language.directives.fast_math_trap_before_a_compound_store_keeps_prior_io"
+role = "backend"
 
 [[case]]
 id = "fast_integer_min_division_catch_cannot_recover_runtime"
@@ -20885,9 +20941,23 @@ contract = "language.directives.fast_math_dec_division_stays_recoverable"
 role = "primary"
 
 [[case]]
+id = "fast_dec_division_recoverable_runtime_release"
+path = "fast_dec_division_recoverable_runtime_release"
+tags = ["integration", "directives", "numeric", "runtime", "release", "html"]
+contract = "language.directives.fast_math_dec_division_stays_recoverable"
+role = "backend"
+
+[[case]]
 id = "fast_math_wasm_wrap_boundaries_runtime"
 path = "fast_math_wasm_wrap_boundaries_runtime"
 tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "language.directives.fast_math_integer_arithmetic_wraps_at_the_result_width"
+role = "backend"
+
+[[case]]
+id = "fast_math_wasm_wrap_boundaries_runtime_release"
+path = "fast_math_wasm_wrap_boundaries_runtime_release"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "release", "html-wasm"]
 contract = "language.directives.fast_math_integer_arithmetic_wraps_at_the_result_width"
 role = "backend"
 
@@ -20927,11 +20997,25 @@ contract = "language.directives.fast_math_dead_results_keep_their_traps"
 role = "primary"
 
 [[case]]
+id = "fast_math_wasm_dead_trap_result_release"
+path = "fast_math_wasm_dead_trap_result_release"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "release", "html-wasm"]
+contract = "language.directives.fast_math_dead_results_keep_their_traps"
+role = "backend"
+
+[[case]]
 id = "fast_math_wasm_untaken_trap_branch_runtime"
 path = "fast_math_wasm_untaken_trap_branch_runtime"
 tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "html-wasm"]
 contract = "language.directives.fast_math_untaken_branches_do_not_trap"
 role = "primary"
+
+[[case]]
+id = "fast_math_wasm_untaken_trap_branch_runtime_release"
+path = "fast_math_wasm_untaken_trap_branch_runtime_release"
+tags = ["integration", "directives", "numeric", "runtime", "fixed-width", "release", "html-wasm"]
+contract = "language.directives.fast_math_untaken_branches_do_not_trap"
+role = "backend"
 
 [[case]]
 id = "fast_math_wasm_float_nonfinite_trap"

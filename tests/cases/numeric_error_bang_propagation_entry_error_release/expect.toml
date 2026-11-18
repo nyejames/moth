@@ -1,0 +1,26 @@
+entry = "."
+
+# Release folding must not turn the runtime propagation into a compile-time failure:
+# the same checked division escapes through the declared Error! chain with the same
+# builtin code, and the fragment staged before the escaping call stays unpublished.
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+entry_error_code = 300
+rendered_output_exact = ""
+
+# Release and development profiles reject the same mandatory-discharge U8 + I8 I16 sum here,
+# so the precise capability diagnostic is shared with the debug owner.
+[backends.html_wasm]
+mode = "failure"
+flags = ["release"]
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.checked_numeric_operations"
+path = "input/@entry.moth"
+line = 13
+column = 24

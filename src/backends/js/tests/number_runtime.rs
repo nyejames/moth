@@ -1,9 +1,9 @@
 //! Executable behavior tests for exact Dec JavaScript runtime helpers.
 
 use super::support::*;
+use crate::backends::js::runtime::NumericRuntimeHelperUsage;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
@@ -79,44 +79,40 @@ fn number_conversion_helper_artifacts_are_deterministic_for_the_same_demands() {
 }
 
 #[test]
-fn number_operation_helpers_round_signed_ties_and_keep_exact_power_intermediates() {
-    let scale = NumberScale::new(1).expect("scale one is valid");
-    let scale_factor = "10n";
-    let mut script = lower_number_operation_source(scale);
-    script.push_str("\nconst summarize = result => result.tag + \" :\" + String(result.value);\n");
-    script.push_str(&format!(
+fn number_fallible_helpers_round_signed_ties_and_keep_exact_power_intermediates() {
+    let mut script = emit_number_helper_fixture();
+    script.push_str("\nconst total = value => String(value);\n");
+    script.push_str("\nconst fallible = result => result.tag + \" :\" + String(result.value);\n");
+    script.push_str(
         "console.log(JSON.stringify([\
-            __moth_number_mul(15n, 1n, {scale_factor}),\
-            __moth_number_mul(25n, 1n, {scale_factor}),\
-            __moth_number_mul(-15n, 1n, {scale_factor}),\
-            __moth_number_mul(-25n, 1n, {scale_factor}),\
-            __moth_number_div(1n, 4n, {scale_factor}),\
-            __moth_number_div(3n, 4n, {scale_factor}),\
-            __moth_number_div(-1n, 4n, {scale_factor}),\
-            __moth_number_div(3n, -4n, {scale_factor}),\
-            __moth_number_pow(15n, 2n, {scale_factor}),\
-            __moth_number_pow(-15n, 3n, {scale_factor}),\
-            __moth_number_idiv(-7n, 3n),\
-            __moth_number_mod(-7n, 3n),\
-            __moth_number_add(123456789012345678901234567890n, 1n),\
-            __moth_number_neg(123456789012345678901234567890n),\
-            __moth_number_pow({scale_factor}, 9223372036854775807n, {scale_factor}),\
-            __moth_number_pow(-{scale_factor}, 9223372036854775807n, {scale_factor}),\
-            __moth_number_pow(0n, 9223372036854775807n, {scale_factor}),\
-            __moth_number_pow(999999999999999999999999999999999999n, 0n, {scale_factor})\
-        ].map(summarize)));"
-    ));
+            total(__moth_number_round_half_even(15n, 10n)),\
+            total(__moth_number_round_half_even(25n, 10n)),\
+            total(__moth_number_round_half_even(-15n, 10n)),\
+            total(__moth_number_round_half_even(-25n, 10n)),\
+            fallible(__moth_number_div(1n, 4n, 10n)),\
+            fallible(__moth_number_div(3n, 4n, 10n)),\
+            fallible(__moth_number_div(-1n, 4n, 10n)),\
+            fallible(__moth_number_div(3n, -4n, 10n)),\
+            fallible(__moth_number_pow(15n, 2n, 10n)),\
+            fallible(__moth_number_pow(-15n, 3n, 10n)),\
+            fallible(__moth_number_idiv(-7n, 3n)),\
+            fallible(__moth_number_mod(-7n, 3n)),\
+            fallible(__moth_number_pow(10n, 9223372036854775807n, 10n)),\
+            fallible(__moth_number_pow(-10n, 9223372036854775807n, 10n)),\
+            fallible(__moth_number_pow(0n, 9223372036854775807n, 10n)),\
+            fallible(__moth_number_pow(999999999999999999999999999999999999n, 0n, 10n))\
+        ]));",
+    );
 
     assert_eq!(
         run_javascript(&script).trim(),
-        r#"["ok :2","ok :2","ok :-2","ok :-2","ok :2","ok :8","ok :-2","ok :-8","ok :22","ok :-34","ok :-2","ok :-1","ok :123456789012345678901234567891","ok :-123456789012345678901234567890","ok :10","ok :-10","ok :0","ok :10"]"#
+        r#"["2","2","-2","-2","ok :2","ok :8","ok :-2","ok :-8","ok :22","ok :-34","ok :-2","ok :-1","ok :10","ok :-10","ok :0","ok :10"]"#
     );
 }
 
 #[test]
 fn number_power_keeps_scale_for_integral_bases_and_rejects_negative_exponents() {
-    let scale_four = NumberScale::new(4).expect("scale four is valid");
-    let mut script = lower_number_operation_source(scale_four);
+    let mut script = emit_number_helper_fixture();
     script.push_str(
         "\nconst summarizeFallible = result => result.tag === \"ok\" ? \"ok:\" + String(result.value) : \"err:\" + __moth_error_code(result.value);\n",
     );
@@ -171,8 +167,7 @@ fn number_power_keeps_scale_for_integral_bases_and_rejects_negative_exponents() 
 
 #[test]
 fn number_power_shortcut_edges_zero_tiny_powers_and_reject_negative_exponents() {
-    let scale_four = NumberScale::new(4).expect("scale four is valid");
-    let mut script = lower_number_operation_source(scale_four);
+    let mut script = emit_number_helper_fixture();
     script.push_str(
         "\nconst summarizeFallible = result => result.tag === \"ok\" ? \"ok:\" + String(result.value) : \"err:\" + __moth_error_code(result.value);\n",
     );
@@ -302,83 +297,39 @@ fn number_text_and_integer_casts_keep_exact_scale_bounds_and_error_codes() {
     );
 }
 
-fn lower_number_operation_source(scale: NumberScale) -> String {
-    let mut expressions = HirExpressionStore::default();
-    use crate::compiler_frontend::datatypes::number::NumberValue;
-    use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
-    use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-    use crate::compiler_frontend::hir::blocks::HirBlock;
-    use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionReturnContract};
-    use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
-    use crate::compiler_frontend::hir::numeric::{
-        HirNumericOp, HirNumericOperands, NumericFailureMode,
-    };
-    use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
-    use crate::compiler_frontend::hir::terminators::HirTerminator;
-
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let (mut type_environment, _) = build_type_environment();
-    let number_type = type_environment.intern_number(scale);
-    let region = RegionId(0);
-    let number_value = NumberValue::from_integer(1, scale);
-    let left = expression(
-        crate::compiler_frontend::hir::expressions::HirExpressionKind::Number(number_value.clone()),
-        number_type,
-        region,
-        crate::compiler_frontend::hir::expressions::ValueKind::Const,
-        &mut expressions,
-    );
-    let right = expression(
-        crate::compiler_frontend::hir::expressions::HirExpressionKind::Number(number_value),
-        number_type,
-        region,
-        crate::compiler_frontend::hir::expressions::ValueKind::Const,
-        &mut expressions,
-    );
-    let block = HirBlock {
-        id: BlockId(0),
-        region,
-        locals: vec![local(0, number_type, region)],
-        statements: vec![statement(
-            1,
-            HirStatementKind::NumericOp {
-                op: HirNumericOp::ordinary(NumericOperator::Multiply, NumericScalar::Number(scale)),
-                failure_mode: NumericFailureMode::Trap,
-                operands: HirNumericOperands::Binary { left, right },
-                result: HirLocalDestination::Define(LocalId(0)),
-            },
-        )],
-        terminator: HirTerminator::Return(HirValueRange::empty()),
-    };
-    let function = HirFunction {
-        id: FunctionId(0),
-        entry: BlockId(0),
-        params: vec![],
-        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
-            vec![],
-            None,
-        )),
-    };
-    let module = build_module(
-        expressions,
-        &mut path_fork,
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "result")],
-    );
-    lower_hir_to_js(
-        &module,
-        &NumericProofs::default(),
+/// Emits the numeric runtime helpers selected by one demand set.
+///
+/// WHY: helper-body tests execute runtime functions directly, so they must name the exact
+///      prelude demand instead of relying on a lowering fixture to select extra helpers.
+fn emit_numeric_helpers(usage: NumericRuntimeHelperUsage) -> String {
+    let string_table = StringTable::new();
+    let path_fork = PathInternerFork::empty();
+    let path_table = path_fork.snapshot_table();
+    let (type_environment, _) = build_type_environment();
+    let hir = crate::compiler_frontend::hir::module::HirModule::new();
+    let numeric_proofs = NumericProofs::default();
+    let mut emitter = crate::backends::js::JsEmitter::new(
+        &hir,
+        &numeric_proofs,
         &string_table,
-        default_config(),
+        &path_table,
+        JsLoweringConfig::direct_js(false),
         &type_environment,
-        &path_fork.snapshot_table(),
-    )
-    .expect("Number HIR should lower to JavaScript")
-    .source
+    );
+    emitter.emit_runtime_error_helpers();
+    emitter.emit_runtime_numeric_helpers(usage, &mut std::collections::HashSet::new());
+    std::mem::take(&mut emitter.out)
+}
+
+/// Emits the fallible Dec family plus the shared half-even kernel it depends on.
+///
+/// WHY: these tests own helper-body values, so they name the exact demand set instead of
+///      lowering a source operation that would also select unrelated helpers.
+fn emit_number_helper_fixture() -> String {
+    emit_numeric_helpers(NumericRuntimeHelperUsage {
+        number_decimal_ops: true,
+        ..NumericRuntimeHelperUsage::default()
+    })
 }
 
 #[test]

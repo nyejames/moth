@@ -1,0 +1,29 @@
+-- HTML executes the safe operations before the retained U32 overflow check.
+-- Its built-in Error propagates to the entry, preventing runtime fragment publication.
+-- HTML-Wasm rejects a checked operation at its source before runtime: the debug profile
+-- stops at the narrow I16 sum, while release folds that prelude and rejects the retained
+-- U32 add in increment_u32. Neither profile reaches runtime.
+
+u8_sum |left U8, right I8| -> I16:
+    return left + right
+;
+
+i64_identity |value I64| -> I64:
+    return value + 0
+;
+
+power_u8 |base U8, exponent U8| -> U32:
+    wide U32 = cast base
+    power U32 = cast exponent
+    return wide ^ power
+;
+
+increment_u32 |value U32| -> U32:
+    return value + 1
+;
+
+exact_sum = u8_sum(200, 100)
+exact_identity = i64_identity(-9223372036854775808)
+exact_power = power_u8(2, 31)
+~[:proven [exact_sum]/[exact_identity]/[exact_power]]
+overflowed = increment_u32(4294967295)

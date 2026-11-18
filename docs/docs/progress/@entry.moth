@@ -41,6 +41,8 @@ init_docs_sidebar()!
     Conservative proof discharges Add, Subtract, Multiply and Negate over fixed-width integer
     domains with full-range containment; other domains are
     excluded from that discharge; the @../numbers/#checked-arithmetic (checked-arithmetic reference) states which operations can fail.
+    HTML-JS lowers total and proven numeric operations and proven narrowings to plain values
+    without recoverable carriers or dead error branches. Both backends treat that discharge as a proof.
 
     The compact typed-expression foundation, type and folding reductions, bounded Wiring foundation,
     trusted Core constant evaluation and owner hardening are implemented. Fresh Windows Canvas/frontend proof remains pending.
@@ -307,7 +309,7 @@ template comment, valid only as a template-body child. Presentation-only roles c
             [: Partial]
             [$md: Broad arithmetic, cast, folding, copy and diagnostic coverage. @https://github.com/nyejames/moth/tree/main/tests/cases/numeric_equal_type_arithmetic_matrix (numeric_equal_type_arithmetic_matrix) and @https://github.com/nyejames/moth/tree/main/tests/cases/numeric_mixed_type_arithmetic_matrix (numeric_mixed_type_arithmetic_matrix) cover result domains. Narrow I8/U8 failure and F16 completion fixtures include release parity. @https://github.com/nyejames/moth/tree/main/tests/cases/numeric_semantic_physical_variants_debug (numeric_semantic_physical_variants_debug) covers HTML/HTML-Wasm scalar parity.]
             [: Frontend / HIR / JS / HTML / HTML-Wasm]
-            [$md: The exact scalar, Dec, Byte and plain cast contracts are delivered through the frontend and HTML-JS. @../numbers (Numbers) and @../casts (Casts) own defaults, result domains, precision and evidence. Cast failure follows ordinary local recovery, private inference or compatible Error! delivery. Copy retains runtime independence. HTML-Wasm executes supported exact scalars, comparisons, formatting and infallible numeric casts, with conservative integer proofs removing only discharged checks. It rejects recoverable numeric failure and every user aggregate holding a fixed scalar before lowering. Dec values, statement casts, unsupported conversions and foreign calls remain target-gated. F16 computation carriers do not widen its semantic precision. Const Error materialisation and branching const catch handlers remain deferred.]
+            [$md: The exact scalar, Dec, Byte and plain cast contracts are delivered through the frontend and HTML-JS. @../numbers (Numbers) and @../casts (Casts) own defaults, result domains, precision and evidence. Cast failure follows ordinary local recovery, private inference or compatible Error! delivery. Copy retains runtime independence. HTML-JS emits total float negation and Dec add, subtract, negate and multiply as plain values, and drops the dead error branches of proven operations. HTML-Wasm executes supported exact scalars, comparisons, formatting and infallible numeric casts, with conservative integer proofs removing only discharged checks. It rejects recoverable numeric failure and every user aggregate holding a fixed scalar before lowering. Dec values, statement casts, unsupported conversions and foreign calls remain target-gated. F16 computation carriers do not widen its semantic precision. Const Error materialisation and branching const catch handlers remain deferred.]
         ]
 
         [data:

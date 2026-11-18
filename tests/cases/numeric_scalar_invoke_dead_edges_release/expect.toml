@@ -1,0 +1,40 @@
+entry = "."
+
+# Release lowering must keep the same scalar prelude and the same recovery. The leading
+# value-proven U32 add (`small + small`) stays scalar; the separately seeded I32 chain stays
+# scalar where its interval proves, while its overflowing control's second add keeps the real
+# checked operation and failure path. The total F64 negation stays scalar. No BigInt family and
+# no dead success conditional may be emitted; the checked division still recovers its real
+# failure.
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = "dead edges ok=25.75 failed=-1 code=300 calls=2 seeded=1014/-32754 overflow=2147451880/0 overflow-code=301"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_not_contain = [
+    "if (true)",
+    "function __moth_bigint_add(",
+    "function __moth_float32_add(",
+    "function __moth_float16_add(",
+]
+must_contain = [
+    "function __moth_int_div(",
+    "function __moth_float_add(",
+]
+
+[backends.html_wasm]
+mode = "failure"
+flags = ["release"]
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.recoverable_numeric_failure"
+path = "input/@entry.moth"
+line = 8
+column = 6

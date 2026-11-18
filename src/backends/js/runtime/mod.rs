@@ -40,14 +40,25 @@ use crate::backends::js::JsEmitter;
 
 /// Describes which checked and fast numeric carriers are required by emitted JS.
 ///
-/// WHY: each checked family is shared by every semantic domain with its carrier, while
-///      unreachable families stay out of the generated prelude. Fast arithmetic tracks each
-///      trapping helper separately, so a wrapping operation never carries unused code.
+/// WHY: each checked family is shared by every semantic domain with its carrier, while families
+///      no emitted operation can consume stay out of the generated prelude. Demand covers every
+///      emitted function because function bodies are emitted even when the start path never calls
+///      them. The `Dec` group is split into the shared half-even kernel and the fallible
+///      div/idiv/mod/pow family: a positive-scale total multiply carries only the kernel, while
+///      total add/subtract/negate and scale-zero multiply carry no numeric code at all. Fast
+///      arithmetic tracks each trapping helper separately, so a wrapping operation never carries
+///      unused code.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct NumericRuntimeHelperUsage {
     pub(crate) number_integer_ops: bool,
     pub(crate) big_integer_ops: bool,
+    /// A checked `Dec` division, integer division, remainder or power operation needs the
+    /// fallible `__moth_number_*` family.
     pub(crate) number_decimal_ops: bool,
+    /// A positive-scale `Dec` multiply, divide or power rounds its coefficient through the shared
+    /// half-even kernel. A positive-scale total multiply demands it without the fallible family,
+    /// while a scale-zero total multiply is exact coefficient arithmetic and demands neither.
+    pub(crate) number_round_half_even: bool,
     pub(crate) binary16_ops: bool,
     pub(crate) binary32_ops: bool,
     pub(crate) binary64_ops: bool,
@@ -133,6 +144,7 @@ impl NumericRuntimeHelperUsage {
         self.number_integer_ops
             || self.big_integer_ops
             || self.number_decimal_ops
+            || self.number_round_half_even
             || self.binary16_ops
             || self.binary32_ops
             || self.binary64_ops
@@ -174,7 +186,10 @@ impl<'hir> JsEmitter<'hir> {
     ///   map helpers             — guarded get/set/remove and infallible contains/clear/length for ordered maps
     ///   string helpers          — generic value-to-string conversion
     ///   cast helpers            — numeric and string casting with Result-typed errors
-    ///   numeric helpers         — checked Number/BigInt integer and exact-precision binary-float arithmetic
+    ///   numeric helpers         — checked Number/BigInt integer and exact-precision binary-float
+    ///                             arithmetic plus the shared Dec half-even kernel and its fallible
+    ///                             family; a positive-scale total Dec multiply still consumes the
+    ///                             kernel, while other total scalar operations emit no helper
     ///   choice helpers          — structural equality for nominal choice carriers
     ///
     /// Most groups use hoisted JS `function` declarations. Binary-float power also initialises

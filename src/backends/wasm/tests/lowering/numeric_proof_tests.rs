@@ -41,8 +41,12 @@ use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::validate_hir_module;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork, PathTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
+use crate::compiler_frontend::tests::hir_fixture_support::lower_hir_result;
+use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 /// Fixture statement-local identifiers the two lanes share, keying the analysis queries.
@@ -732,5 +736,215 @@ fn analysed_table_proves_literal_derived_aliasing_and_retains_dynamic_controls()
     assert_ne!(
         retained[3].dst, negate_operand,
         "retained negation writes a separate temp before committing its alias dst"
+    );
+}
+
+/// Real-source scalar fixture plus the lowered checked integer operations per function.
+struct SourceIntegerFixture {
+    statements: Vec<(HirNodeId, HirNumericOp, NumericFailureMode)>,
+    operations: Vec<(String, Vec<WasmCheckedIntegerOperation>)>,
+}
+
+/// Lowers one source module and groups its checked integer operations by emitted function.
+///
+/// WHY: mandatory discharge is a producer contract. Building the `NumericOp` by hand can only
+///      reproduce the statement shape; lowering real source proves the frontend selects
+///      `Infallible` for mixed widths and that the Wasm lowering consumes it with no table fact.
+fn lower_source_integer_fixture(source: &str) -> SourceIntegerFixture {
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let registry = default_external_package_registry(&mut string_table);
+    let lowering = lower_hir_result(ast, &mut string_table, &mut path_fork, &registry);
+    let module = lowering.hir_module;
+    let type_environment = lowering.type_environment;
+    validate_hir_module(&module, &type_environment, &registry)
+        .expect("source-lowered Wasm numeric fixture must satisfy production HIR validation");
+    let statements = module
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .filter_map(|statement| match &statement.kind {
+            HirStatementKind::NumericOp {
+                op, failure_mode, ..
+            } => Some((statement.id, *op, *failure_mode)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    let lowered = lower_hir_to_wasm_lir(
+        &module,
+        &default_borrow_facts(),
+        &default_numeric_proofs(),
+        &WasmBackendRequest::default(),
+        &string_table,
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("the source fixture's ordinary integer statements should lower with an empty table");
+    let operations = lowered
+        .lir_module
+        .functions
+        .iter()
+        .filter(|function| function.origin == WasmLirFunctionOrigin::Normal)
+        .map(|function| {
+            let operations = function
+                .blocks
+                .iter()
+                .flat_map(|block| block.statements.iter())
+                .filter_map(|statement| match statement {
+                    WasmLirStmt::CheckedIntegerOp { operation } => Some(*operation),
+                    _ => None,
+                })
+                .collect();
+            (function.debug_name.clone(), operations)
+        })
+        .collect();
+
+    SourceIntegerFixture {
+        statements,
+        operations,
+    }
+}
+
+/// Returns the single checked operation lowered for the function whose debug name matches.
+#[track_caller]
+fn operation_for<'a>(
+    operations: &'a [(String, Vec<WasmCheckedIntegerOperation>)],
+    needle: &str,
+) -> (&'a str, &'a WasmCheckedIntegerOperation) {
+    let names = operations
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>();
+    let (name, found) = operations
+        .iter()
+        .find(|(name, _)| name.contains(needle))
+        .unwrap_or_else(|| panic!("lowered functions {names:?} must include {needle}"));
+    let [operation] = found.as_slice() else {
+        panic!("{needle} must lower exactly one checked integer operation, found {found:?}");
+    };
+    (name, operation)
+}
+
+/// Verifies the mandatory `Infallible` mode survives from source lowering to proven-safe Wasm.
+///
+/// WHAT: lowers real mixed-width `I32 + U32 -> I64`, `I32 * U32 -> I64`, and `I16 * U16 -> I32`
+///       operations plus equal-width trapping controls, all with the empty proof table.
+/// WHY: complete operand type ranges discharge the mixed-width operations before the optional
+///       analysis runs, so the mandatory fact alone must select `ProvenSafe`. The discharged
+///       16-bit multiply needs no widened product scratch, the checked equal-width multiply keeps
+///       that scratch, and the equal-width controls stay `Runtime`, proving the new producer input
+///       did not make ordinary integer operations proven-safe.
+#[test]
+fn infallible_statement_mode_lowers_proven_safe_with_an_empty_table() {
+    let source = "\
+mixed_add |left I32, right U32| -> I64:
+    return left + right
+;
+
+mixed_multiply |left I32, right U32| -> I64:
+    return left * right
+;
+
+discharged_multiply |left I16, right U16| -> I32:
+    return left * right
+;
+
+checked_multiply |left I32, right I32| -> I32:
+    return left * right
+;
+
+overflow_add |left I32, right I32| -> I32:
+    return left + right
+;
+";
+    let fixture = lower_source_integer_fixture(source);
+
+    let infallible = fixture
+        .statements
+        .iter()
+        .filter(|(_, _, mode)| *mode == NumericFailureMode::Infallible)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        infallible.len(),
+        3,
+        "the two mixed-width I64 operations and the 16-bit I32 multiply must be mandatory-discharge statements"
+    );
+    assert_eq!(
+        infallible
+            .iter()
+            .filter(|(_, operation, _)| {
+                operation.domain == NumericScalar::Fixed(FixedScalar::I64)
+            })
+            .count(),
+        2,
+        "the I32/U32 mixed-width operations complete in their I64 common domain"
+    );
+    assert!(
+        infallible.iter().any(|(_, operation, _)| {
+            operation.operator == NumericOperator::Multiply
+                && operation.domain == NumericScalar::Fixed(FixedScalar::I32)
+        }),
+        "the I16/U16 multiply completes in I32 and is producer-discharged"
+    );
+    assert!(
+        infallible
+            .iter()
+            .any(|(_, operation, _)| operation.operator == NumericOperator::Add),
+        "the mixed-width addition must be the producer-discharged Add"
+    );
+    assert!(
+        infallible
+            .iter()
+            .any(|(_, operation, _)| operation.operator == NumericOperator::Multiply),
+        "the mixed-width multiplication must be the producer-discharged Multiply"
+    );
+    let trapping = fixture
+        .statements
+        .iter()
+        .filter(|(_, _, mode)| *mode == NumericFailureMode::Trap)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        trapping.len(),
+        2,
+        "the equal-width controls stay trapping statements"
+    );
+
+    let (add_name, add) = operation_for(&fixture.operations, "mixed_add");
+    assert_eq!(
+        add.check_mode,
+        IntegerCheckMode::ProvenSafe,
+        "{add_name}: an Infallible statement needs no proof-table entry to lose its predicates"
+    );
+    let (multiply_name, multiply) = operation_for(&fixture.operations, "mixed_multiply");
+    assert_eq!(
+        multiply.check_mode,
+        IntegerCheckMode::ProvenSafe,
+        "{multiply_name}: a discharged multiply lowers proven-safe with an empty table"
+    );
+    let (discharged_name, discharged) = operation_for(&fixture.operations, "discharged_multiply");
+    assert_eq!(
+        discharged.check_mode,
+        IntegerCheckMode::ProvenSafe,
+        "{discharged_name}: the I16/U16 multiply lowers proven-safe with an empty table"
+    );
+    assert!(
+        discharged.scratch.product.is_none(),
+        "{discharged_name}: a proven-safe 32-bit multiply needs no widened product scratch"
+    );
+    let (checked_name, checked) = operation_for(&fixture.operations, "checked_multiply");
+    assert_eq!(
+        checked.check_mode,
+        IntegerCheckMode::Runtime,
+        "{checked_name}: the equal-width multiply keeps its runtime checks"
+    );
+    assert!(
+        checked.scratch.product.is_some(),
+        "{checked_name}: the checked multiply keeps its widened product scratch"
+    );
+    let (overflow_name, overflow) = operation_for(&fixture.operations, "overflow_add");
+    assert_eq!(
+        overflow.check_mode,
+        IntegerCheckMode::Runtime,
+        "{overflow_name}: the dynamically overflowing equal-width add keeps its runtime checks"
     );
 }

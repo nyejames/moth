@@ -4,9 +4,8 @@
 //! WHY: JS is the stable near-term backend and needs deterministic lowering output.
 
 use crate::backends::js::JsModule;
-use crate::backends::js::numeric_carrier::{
-    JsFastNumericLowering, JsFastStoreConversion, JsNumericCarrier,
-};
+use crate::backends::js::js_statement::NumericDelivery;
+use crate::backends::js::numeric_carrier::{JsFastStoreConversion, JsNumericOperationLowering};
 use crate::backends::js::runtime::NumericRuntimeHelperUsage;
 use crate::backends::js::{ENTRY_FAILURE_NOTICE, JsFunctionEmissionPolicy, JsLoweringConfig};
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
@@ -15,7 +14,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerStage, compiler_errors::InfrastructureFailure,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -83,6 +81,20 @@ pub(crate) struct JsEmitter<'hir> {
     pub(crate) used_cast_policies: HashSet<BuiltinCastPolicyId>,
 }
 
+/// One function chosen for emission, paired with the live block closure computed for it once.
+///
+/// WHAT: the function selected for emission plus the block set that map discovery, numeric-helper
+///       discovery, cast-policy discovery and dispatcher emission all read.
+/// WHY: each scan previously rebuilt and sorted the same closure per function, reclassifying every
+///      numeric Invoke. One precomputed closure per function keeps a single owner for the pass and
+///      keeps the set travelling with the function it describes.
+struct FunctionEmission<'hir> {
+    function: &'hir HirFunction,
+    /// Blocks reachable through an edge that can execute. Local declarations use the separate
+    /// unpruned closure.
+    live_blocks: Vec<BlockId>,
+}
+
 impl<'hir> JsEmitter<'hir> {
     pub(crate) fn new(
         hir: &'hir HirModule,
@@ -128,8 +140,9 @@ impl<'hir> JsEmitter<'hir> {
         }
         self.build_symbol_maps()?;
 
-        let functions = self.functions_to_emit();
-        let start_is_fallible = functions.iter().any(|function| {
+        let functions = self.functions_to_emit()?;
+        let start_is_fallible = functions.iter().any(|emission| {
+            let function = emission.function;
             Some(function.id) == self.hir.start_function && self.function_is_fallible(function)
         });
         let emitted_code_uses_maps = self.emitted_functions_use_maps(&functions)?;
@@ -148,12 +161,12 @@ impl<'hir> JsEmitter<'hir> {
         }
         self.emit_runtime_prelude(emitted_code_uses_maps, emitted_code_uses_numeric_helpers);
 
-        for (index, function) in functions.into_iter().enumerate() {
+        for (index, emission) in functions.into_iter().enumerate() {
             if index > 0 {
                 self.emit_line("");
             }
 
-            self.emit_function(function)?;
+            self.emit_function(emission.function, &emission.live_blocks)?;
         }
 
         self.emit_core_package_helpers();
@@ -225,43 +238,66 @@ impl<'hir> JsEmitter<'hir> {
         })
     }
 
-    fn functions_to_emit(&self) -> Vec<&'hir HirFunction> {
-        let mut functions = self
+    /// Selects the emitted functions and computes each live block closure once.
+    ///
+    /// WHAT: pairs every function the emission policy includes with the live reachable set that
+    ///       every discovery scan and dispatcher body reads.
+    /// WHY: the closure is identical for all consumers; computing it here keeps one owner without
+    ///      making each scan build its own set or reclassify numeric Invokes.
+    fn functions_to_emit(&self) -> Result<Vec<FunctionEmission<'hir>>, InfrastructureFailure> {
+        let mut functions = Vec::with_capacity(self.hir.functions.len());
+        for function in self
             .hir
             .functions
             .iter()
             .filter(|function| self.config.function_emission_policy.includes(function.id))
-            .collect::<Vec<_>>();
-        functions.sort_by_key(|function| function.id.0);
+        {
+            functions.push(FunctionEmission {
+                function,
+                live_blocks: self.collect_reachable_blocks(function.entry)?,
+            });
+        }
+        functions.sort_by_key(|emission| emission.function.id.0);
 
-        functions
+        Ok(functions)
     }
 
-    /// Records the carrier families needed by reachable numeric statements.
+    /// Records the carrier families needed by reachable numeric statements and Invokes in emitted
+    /// functions.
     ///
-    /// WHAT: scans the emitted function/block subset and selects each checked operation family
-    ///       through the same exact-scalar carrier owner used by expression and cast lowering.
+    /// WHAT: scans the emitted function/block subset and classifies each reachable operation
+    ///       through the same owner as statement lowering, so a fast, total scalar or proven
+    ///       integer operation demands only what it actually emits.
     /// WHY: a BigInt operator must not inherit a Number helper merely because both domains are
-    ///      semantically integers.
+    ///      integers, and an Invoke reads a checked carrier directly instead of demanding the
+    ///      statement trap helper. A checked statement adds that trap demand here, mirroring
+    ///      `emit_numeric_carrier_assignment`.
     fn emitted_functions_use_numeric_helpers(
         &self,
-        functions: &[&'hir HirFunction],
+        functions: &[FunctionEmission<'hir>],
     ) -> Result<NumericRuntimeHelperUsage, InfrastructureFailure> {
         let mut usage = NumericRuntimeHelperUsage::default();
 
-        for function in functions {
-            let reachable_blocks = self.collect_reachable_blocks(function.entry)?;
-            for block_id in reachable_blocks {
-                let block = self.block_by_id(block_id)?;
+        for emission in functions {
+            for block_id in &emission.live_blocks {
+                let block = self.block_by_id(*block_id)?;
                 for statement in &block.statements {
                     match &statement.kind {
-                        HirStatementKind::NumericOp { op, .. } => {
-                            self.collect_numeric_operation_helpers(
+                        HirStatementKind::NumericOp {
+                            op, failure_mode, ..
+                        } => {
+                            let lowering = self.collect_numeric_operation_helpers(
                                 *op,
                                 statement.id,
-                                true,
+                                NumericDelivery::Statement(*failure_mode),
                                 &mut usage,
                             )?;
+                            // Only a non-scalar statement consumes the recoverable carrier
+                            // through `__moth_numeric_trap`; a scalar fast, total, discharged or
+                            // proven operation never demands it.
+                            if !lowering.is_scalar() {
+                                usage.numeric_trap = true;
+                            }
                         }
                         HirStatementKind::FastStoreConversion { conversion, .. } => {
                             JsFastStoreConversion::classify(*conversion)?
@@ -292,7 +328,12 @@ impl<'hir> JsEmitter<'hir> {
                 if let HirTerminator::Invoke { id, operation, .. } = &block.terminator {
                     match operation {
                         HirFallibleOperation::NumericOp { op, .. } => {
-                            self.collect_numeric_operation_helpers(*op, *id, false, &mut usage)?;
+                            self.collect_numeric_operation_helpers(
+                                *op,
+                                *id,
+                                NumericDelivery::Invoke,
+                                &mut usage,
+                            )?;
                         }
                         HirFallibleOperation::FormatFloat { source } => {
                             let (_, precision) = self.float_source_scalar(*source, "FormatFloat");
@@ -313,72 +354,22 @@ impl<'hir> JsEmitter<'hir> {
         Ok(usage)
     }
 
+    /// Classifies one reachable numeric operation and records its helper demand.
+    ///
+    /// WHAT: returns the shared lowering so the caller can add statement-delivery trap demand.
+    /// WHY: the demand scan must apply the same fast/scalar/proven/checked decision as lowering;
+    ///      a second operator or proof test here could demand a helper the operation never calls.
     fn collect_numeric_operation_helpers(
         &self,
         op: HirNumericOp,
         id: HirNodeId,
-        statement_delivery: bool,
+        delivery: NumericDelivery,
         usage: &mut NumericRuntimeHelperUsage,
-    ) -> Result<(), InfrastructureFailure> {
-        // Fast arithmetic owns distinct helpers and expressions. It never uses the checked
-        // carrier family and its total operations need no runtime code at all.
-        if op.semantics.is_fast() {
-            JsFastNumericLowering::classify(op)?.require_helpers(usage);
-            return Ok(());
-        }
+    ) -> Result<JsNumericOperationLowering, InfrastructureFailure> {
+        let lowering = self.classify_numeric_operation(op, id, delivery)?;
+        lowering.require_helpers(usage);
 
-        let carrier = JsNumericCarrier::for_scalar(op.domain).unwrap_or_else(|| {
-            crate::compiler_bug!(
-                CompilerStage::BackendLowering,
-                "JS backend has no numeric carrier for {:?}",
-                op.domain
-            )
-        });
-        let helper_family = carrier.helper_family();
-        // Proof elision uses the operation's stable identity for statements and Invoke alike.
-        // The failure continuation remains intact even when no checked helper is demanded.
-        let proven_safe = matches!(
-            op.operator,
-            NumericOperator::Add
-                | NumericOperator::Subtract
-                | NumericOperator::Multiply
-                | NumericOperator::IntegerDivide
-                | NumericOperator::Remainder
-                | NumericOperator::Negate
-        ) && matches!(
-            carrier,
-            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. }
-        ) && self.numeric_proofs.integer_operation_is_safe(id);
-        if !proven_safe {
-            match helper_family {
-                "int" => usage.number_integer_ops = true,
-                "number" => usage.number_decimal_ops = true,
-                "bigint" => usage.big_integer_ops = true,
-                "float16" => usage.binary16_ops = true,
-                "float32" => usage.binary32_ops = true,
-                "float" => usage.binary64_ops = true,
-                _ => crate::compiler_bug!(
-                    CompilerStage::BackendLowering,
-                    "JS backend received an unreachable numeric operation domain {:?}",
-                    op.domain
-                ),
-            }
-            // A checked binary-float Power op demands that precision's `pow` member together
-            // with the shared power helper it calls. No other operator emits a `pow` member.
-            match (op.operator, helper_family) {
-                (NumericOperator::Power, "float16") => usage.binary16_power = true,
-                (NumericOperator::Power, "float32") => usage.binary32_power = true,
-                (NumericOperator::Power, "float") => usage.binary64_power = true,
-                _ => {}
-            }
-            // A trap-delivered statement consumes the helper's recoverable carrier. An Invoke
-            // reads the carrier directly and needs no trap helper.
-            if statement_delivery {
-                usage.numeric_trap = true;
-            }
-        }
-
-        Ok(())
+        Ok(lowering)
     }
 
     /// Returns true when any emitted reachable JS body can construct, store, copy, display, or
@@ -389,10 +380,11 @@ impl<'hir> JsEmitter<'hir> {
     /// changing existing golden artifacts while still making map copy/string fallback paths safe.
     fn emitted_functions_use_maps(
         &self,
-        functions: &[&'hir HirFunction],
+        functions: &[FunctionEmission<'hir>],
     ) -> Result<bool, InfrastructureFailure> {
-        for function in functions {
-            let returns_a_map = function.return_contract.ordinary().is_some_and(|returns| {
+        for emission in functions {
+            let return_contract = emission.function.return_contract.ordinary();
+            let returns_a_map = return_contract.is_some_and(|returns| {
                 returns
                     .success()
                     .iter()
@@ -404,9 +396,8 @@ impl<'hir> JsEmitter<'hir> {
                 return Ok(true);
             }
 
-            let reachable_blocks = self.collect_reachable_blocks(function.entry)?;
-            for block_id in reachable_blocks {
-                let block = self.block_by_id(block_id)?;
+            for block_id in &emission.live_blocks {
+                let block = self.block_by_id(*block_id)?;
                 for local in &block.locals {
                     if self.type_environment.is_map_type(local.ty) {
                         return Ok(true);
@@ -490,14 +481,13 @@ impl<'hir> JsEmitter<'hir> {
     /// the later expression-lowering pass that writes function bodies.
     fn collect_used_cast_policies(
         &mut self,
-        functions: &[&'hir HirFunction],
+        functions: &[FunctionEmission<'hir>],
     ) -> Result<(), InfrastructureFailure> {
         self.used_cast_policies.clear();
 
-        for function in functions {
-            let reachable_blocks = self.collect_reachable_blocks(function.entry)?;
-            for block_id in reachable_blocks {
-                let block = self.block_by_id(block_id)?;
+        for emission in functions {
+            for block_id in &emission.live_blocks {
+                let block = self.block_by_id(*block_id)?;
 
                 for statement in &block.statements {
                     collect_statement_cast_policies(

@@ -1,0 +1,9 @@
+entry = "."
+
+# Release must keep fast arithmetic wrapping at the same semantic widths. The operands are
+# function parameters, so no caller can constant-fold the operations away.
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = "wrap i8=-128/1/-128 u16=65535 i32=-2 u32=1 quotient=-3 remainder=-1/0 i64=-9223372036854775808 u64=18446744073709551614 power=-2147483648/0 mixed=382 real=-3.5/2147483648"

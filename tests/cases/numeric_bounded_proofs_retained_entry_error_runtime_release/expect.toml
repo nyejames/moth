@@ -1,0 +1,27 @@
+entry = "."
+
+# Release keeps the proven mixed-width operations scalar and still retains the U32 overflow
+# check that ends the run. The built-in Error reaches the entry contract, so the staged
+# success fragment is never published.
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+entry_error_code = 301
+rendered_output_exact = ""
+
+# Release folds the earlier proven prelude, so the Wasm capability gate rejects the retained
+# U32 addition in increment_u32 (line 22) rather than the debug profile's narrow U8 + I8 sum.
+# Pin that exact operation so an unrelated capability rejection cannot satisfy this case.
+[backends.html_wasm]
+mode = "failure"
+flags = ["release"]
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.recoverable_numeric_failure"
+path = "input/@entry.moth"
+line = 22
+column = 18

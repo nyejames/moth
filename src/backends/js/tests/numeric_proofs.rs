@@ -1,8 +1,8 @@
 //! Executable parity tests for the numeric proof table consumer.
 //!
-//! WHAT: lowers the same hand-built HIR twice — once with the analysed proof table and once with
-//!       the empty default table that retains every check — and executes both generated modules
-//!       in Node.js.
+//! WHAT: lowers the same hand-built HIR twice — once with the analysed proof table, which derives
+//!       sole-success-edge seeds, and once with the empty default table that retains every check —
+//!       and executes both generated modules in Node.js.
 //! WHY: proven integer operations and narrowings must produce equal exact results, error codes
 //!       and effect ordering while omitting only the checked machinery the proof makes
 //!       unreachable, including signed-zero normalization and required ABI result shapes.
@@ -34,6 +34,9 @@ use crate::compiler_frontend::hir::terminators::{
     HirFallibleOperation, HirTerminator, RuntimeFailureKind,
 };
 use crate::compiler_frontend::hir::validate_hir_module;
+use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
+use crate::compiler_frontend::tests::hir_fixture_support::lower_hir_result;
+use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::process::Command;
 
@@ -768,6 +771,165 @@ fn unproven_operations_keep_runtime_errors_identical_across_tables() {
     );
 }
 
+/// A source-lowered fixture plus the producer facts the test consumes.
+struct SourceLoweredFixture {
+    lowered: LoweredFixture,
+    discharged: Vec<(HirNodeId, HirNumericOp)>,
+    numeric_invokes: usize,
+}
+
+/// Lowers one function from real Moth source and then feeds the same HIR to the JS backend.
+///
+/// WHY: mandatory discharge is a producer contract. A hand-built statement can only reproduce
+///      its shape; lowering the source proves the frontend actually selects `Infallible` and that
+///      the backend consumes it without any proof-table fact.
+fn lower_source_fixture(source: &str) -> SourceLoweredFixture {
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let registry = default_external_package_registry(&mut string_table);
+    let lowering = lower_hir_result(ast, &mut string_table, &mut path_fork, &registry);
+    let module = lowering.hir_module;
+    let type_environment = lowering.type_environment;
+    validate_hir_module(&module, &type_environment, &registry)
+        .expect("source-lowered numeric fixture must satisfy production HIR validation");
+    let function_id = module
+        .functions
+        .iter()
+        .map(|function| function.id)
+        .find(|id| Some(*id) != module.start_function)
+        .expect("the source module must contain the fixture function beside its entry start");
+    let discharged = module
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .filter_map(|statement| match &statement.kind {
+            HirStatementKind::NumericOp {
+                op,
+                failure_mode: NumericFailureMode::Infallible,
+                ..
+            } => Some((statement.id, *op)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let numeric_invokes = module
+        .blocks
+        .iter()
+        .filter(|block| {
+            matches!(
+                &block.terminator,
+                HirTerminator::Invoke {
+                    operation: HirFallibleOperation::NumericOp { .. },
+                    ..
+                }
+            )
+        })
+        .count();
+
+    let analysed_table = analyse_numeric_proofs(&module, &type_environment);
+    let config = JsLoweringConfig::direct_js(false);
+    let analysed_module = lower_hir_to_js(
+        &module,
+        &analysed_table,
+        &string_table,
+        config.clone(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("analysed-table lowering should succeed");
+    let retained_module = lower_hir_to_js(
+        &module,
+        &NumericProofs::default(),
+        &string_table,
+        config,
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("retained-table lowering should succeed");
+    let function_name = analysed_module
+        .function_name_by_id
+        .get(&function_id)
+        .cloned()
+        .expect("the source function is emitted");
+
+    SourceLoweredFixture {
+        lowered: LoweredFixture {
+            analysed_source: analysed_module.source,
+            retained_source: retained_module.source,
+            analysed_table,
+            function_name,
+        },
+        discharged,
+        numeric_invokes,
+    }
+}
+
+/// Verifies the mandatory `Infallible` mode survives from source lowering to scalar JS.
+///
+/// WHAT: lowers a real mixed-width `I8 + U8 -> I16` addition, asserts HIR delivers an
+///       `Infallible` statement, then lowers under the empty proof table.
+/// WHY: the frontend discharge from complete operand type ranges is the producer contract that
+///       must lower to a scalar without any `NumericProofs` entry. The empty table therefore
+///       proves the statement mode alone removed the checked helper, trap machinery and
+///       `{ tag, value }` carrier.
+#[test]
+fn infallible_statement_mode_lowers_scalar_with_an_empty_proof_table() {
+    let source = "\
+mixed_add |left I8, right U8| -> I16:
+    return left + right
+;
+";
+    let fixture = lower_source_fixture(source);
+
+    assert_eq!(
+        fixture.discharged.len(),
+        1,
+        "the mixed-width add must deliver exactly one Infallible statement"
+    );
+    let (statement_id, operation) = fixture.discharged[0];
+    assert_eq!(
+        operation.domain,
+        NumericScalar::Fixed(FixedScalar::I16),
+        "the mixed-width add completes in its I16 common domain"
+    );
+    assert_eq!(operation.operator, NumericOperator::Add);
+    assert_eq!(
+        fixture.numeric_invokes, 0,
+        "a discharged statement is not an Invoke"
+    );
+    assert!(
+        fixture
+            .lowered
+            .analysed_table
+            .integer_operation_is_safe(statement_id),
+        "the optional analysis proves the same complete operand ranges; the empty-table lowering \
+         below is the check that the mandatory mode alone is sufficient"
+    );
+
+    for source in [
+        &fixture.lowered.analysed_source,
+        &fixture.lowered.retained_source,
+    ] {
+        for helper in [
+            "function __moth_int_add(",
+            "__moth_int_add(",
+            "function __moth_int_check(",
+            "__moth_numeric_trap(",
+        ] {
+            assert!(
+                !source.contains(helper),
+                "a discharged statement must not reference or emit {helper}"
+            );
+        }
+    }
+    let driver = format!("console.log({}(-5, 250));", fixture.lowered.function_name);
+    let (analysed, retained) = run_both_tables(&fixture.lowered, &driver);
+    assert_same_runtime(&analysed, &retained, "discharged statement");
+    assert_eq!(
+        analysed.stdout.trim(),
+        "245",
+        "the discharged add must keep its exact I16 value"
+    );
+}
+
 /// Verifies that `Power` keeps its checked lowering and trap machinery even when operands are
 /// exact literals.
 #[test]
@@ -817,6 +979,119 @@ fn power_always_retains_checked_lowering() {
     let (analysed, retained) = run_both_tables(&lowered, &driver);
     assert_same_runtime(&analysed, &retained, "checked power");
     assert_eq!(analysed.stdout.trim(), "8");
+}
+
+/// Lowers one proven numeric Invoke whose exclusive failure block demands its own checked family.
+///
+/// WHAT: the success block returns the `I32` result; the failure block adds two unknown `I64`
+///       parameters - never proved by analysis - demanding `__moth_bigint_add` and the trap
+///       before returning the error. `success_slot_in_failure_block` declares the success slot in
+///       the pruned failure block instead of the entry block.
+/// WHY: the failure block is unreachable once the proof discharges the Invoke, so helper absence
+///      proves live-edge pruning skipped it. The unproved add makes helper absence independent of
+///      the proof table, and the moved success slot regresses declaration soundness for a local
+///      whose declaring block only the pruned edge reaches.
+fn lower_exclusive_handler_fixture(
+    name: &str,
+    success_slot_in_failure_block: bool,
+) -> LoweredFixture {
+    let (type_environment, types) = build_type_environment();
+    let region = RegionId(0);
+    let mut expressions = HirExpressionStore::default();
+    let i64_ty = builtin_type_ids::fixed_scalar(FixedScalar::I64);
+    let (result, error, dead, left, right) =
+        (LocalId(0), LocalId(1), LocalId(2), LocalId(3), LocalId(4));
+
+    let invoke = HirTerminator::Invoke {
+        id: HirNodeId(2),
+        span: None,
+        operation: HirFallibleOperation::NumericOp {
+            op: HirNumericOp::ordinary(
+                NumericOperator::Add,
+                NumericScalar::Fixed(FixedScalar::I32),
+            ),
+            operands: binary_operands(
+                i32_expression(2, types.i32, region, &mut expressions),
+                i32_expression(3, types.i32, region, &mut expressions),
+            ),
+        },
+        success: BlockId(1),
+        success_results: vec![result],
+        failure: BlockId(2),
+        error_result: error,
+    };
+    let dead_add = statement(
+        3,
+        trap_op(
+            NumericOperator::Add,
+            NumericScalar::Fixed(FixedScalar::I64),
+            binary_operands(
+                load_local(left.0, i64_ty, region, &mut expressions),
+                load_local(right.0, i64_ty, region, &mut expressions),
+            ),
+            dead.0,
+        ),
+    );
+    let success_return = load_local(result.0, types.i32, region, &mut expressions);
+    let failure_error = load_local(error.0, types.error, region, &mut expressions);
+
+    let mut entry_locals = vec![
+        local(error.0, types.error, region),
+        local(left.0, i64_ty, region),
+        local(right.0, i64_ty, region),
+    ];
+    let mut failure_locals = vec![local(dead.0, i64_ty, region)];
+    if success_slot_in_failure_block {
+        failure_locals.push(local(result.0, types.i32, region));
+    } else {
+        entry_locals.push(local(result.0, types.i32, region));
+    }
+
+    let blocks = vec![
+        HirBlock {
+            id: BlockId(0),
+            region,
+            locals: entry_locals,
+            statements: vec![],
+            terminator: invoke,
+        },
+        HirBlock {
+            id: BlockId(1),
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: HirTerminator::Return(append_values(&[success_return], &mut expressions)),
+        },
+        HirBlock {
+            id: BlockId(2),
+            region,
+            locals: failure_locals,
+            statements: vec![dead_add],
+            terminator: HirTerminator::ReturnError(failure_error),
+        },
+    ];
+    lower_numeric_blocks(
+        name,
+        expressions,
+        type_environment,
+        blocks,
+        HirFunction {
+            id: FunctionId(0),
+            entry: BlockId(0),
+            params: vec![left, right],
+            return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                vec![types.i32],
+                Some(types.error),
+            )),
+        },
+        vec![
+            (result, "result"),
+            (error, "error"),
+            (dead, "dead"),
+            (left, "left"),
+            (right, "right"),
+        ],
+    )
 }
 
 /// A native Invoke chain returns its final scalar through the fallible ABI. The sibling fixtures
@@ -923,33 +1198,309 @@ fn lower_recoverable_fixture(
 
 #[test]
 fn proven_invoke_elides_checks_and_preserves_success_abi() {
-    let lowered = lower_recoverable_fixture("proven_invoke", |types, region, expressions| {
-        vec![(
-            2,
-            HirFallibleOperation::NumericOp {
-                op: HirNumericOp::ordinary(
-                    NumericOperator::Add,
-                    NumericScalar::Fixed(FixedScalar::I32),
-                ),
-                operands: binary_operands(
-                    i32_expression(2, types.i32, region, expressions),
-                    i32_expression(3, types.i32, region, expressions),
-                ),
-            },
-            types.i32,
-        )]
-    });
+    let lowered = lower_exclusive_handler_fixture("proven_invoke", false);
     assert!(
         lowered
             .analysed_table
             .integer_operation_is_safe(HirNodeId(2))
     );
+    assert!(
+        !lowered
+            .analysed_table
+            .integer_operation_is_safe(HirNodeId(3)),
+        "the handler's parametric I64 add must stay unproved so helper absence tests pruning"
+    );
     assert!(!lowered.analysed_source.contains("function __moth_int_add("));
     assert!(!lowered.analysed_source.contains("__moth_int_check("));
     assert!(!lowered.analysed_source.contains("__moth_numeric_trap("));
-    let driver = format!("console.log(JSON.stringify({}()));", lowered.function_name);
+    assert!(
+        !lowered
+            .analysed_source
+            .contains("function __moth_bigint_add("),
+        "the exclusive handler's checked family must not be demanded"
+    );
+    assert!(
+        !lowered.analysed_source.contains("if (true)"),
+        "a proven numeric Invoke must not emit a dead success conditional"
+    );
+    assert!(
+        !lowered.analysed_source.contains(".tag === \"ok\""),
+        "a proven numeric Invoke must not test its scalar result as a carrier"
+    );
+    assert!(
+        !lowered
+            .analysed_source
+            .contains("tag: \"err\", value: __moth_read("),
+        "the proven Invoke's exclusive failure handler must not be emitted"
+    );
+    assert!(
+        lowered.retained_source.contains(".tag === \"ok\""),
+        "the empty proof table keeps the checked success branch"
+    );
+    assert!(
+        lowered
+            .retained_source
+            .contains("function __moth_bigint_add("),
+        "the empty proof table reaches the handler and demands its checked family"
+    );
+    let driver = format!(
+        "console.log(JSON.stringify({}(1n, 2n)));",
+        lowered.function_name
+    );
     let (analysed, retained) = run_both_tables(&lowered, &driver);
     assert_same_runtime(&analysed, &retained, "proven Invoke success ABI");
+    assert_eq!(analysed.stdout.trim(), r#"{"tag":"ok","value":5}"#);
+}
+
+/// A chained Invoke proves its second operation only because the first proof seeds the sole
+/// success block's entry interval.
+///
+/// WHAT: lowers `wide(left) + wide(right)`, then `sum + 7`, then a real division by the chained
+///       result under the analysed and empty tables and runs three inputs in Node.
+/// WHY: the second add is inside the first Invoke's sole success block. Without the seed its
+///      canonical I32 operand bounds admit overflow, so the checked add and its helper would
+///      remain. The division stays checked and really fails when the chain reaches zero, so both
+///      success and error results stay observable across tables.
+#[test]
+fn seeded_success_block_proves_the_next_invoke_and_preserves_runtime_parity() {
+    let (type_environment, types) = build_type_environment();
+    let region = RegionId(0);
+    let mut expressions = HirExpressionStore::default();
+    let i16_ty = builtin_type_ids::fixed_scalar(FixedScalar::I16);
+    let (sum, biased, quotient, error, left, right) = (
+        LocalId(0),
+        LocalId(1),
+        LocalId(2),
+        LocalId(3),
+        LocalId(4),
+        LocalId(5),
+    );
+
+    let cast_to_i32 = |source, expressions: &mut HirExpressionStore| {
+        expression(
+            HirExpressionKind::Cast {
+                source,
+                policy: BuiltinCastPolicyId::NumericConversion {
+                    source: NumericScalar::Fixed(FixedScalar::I16),
+                    target: NumericScalar::Fixed(FixedScalar::I32),
+                },
+            },
+            types.i32,
+            region,
+            ValueKind::RValue,
+            expressions,
+        )
+    };
+    let left_value = load_local(left.0, i16_ty, region, &mut expressions);
+    let wide_left = cast_to_i32(left_value, &mut expressions);
+    let right_value = load_local(right.0, i16_ty, region, &mut expressions);
+    let wide_right = cast_to_i32(right_value, &mut expressions);
+    let first_invoke = HirTerminator::Invoke {
+        id: HirNodeId(0),
+        span: None,
+        operation: HirFallibleOperation::NumericOp {
+            op: HirNumericOp::ordinary(
+                NumericOperator::Add,
+                NumericScalar::Fixed(FixedScalar::I32),
+            ),
+            operands: binary_operands(wide_left, wide_right),
+        },
+        success: BlockId(1),
+        success_results: vec![sum],
+        failure: BlockId(4),
+        error_result: error,
+    };
+
+    let sum_load = load_local(sum.0, types.i32, region, &mut expressions);
+    let seven = i32_expression(7, types.i32, region, &mut expressions);
+    let second_invoke = HirTerminator::Invoke {
+        id: HirNodeId(1),
+        span: None,
+        operation: HirFallibleOperation::NumericOp {
+            op: HirNumericOp::ordinary(
+                NumericOperator::Add,
+                NumericScalar::Fixed(FixedScalar::I32),
+            ),
+            operands: binary_operands(sum_load, seven),
+        },
+        success: BlockId(2),
+        success_results: vec![biased],
+        failure: BlockId(4),
+        error_result: error,
+    };
+
+    let million = i32_expression(1_000_000, types.i32, region, &mut expressions);
+    let biased_load = load_local(biased.0, types.i32, region, &mut expressions);
+    let third_invoke = HirTerminator::Invoke {
+        id: HirNodeId(2),
+        span: None,
+        operation: HirFallibleOperation::NumericOp {
+            op: HirNumericOp::ordinary(
+                NumericOperator::IntegerDivide,
+                NumericScalar::Fixed(FixedScalar::I32),
+            ),
+            operands: binary_operands(million, biased_load),
+        },
+        success: BlockId(3),
+        success_results: vec![quotient],
+        failure: BlockId(4),
+        error_result: error,
+    };
+
+    let success_value = load_local(quotient.0, types.i32, region, &mut expressions);
+    let success_return = append_values(&[success_value], &mut expressions);
+    let failure_error = load_local(error.0, types.error, region, &mut expressions);
+
+    let blocks = vec![
+        HirBlock {
+            id: BlockId(0),
+            region,
+            locals: vec![
+                local(sum.0, types.i32, region),
+                local(biased.0, types.i32, region),
+                local(quotient.0, types.i32, region),
+                local(error.0, types.error, region),
+                local(left.0, i16_ty, region),
+                local(right.0, i16_ty, region),
+            ],
+            statements: vec![],
+            terminator: first_invoke,
+        },
+        HirBlock {
+            id: BlockId(1),
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: second_invoke,
+        },
+        HirBlock {
+            id: BlockId(2),
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: third_invoke,
+        },
+        HirBlock {
+            id: BlockId(3),
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: HirTerminator::Return(success_return),
+        },
+        HirBlock {
+            id: BlockId(4),
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: HirTerminator::ReturnError(failure_error),
+        },
+    ];
+
+    let lowered = lower_numeric_blocks(
+        "seeded_invoke_chain",
+        expressions,
+        type_environment,
+        blocks,
+        HirFunction {
+            id: FunctionId(0),
+            entry: BlockId(0),
+            params: vec![left, right],
+            return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                vec![types.i32],
+                Some(types.error),
+            )),
+        },
+        vec![
+            (sum, "sum"),
+            (biased, "biased"),
+            (quotient, "quotient"),
+            (error, "error"),
+            (left, "left"),
+            (right, "right"),
+        ],
+    );
+
+    assert!(
+        lowered
+            .analysed_table
+            .integer_operation_is_safe(HirNodeId(0))
+    );
+    assert!(
+        lowered
+            .analysed_table
+            .integer_operation_is_safe(HirNodeId(1)),
+        "the sole success block's seeded interval must prove the chained add"
+    );
+    assert!(
+        !lowered
+            .analysed_table
+            .integer_operation_is_safe(HirNodeId(2)),
+        "the division may divide by the chained zero result and must stay checked"
+    );
+    assert_eq!(
+        lowered.analysed_source.matches("= __moth_int_add(").count(),
+        0,
+        "the first and chained adds must both lower to scalars without checked helper calls"
+    );
+    assert_eq!(
+        lowered.retained_source.matches("= __moth_int_add(").count(),
+        2,
+        "the empty proof table must keep both checked add calls"
+    );
+    assert!(
+        lowered.analysed_source.contains("function __moth_int_div("),
+        "the checked division must keep its helper"
+    );
+
+    let driver = format!(
+        "const show = (result) => result.tag === \"ok\" ? String(result.value) : \"err:\" + __moth_error_code(result.value);\n\
+         console.log(show({}(200, 300)));\n\
+         console.log(show({}(0, -7)));\n\
+         console.log(show({}(0, -8)));",
+        lowered.function_name, lowered.function_name, lowered.function_name
+    );
+    let (analysed, retained) = run_both_tables(&lowered, &driver);
+    assert_same_runtime(&analysed, &retained, "seeded Invoke chain");
+    assert!(
+        analysed.success,
+        "the seeded chain must execute: {}",
+        analysed.stderr
+    );
+    assert_eq!(analysed.stdout, "1972\nerr:300\n-1000000\n");
+}
+
+/// A success slot declared only in a pruned failure block still reserves its JS name.
+///
+/// WHAT: lowers the proven Invoke with `success_results` declared by the failure block, then
+///       executes the analysed module in Node.
+/// WHY: HIR validation only checks same-function ownership, not declaration dominance, so the
+///      live success transfer must not write an undeclared name when the declaring block is
+///      reachable only through the pruned failure edge.
+#[test]
+fn success_slot_declared_in_a_pruned_block_still_gets_a_declaration() {
+    let lowered = lower_exclusive_handler_fixture("pruned_declaration", true);
+    let result_name = expected_dev_local_name("result", 0);
+    assert!(
+        lowered
+            .analysed_source
+            .contains(&format!("let {result_name};")),
+        "a success slot declared in the pruned failure block must still reserve its name"
+    );
+    assert!(
+        !lowered.analysed_source.contains("if (true)"),
+        "the failure edge must still be pruned for this regression"
+    );
+    let driver = format!(
+        "console.log(JSON.stringify({}(1n, 2n)));",
+        lowered.function_name
+    );
+    let (analysed, retained) = run_both_tables(&lowered, &driver);
+    assert!(
+        analysed.success,
+        "the analysed module must execute without an undeclared-name error: {}",
+        analysed.stderr
+    );
+    assert_same_runtime(&analysed, &retained, "pruned-block success slot");
     assert_eq!(analysed.stdout.trim(), r#"{"tag":"ok","value":5}"#);
 }
 
@@ -1000,6 +1551,516 @@ fn proven_invoke_with_unsafe_sibling_keeps_checked_family() {
     );
 }
 
+/// Lowers a four-Invoke fixture whose checked siblings share the proven Invokes' handler.
+///
+/// WHAT: block 0 invokes a literal-proven I32 add; block 1 invokes a literal-proven I32-to-I8
+///       narrowing; block 2 invokes a checked I32 add whose operand comes from the function
+///       parameter; block 3 invokes a checked I32-to-I8 narrowing of the same policy on the
+///       checked add's result. The proven and checked numeric adds share one handler, and the
+///       proven and checked narrowings share a second cast handler. `cyclic` inserts a
+///       literal-false back edge, which forces the dispatcher instead of structured emission.
+/// WHY: the proven Invokes' failure edges are dead while each shared handler is still live through
+///       its checked sibling, so both handlers must stay emitted and recover in either proof table
+///       and under both control-flow strategies. The runtime calls reach the checked add failure,
+///       the checked narrowing failure, and the all-safe path, proving the shared cast handler
+///       still serves the checked narrow while the proven narrow needs no failure path.
+fn lower_shared_handler_fixture(name: &str, cyclic: bool) -> LoweredFixture {
+    let (type_environment, types) = build_type_environment();
+    let region = RegionId(0);
+    let i8_ty = builtin_type_ids::fixed_scalar(FixedScalar::I8);
+    let mut expressions = HirExpressionStore::default();
+    let first_result = LocalId(0);
+    // One error local for every failure edge: the handler is reachable from each of them, so a
+    // definition must dominate its use on all incoming paths.
+    let error = LocalId(1);
+    let second_result = LocalId(2);
+    let proven_cast_result = LocalId(3);
+    let checked_cast_result = LocalId(4);
+    let input = LocalId(5);
+    // A dense block table keeps the fixture identical to production compacted HIR.
+    let (checked_cast_success, return_block, cast_handler, add_handler) = if cyclic {
+        (BlockId(4), BlockId(5), BlockId(6), BlockId(7))
+    } else {
+        (BlockId(4), BlockId(4), BlockId(5), BlockId(6))
+    };
+
+    let proven_add = HirTerminator::Invoke {
+        id: HirNodeId(2),
+        span: None,
+        operation: HirFallibleOperation::NumericOp {
+            op: HirNumericOp::ordinary(
+                NumericOperator::Add,
+                NumericScalar::Fixed(FixedScalar::I32),
+            ),
+            operands: binary_operands(
+                i32_expression(2, types.i32, region, &mut expressions),
+                i32_expression(3, types.i32, region, &mut expressions),
+            ),
+        },
+        success: BlockId(1),
+        success_results: vec![first_result],
+        failure: add_handler,
+        error_result: error,
+    };
+    let proven_cast = HirTerminator::Invoke {
+        id: HirNodeId(6),
+        span: None,
+        operation: narrowing_cast(
+            FixedScalar::I32,
+            FixedScalar::I8,
+            i32_expression(100, types.i32, region, &mut expressions),
+        ),
+        success: BlockId(2),
+        success_results: vec![proven_cast_result],
+        failure: cast_handler,
+        error_result: error,
+    };
+    let checked_add = HirTerminator::Invoke {
+        id: HirNodeId(4),
+        span: None,
+        operation: HirFallibleOperation::NumericOp {
+            op: HirNumericOp::ordinary(
+                NumericOperator::Add,
+                NumericScalar::Fixed(FixedScalar::I32),
+            ),
+            operands: binary_operands(
+                load_local(input.0, types.i32, region, &mut expressions),
+                i32_expression(3, types.i32, region, &mut expressions),
+            ),
+        },
+        success: BlockId(3),
+        success_results: vec![second_result],
+        failure: add_handler,
+        error_result: error,
+    };
+    let checked_cast = HirTerminator::Invoke {
+        id: HirNodeId(8),
+        span: None,
+        operation: narrowing_cast(
+            FixedScalar::I32,
+            FixedScalar::I8,
+            load_local(second_result.0, types.i32, region, &mut expressions),
+        ),
+        success: checked_cast_success,
+        success_results: vec![checked_cast_result],
+        failure: cast_handler,
+        error_result: error,
+    };
+    let success_return = HirTerminator::Return(append_values(
+        &[load_local(
+            second_result.0,
+            types.i32,
+            region,
+            &mut expressions,
+        )],
+        &mut expressions,
+    ));
+    let cyclic_terminator = HirTerminator::If {
+        condition: bool_expression(false, types.boolean, region, &mut expressions),
+        then_block: BlockId(3),
+        else_block: return_block,
+    };
+
+    let mut blocks = vec![
+        HirBlock {
+            id: BlockId(0),
+            region,
+            locals: vec![
+                local(first_result.0, types.i32, region),
+                local(error.0, types.error, region),
+                local(second_result.0, types.i32, region),
+                local(proven_cast_result.0, i8_ty, region),
+                local(checked_cast_result.0, i8_ty, region),
+                local(input.0, types.i32, region),
+            ],
+            statements: vec![],
+            terminator: proven_add,
+        },
+        HirBlock {
+            id: BlockId(1),
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: proven_cast,
+        },
+        HirBlock {
+            id: BlockId(2),
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: checked_add,
+        },
+        HirBlock {
+            id: BlockId(3),
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: checked_cast,
+        },
+        HirBlock {
+            id: BlockId(4),
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: if cyclic {
+                cyclic_terminator
+            } else {
+                success_return.clone()
+            },
+        },
+    ];
+    if cyclic {
+        blocks.push(HirBlock {
+            id: return_block,
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: success_return,
+        });
+    }
+    blocks.push(HirBlock {
+        id: cast_handler,
+        region,
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::ReturnError(load_local(
+            error.0,
+            types.error,
+            region,
+            &mut expressions,
+        )),
+    });
+    blocks.push(HirBlock {
+        id: add_handler,
+        region,
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::ReturnError(load_local(
+            error.0,
+            types.error,
+            region,
+            &mut expressions,
+        )),
+    });
+
+    lower_numeric_blocks(
+        name,
+        expressions,
+        type_environment,
+        blocks,
+        HirFunction {
+            id: FunctionId(0),
+            entry: BlockId(0),
+            params: vec![input],
+            return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                vec![types.i32],
+                Some(types.error),
+            )),
+        },
+        vec![
+            (first_result, "first"),
+            (error, "error"),
+            (second_result, "second"),
+            (proven_cast_result, "proven_cast"),
+            (checked_cast_result, "checked_cast"),
+            (input, "input"),
+        ],
+    )
+}
+
+/// Verifies a scalar numeric Invoke inside one structured `If` arm reaches the shared join.
+///
+/// WHAT: the then arm performs a literal-proven I32 add whose scalar Invoke stores its result;
+///       that success continuation publishes the result into a pre-declared local and jumps to
+///       the join. The else arm jumps to the same join. The join copies the local once and returns
+///       it.
+/// WHY: structured lowering must emit that continuation once after the `if`/`else` rather than
+///      duplicating it inside the scalar Invoke's success continuation. Running both arms proves
+///      each path crosses the single shared return with its own value.
+#[test]
+fn scalar_invoke_inside_structured_if_arm_reaches_the_shared_join_once() {
+    let (type_environment, types) = build_type_environment();
+    let region = RegionId(0);
+    let mut expressions = HirExpressionStore::default();
+    let (result, error, base, flag, joined) =
+        (LocalId(0), LocalId(1), LocalId(2), LocalId(3), LocalId(4));
+
+    let invoke = HirTerminator::Invoke {
+        id: HirNodeId(1),
+        span: None,
+        operation: HirFallibleOperation::NumericOp {
+            op: HirNumericOp::ordinary(
+                NumericOperator::Add,
+                NumericScalar::Fixed(FixedScalar::I32),
+            ),
+            operands: binary_operands(
+                i32_expression(2, types.i32, region, &mut expressions),
+                i32_expression(3, types.i32, region, &mut expressions),
+            ),
+        },
+        success: BlockId(3),
+        success_results: vec![result],
+        failure: BlockId(5),
+        error_result: error,
+    };
+    let seed_base = statement(
+        4,
+        define_local(
+            base.0,
+            i32_expression(10, types.i32, region, &mut expressions),
+        ),
+    );
+    let result_load = load_local(result.0, types.i32, region, &mut expressions);
+    let publish = statement(
+        3,
+        HirStatementKind::Write {
+            target: HirWriteTarget::AssignPlace(HirPlace::local(base)),
+            value: result_load,
+        },
+    );
+    let join_write = statement(
+        2,
+        define_local(
+            joined.0,
+            load_local(base.0, types.i32, region, &mut expressions),
+        ),
+    );
+    let joined_return = load_local(joined.0, types.i32, region, &mut expressions);
+    let error_load = load_local(error.0, types.error, region, &mut expressions);
+
+    let blocks = vec![
+        HirBlock {
+            id: BlockId(0),
+            region,
+            locals: vec![
+                local(result.0, types.i32, region),
+                local(error.0, types.error, region),
+                local(base.0, types.i32, region),
+                local(flag.0, types.boolean, region),
+                local(joined.0, types.i32, region),
+            ],
+            statements: vec![seed_base],
+            terminator: HirTerminator::If {
+                condition: load_local(flag.0, types.boolean, region, &mut expressions),
+                then_block: BlockId(1),
+                else_block: BlockId(2),
+            },
+        },
+        HirBlock {
+            id: BlockId(1),
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: invoke,
+        },
+        HirBlock {
+            id: BlockId(2),
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: HirTerminator::Jump {
+                target: BlockId(4),
+                args: vec![],
+            },
+        },
+        // The scalar Invoke's success continuation publishes its result, then reaches the join.
+        HirBlock {
+            id: BlockId(3),
+            region,
+            locals: vec![],
+            statements: vec![publish],
+            terminator: HirTerminator::Jump {
+                target: BlockId(4),
+                args: vec![],
+            },
+        },
+        HirBlock {
+            id: BlockId(4),
+            region,
+            locals: vec![],
+            statements: vec![join_write],
+            terminator: HirTerminator::Return(append_values(&[joined_return], &mut expressions)),
+        },
+        HirBlock {
+            id: BlockId(5),
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: HirTerminator::ReturnError(error_load),
+        },
+    ];
+
+    let lowered = lower_numeric_blocks(
+        "structured_join",
+        expressions,
+        type_environment,
+        blocks,
+        HirFunction {
+            id: FunctionId(0),
+            entry: BlockId(0),
+            params: vec![flag],
+            return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                vec![types.i32],
+                Some(types.error),
+            )),
+        },
+        vec![
+            (result, "result"),
+            (error, "error"),
+            (base, "base"),
+            (joined, "joined"),
+            (flag, "flag"),
+        ],
+    );
+
+    assert!(
+        lowered
+            .analysed_table
+            .integer_operation_is_safe(HirNodeId(1)),
+        "the literal add inside the then arm must be proven and lowered as a scalar Invoke"
+    );
+    for source in [&lowered.analysed_source, &lowered.retained_source] {
+        assert!(
+            !source.contains("switch (__bb"),
+            "an acyclic If with one scalar-Invoke arm must stay on structured lowering"
+        );
+        assert!(
+            source.contains("if ("),
+            "the fixture must emit a structured conditional"
+        );
+    }
+    assert!(
+        !lowered.analysed_source.contains("if (true)"),
+        "a proven scalar Invoke must not emit a dead success conditional"
+    );
+    let joined_name = expected_dev_local_name("joined", 4);
+    assert_eq!(
+        lowered
+            .analysed_source
+            .matches(&format!("{joined_name} = "))
+            .count(),
+        1,
+        "the shared join must be emitted once, after the if/else"
+    );
+
+    let driver = format!(
+        "const yes = {}(true);\nconst no = {}(false);\nconsole.log(yes.tag, yes.value, no.tag, no.value);",
+        lowered.function_name, lowered.function_name
+    );
+    let (analysed, retained) = run_both_tables(&lowered, &driver);
+    assert_same_runtime(&analysed, &retained, "structured If scalar Invoke join");
+    assert_eq!(
+        analysed.stdout.trim(),
+        "ok 5 ok 10",
+        "each arm must reach the shared continuation once with its own value"
+    );
+}
+
+#[test]
+fn scalar_invoke_dead_failure_edge_keeps_a_shared_live_handler() {
+    for cyclic in [false, true] {
+        let lowered = lower_shared_handler_fixture("shared_handler", cyclic);
+        let strategy = if cyclic { "dispatcher" } else { "structured" };
+        assert!(
+            lowered
+                .analysed_table
+                .integer_operation_is_safe(HirNodeId(2)),
+            "{strategy}: the literal add must be proven"
+        );
+        assert!(
+            lowered
+                .analysed_table
+                .integer_narrowing_is_safe(HirNodeId(6)),
+            "{strategy}: the literal narrowing must be proven"
+        );
+        assert!(
+            !lowered
+                .analysed_table
+                .integer_operation_is_safe(HirNodeId(4)),
+            "{strategy}: the parameter-fed add must stay checked"
+        );
+        assert!(
+            !lowered
+                .analysed_table
+                .integer_narrowing_is_safe(HirNodeId(8)),
+            "{strategy}: the narrowing of the checked add result must stay checked"
+        );
+        assert_eq!(
+            lowered.analysed_source.contains("switch (__bb"),
+            cyclic,
+            "{strategy}: the literal-false back edge must select the expected control-flow strategy"
+        );
+        assert!(
+            !lowered.analysed_source.contains("if (true)"),
+            "{strategy}: a proven Invoke must not emit a dead success conditional"
+        );
+        assert_eq!(
+            lowered.analysed_source.matches(".tag === \"ok\"").count(),
+            2,
+            "{strategy}: only the checked add and checked narrowing keep carrier branches"
+        );
+        assert_eq!(
+            lowered.retained_source.matches(".tag === \"ok\"").count(),
+            4,
+            "{strategy}: the empty proof table keeps all four checked branches"
+        );
+        assert!(
+            lowered
+                .analysed_source
+                .contains("function __moth_cast_integer_to_integer("),
+            "{strategy}: the checked narrowing keeps its cast helper"
+        );
+        assert!(
+            lowered
+                .analysed_source
+                .contains("tag: \"err\", value: __moth_read("),
+            "{strategy}: the shared cast handler stays live through the checked narrowing"
+        );
+        // The shared error slot is the handler's incoming binding. Only the two checked siblings
+        // may clear or write it once the proven Invokes' failure edges are pruned.
+        let error_name = expected_dev_local_name("error", 1);
+        let clear = format!("{error_name} = undefined;");
+        let write = format!("{error_name} = __moth_binding(");
+        for (source, expected, table) in [
+            (&lowered.analysed_source, 2, "analysed"),
+            (&lowered.retained_source, 4, "retained"),
+        ] {
+            assert_eq!(
+                source.matches(&clear).count(),
+                expected,
+                "{strategy} {table}: error slot clears"
+            );
+            assert_eq!(
+                source.matches(&write).count(),
+                expected,
+                "{strategy} {table}: error slot writes"
+            );
+        }
+
+        let driver = format!(
+            "const castFailure = {f}(300);\n\
+             const addFailure = {f}({max});\n\
+             const success = {f}(0);\n\
+             console.log(castFailure.tag + \":\" + __moth_error_code(castFailure.value));\n\
+             console.log(addFailure.tag + \":\" + __moth_error_code(addFailure.value));\n\
+             console.log(success.tag + \" \" + success.value);",
+            f = lowered.function_name,
+            max = i32::MAX
+        );
+        let (analysed, retained) = run_both_tables(&lowered, &driver);
+        assert_same_runtime(&analysed, &retained, strategy);
+        assert_eq!(
+            analysed.stdout.trim(),
+            format!(
+                "err:{cast}\nerr:{add}\nok 3",
+                cast = BuiltinErrorCode::IntCastOutOfRange.as_u32(),
+                add = BuiltinErrorCode::IntOverflow.as_u32()
+            ),
+            "{strategy}: the shared handler must recover the checked narrowing while the numeric sibling recovers its overflow and the proven narrowing stays out of the failure path"
+        );
+    }
+}
+
 /// Narrowing elides only its predicate, preserving physical conversion and the fallible ABI.
 #[test]
 fn proven_narrowing_elides_checked_cast_helpers() {
@@ -1045,6 +2106,20 @@ fn proven_narrowing_elides_checked_cast_helpers() {
             lowered
                 .retained_source
                 .contains("function __moth_cast_integer_to_integer(")
+        );
+        assert!(
+            !lowered.analysed_source.contains("if (true)"),
+            "a proven narrowing must not emit a dead success conditional"
+        );
+        assert_eq!(
+            lowered.analysed_source.matches(".tag === \"ok\"").count(),
+            0,
+            "a proven narrowing transfers success unconditionally"
+        );
+        assert_eq!(
+            lowered.retained_source.matches(".tag === \"ok\"").count(),
+            1,
+            "the empty proof table keeps the checked narrowing branch"
         );
         let driver = format!("console.log(JSON.stringify({}()));", lowered.function_name);
         let (analysed, retained) = run_both_tables(&lowered, &driver);
@@ -1097,6 +2172,20 @@ fn narrowing_policy_with_retained_use_keeps_checked_helpers() {
         lowered
             .analysed_source
             .contains("function __moth_cast_integer_to_integer(")
+    );
+    assert!(
+        !lowered.analysed_source.contains("if (true)"),
+        "the proven sibling must not leave a dead success conditional"
+    );
+    assert_eq!(
+        lowered.analysed_source.matches(".tag === \"ok\"").count(),
+        1,
+        "only the checked sibling keeps its carrier branch"
+    );
+    assert_eq!(
+        lowered.retained_source.matches(".tag === \"ok\"").count(),
+        2,
+        "the empty proof table keeps both checked narrowing branches"
     );
     let driver = format!(
         "const results = {}().value;\nconsole.log(JSON.stringify({{tag: \"ok\", value: results[0]}}), __moth_error_code(results[1]));",

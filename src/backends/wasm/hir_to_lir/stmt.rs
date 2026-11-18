@@ -335,11 +335,14 @@ fn lower_checked_integer_operation(
         )
     });
     // Proven-safe operations keep evaluation order, domain and signedness while losing only
-    // the redundant runtime predicates. Every other mode retains the checked lowering below.
-    let check_mode = if context
-        .module_context
-        .numeric_proofs
-        .integer_operation_is_safe(statement)
+    // the redundant runtime predicates. An `Infallible` statement mode records totality its HIR
+    // producer already established (operand-range discharge or a dominating guard), so it
+    // proves safety without the optional table; every other mode retains the checked lowering.
+    let check_mode = if failure_mode == NumericFailureMode::Infallible
+        || context
+            .module_context
+            .numeric_proofs
+            .integer_operation_is_safe(statement)
     {
         IntegerCheckMode::ProvenSafe
     } else {

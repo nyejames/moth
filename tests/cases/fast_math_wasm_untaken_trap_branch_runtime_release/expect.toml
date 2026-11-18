@@ -1,0 +1,15 @@
+entry = "."
+
+# Release must still leave the untaken trapping branch unexecuted on both backends.
+# The branch condition is runtime data, so no build profile can decide it statically.
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = "value=99"
+
+[backends.html_wasm]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = "value=99"

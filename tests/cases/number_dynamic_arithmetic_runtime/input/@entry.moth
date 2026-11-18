@@ -48,6 +48,14 @@ add_float |value F64, increment F64| -> F64:
     return value + increment
 ;
 
+negate_float |value F64| -> F64:
+    return -value
+;
+
+add_then_divide |left Dec2, right Dec2, divisor Dec2| -> Dec2, Error!:
+    return (left + right) / divisor
+;
+
 number_to_int |value Dec0| -> I32, Error!:
     return cast value
 ;
@@ -82,6 +90,15 @@ power_negative_one = power_tenths(-2.0, 1)
 power_negative_zero = power_tenths(-2.0, 0)
 power_integral_large = power_tenths(2.0, 10)
 float_profile = add_float(16777216.0, 1.0)
+float_negation = negate_float(1.25)
+mixed_chain = add_then_divide(0.25, 0.35, 0.20) catch:
+    then -1
+;
+mixed_chain_code ~U32 = 0
+mixed_chain_failure = add_then_divide(0.25, 0.35, 0) catch |mixed_error|:
+    ~mixed_chain_code = mixed_error.code
+    then -1
+;
 
 int32_maximum = number_to_int(2147483647) catch:
     then 0
@@ -92,4 +109,4 @@ int32_overflow = number_to_int(2147483648) catch |int32_error|:
     then 0
 ;
 
-~[:number arithmetic zero=[zero_sum]/[zero_difference]/[zero_product]/[zero_floor]/[zero_remainder]/[zero_negation] scale1=[positive_half]/[negative_half]/[tie_even_half] tiny-ties=[positive_tiny_tie]/[negative_tiny_tie] scale2=[third]/[negative_remainder] scale256=[tiny_is_exact] large=[large_increment] operation-rounding=[rounded_each_operation] power=[power_once]/[power_signed]/[power_chain_result]/[power_zero] integral-power=[power_negative_cube]/[power_negative_one]/[power_negative_zero]/[power_integral_large] float64=[float_profile] int32=[int32_maximum]/[int32_overflow_code]]
+~[:number arithmetic zero=[zero_sum]/[zero_difference]/[zero_product]/[zero_floor]/[zero_remainder]/[zero_negation] scale1=[positive_half]/[negative_half]/[tie_even_half] tiny-ties=[positive_tiny_tie]/[negative_tiny_tie] scale2=[third]/[negative_remainder] scale256=[tiny_is_exact] large=[large_increment] operation-rounding=[rounded_each_operation] power=[power_once]/[power_signed]/[power_chain_result]/[power_zero] integral-power=[power_negative_cube]/[power_negative_one]/[power_negative_zero]/[power_integral_large] float64=[float_profile] float-negation=[float_negation] mixed=[mixed_chain]/[mixed_chain_code]/[mixed_chain_failure] int32=[int32_maximum]/[int32_overflow_code]]

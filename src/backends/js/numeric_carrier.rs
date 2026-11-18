@@ -1,13 +1,15 @@
 //! JavaScript numeric carrier and conversion policy.
 //!
-//! WHAT: maps numeric domains to JS carriers, then classifies casts into shared
-//!       lowering decisions and demand-driven runtime-helper requirements.
+//! WHAT: maps numeric domains to JS carriers, then classifies casts and numeric operations into
+//!       shared lowering decisions and demand-driven runtime-helper requirements.
 //! WHY: representation and helper selection must not drift between generated calls and the
 //!      prelude, especially when BigInt and Number carriers meet.
 //!
-//! Exclusions: frontend evidence owns semantic conversion fallibility. `Byte` is an octet value,
-//! and binary floats remain separate from exact decimal `Dec`. Dec operations and exact casts
-//! use a shared BigInt coefficient family with scales supplied by validated HIR or cast policies.
+//! Exclusions: frontend evidence owns semantic conversion fallibility, and the frontend
+//! `numeric_failure_codes` table owns operation fallibility. The backend only maps those facts to
+//! JavaScript representation. `Byte` is an octet value, and binary floats remain separate from
+//! exact decimal `Dec`. Dec operations and exact casts use a shared BigInt coefficient family
+//! with scales supplied by validated HIR or cast policies.
 
 use crate::backends::js::runtime::NumericRuntimeHelperUsage;
 use crate::compiler_frontend::builtins::casts::evidence::numeric_conversion_fallibility;
@@ -15,7 +17,9 @@ use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::datatypes::number::NumberValue;
-use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_operators::{
+    NumericOperator, numeric_failure_codes,
+};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::numeric::{
     FastStoreConversionClass, HirFastStoreConversion, HirNumericOp,
@@ -466,8 +470,8 @@ impl JsNumericConversion {
     ///
     /// WHAT: proven narrowing performs exactly the original carrier conversion — identity within
     ///       one carrier, `BigInt`/`Number` across carriers — and omits only the range predicate
-    ///       the checked helper would enforce. The caller keeps the `{tag, value}` success-carrier
-    ///       shape the unchanged HIR requires.
+    ///       the checked helper would enforce. The caller stores the converted scalar directly
+    ///       through the Invoke's success slot; no `{tag, value}` success-carrier shape remains.
     /// WHY: the proof table guarantees the source value is inside the target range, so the
     ///       conversion needs no runtime check, and it demands no runtime helpers.
     pub(crate) fn proven_safe_integer_narrowing(
@@ -788,7 +792,7 @@ impl JsFastNumericLowering {
     /// Rejects ordinary operations, `Dec` domains and unsupported domain/operator pairs: a fast
     /// operation is always a fixed integer or binary float, and integer `/` already computes in
     /// `F64`, so an integer `Divide` can only be an internal contradiction.
-    pub(crate) fn classify(op: HirNumericOp) -> Result<Self, InfrastructureFailure> {
+    fn classify(op: HirNumericOp) -> Result<Self, InfrastructureFailure> {
         if !op.semantics.is_fast() {
             return Err(fast_lowering_error(format!(
                 "JS backend received non-fast numeric operation {op} on the fast lowering path"
@@ -875,7 +879,7 @@ impl JsFastNumericLowering {
     ///      so a fast Number integer always demands that shared helper and only the trapping
     ///      helper its own operator uses. Fast BigInt add, subtract, multiply and negate inline
     ///      their `BigInt.asIntN`/`asUintN` normalisation and demand no runtime code.
-    pub(crate) fn require_helpers(self, usage: &mut NumericRuntimeHelperUsage) {
+    fn require_helpers(self, usage: &mut NumericRuntimeHelperUsage) {
         match self {
             Self::NumberInteger { operator, .. } => {
                 usage.fast_number_integer_wrap = true;
@@ -919,7 +923,7 @@ impl JsFastNumericLowering {
     }
 
     /// Renders the operation over already-lowered operand expressions.
-    pub(crate) fn expression(self, operands: &[String]) -> String {
+    fn expression(self, operands: &[String]) -> String {
         match self {
             Self::NumberInteger {
                 operator,
@@ -997,19 +1001,11 @@ impl JsFastNumericLowering {
                 operator,
                 precision,
             } => {
-                let operation = match operator {
-                    NumericOperator::Add => "add",
-                    NumericOperator::Subtract => "sub",
-                    NumericOperator::Multiply => "mul",
-                    NumericOperator::Divide => "div",
-                    NumericOperator::Remainder => "mod",
-                    NumericOperator::Power => "pow",
-                    NumericOperator::IntegerDivide | NumericOperator::Negate => {
-                        crate::compiler_bug!(
-                            CompilerStage::BackendLowering,
-                            "JS fast binary-float operation {operator:?} has no helper"
-                        )
-                    }
+                let Some(operation) = binary_float_helper_operation(operator) else {
+                    crate::compiler_bug!(
+                        CompilerStage::BackendLowering,
+                        "JS fast binary-float operation {operator:?} has no helper"
+                    )
                 };
                 let family = fast_float_helper_family(precision);
                 match operands {
@@ -1021,11 +1017,7 @@ impl JsFastNumericLowering {
                 }
             }
             Self::BinaryFloatNegate { precision } => match operands {
-                [operand] => match precision {
-                    BinaryFloatPrecision::Binary16 => format!("Math.f16round(-({operand}))"),
-                    BinaryFloatPrecision::Binary32 => format!("Math.fround(-({operand}))"),
-                    BinaryFloatPrecision::Binary64 => format!("(-({operand}))"),
-                },
+                [operand] => binary_float_negate_expression(precision, operand),
                 _ => crate::compiler_bug!(
                     CompilerStage::BackendLowering,
                     "JS fast binary-float negation has unexpected operand shape"
@@ -1033,6 +1025,461 @@ impl JsFastNumericLowering {
             },
         }
     }
+}
+
+/// The helper suffix for one binary-float arithmetic operator.
+///
+/// WHAT: the shared `add`/`sub`/`mul`/`div`/`mod`/`pow` spelling, or `None` for the operators with
+///       no binary-float helper.
+/// WHY: the fast and checked helper families differ only in their stems and failure delivery, so
+///      one suffix map keeps the two call sites from spelling the same operation differently.
+fn binary_float_helper_operation(operator: NumericOperator) -> Option<&'static str> {
+    match operator {
+        NumericOperator::Add => Some("add"),
+        NumericOperator::Subtract => Some("sub"),
+        NumericOperator::Multiply => Some("mul"),
+        NumericOperator::Divide => Some("div"),
+        NumericOperator::Remainder => Some("mod"),
+        NumericOperator::Power => Some("pow"),
+        NumericOperator::IntegerDivide | NumericOperator::Negate => None,
+    }
+}
+
+/// The JavaScript expression for total binary-float negation at one precision.
+///
+/// WHAT: rounds `-operand` at the resolved precision, which for F16/F32 is also the value's own
+///       carrier precision and for F64 needs no rounding step.
+/// WHY: ordinary total negation and fast arithmetic negation share this expression so both
+///      deliveries keep identical rounding and signed-zero behaviour; negation is the one binary
+///      float operation with no failure edge, and only its delivery differed before this owner.
+fn binary_float_negate_expression(precision: BinaryFloatPrecision, operand: &str) -> String {
+    match precision {
+        BinaryFloatPrecision::Binary16 => format!("Math.f16round(-({operand}))"),
+        BinaryFloatPrecision::Binary32 => format!("Math.fround(-({operand}))"),
+        BinaryFloatPrecision::Binary64 => format!("(-({operand}))"),
+    }
+}
+
+/// The JavaScript lowering selected for one ordinary or fast numeric operation.
+///
+/// WHAT: classifies an operation once as fast arithmetic, a total ordinary scalar, a proven
+///       integer scalar or a checked recoverable-carrier helper call, then owns its rendered
+///       expression and runtime-helper demand.
+/// WHY: statement lowering and the demand scan must reach the same decision. A second
+///      operator/carrier/proof test in either place can select a helper the other omits, or
+///      demand a family an operation never calls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum JsNumericOperationLowering {
+    /// `$fast_math` arithmetic with the fast wrap/trap helpers.
+    Fast(JsFastNumericLowering),
+    /// An ordinary operation whose shared failure classification is empty, so it returns a
+    /// scalar and needs no carrier unwrap or trap helper.
+    Scalar(JsScalarNumericLowering),
+    /// An ordinary checked integer operation discharged by the sparse proof table.
+    ProvenInteger(JsProvenIntegerLowering),
+    /// An ordinary operation that retains the recoverable-carrier helper family.
+    Checked(JsCheckedNumericLowering),
+}
+
+impl JsNumericOperationLowering {
+    /// Classifies one numeric operation, consulting the proof table lazily.
+    ///
+    /// WHAT: fast arithmetic wins first, then a proof-backed integer expression, then the shared
+    ///       empty-failure-set scalar path, and finally the checked helper family.
+    /// WHY: `numeric_failure_codes` remains the only semantic fallibility classifier, and the
+    ///      proof table remains the only optional check-elision source. The closure keeps the
+    ///      sparse proof lookup off every fast, float and Dec path, which it can never prove.
+    pub(crate) fn classify(
+        op: HirNumericOp,
+        proven_integer: impl FnOnce() -> bool,
+    ) -> Result<Self, InfrastructureFailure> {
+        if op.semantics.is_fast() {
+            return Ok(Self::Fast(JsFastNumericLowering::classify(op)?));
+        }
+
+        let carrier = JsNumericCarrier::for_scalar(op.domain).ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::BackendLowering,
+                format!("JS backend has no numeric carrier for {:?}", op.domain),
+            )
+        })?;
+
+        if let Some(proven) = JsProvenIntegerLowering::classify(op, carrier, proven_integer) {
+            return Ok(Self::ProvenInteger(proven));
+        }
+
+        if numeric_failure_codes(op.operator, op.domain).is_empty() {
+            return Ok(Self::Scalar(JsScalarNumericLowering::classify(
+                op, carrier,
+            )?));
+        }
+
+        Ok(Self::Checked(JsCheckedNumericLowering {
+            carrier,
+            operator: op.operator,
+        }))
+    }
+
+    /// Renders the operation over already-lowered operand expressions.
+    ///
+    /// Operands are consumed so the checked renderer can append its scale factor and bounds
+    /// without cloning every expression string.
+    pub(crate) fn expression(self, operands: Vec<String>) -> String {
+        match self {
+            Self::Fast(lowering) => lowering.expression(&operands),
+            Self::Scalar(lowering) => lowering.expression(&operands),
+            Self::ProvenInteger(lowering) => lowering.expression(&operands),
+            Self::Checked(lowering) => lowering.expression(operands),
+        }
+    }
+
+    /// Whether the rendered expression is a scalar value rather than a `{ tag, value }` carrier.
+    pub(crate) fn is_scalar(self) -> bool {
+        !matches!(self, Self::Checked(_))
+    }
+
+    /// Records the runtime helpers this operation needs from the numeric prelude.
+    ///
+    /// Delivery is not part of helper demand: the demand scan adds the trap demand for a
+    /// statement that consumes a checked carrier, mirroring `emit_numeric_carrier_assignment`.
+    pub(crate) fn require_helpers(self, usage: &mut NumericRuntimeHelperUsage) {
+        match self {
+            Self::Fast(lowering) => lowering.require_helpers(usage),
+            Self::Scalar(lowering) => lowering.require_helpers(usage),
+            Self::ProvenInteger(_) => {}
+            Self::Checked(lowering) => lowering.require_helpers(usage),
+        }
+    }
+}
+
+/// The scalar ordinary lowering for an operation with no recoverable failure.
+///
+/// WHAT: exact `Dec` coefficient arithmetic and binary-float arithmetic at the resolved precision.
+/// WHY: the shared failure classifier says these operations cannot fail, so a carrier would only
+///      add allocation and an unwrap. Positive-scale Dec multiplication still rounds once through
+///      the same half-even kernel the fallible Dec family uses, so values cannot diverge between
+///      paths; scale-zero multiplication is exact coefficient multiplication and skips the kernel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum JsScalarNumericLowering {
+    /// Add, subtract, negate or multiply BigInt coefficients at one resolved `Dec` scale.
+    Decimal {
+        operator: NumericOperator,
+        scale: NumberScale,
+    },
+    /// Binary-float arithmetic at the resolved precision.
+    BinaryFloat {
+        operator: NumericOperator,
+        precision: BinaryFloatPrecision,
+    },
+}
+
+impl JsScalarNumericLowering {
+    /// Selects the scalar family from the operation's resolved carrier.
+    ///
+    /// WHAT: `Dec` and binary float own a scalar renderer; an integer carrier cannot be total
+    ///       here because every integer arithmetic failure set is non-empty.
+    /// WHY: `JsNumericOperationLowering::classify` has already gated this path on the shared empty
+    ///      failure set, so repeating the per-operator Dec/float sets here would be a second
+    ///      fallibility authority. The renderer keeps its `compiler_bug!` for a total operator it
+    ///      cannot spell, which the current classifier never selects.
+    fn classify(
+        op: HirNumericOp,
+        carrier: JsNumericCarrier,
+    ) -> Result<Self, InfrastructureFailure> {
+        match carrier {
+            JsNumericCarrier::ScaledInteger { scale } => Ok(Self::Decimal {
+                operator: op.operator,
+                scale,
+            }),
+            JsNumericCarrier::BinaryFloat { precision } => Ok(Self::BinaryFloat {
+                operator: op.operator,
+                precision,
+            }),
+            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. } => {
+                Err(total_lowering_error(op))
+            }
+        }
+    }
+
+    /// Renders the scalar expression over already-lowered operands.
+    fn expression(self, operands: &[String]) -> String {
+        match self {
+            Self::Decimal { operator, scale } => match (operator, operands) {
+                (NumericOperator::Add, [left, right]) => format!("({left} + {right})"),
+                (NumericOperator::Subtract, [left, right]) => format!("({left} - {right})"),
+                (NumericOperator::Negate, [operand]) => format!("(-({operand}))"),
+                (NumericOperator::Multiply, [left, right]) if scale.get() == 0 => {
+                    format!("({left} * {right})")
+                }
+                (NumericOperator::Multiply, [left, right]) => format!(
+                    "__moth_number_round_half_even(({left} * {right}), {})",
+                    number_scale_factor_js(scale.get())
+                ),
+                _ => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "JS scalar Dec operation {operator:?} has unexpected operand shape"
+                ),
+            },
+            Self::BinaryFloat {
+                operator,
+                precision,
+            } => match (operator, operands) {
+                (NumericOperator::Negate, [operand]) => {
+                    binary_float_negate_expression(precision, operand)
+                }
+                _ => crate::compiler_bug!(
+                    CompilerStage::BackendLowering,
+                    "JS scalar binary-float operation {operator:?} has unexpected operand shape"
+                ),
+            },
+        }
+    }
+
+    /// Records the runtime helpers this scalar expression needs.
+    fn require_helpers(self, usage: &mut NumericRuntimeHelperUsage) {
+        if matches!(
+            self,
+            Self::Decimal {
+                operator: NumericOperator::Multiply,
+                scale,
+            } if scale.get() > 0
+        ) {
+            usage.number_round_half_even = true;
+        }
+    }
+}
+
+/// The native-carrier expression for one proof-discharged integer operation.
+///
+/// WHAT: exact Number or BigInt arithmetic with the same `-0` normalisation the checked helpers
+///       apply at their success boundary.
+/// WHY: the proof table says the checked range predicate cannot fail, so only the helper envelope
+///      and predicate are removed; values, signedness and BigInt range stay byte-identical.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct JsProvenIntegerLowering {
+    carrier: JsNumericCarrier,
+    operator: NumericOperator,
+}
+
+impl JsProvenIntegerLowering {
+    /// Selects the proof-backed expression only for the operator/carrier pairs it can render.
+    ///
+    /// Returns `None` for `Divide`, `Power`, binary floats and Dec, which the proof table never
+    /// proves. The proof lookup runs only after the operator/carrier gate passes, so fast and
+    /// non-integer operations never touch the sparse proof table. The shared classifier then
+    /// chooses the total scalar lowering or the checked helper from the frontend failure
+    /// classification.
+    fn classify(
+        op: HirNumericOp,
+        carrier: JsNumericCarrier,
+        proven_integer: impl FnOnce() -> bool,
+    ) -> Option<Self> {
+        let integer_carrier = matches!(
+            carrier,
+            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. }
+        );
+        let supported_operator = matches!(
+            op.operator,
+            NumericOperator::Add
+                | NumericOperator::Subtract
+                | NumericOperator::Multiply
+                | NumericOperator::IntegerDivide
+                | NumericOperator::Remainder
+                | NumericOperator::Negate
+        );
+        (integer_carrier && supported_operator && proven_integer()).then_some(Self {
+            carrier,
+            operator: op.operator,
+        })
+    }
+
+    /// Renders the proven operation over already-lowered operands.
+    fn expression(self, operands: &[String]) -> String {
+        match (self.carrier, self.operator, operands) {
+            (JsNumericCarrier::ExactInteger { .. }, NumericOperator::Add, [left, right]) => {
+                format!("({left} + {right})")
+            }
+            (JsNumericCarrier::ExactInteger { .. }, NumericOperator::Subtract, [left, right]) => {
+                format!("({left} - {right})")
+            }
+            (JsNumericCarrier::ExactInteger { .. }, NumericOperator::Multiply, [left, right]) => {
+                format!("({left} * {right} + 0)")
+            }
+            (
+                JsNumericCarrier::ExactInteger { .. },
+                NumericOperator::IntegerDivide,
+                [left, right],
+            ) => format!("(Math.trunc({left} / {right}) + 0)"),
+            (JsNumericCarrier::ExactInteger { .. }, NumericOperator::Remainder, [left, right]) => {
+                format!("({left} % {right} + 0)")
+            }
+            (JsNumericCarrier::ExactInteger { .. }, NumericOperator::Negate, [left]) => {
+                format!("(-({left}) + 0)")
+            }
+            (JsNumericCarrier::BigInteger { .. }, NumericOperator::Add, [left, right]) => {
+                format!("({left} + {right})")
+            }
+            (JsNumericCarrier::BigInteger { .. }, NumericOperator::Subtract, [left, right]) => {
+                format!("({left} - {right})")
+            }
+            (JsNumericCarrier::BigInteger { .. }, NumericOperator::Multiply, [left, right]) => {
+                format!("({left} * {right})")
+            }
+            (
+                JsNumericCarrier::BigInteger { .. },
+                NumericOperator::IntegerDivide,
+                [left, right],
+            ) => format!("({left} / {right})"),
+            (JsNumericCarrier::BigInteger { .. }, NumericOperator::Remainder, [left, right]) => {
+                format!("({left} % {right})")
+            }
+            (JsNumericCarrier::BigInteger { .. }, NumericOperator::Negate, [left]) => {
+                format!("(-({left}))")
+            }
+            _ => crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JS proven integer operation {:?} has no renderable carrier/operator/operand shape",
+                self.operator
+            ),
+        }
+    }
+}
+
+/// The checked helper call retained by an ordinary operation with a recoverable failure edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct JsCheckedNumericLowering {
+    carrier: JsNumericCarrier,
+    operator: NumericOperator,
+}
+
+impl JsCheckedNumericLowering {
+    /// Renders the helper call, including the compile-time scale factor and semantic bounds.
+    fn expression(self, mut arguments: Vec<String>) -> String {
+        if let JsNumericCarrier::ScaledInteger { scale } = self.carrier
+            && matches!(
+                self.operator,
+                NumericOperator::Divide | NumericOperator::Power
+            )
+        {
+            arguments.push(number_scale_factor_js(scale.get()));
+        }
+        if let Some((minimum, maximum)) = self.carrier.integer_bounds_js() {
+            arguments.push(minimum);
+            arguments.push(maximum);
+        }
+
+        format!(
+            "__moth_{}_{}({})",
+            self.carrier.helper_family(),
+            self.helper_operation(),
+            arguments.join(", ")
+        )
+    }
+
+    /// Records the checked family and its optional members.
+    fn require_helpers(self, usage: &mut NumericRuntimeHelperUsage) {
+        match self.carrier {
+            JsNumericCarrier::ExactInteger { .. } => usage.number_integer_ops = true,
+            JsNumericCarrier::ScaledInteger { .. } => usage.number_decimal_ops = true,
+            JsNumericCarrier::BigInteger { .. } => usage.big_integer_ops = true,
+            JsNumericCarrier::BinaryFloat { precision } => {
+                let demands_power = self.operator == NumericOperator::Power;
+                match precision {
+                    BinaryFloatPrecision::Binary16 => {
+                        usage.binary16_ops = true;
+                        if demands_power {
+                            usage.binary16_power = true;
+                        }
+                    }
+                    BinaryFloatPrecision::Binary32 => {
+                        usage.binary32_ops = true;
+                        if demands_power {
+                            usage.binary32_power = true;
+                        }
+                    }
+                    BinaryFloatPrecision::Binary64 => {
+                        usage.binary64_ops = true;
+                        if demands_power {
+                            usage.binary64_power = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The operation suffix of the checked helper name.
+    ///
+    /// Total ordinary operations never reach this path; their absence here keeps the emitted
+    /// prelude free of helper definitions nothing can call.
+    fn helper_operation(self) -> &'static str {
+        match (self.carrier, self.operator) {
+            (
+                JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
+                NumericOperator::Add,
+            ) => "add",
+            (
+                JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
+                NumericOperator::Subtract,
+            ) => "sub",
+            (
+                JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
+                NumericOperator::Multiply,
+            ) => "mul",
+            (
+                JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
+                NumericOperator::IntegerDivide,
+            ) => "div",
+            (
+                JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
+                NumericOperator::Remainder,
+            ) => "mod",
+            (
+                JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
+                NumericOperator::Power,
+            ) => "pow",
+            (
+                JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
+                NumericOperator::Negate,
+            ) => "neg",
+            (JsNumericCarrier::ScaledInteger { scale }, NumericOperator::Divide)
+                if scale.get() > 0 =>
+            {
+                "div"
+            }
+            (JsNumericCarrier::ScaledInteger { scale }, NumericOperator::IntegerDivide)
+                if scale.get() == 0 =>
+            {
+                "idiv"
+            }
+            (JsNumericCarrier::ScaledInteger { .. }, NumericOperator::Remainder) => "mod",
+            (JsNumericCarrier::ScaledInteger { .. }, NumericOperator::Power) => "pow",
+            (JsNumericCarrier::BinaryFloat { .. }, operator) => {
+                let Some(operation) = binary_float_helper_operation(operator) else {
+                    crate::compiler_bug!(
+                        CompilerStage::BackendLowering,
+                        "JS checked binary-float operation {operator:?} has no helper"
+                    )
+                };
+                operation
+            }
+            _ => crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JS ordinary operation {:?} reached the checked helper path despite total semantics",
+                self.operator
+            ),
+        }
+    }
+}
+
+fn total_lowering_error(op: HirNumericOp) -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::BackendLowering,
+        format!(
+            "JS backend classified {op} as total but has no scalar lowering for domain {:?}",
+            op.domain
+        ),
+    )
 }
 
 fn require_fast_float_helpers(

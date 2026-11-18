@@ -3,4 +3,17 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "recovered=7"
+rendered_output_exact = "recovered=7 observed=-1.5 power=9/302"
+
+# `$fast_math` never creates a fast Dec path: Dec stays ordinary and recoverable, so no fast
+# helper and no total Dec helper may be emitted for these operations.
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_not_contain = [
+    "function __moth_fast_",
+    "function __moth_number_add(",
+    "function __moth_number_sub(",
+    "function __moth_number_mul(",
+    "function __moth_number_neg(",
+]

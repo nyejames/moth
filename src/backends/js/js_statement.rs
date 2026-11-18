@@ -6,8 +6,8 @@
 use crate::backends::js::JsEmitter;
 use crate::backends::js::js_expr::{escape_js_string, js_cast_expression_for_policy};
 use crate::backends::js::numeric_carrier::{
-    JsFastNumericLowering, JsFastStoreConversion, JsNumericCarrier, JsNumericConversion,
-    binary_float_precision_bits, number_scale_factor_js,
+    JsFastStoreConversion, JsNumericCarrier, JsNumericConversion, JsNumericOperationLowering,
+    binary_float_precision_bits,
 };
 use crate::backends::js::runtime::fatal_numeric_trap_throw;
 use crate::backends::js::value_use::JsValueUse;
@@ -15,7 +15,6 @@ use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::{
     CompilerStage, compiler_errors::InfrastructureFailure,
 };
-use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
 
@@ -24,7 +23,9 @@ use crate::compiler_frontend::hir::expression_store::HirValueRange;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, HirValueId, LocalId};
-use crate::compiler_frontend::hir::numeric::{HirNumericOp, HirNumericOperands};
+use crate::compiler_frontend::hir::numeric::{
+    HirNumericOp, HirNumericOperands, NumericFailureMode,
+};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelationalPatternOp};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{
@@ -33,6 +34,41 @@ use crate::compiler_frontend::hir::statements::{
 use crate::compiler_frontend::hir::terminators::{
     HirAssertionMessageEvaluation, HirFallibleOperation, HirTerminator,
 };
+
+/// The delivery context in which one numeric operation is classified.
+///
+/// WHAT: a `NumericOp` statement carries the failure mode the frontend recorded for it; an
+///       `Invoke` operation has no statement mode.
+/// WHY: only statement delivery can carry the frontend's mandatory `Infallible` totality
+///      (operand-range discharge or a dominating guard), so the classifier needs that fact
+///      alongside the optional proof table. Naming the delivery keeps every caller from passing
+///      a positional boolean that the next caller could invert.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NumericDelivery {
+    /// A `NumericOp` statement, with the failure mode the frontend recorded for it.
+    Statement(NumericFailureMode),
+    /// A recoverable `Invoke` operation, which carries no statement failure mode.
+    Invoke,
+}
+
+impl NumericDelivery {
+    /// Whether the frontend already established this delivery's totality.
+    fn is_discharged(self) -> bool {
+        matches!(self, Self::Statement(NumericFailureMode::Infallible))
+    }
+}
+
+/// How one lowered Invoke delivers its operation value to the success edge.
+///
+/// WHAT: `Captured` holds the value in the shared `__invoke_result` temp that the success edge
+///       transfers from; `StoredScalar` is a scalar numeric or proven integer-narrowing result
+///       that `prepare_invoke` already stored in its single success destination.
+/// WHY: a scalar operation result has no live failure edge and no transfer, so naming that
+///      delivery keeps callers from reading a temp that was never emitted.
+pub(crate) enum PreparedInvoke {
+    Captured { value: String },
+    StoredScalar,
+}
 
 impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_block_statements(
@@ -78,15 +114,21 @@ impl<'hir> JsEmitter<'hir> {
 
             HirStatementKind::NumericOp {
                 op,
+                failure_mode,
                 operands,
                 result,
-                ..
             } => {
-                // WHAT: dispatch the operation through the checked carrier or the fast lowering.
-                // WHY: the semantic result domain determines checked JS arithmetic and its bounds,
-                //      while fast arithmetic owns its wrap and trap helpers. Both deliveries
-                //      consume the same helper envelope, so the statement mode is not re-read.
-                self.emit_numeric_op_statement(*op, operands, *result, statement.id)?;
+                // WHAT: dispatch the operation through the shared numeric classifier.
+                // WHY: scalar fast, total and discharged results are assigned directly, while
+                //      only a checked carrier goes through `__moth_numeric_trap`; the statement
+                //      mode carries the mandatory `Infallible` totality, not a second delivery test.
+                self.emit_numeric_op_statement(
+                    *op,
+                    *failure_mode,
+                    operands,
+                    *result,
+                    statement.id,
+                )?;
             }
 
             HirStatementKind::FastStoreConversion {
@@ -241,20 +283,26 @@ impl<'hir> JsEmitter<'hir> {
         Ok(call)
     }
 
-    /// Lower a checked HIR numeric operation through its domain-selected carrier family.
+    /// Lower one numeric statement and assign its result.
     ///
-    /// WHAT: validates HIR arity, lowers operands, selects the operation helper and appends
-    ///       semantic integer bounds when that family uses an integer carrier.
-    /// WHY: one helper family covers all domains with the same JS representation without losing
-    ///      each operation result's range.
+    /// WHAT: a plain scalar value is assigned directly, while a checked carrier is consumed
+    ///       through `__moth_numeric_trap`.
+    /// WHY: the shared classifier already decided the value shape, so delivery only picks the
+    ///      matching assignment form.
     fn emit_numeric_op_statement(
         &mut self,
         op: HirNumericOp,
+        failure_mode: NumericFailureMode,
         operands: &HirNumericOperands,
         result: HirLocalDestination,
         statement: HirNodeId,
     ) -> Result<(), InfrastructureFailure> {
-        let (value, plain_scalar) = self.lower_numeric_operation(op, operands, statement)?;
+        let (value, plain_scalar) = self.lower_numeric_operation(
+            op,
+            operands,
+            statement,
+            NumericDelivery::Statement(failure_mode),
+        )?;
         if plain_scalar {
             self.emit_value_destination(result, &value)
         } else {
@@ -262,11 +310,37 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
+    /// Classify one numeric operation through the shared lowering owner.
+    ///
+    /// WHAT: combines the statement's mandatory `Infallible` totality with the optional sparse
+    ///       proof table into the single lazy proof input the carrier classifier consults.
+    /// WHY: statement lowering, the prelude demand scan and Invoke edge liveness must reach the
+    ///      same fast/scalar/proven/checked decision. A discharged statement answers the proof
+    ///      input directly, so it never consults the sparse table.
+    pub(crate) fn classify_numeric_operation(
+        &self,
+        op: HirNumericOp,
+        node: HirNodeId,
+        delivery: NumericDelivery,
+    ) -> Result<JsNumericOperationLowering, InfrastructureFailure> {
+        JsNumericOperationLowering::classify(op, || {
+            delivery.is_discharged() || self.numeric_proofs.integer_operation_is_safe(node)
+        })
+    }
+
+    /// Classify and render one HIR numeric operation over its lowered operands.
+    ///
+    /// WHAT: validates HIR arity, lowers each operand once in source order, then lets the carrier
+    ///       owner choose fast, scalar, proven-integer or checked lowering. The flag reports
+    ///       whether the rendered value is a plain scalar rather than a carrier.
+    /// WHY: the same classifier decides the prelude demand scan, so statement lowering cannot
+    ///      call a helper the prelude omitted or skip one it demanded.
     fn lower_numeric_operation(
         &mut self,
         op: HirNumericOp,
         operands: &HirNumericOperands,
         statement: HirNodeId,
+        delivery: NumericDelivery,
     ) -> Result<(String, bool), InfrastructureFailure> {
         // Guard against arity mismatch between HIR and the backend.
         let is_unary = op.is_unary();
@@ -279,118 +353,16 @@ impl<'hir> JsEmitter<'hir> {
         }
 
         // Lower each HIR operand to a JS expression once, in source order.
-        let mut lowered_args = match operands {
+        let lowered_args = match operands {
             HirNumericOperands::Unary { operand } => vec![self.lower_expr(*operand)?],
             HirNumericOperands::Binary { left, right } => {
                 vec![self.lower_expr(*left)?, self.lower_expr(*right)?]
             }
         };
 
-        // Fast arithmetic owns its own expressions: fixed integers wrap at the semantic result
-        // width, and fast trapping helpers throw the canonical cause directly. They never build
-        // the checked `{ tag, value }` carrier, so operand scale/bounds arguments and proof-based
-        // check elision do not apply.
-        if op.semantics.is_fast() {
-            let lowering = JsFastNumericLowering::classify(op)?;
-            return Ok((lowering.expression(&lowered_args), true));
-        }
+        let lowering = self.classify_numeric_operation(op, statement, delivery)?;
 
-        let carrier = JsNumericCarrier::for_scalar(op.domain).unwrap_or_else(|| {
-            crate::compiler_bug!(
-                CompilerStage::BackendLowering,
-                "JS backend has no numeric carrier for {:?}",
-                op.domain
-            )
-        });
-
-        // A proof removes only checked helper machinery, never the Invoke's failure edge.
-        if self.numeric_proofs.integer_operation_is_safe(statement)
-            && let Some(proven_expression) =
-                self.proven_integer_operation_expression(op, &carrier, &lowered_args)
-        {
-            return Ok((proven_expression, true));
-        }
-
-        let (helper_name, bounds) = js_numeric_helper_for_op(op);
-        if let NumericScalar::Number(scale) = op.domain
-            && matches!(
-                op.operator,
-                NumericOperator::Multiply | NumericOperator::Divide | NumericOperator::Power
-            )
-        {
-            lowered_args.push(number_scale_factor_js(scale.get()));
-        }
-        if let Some((min, max)) = bounds {
-            lowered_args.push(min);
-            lowered_args.push(max);
-        }
-
-        Ok((format!("{helper_name}({})", lowered_args.join(", ")), false))
-    }
-
-    /// Renders exact native-carrier arithmetic for one proven-safe integer operation.
-    ///
-    /// Proven operations evaluate operands once and preserve their exact Number or BigInt
-    /// domain, including truncating division and dividend-signed remainder.
-    /// WHY: JS still produces `-0` on the Number carrier where Moth has one canonical integer
-    ///       zero — `0 * negative`, `0 / negative`, `negative % divisor` dividing evenly and
-    ///       negating `0` — so those operations renormalise with `+ 0` without re-evaluating any
-    ///       operand, matching the checked helpers' success boundary. Negation also groups its
-    ///       operand inside the emitted unary minus, because a leading-minus operand spelling
-    ///       (a negative literal) would otherwise fuse into an invalid JS `--` update token.
-    ///
-    /// Returns `None` for every operation the proof table never proves (binary-float and Dec
-    /// domains, `Power`, and unsupported operator/domain combinations), leaving them on the
-    /// checked lowering path.
-    fn proven_integer_operation_expression(
-        &self,
-        op: HirNumericOp,
-        carrier: &JsNumericCarrier,
-        lowered_args: &[String],
-    ) -> Option<String> {
-        match (carrier, op.operator, lowered_args) {
-            (JsNumericCarrier::ExactInteger { .. }, NumericOperator::Add, [left, right]) => {
-                Some(format!("({left} + {right})"))
-            }
-            (JsNumericCarrier::ExactInteger { .. }, NumericOperator::Subtract, [left, right]) => {
-                Some(format!("({left} - {right})"))
-            }
-            (JsNumericCarrier::ExactInteger { .. }, NumericOperator::Multiply, [left, right]) => {
-                Some(format!("({left} * {right} + 0)"))
-            }
-            (
-                JsNumericCarrier::ExactInteger { .. },
-                NumericOperator::IntegerDivide,
-                [left, right],
-            ) => Some(format!("(Math.trunc({left} / {right}) + 0)")),
-            (JsNumericCarrier::ExactInteger { .. }, NumericOperator::Remainder, [left, right]) => {
-                Some(format!("({left} % {right} + 0)"))
-            }
-            (JsNumericCarrier::ExactInteger { .. }, NumericOperator::Negate, [left]) => {
-                Some(format!("(-({left}) + 0)"))
-            }
-            (JsNumericCarrier::BigInteger { .. }, NumericOperator::Add, [left, right]) => {
-                Some(format!("({left} + {right})"))
-            }
-            (JsNumericCarrier::BigInteger { .. }, NumericOperator::Subtract, [left, right]) => {
-                Some(format!("({left} - {right})"))
-            }
-            (JsNumericCarrier::BigInteger { .. }, NumericOperator::Multiply, [left, right]) => {
-                Some(format!("({left} * {right})"))
-            }
-            (
-                JsNumericCarrier::BigInteger { .. },
-                NumericOperator::IntegerDivide,
-                [left, right],
-            ) => Some(format!("({left} / {right})")),
-            (JsNumericCarrier::BigInteger { .. }, NumericOperator::Remainder, [left, right]) => {
-                Some(format!("({left} % {right})"))
-            }
-            (JsNumericCarrier::BigInteger { .. }, NumericOperator::Negate, [left]) => {
-                Some(format!("(-({left}))"))
-            }
-            _ => None,
-        }
+        Ok((lowering.expression(lowered_args), lowering.is_scalar()))
     }
 
     /// Render the raw carrier conversion for a proven-safe fallible integer narrowing.
@@ -814,87 +786,122 @@ impl<'hir> JsEmitter<'hir> {
         Ok(())
     }
 
-    /// Consume helper/call ABI envelopes at the boundary and define only the selected edge.
+    /// Lower one Invoke operation once and describe how its value reaches the success edge.
+    ///
+    /// WHAT: emits the capture and slot clearing a live edge needs, or stores a scalar numeric
+    ///       or proven integer-narrowing result directly in its single success destination, then
+    ///       returns the [`PreparedInvoke`] the caller selects its branch shape from.
+    /// WHY: callers must not re-derive whether a scalar result has a live failure edge; the same
+    ///      classification drives branch shape, slot clearing and live-edge pruning. A direct
+    ///      assignment evaluates its right-hand side before storing, so operands still read the
+    ///      previous binding.
     pub(crate) fn prepare_invoke(
         &mut self,
         id: HirNodeId,
         operation: &HirFallibleOperation,
         success_results: &[LocalId],
         error_result: LocalId,
-    ) -> Result<(String, bool), InfrastructureFailure> {
-        let (value, proven) = match operation {
+    ) -> Result<PreparedInvoke, InfrastructureFailure> {
+        let value = match operation {
             HirFallibleOperation::Call { target, args } => {
-                (self.lower_call_expression(target, *args)?, false)
+                self.lower_call_expression(target, *args)?
             }
             HirFallibleOperation::MapOp { op, receiver, args } => {
-                (self.lower_map_operation(*op, *receiver, *args)?, false)
+                self.lower_map_operation(*op, *receiver, *args)?
             }
             HirFallibleOperation::NumericOp { op, operands } => {
-                self.lower_numeric_operation(*op, operands, id)?
+                let (value, scalar) =
+                    self.lower_numeric_operation(*op, operands, id, NumericDelivery::Invoke)?;
+                if scalar {
+                    // A scalar numeric result has no live failure edge, so the operation's value
+                    // initialises its one success destination directly. HIR validation fixes a
+                    // numeric Invoke at one success destination, and the assignment evaluates its
+                    // right-hand side before storing, so operands still read the previous binding
+                    // without a staging temp or a clear-then-write pair.
+                    self.store_scalar_invoke_result(success_results, &value, "numeric")?;
+                    return Ok(PreparedInvoke::StoredScalar);
+                }
+                value
             }
             HirFallibleOperation::CastOp { policy, source } => {
                 let source = self.lower_expr(*source)?;
                 if let Some(value) = self.proven_narrowing_expression(*policy, &source, id) {
-                    (value, true)
-                } else {
-                    (js_cast_expression_for_policy(*policy, &source)?, false)
+                    // A proven narrowing performs the same physical Number/BigInt conversion as
+                    // the checked helper, but its range predicate can never fail. The same proof
+                    // query makes the failure edge dead, so this is the scalar-Invoke path.
+                    self.store_scalar_invoke_result(success_results, &value, "narrowing")?;
+                    return Ok(PreparedInvoke::StoredScalar);
                 }
+                js_cast_expression_for_policy(*policy, &source)?
             }
             HirFallibleOperation::LoopStepFailure { cause } => {
                 let code = cause.builtin_error_code();
-                (
-                    format!(
-                        "__moth_error_result({:?}, {})",
-                        code.default_message(),
-                        code.as_u32()
-                    ),
-                    false,
+                format!(
+                    "__moth_error_result({:?}, {})",
+                    code.default_message(),
+                    code.as_u32()
                 )
             }
             HirFallibleOperation::FormatFloat { source } => {
                 let value = self.lower_expr(*source)?;
                 let (scalar, precision) = self.float_source_scalar(*source, "FormatFloat");
-                (
-                    format!(
-                        "__moth_format_float({value}, {}, \"{scalar}\")",
-                        binary_float_precision_bits(precision)
-                    ),
-                    false,
+                format!(
+                    "__moth_format_float({value}, {}, \"{scalar}\")",
+                    binary_float_precision_bits(precision)
                 )
             }
             HirFallibleOperation::ValidateFloat { source } => {
                 let value = self.lower_expr(*source)?;
                 let (_, precision) = self.float_source_scalar(*source, "ValidateFloat");
-                (
-                    format!(
-                        "__moth_float_validate({value}, {})",
-                        binary_float_precision_bits(precision)
-                    ),
-                    false,
+                format!(
+                    "__moth_float_validate({value}, {})",
+                    binary_float_precision_bits(precision)
                 )
             }
         };
         let captured = self.next_temp_identifier("__invoke_result");
         self.emit_line(&format!("const {captured} = {value};"));
         // Clear both outcomes on every execution, including repeated loop visits. Capture the
-        // operation first because its operands may read a previous edge-local binding.
+        // operation first because its operands may read a previous edge-local binding. A dead
+        // failure edge never reads its slot, so only a reachable one is cleared.
         for local in success_results.iter().chain(std::iter::once(&error_result)) {
             let name = self.local_name(*local)?.to_owned();
             self.emit_line(&format!("{name} = undefined;"));
         }
-        Ok((captured, proven))
+        Ok(PreparedInvoke::Captured { value: captured })
     }
 
+    /// Store one scalar Invoke result in its sole success destination.
+    ///
+    /// WHY: a scalar numeric or proven-narrowing result has no live failure edge, so its value
+    ///      belongs in the success slot directly. HIR validation fixes these Invokes at one
+    ///      success destination, and the storing assignment evaluates its right-hand side first.
+    fn store_scalar_invoke_result(
+        &mut self,
+        success_results: &[LocalId],
+        value: &str,
+        kind: &str,
+    ) -> Result<(), InfrastructureFailure> {
+        let [result] = success_results else {
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JavaScript backend: scalar {kind} Invoke must have exactly one success destination"
+            )
+        };
+        self.emit_value_destination(HirLocalDestination::Define(*result), value)
+    }
+
+    /// Store a captured operation value in its success destinations.
+    ///
+    /// A scalar operation result never reaches this transfer: `prepare_invoke` stores it in place
+    /// and no capture temp exists for it.
     pub(crate) fn emit_invoke_success_transfer(
         &mut self,
         captured: &str,
-        proven: bool,
         results: &[LocalId],
     ) -> Result<(), InfrastructureFailure> {
         for (index, result) in results.iter().enumerate() {
-            let value = if proven {
-                captured.to_owned()
-            } else if results.len() == 1 {
+            let value = if results.len() == 1 {
                 format!("{captured}.value")
             } else {
                 format!("{captured}.value[{index}]")
@@ -1139,25 +1146,32 @@ impl<'hir> JsEmitter<'hir> {
                 error_result,
                 ..
             } => {
-                let (captured, proven) =
+                let prepared =
                     self.prepare_invoke(*id, operation, success_results, *error_result)?;
-                let condition = if proven {
-                    "true".to_owned()
-                } else {
-                    format!("{captured}.tag === \"ok\"")
-                };
-                self.emit_line(&format!("if ({condition}) {{"));
-                self.indent += 1;
-                self.emit_invoke_success_transfer(&captured, proven, success_results)?;
-                self.emit_line(&format!("{state_identifier} = {};", success.0));
-                self.indent -= 1;
-                self.emit_line("} else {");
-                self.indent += 1;
-                self.emit_invoke_error_transfer(&captured, *error_result)?;
-                self.emit_line(&format!("{state_identifier} = {};", failure.0));
-                self.indent -= 1;
-                self.emit_line("}");
-                self.emit_line("continue;");
+                match prepared {
+                    PreparedInvoke::StoredScalar => {
+                        // A scalar operation result always succeeds and `prepare_invoke` has
+                        // already stored its value, so the failure edge cannot execute: continue
+                        // to the success block.
+                        self.emit_line(&format!("{state_identifier} = {};", success.0));
+                        self.emit_line("continue;");
+                    }
+                    PreparedInvoke::Captured { value: captured } => {
+                        let condition = format!("{captured}.tag === \"ok\"");
+                        self.emit_line(&format!("if ({condition}) {{"));
+                        self.indent += 1;
+                        self.emit_invoke_success_transfer(&captured, success_results)?;
+                        self.emit_line(&format!("{state_identifier} = {};", success.0));
+                        self.indent -= 1;
+                        self.emit_line("} else {");
+                        self.indent += 1;
+                        self.emit_invoke_error_transfer(&captured, *error_result)?;
+                        self.emit_line(&format!("{state_identifier} = {};", failure.0));
+                        self.indent -= 1;
+                        self.emit_line("}");
+                        self.emit_line("continue;");
+                    }
+                }
             }
 
             HirTerminator::Match { scrutinee, arms } => {
@@ -1338,77 +1352,4 @@ impl<'hir> JsEmitter<'hir> {
             Ok(pattern_condition)
         }
     }
-}
-
-/// Selects the checked JS helper family and domain bounds for one HIR numeric operation.
-fn js_numeric_helper_for_op(op: HirNumericOp) -> (String, Option<(String, String)>) {
-    let carrier = JsNumericCarrier::for_scalar(op.domain).unwrap_or_else(|| {
-        crate::compiler_bug!(
-            CompilerStage::BackendLowering,
-            "JS backend has no numeric carrier for {:?}",
-            op.domain
-        )
-    });
-
-    let operation = match (carrier, op.operator) {
-        (
-            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
-            NumericOperator::Add,
-        ) => "add",
-        (
-            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
-            NumericOperator::Subtract,
-        ) => "sub",
-        (
-            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
-            NumericOperator::Multiply,
-        ) => "mul",
-        (
-            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
-            NumericOperator::IntegerDivide,
-        ) => "div",
-        (
-            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
-            NumericOperator::Remainder,
-        ) => "mod",
-        (
-            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
-            NumericOperator::Power,
-        ) => "pow",
-        (
-            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
-            NumericOperator::Negate,
-        ) => "neg",
-        (JsNumericCarrier::ScaledInteger { .. }, NumericOperator::Add) => "add",
-        (JsNumericCarrier::ScaledInteger { .. }, NumericOperator::Subtract) => "sub",
-        (JsNumericCarrier::ScaledInteger { .. }, NumericOperator::Multiply) => "mul",
-        (JsNumericCarrier::ScaledInteger { scale }, NumericOperator::Divide) if scale.get() > 0 => {
-            "div"
-        }
-        (JsNumericCarrier::ScaledInteger { scale }, NumericOperator::IntegerDivide)
-            if scale.get() == 0 =>
-        {
-            "idiv"
-        }
-        (JsNumericCarrier::ScaledInteger { .. }, NumericOperator::Remainder) => "mod",
-        (JsNumericCarrier::ScaledInteger { .. }, NumericOperator::Power) => "pow",
-        (JsNumericCarrier::ScaledInteger { .. }, NumericOperator::Negate) => "neg",
-        (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Add) => "add",
-        (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Subtract) => "sub",
-        (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Multiply) => "mul",
-        (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Divide) => "div",
-        (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Remainder) => "mod",
-        (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Power) => "pow",
-        (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Negate) => "neg",
-        _ => crate::compiler_bug!(
-            CompilerStage::BackendLowering,
-            "JS backend received unreachable numeric operation {op}"
-        ),
-    };
-    let family = carrier.helper_family();
-
-    (
-        format!("__moth_{family}_{operation}"),
-        carrier.integer_bounds_js(),
-    )
 }

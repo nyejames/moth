@@ -16,9 +16,11 @@ use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureSource,
 };
+use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::reachability::{
     HirReachability, collect_reachability_from_function_link_facts,
 };
+use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::public_interface::{
     PublicCallableReturnContract, PublicDeclarationSemantics, PublicFunctionCategory,
@@ -915,42 +917,169 @@ fn assert_link_facts_match_final_cfg(
         .expect("published link facts should describe the final CFG");
 }
 
+/// Published proof dispositions sampled from one module's numeric operations in HIR order.
+#[derive(Debug, PartialEq, Eq)]
+struct PublishedNumericProofs {
+    operations: Vec<bool>,
+    narrowings: Vec<bool>,
+}
+
 /// Checks each published proof against a fresh analysis of the executable's final HIR and returns
-/// the published dispositions of its numeric operations in HIR order.
+/// the published dispositions of its numeric operations and narrowings in HIR order.
 #[track_caller]
 fn assert_published_numeric_proofs_match_final_hir(
     module: &crate::compiler_frontend::module_compilation::Module,
-) -> Vec<bool> {
+) -> PublishedNumericProofs {
     let executable = &module.executable;
     let fresh = analyse_numeric_proofs(&executable.hir, &executable.type_environment);
-    executable
-        .hir
-        .blocks
-        .iter()
-        .flat_map(|block| {
-            let statement_operations = block.statements.iter().filter_map(|statement| {
-                matches!(statement.kind, HirStatementKind::NumericOp { .. }).then_some(statement.id)
-            });
-            let invoked_operation = match &block.terminator {
-                HirTerminator::Invoke {
-                    id,
-                    operation: HirFallibleOperation::NumericOp { .. },
-                    ..
-                } => Some(*id),
-                _ => None,
-            };
-            statement_operations.chain(invoked_operation)
-        })
-        .map(|id| {
+    let mut operations = Vec::new();
+    let mut narrowings = Vec::new();
+    for block in &executable.hir.blocks {
+        let statement_operations = block.statements.iter().filter_map(|statement| {
+            matches!(statement.kind, HirStatementKind::NumericOp { .. }).then_some(statement.id)
+        });
+        let invoked = match &block.terminator {
+            HirTerminator::Invoke {
+                id,
+                operation: HirFallibleOperation::NumericOp { .. },
+                ..
+            } => Some((*id, false)),
+            HirTerminator::Invoke {
+                id,
+                operation: HirFallibleOperation::CastOp { .. },
+                ..
+            } => Some((*id, true)),
+            _ => None,
+        };
+        for id in statement_operations {
             let published = executable.numeric_proofs.integer_operation_is_safe(id);
             assert_eq!(
                 published,
                 fresh.integer_operation_is_safe(id),
-                "published proof must match the final HIR"
+                "published operation proof must match the final HIR"
             );
-            published
+            operations.push(published);
+        }
+        if let Some((id, is_narrowing)) = invoked {
+            if is_narrowing {
+                let published = executable.numeric_proofs.integer_narrowing_is_safe(id);
+                assert_eq!(
+                    published,
+                    fresh.integer_narrowing_is_safe(id),
+                    "published narrowing proof must match the final HIR"
+                );
+                narrowings.push(published);
+            } else {
+                let published = executable.numeric_proofs.integer_operation_is_safe(id);
+                assert_eq!(
+                    published,
+                    fresh.integer_operation_is_safe(id),
+                    "published operation proof must match the final HIR"
+                );
+                operations.push(published);
+            }
+        }
+    }
+    PublishedNumericProofs {
+        operations,
+        narrowings,
+    }
+}
+
+/// Asserts one generated sidecar carries the late-seeded narrowing shape.
+///
+/// WHAT: the authored `cast small + 1` lowers to an Add Invoke whose success block performs the
+///       cast Invoke. The lane split moves the Add Invoke after that success block, so the Add
+///       keeps its own narrow operand proof while the cast's source is no longer seeded.
+/// WHY: this is the shape whose pre-split analysis proved the narrowing and whose final analysis
+///      cannot. Without it the published-versus-fresh comparison would not distinguish a stale
+///      pre-split table, and the sidecar operations would not be shown to have become Invokes.
+#[track_caller]
+fn assert_late_seeded_narrowing_sidecar(
+    module: &crate::compiler_frontend::module_compilation::Module,
+) {
+    let hir = &module.executable.hir;
+    let (add_id, add_block, cast_id) = hir
+        .blocks
+        .iter()
+        .find_map(|block| {
+            let HirTerminator::Invoke {
+                id: add_id,
+                operation: HirFallibleOperation::NumericOp { .. },
+                success,
+                ..
+            } = &block.terminator
+            else {
+                return None;
+            };
+            let HirTerminator::Invoke {
+                id: cast_id,
+                operation: HirFallibleOperation::CastOp { .. },
+                ..
+            } = &hir.block(*success)?.terminator
+            else {
+                return None;
+            };
+            Some((*add_id, block.id, *cast_id))
         })
-        .collect()
+        .expect("the sidecar must retain an Add Invoke feeding a cast Invoke");
+    assert!(
+        module
+            .executable
+            .numeric_proofs
+            .integer_operation_is_safe(add_id),
+        "the Add Invoke proves from the narrow source local written before it"
+    );
+    assert!(
+        !module
+            .executable
+            .numeric_proofs
+            .integer_narrowing_is_safe(cast_id),
+        "the late-seeded cast source cannot prove the narrowing in the final HIR"
+    );
+    let add_success = match &hir
+        .block(add_block)
+        .expect("the Add block exists")
+        .terminator
+    {
+        HirTerminator::Invoke { success, .. } => *success,
+        _ => unreachable!("the Add block was selected by its Invoke terminator"),
+    };
+    assert!(
+        add_success.0 < add_block.0,
+        "the lane split must move the Add Invoke after its own success block: success {add_success:?}, Invoke {add_block:?}"
+    );
+    let numeric_invokes = hir
+        .blocks
+        .iter()
+        .filter(|block| {
+            matches!(
+                &block.terminator,
+                HirTerminator::Invoke {
+                    operation: HirFallibleOperation::NumericOp { .. },
+                    ..
+                }
+            )
+        })
+        .count();
+    assert!(
+        numeric_invokes >= 2,
+        "the lane split must convert the trapping arithmetic into numeric Invokes"
+    );
+    assert!(
+        !hir.blocks.iter().any(|block| {
+            block.statements.iter().any(|statement| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::NumericOp {
+                        failure_mode: NumericFailureMode::Trap,
+                        ..
+                    }
+                )
+            })
+        }),
+        "every trapping statement in the lane function must have become an Invoke"
+    );
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -998,14 +1127,18 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
             "@utils pass_through\nsame I32 = pass_through(42)\n~[: same=[same]]\n",
             Some("$export\npass_through |value I32| -> I32:\n    return identity(value)\n;\n"),
         ),
-        // The sidecar's failure lane splits the block after `sum`. The second add then sits after
-        // an unwrapped write, so only the first sum keeps a proof. The published table must match
-        // the final HIR, not an intermediate table.
+        // The sidecar's failure lane splits at the trapping `seed + 1`, moving the authored
+        // `small + 1` Add Invoke into an appended success block. That Add still proves from the
+        // narrow `small` local written immediately before it, but its own success block now
+        // precedes it: the cast Invoke there no longer receives the Add result's interval. The
+        // pre-split analysis proved that narrowing; the final HIR cannot. The published table
+        // must match a fresh analysis of the final HIR, not the pre-split table, and the sidecar
+        // operations must actually have become Invokes.
         (
             LaneFixture::RewritesSidecarProofs,
-            "compute type T |value T| -> I32:\n    seed I32 = 3\n    sum I32 = seed + 1\n    doubled I32 = sum + sum\n    return doubled\n;\n\n\
+            "compute type T |value T, seed I32| -> I32:\n    a I32 = seed + 1\n    small U16 = 5\n    incremented I16 = cast small + 1 catch then 0\n    return cast incremented\n;\n\n\
              marker I32 = 1\n\
-             result I32 = compute(marker) catch then 0\n\
+             result I32 = compute(marker, 1) catch then 0\n\
              ~[: result=[result]]\n",
             None,
         ),
@@ -1082,6 +1215,9 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
             sidecar_proofs.push(assert_published_numeric_proofs_match_final_hir(
                 &sidecar.module,
             ));
+            if fixture == LaneFixture::RewritesSidecarProofs {
+                assert_late_seeded_narrowing_sidecar(&sidecar.module);
+            }
             sidecar_count += 1;
         }
         assert_eq!(
@@ -1091,8 +1227,11 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
         if fixture == LaneFixture::RewritesSidecarProofs {
             assert_eq!(
                 sidecar_proofs,
-                [vec![true, false]],
-                "{fixture:?}: only the first sum keeps its proof after the lane split"
+                [PublishedNumericProofs {
+                    operations: vec![false, true],
+                    narrowings: vec![false],
+                }],
+                "{fixture:?}: the Add keeps its own proof, while the late-seeded cast narrowing loses its fact"
             );
         }
     }

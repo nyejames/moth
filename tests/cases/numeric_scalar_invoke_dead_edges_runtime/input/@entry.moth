@@ -1,0 +1,60 @@
+-- A proven operation and a total float negation precede a real division failure.
+-- The proven add lowers to a scalar with no error edge and the negation stays scalar.
+-- The division's Invoke terminates its block; its success continuation computes the
+-- casts and return. The caught failure must still recover its builtin code, and the call
+-- counter proves the earlier statements ran before the failure.
+
+proven_total_then_failure |calls ~I32, factor F64, divisor I32| -> F64, Error!:
+    ~calls += 1
+    small ~U32 = 1
+    proven = small + small
+    negated = -factor
+    hazard = 100 // divisor
+    proven_float F64 = cast proven
+    hazard_float F64 = cast hazard
+    return negated + proven_float + hazard_float
+;
+
+-- The second add in each chain is an Invoke in the first add's sole success
+-- block. The seeded interval proves seeded_chain's second add scalar, while
+-- overflowing_chain's near-maximum interval keeps the second add checked and
+-- really fails for the widest I16 input.
+seeded_chain |value I16| -> I32, Error!:
+    wide I32 = cast value
+    first = wide + 7
+    second = first + 7
+    return second
+;
+
+overflowing_chain |value I16| -> I32, Error!:
+    wide I32 = cast value
+    near_max = wide + 2147450880
+    over = near_max + 1000
+    return over
+;
+
+calls ~I32 = 0
+ok_result = proven_total_then_failure(~calls, 1.25, 4) catch |ok_failure|:
+    then -1.0
+;
+fail_code ~U32 = 0
+failed_result = proven_total_then_failure(~calls, 1.25, 0) catch |failed_failure|:
+    ~fail_code = copy failed_failure.code
+    then -1.0
+;
+seeded_positive = seeded_chain(1000) catch:
+    then 0
+;
+seeded_negative = seeded_chain(-32768) catch:
+    then 0
+;
+overflow_ok = overflowing_chain(0) catch:
+    then 0
+;
+overflow_code ~U32 = 0
+overflow_failed = overflowing_chain(32767) catch |overflow_error|:
+    ~overflow_code = copy overflow_error.code
+    then 0
+;
+
+~[:dead edges ok=[ok_result] failed=[failed_result] code=[fail_code] calls=[calls] seeded=[seeded_positive]/[seeded_negative] overflow=[overflow_ok]/[overflow_failed] overflow-code=[overflow_code]]

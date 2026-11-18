@@ -5,6 +5,7 @@
 //! harder to audit than a single stage-local support surface.
 
 pub(super) use crate::backends::js::JsFunctionEmissionPolicy;
+use crate::backends::js::JsModule;
 pub(super) use crate::backends::js::test_symbol_helpers::{
     expected_dev_field_name, expected_dev_function_name, expected_dev_local_name,
 };
@@ -482,6 +483,41 @@ pub(super) fn default_config() -> JsLoweringConfig {
     JsLoweringConfig::direct_js(false)
 }
 
+/// Lowers one single-block module whose entry function is the only emitted function.
+///
+/// WHAT: builds the string table, path interner and module name every single-entry fixture uses,
+///       then lowers through the standard configuration.
+/// WHY: fixtures differ only in their statement, locals and return shape, so one lowering tail
+///      keeps the generated module scaffolding from drifting between them.
+fn lower_single_entry_module(
+    type_environment: TypeEnvironment,
+    expressions: HirExpressionStore,
+    block: HirBlock,
+    function: HirFunction,
+) -> JsModule {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let module = build_module(
+        expressions,
+        &mut path_fork,
+        &mut string_table,
+        "main",
+        vec![block],
+        function,
+        &[(LocalId(0), "result")],
+    );
+
+    lower_hir_to_js(
+        &module,
+        &NumericProofs::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("JS lowering should succeed")
+}
+
 /// Builds and lowers a minimal module whose single statement defines local 0 as `result_type`.
 ///
 /// WHAT: takes the prepared expression store and the statement kind; the block, function, named
@@ -494,8 +530,6 @@ fn lower_minimal_module_with_single_definition(
     statement_kind: HirStatementKind,
     result_type: TypeId,
 ) -> String {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let region = RegionId(0);
 
     let block = HirBlock {
@@ -516,26 +550,7 @@ fn lower_minimal_module_with_single_definition(
         )),
     };
 
-    let module = build_module(
-        expressions,
-        &mut path_fork,
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "result")],
-    );
-
-    lower_hir_to_js(
-        &module,
-        &NumericProofs::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-        &path_fork.snapshot_table(),
-    )
-    .expect("JS lowering should succeed")
-    .source
+    lower_single_entry_module(type_environment, expressions, block, function).source
 }
 
 /// Builds and lowers a minimal module with one numeric operation statement.
@@ -562,6 +577,62 @@ pub(super) fn lower_minimal_module_with_numeric_op(
         },
         result_type,
     )
+}
+
+/// One lowered fixture whose entry returns a single scalar local.
+pub(super) struct ScalarEntry {
+    pub(super) source: String,
+    pub(super) function_name: String,
+}
+
+/// Builds and lowers a single-statement entry that returns its result local as a scalar.
+///
+/// WHAT: owns the block, scalar return value and function contract shared by every fixture that
+///       observes one emitted operation value directly, then lowers through the single-entry
+///       scaffold.
+/// WHY: fast and total scalar fixtures differ only in their statement and operand types; one
+///      scaffold keeps their return shape, naming and lowering setup from drifting apart.
+pub(super) fn lower_returned_scalar_entry(
+    type_environment: TypeEnvironment,
+    mut expressions: HirExpressionStore,
+    statement_kind: HirStatementKind,
+    result_type: TypeId,
+) -> ScalarEntry {
+    let region = RegionId(0);
+    let returned = expression(
+        HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+        result_type,
+        region,
+        ValueKind::RValue,
+        &mut expressions,
+    );
+    let block = HirBlock {
+        id: BlockId(0),
+        region,
+        locals: vec![local(0, result_type, region)],
+        statements: vec![statement(1, statement_kind)],
+        terminator: HirTerminator::Return(append_values(&[returned], &mut expressions)),
+    };
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![],
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![result_type],
+            None,
+        )),
+    };
+
+    let lowered = lower_single_entry_module(type_environment, expressions, block, function);
+
+    ScalarEntry {
+        source: lowered.source,
+        function_name: lowered
+            .function_name_by_id
+            .get(&FunctionId(0))
+            .cloned()
+            .expect("the fixture carries its entry function name"),
+    }
 }
 
 /// Builds and lowers a minimal module containing one fast compound write-back conversion.

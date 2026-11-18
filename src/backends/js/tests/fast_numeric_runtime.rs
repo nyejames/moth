@@ -22,7 +22,6 @@ use crate::compiler_frontend::hir::numeric::{
     HirFastStoreConversion, HirNumericOp, HirNumericOperands, LoopStepFailureCause,
     NumericFailureMode,
 };
-use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use moth_lexical::numeric::decimal::NumberScale;
@@ -72,18 +71,12 @@ fn lower_fast_binary(
     )
 }
 
-/// One lowered fast fixture whose entry returns the operation result.
-struct FastEntry {
-    source: String,
-    function_name: String,
-}
-
 /// Lowers one fast unary operation as the entry's returned scalar.
 fn lower_fast_unary_entry(
     operator: NumericOperator,
     scalar: FixedScalar,
     operand: FixedScalarValue,
-) -> FastEntry {
+) -> ScalarEntry {
     let ty = builtin_type_ids::fixed_scalar(scalar);
     let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
@@ -104,7 +97,7 @@ fn lower_fast_binary_entry(
     scalar: FixedScalar,
     left: FixedScalarValue,
     right: FixedScalarValue,
-) -> FastEntry {
+) -> ScalarEntry {
     let ty = builtin_type_ids::fixed_scalar(scalar);
     let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
@@ -125,74 +118,24 @@ fn lower_fast_entry(
     failure_mode: NumericFailureMode,
     operands: HirNumericOperands,
     result_type: crate::compiler_frontend::datatypes::ids::TypeId,
-    mut expressions: HirExpressionStore,
-) -> FastEntry {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    expressions: HirExpressionStore,
+) -> ScalarEntry {
     let (type_environment, _) = build_type_environment();
-    let region = RegionId(0);
-    let returned = expression(
-        HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-        result_type,
-        region,
-        ValueKind::RValue,
-        &mut expressions,
-    );
-    let returned = append_values(&[returned], &mut expressions);
-    let block = HirBlock {
-        id: BlockId(0),
-        region,
-        locals: vec![local(0, result_type, region)],
-        statements: vec![statement(
-            1,
-            HirStatementKind::NumericOp {
-                op,
-                failure_mode,
-                operands,
-                result: HirLocalDestination::Define(LocalId(0)),
-            },
-        )],
-        terminator: HirTerminator::Return(returned),
-    };
-    let function = HirFunction {
-        id: FunctionId(0),
-        entry: BlockId(0),
-        params: vec![],
-        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
-            vec![result_type],
-            None,
-        )),
-    };
-    let module = build_module(
+    lower_returned_scalar_entry(
+        type_environment,
         expressions,
-        &mut path_fork,
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "result")],
-    );
-    let lowered = lower_hir_to_js(
-        &module,
-        &NumericProofs::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-        &path_fork.snapshot_table(),
+        HirStatementKind::NumericOp {
+            op,
+            failure_mode,
+            operands,
+            result: HirLocalDestination::Define(LocalId(0)),
+        },
+        result_type,
     )
-    .expect("fast fixture should lower");
-    FastEntry {
-        function_name: lowered
-            .function_name_by_id
-            .get(&FunctionId(0))
-            .cloned()
-            .expect("fixture entry has a generated name"),
-        source: lowered.source,
-    }
 }
 
 /// Executes the lowered entry and renders its scalar result or thrown message.
-fn run_fast_entry(entry: &FastEntry) -> String {
+fn run_fast_entry(entry: &ScalarEntry) -> String {
     let mut script = entry.source.clone();
     script.push_str(&format!(
         "\ntry {{ console.log(String({}())); }} catch (error) {{ console.log(\"trap:\" + error.message); }}",
@@ -800,7 +743,27 @@ fn fast_helpers_are_absent_from_ordinary_and_dec_modules() {
     assert!(ordinary.contains("__moth_int_add("));
 
     let dec = lower_dec_multiplication();
-    assert!(dec.contains("function __moth_number_mul("));
+    assert!(dec.contains("function __moth_number_round_half_even("));
+    assert!(
+        dec.contains("__moth_number_round_half_even((10n * 10n), 10n)"),
+        "a total Dec multiply must lower to the shared half-even kernel"
+    );
+    for absent in [
+        "function __moth_number_add(",
+        "function __moth_number_sub(",
+        "function __moth_number_mul(",
+        "function __moth_number_neg(",
+        "function __moth_number_div(",
+        "function __moth_number_idiv(",
+        "function __moth_number_mod(",
+        "function __moth_number_pow(",
+        "function __moth_numeric_trap(",
+    ] {
+        assert!(
+            !dec.contains(absent),
+            "a total Dec multiply must not emit or reference {absent}"
+        );
+    }
     assert!(!dec.contains("function __moth_fast_"));
     assert!(!dec.contains("BigInt.asIntN(64"));
 

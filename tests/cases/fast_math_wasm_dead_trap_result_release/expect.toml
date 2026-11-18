@@ -1,0 +1,17 @@
+entry = "."
+
+# A trapping result stays trapping in release even when no later statement reads it.
+# Dead-result elimination must not erase the runtime trap on either backend.
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = ""
+runtime_error_contains = ["Division by zero"]
+
+[backends.html_wasm]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = ""
+runtime_trap_contains = ["unreachable"]

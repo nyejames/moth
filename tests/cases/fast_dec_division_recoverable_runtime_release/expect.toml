@@ -1,0 +1,20 @@
+entry = "."
+
+# Release must keep Dec ordinary under `$fast_math`: the dividing and exponentiating
+# operations still recover their builtin codes and no fast or total helper family appears.
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = "recovered=7 observed=-1.5 power=9/302"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_not_contain = [
+    "function __moth_fast_",
+    "function __moth_number_add(",
+    "function __moth_number_sub(",
+    "function __moth_number_mul(",
+    "function __moth_number_neg(",
+]
