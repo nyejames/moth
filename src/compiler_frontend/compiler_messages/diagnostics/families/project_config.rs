@@ -42,7 +42,7 @@ unit_code! {
         EscapesSymlink = 8,
         EscapesProjectRoot = 9,
         HiddenPath = 10,
-        ReservedConfigFile = 11,
+        ReservedConfigDirectory = 11,
     }
 }
 
@@ -60,7 +60,7 @@ impl InvalidCompileTimePathCode {
             InvalidCompileTimePathReason::EscapesSymlink => Self::EscapesSymlink,
             InvalidCompileTimePathReason::EscapesProjectRoot => Self::EscapesProjectRoot,
             InvalidCompileTimePathReason::HiddenPath => Self::HiddenPath,
-            InvalidCompileTimePathReason::ReservedConfigFile => Self::ReservedConfigFile,
+            InvalidCompileTimePathReason::ReservedConfigDirectory => Self::ReservedConfigDirectory,
         }
     }
 
@@ -96,7 +96,7 @@ impl InvalidCompileTimePathCode {
             Self::EscapesSymlink => InvalidCompileTimePathReason::EscapesSymlink,
             Self::EscapesProjectRoot => InvalidCompileTimePathReason::EscapesProjectRoot,
             Self::HiddenPath => InvalidCompileTimePathReason::HiddenPath,
-            Self::ReservedConfigFile => InvalidCompileTimePathReason::ReservedConfigFile,
+            Self::ReservedConfigDirectory => InvalidCompileTimePathReason::ReservedConfigDirectory,
         })
     }
 }

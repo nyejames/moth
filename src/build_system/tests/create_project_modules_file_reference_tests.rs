@@ -1,25 +1,28 @@
 use super::super::file_reference_resolution::{
-    SingleFileReferenceOutcome, SingleFileReferenceResolver, stable_case_mismatch,
+    FileReferenceResolver, SingleFileReferenceOutcome, SingleFileReferenceResolver,
+    stable_case_mismatch,
 };
 use super::super::resource_inputs::ResourceInputRegistry;
+use super::super::source_tree_index::{SourceTreeIndex, SourceTreeProjectContext};
+use crate::builder_surface::SourcePackageRegistry;
+use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     InvalidCompileTimePathCode, InvalidCompileTimePathView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_resolved_failure_for_test;
-#[cfg(unix)]
-use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceFailure;
 use crate::compiler_frontend::paths::file_references::{
-    PreparedFileReference, PreparedFileReferenceClass,
+    PreparedFileReference, PreparedFileReferenceClass, ResolvedFileReferenceFailure,
+    ResolvedFileReferenceOutcome,
 };
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::source::{LocalSpan, SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::projects::settings::Config;
 
 use std::fs;
 
-#[cfg(unix)]
 fn invalid_path_reason(
     failure: ResolvedFileReferenceFailure,
 ) -> Option<InvalidCompileTimePathCode> {
@@ -31,13 +34,24 @@ fn invalid_path_reason(
         .map(|facts| facts.reason)
 }
 
-#[cfg(unix)]
 fn has_invalid_path_reason(
     outcome: SingleFileReferenceOutcome,
     expected: InvalidCompileTimePathCode,
 ) -> bool {
     match outcome {
         SingleFileReferenceOutcome::Diagnostic(diagnostic) => {
+            invalid_path_reason(diagnostic) == Some(expected)
+        }
+        _ => false,
+    }
+}
+
+fn has_resolved_outcome_reason(
+    outcome: ResolvedFileReferenceOutcome,
+    expected: InvalidCompileTimePathCode,
+) -> bool {
+    match outcome {
+        ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
             invalid_path_reason(diagnostic) == Some(expected)
         }
         _ => false,
@@ -112,7 +126,11 @@ fn synthetic_physical_resolution_cache_reuses_settled_outcome() {
 }
 
 #[test]
-fn synthetic_moth_value_skips_physical_resolution_for_missing_target() {
+fn synthetic_moth_value_skips_physical_resolution() {
+    // `@"@config.moth"` is classified `SourceKindNoFileValue` from its `.moth` suffix like any
+    // other source value. AST owns that class and rejects it with `MothFileHasNoValue`
+    // (`MOTH-SYNTAX-0023`), so Stage 0 must not manufacture a reserved-config-directory reason,
+    // a resource record or a watch interest for the config-file spelling.
     let temp = tempfile::tempdir().expect("test root should be created");
     let root = fs::canonicalize(temp.path()).expect("test root should canonicalize");
     let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
@@ -122,35 +140,199 @@ fn synthetic_moth_value_skips_physical_resolution_for_missing_target() {
     let mut strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut path_syntax = PathSyntaxTable::new();
-    let path = path_fork
-        .try_intern_portable_path("missing.moth", &mut strings)
-        .expect("test path fits");
-    let path_syntax_id = path_syntax
-        .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
-        .expect("test path syntax row should fit");
-    let reference = PreparedFileReference {
-        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-        source_file: SourceId::COMPILATION_ROOT,
-        path_syntax: path_syntax_id,
-        class: PreparedFileReferenceClass::SourceKindNoFileValue,
-    };
+    let owner = root.join("main.moth");
 
-    let resolved = resolver
-        .resolve(
-            &root.join("main.moth"),
-            &path_syntax,
-            &reference,
-            &mut strings,
-            &path_fork,
-        )
-        .expect("a .moth value should be identified without a physical target");
+    for authored in ["missing.moth", "@config.moth"] {
+        let path = path_fork
+            .try_intern_portable_path(authored, &mut strings)
+            .expect("test path fits");
+        let path_syntax_id = path_syntax
+            .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+            .expect("test path syntax row should fit");
+        let reference = PreparedFileReference {
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            source_file: SourceId::COMPILATION_ROOT,
+            path_syntax: path_syntax_id,
+            class: PreparedFileReferenceClass::SourceKindNoFileValue,
+        };
 
-    assert!(matches!(
-        resolved.outcome,
-        SingleFileReferenceOutcome::IdentifiedSourceKind
-    ));
+        let resolved = resolver
+            .resolve(&owner, &path_syntax, &reference, &mut strings, &path_fork)
+            .expect("a .moth value should be identified without a physical target");
+
+        assert!(
+            matches!(
+                resolved.outcome,
+                SingleFileReferenceOutcome::IdentifiedSourceKind
+            ),
+            "{authored} outcome: {:?}",
+            resolved.outcome
+        );
+    }
     assert!(resource_inputs.records().is_empty());
     assert!(resource_inputs.missing_watch_interests().is_empty());
+}
+
+#[test]
+fn synthetic_config_named_directory_is_rejected_for_resources_and_content() {
+    // A directory sharing the reserved config filename is inert to source discovery. A physical
+    // reference into it must be diagnosed lexically before any target lookup, resource record or
+    // missing-target watch.
+    let temp = tempfile::tempdir().expect("test root should be created");
+    let root = fs::canonicalize(temp.path()).expect("test root should canonicalize");
+    let config_directory = root.join("@config.moth");
+    fs::create_dir_all(&config_directory).expect("config-named directory should be created");
+    fs::write(config_directory.join("logo.svg"), "resource")
+        .expect("resource inside the config-named directory should be created");
+
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let mut resolver =
+        SingleFileReferenceResolver::new(root.clone(), &source_file_kinds, &mut resource_inputs);
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut path_syntax = PathSyntaxTable::new();
+    let owner = root.join("main.moth");
+
+    let mut resolve = |authored: &str, class: PreparedFileReferenceClass| {
+        let path = path_fork
+            .try_intern_portable_path(authored, &mut strings)
+            .expect("test path fits");
+        let path_syntax_id = path_syntax
+            .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+            .expect("test path syntax row should fit");
+        let reference = PreparedFileReference {
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            source_file: SourceId::COMPILATION_ROOT,
+            path_syntax: path_syntax_id,
+            class,
+        };
+        resolver
+            .resolve(&owner, &path_syntax, &reference, &mut strings, &path_fork)
+            .expect("config-directory references should stay a typed outcome")
+    };
+
+    for authored in ["@config.moth/logo.svg", "@config.moth/missing.svg"] {
+        assert!(
+            has_invalid_path_reason(
+                resolve(authored, PreparedFileReferenceClass::ResourceFile).outcome,
+                InvalidCompileTimePathCode::ReservedConfigDirectory
+            ),
+            "{authored} must be rejected as an excluded directory"
+        );
+    }
+    assert!(
+        has_invalid_path_reason(
+            resolve(
+                "@config.moth/notes.mtf",
+                PreparedFileReferenceClass::ContentSource
+            )
+            .outcome,
+            InvalidCompileTimePathCode::ReservedConfigDirectory
+        ),
+        "content under the excluded directory must be rejected"
+    );
+    assert!(resource_inputs.records().is_empty());
+    assert!(resource_inputs.missing_watch_interests().is_empty());
+}
+
+#[test]
+fn directory_resolution_rejects_targets_inside_a_config_named_directory() {
+    // Directory discovery skips a `@config.moth` directory at every depth. A content reference
+    // into it would otherwise miss the source index (an infrastructure failure on user input),
+    // and a resource reference would register bytes and watches from an excluded subtree.
+    let temp = tempfile::tempdir().expect("test root should be created");
+    let root = temp.path().to_path_buf();
+    let src = root.join("src");
+    let config_directory = src.join("@config.moth");
+    fs::create_dir_all(&config_directory).expect("config-named directory should be created");
+    fs::write(src.join("@entry.moth"), "").expect("entry root should be created");
+    fs::write(config_directory.join("notes.mtf"), "").expect("content file should be created");
+    fs::write(config_directory.join("logo.png"), "not source")
+        .expect("resource file should be created");
+
+    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
+    let canonical_src = fs::canonicalize(&src).expect("entry root should canonicalize");
+    let mut discovery_strings = StringTable::new();
+    let mut config = Config::new(canonical_root.clone());
+    config.project_name = String::from("config_directory_fixture");
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    let source_packages = SourcePackageRegistry::default();
+    let external_import_providers = ExternalImportProviderRegistry::default();
+    let index = SourceTreeIndex::discover(
+        canonical_src.clone(),
+        SourceTreeProjectContext {
+            project_root: &canonical_root,
+            validated_output_settings: None,
+        },
+        &config,
+        &source_packages,
+        &source_file_kinds,
+        &external_import_providers,
+        &mut discovery_strings,
+    )
+    .expect("source tree index should build");
+    let consumer_module = index
+        .module_identities()
+        .module_id_for_directory(&canonical_src)
+        .expect("the selected entry root should be a module");
+
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let source_files = SourceDatabase::empty();
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut path_syntax = PathSyntaxTable::new();
+    let mut discovered_content_sources = Vec::new();
+
+    let mut resolve = |authored: &str, class: PreparedFileReferenceClass| {
+        let path = path_fork
+            .try_intern_portable_path(authored, &mut strings)
+            .expect("test path fits");
+        let path_syntax_id = path_syntax
+            .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+            .expect("test path syntax row should fit");
+        let reference = PreparedFileReference {
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            source_file: SourceId::COMPILATION_ROOT,
+            path_syntax: path_syntax_id,
+            class,
+        };
+        FileReferenceResolver::new(&index, &mut resource_inputs)
+            .resolve(
+                consumer_module,
+                &path_syntax,
+                &reference,
+                &source_files,
+                &mut strings,
+                &path_fork,
+                &mut discovered_content_sources,
+            )
+            .expect("config-directory references should stay a typed outcome")
+    };
+
+    for authored in ["@config.moth/logo.png", "@config.moth/missing.svg"] {
+        assert!(
+            has_resolved_outcome_reason(
+                resolve(authored, PreparedFileReferenceClass::ResourceFile).outcome,
+                InvalidCompileTimePathCode::ReservedConfigDirectory
+            ),
+            "{authored} must be rejected as an excluded directory"
+        );
+    }
+    assert!(
+        has_resolved_outcome_reason(
+            resolve(
+                "@config.moth/notes.mtf",
+                PreparedFileReferenceClass::ContentSource
+            )
+            .outcome,
+            InvalidCompileTimePathCode::ReservedConfigDirectory
+        ),
+        "content under the excluded directory must be rejected"
+    );
+    assert!(resource_inputs.records().is_empty());
+    assert!(resource_inputs.missing_watch_interests().is_empty());
+    assert!(discovered_content_sources.is_empty());
 }
 
 #[test]

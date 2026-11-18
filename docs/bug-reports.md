@@ -25,12 +25,12 @@ A casual log of bugs and limitations found during other work and left for later 
 - Observed: a folded call with no source span cannot be matched against skipped statement spans, so the release path assumes it was live. If such a call originates in a skipped handler or after a terminator and its callee may trap or fail, release could reject `$infallible` where debug accepts. No test reached this case. The numeric backend contract calls for identical debug and release verdicts.
 - Investigate: determine whether any legal source or materialised callable can produce a spanless erased call in skipped code. Add a focused debug/release parity test if reachable. If impossible, document and enforce that invariant at the producer, then remove the fallback ambiguity. Otherwise carry explicit liveness or enclosing statement identity into the ledger rather than guessing from absent span data.
 
-### `ReservedConfigFile` path reason is unreachable for file values
+### A symlink alias into a `@config.moth` directory bypasses its exclusion
 
-- Found: Core/Builder package namespace and config filename work, 2026-11.
-- Where: `src/build_system/create_project_modules/file_reference_resolution.rs` (directory resolver around line 115, single-file resolver around line 922) and `InvalidCompileTimePathReason::ReservedConfigFile`.
-- Observed: a file value such as `@"@config.moth"` is rejected by the AST first with `MOTH-SYNTAX-0023` (`invalid_expression.moth_file_has_no_value`). The resolver check that would report `invalid_compile_time_path.reserved_config_file` never runs for it, although both resolver comments say the reserved filename is reported instead of the no-value reason. The case `file_value_reserved_config_reference_rejected` pins the AST diagnostic.
-- Investigate: either let the reserved filename win before the AST no-value check or delete the reason, its code, key and renderer branch along with the misleading comments.
+- Found: reserved config directory fix, 2026-11. Traced, not reproduced.
+- Where: `SourceTreeSkipPolicy::canonical_directory_is_skipped` in `src/build_system/create_project_modules/source_tree_index.rs` and `authored_directory_exclusion` in `file_reference_resolution.rs`.
+- Observed: discovery skips a `@config.moth` directory only by its listed name, and the resolvers reject it only by authored components. A visible alias such as `src/alias -> src/@config.moth` is traversed and indexed under its canonical path, and `@alias/notes.mtf` can resolve into the excluded subtree. Hidden `_` directories have canonical-ancestry checks in both places for this case. Separately, dependency clauses that enter a `@config.moth` directory are rejected but the message says the import names `@config.moth` itself.
+- Investigate: whether the config directory exclusion should match the hidden-subtree rule in canonical ancestry. If so, add it to the skip policy and both resolvers' canonical checks with a Unix symlink test.
 
 ### Damaged package set classification is path-only
 

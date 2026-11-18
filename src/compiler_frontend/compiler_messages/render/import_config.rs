@@ -558,8 +558,8 @@ pub(crate) fn invalid_compile_time_path_message(
         InvalidCompileTimePathReason::HiddenPath => format!(
             "Compile-time path '{path_text}' enters a directory whose name starts with '_'. Such directories are excluded from the project's source tree, so they cannot be imported or used as resources."
         ),
-        InvalidCompileTimePathReason::ReservedConfigFile => format!(
-            "Compile-time path '{path_text}' names '@config.moth'. That file is a build-owned configuration source, not a module helper, so it cannot be imported or used as a resource."
+        InvalidCompileTimePathReason::ReservedConfigDirectory => format!(
+            "Compile-time path '{path_text}' enters a directory named '@config.moth'. That directory is excluded from the source tree, so files inside it cannot be imported or used as resources."
         ),
     }
 }

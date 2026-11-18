@@ -22,7 +22,7 @@ use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::{
-    dependency_path_references_config_file, file_name_is_module_root_file,
+    file_name_is_config_file, file_name_is_module_root_file,
 };
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -112,18 +112,8 @@ impl<'a> FileReferenceResolver<'a> {
             .try_path_for_token(reference.path_syntax, reference.span)?
             .root;
 
-        // The build-only config source is reserved even when a file value names it directly.
-        // This precedes the class-based early returns so `@config.moth` reports the reserved
-        // filename rather than a source-kind no-value reason.
-        if dependency_path_references_config_file(authored_path, path_fork, string_table) {
-            return Ok(self.diagnostic_outcome(
-                source_file,
-                reference,
-                authored_path,
-                InvalidCompileTimePathReason::ReservedConfigFile,
-            ));
-        }
-
+        // `.moth` values, including `@config.moth`, are never physical targets: AST owns their
+        // `MothFileHasNoValue` rejection. A `@config.moth` directory component is rejected below.
         match reference.class {
             PreparedFileReferenceClass::SiteRoot | PreparedFileReferenceClass::Extensionless => {
                 return Ok(ResolvedFileReference {
@@ -171,24 +161,8 @@ impl<'a> FileReferenceResolver<'a> {
             });
         }
 
-        // Only directory components can be hidden; a final file name such as `_helper.moth`
-        // remains eligible. This lexical check keeps the authored span and adds no watcher edge
-        // for a hidden target that may not exist.
-        let enters_hidden_directory =
-            authored_components
-                .split_last()
-                .is_some_and(|(_file, directories)| {
-                    directories
-                        .iter()
-                        .any(|component| component.starts_with('_'))
-                });
-        if enters_hidden_directory {
-            return Ok(self.diagnostic_outcome(
-                source_file,
-                reference,
-                authored_path,
-                InvalidCompileTimePathReason::HiddenPath,
-            ));
+        if let Some(reason) = authored_directory_exclusion(&authored_components) {
+            return Ok(self.diagnostic_outcome(source_file, reference, authored_path, reason));
         }
 
         let candidate = join_components(&root_directory, &authored_components);
@@ -830,6 +804,31 @@ fn invalid_components_failure(
     None
 }
 
+/// Report the source-tree exclusion an authored path's directory prefix enters.
+///
+/// Only non-final components are proven directories: a final `_helper.moth` is an ordinary source
+/// file and a final `@config.moth` is a source-kind value owned by AST. The check stays lexical so
+/// resolution rejects the path before an unindexed target reaches the source index or an excluded
+/// subtree gains a resource record or missing-target watch. The reserved config directory is
+/// tested first because it is the more specific reason when both rules match.
+fn authored_directory_exclusion(components: &[String]) -> Option<InvalidCompileTimePathReason> {
+    let (_, directories) = components.split_last()?;
+    if directories
+        .iter()
+        .any(|component| file_name_is_config_file(component))
+    {
+        return Some(InvalidCompileTimePathReason::ReservedConfigDirectory);
+    }
+    if directories
+        .iter()
+        .any(|component| component.starts_with('_'))
+    {
+        return Some(InvalidCompileTimePathReason::HiddenPath);
+    }
+
+    None
+}
+
 /// One retained invalid-path failure for a synthesized single-file reference.
 fn invalid_path_outcome(
     authored_path: PathId,
@@ -919,19 +918,9 @@ impl<'a> SingleFileReferenceResolver<'a> {
             outcome: SingleFileReferenceOutcome::NoPhysicalTarget,
         };
 
-        // Match the directory resolver's reserved-file ordering so a file value naming
-        // `@config.moth` reports the reserved filename instead of a source-kind no-value reason.
-        if dependency_path_references_config_file(authored_path, path_fork, string_table) {
-            return Ok(SingleFileResolvedReference {
-                outcome: invalid_path_outcome(
-                    authored_path,
-                    InvalidCompileTimePathReason::ReservedConfigFile,
-                    reference,
-                ),
-                ..result
-            });
-        }
-
+        // The build-only config spelling is `SourceKindNoFileValue` like any other `.moth` value;
+        // AST owns that rejection (`MothFileHasNoValue`). Only a `@config.moth` directory
+        // component is rejected by Stage 0, below.
         match reference.class {
             PreparedFileReferenceClass::SiteRoot | PreparedFileReferenceClass::Extensionless => {
                 return Ok(result);
@@ -961,21 +950,9 @@ impl<'a> SingleFileReferenceResolver<'a> {
             });
         }
 
-        let enters_hidden_directory =
-            authored_components
-                .split_last()
-                .is_some_and(|(_file, directories)| {
-                    directories
-                        .iter()
-                        .any(|component| component.starts_with('_'))
-                });
-        if enters_hidden_directory {
+        if let Some(reason) = authored_directory_exclusion(&authored_components) {
             return Ok(SingleFileResolvedReference {
-                outcome: invalid_path_outcome(
-                    authored_path,
-                    InvalidCompileTimePathReason::HiddenPath,
-                    reference,
-                ),
+                outcome: invalid_path_outcome(authored_path, reason, reference),
                 ..result
             });
         }
