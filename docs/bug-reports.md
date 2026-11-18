@@ -74,13 +74,6 @@ A casual log of bugs and limitations found during other work and left for later 
 - Observed: validation accepts spaces, Unicode and `%` in the `origin` setting. Emitted URLs use the authored spelling verbatim, so a browser requests `/caf%C3%A9/...` for origin `/café` and the dev server's literal prefix match returns 404. It is undefined whether an authored `%20` is already encoded text or a literal percent.
 - Investigate: choose one rule, either restrict origin segments to URL-safe characters or treat the authored origin as decoded text and encode it on emission. Apply the same rule to the dev server prefix match and add loopback coverage.
 
-### Absolute `PathId` facts render with a doubled root separator
-
-- Found: portable path display hardening MTF input review, 2026-11.
-- Where: `DiagnosticPathContext::render` in `src/compiler_frontend/compiler_messages/render/context.rs` and `render_portable_with` in `src/compiler_frontend/symbols/path_interner/fork.rs`.
-- Observed: both join resolved components with `/`. An absolute native path interned with its root component `/` renders as `//project/src/page.mtf`. A Windows prefix and root component would render with mixed separators. Logical relative paths are unaffected.
-- Investigate: whether absolute `PathId` facts should reach diagnostics at all. If they should, render root and prefix components without an extra separator and add exact Unix and Windows assertions.
-
 ### Windows root-relative in-memory template names fail as internal errors
 
 - Found: portable path display hardening MTF input review, 2026-11.

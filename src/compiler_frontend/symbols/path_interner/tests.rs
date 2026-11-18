@@ -7,7 +7,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use std::mem::{align_of, size_of};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[test]
 fn path_ids_and_nodes_have_dense_layout() {
@@ -690,6 +690,144 @@ fn portable_and_native_rendering_share_components() {
         table.render_native_frozen(PathId::ROOT, &frozen_strings, &mut scratch),
         PathBuf::new()
     );
+}
+
+/// One interned filesystem identity and the renderers that share its tables.
+struct TestPathIdentity {
+    strings: StringTable,
+    fork: PathInternerFork,
+    table: PathTable,
+    path: PathId,
+}
+
+/// Intern one native filesystem path through the builder, then fork its identity base.
+fn intern_filesystem_path(native: &Path) -> TestPathIdentity {
+    let mut strings = StringTable::new();
+    let mut builder = PathInternerBuilder::new();
+    let path = builder
+        .try_intern_filesystem_path(native, &mut strings)
+        .expect("test path bytes are UTF-8 on this host");
+    let fork_source = builder.fork_source();
+    let fork = fork_source.fork_for_module();
+    let table = builder.freeze();
+
+    TestPathIdentity {
+        strings,
+        fork,
+        table,
+        path,
+    }
+}
+
+/// Assert every portable renderer over one interned filesystem identity.
+fn assert_portable_renderers(identity: &TestPathIdentity, expected: &str) {
+    let frozen_strings = identity.strings.clone().freeze();
+    let mut scratch = Vec::new();
+
+    assert_eq!(
+        identity
+            .fork
+            .render_portable(identity.path, &identity.strings, &mut scratch),
+        expected
+    );
+    assert_eq!(
+        identity
+            .fork
+            .render_portable_frozen(identity.path, &frozen_strings, &mut scratch),
+        expected
+    );
+    assert_eq!(
+        identity
+            .table
+            .render_portable(identity.path, &identity.strings, &mut scratch),
+        expected
+    );
+    assert_eq!(
+        identity
+            .table
+            .render_portable_frozen(identity.path, &frozen_strings, &mut scratch),
+        expected
+    );
+}
+
+/// Assert both native renderers reproduce the originally interned native path.
+fn assert_native_round_trip(identity: &TestPathIdentity, native: &Path) {
+    let frozen_strings = identity.strings.clone().freeze();
+    let mut scratch = Vec::new();
+    let native = native.to_path_buf();
+
+    assert_eq!(
+        identity
+            .fork
+            .render_native(identity.path, &identity.strings, &mut scratch),
+        native
+    );
+    assert_eq!(
+        identity
+            .table
+            .render_native_frozen(identity.path, &frozen_strings, &mut scratch),
+        native
+    );
+}
+
+/// Intern one native filesystem path, then assert every portable renderer and native rendering.
+fn assert_filesystem_path_renderers(native: &Path, expected_portable: &str) {
+    let identity = intern_filesystem_path(native);
+    assert_portable_renderers(&identity, expected_portable);
+    assert_native_round_trip(&identity, native);
+}
+
+/// The entry path interned for `MOTH-IMPORT-0026` is absolute, so its root must not gain a
+/// separator.
+#[test]
+fn absolute_filesystem_paths_render_with_one_root_separator() {
+    #[cfg(not(windows))]
+    let native = PathBuf::from("/project/src/page.mtf");
+    #[cfg(not(windows))]
+    let expected = "/project/src/page.mtf";
+
+    #[cfg(windows)]
+    let native = PathBuf::from(r"C:\project\src\page.mtf");
+    #[cfg(windows)]
+    let expected = "C:/project/src/page.mtf";
+
+    assert_filesystem_path_renderers(&native, expected);
+}
+
+/// A UNC share is both the prefix and the root; only one separator may follow it.
+#[cfg(windows)]
+#[test]
+fn unc_filesystem_paths_render_with_one_share_separator() {
+    let native = PathBuf::from(r"\\server\share\project\page.mtf");
+    assert_filesystem_path_renderers(&native, "//server/share/project/page.mtf");
+
+    // A forward-slash spelling interns a forward-slash raw prefix and a backslash root component.
+    // Display text is still rooted at the share; native rendering canonicalises the root separator,
+    // so this path pins the portable spelling only.
+    let forward_slashes = PathBuf::from("//server/share/project/page.mtf");
+    let identity = intern_filesystem_path(&forward_slashes);
+    assert_portable_renderers(&identity, "//server/share/project/page.mtf");
+}
+
+/// A verbatim Windows identity keeps `.` and `..` components; portable display must not normalise
+/// them away while reassembling the root.
+#[cfg(windows)]
+#[test]
+fn verbatim_filesystem_paths_keep_parent_components_in_portable_text() {
+    let native = PathBuf::from(r"\\?\C:\folder\..\page.mtf");
+
+    let identity = intern_filesystem_path(&native);
+    assert_portable_renderers(&identity, "C:/folder/../page.mtf");
+}
+
+/// Relative logical components are name text: a backslash is not a separator and must not be
+/// rewritten by the shared portable renderer.
+#[cfg(not(windows))]
+#[test]
+fn relative_filesystem_paths_keep_literal_backslash_components() {
+    let native = PathBuf::from(r"docs\literal/page.mtf");
+
+    assert_filesystem_path_renderers(&native, r"docs\literal/page.mtf");
 }
 
 #[cfg(unix)]

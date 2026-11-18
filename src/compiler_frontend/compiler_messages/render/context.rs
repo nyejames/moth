@@ -20,7 +20,9 @@ use crate::compiler_frontend::source::line_index::{LineIndex, LinePosition};
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 #[cfg(test)]
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
+use crate::compiler_frontend::symbols::path_interner::{
+    PathId, PathTable, render_portable_components,
+};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 use std::path::{Path, PathBuf};
 use unicode_width::UnicodeWidthStr;
@@ -79,14 +81,7 @@ impl<'a> DiagnosticPathContext<'a> {
             Self::Fork(fork) => fork.resolve_components(path, scratch),
             Self::Table(table) => table.resolve_components(path, scratch),
         };
-        let mut rendered = String::new();
-        for (index, component) in components.iter().enumerate() {
-            if index > 0 {
-                rendered.push('/');
-            }
-            rendered.push_str(string_table.resolve(*component));
-        }
-        rendered
+        render_portable_components(components, string_table)
     }
 }
 
@@ -142,17 +137,9 @@ impl<'a> DiagnosticRenderContext<'a> {
     /// Render a complete logical path through the explicitly attached identity table.
     pub(crate) fn render_path(self, path: PathId) -> String {
         let mut scratch = Vec::new();
-        self.render_path_with_scratch(path, &mut scratch)
-    }
-
-    pub(crate) fn render_path_with_scratch(
-        self,
-        path: PathId,
-        scratch: &mut Vec<StringId>,
-    ) -> String {
         self.path_context
             .expect("diagnostic path rendering requires an attached path table")
-            .render(path, self.string_table, scratch)
+            .render(path, self.string_table, &mut scratch)
     }
 
     pub(crate) fn path_table(self) -> Option<&'a PathTable> {
