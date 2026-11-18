@@ -4,15 +4,14 @@
 //! WHY: compile orchestration should receive deterministic, duplicate-checked inputs without
 //! owning filesystem traversal policy.
 
+use super::render::document_url_context;
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{imports, token_lexical};
 use crate::compiler_frontend::compiler_messages::{PreparedFailure, SourceSpanCapacityResource};
-use crate::compiler_frontend::symbols::path_interner::{
-    NonUtf8PathComponent, PathId, PathInternError, PathInternerFork,
-};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternError, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::collections::HashSet;
@@ -32,15 +31,17 @@ pub(crate) enum MothTemplateInput {
 pub(crate) struct MothTemplateSource {
     /// The caller's in-memory logical source name.
     ///
-    /// This is a portable identity, not a file to open: components must be UTF-8 and the only
-    /// separator is `/`. A relative name must not contain a backslash at all. A rooted name,
-    /// whether absolute or root-relative such as `/docs/intro.mtf`, may spell only its prefix
-    /// and root natively; everything after them must still use `/` and must not begin with a
-    /// drive prefix once the root is stripped. Rootedness is `Path::has_root`, so a root without
-    /// a drive prefix is a rooted identity on every host and follows the same common-ancestor
-    /// rule as an absolute name. A name with no portable basis, such as a drive prefix without a
-    /// root or a bare root or UNC share with no file component, is rejected as input. Filesystem
-    /// inputs carry canonical native paths instead.
+    /// This is a portable identity, not a file to open: the only separator is `/`, and the
+    /// spelling that enters compiler identity must be UTF-8. For a rooted name that spelling is
+    /// its path under the request's shared ancestor, so an unrepresentable ancestor above that
+    /// root is not identity, exactly as for a filesystem source root. A relative name must not
+    /// contain a backslash at all. A rooted name, whether absolute or root-relative such as
+    /// `/docs/intro.mtf`, may spell only its prefix and root natively. Everything after them must
+    /// still use `/` and must not begin with a drive prefix once the root is stripped. Rootedness
+    /// is `Path::has_root`, so a root without a drive prefix is a rooted identity on every host
+    /// and follows the same common-ancestor rule as an absolute name. A name with no portable
+    /// basis, such as a drive prefix without a root or a bare root or UNC share with no file
+    /// component, is rejected as input. Filesystem inputs carry canonical native paths instead.
     pub(crate) display_path: PathBuf,
     pub(crate) source_text: String,
 }
@@ -281,8 +282,10 @@ fn no_common_ancestor_failure(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> PreparedFailure {
-    let first_interned = intern_filesystem_path_identity(first_path, path_fork, string_table);
-    let second_interned = intern_filesystem_path_identity(second_path, path_fork, string_table);
+    let first_interned =
+        intern_filesystem_path_identity(first_path, first_path, path_fork, string_table);
+    let second_interned =
+        intern_filesystem_path_identity(second_path, second_path, path_fork, string_table);
     let (first_interned, second_interned) = match (first_interned, second_interned) {
         (Ok(first), Ok(second)) => (first, second),
         (Err(failure), _) | (_, Err(failure)) => {
@@ -312,8 +315,9 @@ fn no_common_ancestor_failure(
 /// identity once host parsing or downstream URL conversion reads it as a separator. A drive
 /// prefix without a root has no portable basis and is rejected here rather than reaching the
 /// relative branch and failing later as an internal logical-path error. A name with no file
-/// component below its root, such as a bare UNC share, is likewise rejected as input. UTF-8
-/// validation belongs to `validate_source_path_identities`, which sees every input path.
+/// component below its root, such as a bare UNC share, is likewise rejected as input. Structural
+/// checks read native bytes, so they still apply beside a non-UTF-8 component. UTF-8 validation
+/// of the components that enter compiler identity belongs to `validate_source_path_identities`.
 fn validate_in_memory_source_name(display_path: &Path) -> Result<(), PreparedFailure> {
     // A drive prefix without a root names a path relative to a drive's current directory, which
     // has no portable meaning. Only Windows parses a drive prefix, so this spelling is rejected
@@ -333,17 +337,11 @@ fn validate_in_memory_source_name(display_path: &Path) -> Result<(), PreparedFai
 
     let remainder = path_after_native_structure(display_path);
 
-    // A non-UTF-8 spelling cannot be compared as portable text; the shared identity validation
-    // reports it through the typed source-path failure before duplicate handling.
-    let Some(spelling) = remainder.to_str() else {
-        return Ok(());
-    };
-
     // A name with nothing after its prefix and root has no source identity: `//server/share`
     // spells only a UNC prefix and its implicit root, while `/` and `C:\` spell only a root. The
     // implicit root occupies no bytes of the spelling, so this must be rejected before any
     // offset arithmetic and before module-root derivation.
-    if spelling.is_empty() {
+    if remainder.as_os_str().is_empty() {
         return Err(InfrastructureFailure::filesystem(
             CompilerStage::SourceLoading,
             display_path,
@@ -357,8 +355,11 @@ fn validate_in_memory_source_name(display_path: &Path) -> Result<(), PreparedFai
 
     // Prefix and root spellings are structural host syntax only before the portable remainder.
     // A root-relative name has a root even where the host does not call it absolute, so its root
-    // still counts as structural syntax.
-    if spelling.contains('\\') {
+    // still counts as structural syntax. Native bytes are checked because a non-UTF-8 component
+    // cannot be compared as text, while an ASCII backslash is unambiguous in the encoded spelling
+    // on every host. The backslash rule must still cover the UTF-8 remainder beside such a
+    // component.
+    if remainder.as_os_str().as_encoded_bytes().contains(&b'\\') {
         return Err(InfrastructureFailure::filesystem(
             CompilerStage::SourceLoading,
             display_path,
@@ -391,51 +392,74 @@ fn path_after_native_structure(path: &Path) -> &Path {
     components.as_path()
 }
 
-/// Validate every source path through the typed UTF-8 identity lane.
+/// Validate every request-relative source identity through the typed UTF-8 identity lane.
 ///
-/// Interning here means a unique non-UTF-8 name fails with the MTF-owned failure and native
-/// `host_path` instead of surfacing later as a source-database logical-path failure.
+/// Compiler identity is a source's spelling under its selected root: `relative_path` for
+/// directory, file-list, and in-memory units, and the file name for a single-file request. A
+/// canonical native path can contain a non-UTF-8 directory above that root, which is a host
+/// detail rather than identity, so only the identity is interned here. Interning means a
+/// non-UTF-8 identity fails with the MTF-owned failure and native `host_path` instead of
+/// surfacing later as a source-database logical-path failure.
 fn validate_source_path_identities(
     units: &[MothTemplateSourceUnit],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), PreparedFailure> {
     for unit in units {
-        intern_filesystem_path_identity(&unit.source_path, path_fork, string_table)?;
+        let single_file_identity;
+        let identity_path = match unit.relative_path.as_deref() {
+            Some(relative_path) => relative_path,
+            // The document URL context owns the single-file identity rule: a request without a
+            // relative path is identified by its file name.
+            None => {
+                single_file_identity = document_url_context(None, &unit.source_path)?;
+                single_file_identity.as_path()
+            }
+        };
+
+        intern_filesystem_path_identity(identity_path, &unit.source_path, path_fork, string_table)?;
     }
 
     Ok(())
 }
 
-/// Intern one filesystem path for user-facing identity, failing non-UTF-8 paths like the
-/// duplicate-input check does. Compact-table exhaustion is authored input rejection, so it maps
-/// to the typed source capacity diagnostic.
+/// Intern one identity spelling for the UTF-8 gate, reporting a failure against `host_path`.
+///
+/// `host_path` is the path the failure carries: request-relative validation passes the canonical
+/// native source path because the identity can sit below a root whose ancestors are not
+/// representable, while whole-path callers pass the same path for both arguments. Compact-table
+/// exhaustion is authored input rejection, so it maps to the typed source capacity diagnostic.
 fn intern_filesystem_path_identity(
-    path: &Path,
+    identity_path: &Path,
+    host_path: &Path,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<PathId, PreparedFailure> {
     path_fork
-        .try_intern_filesystem_path(path, string_table)
+        .try_intern_filesystem_path(identity_path, string_table)
         .map_err(|error| match error {
-            PathInternError::NonUtf8(NonUtf8PathComponent { path: bad_path }) => {
-                InfrastructureFailure::filesystem(
-                    CompilerStage::SourceLoading,
-                    &bad_path,
-                    format!(
-                        "Moth template source path {bad_path:?} contains a non-UTF-8 component; Moth \
+            PathInternError::NonUtf8(_) => InfrastructureFailure::filesystem(
+                CompilerStage::SourceLoading,
+                host_path,
+                format!(
+                    "Moth template source path {host_path:?} contains a non-UTF-8 component; Moth \
                          identity requires UTF-8 paths."
-                    ),
-                )
-                .into()
-            }
-            PathInternError::TableFull => PreparedFailure::capture_diagnosed(DiagnosticBag::from(token_lexical::source_span_capacity(
-                0,
-                u32::MAX,
-                SourceSpanCapacityResource::LogicalPath,
+                ),
+            )
+            .into(),
+            PathInternError::TableFull => PreparedFailure::capture_diagnosed(
+                DiagnosticBag::from(token_lexical::source_span_capacity(
+                    0,
+                    u32::MAX,
+                    SourceSpanCapacityResource::LogicalPath,
+                    None,
+                )),
+                string_table.take_for_handoff(),
                 None,
-            )), string_table.take_for_handoff(), None, Some(Arc::new(path_fork.shared_table()))),
-            PathInternError::BaseMismatch { .. } => InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly,
+                Some(Arc::new(path_fork.shared_table())),
+            ),
+            PathInternError::BaseMismatch { .. } => InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
                 "logical path merge base is not a structural prefix of the destination table",
             )
             .into(),
@@ -551,7 +575,16 @@ fn reject_duplicate_source_paths(
 
     for unit in units {
         if !seen_paths.insert(unit.source_path.as_path()) {
-            let path = intern_filesystem_path_identity(&unit.source_path, path_fork, string_table)?;
+            // The duplicate diagnostic names the canonical input path exactly, so this fact is
+            // the whole native path rather than a request-relative identity. A duplicate request
+            // whose ancestor above the selected root is non-UTF-8 therefore reports the identity
+            // failure instead of reaching this diagnostic.
+            let path = intern_filesystem_path_identity(
+                &unit.source_path,
+                &unit.source_path,
+                path_fork,
+                string_table,
+            )?;
             diagnostics.push(imports::duplicate_moth_template_input_path(
                 path, None, None,
             ));

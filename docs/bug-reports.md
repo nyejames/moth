@@ -74,13 +74,6 @@ A casual log of bugs and limitations found during other work and left for later 
 - Observed: validation accepts spaces, Unicode and `%` in the `origin` setting. Emitted URLs use the authored spelling verbatim, so a browser requests `/caf%C3%A9/...` for origin `/café` and the dev server's literal prefix match returns 404. It is undefined whether an authored `%20` is already encoded text or a literal percent.
 - Investigate: choose one rule, either restrict origin segments to URL-safe characters or treat the authored origin as decoded text and encode it on emission. Apply the same rule to the dev server prefix match and add loopback coverage.
 
-### Direct Moth template sources reject a non-UTF-8 ancestor above the source root
-
-- Found: portable path display hardening final integration review, 2026-11.
-- Where: `validate_source_path_identities` and `intern_filesystem_path_identity` in `src/projects/html_project/moth_template/input.rs`.
-- Observed: the direct filesystem lane interns each whole native source path, so a non-UTF-8 directory above the selected source root fails the MTF-owned UTF-8 identity check even when every module-relative name is UTF-8. The lane has no production caller outside its tests, and no test covers the case.
-- Investigate: whether identity should be checked only for the root-relative portion. Add a Unix test with a non-UTF-8 ancestor either way.
-
 ### Windows protected output roots are only checked on `C:`
 
 - Found: portable path display hardening final review, 2026-11.

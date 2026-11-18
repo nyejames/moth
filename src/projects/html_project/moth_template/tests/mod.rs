@@ -1111,6 +1111,69 @@ fn files_input_rejects_distinct_non_utf8_names_without_collapsing_them() {
     );
 }
 
+// A selected source root can sit below a directory whose name is not UTF-8. That ancestor is a
+// host detail, not compiler identity: single-file, file-list, and directory requests identify
+// their sources below that root, so every lane accepts the tree.
+#[cfg(all(unix, not(target_vendor = "apple")))]
+#[test]
+fn non_utf8_ancestor_above_the_selected_source_root_is_accepted() {
+    let temp_dir = temp_project(&[]);
+    let source_root = temp_dir
+        .path()
+        .join(non_utf8_file_name(b"root\xFF"))
+        .join("docs");
+    fs::create_dir_all(&source_root).expect("non-UTF-8 ancestor directory should be created");
+    let source_path = source_root.join("page.mtf");
+    fs::write(&source_path, "# Page").expect("source should be written");
+    let second_source_path = source_root.join("second.mtf");
+    fs::write(&second_source_path, "# Second").expect("second source should be written");
+    let canonical_source_path = fs::canonicalize(&source_path).expect("source should canonicalize");
+
+    // A file-list request selects the same root through its files' common ancestor.
+    let files_output = compile_ok(MothTemplateInput::Files(vec![
+        source_path.clone(),
+        second_source_path,
+    ]));
+    assert_eq!(files_output.documents.len(), 2);
+    assert_eq!(
+        files_output
+            .documents
+            .iter()
+            .map(|document| document.relative_path.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some(Path::new("page.mtf")), Some(Path::new("second.mtf"))],
+        "the shared ancestor, not its non-UTF-8 parent, anchors both relative identities",
+    );
+
+    let file_output = compile_ok(MothTemplateInput::File(source_path));
+    assert_eq!(file_output.documents.len(), 1);
+    assert_eq!(file_output.documents[0].content, "<h1>Page</h1>");
+    assert_eq!(
+        file_output.documents[0].relative_path, None,
+        "a single-file request keeps the entry-root identity",
+    );
+    assert_eq!(
+        file_output.documents[0].source_path, canonical_source_path,
+        "the canonical native path should stay the document's host path",
+    );
+
+    let directory_output = compile_ok(MothTemplateInput::Directory {
+        path: source_root,
+        recursive: true,
+    });
+    assert_eq!(directory_output.documents.len(), 1);
+    assert_eq!(directory_output.documents[0].content, "<h1>Page</h1>");
+    assert_eq!(
+        directory_output.documents[0].relative_path,
+        Some(PathBuf::from("page.mtf")),
+        "the selected root, not the non-UTF-8 ancestor, anchors the relative identity",
+    );
+    assert_eq!(
+        directory_output.documents[0].source_path, canonical_source_path,
+        "the canonical native path should stay the document's host path",
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn literal_backslash_file_names_keep_distinct_identities_and_deterministic_order() {
@@ -1340,6 +1403,34 @@ fn in_memory_sources_reject_non_utf8_display_paths() {
     assert!(
         errors.primary.message.contains("non-UTF-8"),
         "the rejection should name the non-UTF-8 component: {}",
+        errors.primary.message,
+    );
+}
+
+// The portable-name rule still applies beside a non-UTF-8 ancestor: the UTF-8 identity below a
+// rooted name must separate its components with `/`, never a literal backslash.
+#[cfg(unix)]
+#[test]
+fn rooted_in_memory_names_with_non_utf8_ancestors_still_reject_backslashes() {
+    let display_path = PathBuf::from(non_utf8_file_name(b"/\xFF/x\\y.mtf"));
+
+    let errors = expect_infrastructure_failure(
+        MothTemplateInput::Sources(vec![MothTemplateSource {
+            display_path: display_path.clone(),
+            source_text: "bad".to_owned(),
+        }]),
+        "a rooted in-memory name with a non-UTF-8 ancestor and a backslash",
+    );
+
+    assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(
+        errors.primary.host_path.as_deref(),
+        Some(display_path.as_path()),
+        "the in-memory logical name should be rejected exactly as supplied",
+    );
+    assert!(
+        errors.primary.message.contains("contains a backslash"),
+        "the rejection should name the portable separator rule: {}",
         errors.primary.message,
     );
 }
