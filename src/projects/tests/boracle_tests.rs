@@ -2280,7 +2280,7 @@ Pair = |
 
 pair ~= Pair({1}, {2})
 shared = pair
-pair.first = {3}
+~pair.first = {3}
 result = shared
 "#,
     );
@@ -2311,8 +2311,8 @@ Pair = |
 
 pair ~= Pair({1}, {2})
 old = pair.first
-pair = Pair({3}, {4})
-pair.first = {5}
+~pair = Pair({3}, {4})
+~pair.first = {5}
 result = old
 "#,
     );
@@ -2339,7 +2339,7 @@ Pair = |
 
 pair ~= Pair({1}, {2})
 first = pair.first
-pair.second = {3}
+~pair.second = {3}
 result = first
 "#,
     );
@@ -2365,9 +2365,9 @@ Pair = |
 |
 
 pair ~= Pair({1}, {2})
-pair.first = {3}
+~pair.first = {3}
 shared = pair
-pair.first = {4}
+~pair.first = {4}
 result = shared
 "#,
     );
@@ -3082,9 +3082,10 @@ fn dead_exclusive_selection() -> BoracleRuleSelection {
 fn successful_value<T>(result: CompilationResult<T>) -> T {
     match result {
         Ok(CompilationOutcome::Success { value, .. }) => value,
-        Ok(CompilationOutcome::Diagnosed(reports)) => {
-            panic!("source should compile without user diagnostics: {reports:?}")
-        }
+        Ok(CompilationOutcome::Diagnosed(reports)) => panic!(
+            "source should compile without user diagnostics:\n{}",
+            terse::format_terse_diagnostic_reports(&reports).join("\n")
+        ),
         Err(errors) => panic!("source should compile without infrastructure failures: {errors:?}"),
     }
 }

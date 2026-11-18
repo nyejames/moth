@@ -74,13 +74,6 @@ A casual log of bugs and limitations found during other work and left for later 
 - Observed: a non-UTF-8 canonical component is dropped from the compared list, the lengths differ and `first_case_mismatch` returns `None`, so `InvalidImportPathReason::CaseMismatch` is skipped. Containment still applies and later source loading may reject the file.
 - Investigate: treat a non-UTF-8 canonical component as a typed rejection or a mismatch instead of omitting it. Confirm which lane rejects the file today.
 
-### Boracle projected field source tests fail on `main`
-
-- Found: portable path display hardening validation, 2026-11.
-- Where: `src/projects/tests/boracle_tests.rs` (`run_source_dump` and `successful_value`), run by `just boracle`.
-- Observed: `boracle_source_base_alias_protects_fresh_projected_storage`, `boracle_source_distinct_projected_fields_remain_disjoint`, `boracle_source_projected_rebind_separates_old_projection_origin` and `boracle_source_projected_write_is_not_a_binding_definition` fail with a user diagnostic (`DiagnosticCode(3044)`) on the projected field write. The same failure reproduces at base `7b50e17e9`.
-- Investigate: whether the frontend now rejects these projected writes by design, in which case the fixtures need updating, or whether the Boracle source path lost a supported form.
-
 ### HTML `origin` has no URL encoding contract
 
 - Found: portable path display hardening dev-server URL review, 2026-11.
