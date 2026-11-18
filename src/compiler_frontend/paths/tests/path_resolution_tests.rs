@@ -1109,6 +1109,60 @@ fn dependency_case_sensitive_symbol_mismatch_rejected() {
     }
 }
 
+/// A file name that cannot be represented as UTF-8.
+///
+/// APFS rejects such names, so only other Unix hosts can create the fixture.
+#[cfg(all(unix, not(target_vendor = "apple")))]
+fn non_utf8_file_name() -> std::ffi::OsString {
+    use std::os::unix::ffi::OsStringExt;
+    std::ffi::OsString::from_vec(b"invalid-\xFF".to_vec())
+}
+
+#[cfg(all(unix, not(target_vendor = "apple")))]
+#[test]
+fn non_utf8_canonical_component_reports_the_typed_identity_failure() {
+    let mut h = TestHarness::new();
+    let target_dir = h.project_root.join("src/nested").join(non_utf8_file_name());
+    fs::create_dir_all(&target_dir).expect("non-UTF-8 directory should be created");
+    let target = target_dir.join("page.moth");
+    fs::write(&target, b"").expect("target should be written");
+    let canonical_target = fs::canonicalize(&target).expect("target should canonicalize");
+
+    // The authored alias is UTF-8, so resolution only reaches the non-UTF-8 component after
+    // canonicalization. The target is deeper than the alias, which made the pre-fix component
+    // lists differ in length and silently skip the case check.
+    let alias = h.project_root.join("src/alias.moth");
+    std::os::unix::fs::symlink(&target, &alias).expect("alias symlink should be created");
+    let declaring_source = h.declaring_source();
+    let path = h.make_path(&["alias"]);
+
+    let error = h
+        .resolver
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
+        .expect_err("a non-UTF-8 canonical component cannot enter Moth identity");
+    let DependencyPathResolutionError::Infrastructure(error) = error else {
+        panic!("a non-UTF-8 canonical component must stay on the infrastructure lane");
+    };
+
+    assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(
+        error.stage,
+        crate::compiler_frontend::compiler_messages::CompilerStage::DependencyResolution
+    );
+    assert_eq!(error.host_path.as_deref(), Some(canonical_target.as_path()));
+    assert_eq!(
+        error.message(),
+        format!(
+            "Resolved dependency target {canonical_target:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
+        )
+    );
+}
+
 // -----------------------------------------------------------------------
 // Plain Markdown dependency discovery
 // -----------------------------------------------------------------------

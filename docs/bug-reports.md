@@ -60,13 +60,6 @@ A casual log of bugs and limitations found during other work and left for later 
 - Observed: a non-UTF-8 repository or entry path becomes U+FFFD text, so the compiler is launched against a different path. The recorded profile command quotes only empty or whitespace-bearing arguments.
 - Investigate: keep the entry argument as `PathBuf`/`OsString` through `Command::arg`. Quote recorded command lines completely or label them as non-runnable.
 
-### Import case check skips non-UTF-8 canonical components
-
-- Found: portable path display hardening inventory, 2026-11.
-- Where: `src/compiler_frontend/paths/dependency_resolution.rs` (canonical component collection with `segment.to_str()` and `first_case_mismatch`).
-- Observed: a non-UTF-8 canonical component is dropped from the compared list, the lengths differ and `first_case_mismatch` returns `None`, so `InvalidImportPathReason::CaseMismatch` is skipped. Containment still applies and later source loading may reject the file.
-- Investigate: treat a non-UTF-8 canonical component as a typed rejection or a mismatch instead of omitting it. Confirm which lane rejects the file today.
-
 ### HTML `origin` has no URL encoding contract
 
 - Found: portable path display hardening dev-server URL review, 2026-11.
