@@ -566,6 +566,8 @@ fn windows_system_root_guard_folds_case_and_requires_exact_components() {
         r"C:\WINDOWS",
         r"\\?\C:\Windows",
         r"\\?\c:\WINDOWS",
+        r"C:\Windows\System32",
+        r"c:\windows\system32",
         r"C:\Program Files (x86)",
         r"C:\Users",
     ] {
@@ -576,7 +578,8 @@ fn windows_system_root_guard_folds_case_and_requires_exact_components() {
     }
 
     for allowed in [
-        r"C:\Windows\System32",
+        r"C:\Windows\Temp",
+        r"C:\Windows\System32\drivers",
         r"C:\Users\build",
         r"C:\Program Files\app",
         r"\\?\C:\Users\build\_dev",
@@ -615,13 +618,59 @@ fn windows_protected_roots_follow_the_system_drive() {
         for protected in [
             r"\\?\D:\Windows",
             r"D:\Windows",
+            r"D:\Windows\System32",
             r"D:\Users",
             r"D:\Program Files",
             r"D:\Program Files (x86)",
             r"C:\Windows",
+            r"C:\Windows\System32",
             r"C:\Users",
             r"C:\Program Files",
+        ] {
+            assert!(
+                is_dangerous_system_path_with_locations(Path::new(protected), &locations),
+                "'{protected}' names a protected Windows root for SystemRoot '{system_root}'"
+            );
+        }
+
+        // For this installation below `D:\Windows`, drive-root System32 spellings are ordinary
+        // directories rather than protected roots.
+        for allowed in [
+            r"D:\Windows\Temp",
+            r"D:\Windows\System32\drivers",
+            r"D:\System32",
             r"C:\System32",
+            r"D:\Users\build",
+            r"D:\Program Files\app",
+            r"D:\dev\_dev",
+        ] {
+            assert!(
+                !is_dangerous_system_path_with_locations(Path::new(allowed), &locations),
+                "'{allowed}' is not an exact protected Windows root for SystemRoot '{system_root}'"
+            );
+        }
+    }
+}
+
+/// A drive-root `SystemRoot` places `System32` directly on the drive.
+///
+/// WHY: Windows permits an installation at `D:\`, where the system directory is `D:\System32`.
+/// Rejecting that `SystemRoot` as malformed would fall back to `D:\Windows` and stop protecting
+/// the real system directory. The drive root itself is already rejected by the structural
+/// filesystem-root rule, so including it in this layout adds no protection beyond that rule.
+#[cfg(windows)]
+#[test]
+fn windows_system_root_at_a_drive_root_protects_its_system32() {
+    for (system_root, system_drive) in [(r"D:\", Some(r"D:")), ("D:/", Some("D:/")), (r"D:\", None)]
+    {
+        let locations = WindowsSystemLocations::from_parts(Some(system_root), system_drive);
+
+        for protected in [
+            r"D:\",
+            r"D:\System32",
+            r"D:\Users",
+            r"D:\Program Files",
+            r"D:\Program Files (x86)",
         ] {
             assert!(
                 is_dangerous_system_path_with_locations(Path::new(protected), &locations),
@@ -630,10 +679,10 @@ fn windows_protected_roots_follow_the_system_drive() {
         }
 
         for allowed in [
+            r"D:\System32\drivers",
+            r"D:\Windows",
             r"D:\Windows\System32",
             r"D:\Users\build",
-            r"D:\Program Files\app",
-            r"D:\dev\_dev",
         ] {
             assert!(
                 !is_dangerous_system_path_with_locations(Path::new(allowed), &locations),
@@ -656,10 +705,10 @@ fn windows_protected_roots_keep_a_nested_system_root_on_its_drive() {
 
         for protected in [
             r"D:\OS\Windows",
+            r"D:\OS\Windows\System32",
             r"D:\Users",
             r"D:\Program Files",
             r"D:\Program Files (x86)",
-            r"D:\System32",
         ] {
             assert!(
                 is_dangerous_system_path_with_locations(Path::new(protected), &locations),
@@ -690,6 +739,10 @@ fn windows_protected_roots_ignore_malformed_system_locations() {
             is_dangerous_system_path_with_locations(Path::new(r"D:\Windows"), &locations),
             "malformed SystemRoot '{malformed_system_root}' must fall back to the system drive"
         );
+        assert!(
+            is_dangerous_system_path_with_locations(Path::new(r"D:\Windows\System32"), &locations),
+            "malformed SystemRoot '{malformed_system_root}' must keep System32 under the fallback"
+        );
     }
 
     for malformed_system_drive in [r"D:\Windows", r"Windows", r"\\server\share"] {
@@ -707,6 +760,13 @@ fn windows_protected_roots_ignore_malformed_system_locations() {
         "missing system locations must keep the C: fallback protected"
     );
     assert!(
+        is_dangerous_system_path_with_locations(
+            Path::new(r"C:\Windows\System32"),
+            &missing_locations
+        ),
+        "missing system locations must keep the literal System32 root protected"
+    );
+    assert!(
         !is_dangerous_system_path_with_locations(Path::new(r"D:\Users"), &missing_locations),
         "a drive named only by malformed or missing values is not protected"
     );
@@ -721,6 +781,10 @@ fn windows_protected_roots_use_the_authoritative_system_root() {
     assert!(
         is_dangerous_system_path_with_locations(Path::new(r"D:\WinNT"), &locations),
         "SystemRoot names the installation directory even when it is not called Windows"
+    );
+    assert!(
+        is_dangerous_system_path_with_locations(Path::new(r"D:\WinNT\System32"), &locations),
+        "System32 lives under the authoritative installation directory"
     );
     assert!(
         is_dangerous_system_path_with_locations(Path::new(r"D:\Users"), &locations),

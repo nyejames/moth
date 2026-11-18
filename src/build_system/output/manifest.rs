@@ -1058,8 +1058,8 @@ fn is_dangerous_system_path_with_fixed_roots(path: &Path) -> bool {
 
 /// Check a path against protected Windows roots derived from runtime system locations.
 ///
-/// WHAT: rejects filesystem and share roots plus the Windows installation directory and the named
-/// system directories on the system drive.
+/// WHAT: rejects filesystem and share roots plus the Windows installation directory, its
+/// `System32` subdirectory and the named system directories on the system drive.
 /// WHY: a Windows installation can live on any drive, so hard-coded `C:` roots leave equivalent
 /// directories on the system drive unprotected. Tests inject locations because edition 2024
 /// `std::env::set_var` is unsafe and process-global mutation races under parallel tests.
@@ -1132,22 +1132,18 @@ impl WindowsSystemLocations {
 
     /// Directory roots that must never become an output root.
     ///
-    /// WHAT: the Windows installation directory plus `Program Files`, `Program Files (x86)`,
-    /// `Users` and `System32` on the system drive, unioned with their `C:` spellings.
-    /// WHY: the literal `C:` entries keep the previous protection when the resolved drive differs,
-    /// so a relocated installation cannot silently drop a named root. The drive root comes from
+    /// WHAT: the Windows installation directory and its `System32` subdirectory plus
+    /// `Program Files`, `Program Files (x86)` and `Users` on the system drive, unioned with the
+    /// same layout spelled from `C:`.
+    /// WHY: `System32` lives below the installation directory, which is usually but not always
+    /// below the drive root, so it must follow `SystemRoot`. The literal `C:` roots keep the
+    /// previous protection when the resolved drive differs, so a relocated installation cannot
+    /// silently drop a named root. Both sets come from `protected_roots_for`, so their spellings
+    /// cannot drift apart. The drive root comes from
     /// `SystemDrive` or `SystemRoot`'s disk prefix, never from `SystemRoot`'s parent directory.
     /// Every derived path is built from a rooted drive path because
     /// `PathBuf::from("D:").join("Windows")` is the drive-relative `D:Windows`.
     pub(super) fn protected_roots(&self) -> impl Iterator<Item = PathBuf> {
-        const LITERAL_C_PROTECTED_ROOTS: &[&str] = &[
-            r"C:\Windows",
-            r"C:\Program Files",
-            r"C:\Program Files (x86)",
-            r"C:\Users",
-            r"C:\System32",
-        ];
-
         let windows_directory = self
             .system_root
             .as_deref()
@@ -1161,25 +1157,41 @@ impl WindowsSystemLocations {
 
         let windows_directory = windows_directory.unwrap_or_else(|| drive_root.join("Windows"));
 
-        let derived_roots = [
-            windows_directory,
-            drive_root.join("Program Files"),
-            drive_root.join("Program Files (x86)"),
-            drive_root.join("Users"),
-            drive_root.join("System32"),
-        ];
-
-        derived_roots
+        protected_roots_for(&drive_root, &windows_directory)
             .into_iter()
-            .chain(LITERAL_C_PROTECTED_ROOTS.iter().copied().map(PathBuf::from))
+            .chain(protected_roots_for(
+                Path::new(r"C:\"),
+                Path::new(r"C:\Windows"),
+            ))
     }
+}
+
+/// The protected roots that belong to one Windows installation.
+///
+/// WHAT: the installation directory, its `System32` subdirectory and the named system directories
+/// on `drive_root`.
+/// WHY: the runtime-derived roots and the literal `C:` mirror share this layout, so a protected
+/// directory cannot drift between them. `System32` sits below the installation directory, which
+/// can itself be a drive root. `drive_root` must already be rooted because
+/// `PathBuf::from("D:").join("Windows")` is the drive-relative `D:Windows`.
+#[cfg(windows)]
+fn protected_roots_for(drive_root: &Path, windows_directory: &Path) -> [PathBuf; 5] {
+    [
+        windows_directory.to_path_buf(),
+        windows_directory.join("System32"),
+        drive_root.join("Program Files"),
+        drive_root.join("Program Files (x86)"),
+        drive_root.join("Users"),
+    ]
 }
 
 /// Parse the authoritative Windows installation directory from `SystemRoot`.
 ///
-/// WHAT: requires an ordinary rooted disk path with at least one normal component.
-/// WHY: drive-relative `D:Windows`, UNC shares and device paths cannot name the installation
-/// directory or the local disk that owns its named system directories.
+/// WHAT: requires an ordinary rooted disk path. A bare drive root such as `D:\` is valid.
+/// WHY: Windows can install at the drive root, where `System32` is `D:\System32`. Rejecting that
+/// `SystemRoot` would fall back to `D:\Windows` and leave the real system directory unprotected.
+/// Drive-relative `D:Windows`, UNC shares and device paths cannot name the installation directory
+/// or the local disk that owns its named system directories.
 #[cfg(windows)]
 fn rooted_windows_directory(raw: &OsStr) -> Option<PathBuf> {
     use std::path::Prefix;
@@ -1194,16 +1206,15 @@ fn rooted_windows_directory(raw: &OsStr) -> Option<PathBuf> {
     }
 
     let mut is_rooted = false;
-    let mut has_normal_component = false;
     for component in components {
         match component {
             Component::RootDir => is_rooted = true,
-            Component::Normal(_) => has_normal_component = true,
+            Component::Normal(_) => {}
             Component::Prefix(_) | Component::CurDir | Component::ParentDir => return None,
         }
     }
 
-    (is_rooted && has_normal_component).then(|| path.to_path_buf())
+    is_rooted.then(|| path.to_path_buf())
 }
 
 /// Parse `SystemDrive` as a rooted drive path such as `D:\`.

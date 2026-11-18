@@ -41,13 +41,6 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: validation accepts spaces, Unicode and `%` in the `origin` setting. Emitted URLs use the authored spelling verbatim, so a browser requests `/caf%C3%A9/...` for origin `/café` and the dev server's literal prefix match returns 404. It is undefined whether an authored `%20` is already encoded text or a literal percent.
 - Investigate: choose one rule, either restrict origin segments to URL-safe characters or treat the authored origin as decoded text and encode it on emission. Apply the same rule to the dev server prefix match and add loopback coverage.
 
-### Windows protected roots name a nonexistent `System32` directory
-
-- Found: Windows protected output roots fix, 2026-11. Unverified lead.
-- Where: `WindowsSystemLocations::protected_roots` in `src/build_system/output/manifest.rs` (`{drive}\System32` and the literal `C:\System32`).
-- Observed: Windows keeps `System32` below the Windows directory, not at the drive root, so these entries protect nothing on a standard installation. The fix preserved them to avoid changing protection scope. `policy_tests.rs` asserts that `C:\Windows\System32` is an allowed output root because only exact protected directories are rejected.
-- Investigate: decide whether the intended root is `<SystemRoot>\System32`. If so, replace the drive-root spelling and update the allowed-root assertion. Otherwise delete the dead entries.
-
 ### Wasm rejects a runtime fragment that renders an open const loop template
 
 - Found: `$supplied` directive work, 2026-11. Reproduced without `$supplied` on base `1c79842cf`.
