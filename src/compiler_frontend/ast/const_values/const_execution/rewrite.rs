@@ -564,6 +564,16 @@ impl RewriteWalk<'_, '_> {
         let ExpressionOperationView::Call(call) = view.operation() else {
             return Ok(None);
         };
+        let span = view.span();
+        // HIR decides whether an erased call was live by matching its authored span against
+        // authored-dead and pruned-handler ranges. A spanless row could only be guessed live,
+        // which would let release reject `$infallible` source that debug accepts, so release
+        // speculation declines a spanless call and keeps the runtime call in both profiles.
+        // No legal source or materialised callable produces one today; this owns the invariant
+        // permanently at the ledger's producer.
+        if self.mode.is_release() && span.is_none() {
+            return Ok(None);
+        }
         // A direct catch subject owns the recovery facts its enclosing catch validates. Replacing
         // it with a constant would erase that recovery channel and leave an invalid catch block, so
         // release speculation leaves the call at runtime. Calls merely nested inside a handled
@@ -600,7 +610,7 @@ impl RewriteWalk<'_, '_> {
         })?;
         Ok(Some(ConstCallSite {
             path,
-            span: view.span(),
+            span,
             value_mode: view.value_mode(),
             result_type,
             failure_caught,
@@ -956,9 +966,17 @@ impl RewriteWalk<'_, '_> {
         // build that keeps the runtime call does. Nested candidate execution runs interpreted
         // walks, so a callee's internal folds are never recorded against this caller.
         if self.mode.is_release() {
+            // `const_call_site` only recognises a release call whose expression carries an
+            // authored span, and the record's span is that same view span.
+            let Some(span) = call.span else {
+                crate::compiler_bug!(
+                    CompilerStage::ConstantEvaluation,
+                    "release erased a call site without an authored span"
+                );
+            };
             self.interpreter.state.release_erased_calls.push((
                 call.path,
-                call.span,
+                span,
                 call.failure_caught,
             ));
         }

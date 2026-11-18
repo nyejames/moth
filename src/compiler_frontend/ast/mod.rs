@@ -349,15 +349,17 @@ pub(crate) fn normalize_fast_operation_witnesses(witnesses: &mut Vec<AstFastOper
 ///      absent from every HIR block. The erased call is still selected source, though: its callee's
 ///      summary bits and fast-use witness must reach the caller exactly as they do in a debug build
 ///      that keeps the call. HIR projects each row through the same call-target mapping and
-///      inactive-static-branch filter as authored and skipped call evidence.
+///      inactive-static-branch filter as authored and skipped call evidence. The span is mandatory
+///      because HIR decides erased-call liveness from authored liveness by exact span membership;
+///      the release producer declines to erase a spanless call instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct AstReleaseErasedCallSite {
     /// The callable body whose expression release speculation folded.
     pub(crate) function: AstFunctionIdentity,
     /// The callee's ordered declaration path in this module's AST.
     pub(crate) target: PathId,
-    /// The authored span of the erased call expression; `None` for generated calls.
-    pub(crate) span: Option<SourceSpan>,
+    /// The authored span of the erased call expression.
+    pub(crate) span: SourceSpan,
     /// Whether an enclosing catch owns this call's recoverable failure.
     ///
     /// WHAT: recorded from the rewrite walk's catch-subject containment.

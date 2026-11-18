@@ -426,27 +426,19 @@ impl<'a> HirBuilder<'a> {
             // rather than a second AST-path translation. The live subset also feeds
             // liveness-conditioned trap and escaping-failure analysis.
             for site in &ast.release_erased_call_sites {
-                if identity != Some(site.function) || is_pruned(site.span) {
+                if identity != Some(site.function) || is_pruned(Some(site.span)) {
                     continue;
                 }
                 let target = self.resolve_call_target_or_error(&site.target)?;
                 // An erased call is dead only when authored control flow cannot reach it, or when
                 // it stood in a statically pruned catch handler. A release-folded assertion
                 // terminal is not authored liveness; reading that post-fold skip would make
-                // constraint verdicts differ from debug.
-                //
-                // A spanless call cannot be matched against authored liveness. Treating it as live
-                // is the conservative direction: trap evidence may reject source that debug
-                // accepts, never the reverse.
-                let live = match site.span {
-                    None => true,
-                    Some(span) => {
-                        !ast.authored_dead_failure_spans.contains(&span)
-                            && skipped_source.is_none_or(|skipped| {
-                                !skipped.contains_pruned_handler_span(span, span_sources)
-                            })
-                    }
-                };
+                // constraint verdicts differ from debug. The producer guarantees an authored
+                // span, so authored liveness is decidable for every row.
+                let live = !ast.authored_dead_failure_spans.contains(&site.span)
+                    && skipped_source.is_none_or(|skipped| {
+                        !skipped.contains_pruned_handler_span(site.span, span_sources)
+                    });
                 if live {
                     insert_live_erased_site_in_source_order(
                         &mut live_erased_call_sites,
@@ -462,7 +454,7 @@ impl<'a> HirBuilder<'a> {
                         &mut skipped_call_sites,
                         HirSelectedCallSite {
                             target,
-                            span: site.span,
+                            span: Some(site.span),
                         },
                         span_sources,
                     );
@@ -474,7 +466,7 @@ impl<'a> HirBuilder<'a> {
                     &mut live_sites,
                     HirSelectedCallSite {
                         target: site.target.clone(),
-                        span: site.span,
+                        span: Some(site.span),
                     },
                     span_sources,
                 );
@@ -667,15 +659,10 @@ fn insert_live_erased_site_in_source_order(
     site: HirLiveErasedCallSite,
     sources: &SpanResolutionSources<'_>,
 ) {
-    let Some(site_span) = site.span else {
-        sites.push(site);
-        return;
-    };
-    let position = sites.iter().position(|existing| {
-        existing
-            .span
-            .is_some_and(|existing| site_precedes(site_span, existing, sources))
-    });
+    let site_span = site.span;
+    let position = sites
+        .iter()
+        .position(|existing| site_precedes(site_span, existing.span, sources));
     match position {
         Some(index) => sites.insert(index, site),
         None => sites.push(site),

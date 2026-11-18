@@ -344,6 +344,7 @@ struct FrontendProject {
     frontend: FrontendServices,
     builder_root_slots: Option<BuilderRootSlotSchema>,
     entry_role: FileRole,
+    build_profile: FrontendBuildProfile,
 }
 
 impl FrontendProject {
@@ -428,12 +429,19 @@ impl FrontendProject {
             frontend,
             builder_root_slots: None,
             entry_role,
+            build_profile: FrontendBuildProfile::Dev,
         }
     }
 
     /// Registers the named destinations the frontend may route direct root contributions to.
     fn with_builder_root_slots(mut self, schema: BuilderRootSlotSchema) -> Self {
         self.builder_root_slots = Some(schema);
+        self
+    }
+
+    /// Select the build profile the AST request declares.
+    fn with_build_profile(mut self, build_profile: FrontendBuildProfile) -> Self {
+        self.build_profile = build_profile;
         self
     }
 
@@ -539,7 +547,7 @@ impl FrontendProject {
                     sorted,
                     module_anchor_path: &self.entry_file,
                     synthesizes_entry_start: matches!(self.entry_role, FileRole::ActiveEntryRoot),
-                    build_profile: FrontendBuildProfile::Dev,
+                    build_profile: self.build_profile,
                     capacity_estimate: Default::default(),
                     resolved_file_references: ResolvedFileReferenceTable::default(),
                     module_origin: None,
@@ -5763,6 +5771,90 @@ fn dead_statement_tail_keeps_selected_call_evidence_without_failure_contributors
     assert!(report.analysis.public_call_summaries[&failing].escapes_builtin_failure);
     assert!(report.analysis.public_call_summaries[&probe].escapes_builtin_failure);
     assert!(!report.analysis.public_call_summaries[&dead_only].escapes_builtin_failure);
+}
+
+#[test]
+fn release_erased_nested_dead_call_keeps_selected_evidence_without_liveness() {
+    let source = "assert_positive |value I32| -> I32:\n    assert(value > 0)\n    return value\n;\n\
+                  $infallible\n\
+                  probe |value I32| -> I32:\n    return 4\n\
+                  dead Bool = value is assert_positive(1)\n    return 0\n;\n\
+                  ~[: probe=[probe(1)] ]\n";
+    let mut debug = FrontendProject::new(
+        &[("src/@entry.moth", source)],
+        "src/@entry.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+    let mut release = FrontendProject::new(
+        &[("src/@entry.moth", source)],
+        "src/@entry.moth",
+        StyleDirectiveRegistry::built_ins(),
+    )
+    .with_build_profile(FrontendBuildProfile::Release);
+
+    // Anchor on the authored call nested inside the dead comparison. Debug keeps it at runtime
+    // and has no erased-call ledger.
+    let debug_ast = debug.ast();
+    let debug_body = named_function_body(&debug, &debug_ast, "probe");
+    let comparison = initializer(&debug_ast, &debug_body[1]);
+    let ExpressionOperationView::Compare { right, .. } = comparison.operation() else {
+        panic!("`value is call` must be a comparison expression");
+    };
+    let ExpressionOperationView::Call(call) = right.operation() else {
+        panic!("the comparison's right operand must be the nested call");
+    };
+    let authored_call_span = call
+        .metadata()
+        .span
+        .expect("every authored call carries its parse span");
+    assert!(
+        debug_ast.release_erased_call_sites.is_empty(),
+        "debug builds erase no call"
+    );
+
+    // Release folds exactly that nested call and records its own span, not the statement root.
+    // The entry's live call to `probe` is also foldable, so select the nested row by its span.
+    let release_ast = release.ast();
+    assert!(
+        release_ast
+            .release_erased_call_sites
+            .iter()
+            .any(|site| site.span == authored_call_span),
+        "release should erase the nested dead call at {authored_call_span:?}: {:?}",
+        release_ast.release_erased_call_sites
+    );
+    assert!(
+        release_ast
+            .authored_dead_failure_spans
+            .contains(&authored_call_span),
+        "authored liveness must place the nested call in the dead statement tail"
+    );
+
+    let hir = release
+        .lower_ast_result(release_ast)
+        .expect("release HIR lowering should succeed");
+    let probe = named_hir_function(&release, &hir, "probe").id;
+    let facts = &hir.function_failure_facts[&probe];
+    assert!(
+        facts.constraint.live_erased_call_sites.is_empty(),
+        "a dead nested call must not project a live erased site: {:?}",
+        facts.constraint.live_erased_call_sites
+    );
+    let erased_selected = facts
+        .constraint
+        .selected_call_sites
+        .iter()
+        .filter(|site| site.span == Some(authored_call_span))
+        .count();
+    assert_eq!(
+        erased_selected, 1,
+        "the dead call must still contribute selected fast-use evidence exactly once"
+    );
+    assert!(
+        facts.contributors.is_empty(),
+        "a dead nested call must not project an executable failure contributor: {:?}",
+        facts.contributors
+    );
 }
 
 #[test]

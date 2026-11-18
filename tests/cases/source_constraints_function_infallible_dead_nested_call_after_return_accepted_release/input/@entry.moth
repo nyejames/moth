@@ -1,0 +1,13 @@
+assert_positive |value I32| -> I32:
+    assert(value > 0)
+    return value
+;
+
+$infallible
+probe |value I32| -> I32:
+    return 4
+    dead Bool = value is assert_positive(1)
+    return 0
+;
+
+~[: probe=[probe(1)] ]

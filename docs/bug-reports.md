@@ -13,13 +13,6 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: copy an immutable function parameter to a mutable local, then pass that local to another function through `~`. Compilation fails with `MOTH-INFRA-0001` and an `invalid effect combination` message instead of accepting the legal access or producing a source diagnostic. The implementation agent reproduced it on original base `d80f56343` and referenced a temporary probe at `tmp/probes-t3/p90`, which is not a durable test fixture.
 - Investigate: first commit a minimal repro under `tests/cases/`, then follow the parameter's declared access, mutation effect and transfer effect to find the first inconsistent producer. Preserve the `Shared` versus `Mutable` summary invariants and fix the producer rather than weakening the validator to accept invalid combinations.
 
-### Spanless release-folded calls may lose debug/release constraint parity
-
-- Found: Constraints follow-up `abc903852` source review, 2026-11. This is a potential limitation, not a reproduced source-level defect.
-- Where: `project_selected_hir_evidence` in `src/compiler_frontend/hir/hir_builder/metadata.rs`, specifically the `None => true` liveness fallback for `ast.release_erased_call_sites`, and the release-fold ledger in `ast/const_values/const_execution/rewrite.rs`.
-- Observed: a folded call with no source span cannot be matched against skipped statement spans, so the release path assumes it was live. If such a call originates in a skipped handler or after a terminator and its callee may trap or fail, release could reject `$infallible` where debug accepts. No test reached this case. The numeric backend contract calls for identical debug and release verdicts.
-- Investigate: determine whether any legal source or materialised callable can produce a spanless erased call in skipped code. Add a focused debug/release parity test if reachable. If impossible, document and enforce that invariant at the producer, then remove the fallback ambiguity. Otherwise carry explicit liveness or enclosing statement identity into the ledger rather than guessing from absent span data.
-
 ### A symlink alias into a `@config.moth` directory bypasses its exclusion
 
 - Found: reserved config directory fix, 2026-11. Traced, not reproduced.

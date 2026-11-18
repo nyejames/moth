@@ -89,11 +89,12 @@ pub(crate) struct HirSelectedCallSite {
 ///       failure.
 /// WHY: an erased call retains its trap hazard, but only an escaping call widens `may_fail`.
 ///      Reusing [`HirSelectedCallSite`] would force every selected-site producer to carry a
-///      containment bit it cannot know.
+///      containment bit it cannot know. The span is required because liveness was already decided
+///      from the authored span by the producer; a spanless consumer would have to guess.
 #[derive(Clone, Debug)]
 pub(crate) struct HirLiveErasedCallSite {
     pub(crate) target: CallTarget,
-    pub(crate) span: Option<SourceSpan>,
+    pub(crate) span: SourceSpan,
     pub(crate) failure_caught: bool,
 }
 

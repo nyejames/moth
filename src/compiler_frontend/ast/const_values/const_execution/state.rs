@@ -108,8 +108,10 @@ pub(super) struct ExecutionState {
     /// WHY: the walk knows the erased call but not which callable owns the expression, so the
     ///      caller drains these rows and attributes them to the node it is rewriting. Executing a
     ///      prepared candidate runs nested walks in `InterpretedBody` mode, which do not record;
-    ///      a callee's internal folds therefore cannot be misattributed to its caller.
-    pub(super) release_erased_calls: Vec<(PathId, Option<SourceSpan>, bool)>,
+    ///      a callee's internal folds therefore cannot be misattributed to its caller. The span is
+    ///      required because HIR decides erased-call liveness by matching it against authored
+    ///      dead and pruned-handler ranges; release speculation declines a spanless call instead.
+    pub(super) release_erased_calls: Vec<(PathId, SourceSpan, bool)>,
     /// Catch handler currently available to collection failures.
     ///
     /// This is not owned by one collection operation: a larger handled expression installs its
