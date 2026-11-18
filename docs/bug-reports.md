@@ -154,3 +154,10 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Where: `JsEmitter::new` in `src/backends/js/emitter.rs` builds `blocks_by_id: HashMap<BlockId, &HirBlock>` over every module block, and `block_by_id` in `src/backends/js/lookups.rs` reads it. `HirModule::block` in `src/compiler_frontend/hir/module.rs` already offers an identity-checked dense lookup, relying on the `compact_block_ids` invariant that analyses such as `analysis/numeric_proofs` depend on.
 - Observed: every JS lowering, including each linked module, hashes all blocks into a second lookup structure. Every reachability, cycle, branch-inspection, demand-scan and emission visit then goes through that map.
 - Investigate: confirm that every HIR reaching `lower_hir_to_js` has passed `compact_block_ids`, including hand-built backend test fixtures. If it has, replace the map with `HirModule::block` and keep the typed infrastructure failure for a missing block.
+
+### Frontend analysis module header names only frontend consumers
+
+- Found: AUD-0024 numeric proof comments audit, 2026-11. Comments lead in the parent module, outside that audit's area.
+- Where: the header of `src/compiler_frontend/analysis/mod.rs` says "later frontend stages need one place to access borrow-checking reports and analysis data".
+- Observed: the module also declares `numeric_proofs`, whose only production consumers are the JS and Wasm backends through `ModuleExecutable`. The WHY names neither those consumers nor the pass's optional status.
+- Investigate: confirm the consumer set of both child modules, then state what the analysis module owns and who reads its results.
