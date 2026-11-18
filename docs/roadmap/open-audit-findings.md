@@ -8,7 +8,10 @@ Unresolved **formal audit** findings only. The evidence and triage decision live
 
 ## Audits in progress
 
-None.
+- [AUD-0024: Numeric proof side-table comments](./audits/open_audits/AUD-0024-numeric-proofs-comments.md)
+  - `Comments` | `analysis.numeric_proofs`
+- [AUD-0025: Numeric proof side-table style](./audits/open_audits/AUD-0025-numeric-proofs-style.md)
+  - `Style` | `analysis.numeric_proofs`
 
 ## Candidate findings
 
