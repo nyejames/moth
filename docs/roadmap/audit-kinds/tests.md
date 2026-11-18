@@ -16,7 +16,7 @@ Read the canonical owner, [progress matrix](../../docs/progress/@entry.moth), co
 - Meaningful variants across modules, builders, backends, feature configurations, host platforms and CLI paths.
 - Boundaries recently changed or historically fragile, including regression cases for fixed bugs.
 
-Separate accepted, partially implemented and deferred behaviour. Do not demand tests for unsupported future work. Identify the intended **primary test owner** where required and recognise legitimate backend-only or adversarial-only families.
+Separate accepted, partially implemented and deferred behaviour. Do not demand success coverage for unsupported future work, but protect its required rejection and feature gates. Identify the intended **primary test owner** where required and recognise legitimate backend-only or adversarial-only families.
 
 ## 2. Identify the correct owner and whether it runs
 

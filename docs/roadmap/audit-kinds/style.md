@@ -4,7 +4,7 @@ Find correct Rust whose presentation or local structure makes Moth harder to rea
 
 Follow the [audit guide](../audit-guide.md) for formal findings and coverage. The [style guide](../../developer-docs/style-guide/style-guide.mtf) owns implementation standards. Use the [Redundancy guide](./redundancy.md) for duplicated ownership or obsolete layers. Log incidental issues in [`docs/bug-reports.md`](../../bug-reports.md).
 
-**Evidence bar:** show specific code, the ambiguity or unnecessary mental work it creates and a smaller, clearer alternative that preserves the same contract. `rustfmt` preferences and unsupported claims that something is simply "unidiomatic" are not findings.
+**Evidence bar:** show specific code, the ambiguity or unnecessary mental work it creates and a concrete, clearer alternative that preserves the same contract. `rustfmt` preferences and unsupported claims that something is simply "unidiomatic" are not findings.
 
 ## 1. Read the path as a new maintainer
 

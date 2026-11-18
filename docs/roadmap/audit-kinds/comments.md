@@ -84,7 +84,7 @@ For each formal finding, record:
 - Exact source location and the comment or code that needs context.
 - Missing or false intent, with the producer, consumer or invariant that establishes it.
 - How a future reader could misunderstand or break the code.
-- The smallest useful action: add a local explanation, correct wording, delete noise or replace it with a clearer name.
+- The smallest useful comment action: add a local explanation, correct wording or delete noise. Route a needed rename to Style.
 - Why existing nearby context is insufficient and how to verify the proposed statement.
 
 A demonstrated broken invariant is a [Correctness](./correctness.md) issue. Misleading public or canonical prose belongs to [Documentation](./documentation.md). Log such out-of-scope discoveries in `docs/bug-reports.md` without widening this run. Audits never edit code or comments themselves.
