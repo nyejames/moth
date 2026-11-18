@@ -21469,14 +21469,14 @@ role = "boundary"
 [[case]]
 id = "source_constraints_function_infallible_dead_nested_call_after_return_accepted"
 path = "source_constraints_function_infallible_dead_nested_call_after_return_accepted"
-tags = ["integration", "directives", "numeric", "runtime", "constraints", "functions", "generics"]
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "functions"]
 contract = "language.directives.function_infallible_ignores_dead_nested_call_tail"
 role = "primary"
 
 [[case]]
 id = "source_constraints_function_infallible_dead_nested_call_after_return_accepted_release"
 path = "source_constraints_function_infallible_dead_nested_call_after_return_accepted_release"
-tags = ["integration", "directives", "numeric", "runtime", "constraints", "functions", "generics", "release"]
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "functions", "release"]
 contract = "language.directives.function_infallible_ignores_dead_nested_call_tail"
 role = "boundary"
 
