@@ -1,6 +1,8 @@
 # Bug reports
 
-A casual log of bugs and limitations found during other work and left for later investigation. Each entry names where the problem lives, what was observed and a starting point for the fix. Remove an entry in the commit that resolves it.
+A lightweight queue for unresolved bugs and issues discovered during other work or a Correctness audit. Any agent may record an unrelated, non-blocking concern here and return to its task without starting a formal audit. This includes concrete documentation, test, redundancy and efficiency leads found outside the current scope.
+
+Check for an existing entry before adding one. Name where the problem lives, what was observed or looks suspicious and a useful next investigation. Distinguish confirmed defects from unverified hypotheses. Keep the format flexible and the entry short when evidence is limited. Follow [the audit guide](./roadmap/audit-guide.md) for formal audit coverage and findings. Remove an entry in the commit that resolves it.
 
 ## Open
 
@@ -96,3 +98,17 @@ A casual log of bugs and limitations found during other work and left for later 
 
   The space before the helper and the space after it both reach the default slot, so a common idiom yields a double space.
 - Investigate: decide whether inline spaces next to an `$in` helper count as formatting whitespace. If they do, drop them at routing. If not, document that the helper does not absorb adjacent spaces.
+
+### JS emitter rebuilds a block lookup map that dense HIR already provides
+
+- Found: AUD-0022 numeric proof redundancy audit, 2026-11. Unmeasured efficiency and redundancy lead outside that audit's area.
+- Where: `JsEmitter::new` in `src/backends/js/emitter.rs` builds `blocks_by_id: HashMap<BlockId, &HirBlock>` over every module block, and `block_by_id` in `src/backends/js/lookups.rs` reads it. `HirModule::block` in `src/compiler_frontend/hir/module.rs` already offers an identity-checked dense lookup, relying on the `compact_block_ids` invariant that analyses such as `analysis/numeric_proofs` depend on.
+- Observed: every JS lowering, including each linked module, hashes all blocks into a second lookup structure. Every reachability, cycle, branch-inspection, demand-scan and emission visit then goes through that map.
+- Investigate: confirm that every HIR reaching `lower_hir_to_js` has passed `compact_block_ids`, including hand-built backend test fixtures. If it has, replace the map with `HirModule::block` and keep the typed infrastructure failure for a missing block.
+
+### Frontend analysis module header names only frontend consumers
+
+- Found: AUD-0024 numeric proof comments audit, 2026-11. Comments lead in the parent module, outside that audit's area.
+- Where: the header of `src/compiler_frontend/analysis/mod.rs` says "later frontend stages need one place to access borrow-checking reports and analysis data".
+- Observed: the module also declares `numeric_proofs`, whose only production consumers are the JS and Wasm backends through `ModuleExecutable`. The WHY names neither those consumers nor the pass's optional status.
+- Investigate: confirm the consumer set of both child modules, then state what the analysis module owns and who reads its results.

@@ -1,61 +1,94 @@
 # Comments
 
-Looking for: missing, stale, misleading or noisy local intent.
+Find missing, misleading, stale or noisy explanations of **why the code is shaped as it is**. A reader should understand important local intent without tracing every distant producer and consumer.
 
-The [style guide](../../developer-docs/style-guide/style-guide.mtf) is the authority for comment form. This kind is code-neutral - it changes no executable tokens.
+Follow the [audit guide](../audit-guide.md) for formal findings and coverage. The [style guide](../../developer-docs/style-guide/style-guide.mtf) owns comment standards. Record incidental bugs in [`docs/bug-reports.md`](../../bug-reports.md) and return to this kind.
 
-**Evidence bar:** a specific intent that is missing, wrong or buried. "Add comments" is not a finding; name the intent that needs preserving.
+**Evidence bar:** identify the precise fact, invariant or decision a reader cannot reliably recover, or the false statement they would trust. A request for more comments without a named purpose is not a finding.
 
-## What needs explaining
+## 1. Map the intent before judging the prose
 
-Map the area first: what it owns, its exclusions, its stage position, and the invariants a local reader cannot infer from types. That map decides what needs a comment. Do not copy architecture documents into code.
+Read the area's `mod.rs`, file headers, key types and execution path. Check the relevant architecture and current ownership where a comment makes a non-local claim. Ask:
 
-## Module entry points
+- What does this module own and exclude? What do its callers supply and consumers assume?
+- Which constraints determine data representation, ordering, stage placement or lifetime?
+- Which branches, failure paths and fallbacks would look accidental without context?
+- Which previous migrations or fixes might have left outdated explanations?
 
-States the single responsibility, names important input and output data, explains how files divide the work, identifies exclusions and neighbours, and describes the main flow in execution order when it orchestrates steps. Uses current file and type names. Does not claim authority over behaviour owned elsewhere.
+Assess comments against the **current contract and code**, not their apparent plausibility. A search hit for `TODO`, `SAFETY`, `temporary` or a renamed stage is a lead until verified.
 
-File a finding when a reader cannot tell where to start or what the module owns.
+## 2. Check explanations at the right level
 
-## File headers
+### Module and file entry points
 
-Concise WHAT/WHY where the role is not obvious from module and filename. States what the file owns, important exclusions, and how it fits the wider stage. Names downstream consumers when they constrain the data shape. Does not repeat the filename or list every type.
+- Every handwritten Rust source file starts with concise module documentation, including small files. Keep an obvious leaf file's header short rather than omitting it.
+- A multi-file module's `mod.rs` explains its responsibility, important exclusions, file roles and principal data flow. It should guide a new reader to the right owner.
+- Headers explain purpose and relevant neighbours, not merely repeat the filename, list every item or copy an architecture document.
+- Comments use current type, module and stage names. They do not claim ownership of work performed elsewhere.
 
-A tiny file whose purpose is obvious needs no header. Do not require boilerplate.
+### Types, records and identities
 
-## Types and data structures
+Check important structs, enums, IDs, tables, side tables and results. Can a reader tell:
 
-Comments on important structs, enums, IDs, tables and result types should explain semantic ownership, lifecycle and mutability, identity domain and valid comparisons, alignment between parallel structures, whether the data may cross a module, stage, thread or persistence boundary, whether it is authoritative or derived, and why an unusual representation is safe.
+- What the value represents, which stage owns it and when it is valid or immutable?
+- Whether fields are authoritative, derived, cached or aligned with another store?
+- Which ID domain permits comparisons and whether values may cross module, worker or persistent boundaries?
+- Why a non-obvious layout, invariant, lifetime or ownership choice is required?
 
-Reject comments that restate field names.
+Explain a real constraint at its declaration or nearest enforcing operation. Field-by-field narration of clear names adds no value.
 
-## Complex flow
+### Execution and failure paths
 
-Landmarks explaining the overall operation, major phases and their required order, why one phase precedes another, where data changes authority or representation, why a fallback exists, why independent branches may or may not continue, where deterministic ordering is restored after parallel work, and why a no-op branch is intentional.
+Inspect major functions, matches, loops, stage handoffs and unusual branches for landmarks that explain:
 
-Comments support a readable flow. They do not compensate for an unreadable function - route that to Style.
+- The overall steps, why their order matters and where authority changes.
+- Why a validation or error belongs here rather than at a later consumer.
+- Why a fallback is conservative, a branch is intentionally empty or independent work may continue after failure.
+- Where deterministic order is recovered after parallel processing.
+- Which assumptions justify `unwrap`, `expect`, unchecked indexing, `unreachable!` or `unsafe`.
 
-## Non-local intent
+The code must still enforce its invariants. A comment cannot make an unsafe or incorrect path valid.
 
-The highest-value comments. Where correctness depends on facts outside the block: producer and consumer contracts, stable identity and remapping requirements, why source is not rescanned, why data cannot cross a boundary, why validation is deliberately conservative, why optional proof falls back rather than rejecting, why a path is serial despite available parallelism, why a clone is currently necessary, why similar-looking code stays separate.
+## 3. Hunt for high-value non-local intent
 
-Give the local reason. Do not write history essays - Git has those.
+Focus on statements whose reason lives outside the current function:
 
-## Invariants and failure paths
+- A producer publishes a fact once because consumers must not reconstruct source semantics.
+- A local ID must be remapped before another module can compare it.
+- A failed producer must not publish a partial interface or cache success.
+- A mandatory proof rejects input while an optional optimisation proof falls back.
+- A clone preserves independent ownership or a frozen snapshot beyond its source lifetime.
+- Similar-looking target paths remain separate because their capabilities or failure contracts differ.
 
-Non-obvious invariants around unchecked indexing, `.unwrap()`, `unreachable!`, unsafe code, table alignment, graph acyclicity, phase transitions, cache keys, remapping, ownership facts and target assumptions.
+For each, ask whether the comment identifies the **specific constraint** and its local consequence. For example, `// Needed for safety` is too vague to protect an invariant. A comment naming the value's lifetime and the consumer that outlives its producer is actionable.
 
-A comment does not legalise a weak invariant. Where the code cannot enforce what the comment claims, file a linked Correctness or Style finding.
+## 4. Remove noise and correct stale claims
 
-## Noise to remove
+Look for:
 
-Comments narrating the next line, paraphrasing a descriptive name, repeating a type signature, labelling trivial getters or loops, restating canonical docs without local relevance, banner-separating minor blocks, preserving history Git records, TODOs with no owner or current relevance, and vague claims - "for safety", "for performance", "temporary" - that never name the constraint.
+- Comments that narrate syntax, repeat names or describe a trivial getter, loop or branch.
+- Large banners, changelog prose, abandoned plans or implementation history that Git already records.
+- TODOs without a current action, reference or relevant remaining limitation.
+- Claims of safety, performance or temporary compatibility without a verifiable reason.
+- Descriptions of deleted passes, renamed types, old paths, changed stage order or ownership that moved.
+- Comments promising immutability, caching, recovery or deterministic order that the code no longer provides.
 
-Prefer deletion when the code already says it. Prefer a rename when the comment exists only because the code is obscure.
+Prefer deleting redundant prose. Prefer an obvious rename or simpler control flow when the comment only compensates for unclear code. Route that structural change to [Style](./style.md) or [Redundancy](./redundancy.md) rather than demanding a paragraph to explain it.
 
-## Staleness
+## 5. Challenge and report findings
 
-A stale comment is a finding even when the code is correct, because it actively misleads. Look for renamed types, stages or modules; descriptions of deleted passes; stale ordering claims; ownership assigned to the wrong stage; claims that a value is copied, cached or immutable when it no longer is; and references to old paths or plans.
+Before filing a Comments finding, check whether nearby code or module documentation already conveys the fact and whether the proposed wording will remain accurate through ordinary changes. The strongest counter-explanation may be that a comment would duplicate an enforceable type or a more authoritative document.
+
+For each formal finding, record:
+
+- Exact source location and the comment or code that needs context.
+- Missing or false intent, with the producer, consumer or invariant that establishes it.
+- How a future reader could misunderstand or break the code.
+- The smallest useful comment action: add a local explanation, correct wording or delete noise. Route a needed rename to Style.
+- Why existing nearby context is insufficient and how to verify the proposed statement.
+
+A demonstrated broken invariant is a [Correctness](./correctness.md) issue. Misleading public or canonical prose belongs to [Documentation](./documentation.md). Log such out-of-scope discoveries in `docs/bug-reports.md` without widening this run. Audits never edit code or comments themselves.
 
 ## Stale when
 
-Module ownership, principal control flow, stage ordering, important types or invariants, or the terminology the comments use changes materially.
+Module ownership, significant types or identities, stage ordering, principal control flow, invariants or the terminology explained by local comments change materially.

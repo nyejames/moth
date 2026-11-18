@@ -1,65 +1,87 @@
 # Style
 
-Looking for: code that behaves correctly but is hard to read, review, extend or delete.
+Find correct Rust whose presentation or local structure makes Moth harder to read, review, extend or safely change. The goal is **obvious ownership and data flow**, not minimum lines or personal taste.
 
-The [style guide](../../developer-docs/style-guide/style-guide.mtf) is the authority. This is the procedure for auditing against it.
+Follow the [audit guide](../audit-guide.md) for formal findings and coverage. The [style guide](../../developer-docs/style-guide/style-guide.mtf) owns implementation standards. Use the [Redundancy guide](./redundancy.md) for duplicated ownership or obsolete layers. Log incidental issues in [`docs/bug-reports.md`](../../bug-reports.md).
 
-**Evidence bar:** concrete code plus a named cost - slows review, obscures data flow, makes an API easy to misuse, or hides a state transition. "Cleaner" and "more idiomatic" are not justifications. Do not record formatting `rustfmt` already decides.
+**Evidence bar:** show specific code, the ambiguity or unnecessary mental work it creates and a concrete, clearer alternative that preserves the same contract. `rustfmt` preferences and unsupported claims that something is simply "unidiomatic" are not findings.
 
-## Ownership
+## 1. Read the path as a new maintainer
 
-Open the module entry point first. Identify the single responsibility, its input and output data, and its neighbours. Names and structure should make that visible before any implementation is read. Record files whose name no longer matches what they own.
+Open the area's `mod.rs`, relevant file headers, public entry points and primary data types. Follow one normal path and at least one error or exceptional path. Ask:
 
-Do not infer a new architecture because the layout is untidy - route ownership changes to Redundancy or Correctness.
+- Can the reader locate the owner without searching through unrelated helpers?
+- Do names, inputs, results and side effects tell the same story?
+- Can the main function be read as a sequence of meaningful steps?
+- Which detail forces a reader to jump between files, expand a dense expression or memorise unrelated state?
+- Do the current tests reveal an API whose shape is easy to misuse?
 
-## Module and file structure
+Trace the real caller before recommending a new helper, type or module. A familiar Rust pattern is not automatically suitable for this compiler boundary.
 
-Entry points act as a structural map, not a storage place. Files group one coherent task or data owner. Related private behaviour deepens into submodules rather than scattering across broad utility files. Files are not split so aggressively that basic control flow needs constant navigation. Re-exports expose a narrow intentional surface. Test code stays out of production files.
+## 2. Check module organisation and data shapes
 
-When proposing a split, name the responsibility that moves and the data boundary it receives and returns. Never split only to reduce line count.
+### File and module boundaries
 
-## Data shape
+- A multi-file module's `mod.rs` maps its responsibility and the role of its children. It is not a dumping ground for implementation.
+- Files group coherent tasks. Split mixed responsibilities when their changes and invariants are independent, not to enforce a line limit.
+- Avoid both sprawling files with unrelated stages and tiny forwarding modules that make one operation hard to follow.
+- Keep visibility and re-exports as narrow as the actual caller set requires. Test code belongs in its owning `tests/` directory.
+- Names follow the actual stage and responsibility after a move. Avoid broad `utils` modules and misleading generic names.
 
-- Structs represent data records or stage results, not objects with broad behavioural ownership.
-- Passes operate over explicit inputs, stores, arenas, tables, side tables or immutable artefacts.
-- Data used together is stored and passed together; data with different lifetimes is not hidden in one broad context.
-- Enums represent meaningful states instead of boolean clusters.
-- Named result structs replace tuple-heavy returns when field meaning matters.
-- IDs make their owning table obvious; parallel structures have an explicit alignment invariant.
-- Trait objects and generic surfaces do not obscure concrete stage ownership.
+A proposed split should name what moves, which owner retains it and the resulting input and output boundary.
 
-Data-oriented design follows access patterns. Do not convert every struct into parallel arrays.
+### Records and APIs
 
-## API shape
+- Prefer explicit data and state transitions to objects hiding several stages of behaviour.
+- Group data that shares a purpose and lifetime. Avoid catch-all context objects that conceal unrelated dependencies.
+- Use meaningful enums for meaningful alternatives instead of combinations of booleans or magic values.
+- Use named result types where tuple positions are hard to distinguish. Keep IDs visibly tied to their issuing domain.
+- Prefer borrowing for read-only access when the ownership contract allows it. Avoid accidental conversion chains at call boundaries.
+- Keep traits, generics and macros when they make a **current** operation clearer, not merely because Rust supports the abstraction.
 
-Descriptive input and result types. Narrow functions exposing one operation. Explicit state transitions rather than hidden mutation. No boolean-heavy call sites whose meaning needs the signature to decode. No defaulted parameter preserving an obsolete shape. No broad trait bound existing for one call site. Borrowed views for read-only queries. Consistent naming across a producer-consumer pair.
+A record-oriented design is not a mandate to split every struct into parallel arrays or to wrap every value in a new type.
 
-Internal pre-release API compatibility is not a goal. Structural removal of the old path belongs to a linked Redundancy finding.
+## 3. Inspect functions and control flow
 
-## Functions and control flow
+Walk the longest or most central functions, then their callers. Look for:
 
-The name matches the complete responsibility. The main path reads as named steps. Early returns clarify terminal paths. Complex validation uses explicit control flow rather than nested combinator chains. Large matches group by meaning. Named intermediates expose data flow. Closures stay small and local. Deep nesting usually means a missing helper or state enum.
+- Names covering only part of a function's responsibility, overly broad arguments or functions that mix unrelated phases.
+- Nested `map` / `and_then` chains hiding errors, mutable iterator closures or stateful combinators that obscure execution order.
+- Large inline matches without conceptual groups, deeply nested branches and duplicated success or error paths that are hard to compare.
+- Dense builder or conversion chains where named intermediate values would expose ownership and provenance.
+- Long argument lists where several values share one purpose and lifetime, or context structs created solely to hide dependencies.
+- Multiple tiny helpers whose names do not explain a meaningful step and whose navigation exceeds their benefit.
+- Early returns or no-op branches whose meaning is unclear without tracing distant state.
 
-Prefer the shortest form that stays obvious under review, not the fewest lines.
+Prefer explicit loops for multi-step operations, named intermediates for complex expressions and small functions that isolate real responsibilities. Keep a long cohesive transformation together when splitting it would scatter its state.
 
-## Naming, imports, layout
+## 4. Review names, errors and local Rust habits
 
-Full domain terms over unexplained abbreviations. Similar names have distinct roles. Stage names match canonical terminology. Imports keep long paths out of bodies without flooding the namespace. Blank lines reveal logical steps. Macros are smaller and clearer than what they replace. Section banners mark real boundaries, not an oversized file.
+- Use descriptive domain terms and consistent producer-consumer naming. Avoid `ctx`, `ty` and other opaque abbreviations outside tiny scopes.
+- Import long paths at module scope where useful. Avoid import aliases that obscure which stage owns a type.
+- Use spacing and short landmarks for major steps, not decorative banners or commentary on obvious syntax.
+- Keep user-facing `DiagnosticDraft`, operational `InfrastructureFailure` and proven internal `compiler_bug!` lanes visibly separate. Do not hide failures behind broad fallbacks.
+- Examine unexplained `unwrap`, `expect`, unchecked indexing, `todo!`, debug printing and lint `allow` attributes. Verify the claimed internal invariant before classifying a style issue.
+- Look for `.clone()`, `.to_owned()` and temporary buffers used to avoid clearer borrowing or moving. Check the lifetime before suggesting their removal.
 
-## Ownership noise
+If invalid input can actually crash, data can be corrupted or a failure enters the wrong lane, route a [Correctness](./correctness.md) lead to `docs/bug-reports.md`. Runtime cost claims require [Performance](./performance.md) evidence. Missing explanation of otherwise clear code belongs to [Comments](./comments.md).
 
-Without making performance claims: `.clone()` used to dodge a clearer borrow, owned `String` or `PathBuf` where interned identity exists, whole-collection cloning for one lookup, repeated conversion between equivalent representations, wrappers introduced only to satisfy an awkward API, defensive copies signalling unclear mutation ownership.
+## 5. Test the simplest alternative
 
-Any runtime claim routes to Performance; any cross-stage consolidation routes to Redundancy.
+Compare the current code with the least disruptive correction:
 
-## Errors and lints
+1. Rename a misleading function, binding or type.
+2. Expose the operation with a named intermediate or straightforward branch.
+3. Inline a pointless local helper, or extract one that names an actual step.
+4. Narrow a parameter or introduce a meaningful stage-local state/result type.
+5. Split a mixed-responsibility file without moving semantic ownership.
 
-User paths free of `panic!`, `todo!`, unchecked indexing and unjustified `.unwrap()`. Internal failures visibly distinct from user-facing ones. Lint suppressions narrow, documented and still needed. No `allow(dead_code)` preserving forgotten implementation. No leftover debug printing.
+Ask what new concepts, indirection or duplication the alternative adds. Reject clean-looking rewrites that hide side effects, couple lifetimes or merely relocate complexity. A distinct target boundary or longer but explicit operation may be intentionally clearer.
 
-## Pick the smallest valid action
+## Findings, coverage and staleness
 
-Rename locally; simplify without moving ownership; introduce a narrow named type inside the same owner; split a mixed-responsibility file inside the same owner; route a cross-owner concern elsewhere; or leave it because the explicit form is clearer than the abstraction.
+For each formal Style finding, provide the code location and caller context, the concrete reading or misuse cost, the strongest reason to keep the existing form, the proposed smallest correction and the invariants to preserve. Include relevant nearby examples so reviewers can compare before accepting the change. Group manifestations of one local style problem without claiming an unrelated architectural refactor.
 
-## Stale when
+Record which modules, APIs and control-flow paths were actually read. A file list or formatting check does not establish complete style coverage.
 
-Module organisation, important APIs, principal data structures or the control-flow shape of substantial functions change materially.
+Coverage becomes stale when module organisation, principal APIs and types, naming conventions or the control-flow shape of substantial functions change materially.

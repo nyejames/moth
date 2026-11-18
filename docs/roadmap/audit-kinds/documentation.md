@@ -4,7 +4,7 @@ Looking for: prose that misleads - wrong authority, stale status, broken routing
 
 **Evidence bar:** the exact conflicting, missing or ambiguous content, plus the canonical source of truth it contradicts.
 
-A documentation audit may correct inaccurate documentation. It cannot change accepted semantics under the label of cleanup, and it cannot settle an open design question. Record those as blocked design proposals.
+A documentation audit identifies inaccurate documentation and proposes corrections for a separate task. It does not edit canonical documents, change accepted semantics under the label of cleanup or settle an open design question. Record unresolved design conflicts as blocked proposals.
 
 ## Authority hierarchy
 
@@ -31,7 +31,7 @@ Compare canonical design with the [progress matrix](../../docs/progress/@entry.m
 - backend coverage matches actual target support
 - coverage labels are defensible against `tests/cases/manifest.toml`
 
-A code defect found here becomes a linked Correctness finding; a missing test becomes a linked Tests finding. The documentation finding owns only the inaccurate claim.
+Record an incidental code defect or missing test in [`docs/bug-reports.md`](../../bug-reports.md) without extending this audit. The Documentation finding owns only the inaccurate claim.
 
 ## Paths, links and terminology
 

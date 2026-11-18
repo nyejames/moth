@@ -4,7 +4,7 @@ Audit the quality, coverage and construction of compiler diagnostics. Look for u
 
 A good diagnostic tells the developer **what failed, why it failed and what to do next when the compiler can establish a valid next step**. Its code, source attribution and presentation must remain reliable across compiler stages and commands.
 
-Source that the compiler incorrectly accepts or rejects belongs to **Correctness**. Link a Correctness finding when a diagnostic defect also affects legality or compilation outcomes. Weak or missing test assertions belong to **Tests** and should be linked rather than counted as separate diagnostic defects without evidence.
+Source that the compiler incorrectly accepts or rejects belongs to **Correctness**. Record that defect in [`docs/bug-reports.md`](../../bug-reports.md) without expanding this audit. Weak or missing test assertions belong to **Tests** and can be logged there as incidental leads rather than counted as separate diagnostic defects without evidence.
 
 **Authorities:** `docs/compiler-data-layout-design.md` owns the three failure lanes, diagnostic schema, physical layout and identity lifetimes. `docs/compiler-design-overview.md` owns semantic stages and recovery. `docs/build-system-design.md` owns graph outcomes, scheduling and command boundaries. The codebase style guide and testing guide govern implementation and fixtures. Follow these owners instead of copying their detailed representation contracts into this guide.
 
@@ -85,7 +85,7 @@ Do not create a new code for every sentence, duplicate constructors to vary pros
 - Review common malformed-input permutations: missing, extra, misplaced and wrong-kind tokens, plus nearby valid spellings likely to produce the mistake.
 - Check whether an earlier failure removes the semantic context needed for a useful later message. Improve the owning producer or recovery boundary instead of reparsing source in the renderer.
 - Test invalid inputs adjacent to legal boundaries, including empty constructs, nested syntax, conflicts across files and capacity limits.
-- Distinguish unreported invalid source from poor reporting. Wrong legality is a Correctness finding even when adding a diagnostic forms part of its fix.
+- Distinguish unreported invalid source from poor reporting. Wrong legality belongs in the Correctness bug queue even when adding a diagnostic forms part of its fix.
 
 ## Compiler construction and ownership
 
@@ -99,7 +99,7 @@ Do not create a new code for every sentence, duplicate constructors to vary pros
 - Keep compiler diagnostics separate from runtime Moth `Error` values, entry-startup failures and the standalone MON service's public errors.
 - A diagnosed module never publishes a partial semantic interface. Infrastructure failure and compiler bugs follow the owning outcome contract rather than being converted to ordinary source diagnostics.
 
-A wrong lane that changes compilation outcomes needs a linked Correctness finding.
+A wrong lane that changes compilation outcomes belongs in the Correctness bug queue.
 
 ### Typed facts, identity and rendering
 
@@ -142,10 +142,10 @@ Treat these as investigation triggers, not automatic findings without reproducti
 - **Poorly located:** the span points at an enclosing function instead of the erroneous operator, or a collision omits its original declaration.
 - **Redundant:** message, guidance and labels repeat the same facts without explaining relationships.
 - **Technically exposed:** printed `TypeId` values, IR node names, raw fact indexes or renderer fallback placeholders appear in user-facing output.
-- **Wrong lane:** malformed source produces `InfrastructureFailure` or a panic, or an operational read failure masquerades as a source error.
+- **Wrong lane:** a failure is classified or presented as the wrong kind. If malformed source panics or an operational failure becomes a source rejection, log a Correctness lead rather than treating the changed outcome as a diagnostic-only finding.
 - **Poorly constructed:** `format!` strings sit in semantic payloads, callers duplicate similar prose, paths are cloned into records or renderers reinterpret codes to determine the underlying reason.
 - **Unstable:** report order changes across runs, identities are misremapped or one failed dependency generates repeated downstream errors.
-- **Missing:** a validator silently accepts or ignores a recognised invalid case, or one normal error prevents independent cases from being reported where recovery permits them.
+- **Missing:** a known invalid case receives only a generic diagnostic, or a recovery boundary loses independent diagnostic context. If a validator silently accepts invalid source, log it under Correctness instead.
 
 ## Audit workflow
 
@@ -154,7 +154,7 @@ Treat these as investigation triggers, not automatic findings without reproducti
 3. **Reproduce the output.** Use the smallest source or project fixture. Capture the exact code, message, guidance, primary span, relevant labels and command/target context. Record actual behaviour before proposing a replacement.
 4. **Probe permutations.** Exercise distinct causes, context kinds, boundaries, related declarations, malformed near-misses and supported alternatives. Compare the result against the quality and specialisation rules.
 5. **Locate the missing fact.** Decide whether the renderer can use existing data, the typed schema needs a reason/fact or an earlier semantic owner must capture information. Do not move semantic analysis into presentation code.
-6. **Classify the finding.** Group related message, coverage and construction problems under one root cause. Link separate Correctness and Tests findings when their contracts are affected.
+6. **Classify the finding.** Group related message, coverage and construction problems under one root cause. Record separate wrong-legality or test-coverage leads in `docs/bug-reports.md` without creating linked formal findings or expanding audit scope.
 7. **Propose the smallest fix.** Prefer refining prose or existing facts before expanding a reason enum, and expand a reason enum before introducing a new family when the semantic identity remains unchanged. Remove obsolete branches and redundant helpers touched by the change.
 8. **Specify verification.** Name fixtures and assertions that establish the corrected behaviour without relying only on "must fail" or a generic snapshot.
 

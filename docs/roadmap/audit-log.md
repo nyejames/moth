@@ -20,16 +20,35 @@ What has been audited, where, and when. This is a record, not a permission list.
 
 ## Entry format
 
-Each entry is `Kind YYYY-MM AUD-####`, optionally followed by one or more qualifiers. `partial`
-and `stale` may be combined when the inspected subset has since changed materially:
+Formal audits use `Kind YYYY-MM AUD-####`. New Correctness audits use
+`Correctness YYYY-MM @<commit>` without a report ID. The commit identifies the
+revision inspected. Existing Correctness entries with `AUD-####` remain valid
+historical records and are not migrated.
+
+Add `partial` and the inspected subset or exclusions directly to a lightweight
+Correctness entry. The `Covers` column defines the area a complete run claims.
+Prefer a narrower area row if a partial note would become long. Formal audit
+reports retain their detailed coverage and limitations. Both formats may include
+`stale` when material changes invalidate the recorded coverage.
+
+For example:
+
+```text
+Correctness 2026-11 @a1b2c3d
+Correctness 2026-11 @a1b2c3d `partial (only parser heads, not recovery)`
+Redundancy 2026-11 AUD-0022 `partial`
+```
+
+The qualifiers mean:
 
 | Qualifier | Meaning |
 |---|---|
 | *(none)* | The whole area was inspected for that kind. |
-| `partial` | Only part of the area was inspected. The report says which part. |
+| `partial` | Only part of the area was inspected. Formal reports describe the limit, while lightweight Correctness entries name it here. |
 | `stale` | The recorded coverage has changed materially since that audit. |
 
-Coverage is not quality. An audited area may still have open findings.
+Coverage is not quality. An audited area may still have formal findings or bugs
+in `docs/bug-reports.md`. Recording an incidental issue never records coverage.
 
 ## Audited areas
 
@@ -55,6 +74,7 @@ Coverage is not quality. An audited area may still have open findings.
 | `frontend.function_body_parsing` | Statement parsing inside function bodies after header capture of the body range, including nested block closers and whether later statements are absorbed by an unclosed inner block. This run did not exhaust match-arm, multi-bind or generic-body parsers. | Correctness 2026-11 AUD-0019 `partial` `stale` |
 | `backends.feature_validation` | Target-contract validation in `src/backends/backend_feature_validation.rs` (Wasm arms only; the `Js` arm is an intentional no-op). This run did not inspect `external_package_validation.rs`, nested generic-instance occurrences, or every `MOTH-RULE-0064` fixture. | Correctness 2026-11 AUD-0020 `partial` `stale` |
 | `contract.constraints.selected_evidence` | Constraint evidence from release-folded and skipped AST calls through HIR projection, convergence and generated-instance witness diagnostics. Excludes full generic materialisation, const evaluation and backend arithmetic implementations. | Correctness 2026-11 AUD-0021 `partial` |
+| `analysis.numeric_proofs` | Bounded-integer proof side table: `src/compiler_frontend/analysis/numeric_proofs/mod.rs`, its production invocations in `module_compilation/service.rs` and `generated/{convergence,materialisation}.rs`, publication on `ModuleExecutable`, threading through `projects/html_project`, and the backend proof queries in `backends/js/{reachability,js_statement,emitter,js_function}.rs` and `backends/wasm/hir_to_lir/stmt.rs`. Excludes the wider JS numeric carrier and runtime kernels, Wasm LIR emission and test modules. | Redundancy 2026-11 AUD-0022 `partial`; Performance 2026-11 AUD-0023 `partial`; Comments 2026-11 AUD-0024 `partial`; Style 2026-11 AUD-0025 `partial` |
 
 ## Never audited
 
