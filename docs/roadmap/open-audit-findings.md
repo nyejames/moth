@@ -8,7 +8,10 @@ Unresolved **formal audit** findings only. The evidence and triage decision live
 
 ## Audits in progress
 
-None.
+- [AUD-0022: Numeric proof side-table redundancy](./audits/open_audits/AUD-0022-numeric-proofs-redundancy.md)
+  - `Redundancy` | `analysis.numeric_proofs`
+- [AUD-0023: Numeric proof side-table performance](./audits/open_audits/AUD-0023-numeric-proofs-performance.md)
+  - `Performance` | `analysis.numeric_proofs`
 
 ## Candidate findings
 
