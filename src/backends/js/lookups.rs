@@ -59,7 +59,7 @@ impl<'hir> JsEmitter<'hir> {
         &self,
         block_id: BlockId,
     ) -> Result<&'hir HirBlock, InfrastructureFailure> {
-        self.blocks_by_id.get(&block_id).copied().ok_or_else(|| {
+        self.hir.block(block_id).ok_or_else(|| {
             InfrastructureFailure::internal(
                 CompilerStage::BackendLowering,
                 format!("JavaScript backend: block {block_id:?} not found in HIR module"),

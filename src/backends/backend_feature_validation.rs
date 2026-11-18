@@ -922,7 +922,6 @@ fn validate_wasm_mutable_function_parameters(
     target: BackendTarget,
     string_table: &mut DiagnosticStringBuilder,
 ) -> Result<(), DiagnosticDraft> {
-    let mut block_by_id = None;
     let mut has_spanless_mutable_parameter = false;
 
     for function in &hir.functions {
@@ -933,17 +932,7 @@ fn validate_wasm_mutable_function_parameters(
             continue;
         }
 
-        let entry_block = block_by_id
-            .get_or_insert_with(|| {
-                let mut block_by_id = FxHashMap::default();
-                for block in &hir.blocks {
-                    block_by_id.entry(block.id).or_insert(block);
-                }
-                block_by_id
-            })
-            .get(&function.entry)
-            .copied();
-        let Some(entry_block) = entry_block else {
+        let Some(entry_block) = hir.block(function.entry) else {
             crate::compiler_bug!(
                 CompilerStage::BackendLowering,
                 "Backend feature validation could not resolve entry block {:?} for selected function {:?}",
@@ -1006,12 +995,6 @@ fn validate_wasm_mutable_local_aliases(
     string_table: &mut DiagnosticStringBuilder,
 ) -> Result<(), DiagnosticDraft> {
     let mut spanless_alias = false;
-    let blocks_by_id = hir
-        .blocks
-        .iter()
-        .enumerate()
-        .map(|(order, block)| (block.id, (order, block)))
-        .collect::<FxHashMap<_, _>>();
 
     for function in &hir.functions {
         if !selection.contains_function(function.id) {
@@ -1027,26 +1010,27 @@ fn validate_wasm_mutable_local_aliases(
         };
         let mut selected_blocks = Vec::with_capacity(selected_block_ids.len());
         for block_id in selected_block_ids {
-            let Some((order, block)) = blocks_by_id.get(block_id).copied() else {
+            let Some(block) = hir.block(*block_id) else {
                 crate::compiler_bug!(
                     CompilerStage::BackendLowering,
                     "Backend feature validation selected unknown block {block_id:?} for function {:?}",
                     function.id,
                 )
             };
-            selected_blocks.push((order, block));
+            selected_blocks.push(block);
         }
-        // Keep the module's established block order so the first source diagnostic stays stable.
-        selected_blocks.sort_unstable_by_key(|(order, _)| *order);
+        // Dense block ids encode the module's block order, so ascending id keeps the first
+        // source diagnostic stable.
+        selected_blocks.sort_unstable_by_key(|block| block.id.0);
 
         let mutable_locals = selected_blocks
             .iter()
-            .flat_map(|(_, block)| block.locals.iter())
+            .flat_map(|block| block.locals.iter())
             .filter(|local| local.mutable)
             .map(|local| local.id)
             .collect::<FxHashSet<_>>();
 
-        for (_, block) in &selected_blocks {
+        for block in &selected_blocks {
             for statement in &block.statements {
                 let HirStatementKind::Write {
                     target: write_target,
