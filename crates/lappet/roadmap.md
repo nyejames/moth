@@ -12,13 +12,14 @@ planned backend support as available.
   contract crate and the native binding handoff are delivered. The `lappet`
   crate has a Wasmtime runtime and host boundary tables. It has no host adapter
   yet.
-- Current milestone: none is startable. Milestone 6 needs its checkpoint
-  approved and milestone 7 waits for the compiler work listed under
-  [Waiting on main](#waiting-on-main).
-- Blockers: Nye approves the milestone 6 checkpoint or the milestone 8
-  checkpoint, or the native host ABI lowering lands on `main`. The branch was
-  synced with `main` on 14 November 2026.
-- Next action: prepare the milestone 6 checkpoint inventory for approval.
+- Current milestone: the pre-roadmap native readiness and hardening gate.
+  Further roadmap milestones wait for its completion. Milestone 7 also waits
+  for the compiler work listed under [Waiting on main](#waiting-on-main).
+- Blockers: none for prerequisite runtime fixes and contract inventory.
+  Compiler native host ABI lowering and package dependency design remain
+  independent gates for the later integration and package milestones.
+- Next action: implement the prerequisite's focused runtime corrections, then
+  prepare the Core implementation and conformance inventory for approval.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
 and [Wasm optimisation](../../docs/developer-docs/wasm-optimisation/overview.mtf)
@@ -40,14 +41,16 @@ compiler crate.
 | 3 | Build host boundary tables and fault mechanics | Delivered | Delivered | None |
 | 4 | Extract the shared host contract crate | Delivered | Delivered | None |
 | 5 | Finish the native binding and artefact handoff | Delivered | Delivered | None |
-| 6 | Establish official Core conformance | Lappet, Core references | Milestones 3 and 5 and its own checkpoint | Write when the checkpoint is approved |
-| 7 | Connect real Moth applications | Lappet, public compiler services | The compiler's native host ABI prerequisites | Write when the gate opens |
-| 8 | Package declaration and local catalog foundations | Build system, Stage 0, Lappet | Its checkpoint and the package prerequisites | Write when the checkpoint is approved |
+| Prerequisite | Native readiness and hardening | Lappet runtime, Core and host contracts | Start now | [Phased plan](../../docs/roadmap/plans/lappet-native-readiness-and-hardening-plan.md) |
+| 6 | Establish official Core conformance | Lappet, Core references | Prerequisite, milestones 3 and 5 and its own checkpoint | Write when the checkpoint is approved |
+| 7 | Connect real Moth applications | Lappet, public compiler services | Prerequisite and the compiler's native host ABI prerequisites | Write when the gate opens |
+| 8 | Package declaration and local catalog foundations | Build system, Stage 0, Lappet | Prerequisite, its checkpoint and the package prerequisites | Write when the checkpoint is approved |
 | 9 | Package eligibility and dependency evidence | Lappet, compiler facts | Milestone 8 | Write when the checkpoint is approved |
 | 10 | Remote admission | Lappet | Milestone 9 and its checkpoint | Write when the checkpoint is approved |
 
 The package lane, milestones 8 to 10, is independent of Wasmtime and may move
-ahead of milestones 6 and 7 once its prerequisites and checkpoint are met.
+ahead of milestones 6 and 7 once the common prerequisite, its compiler
+prerequisites and its own checkpoint are satisfied.
 
 ## Waiting on main
 
@@ -76,10 +79,25 @@ check, then re-read any authority the merge changed.
 
 ## Open decisions
 
-None are open. Nye confirmed the runtime policy defaults and the host boundary
-limits on 14 November 2026, with the values unchanged. They now live in
-[the runtime design](docs/design.md) and
-[the host ABI adapter responsibilities](docs/host-abi.md).
+**Accepted for native readiness:** retain the restricted V1 host ABI and route
+Core operations through compiler-owned direct, helper or native providers.
+Official Core eligibility uses a trusted first-party builder catalogue, not
+custom builder self-identification. The Rust adapter uses manifest-validated
+selected exports, canonical resource/context descriptors and no implicit start
+for host-callable artefacts. The exact operational bound for copied export
+strings remains a prerequisite checkpoint, not a chosen number. These decisions
+live in [the runtime design](docs/design.md),
+[the host ABI adapter responsibilities](docs/host-abi.md) and
+[the package-manager design](docs/package-manager.md).
+
+**Deferred compiler-wide decision:** the syntax and resolution of external
+project dependencies in `@config.moth` are not approved or committed here.
+They need a separate Moth roadmap design decision before package foundations
+can proceed. The queued namespaced public-export-path work is independent of
+how external packages are acquired and declared.
+
+**Previously decided:** Nye confirmed the runtime policy defaults and host
+boundary limits on 14 November 2026, with the values unchanged.
 
 **Facade-only projects: decided.** A project with a valid package facade and no
 executable entry is a valid build target for a package-capable builder. The
@@ -96,6 +114,27 @@ diagnostic itself against the source root the frontend compiled. One ordering
 change follows: an HTML project with no entry and a source error now reports
 the source error first, because compilation runs before the builder's check.
 The `just validate` run recorded under milestone 2 covered this tree.
+
+## Native readiness findings
+
+The pre-roadmap plan owns their implementation and tests. The current runtime
+has four concrete correctness/diagnostic issues:
+
+- `instance.rs` can validate a token before reporting a quarantined instance,
+  and a rejected call can still install an epoch deadline.
+- `staging.rs` checks configurable byte limits without independently enforcing
+  the native ABI's `i32::MAX` text-length ceiling.
+- The scope driver reports oversized Rust caller input as an internal host
+  fault. It should reject the input before guest entry without quarantine.
+- The single-string fixture driver reports declared errors without decoding
+  their record and uses the noncanonical-status fault for malformed result
+  spans and UTF-8. The manifest adapter must replace this path in milestone 7.
+
+Core conformance also has a concrete integration blocker: `@core/time` and
+`@core/io` return opaque Core types, while general V1 host imports disallow
+resource results. The compiler's existing host requirement collection does
+not include Core-backed external bindings. The prerequisite inventory must
+assign explicit Core provider routes before native implementation starts.
 
 ## Working rules
 
@@ -683,6 +722,13 @@ unsupported results for browser, game and headless server hosts. Define the
 trusted official-environment identity used by package admission. A builder's
 self-declaration or use of Lappet cannot grant certification.
 
+**Accepted direction.** The compiler selects direct lowering, a compiler
+helper or a native Core provider by canonical identity and target capability.
+The prerequisite inventory must resolve opaque return values from `@core/time`
+and `@core/io` without widening general host bindings. Official certification
+comes from the trusted first-party catalogue and complete applicable Core
+conformance, not a builder name or the presence of native implementations.
+
 **Delivery.** Provide reusable native Core implementations through the existing
 canonical binding contracts. Retain efficient compiler/Wasm implementations
 where already suitable. Custom builders may select implementations for local
@@ -707,11 +753,18 @@ also needs the host context and opaque resource descriptor work listed under
 [milestone 5](#5-finish-the-native-binding-and-artefact-handoff), which V1
 requires.
 
+The pre-roadmap readiness gate must also be completed. Its selected-export
+contract requires the compiler manifest, no implicit Wasm start function and
+an approved bounded-copy policy before a public Rust call adapter ships.
+
 **Delivery.** Compile through public Moth services, install matching Rust host
-implementations and invoke explicitly selected exports. Extend the `moth-host`
+implementations and invoke explicitly selected exports through checked,
+manifest-validated typed handles. Preserve multiple ordered success slots,
+builtin declared errors and distinct runtime faults. Extend the `moth-host`
 descriptors, the compiler's conversion table and `preflight` to host context
-and opaque resources. Prove one embedded game lifecycle and one server
-lifecycle without adding a scheduler or web framework.
+and opaque resource parameters. Replace the fixture-only export driver rather
+than maintaining a second semantic signature or call path. Prove one embedded
+game lifecycle and one server lifecycle without adding a scheduler or web framework.
 Keep rendering/output/resource planning with the builder and build system.
 
 **Evidence.** Run actual Moth programs, not hand-authored ABI substitutes.
