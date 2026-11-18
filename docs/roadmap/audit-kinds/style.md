@@ -34,7 +34,7 @@ Data-oriented design follows access patterns. Do not convert every struct into p
 
 Descriptive input and result types. Narrow functions exposing one operation. Explicit state transitions rather than hidden mutation. No boolean-heavy call sites whose meaning needs the signature to decode. No defaulted parameter preserving an obsolete shape. No broad trait bound existing for one call site. Borrowed views for read-only queries. Consistent naming across a producer-consumer pair.
 
-Internal pre-release API compatibility is not a goal. Structural removal of the old path belongs to a linked Redundancy finding.
+Internal pre-release API compatibility is not a goal. Record an out-of-scope structural removal as an incidental Redundancy lead in [`docs/bug-reports.md`](../../bug-reports.md).
 
 ## Functions and control flow
 

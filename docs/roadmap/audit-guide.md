@@ -4,7 +4,9 @@ This document owns the rules for running a structured codebase audit: what to au
 
 An audit is an **explicitly invoked** activity. It is not the Slice review in [AGENTS.md](../../AGENTS.md), which every non-trivial change ends with. The Slice review needs no scope, produces no report and never writes here. Do not block one on the other.
 
-Focused checklists live under [audit-kinds](./audit-kinds/README.md). Reports live under [audits](./audits/README.md), split into [open audits](./audits/open_audits/) and [closed audits](./audits/closed_audits/). Coverage lives in the [audit log](./audit-log.md), unresolved work in [open findings](./open-audit-findings.md) and resolution history in the [completed audits log](./completed_audits_log.md).
+Focused checklists live under [audit-kinds](./audit-kinds/README.md). Every audit records coverage in the [audit log](./audit-log.md). **Correctness audits** record bugs in [bug reports](../bug-reports.md) and need no separate report. Other kinds use formal reports under [audits](./audits/README.md), with unresolved work in [open findings](./open-audit-findings.md) and resolution history in the [completed audits log](./completed_audits_log.md).
+
+Any audit may also log an unrelated issue in `docs/bug-reports.md` without opening another audit or extending its coverage. The bug log is a lightweight investigation queue, not a second formal findings index.
 
 ## What an audit is for
 
@@ -21,7 +23,7 @@ Follow [AGENTS.md](../../AGENTS.md) task routing first. Then read:
 
 1. The chosen checklist under [audit-kinds](./audit-kinds/).
 2. The [audit log](./audit-log.md) row for the area, if it has one.
-3. Open findings, any recent report for the same area and the completed audits log when checking earlier resolutions.
+3. [Bug reports](../bug-reports.md), relevant formal open findings, recent reports and earlier resolutions when checking for duplicate work.
 4. The canonical authorities the area's subject matter routes to, plus the [progress matrix](../docs/progress/@entry.moth) when current support status matters.
 
 Do not blanket-read every design document. Follow the routing.
@@ -51,13 +53,15 @@ If you cannot cover the whole area, cover part of it and say which part. A parti
 
 ## Running the audit
 
-### 1. Reserve the report
+### 1. Select the recording lane
 
-Pick the next unused `AUD-####` across both report folders, create the report under `audits/open_audits/` from the skeleton in [audits/README.md](./audits/README.md), and add it under `Audits in progress` in [open findings](./open-audit-findings.md). Do this before inspecting anything, so concurrent runs collide visibly rather than silently.
+For **Correctness**, use the lightweight lane: inspect the area, log bugs in `docs/bug-reports.md` and record coverage directly in `audit-log.md`. Do not reserve an `AUD-####`, create a report or add entries to the formal open-findings and completed-audits logs. Coordinate overlapping runs with active agents since no report reservation exists.
 
-### 2. Record the baseline
+For **every other kind**, reserve the next unused `AUD-####` across both report folders. Create a report under `audits/open_audits/` from the [report skeleton](./audits/README.md) and add it under `Audits in progress` in [open findings](./open-audit-findings.md). Reserve before inspecting so concurrent formal runs collide visibly.
 
-Note current validation state, known pre-existing failures, active plans touching the area, and anything that limits confidence. An audit may run against an unhealthy baseline, but it must say so and must not claim a gate passed when it did not run.
+### 2. Establish the baseline
+
+Check current validation state, known pre-existing failures, active plans touching the area and anything that limits confidence. Formal reports record this baseline. Correctness audits preserve material limitations in their coverage note or the relevant bug entry. Never claim a gate passed when it did not run.
 
 ### 3. Inspect
 
@@ -65,7 +69,7 @@ Work through the chosen checklist. Read the area's entry points and ownership be
 
 A directory listing, search hit count or test count is not evidence of coverage.
 
-### 4. Challenge each finding before filing it
+### 4. Challenge each in-scope finding before filing it
 
 This is the step that separates a finding from an opinion. For each one:
 
@@ -74,26 +78,39 @@ This is the step that separates a finding from an opinion. For each one:
 - Check open findings and active plans for the same root cause.
 - Name the evidence that would disprove it.
 
-Preference alone is not a finding. Performance needs measurement and attribution. Duplication needs equivalent behaviour and ownership, not similar text. Correctness needs a violated contract and a path that violates it.
+Preference alone is not a finding. Claims of faster execution or lower memory use need measurement and attribution. A Performance audit may also record demonstrably unnecessary work as unmeasured structural cleanup without claiming a speedup. Duplication needs equivalent behaviour and ownership, not similar text. A confirmed correctness bug needs a violated contract and a path that violates it. A credible but unproven concern may be logged for investigation if its uncertainty is explicit.
 
-### 5. File the finding
+### 5. Record the result
 
-Use the report schema. Every finding needs: the problem, concrete evidence, the counter-explanation you tested, the contract or cost it violates, the root owner, and a suggested correction.
+**Correctness:** add a concise entry to `docs/bug-reports.md` for each distinct unresolved root cause. Name where it occurs, the observed or suspected wrong behaviour, the violated contract when established and the next useful investigation or reproduction. Mark unconfirmed hypotheses clearly. Check for an existing entry first and extend it rather than duplicating it. A clean audit produces no bug entry.
 
-**A suggested correction does not authorise anything.** It seeds later work. Triage decides whether the finding is accepted; implementation decides the actual fix shape.
+**Other kinds:** use the formal report schema. Each finding needs the problem, concrete evidence, the counter-explanation tested, the contract or cost it violates, the root owner and a suggested correction. Route an out-of-kind discovery through the incidental issue rule below.
+
+**A suggested correction does not authorise anything.** Formal findings require triage before implementation. Bug-log entries require independent investigation before their fix scope is chosen.
 
 ### 6. Close the run
 
 - Mark coverage `complete` or `partial`, honestly.
-- Add unresolved findings to [open findings](./open-audit-findings.md) and remove the report from `Audits in progress`.
 - Update the audit log row for the area and kind you ran. Do not touch any other row.
-- If the report has no unresolved findings, move it to `audits/closed_audits/` and add a brief entry in the [completed audits log](./completed_audits_log.md). Update its incoming links.
+- **Correctness:** record the audited revision and, for partial coverage, the exact inspected subset and exclusions in the audit log. The area's `Covers` definition supplies the full-coverage boundary. No report or archive entry follows, even when no bugs were found.
+- **Other kinds:** add unresolved findings to [open findings](./open-audit-findings.md) and remove the report from `Audits in progress`. If no unresolved findings remain, move it to `audits/closed_audits/`, record its closeout in the [completed audits log](./completed_audits_log.md) and update incoming links.
+
+## Incidental discoveries in any task
+
+An audit can expose a plausible bug, documentation gap, duplicated path, test weakness or efficiency concern unrelated to its chosen kind or area. **Record the lead in `docs/bug-reports.md` and continue the original audit.** Other implementation and review tasks may use the same queue. Do not discard an observation merely because it falls outside the current scope.
+
+- Check for an existing entry first. Name the relevant code or document, what looked wrong and a concrete starting point for verification.
+- Distinguish reproduced defects from unconfirmed suspicions. A brief, accurate lead is enough. Do not require full audit-level proof or an `AUD-####` report before recording it.
+- Do not expand the current audit, claim coverage for another kind or fix the unrelated issue during this run.
+- Do not fill the queue with ungrounded preferences or search hits. Record a specific observable concern, inconsistency or suspicious execution path.
+
+The next task investigating the entry establishes the evidence, design authority and fix scope. If that work becomes a formal audit, its own report and coverage rules apply. Avoid tracking the same unresolved root cause independently in both queues.
 
 ## What an audit may change
 
 An audit run is read-only with respect to production code, tests, benchmarks, fixtures, canonical documents and implementation status.
 
-It may write **only**: its own report, the open-findings index, the audit coverage log and, when closing an audit, the completed audits log and report location.
+It may write **only** `docs/bug-reports.md` and the audit coverage log, plus its own report, the formal open-findings index and the report closeout records when the kind uses formal reports. These documentation-only writes record evidence, not implementations.
 
 ## Authority
 
@@ -109,26 +126,28 @@ When two canonical documents conflict, record the exact conflict and route it to
 
 **Deferred is not broken.** Check the progress matrix before filing anything as a defect. Absence of deferred work is not a finding; accidental exposure of it may be.
 
-**Do not change tests to fit a finding.** A non-test audit that needs coverage changed files a linked Tests finding instead. The same applies to documentation: link a Documentation finding rather than editing canonical prose under another kind.
+**Do not change tests to fit a finding.** A non-test audit that notices a separate test or documentation problem records an incidental lead in `docs/bug-reports.md`. A focused Tests or Documentation audit follows its own formal findings process. Do not edit tests or canonical prose under another kind.
 
 ## Preservation contract
 
-Every accepted finding and every fix implementing one inherits these. A fix that breaks one is invalid, however much else it improves.
+Every accepted formal finding and every fix taken from the bug queue inherits these. A fix that breaks one is invalid, however much else it improves.
 
 | Preserve | Meaning |
 |---|---|
 | Semantics | No change to accepted language, memory, compiler or build behaviour without an approved design change. |
 | Support boundary | Do not report deferred work as a defect, or implement it incidentally. |
-| Tests | Existing tests pass unmodified unless an accepted Tests finding names the exact change. |
+| Tests | Preserve coverage of accepted contracts. A verified bug fix may update an expectation proven wrong and add regression tests in the same scoped task. Unrelated test changes need their own accepted Tests finding. |
 | Diagnostics | Preserve or improve diagnostic identity, source context and recovery. |
 | Outputs | Preserve observable output, public interfaces and artefacts unless the finding proves them wrong. |
 | Determinism | Preserve deterministic identities, ordering and output. |
 | Performance | No material regression, and no improvement claimed without measurement. |
-| Ownership | Do not move responsibility across owners without an accepted boundary finding. |
+| Ownership | Keep each fact with its accepted owner. Review any boundary change against the canonical design and the approved fix scope. |
 
 Do not accept a fix that keeps the replaced path alive behind a wrapper, suppresses a failure instead of fixing it, moves work into a consumer when the fact belongs to a producer, or reconstructs something an earlier stage already owns.
 
-## Findings
+## Formal findings and resolution
+
+This lifecycle applies to kinds that create `AUD-####` reports. Correctness bugs and incidental leads instead follow the lightweight queue in `docs/bug-reports.md`. Investigate and verify those entries before fixing them, then remove each entry in the commit that resolves it. Git history retains the removed text. Historical correctness reports keep their existing IDs and archives without migration.
 
 ```text
 candidate -> accepted -> fixed -> closed
@@ -140,7 +159,7 @@ A candidate may instead be rejected, superseded or blocked on a design decision.
 
 **Implementation** is a separate task. Fix the root owner, delete the path you replace, and return the finding to triage if a correct fix needs a wider boundary than was accepted.
 
-**Verification** is done by someone other than the implementer. Read the original evidence, inspect the changed boundary, confirm no parallel path survives, and confirm linked test or documentation changes were independently authorised. A green suite is necessary and not sufficient.
+**Verification** is done by someone other than the implementer. Read the original evidence, inspect the changed boundary, confirm no parallel path survives, and check that regression tests enforce the verified contract. Unrelated test or documentation changes need separate authority. A green suite is necessary and not sufficient.
 
 ### Closing and archiving
 
@@ -151,12 +170,13 @@ A candidate may instead be rejected, superseded or blocked on a design decision.
 
 Older reports archived before this folder rule may retain `fixed` or other historical status labels even where the resolution log records their closeout. Do not silently reopen them or rewrite their original evidence. Apply the verification gate to new closeouts.
 
-Use `just validate` for code-bearing fixes and the documentation release-build gate for documentation-only work. See the [validation guide](../developer-docs/style-guide/validation.mtf). Record exactly what ran, passed, failed and was not run.
+Choose targeted checks, `just validate` or `just validate-full` by the branch checkpoint and affected behaviour. Use the documentation release-build gate for documentation-only branch checkpoints. Follow the [validation guide](../developer-docs/style-guide/validation.mtf) and record exactly what ran, passed, failed and was not run.
 
 ## Recording coverage
 
 The [audit log](./audit-log.md) holds one row per area, listing what has been audited and when.
 
-- Only an audit run records coverage. Ordinary implementation work never does.
+- Only an audit run records coverage. Adding an incidental issue or fixing a bug never does.
+- Formal kinds link their report ID. New Correctness runs record the inspected revision directly, without an `AUD-####`. Include clear exclusions for partial runs. See the [audit log format](./audit-log.md).
 - Implementation may mark a row **stale** when it materially changes what that row records. Each checklist names what counts as material for its kind.
 - A row with no entry for a kind has simply never been audited for it. That is the normal starting state and is exactly the signal the log exists to give.

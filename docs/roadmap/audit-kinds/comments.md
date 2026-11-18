@@ -44,7 +44,7 @@ Give the local reason. Do not write history essays - Git has those.
 
 Non-obvious invariants around unchecked indexing, `.unwrap()`, `unreachable!`, unsafe code, table alignment, graph acyclicity, phase transitions, cache keys, remapping, ownership facts and target assumptions.
 
-A comment does not legalise a weak invariant. Where the code cannot enforce what the comment claims, file a linked Correctness or Style finding.
+A comment does not legalise a weak invariant. Where the code cannot enforce what the comment claims, record a concrete Correctness or Style lead in [`docs/bug-reports.md`](../../bug-reports.md) without expanding this audit.
 
 ## Noise to remove
 

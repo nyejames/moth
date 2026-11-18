@@ -1,6 +1,6 @@
 # Completed Audits Log
 
-Historical audit resolutions and the index of reports with no outstanding findings. Preserve each decision and its verification record here, rather than in the open-findings queue. The [audit coverage log](./audit-log.md) independently records what was inspected and when.
+Historical formal audit resolutions and the index of reports with no outstanding findings. Preserve each decision and its verification record here, rather than in the open-findings queue. New Correctness audits use [bug reports](../bug-reports.md) and [coverage](./audit-log.md) without a formal closeout. The audit log independently records what was inspected and when.
 
 - [Audit guide](./audit-guide.md)
 - [Open findings](./open-audit-findings.md)

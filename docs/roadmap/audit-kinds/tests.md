@@ -57,7 +57,7 @@ Benchmark fixtures never count as correctness coverage.
 
 ## Findings do not edit tests
 
-This kind may authorise a test change; other kinds may not. When a Correctness or Diagnostics finding needs coverage, it links here and both must be accepted before either lands.
+A Tests finding may propose a standalone test-quality correction. Triage and a separate implementation task authorise the change. Audits do not edit tests. When a Correctness bug needs regression coverage, record that requirement in `docs/bug-reports.md` and add the test in the separate verified fix task. An incidental Diagnostics or other test weakness can enter the bug queue for later investigation without opening a linked Tests audit.
 
 ## Stale when
 

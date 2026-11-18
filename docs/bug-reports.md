@@ -1,6 +1,8 @@
 # Bug reports
 
-A casual log of bugs and limitations found during other work and left for later investigation. Each entry names where the problem lives, what was observed and a starting point for the fix. Remove an entry in the commit that resolves it.
+A lightweight queue for unresolved bugs and issues discovered during other work or a Correctness audit. Any agent may record an unrelated, non-blocking concern here and return to its task without starting a formal audit. This includes concrete documentation, test, redundancy and efficiency leads found outside the current scope.
+
+Check for an existing entry before adding one. Name where the problem lives, what was observed or looks suspicious and a useful next investigation. Distinguish confirmed defects from unverified hypotheses. Keep the format flexible and the entry short when evidence is limited. Follow [the audit guide](./roadmap/audit-guide.md) for formal audit coverage and findings. Remove an entry in the commit that resolves it.
 
 ## Open
 

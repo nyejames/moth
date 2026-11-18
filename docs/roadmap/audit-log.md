@@ -20,16 +20,35 @@ What has been audited, where, and when. This is a record, not a permission list.
 
 ## Entry format
 
-Each entry is `Kind YYYY-MM AUD-####`, optionally followed by one or more qualifiers. `partial`
-and `stale` may be combined when the inspected subset has since changed materially:
+Formal audits use `Kind YYYY-MM AUD-####`. New Correctness audits use
+`Correctness YYYY-MM @<commit>` without a report ID. The commit identifies the
+revision inspected. Existing Correctness entries with `AUD-####` remain valid
+historical records and are not migrated.
+
+Add `partial` and the inspected subset or exclusions directly to a lightweight
+Correctness entry. The `Covers` column defines the area a complete run claims.
+Prefer a narrower area row if a partial note would become long. Formal audit
+reports retain their detailed coverage and limitations. Both formats may include
+`stale` when material changes invalidate the recorded coverage.
+
+For example:
+
+```text
+Correctness 2026-11 @a1b2c3d
+Correctness 2026-11 @a1b2c3d `partial (only parser heads, not recovery)`
+Redundancy 2026-11 AUD-0022 `partial`
+```
+
+The qualifiers mean:
 
 | Qualifier | Meaning |
 |---|---|
 | *(none)* | The whole area was inspected for that kind. |
-| `partial` | Only part of the area was inspected. The report says which part. |
+| `partial` | Only part of the area was inspected. Formal reports describe the limit, while lightweight Correctness entries name it here. |
 | `stale` | The recorded coverage has changed materially since that audit. |
 
-Coverage is not quality. An audited area may still have open findings.
+Coverage is not quality. An audited area may still have formal findings or bugs
+in `docs/bug-reports.md`. Recording an incidental issue never records coverage.
 
 ## Audited areas
 
