@@ -77,21 +77,6 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Workaround: `template_supplied_nested_composition` renders its loop checks in a separate fragment, `~[:[loops]]`, whose const content folds before lowering.
 - Investigate: whether a const range loop with constant bounds should fold or lower without checked `Invoke` delivery. Otherwise, implement recoverable numeric failure on Wasm. Pin the entry above as an `html_wasm` success case once fixed.
 
-### Whitespace around a consumed `$in` helper is kept on both sides
-
-- Found: `$supplied` directive work, 2026-11. Reproduced without `$supplied` on base `1c79842cf`. Possibly intended, since authored body whitespace is otherwise preserved.
-- Where: loose-content grouping in `route_tir_fill_nodes_against_schema` (`src/compiler_frontend/ast/templates/tir/slot_composition/contributions.rs`). Its contract says body formatting whitespace around explicit inserts is not routed.
-- Observed: given `plain #= [$html:<button>[$slot][$slot note]</button>]`, the following fills render as shown.
-
-  | Fill | Output |
-  |---|---|
-  | `[plain: Go]` | `<button> Go</button>` |
-  | `[plain:[$in note:] Go]` | `<button> Go</button>` |
-  | `[plain: [$in note:] Go]` | `<button>  Go</button>` |
-
-  The space before the helper and the space after it both reach the default slot, so a common idiom yields a double space.
-- Investigate: decide whether inline spaces next to an `$in` helper count as formatting whitespace. If they do, drop them at routing. If not, document that the helper does not absorb adjacent spaces.
-
 ### JS emitter rebuilds a block lookup map that dense HIR already provides
 
 - Found: AUD-0022 numeric proof redundancy audit, 2026-11. Unmeasured efficiency and redundancy lead outside that audit's area.

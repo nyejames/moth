@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, TemplateSegmentOrigin, TemplateType,
 };
-use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
+use crate::compiler_frontend::ast::templates::tir::node::{TemplateIrNode, TemplateIrNodeKind};
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrId, TemplateIrNodeId, TemplateIrStore,
 };
@@ -73,6 +73,20 @@ impl TirSlotContributions {
             .entry(index)
             .or_default()
             .extend(nodes);
+    }
+
+    /// Appends routed nodes to the bucket selected by an explicit insert target.
+    ///
+    /// WHAT: dispatches one contribution list to the default, named or positional
+    ///       bucket for `target`.
+    /// WHY: explicit inserts occur both in fill content and inside helper bodies,
+    ///      so one routing step keeps every insert path on the same bucket rules.
+    fn extend_nodes_for_target(&mut self, target: &SlotKey, nodes: Vec<TemplateIrNodeId>) {
+        match target {
+            SlotKey::Default => self.extend_default_nodes(nodes),
+            SlotKey::Named(name) => self.extend_named_nodes(*name, nodes),
+            SlotKey::Positional(index) => self.extend_positional_nodes(*index, nodes),
+        }
     }
 
     /// Returns whether routing decided this slot key, even when the decision was empty.
@@ -174,6 +188,10 @@ pub(crate) fn route_tir_fill_nodes_against_schema(
     let mut contributions = TirSlotContributions::default();
     let mut loose_nodes = Vec::new();
     let mut has_explicit_inserts = false;
+    // The loose run after the most recent explicit insert, when no later insert
+    // has replaced it. Routing removes insert boundaries from the loose stream,
+    // so this marker keeps the boundary available until the run is classified.
+    let mut loose_run_start_after_insert: Option<usize> = None;
 
     // Walk authored fill content exactly once. Explicit `$in` helpers
     // (either as `InsertContribution` nodes or as `ChildTemplate` references to
@@ -222,6 +240,12 @@ pub(crate) fn route_tir_fill_nodes_against_schema(
 
         if let Some(insert_template_id) = insert_info {
             has_explicit_inserts = true;
+            // An explicit insert ends any pending formatting-whitespace run.
+            // Leaving the run pending would merge it with the content after the
+            // insert, so `[$in note:] Go` would render both the formatting space
+            // and the authored space.
+            discard_trailing_body_whitespace(&mut loose_nodes, store, string_table)?;
+
             let target_template = store.get_template(insert_template_id).ok_or_else(|| {
                 internal_infrastructure_failure(
                     "TIR slot routing: slot-insert helper referenced a missing template.",
@@ -251,17 +275,26 @@ pub(crate) fn route_tir_fill_nodes_against_schema(
                 &mut contributions,
             )?;
 
-            match target_key {
-                SlotKey::Default => contributions.extend_default_nodes(contribution_nodes),
-                SlotKey::Named(name) => contributions.extend_named_nodes(*name, contribution_nodes),
-                SlotKey::Positional(index) => {
-                    contributions.extend_positional_nodes(*index, contribution_nodes);
-                }
-            }
+            contributions.extend_nodes_for_target(target_key, contribution_nodes);
+
+            // The loose run that follows this insert starts at the current end
+            // of the loose stream.
+            loose_run_start_after_insert = Some(loose_nodes.len());
         } else {
             // ChildTemplate references that are not slot-insert helpers are
             // ordinary fill content.
             loose_nodes.push(child_id);
+        }
+    }
+
+    // The run after the final explicit insert has no later insert to end it.
+    // When that run is only body formatting whitespace, it would otherwise merge
+    // backward into the meaningful text before the insert and render an extra
+    // space. Classify it here while the insert boundary is still known.
+    if let Some(run_start) = loose_run_start_after_insert {
+        if tir_nodes_are_body_whitespace_only_text(&loose_nodes[run_start..], store, string_table)?
+        {
+            loose_nodes.truncate(run_start);
         }
     }
 
@@ -294,9 +327,9 @@ pub(crate) fn route_tir_fill_nodes_against_schema(
             continue;
         }
 
-        // Formatting whitespace around explicit insert contributions carries no
-        // value when the wrapper has nowhere to render loose content. Discard it
-        // while preserving diagnostics for every meaningful loose contribution.
+        // Formatting whitespace carries no value when the wrapper has nowhere to
+        // render loose content. Discard it while preserving diagnostics for every
+        // meaningful loose contribution.
         if tir_nodes_are_body_whitespace_only_text(&chunk.nodes, store, string_table)? {
             continue;
         }
@@ -360,13 +393,7 @@ fn collect_insert_contribution_content(
 
                 let nested_nodes =
                     collect_insert_contribution_content(store, *template, schema, contributions)?;
-                match target_key {
-                    SlotKey::Default => contributions.extend_default_nodes(nested_nodes),
-                    SlotKey::Named(name) => contributions.extend_named_nodes(*name, nested_nodes),
-                    SlotKey::Positional(index) => {
-                        contributions.extend_positional_nodes(*index, nested_nodes)
-                    }
-                }
+                contributions.extend_nodes_for_target(target_key, nested_nodes);
             }
 
             // Slot declarations do not appear inside a SlotInsert helper body.
@@ -394,6 +421,18 @@ struct LooseTirContribution {
     nodes: Vec<TemplateIrNodeId>,
 }
 
+/// Resolves a loose contribution node, or reports a missing node as an internal failure.
+fn loose_node_or_error(
+    store: &TemplateIrStore,
+    node_id: TemplateIrNodeId,
+) -> ContributionResult<&TemplateIrNode> {
+    store.get_node(node_id).ok_or_else(|| {
+        internal_infrastructure_failure(
+            "TIR slot routing: loose contribution node ID was not present in the store.",
+        )
+    })
+}
+
 /// Groups loose TIR node IDs into logical contribution chunks.
 ///
 /// WHAT: walks loose nodes in authored order and splits them into chunks.
@@ -414,24 +453,19 @@ fn collect_loose_tir_contributions(
     let mut pending_nodes = Vec::new();
 
     for node_id in loose_nodes {
-        let node = store.get_node(node_id).ok_or_else(|| {
-            internal_infrastructure_failure(
-                "TIR slot routing: loose contribution node ID was not present in the store.",
-            )
-        })?;
-        let starts_new_chunk = {
-            matches!(&node.kind, TemplateIrNodeKind::ChildTemplate { .. })
-                || matches!(
-                    &node.kind,
-                    TemplateIrNodeKind::Text {
-                        origin: TemplateSegmentOrigin::Head,
-                        ..
-                    } | TemplateIrNodeKind::DynamicExpression {
-                        origin: TemplateSegmentOrigin::Head,
-                        ..
-                    }
-                )
-        };
+        let node = loose_node_or_error(store, node_id)?;
+        let starts_new_chunk = matches!(
+            &node.kind,
+            TemplateIrNodeKind::ChildTemplate { .. }
+                | TemplateIrNodeKind::Text {
+                    origin: TemplateSegmentOrigin::Head,
+                    ..
+                }
+                | TemplateIrNodeKind::DynamicExpression {
+                    origin: TemplateSegmentOrigin::Head,
+                    ..
+                }
+        );
 
         if starts_new_chunk {
             if pending_nodes.is_empty()
@@ -465,6 +499,32 @@ fn collect_loose_tir_contributions(
     Ok(chunks)
 }
 
+/// Ends a pending loose content run at an explicit insert.
+///
+/// WHAT: removes a trailing run of body-origin whitespace-only text nodes from
+///       the pending loose content.
+/// WHY: the run only separates the insert from whatever precedes it, so it is
+///      formatting rather than a loose contribution. Dropping it keeps
+///      formatting whitespace out of routed content without splitting meaningful
+///      authored text.
+fn discard_trailing_body_whitespace(
+    loose_nodes: &mut Vec<TemplateIrNodeId>,
+    store: &TemplateIrStore,
+    string_table: &StringTable,
+) -> ContributionResult<()> {
+    while let Some(node_id) = loose_nodes.last() {
+        let node = loose_node_or_error(store, *node_id)?;
+
+        if !tir_node_is_body_whitespace_only_text(node, string_table) {
+            break;
+        }
+
+        loose_nodes.pop();
+    }
+
+    Ok(())
+}
+
 /// Reports whether a loose chunk is only body-level formatting whitespace.
 ///
 /// WHAT: requires every node to be a `Body`-origin `Text` node whose full spelling
@@ -482,21 +542,24 @@ fn tir_nodes_are_body_whitespace_only_text(
     }
 
     for node_id in nodes {
-        let node = store.get_node(*node_id).ok_or_else(|| {
-            internal_infrastructure_failure(
-                "TIR slot routing: loose contribution whitespace check found a node ID that was not present in the store.",
-            )
-        })?;
+        let node = loose_node_or_error(store, *node_id)?;
 
-        let TemplateIrNodeKind::Text { text, origin, .. } = &node.kind else {
-            return Ok(false);
-        };
-
-        if *origin != TemplateSegmentOrigin::Body || !string_table.resolve(*text).trim().is_empty()
-        {
+        if !tir_node_is_body_whitespace_only_text(node, string_table) {
             return Ok(false);
         }
     }
 
     Ok(true)
+}
+
+/// Reports whether one TIR node is body-level formatting whitespace.
+fn tir_node_is_body_whitespace_only_text(
+    node: &TemplateIrNode,
+    string_table: &StringTable,
+) -> bool {
+    let TemplateIrNodeKind::Text { text, origin, .. } = &node.kind else {
+        return false;
+    };
+
+    *origin == TemplateSegmentOrigin::Body && string_table.resolve(*text).trim().is_empty()
 }

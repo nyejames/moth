@@ -1,12 +1,12 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "named=title=Chosen|pos=Positional fallback|body=Body fallback|default=title=Chosen|body=Body fallback|paired=title=FirstSecond|pos=Positional fallback|body=Body fallback|box_paired=title=FirstSecond|body=Body fallback|runtime=title=Runtime|pos=Positional fallback|body=Body fallback|emptied=title=|pos=Positional fallback|body=Body fallback|space=title=Space|body= |empty=title=Empty|body="
+rendered_output_exact = "named=title=Chosen|pos=Positional fallback|body=Body fallback|default=title=Chosen|body=Body fallback|paired=title=FirstSecond|pos=Positional fallback|body=Body fallback|box_paired=title=FirstSecond|body=Body fallback|runtime=title=Runtime|pos=Positional fallback|body=Body fallback|emptied=title=|pos=Positional fallback|body=Body fallback|space=title=Space|body= |empty=title=Empty|body=|padded_before=title=Chosen|body= Body|padded_after=title=Chosen|body= Body|authored_before=title=Chosen|body= Body |padded_trailing=title=Chosen|body= Body |tight_trailing=title=Chosen|body=Body"
 
 [backends.html_wasm]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "named=title=Chosen|pos=Positional fallback|body=Body fallback|default=title=Chosen|body=Body fallback|paired=title=FirstSecond|pos=Positional fallback|body=Body fallback|box_paired=title=FirstSecond|body=Body fallback|runtime=title=Runtime|pos=Positional fallback|body=Body fallback|emptied=title=|pos=Positional fallback|body=Body fallback|space=title=Space|body= |empty=title=Empty|body="
+rendered_output_exact = "named=title=Chosen|pos=Positional fallback|body=Body fallback|default=title=Chosen|body=Body fallback|paired=title=FirstSecond|pos=Positional fallback|body=Body fallback|box_paired=title=FirstSecond|body=Body fallback|runtime=title=Runtime|pos=Positional fallback|body=Body fallback|emptied=title=|pos=Positional fallback|body=Body fallback|space=title=Space|body= |empty=title=Empty|body=|padded_before=title=Chosen|body= Body|padded_after=title=Chosen|body= Body|authored_before=title=Chosen|body= Body |padded_trailing=title=Chosen|body= Body |tight_trailing=title=Chosen|body=Body"
 
 [[backends.html_wasm.artifact_assertions]]
 path = "page.wasm"
