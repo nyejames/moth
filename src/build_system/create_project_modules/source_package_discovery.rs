@@ -103,7 +103,7 @@ pub(crate) fn build_source_package_boundary_indexes(
         // never proceeds against a path whose canonicalization failed.
         let canonical_root = fs::canonicalize(path).map_err(|error| {
             let mut reason = format!("Failed to canonicalize source-backed package root: {error}");
-            if let Some(report) = damaged_package_set_report(path) {
+            if let Some(report) = damaged_package_set_report(package.package_set_membership) {
                 reason.push_str(". ");
                 reason.push_str(&report);
             }
@@ -121,6 +121,7 @@ pub(crate) fn build_source_package_boundary_indexes(
             canonical_root,
             package_identity,
             &package.package_prefix,
+            package.package_set_membership,
             source_file_kinds,
             external_import_providers,
             string_table,

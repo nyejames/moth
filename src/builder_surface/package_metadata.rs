@@ -23,6 +23,40 @@ pub enum PackageOrigin {
     Dependency,
 }
 
+/// Whether a package registration belongs to the compiler-shipped installation set.
+///
+/// WHAT: records registration provenance, independent of a package's physical location or path.
+/// WHY: a damaged-installation report applies only to the registrations the compiler itself
+///      contributes from its release package set. A dependency, project-local package or custom
+///      builder package may live in the installed `packages/` directory, use a matching prefix or
+///      resolve through a symlink without becoming part of that set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PackageSetMembership {
+    /// Registered by compiler code as part of its shipped package set.
+    CompilerShipped,
+    /// Every ordinary dependency, project-local or custom builder registration.
+    Ordinary,
+}
+
+impl PackageSetMembership {
+    /// Whether this registration belongs to the compiler-shipped package set.
+    pub(crate) const fn is_compiler_shipped(self) -> bool {
+        matches!(self, Self::CompilerShipped)
+    }
+
+    /// Combine duplicate registrations of one physical source.
+    ///
+    /// Shipped membership is positive and order-independent: if any registration names the
+    /// compiler's package set, a failed read still means that set is incomplete.
+    pub(crate) const fn merge(self, other: Self) -> Self {
+        if self.is_compiler_shipped() || other.is_compiler_shipped() {
+            Self::CompilerShipped
+        } else {
+            Self::Ordinary
+        }
+    }
+}
+
 /// How the compiler obtains a package's implementation.
 ///
 /// WHAT: distinguishes Moth-source packages from binding-backed packages, and separates a

@@ -8,7 +8,9 @@
 //!       separate filesystem-backed resolver. Both lanes finish before the mutable fork
 //!       is moved into the provider context.
 use super::*;
+use crate::builder_surface::external_import_providers::provider::ResolvedExternalImport;
 use crate::builder_surface::external_import_providers::provider_sources::ProviderSourceRegistrar;
+use crate::builder_surface::package_metadata::PackageSetMembership;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{imports, project_config};
 use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
@@ -31,6 +33,11 @@ pub(super) struct ProviderBackedImportRequest<'a> {
     pub(super) raw_prefix: &'a str,
     pub(super) provider: &'a std::sync::Arc<dyn ExternalImportProvider>,
     pub(super) project_path_resolver: &'a ProjectPathResolver,
+    /// Registration provenance of the boundary that owns this provider source.
+    ///
+    /// Synthetic traversal has no directory index and supplies `Ordinary`. Package boundaries
+    /// compile through their directory resolution and supply their registered membership.
+    pub(super) package_set_membership: PackageSetMembership,
     /// The caller-owned discovery fork the provider must intern into.
     pub(super) path_fork: &'a mut PathInternerFork,
     /// Boundary-owned registration for provider files whose diagnostics need exact spans.
@@ -58,6 +65,7 @@ pub(super) fn resolve_provider_backed_import(
         raw_prefix,
         provider,
         project_path_resolver,
+        package_set_membership,
         path_fork,
         provider_sources,
     } = request;
@@ -70,6 +78,7 @@ pub(super) fn resolve_provider_backed_import(
         raw_prefix,
         provider,
         project_path_resolver,
+        package_set_membership,
         path_fork,
         provider_sources,
         external_imports,
@@ -119,6 +128,7 @@ fn invoke_provider_and_record_resolution(
     raw_prefix: &str,
     provider: &std::sync::Arc<dyn ExternalImportProvider>,
     project_path_resolver: &ProjectPathResolver,
+    package_set_membership: PackageSetMembership,
     path_fork: &mut PathInternerFork,
     provider_sources: &mut dyn ProviderSourceRegistrar,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -129,13 +139,21 @@ fn invoke_provider_and_record_resolution(
         provider_kind: provider.kind(),
     };
 
-    // Use cached result when available.
-    if let Some(cached) = external_imports.cache.get(&cache_key) {
+    // Use cached result when available. One provider result may be reused across boundaries, so
+    // an incoming compiler-shipped membership upgrades the cached record in place and later hits.
+    let cached = match external_imports.cache.get_mut(&cache_key) {
+        Some(cached) => {
+            merge_runtime_asset_membership(cached, package_set_membership);
+            Some(cached.clone())
+        }
+        None => None,
+    };
+    if let Some(cached) = cached {
         let source_file_logical =
             source_file_logical_path(consumer_canonical_path, project_path_resolver)?;
         external_imports
             .resolution_table
-            .insert(source_file_logical, raw_prefix, cached.clone());
+            .insert(source_file_logical, raw_prefix, cached);
         return Ok(());
     }
 
@@ -170,7 +188,10 @@ fn invoke_provider_and_record_resolution(
     provider_sources.finish();
     let result = result.map_err(SourceDiscoveryError::Premerge)?;
 
-    if let Some(resolved) = result {
+    if let Some(mut resolved) = result {
+        // Providers own parsing and symbol registration, not package-set provenance. The
+        // boundary that admitted this source supplies it here.
+        merge_runtime_asset_membership(&mut resolved, package_set_membership);
         external_imports.cache.insert(cache_key, resolved.clone());
 
         let source_file_logical =
@@ -181,6 +202,28 @@ fn invoke_provider_and_record_resolution(
     }
 
     Ok(())
+}
+
+/// Merge incoming boundary membership into one resolved runtime asset.
+///
+/// Shipped membership is positive and order-independent: a provider result cached under an
+/// ordinary boundary may be reached again from a shipped package boundary, and the reverse must
+/// not erase the installed-set fact. Returns whether the asset changed.
+fn merge_runtime_asset_membership(
+    resolved: &mut ResolvedExternalImport,
+    package_set_membership: PackageSetMembership,
+) -> bool {
+    let Some(runtime_asset) = resolved.runtime_asset.as_mut() else {
+        return false;
+    };
+    let merged = runtime_asset
+        .package_set_membership
+        .merge(package_set_membership);
+    if merged == runtime_asset.package_set_membership {
+        return false;
+    }
+    runtime_asset.package_set_membership = merged;
+    true
 }
 
 /// Resolves a provider import prefix to a canonical filesystem path without selecting a compiler

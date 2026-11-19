@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::builder_surface::external_import_providers::provider::ResolvedExternalImport;
+use crate::builder_surface::package_metadata::PackageSetMembership;
 use crate::builder_surface::{BuilderSurface, PackageOrigin};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -33,6 +34,7 @@ fn runtime_asset() -> RuntimeAssetIdentity {
                 .expect("fixture path is portable"),
         ),
         canonical_source_path: PathBuf::from("/fixture/runtime.js"),
+        package_set_membership: PackageSetMembership::Ordinary,
         asset_kind: "js".to_owned(),
         source_span: Some(authored_span(10)),
     }
@@ -144,6 +146,7 @@ fn runtime_candidates_reject_conflicting_provider_builder_facts() {
         "presence",
         "origin",
         "kind",
+        "package-set membership",
         "canonical byte-source path",
         "module/import contract",
     ] {
@@ -179,6 +182,13 @@ fn runtime_candidates_reject_conflicting_provider_builder_facts() {
                     .as_mut()
                     .expect("fixture asset")
                     .asset_kind = "wit".to_owned()
+            }
+            "package-set membership" => {
+                builder
+                    .runtime_asset
+                    .as_mut()
+                    .expect("fixture asset")
+                    .package_set_membership = PackageSetMembership::CompilerShipped
             }
             "canonical byte-source path" => {
                 builder

@@ -18,6 +18,7 @@
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::definition::BUILTIN_PACKAGES_ROOT;
 use crate::builder_surface::external_import_providers::provider::BuilderRuntimePackageMetadata;
+use crate::builder_surface::package_metadata::PackageSetMembership;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
@@ -103,6 +104,7 @@ fn register_web_binding_package(
         &logical_source_path(package),
         canonical_source_path(package),
         None,
+        PackageSetMembership::CompilerShipped,
     )
     .expect("built-in @builder/web asset identity is a proven internal invariant");
 

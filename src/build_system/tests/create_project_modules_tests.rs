@@ -1631,6 +1631,8 @@ fn fixture_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAssetIdent
                 .expect("fixture asset logical path should be valid"),
         ),
         canonical_source_path,
+        package_set_membership:
+            crate::builder_surface::package_metadata::PackageSetMembership::Ordinary,
         asset_kind: "js".to_owned(),
         source_span: None,
     }

@@ -6,6 +6,8 @@ use super::super::resource_inputs::ResourceInputRegistry;
 use super::super::source_tree_index::{SourceTreeIndex, SourceTreeProjectContext};
 use crate::builder_surface::SourcePackageRegistry;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
+use crate::builder_surface::package_metadata::PackageSetMembership;
+use crate::builder_surface::{PackageOrigin, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     InvalidCompileTimePathCode, InvalidCompileTimePathView,
 };
@@ -16,6 +18,7 @@ use crate::compiler_frontend::paths::file_references::{
     ResolvedFileReferenceOutcome, ResolvedFileReferenceTarget,
 };
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{LocalSpan, SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -325,6 +328,102 @@ fn directory_resolution_accepts_targets_inside_a_config_named_directory() {
     );
     assert_eq!(resource_inputs.records().len(), 1);
     assert!(discovered_content_sources.is_empty());
+}
+
+#[test]
+fn package_boundary_resources_inherit_registration_provenance() {
+    for (membership, origin, prefix, expects_damaged_set) in [
+        (
+            PackageSetMembership::CompilerShipped,
+            PackageOrigin::Core,
+            "core/html",
+            true,
+        ),
+        (
+            PackageSetMembership::Ordinary,
+            PackageOrigin::ProjectLocal,
+            "fixture",
+            false,
+        ),
+    ] {
+        let temp = tempfile::tempdir().expect("test root should be created");
+        let package_root = temp.path().join("pkg");
+        fs::create_dir_all(&package_root).expect("package root should be created");
+        fs::write(package_root.join("@package.moth"), "$export\nvalue #= 1\n")
+            .expect("support facade should be created");
+        let resource_path = package_root.join("logo.svg");
+        fs::write(&resource_path, "resource").expect("resource should be created");
+
+        let canonical_root =
+            fs::canonicalize(&package_root).expect("package root should canonicalize");
+        let mut discovery_strings = StringTable::new();
+        let index = SourceTreeIndex::discover_package(
+            canonical_root.clone(),
+            StablePackageIdentity::source_package(origin, prefix),
+            prefix,
+            membership,
+            &SourceFileKindRegistry::new(),
+            &ExternalImportProviderRegistry::default(),
+            &mut discovery_strings,
+        )
+        .expect("package boundary index should build");
+        let consumer_module = index
+            .module_identities()
+            .module_id_for_directory(&canonical_root)
+            .expect("the package root should own a module");
+
+        let mut resource_inputs = ResourceInputRegistry::new();
+        let source_files = SourceDatabase::empty();
+        let mut strings = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
+        let mut path_syntax = PathSyntaxTable::new();
+        let mut discovered_content_sources = Vec::new();
+        let path = path_fork
+            .try_intern_portable_path("logo.svg", &mut strings)
+            .expect("test path fits");
+        let path_syntax_id = path_syntax
+            .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+            .expect("test path syntax row should fit");
+        let reference = PreparedFileReference {
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            source_file: SourceId::COMPILATION_ROOT,
+            path_syntax: path_syntax_id,
+            class: PreparedFileReferenceClass::ResourceFile,
+        };
+        let resolved = FileReferenceResolver::new(&index, &mut resource_inputs)
+            .resolve(
+                consumer_module,
+                &path_syntax,
+                &reference,
+                &source_files,
+                &mut strings,
+                &path_fork,
+                &mut discovered_content_sources,
+            )
+            .expect("a package resource should resolve");
+        let ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ResourceSource {
+            source,
+            ..
+        }) = resolved.outcome
+        else {
+            panic!(
+                "expected a package resource target, got {:?}",
+                resolved.outcome
+            );
+        };
+
+        fs::remove_file(&resource_path)
+            .expect("the resource should be removable before the deferred read");
+        let failure = resource_inputs
+            .hash_source(source)
+            .expect_err("the deferred resource read should fail");
+        assert_eq!(
+            failure.message.contains("incomplete"),
+            expects_damaged_set,
+            "resource provenance must decide the read-failure lane: {}",
+            failure.message
+        );
+    }
 }
 
 #[test]

@@ -8,6 +8,7 @@
 
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
+use crate::builder_surface::package_metadata::{PackageOrigin, PackageSetMembership};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -34,6 +35,7 @@ pub(crate) fn js_runtime_asset_identity(
     logical_source_path: &PortableResourcePath,
     canonical_source_path: PathBuf,
     source_span: Option<SourceSpan>,
+    package_set_membership: PackageSetMembership,
 ) -> Result<RuntimeAssetIdentity, InfrastructureFailure> {
     let declared_output_path = js_runtime_asset_output_path(logical_source_path);
     let logical_path = PortableResourcePath::from_relative_logical_path(&declared_output_path)?;
@@ -46,17 +48,20 @@ pub(crate) fn js_runtime_asset_identity(
     Ok(RuntimeAssetIdentity {
         origin: StableResourceOriginId::new(owner, logical_path),
         canonical_source_path,
+        package_set_membership,
         asset_kind: String::from("js"),
         source_span,
     })
 }
 /// Register every planned JS runtime asset as a byte source of the shared registry.
 ///
-/// WHAT: deduplicates the canonical sources, then attaches each provider-owned origin to its
-///       physical source through one preflighted association batch.
+/// WHAT: registers each supplied byte-source spelling, then attaches each provider-owned origin to
+///       its physical source through one preflighted association batch.
 /// WHY: JS assets are deferred resource outputs. The central writer reads their bytes only
 ///      after the complete destination preflight has passed, exactly like module-owned
-///      resources.
+///      resources. Installed alias spellings stay unresolved here so registration performs no
+///      filesystem work; the registry resolves them to one canonical read record at its first
+///      content-read boundary.
 pub(crate) fn register_js_runtime_asset_sources(
     plan: &HtmlExternalRuntimeEmissionPlan,
     resource_inputs: &mut ResourceInputRegistry,
@@ -64,7 +69,14 @@ pub(crate) fn register_js_runtime_asset_sources(
     let mut associations = Vec::with_capacity(plan.js_assets().len());
 
     for asset in plan.js_assets().values() {
-        let source = resource_inputs.register_source(asset.canonical_source_path.clone());
+        let source = if uses_deferred_installed_alias(asset) {
+            resource_inputs.register_deferred_shipped_source(asset.canonical_source_path.clone())
+        } else {
+            resource_inputs.register_source_with_membership(
+                asset.canonical_source_path.clone(),
+                asset.package_set_membership,
+            )
+        };
         associations.push(ResourceSourceAssociation {
             origin: asset.origin.clone(),
             source,
@@ -76,6 +88,25 @@ pub(crate) fn register_js_runtime_asset_sources(
     resource_inputs.commit_resource_source_associations(publication);
 
     Ok(())
+}
+
+/// Whether one shipped runtime asset entered registration without a Stage 0 canonical path.
+///
+/// Direct `@builder/*` binding packages build their runtime asset path from
+/// `BUILTIN_PACKAGES_ROOT` and never traverse a provider request. A provider-resolved JS unit
+/// carries `ProjectLocal` package identity and the canonical path resolved by Stage 0. Only the
+/// direct built-in units therefore wait for the first content read; ordinary and provider plans
+/// keep their direct canonical registration lane.
+fn uses_deferred_installed_alias(asset: &RuntimeAssetIdentity) -> bool {
+    if !asset.package_set_membership.is_compiler_shipped() {
+        return false;
+    }
+    match asset.origin.owner() {
+        StableResourceOwnerId::Provider(owner) => {
+            owner.package().origin() == PackageOrigin::Builder
+        }
+        StableResourceOwnerId::Module(_) => false,
+    }
 }
 
 /// Generate the declared output path for a JS runtime asset.

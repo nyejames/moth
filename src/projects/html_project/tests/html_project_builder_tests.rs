@@ -264,6 +264,11 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
                 crate::builder_surface::PackageOrigin::Core,
             )
         );
+        assert_eq!(
+            core_source.package_set_membership,
+            crate::builder_surface::package_metadata::PackageSetMembership::CompilerShipped,
+            "@{prefix} is a compiler-shipped registration"
+        );
         assert!(
             matches!(
                 &core_source.root,
@@ -290,6 +295,23 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
             crate::builder_surface::PackageOrigin::Builder,
         )
     );
+    assert_eq!(
+        site_package.package_set_membership,
+        crate::builder_surface::package_metadata::PackageSetMembership::CompilerShipped,
+        "@builder/web/site is a compiler-shipped registration"
+    );
+
+    for runtime in &frontend_surface.builder_runtime_packages {
+        assert_eq!(
+            runtime
+                .runtime_asset
+                .as_ref()
+                .expect("every built-in @builder/web package declares a runtime asset")
+                .package_set_membership,
+            crate::builder_surface::package_metadata::PackageSetMembership::CompilerShipped,
+            "official runtime binding assets carry explicit shipped provenance"
+        );
+    }
 
     let page_package = frontend_surface
         .binding_packages

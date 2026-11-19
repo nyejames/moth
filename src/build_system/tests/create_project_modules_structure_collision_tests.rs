@@ -1230,6 +1230,63 @@ fn registered_source_package_rejects_importable_claims_below_reserved_package_ro
 }
 
 #[test]
+fn compiler_shipped_package_reserved_claim_reports_a_damaged_set() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    let package_root = root.join("elsewhere/packages/core/html");
+    fs::create_dir_all(&src).expect("should create src dir");
+    fs::create_dir_all(&package_root).expect("should create package dir");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@entry.moth"), "[:entry]\n").expect("should write entry");
+    fs::write(package_root.join("@package.moth"), "$export\nvalue #= 1\n")
+        .expect("should write package facade");
+    fs::write(package_root.join("@mod.moth"), "$export\nvalue #= 1\n")
+        .expect("should write internal normal root");
+    fs::write(package_root.join("core.moth"), "value #= 1\n")
+        .expect("should write reserved-root claim");
+
+    let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
+    source_packages
+        .register_compiler_shipped_filesystem_root("core/html", package_root, PackageOrigin::Core)
+        .expect("test shipped source root should register");
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let result = build_namespace_set_for_test(&config, &resolver, &source_packages);
+    let Err(failure) = result else {
+        panic!("a shipped registration's reserved-root claim must fail");
+    };
+    let PreparedFailure::Infrastructure(errors) = failure else {
+        panic!("a shipped package claim must use the infrastructure lane: {failure:?}");
+    };
+    assert_eq!(
+        errors.primary.kind,
+        crate::compiler_frontend::compiler_errors::InfrastructureFailureKind::Filesystem
+    );
+    assert!(
+        errors
+            .primary
+            .message
+            .contains("Source package publishes an importable claim")
+            && errors.primary.message.contains("incomplete"),
+        "the shipped claim must report its damaged package set: {}",
+        errors.primary.message
+    );
+}
+
+#[test]
 fn registered_source_package_keeps_entry_only_reserved_directory_legal() {
     // An entry-only module publishes no importable namespace entry, so its reserved-name
     // directory, private helper and asset stay legal inside a registered package boundary.

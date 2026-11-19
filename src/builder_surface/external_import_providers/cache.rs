@@ -43,6 +43,14 @@ impl ExternalImportProviderCache {
         self.entries.get(key)
     }
 
+    /// Returns one cached resolved import for in-place provenance upgrade.
+    pub(crate) fn get_mut(
+        &mut self,
+        key: &ExternalImportCacheKey,
+    ) -> Option<&mut ResolvedExternalImport> {
+        self.entries.get_mut(key)
+    }
+
     /// Inserts a resolved import into the cache.
     pub fn insert(&mut self, key: ExternalImportCacheKey, value: ResolvedExternalImport) {
         self.entries.insert(key, value);

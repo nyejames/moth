@@ -6,13 +6,6 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 ## Open
 
-### Damaged package set classification is path-only
-
-- Found: Core/Builder package namespace and config filename work, 2026-11.
-- Where: `damaged_package_set_report` in `src/builder_surface/definition.rs`, used by Stage 0 package discovery, source tree indexing, resource inputs and package reserved-root validation.
-- Observed: the infrastructure lane is chosen by whether a path sits below the canonical `BUILTIN_PACKAGES_ROOT`. A ProjectLocal or Dependency package registered inside the compiler's `packages/` directory gets a damaged-installation failure instead of an authored diagnostic. An official package root that is a symlink to a directory outside `packages/` gets the authored diagnostic instead. Both need a modified installation.
-- Investigate: whether lane selection should also require Core or compiler-shipped Builder registration identity, kept in one owner for all callers.
-
 ### Repeated work in single-file namespace validation
 
 - Found: Core/Builder package namespace and config filename final review, 2026-11.

@@ -326,7 +326,13 @@ impl<'a> FileReferenceResolver<'a> {
                 })?;
                 let owner_relative_path =
                     PortableResourcePath::from_relative_logical_path(relative_path)?;
-                let resource_source = self.resource_inputs.register_source(canonical.clone());
+                // Module resources inherit their boundary's registration provenance: a file
+                // authored in a compiler-shipped package belongs to the installed set, while a
+                // project or custom package resource stays ordinary.
+                let resource_source = self.resource_inputs.register_source_with_membership(
+                    canonical.clone(),
+                    self.source_tree_index.package_set_membership(),
+                );
                 ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ResourceSource {
                     source: resource_source,
                     owner_relative_path,

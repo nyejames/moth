@@ -863,10 +863,10 @@ fn validate_reserved_package_namespace_claims(
 
 /// Validate reserved-root claims in one already-built source-package namespace set.
 ///
-/// A compiler-shipped package set is installed input rather than authored project source, so an
-/// importable claim inside it means the selected `packages/` set is damaged or was modified. It
-/// takes the same infrastructure lane as a missing shipped facade. Third-party and project-local
-/// registrations keep the authored diagnostic used for project namespaces.
+/// A compiler-shipped package registration is installed input rather than authored project
+/// source, so an importable claim inside it means the selected `packages/` set is damaged or was
+/// modified. It takes the same infrastructure lane as a missing shipped facade. Third-party and
+/// project-local registrations keep the authored diagnostic used for project namespaces.
 fn validate_source_package_reserved_namespace_claims(
     package_namespaces: &[ModuleNamespace],
     source_tree_index: &SourceTreeIndex,
@@ -877,7 +877,7 @@ fn validate_source_package_reserved_namespace_claims(
     else {
         return Ok(());
     };
-    if let Some(report) = damaged_package_set_report(source_tree_index.entry_root()) {
+    if let Some(report) = damaged_package_set_report(source_tree_index.package_set_membership()) {
         return Err(InfrastructureFailure::filesystem(
             CompilerStage::ProjectBuildAssembly,
             source,

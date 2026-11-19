@@ -684,7 +684,7 @@ mod source_package_boundary_indexes_tests {
 
             let mut source_packages = SourcePackageRegistry::new();
             source_packages
-                .register_filesystem_root(prefix, package_root.clone(), origin)
+                .register_compiler_shipped_filesystem_root(prefix, package_root.clone(), origin)
                 .expect("the repository package root should register");
 
             let mut string_table = StringTable::new();
@@ -695,6 +695,11 @@ mod source_package_boundary_indexes_tests {
                 .next()
                 .expect("the repository package should own one boundary index");
             assert_eq!(registered_prefix, prefix);
+            assert_eq!(
+                index.package_set_membership(),
+                crate::builder_surface::package_metadata::PackageSetMembership::CompilerShipped,
+                "the shipped repository registration must reach its boundary index"
+            );
 
             let canonical_root =
                 fs::canonicalize(&package_root).expect("package root should canonicalize");
@@ -805,6 +810,120 @@ mod source_package_boundary_indexes_tests {
             "error message should mention canonicalization: {}",
             error.message,
         );
+    }
+
+    #[test]
+    fn shipped_registration_outside_the_installation_reports_a_damaged_set() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        // The old path-only rule would classify this authored-looking root as third-party.
+        // Registration provenance must keep it in the installed-set lane.
+        let package_root = root.join("elsewhere/packages/core/html");
+        fs::create_dir_all(&package_root).expect("should create package root");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        source_packages
+            .register_compiler_shipped_filesystem_root(
+                "core/html",
+                package_root,
+                crate::builder_surface::PackageOrigin::Core,
+            )
+            .expect("test shipped source root should register");
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("a shipped root without a support facade is a damaged package set");
+        let error = primary_infrastructure_error(failure);
+        assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
+        assert!(
+            error.message.contains("Source package @core/html")
+                && error.message.contains("incomplete"),
+            "the shipped registration must report its damaged package set: {}",
+            error.message
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shipped_root_symlinked_outside_the_installation_reports_a_damaged_set() {
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let outside = root.join("outside/core/html");
+        fs::create_dir_all(&outside).expect("should create outside package root");
+        let installed_parent = root.join("installation/packages/core");
+        fs::create_dir_all(&installed_parent).expect("should create installation package parent");
+        let installed_root = installed_parent.join("html");
+        symlink(&outside, &installed_root).expect("should create package-root symlink");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        source_packages
+            .register_compiler_shipped_filesystem_root(
+                "core/html",
+                installed_root,
+                crate::builder_surface::PackageOrigin::Core,
+            )
+            .expect("symlinked shipped source root should register");
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("a shipped symlink target without a support facade is damaged");
+        let error = primary_infrastructure_error(failure);
+        assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
+        assert!(
+            error.message.contains("incomplete"),
+            "the canonical symlink target outside the installation keeps shipped provenance: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn ordinary_registration_under_the_installation_path_is_not_a_damaged_set() {
+        let missing = crate::builder_surface::definition::BUILTIN_PACKAGES_ROOT
+            .join("__provenance_test_missing_custom_site__");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        source_packages
+            .register_filesystem_root(
+                "builder/web/site",
+                missing,
+                crate::builder_surface::PackageOrigin::Builder,
+            )
+            .expect("test source root should register");
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("a missing ordinary root is still a filesystem failure");
+        let error = primary_infrastructure_error(failure);
+        assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
+        assert!(
+            error.message.contains("canonicalize") && !error.message.contains("incomplete"),
+            "ordinary registration must stay operational even under the installed path: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn custom_registration_with_the_official_builder_prefix_stays_authored() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let package_root = root.join("packages/builder/web/site");
+        fs::create_dir_all(&package_root).expect("should create package root");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        source_packages
+            .register_filesystem_root(
+                "builder/web/site",
+                package_root,
+                crate::builder_surface::PackageOrigin::Builder,
+            )
+            .expect("custom Builder source root should register");
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("a custom root without a support facade publishes no package surface");
+        assert_invalid_config_reason(failure, InvalidConfigCode::SourcePackageMissingRoot);
     }
 
     #[test]

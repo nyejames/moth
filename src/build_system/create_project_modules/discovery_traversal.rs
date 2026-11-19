@@ -14,7 +14,9 @@ use super::discovery_provider_imports::{
 };
 use super::*;
 use crate::builder_surface::external_import_providers::provider_sources::ProviderSourceRegistrar;
-use crate::builder_surface::package_metadata::reserved_package_namespace_claim_root;
+use crate::builder_surface::package_metadata::{
+    PackageSetMembership, reserved_package_namespace_claim_root,
+};
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DependencyClauseKind;
 use crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource;
@@ -896,6 +898,12 @@ fn handle_provider_capable_dependency(
     // lookup and provider target resolution sees PathIds from the same domain the provider will
     // intern diagnostic paths into.
     let resolution = directory_dependency_resolution.map(|r| r.with_path_fork(&*path_fork));
+    // A directory boundary owns its provider sources. Synthetic traversal has no directory
+    // index; its filesystem lane resolves only the selected synthetic unit, and package-owned
+    // provider files compile through their own package boundary resolution.
+    let package_set_membership = resolution
+        .map(|resolution| resolution.source_tree_index().package_set_membership())
+        .unwrap_or(PackageSetMembership::Ordinary);
 
     // `@project` is a reserved synthetic provider, not a source/package path. Keep the exact
     // root out of filesystem discovery and external-package registration only for the owning
@@ -981,6 +989,7 @@ fn handle_provider_capable_dependency(
                 raw_prefix: checked.raw_prefix(),
                 provider,
                 project_path_resolver,
+                package_set_membership,
                 path_fork,
                 provider_sources,
             };

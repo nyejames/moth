@@ -20,7 +20,7 @@ use crate::builder_surface::definition::damaged_package_set_report;
 use crate::builder_surface::external_import_providers::provider::ExternalFileExtension;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::package_metadata::{
-    is_reserved_package_namespace_root, reserved_package_namespace_claim_root,
+    PackageSetMembership, is_reserved_package_namespace_root, reserved_package_namespace_claim_root,
 };
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -487,6 +487,8 @@ struct SourceInventory {
 pub(crate) struct SourceTreeIndex {
     entry_root: PathBuf,
     package_identity: StablePackageIdentity,
+    /// Registration provenance of this boundary's package, or `Ordinary` for the project.
+    package_set_membership: PackageSetMembership,
     module_identities: ModuleIdentityTable,
     sources: Vec<SourceRecord>,
     owned_source_indices: Vec<Vec<SourceRecordIndex>>,
@@ -507,6 +509,8 @@ pub(crate) struct SourceTreeIndex {
 struct SourceTreeBoundary<'a> {
     entry_root: PathBuf,
     package_identity: StablePackageIdentity,
+    /// Registration provenance that decides this boundary's damaged-package-set lane.
+    package_set_membership: PackageSetMembership,
     skip_policy: SourceTreeSkipPolicy,
     kind: SourceTreeBoundaryKind<'a>,
 }
@@ -570,6 +574,7 @@ impl SourceTreeIndex {
         let boundary = SourceTreeBoundary {
             entry_root: entry_root.clone(),
             package_identity: StablePackageIdentity::project_local(&config.project_name),
+            package_set_membership: PackageSetMembership::Ordinary,
             skip_policy: SourceTreeSkipPolicy::from_validated_output_settings(
                 &entry_root,
                 validated_output_settings,
@@ -598,6 +603,7 @@ impl SourceTreeIndex {
         canonical_root: PathBuf,
         package_identity: StablePackageIdentity,
         package_prefix: &str,
+        package_set_membership: PackageSetMembership,
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
@@ -605,6 +611,7 @@ impl SourceTreeIndex {
         let boundary = SourceTreeBoundary {
             entry_root: canonical_root,
             package_identity,
+            package_set_membership,
             skip_policy: SourceTreeSkipPolicy::default(),
             kind: SourceTreeBoundaryKind::Package { package_prefix },
         };
@@ -632,6 +639,7 @@ impl SourceTreeIndex {
         let SourceTreeBoundary {
             entry_root,
             package_identity: boundary_package,
+            package_set_membership,
             skip_policy,
             kind,
         } = boundary;
@@ -1017,6 +1025,7 @@ impl SourceTreeIndex {
                         &directory,
                         &mut directory_roots,
                         package_prefix,
+                        package_set_membership,
                         string_table,
                     )?
                 }
@@ -1087,6 +1096,7 @@ impl SourceTreeIndex {
         Ok(Self {
             entry_root,
             package_identity: boundary_package,
+            package_set_membership,
             module_identities,
             sources,
             owned_source_indices,
@@ -1245,6 +1255,11 @@ impl SourceTreeIndex {
 
     pub(crate) fn entry_root(&self) -> &Path {
         &self.entry_root
+    }
+
+    /// Registration provenance that decides this boundary's damaged-package-set lane.
+    pub(crate) fn package_set_membership(&self) -> PackageSetMembership {
+        self.package_set_membership
     }
 
     /// The stable package identity shared by every module in this boundary.
@@ -1613,12 +1628,15 @@ fn aliased_root_files_error(
 /// Every registered Moth-source package publishes its external API through a directly contained
 /// `@package.moth`. A co-located `@mod.moth` keeps a distinct internal normal-position scope, while
 /// `@entry.moth` only contributes a dormant entry and never a package surface. Missing or aliased
-/// roots keep package-specific typed diagnostics, except in a compiler-shipped package, where a
-/// missing support facade means the installed package set is incomplete.
+/// roots keep package-specific typed diagnostics, except for a registration the compiler ships
+/// as part of its package set, where a missing support facade means that installed set is
+/// incomplete. Registration provenance decides the lane; a custom root under the installed
+/// `packages/` directory or reached through a symlink stays an authored structure diagnostic.
 fn classify_package_root_directory(
     directory: &Path,
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
     package_prefix: &str,
+    package_set_membership: PackageSetMembership,
     string_table: &mut StringTable,
 ) -> Result<ClassifiedDirectoryRoots, PreparedFailure> {
     // The support facade is the only package-facing surface. A normal root alone is an internal
@@ -1627,7 +1645,7 @@ fn classify_package_root_directory(
         .iter()
         .any(|root| root.role == ModuleRootRole::Support);
     if !has_support_facade {
-        if let Some(report) = damaged_package_set_report(directory) {
+        if let Some(report) = damaged_package_set_report(package_set_membership) {
             return Err(InfrastructureFailure::filesystem(
                 CompilerStage::ProjectBuildAssembly,
                 directory,
