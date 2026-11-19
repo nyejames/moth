@@ -1688,17 +1688,18 @@ fn classify_declarations(
     Ok(None)
 }
 
-/// Collects assertion-message private-call obligations from statements lowering will omit.
+/// Collects deferred validation obligations from statements lowering will omit.
 ///
-/// WHAT: walks the inactive region iteratively, statement by statement, and keeps only the
-///       `assertion_message_calls` that convergence validates. It never classifies executable
-///       expressions, exits, custom catches or witnesses, and it registers no call-summary
-///       dependencies, so dead catches cause no extra convergence passes.
-/// WHY: the parser defers private-call checking for assertion messages, so convergence must
-///      still diagnose a fallible message in an authored-dead tail or folded-false loop body.
-///      A fresh recursive projection per later `return` would overflow the stack and go
-///      quadratic on a long flat tail with no source nesting.
-fn collect_inactive_assertion_message_calls(
+/// WHAT: walks the inactive region iteratively, statement by statement, and keeps the
+///       `assertion_message_calls` and `deferred_custom_catches` that convergence validates.
+///       It records no executable failure facts, exits or witnesses, so the region still
+///       contributes no runtime lane.
+/// WHY: the parser defers private-call checking for assertion messages and catches, so
+///      convergence must still reject a fallible message or an ineligible catch in an
+///      authored-dead tail or folded-false loop body. A fresh recursive projection per later
+///      `return` would overflow the stack and go quadratic on a long flat tail with no source
+///      nesting. One explicit worklist therefore walks the region once for both obligations.
+fn collect_inactive_validation_obligations(
     nodes: &[AstNode],
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState<'_>,
@@ -1710,6 +1711,11 @@ fn collect_inactive_assertion_message_calls(
         Body(&'a [AstNode]),
         Node(&'a AstNode),
         Expression(ExprId),
+        /// Registers one expression's deferred catch check after its children.
+        ///
+        /// WHY: the live walk collects a check from `finish_expression`, after the expression's
+        ///      children have been classified, so the same post-order keeps check order stable.
+        FinishExpression(ExprId),
     }
 
     /// Queues one statement's immediate expression roots in authored order.
@@ -1721,7 +1727,7 @@ fn collect_inactive_assertion_message_calls(
         }
     }
 
-    let mut obligations = Vec::new();
+    let mut assertion_obligations = Vec::new();
     let mut tasks = vec![WalkTask::Body(nodes)];
     while let Some(task) = tasks.pop() {
         match task {
@@ -1737,9 +1743,11 @@ fn collect_inactive_assertion_message_calls(
                         template_ir_store,
                         state.expression_builder,
                     )?;
-                    obligations.extend(message_facts.implicit.into_iter().filter(|contributor| {
-                        matches!(contributor.source, ImplicitFailureSource::PrivateCall(_))
-                    }));
+                    assertion_obligations.extend(message_facts.implicit.into_iter().filter(
+                        |contributor| {
+                            matches!(contributor.source, ImplicitFailureSource::PrivateCall(_))
+                        },
+                    ));
                     push_expression_roots(node, &mut tasks);
                 }
                 // A nested declaration is its own callable; this dead region does not make its
@@ -1784,6 +1792,8 @@ fn collect_inactive_assertion_message_calls(
             // position. Header expressions are queued before the bodies they guard.
             WalkTask::Expression(expression) => {
                 let view = state.expression_builder.view(expression)?;
+                // Queue the check before the children below so it pops after they are walked.
+                tasks.push(WalkTask::FinishExpression(expression));
                 if let ExpressionOperationView::ValueBlock(block) = view.operation() {
                     match block {
                         ValueBlock::If(value_if) => {
@@ -1807,10 +1817,13 @@ fn collect_inactive_assertion_message_calls(
                             tasks.push(WalkTask::Expression(value_match.scrutinee));
                         }
                         ValueBlock::Catch(value_catch) => {
+                            // Live classification registers handler-body checks before the
+                            // protected value's, so queue the protected value first and let the
+                            // handler body pop before it.
+                            tasks.push(WalkTask::Expression(value_catch.handled_value));
                             if let FallibleHandling::Handler { body, .. } = &value_catch.handler {
                                 tasks.push(WalkTask::Body(body));
                             }
-                            tasks.push(WalkTask::Expression(value_catch.handled_value));
                         }
                     }
                 } else {
@@ -1821,6 +1834,10 @@ fn collect_inactive_assertion_message_calls(
                     }
                 }
             }
+            WalkTask::FinishExpression(expression) => {
+                let view = state.expression_builder.view(expression)?;
+                collect_deferred_check(view, template_ir_store, state)?;
+            }
         }
     }
 
@@ -1830,7 +1847,7 @@ fn collect_inactive_assertion_message_calls(
             "active function projection retains its purpose"
         );
     };
-    facts.assertion_message_calls.extend(obligations);
+    facts.assertion_message_calls.extend(assertion_obligations);
     Ok(())
 }
 
@@ -1842,10 +1859,10 @@ fn classify_nodes(
     let mut summary = ControlFlowExitSummary::FALLS_THROUGH;
     for (index, node) in nodes.iter().enumerate() {
         // Authored-dead tails cannot contribute executable failure facts in any build profile.
-        // Assertion-message calls are deferred parse-time obligations, so convergence must still
-        // see them from this region.
+        // Deferred assertion-message calls and catch checks are parse-time obligations, so
+        // convergence must still see them from this region.
         if !summary.can_fall_through {
-            collect_inactive_assertion_message_calls(&nodes[index..], template_ir_store, state)?;
+            collect_inactive_validation_obligations(&nodes[index..], template_ir_store, state)?;
             break;
         }
         let effect = match &node.kind {
@@ -2030,8 +2047,8 @@ fn classify_nodes(
                 } else if state.folded_condition(*condition) == Some(false) {
                     // A pre-fold folded-false statement loop never runs its body in any profile.
                     // HIR lowering omits the body and records its selected evidence instead, but
-                    // a deferred assertion-message obligation still needs validation.
-                    collect_inactive_assertion_message_calls(body, template_ir_store, state)?;
+                    // deferred validation obligations still need their checks.
+                    collect_inactive_validation_obligations(body, template_ir_store, state)?;
                     None
                 } else {
                     classify_loop_body(body, template_ir_store, state)?

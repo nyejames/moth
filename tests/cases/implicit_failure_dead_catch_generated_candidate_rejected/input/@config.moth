@@ -1,0 +1,3 @@
+project #= (
+    name = "implicit_failure_dead_catch_generated_candidate_rejected")
+html #= ()

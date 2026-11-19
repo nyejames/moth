@@ -642,6 +642,89 @@ fn deferred_custom_catch_keeps_typed_locations_and_candidates_after_ast_release(
 }
 
 #[test]
+fn authored_dead_tail_collects_validation_obligations_only() {
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "Failure = | message String |\n\
+         flaky type T |value T, divisor I32| -> I32:\n    return divisor\n;\n\
+         load type T |value T| -> I32, Failure!:\n    return 1\n;\n\
+         text type T |value T| -> T:\n    return value\n;\n\
+         probe |value String, count I32| -> I32:\n    return 4\n\
+             dead I32 = flaky(value, 2) catch then 0\n\
+             mixed I32 = load(flaky(count, 2)) catch then 0\n\
+             outer I32 = flaky(value, 2) catch:\n\
+                 inner I32 = flaky(count, 3) catch then 0\n\
+                 then inner\n\
+             ;\n\
+             assert(true, text(value))\n\
+             return dead\n;\n",
+    );
+    let identity = function_node_by_name(&ast, &path_fork, &string_table, "probe")
+        .function_identity()
+        .expect("probe has an authored identity");
+    // Summary computation supplies the folded values that mark the tail inactive; bare
+    // `pending_function_failure_facts` has no such values and walks every statement.
+    let facts = AstBuiltinFailureSummaries::compute(
+        &[&ast.nodes],
+        &TemplateIrStore::new(),
+        &ast.const_values,
+        &ast.expressions,
+    )
+    .expect("dead-tail summaries converge")
+    .into_function_facts()
+    .remove(&identity)
+    .expect("probe owns classified failure facts");
+
+    assert!(
+        facts.body.implicit.is_empty(),
+        "authored-dead work must not contribute executable failure facts"
+    );
+    let [eligibility, compatibility, inner, outer] = facts.body.deferred_custom_catches.as_slice()
+    else {
+        panic!("both plain dead catches and the nested pair keep exactly one check each");
+    };
+    assert!(eligibility.eligibility_only);
+    let [candidate] = eligibility.candidates.as_slice() else {
+        panic!("the eligibility check retains its private-call candidate");
+    };
+    assert!(matches!(
+        candidate.source,
+        ImplicitFailureSource::PrivateCall(_)
+    ));
+    assert!(!compatibility.eligibility_only);
+    assert!(compatibility.typed_producer_span.is_some());
+    assert!(
+        compatibility
+            .candidates
+            .iter()
+            .any(|candidate| matches!(candidate.source, ImplicitFailureSource::PrivateCall(_)))
+    );
+    // The live walk registers handler-body checks before the enclosing catch's own check, so the
+    // nested check comes first even though its source text sits later.
+    assert!(
+        inner.eligibility_only,
+        "the handler-body check is eligibility-only"
+    );
+    assert!(
+        outer.eligibility_only,
+        "the enclosing catch check is eligibility-only"
+    );
+    let (Some(inner_span), Some(outer_span)) = (inner.catch_span, outer.catch_span) else {
+        panic!("the handler-body and enclosing catch checks retain their catch spans");
+    };
+    assert!(
+        inner_span > outer_span,
+        "the handler-body check must precede the enclosing catch's check"
+    );
+    let [message] = facts.assertion_message_calls.as_slice() else {
+        panic!("the dead assertion keeps exactly one message obligation");
+    };
+    assert!(matches!(
+        message.source,
+        ImplicitFailureSource::PrivateCall(_)
+    ));
+}
+
+#[test]
 fn catch_handler_failure_goes_outward_without_reentering_protected_work() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
         "protected |value I32| -> I32:\n    return value + 1\n;\n\

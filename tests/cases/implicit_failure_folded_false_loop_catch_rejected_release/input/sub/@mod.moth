@@ -1,0 +1,11 @@
+flaky type T |value T, divisor I32| -> I32:
+    return divisor
+;
+
+$export
+probe |value I32| -> I32:
+    loop false:
+        dead I32 = flaky(value, 2) catch then 0
+    ;
+    return 1
+;

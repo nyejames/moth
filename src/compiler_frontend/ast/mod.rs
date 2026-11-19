@@ -432,10 +432,12 @@ pub struct Ast {
     /// Pre-fold failure facts for every concrete callable in `nodes`, keyed by callable identity.
     ///
     /// WHAT: the implicit contributors, deferred custom catches and assertion-message calls the
-    ///       AST classifier decided before release folding. The classifier already skipped
-    ///       authored-dead statement tails per occurrence, so each body's contributor lists keep
-    ///       authored order and the map itself is only a lookup. Dormant generic-template
-    ///       identities are dropped because HIR never reads them.
+    ///       AST classifier decided before release folding. Authored-dead statement tails were
+    ///       excluded from executable contributors per occurrence, so each body's contributor
+    ///       lists keep authored order, but those tails still supply their validation-only
+    ///       obligations (deferred custom catches and assertion-message calls). The map itself is
+    ///       only a lookup. Dormant generic-template identities are dropped because HIR never
+    ///       reads them.
     /// WHY: release folding must not add, remove or reorder failure facts. Finalization always
     ///      computes these facts, even when no dormant template needs boundary validation, and HIR
     ///      projects them instead of reclassifying the post-fold AST, so debug and release publish

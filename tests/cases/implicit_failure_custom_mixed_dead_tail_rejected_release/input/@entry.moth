@@ -1,0 +1,12 @@
+Failure = | message String |
+load type T |value T| -> I32, Failure!:
+    return 1
+;
+flaky |value I32| -> I32:
+    return value + 1
+;
+probe |value I32| -> I32:
+    return 4
+    dead I32 = load(flaky(value)) catch then 0
+    return dead
+;

@@ -13827,6 +13827,20 @@ contract = "language.results.custom_catch_rejects_mixed_implicit_failure"
 role = "primary"
 
 [[case]]
+id = "implicit_failure_custom_mixed_dead_tail_rejected"
+path = "implicit_failure_custom_mixed_dead_tail_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend"]
+contract = "language.results.custom_catch_rejects_mixed_implicit_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_custom_mixed_dead_tail_rejected_release"
+path = "implicit_failure_custom_mixed_dead_tail_rejected_release"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "release"]
+contract = "language.results.custom_catch_rejects_mixed_implicit_failure"
+role = "boundary"
+
+[[case]]
 id = "implicit_failure_custom_catch_infallible_private"
 path = "implicit_failure_custom_catch_infallible_private"
 tags = ["integration", "language", "numeric", "results", "runtime", "js-backend"]
@@ -21754,6 +21768,20 @@ contract = "language.results.folded_false_loop_body_contributes_no_implicit_fail
 role = "boundary"
 
 [[case]]
+id = "implicit_failure_folded_false_loop_catch_rejected"
+path = "implicit_failure_folded_false_loop_catch_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "generics", "loops"]
+contract = "language.results.folded_false_loop_body_keeps_catch_eligibility_validation"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_folded_false_loop_catch_rejected_release"
+path = "implicit_failure_folded_false_loop_catch_rejected_release"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "generics", "loops", "release"]
+contract = "language.results.folded_false_loop_body_keeps_catch_eligibility_validation"
+role = "boundary"
+
+[[case]]
 id = "source_constraints_function_safe_math_folded_false_loop_rejected"
 path = "source_constraints_function_safe_math_folded_false_loop_rejected"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "loops"]
@@ -21814,6 +21842,20 @@ id = "implicit_failure_dead_catch_generated_candidate_accepted_release"
 path = "implicit_failure_dead_catch_generated_candidate_accepted_release"
 tags = ["integration", "language", "numeric", "results", "runtime", "generics", "release"]
 contract = "language.results.dead_statement_tail_contributes_no_implicit_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_dead_catch_generated_candidate_rejected"
+path = "implicit_failure_dead_catch_generated_candidate_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "generics"]
+contract = "language.results.dead_source_keeps_catch_eligibility_validation"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_dead_catch_generated_candidate_rejected_release"
+path = "implicit_failure_dead_catch_generated_candidate_rejected_release"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "generics", "release"]
+contract = "language.results.dead_source_keeps_catch_eligibility_validation"
 role = "boundary"
 
 [[case]]
