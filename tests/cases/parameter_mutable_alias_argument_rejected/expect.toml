@@ -7,5 +7,5 @@ diagnostic_codes = ["MOTH-BORROW-0007"]
 code = "MOTH-BORROW-0007"
 reason = "invalid_mutable_access.immutable_place"
 path = "input/@entry.moth"
-line = 12
+line = 10
 column = 14

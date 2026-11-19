@@ -1,6 +1,6 @@
 -- A branch-local mutable alias can be rebound after its final use.
 
-data = "shared_data"
+data ~= "shared_data"
 some_condition = true
 
 first_alias ~= data

@@ -63,6 +63,15 @@ fn require_initialized_update_target(
         ));
     }
 
+    require_mutable_local(layout, local_index, diagnostics, span)
+}
+
+fn require_mutable_local(
+    layout: &FunctionLayout,
+    local_index: usize,
+    diagnostics: &BorrowDiagnostics<'_>,
+    span: Option<SourceSpan>,
+) -> Result<(), BorrowCheckError> {
     if !layout.local_mutable[local_index] {
         return Err(diagnostics.invalid_mutable_access(
             diagnostics.local_place(layout.local_ids[local_index]),
@@ -346,11 +355,7 @@ fn transfer_assign_target(
                         // WHY: treating scratch-to-scratch alias transfer as a source mutation
                         //      produced a false AliasedValueRequiresExclusiveAccess at the producing
                         //      get and stopped the alias before it could reach the user binding.
-                        if target_is_mutable
-                            && !rhs_roots.is_empty()
-                            && rhs_is_place
-                            && !target_is_compiler_owned_scratch
-                        {
+                        if target_is_mutable && rhs_is_place && !target_is_compiler_owned_scratch {
                             let mut check = AccessCheckContext {
                                 context: transfer_context,
                                 layout,
@@ -363,12 +368,14 @@ fn transfer_assign_target(
                                 actor_index_hint: Some(local_index),
                                 current_order,
                             };
+                            let require_root_mutable =
+                                check_mutable_alias_source(&check, &value_expression.kind)?;
                             check_mutable_access(
                                 &mut check,
                                 &rhs_roots,
                                 MutableAccessPolicy {
                                     allow_prior_shared: true,
-                                    require_root_mutable: false,
+                                    require_root_mutable,
                                     strict_move_exclusivity: false,
                                     alias_exclusivity: AliasExclusivity::All,
                                 },
@@ -654,6 +661,27 @@ fn direct_place_from_expression(
         HirExpressionKind::Load(place) => Some(*place),
         _ => None,
     }
+}
+
+/// A shared binding cannot grant exclusive access. For a whole scalar cell, value roots
+/// still govern overlap but can include immutable provenance unrelated to cell mutability.
+fn check_mutable_alias_source(
+    check: &AccessCheckContext<'_, '_>,
+    source: &HirExpressionKind,
+) -> Result<bool, BorrowCheckError> {
+    if let HirExpressionKind::Load(place) = source
+        && let Some(local_index) = place_root_local_index(check.layout, place)
+    {
+        require_mutable_local(
+            check.layout,
+            local_index,
+            &check.context.diagnostics,
+            check.span.or(check.location),
+        )?;
+        return Ok(!place.projections.is_empty()
+            || check.layout.local_has_in_place_mutation_surface[local_index]);
+    }
+    Ok(true)
 }
 
 fn direct_value_roots_from_expression(

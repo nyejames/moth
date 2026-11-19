@@ -4,7 +4,7 @@
 -- This test demonstrates correct usage where the same place has
 -- consistent ownership outcomes regardless of control flow path
 
-data = "test_data"
+data ~= "test_data"
 condition = true
 
 if condition:

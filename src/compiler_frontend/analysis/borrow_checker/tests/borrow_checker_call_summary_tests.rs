@@ -560,29 +560,84 @@ fn parameter_alias_definition_does_not_publish_a_parameter_write() {
 }
 
 #[test]
-fn mutable_parameter_rejects_alias_of_immutable_parameter_at_final_use() {
-    // The callee's mutable parameter needs a mutable root even when the alias has no later use,
-    // because an inferred transfer moves cleanup responsibility without granting mutation.
-    let source = r#"consume |value ~I32|:
+fn mutable_alias_acquisition_rejects_read_only_source_places() {
+    for source in [
+        r#"reader |divisor I32| -> I32:
+    n ~I32 = divisor
+    return n
+;"#,
+        r#"reader |divisor ~I32| -> I32:
+    shared = divisor
+    n ~= shared
+    return n
+;"#,
+        r#"reader || -> I32:
+    total ~= 0
+    loop 1 to 3 |value, ordinal|:
+        ~total = ordinal
+    ;
+    return total
+;"#,
+    ] {
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+        let external_package_registry = default_external_package_registry(&mut string_table);
+        let hir = lower_hir(
+            ast,
+            &mut string_table,
+            &mut path_fork,
+            &external_package_registry,
+        );
+        let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+            .expect_err("a read-only source place cannot grant mutable access");
+        assert_invalid_mutable_access_reason(error, InvalidMutableAccessReason::ImmutablePlace);
+    }
+}
+
+#[test]
+fn mutable_scalar_reborrow_distinguishes_overlap_from_immutable_provenance() {
+    let source = r#"identity |value I32| -> I32:
+    return value
 ;
 
-forward |divisor I32|:
-    n ~I32 = divisor
-    consume(~n)
+read_join |condition Bool| -> I32:
+    original = 5
+    slot ~= 0
+    candidate ~= 0
+    ~candidate = identity(original)
+    if condition:
+        ~candidate = slot
+    ;
+    writer ~= candidate
+    return writer
 ;"#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let external_package_registry = default_external_package_registry(&mut string_table);
-    let hir = lower_hir(
-        ast,
-        &mut string_table,
-        &mut path_fork,
-        &external_package_registry,
+    let registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
+    run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+        .expect("both reaching source cells are mutable");
+
+    let source = r#"identity |value I32| -> I32:
+    return value
+;
+
+read_view || -> I32:
+    original = 5
+    slot ~= 0
+    ~slot = identity(original)
+    view = slot
+    writer ~= slot
+    snapshot = copy writer
+    return snapshot + view
+;"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
+    let error = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+        .expect_err("the shared view still overlaps acquisition of the writer");
+    assert_invalid_mutable_access_reason(
+        error,
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
     );
-    let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-        .expect_err(
-            "a final-use mutable alias of an immutable parameter cannot grant mutable access",
-        );
-    assert_invalid_mutable_access_reason(error, InvalidMutableAccessReason::ImmutablePlace);
 }
 
 fn local_call_mutation_summary_in_order(

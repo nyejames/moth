@@ -1,6 +1,5 @@
--- A mutable alias declared from an immutable parameter may be read, but it cannot
--- carry mutable access back out. Passing it through `~` must be rejected before the
--- parameter's public summary is published.
+-- Reject the mutable alias at its declaration. A later mutable argument cannot
+-- make an immutable source eligible for exclusive access.
 
 set_two |value ~I32|:
     ~value = 2

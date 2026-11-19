@@ -4,7 +4,7 @@
 -- This test demonstrates correct usage where the same place is
 -- consistently borrowed across all control flow paths
 
-data = "shared_data"
+data ~= "shared_data"
 condition = true
 
 if condition:
