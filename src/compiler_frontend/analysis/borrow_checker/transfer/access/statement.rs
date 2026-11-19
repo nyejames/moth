@@ -5,6 +5,8 @@
 //! entrypoint easier to inspect without changing the borrow-analysis model.
 
 use super::*;
+use crate::compiler_frontend::analysis::borrow_checker::state::RootSet;
+use crate::compiler_frontend::compiler_messages::BorrowAccessKind;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::HirMapOp;
 use crate::compiler_frontend::hir::ids::HirValueId;
@@ -594,6 +596,7 @@ fn transfer_call_arguments_and_result(
         input.stats.mutable_call_sites += 1;
     }
 
+    let retains_result = results.clone().next().is_some();
     let mut arg_roots = vec![RootSet::empty(input.layout.local_count()); args.len()];
 
     for (arg_index, arg) in args.iter().enumerate() {
@@ -612,6 +615,31 @@ fn transfer_call_arguments_and_result(
         )?;
     }
 
+    // Result provenance comes from the argument values, not from every root their evaluation
+    // reads. `copy place` reads the source place but produces an independent graph, so a
+    // retargeted alias into the copied value must not keep the source root alive.
+    //
+    // WHAT: only a retained result that may alias an argument reads these roots.
+    // WHY: `Fresh` results and calls without a result never inspect them, so building the sets
+    //      would walk every argument expression for no consumer.
+    let mut arg_value_roots = Vec::new();
+    if retains_result && !matches!(&return_alias, FunctionReturnAliasSummary::Fresh) {
+        arg_value_roots.reserve(args.len());
+        for arg in args {
+            let argument_location = input
+                .context
+                .diagnostics
+                .value_error_span(arg.argument, input.location);
+            arg_value_roots.push(call_argument_value_roots(
+                input.context,
+                input.layout,
+                input.state,
+                arg.argument,
+                argument_location,
+            )?);
+        }
+    }
+
     for (arg_index, arg) in args.iter().enumerate() {
         let argument_location = input
             .context
@@ -621,7 +649,8 @@ fn transfer_call_arguments_and_result(
             arg.effect,
             arg_index,
             &arg_roots,
-            results.clone().next().is_some(),
+            &arg_value_roots,
+            retains_result,
             &return_alias,
         );
         if matches!(
@@ -631,10 +660,13 @@ fn transfer_call_arguments_and_result(
             effect,
             ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable
         ) {
+            // The retained result only keeps the argument borrowed; it does not make the
+            // argument's provenance roots call-argument writes. Merging overlap or value roots
+            // here would publish an immutable parameter as `Writes` during summary finalization.
             input.value_fact_buffer.record_optional_transfer(
                 arg.argument,
                 OptionalTransferStatus::Borrow,
-                &arg_roots[arg_index],
+                &RootSet::empty(input.layout.local_count()),
             );
         }
         if matches!(arg.effect, ArgEffect::MayConsumeShared)
@@ -662,7 +694,13 @@ fn transfer_call_arguments_and_result(
     }
 
     for result in results.clone() {
-        transfer_call_result_alias(input, Some(result), &return_alias, &arg_roots, edge_local)?;
+        transfer_call_result_alias(
+            input,
+            Some(result),
+            &return_alias,
+            &arg_value_roots,
+            edge_local,
+        )?;
     }
     if results.clone().nth(1).is_some() {
         // Native positions are not proof of independent graphs, even for fresh results.
@@ -686,6 +724,79 @@ fn transfer_call_arguments_and_result(
             }
         }
     }
+    // A mutable argument and a shared argument naming the same binding cell overlap inside one
+    // call. Check after ordinary argument and result transfer so existing alias exclusivity keeps
+    // its diagnostic, then reject the same-cell pair the tracker cannot see.
+    let mut shared_arguments = Vec::new();
+    let mut shared_roots = RootSet::empty(input.layout.local_count());
+    for (index, argument) in args.iter().enumerate() {
+        if !matches!(
+            argument.effect,
+            ArgEffect::SharedBorrow | ArgEffect::MayConsumeShared
+        ) {
+            continue;
+        }
+        let Some(actor) = call_argument_actor_index(input, argument.argument) else {
+            continue;
+        };
+        shared_roots.union_with(&arg_roots[index]);
+        shared_arguments.push((
+            index,
+            actor,
+            input
+                .context
+                .diagnostics
+                .value_error_span(argument.argument, input.location),
+        ));
+    }
+    if shared_arguments.is_empty() {
+        return Ok(());
+    }
+    for mutable_arg in args {
+        if !matches!(
+            mutable_arg.effect,
+            ArgEffect::MutableBorrow | ArgEffect::MayConsumeMutable
+        ) {
+            continue;
+        }
+        let Some(mutable_actor) = call_argument_actor_index(input, mutable_arg.argument) else {
+            continue;
+        };
+        let mutable_location = input
+            .context
+            .diagnostics
+            .value_error_span(mutable_arg.argument, input.location);
+        let mutable_roots = mutable_argument_roots(
+            input.context,
+            input.layout,
+            input.state,
+            mutable_arg.argument,
+            mutable_location,
+            input
+                .context
+                .expressions
+                .expression(mutable_arg.argument)
+                .span,
+        )?;
+        if !mutable_roots.intersects(&shared_roots) {
+            continue;
+        }
+        for &(shared_index, shared_actor, shared_location) in &shared_arguments {
+            if !mutable_roots.intersects(&arg_roots[shared_index]) {
+                continue;
+            }
+            let diagnostics = &input.context.diagnostics;
+            return Err(diagnostics.shared_mutable_conflict(
+                diagnostics.local_place(input.layout.local_ids[mutable_actor]),
+                BorrowAccessKind::Shared,
+                BorrowAccessKind::Mutable,
+                Some(diagnostics.local_place(input.layout.local_ids[shared_actor])),
+                shared_location,
+                mutable_location,
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -696,6 +807,35 @@ fn record_call_argument_reads(
     argument_location: &Option<SourceSpan>,
     arg_roots: &mut RootSet,
 ) -> Result<(), BorrowCheckError> {
+    // WHAT: a direct place argument also overlaps the source slot's binding cell.
+    // WHY: the mutable-argument check asks about the cell, while the shared argument's value
+    //      provenance names only its allocation. Recording the cell here makes same-call overlap
+    //      and the shared/mutable conflict see both spellings of the same binding.
+    let cell_roots = direct_place_from_expression(input.context.expressions, argument)
+        .and_then(|place| place_cell_root(input.layout, input.state, &place))
+        .map(|cell_index| {
+            let mut roots = RootSet::empty(input.layout.local_count());
+            roots.insert(cell_index);
+            roots
+        });
+    if let Some(cell_roots) = &cell_roots
+        && matches!(effect, ArgEffect::SharedBorrow)
+    {
+        let mut check = AccessCheckContext {
+            context: input.context,
+            layout: input.layout,
+            state: input.state,
+            block_id: input.block_id,
+            tracker: input.tracker,
+            location: *argument_location,
+            span: input.context.expressions.expression(argument).span,
+            stats: input.stats,
+            actor_index_hint: None,
+            current_order: input.current_order,
+        };
+        check_shared_access(&mut check, cell_roots)?;
+    }
+
     if matches!(
         effect,
         ArgEffect::MutableBorrow | ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable
@@ -712,7 +852,13 @@ fn record_call_argument_reads(
             stats: input.stats,
             value_fact_buffer: input.value_fact_buffer,
         };
-        record_shared_reads_in_place_indices(&mut read_env, &place, *argument_location, arg_roots)?;
+        let mut place_read_roots = RootSet::empty(input.layout.local_count());
+        record_shared_reads_in_place_indices(
+            &mut read_env,
+            &place,
+            *argument_location,
+            &mut place_read_roots,
+        )?;
         let place_roots = roots_for_place(
             input.layout,
             input.state,
@@ -721,22 +867,75 @@ fn record_call_argument_reads(
             input.context.expressions.expression(argument).span,
             &input.context.diagnostics,
         )?;
-        arg_roots.union_with(&place_roots);
-        return Ok(());
+        place_read_roots.union_with(&place_roots);
+        arg_roots.union_with(&place_read_roots);
+    } else {
+        let mut read_env = SharedReadEnv {
+            context: input.context,
+            layout: input.layout,
+            state: input.state,
+            block_id: input.block_id,
+            tracker: input.tracker,
+            location: *argument_location,
+            current_order: input.current_order,
+            stats: input.stats,
+            value_fact_buffer: input.value_fact_buffer,
+        };
+        record_shared_reads_in_expression(&mut read_env, argument, *argument_location, arg_roots)?;
     }
 
-    let mut read_env = SharedReadEnv {
-        context: input.context,
-        layout: input.layout,
-        state: input.state,
-        block_id: input.block_id,
-        tracker: input.tracker,
-        location: *argument_location,
-        current_order: input.current_order,
-        stats: input.stats,
-        value_fact_buffer: input.value_fact_buffer,
-    };
-    record_shared_reads_in_expression(&mut read_env, argument, *argument_location, arg_roots)
+    if let Some(cell_roots) = &cell_roots {
+        arg_roots.union_with(cell_roots);
+    }
+
+    Ok(())
+}
+
+/// Roots of the value an argument expression denotes, separate from roots read to evaluate it.
+///
+/// WHAT: a direct place read reports the place's effective roots, `copy` reports a fresh value and
+///       computed shapes keep their conservative child-root union.
+/// WHY: return-alias summaries describe the result's value provenance. Evaluation roots also
+///      include roots that cannot be aliased by the produced value, so using them as result
+///      provenance falsely extends a copied source's borrow.
+fn call_argument_value_roots(
+    context: &BorrowTransferContext<'_>,
+    layout: &FunctionLayout,
+    state: &BorrowState,
+    expression_id: HirValueId,
+    location: Option<SourceSpan>,
+) -> Result<RootSet, BorrowCheckError> {
+    let expression = context.expressions.expression(expression_id);
+
+    match &expression.kind {
+        HirExpressionKind::Copy(_) => Ok(RootSet::empty(layout.local_count())),
+
+        HirExpressionKind::Load(place) => match expression.value_kind {
+            ValueKind::Place | ValueKind::RValue => roots_for_place(
+                layout,
+                state,
+                place,
+                location,
+                expression.span,
+                &context.diagnostics,
+            ),
+            ValueKind::Const => Ok(RootSet::empty(layout.local_count())),
+        },
+
+        _ => {
+            let mut roots = RootSet::empty(layout.local_count());
+            collect_expression_roots(
+                context,
+                layout,
+                state,
+                expression_id,
+                &mut roots,
+                location,
+                expression.span,
+            )?;
+            Ok(roots)
+        }
+    }
 }
 
 fn transfer_call_argument_access(
@@ -810,6 +1009,7 @@ fn effective_call_argument_effect(
     effect: ArgEffect,
     argument_index: usize,
     argument_roots: &[RootSet],
+    argument_value_roots: &[RootSet],
     retains_result: bool,
     return_alias: &FunctionReturnAliasSummary,
 ) -> ArgEffect {
@@ -823,12 +1023,13 @@ fn effective_call_argument_effect(
 
     // A retained result must keep any root it may alias alive until the result is consumed.
     // Downgrade only the affected optional arguments so unrelated final-use arguments can still
-    // receive inferred transfer responsibility.
+    // receive inferred transfer responsibility. Return provenance describes the argument value,
+    // so a copied argument's source is not a possible alias target.
     let result_may_alias_argument = retains_result
         && match return_alias {
             FunctionReturnAliasSummary::Fresh => false,
             FunctionReturnAliasSummary::AliasParams(indices) => indices.contains(&argument_index),
-            FunctionReturnAliasSummary::Unknown => !argument_roots[argument_index].is_empty(),
+            FunctionReturnAliasSummary::Unknown => !argument_value_roots[argument_index].is_empty(),
         };
     let has_same_statement_use =
         argument_roots
@@ -1027,7 +1228,7 @@ fn transfer_call_result_alias(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     result: Option<HirLocalDestination>,
     return_alias: &FunctionReturnAliasSummary,
-    arg_roots: &[RootSet],
+    arg_value_roots: &[RootSet],
     edge_local: bool,
 ) -> Result<(), BorrowCheckError> {
     let Some(destination) = result else {
@@ -1047,21 +1248,21 @@ fn transfer_call_result_alias(
         FunctionReturnAliasSummary::AliasParams(arg_indices) => {
             let mut roots = RootSet::empty(input.layout.local_count());
             for arg_index in arg_indices {
-                let Some(arg_root_set) = arg_roots.get(*arg_index) else {
+                let Some(arg_value_root_set) = arg_value_roots.get(*arg_index) else {
                     return Err(input.context.diagnostics.internal_error(
                         format!(
                             "Borrow checker found out-of-range return-alias index {arg_index} at call site"
                         ),
                     ));
                 };
-                roots.union_with(arg_root_set);
+                roots.union_with(arg_value_root_set);
             }
             Some(roots)
         }
         FunctionReturnAliasSummary::Unknown => {
             let mut roots = RootSet::empty(input.layout.local_count());
-            for arg_root_set in arg_roots {
-                roots.union_with(arg_root_set);
+            for arg_value_root_set in arg_value_roots {
+                roots.union_with(arg_value_root_set);
             }
             Some(roots)
         }

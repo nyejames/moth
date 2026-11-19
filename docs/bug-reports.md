@@ -41,35 +41,6 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: validation accepts spaces, Unicode and `%` in the `origin` setting. Emitted URLs use the authored spelling verbatim, so a browser requests `/caf%C3%A9/...` for origin `/café` and the dev server's literal prefix match returns 404. It is undefined whether an authored `%20` is already encoded text or a literal percent.
 - Investigate: choose one rule, either restrict origin segments to URL-safe characters or treat the authored origin as decoded text and encode it on emission. Apply the same rule to the dev server prefix match and add loopback coverage.
 
-### Receiver mutation through a `catch`-joined slot changes an immutable parameter's element
-
-- Found: mutable `~` summary fix soundness review, 2026-11. Reproduced by probe on `bug-fixes` HEAD (`tmp/probes-mt/m12_nested_get_receiver_push`, not a durable fixture). Silent miscompile.
-- Where: alias-root tracking through `catch` result joins in `src/compiler_frontend/analysis/borrow_checker/transfer/`; root cause not traced.
-- Observed: the program below compiles on both profiles and prints `m12 len=2`. The immutable `inner` changes through the immutable `rows` parameter. The alias roots of `rows.get(0)` appear to be lost at the `catch` join, so `~slot.push(4)` sees no immutable root.
-
-  ```moth
-  mutate_param |rows {{I32}}|:
-      slot ~{I32} = {0}
-      ~slot = rows.get(0) catch:
-          then {7}
-      ;
-      ~slot.push(4)
-  ;
-  inner {I32} = {1}
-  data {{I32}} = {inner}
-  mutate_param(data)
-  io.line([: m12 len=[inner.length()]])
-  ```
-
-- Investigate: commit the program as a rejected case expecting `MOTH-BORROW-0007`, then find where the `catch` join drops the success value's roots.
-
-### Mutable scalar slot holding an immutable value's provenance is rejected by `~`
-
-- Found: mutable `~` summary fix review, 2026-11. Confirmed conservative over-rejection on HEAD.
-- Where: `roots_for_place` / `effective_roots` in `src/compiler_frontend/analysis/borrow_checker/transfer/access.rs`, consumed by `check_call_mutable_borrow` and `check_call_may_consume`.
-- Observed: with immutable `original = 5`, mutable `slot ~= 0`, `~slot = identity(original)` and then `set_two(~slot)` (which only does `~value = 2`) is rejected with `MOTH-BORROW-0007` on `original`. A definite slot storing a produced value reports only the value's provenance roots, so the check targets `original` rather than the slot's own cell.
-- Investigate: an attempted waiver for definite slots was unsound for aggregates. Collections, maps and structs share their allocation, so a callee could mutate the immutable original in place. Any relaxation must be limited to types with no in-place mutation surface and must keep the aggregate shapes rejected (see the regression cases added with the `~` summary fix).
-
 ### Mutable alias declarations accept an immutable source
 
 - Found: mutable `~` summary fix review, 2026-11. Design conflict between canonical docs and implementation.

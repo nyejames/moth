@@ -1,0 +1,15 @@
+-- A function that returns a collection `get` result returns a shared alias of its parameter.
+-- The public call summary must keep that alias: storing the call result in a mutable slot and
+-- pushing through the slot would mutate storage the immutable `data` binding owns.
+first |rows {{I32}}| -> {I32}, Error!:
+    return rows.get(0)!
+;
+push_into_alias |rows {{I32}}|:
+    slot ~{I32} = {0}
+    ~slot = first(rows) catch:
+        then {7}
+    ;
+    ~slot.push(4)
+;
+data {{I32}} = {{9}}
+push_into_alias(data)

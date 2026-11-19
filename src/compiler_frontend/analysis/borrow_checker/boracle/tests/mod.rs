@@ -764,9 +764,15 @@ fn boracle_alpha_shared_subset_differential_disagreements_are_classified() {
         let string_table = StringTable::new();
         let external_packages = ExternalPackageRegistry::new();
         let path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
-        let alpha_accepts =
-            super::super::check_borrows(&module, &external_packages, &path_fork, &string_table)
-                .is_ok();
+        let type_environment = TypeEnvironment::new();
+        let alpha_accepts = super::super::check_borrows(
+            &module,
+            &type_environment,
+            &external_packages,
+            &path_fork,
+            &string_table,
+        )
+        .is_ok();
         let problem = super::super::problem::from_hir(&module, &function, None, None)
             .expect("shared differential HIR should extract");
         let boracle_accepts = !super::BoracleSolver::solve(&problem)

@@ -8,7 +8,9 @@
 //! flags (those belong in the orchestration layer and `visible_names.rs`).
 
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::compiler_messages::InvalidImportPathReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::external_packages::{
     ExternalPackageId, ExternalPackageRegistry, ExternalSymbolId,
 };
@@ -73,6 +75,8 @@ pub(crate) enum ExternalPackageSymbolLookup {
         symbol_name: StringId,
         candidates: Vec<StringId>,
     },
+    /// The authored path names a compiler-owned implicit package before any symbol lookup.
+    ImplicitPackage,
     NoMatch,
 }
 
@@ -109,6 +113,7 @@ pub(crate) fn resolve_external_package_symbol(
             symbol_name,
             candidates,
         },
+        VirtualPackageMatch::ImplicitPackage => ExternalPackageSymbolLookup::ImplicitPackage,
         VirtualPackageMatch::NoMatch => ExternalPackageSymbolLookup::NoMatch,
     }
 }
@@ -182,6 +187,13 @@ pub(crate) fn resolve_dependency_target(
             }) {
                 ExternalPackageSymbolLookup::Found { symbol_id } => {
                     return Ok(ResolvedDependencyTarget::External { symbol_id });
+                }
+                ExternalPackageSymbolLookup::ImplicitPackage => {
+                    return Err(imports::invalid_import_path(
+                        *input.dependency_path,
+                        InvalidImportPathReason::ImplicitPackage,
+                        input.span,
+                    ));
                 }
                 ExternalPackageSymbolLookup::PackageFoundSymbolMissing {
                     package_path,
@@ -314,6 +326,8 @@ enum VirtualPackageMatch {
         symbol_name: StringId,
         candidates: Vec<StringId>,
     },
+    /// The authored path names a compiler-owned implicit package before any symbol lookup.
+    ImplicitPackage,
     NoMatch,
 }
 
@@ -334,6 +348,12 @@ fn resolve_virtual_package_dependency(
     else {
         return VirtualPackageMatch::NoMatch;
     };
+    // Source-binding policy is a property of the matched package, so it applies before any
+    // symbol lookup. A misspelled member must not reach candidate suggestions that name
+    // compiler-owned helpers the author cannot import.
+    if !registry.package_is_source_bindable(&package_match.package_path) {
+        return VirtualPackageMatch::ImplicitPackage;
+    }
     let package_path = string_table.intern(&package_match.package_path);
 
     let mut components = Vec::new();

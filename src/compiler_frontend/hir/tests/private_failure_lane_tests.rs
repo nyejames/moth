@@ -103,7 +103,7 @@ fn install_lanes(
             "installation preserves numeric producer identity, span and success destination"
         );
     }
-    (hir, type_environment, report, path_fork, string_table)
+    (hir.hir_module, type_environment, report, path_fork, string_table)
 }
 
 #[test]

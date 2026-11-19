@@ -1,0 +1,20 @@
+-- A mutable slot holding a scalar produced from an immutable input can pass the slot to a
+-- callee that writes and returns it. The returned value stays borrowed from an argument fact,
+-- but that fact must not publish the immutable input as written.
+
+identity |value I32| -> I32:
+    return value
+;
+
+set_and_return |value ~I32| -> I32:
+    ~value = 9
+    return value
+;
+
+probe |input I32| -> I32:
+    slot ~= identity(input)
+    return set_and_return(~slot)
+;
+
+result = probe(5)
+io.line([: result=[result]])

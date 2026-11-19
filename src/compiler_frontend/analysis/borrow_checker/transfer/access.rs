@@ -287,13 +287,12 @@ fn transfer_assign_target(
                 value_expression.span,
                 &transfer_context.diagnostics,
             )?;
-            let rhs_direct_alias_roots = rhs_roots.as_ref().map(|roots| {
+            let rhs_direct_alias_roots = rhs_roots.as_ref().map(|_| {
                 direct_root_aliases_from_expression(
                     layout,
                     state,
                     transfer_context.expressions,
                     value,
-                    roots,
                 )
             });
 
@@ -594,6 +593,21 @@ fn mutable_argument_roots(
 ) -> Result<RootSet, BorrowCheckError> {
     let expression = context.expressions.expression(expression_id);
     if let HirExpressionKind::Load(place) = &expression.kind {
+        // A definite slot of a value type owns the value in its own cell. A produced value may
+        // carry provenance roots from an older allocation, but the callee's mutable parameter
+        // writes that cell; it cannot mutate the older allocation in place. Keep the slot's own
+        // root so exclusive access still checks aliases of the binding. Heap-allocated types keep
+        // their provenance roots because a stored aggregate or string can share storage.
+        if place.projections.is_empty()
+            && let Some(local_index) = layout.index_of(place.root)
+            && state.local_state(local_index).mode == LocalMode::SLOT
+            && !layout.local_has_in_place_mutation_surface[local_index]
+        {
+            let mut roots = RootSet::empty(layout.local_count());
+            roots.insert(local_index);
+            return Ok(roots);
+        }
+
         return roots_for_place(
             layout,
             state,
@@ -655,12 +669,30 @@ fn direct_value_roots_from_expression(
     }
 }
 
+/// Cell index of a projection-free definite slot, for overlap identity.
+///
+/// WHAT: reports the slot's own binding cell, never allocation provenance.
+/// WHY: exclusivity and same-call overlap ask which cells a place touches, while value
+///      provenance asks which immutable origins a value came from. Keeping them separate
+///      prevents a cell bit from travelling through call results into fresh scalars.
+pub(super) fn place_cell_root(
+    layout: &FunctionLayout,
+    state: &BorrowState,
+    place: &HirPlace,
+) -> Option<usize> {
+    if !place.projections.is_empty() {
+        return None;
+    }
+    let local_index = layout.index_of(place.root)?;
+    let mode = state.local_state(local_index).mode;
+    (mode.contains(LocalMode::SLOT) && !mode.contains(LocalMode::ALIAS)).then_some(local_index)
+}
+
 fn direct_root_aliases_from_expression(
     layout: &FunctionLayout,
     state: &BorrowState,
     expressions: &HirExpressionStore,
     expression_id: HirValueId,
-    rhs_roots: &RootSet,
 ) -> RootSet {
     let mut direct_roots = RootSet::empty(layout.local_count());
     let expression = expressions.expression(expression_id);
@@ -673,18 +705,17 @@ fn direct_root_aliases_from_expression(
         return direct_roots;
     };
 
-    if !place.projections.is_empty() {
-        return direct_roots;
-    }
-
     let Some(source_index) = layout.index_of(place.root) else {
         return direct_roots;
     };
 
-    let source_state = state.local_state(source_index);
-    if source_state.mode.contains(LocalMode::SLOT) && rhs_roots.contains(source_index) {
-        direct_roots.insert(source_index);
+    // A place load binds the source place's own cell when that source is a definite slot. Cell
+    // identity is overlap information only; it must not enter the value's provenance roots or a
+    // returned scalar would inherit a later slot write.
+    if let Some(cell_index) = place_cell_root(layout, state, place) {
+        direct_roots.insert(cell_index);
     }
+    let source_state = state.local_state(source_index);
     if source_state.mode.contains(LocalMode::ALIAS) {
         // An alias source carries the referent cells through to the new binding. Chained aliases
         // must keep observing the same cells, while a slot-backed value alias contributes no

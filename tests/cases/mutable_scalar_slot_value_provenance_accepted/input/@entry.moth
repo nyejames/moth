@@ -1,0 +1,22 @@
+-- A definite scalar slot may hold a produced value whose provenance names an immutable
+-- source. Passing the slot by `~` writes the slot's own cell, so the callee cannot mutate
+-- the immutable `original` binding.
+
+identity |value I32| -> I32:
+    return value
+;
+
+set_two |value ~I32|:
+    ~value = 2
+;
+
+probe || -> I32:
+    original = 5
+    slot ~= 0
+    ~slot = identity(original)
+    set_two(~slot)
+    return slot
+;
+
+result = probe()
+io.line([: mutable_scalar_slot_value_provenance result=[result]])

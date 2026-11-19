@@ -61,6 +61,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_infrastructure_error_contains, assert_invalid_mutable_access_reason, run_borrow_checker,
+    run_borrow_checker_with_types,
 };
 use crate::compiler_frontend::tests::external_package_support::{
     default_external_package_registry, register_external_function,
@@ -3681,14 +3682,26 @@ fn catch_private_call_return_alias_unions_success_and_parameter_derived_handler(
     let (mut hir, mut type_environment) =
         lower_ast(ast, &mut string_table, &mut path_fork, &registry)
             .expect("a direct private catch must lower");
-    let mut initial = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
-        .expect("the pre-installation HIR must be legal");
+    let mut initial = run_borrow_checker_with_types(
+        &hir,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    )
+    .expect("the pre-installation HIR must be legal");
     infer_builtin_failure_summaries(&hir, &mut initial);
     install_private_failure_lanes(&mut hir, &initial, &mut type_environment, &registry)
         .expect("the inferred call must install a real handler edge");
     assert!(hir.catch_protected_calls.is_empty());
-    let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
-        .expect("return provenance must remain legal after error edges are installed");
+    let report = run_borrow_checker_with_types(
+        &hir,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    )
+    .expect("return provenance must remain legal after error edges are installed");
     let recover_name = path_fork
         .try_intern_child(entry_path, string_table.intern("recover"))
         .expect("the test path fits");

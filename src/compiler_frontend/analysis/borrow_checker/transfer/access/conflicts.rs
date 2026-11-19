@@ -293,10 +293,15 @@ fn active_alias_count_for_root(
             continue;
         }
 
-        if !activity
-            .state
-            .effective_root_contains(candidate_index, root_index)
-        {
+        // A definite slot whose value carries provenance omits its own cell from
+        // `effective_roots`. The acting slot still holds the written cell, so count it
+        // explicitly; otherwise one real alias would look like the only participant.
+        if candidate_index == actor_index && candidate_index == root_index {
+            count += 1;
+            continue;
+        }
+
+        if !candidate_contains_root(activity, candidate_index, root_index) {
             continue;
         }
 
@@ -347,10 +352,7 @@ fn active_mutable_alias_for_root(
             continue;
         }
 
-        if !activity
-            .state
-            .effective_root_contains(candidate_index, root_index)
-        {
+        if !candidate_contains_root(activity, candidate_index, root_index) {
             continue;
         }
 
@@ -399,10 +401,7 @@ fn conflicting_active_local_for_root(
         // Membership is a bit test; the liveness check does several layout and diagnostics
         // lookups per candidate. Both are pure filters, so testing membership first saves work
         // without changing which candidate is found.
-        if !activity
-            .state
-            .effective_root_contains(candidate_index, root_index)
-        {
+        if !candidate_contains_root(activity, candidate_index, root_index) {
             continue;
         }
 
@@ -423,6 +422,24 @@ fn conflicting_active_local_for_root(
     }
 
     None
+}
+
+// WHAT: Whether a candidate observes the root's cell or allocation, for alias scans.
+// WHY: direct aliases of a value-backed slot keep the cell in `direct_alias_roots` while their
+//      value provenance names only older allocation roots; either form participates.
+fn candidate_contains_root(
+    activity: &AliasActivityContext<'_>,
+    candidate_index: usize,
+    root_index: usize,
+) -> bool {
+    activity
+        .state
+        .effective_root_contains(candidate_index, root_index)
+        || activity
+            .state
+            .local_state(candidate_index)
+            .direct_alias_roots
+            .contains(root_index)
 }
 
 // WHAT: Decides whether a candidate alias observes a write to the root of this binding cell.

@@ -24,6 +24,11 @@ pub(super) struct FunctionLayout {
     pub local_ids: Vec<LocalId>,
     pub local_index_by_id: FxHashMap<LocalId, usize>,
     pub local_mutable: Vec<bool>,
+    /// Whether a mutable access to each local's type can change storage through an alias.
+    ///
+    /// WHY: a definite slot storing a produced value keeps its own binding cell. For value types
+    /// the write replaces that cell, while heap-allocated types may expose the older allocation.
+    pub local_has_in_place_mutation_surface: Vec<bool>,
     pub local_first_write_order: Vec<OrderKey>,
     pub local_last_use_order: Vec<OrderKey>,
     // WHAT: Per-node evaluation order used during transfer.
@@ -47,6 +52,7 @@ pub(super) struct FunctionLayoutInputs {
     // WHY: Keeping this separate from FunctionLayout lets callers build then validate atomically.
     pub local_ids: Vec<LocalId>,
     pub local_mutable: Vec<bool>,
+    pub local_has_in_place_mutation_surface: Vec<bool>,
     pub local_first_write_order: Vec<OrderKey>,
     pub local_last_use_order: Vec<OrderKey>,
     pub statement_order_by_id: FxHashMap<HirNodeId, OrderKey>,
@@ -86,6 +92,7 @@ impl FunctionLayout {
             local_ids: inputs.local_ids,
             local_index_by_id,
             local_mutable: inputs.local_mutable,
+            local_has_in_place_mutation_surface: inputs.local_has_in_place_mutation_surface,
             local_first_write_order: inputs.local_first_write_order,
             local_last_use_order: inputs.local_last_use_order,
             statement_order_by_id: inputs.statement_order_by_id,

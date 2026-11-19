@@ -161,6 +161,25 @@ impl ExternalPackageRegistry {
         self.register_package_with_metadata(
             path,
             crate::builder_surface::PackageMetadata::binding(origin),
+            true,
+        )
+    }
+
+    /// Registers a compiler-owned package that no source dependency clause may name.
+    ///
+    /// WHAT: keeps the package registered for compiler-owned syntax while marking it implicit
+    ///       for source binding.
+    /// WHY: collection receiver methods resolve `@core/collections` directly, but an authored
+    ///      dependency clause has no source-visible surface to bind.
+    pub(crate) fn register_implicit_package(
+        &mut self,
+        path: impl Into<String>,
+        origin: crate::builder_surface::PackageOrigin,
+    ) -> Result<ExternalPackageId, ExternalRegistrationError> {
+        self.register_package_with_metadata(
+            path,
+            crate::builder_surface::PackageMetadata::binding(origin),
+            false,
         )
     }
 
@@ -178,6 +197,7 @@ impl ExternalPackageRegistry {
         self.register_package_with_metadata(
             path,
             crate::builder_surface::PackageMetadata::host_binding(origin),
+            true,
         )
     }
 
@@ -185,6 +205,7 @@ impl ExternalPackageRegistry {
         &mut self,
         path: impl Into<String>,
         metadata: crate::builder_surface::PackageMetadata,
+        source_bindable: bool,
     ) -> Result<ExternalPackageId, ExternalRegistrationError> {
         let path = path.into();
         let origin = metadata.origin;
@@ -216,7 +237,7 @@ impl ExternalPackageRegistry {
         }
         let id = ExternalPackageId(self.next_package_id);
         self.next_package_id += 1;
-        let package = ExternalPackage::new(id, path.clone(), metadata);
+        let package = ExternalPackage::new(id, path.clone(), metadata, source_bindable);
         self.packages.insert(id, package);
         self.package_id_by_path.insert(path, id);
         Ok(id)
@@ -856,6 +877,16 @@ impl ExternalPackageRegistry {
     /// Looks up a specific package by its stable ID.
     pub fn get_package_by_id(&self, id: ExternalPackageId) -> Option<&ExternalPackage> {
         self.packages.get(&id)
+    }
+
+    /// Whether a source dependency clause may bind symbols from the named package.
+    ///
+    /// WHAT: implicit compiler-owned packages return `false`.
+    /// WHY: authored dependency clauses must agree with the documented package surface, so the
+    ///      rejection owner reads the registration fact instead of matching a package path.
+    pub(crate) fn package_is_source_bindable(&self, package_path: &str) -> bool {
+        self.get_package(package_path)
+            .is_some_and(|package| package.source_bindable)
     }
 
     /// Resolves any symbol (function, type, or constant) at a structured path within a

@@ -52,6 +52,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_view, assert_invalid_mutable_access_reason, run_borrow_checker,
+    run_borrow_checker_with_types,
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
@@ -336,9 +337,14 @@ fn shared_expression_row_merges_branch_roots_in_either_successor_order() {
         )
         .expect("shared alias reads should preserve the module's HIR invariants");
 
-        let report =
-            run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-                .expect("the shared scratch alias should be borrow-safe");
+        let report = run_borrow_checker_with_types(
+            &hir,
+            &type_environment,
+            &external_package_registry,
+            &path_fork,
+            &string_table,
+        )
+        .expect("the shared scratch alias should be borrow-safe");
         let fact = report
             .analysis
             .value_fact(shared_read)
@@ -1026,8 +1032,14 @@ sentinel = 0\n\
         &external_package_registry,
     )
     .expect("the dedicated result update must remain structurally valid HIR");
-    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-        .expect("the alias return should preserve the mixed update roots");
+    let report = run_borrow_checker_with_types(
+        &hir,
+        &type_environment,
+        &external_package_registry,
+        &path_fork,
+        &string_table,
+    )
+    .expect("the alias return should preserve the mixed update roots");
     let sentinel =
         find_local_definition_statement_id_for_name(&hir, &path_fork, &string_table, "sentinel")
             .expect("the sentinel follows the operation update");

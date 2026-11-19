@@ -59,7 +59,7 @@ separate package-admission policy.
 
 - `@core/prelude` lacks validity. No `@core/prelude` package exists.
 - The prelude does not expose a namespace record that can be passed as a runtime value.
-- The prelude does not expose `@core/math`, `@core/text`, `@core/random`, `@core/time` or `@core/collections` without explicit dependency clauses.
+- The prelude does not expose `@core/math`, `@core/text`, `@core/random` or `@core/time` without explicit dependency clauses. `@core/collections` stays implicit and carries no dependency-clause surface at all.
 
 ### Related concepts
 

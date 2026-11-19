@@ -1,0 +1,22 @@
+-- Passing the same scalar slot as a mutable argument and a shared argument in one call
+-- overlaps the slot's binding cell. The callee writes through the mutable parameter and
+-- observes through the shared one, so the call must stay rejected.
+
+identity |value I32| -> I32:
+    return value
+;
+
+mutate_and_read |target ~I32, observed I32| -> I32:
+    ~target = 9
+    return observed
+;
+
+probe || -> I32:
+    original = 5
+    slot ~= 0
+    ~slot = identity(original)
+    return mutate_and_read(~slot, slot)
+;
+
+result = probe()
+io.line([: same_call result=[result]])

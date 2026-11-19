@@ -11,6 +11,7 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType;
+use crate::compiler_frontend::compiler_messages::InvalidImportPathReason;
 use crate::compiler_frontend::compiler_messages::InvalidReceiverDeclarationReason;
 use crate::compiler_frontend::compiler_messages::NameNamespace;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
@@ -1396,6 +1397,31 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         Ok(target)
     }
 
+    /// Reject a dependency clause that names a compiler-owned implicit package.
+    ///
+    /// WHAT: keeps the package registered for compiler-owned syntax while refusing authored
+    ///       bindings from it.
+    /// WHY: implicit packages carry no source-visible dependency surface, and a dependency clause
+    ///      is the only way an author can claim their symbols.
+    fn reject_implicit_package_dependency(
+        &self,
+        dependency: &RetainedDependencyPath,
+        package_path: &str,
+    ) -> BuilderResult<()> {
+        if self
+            .external_package_registry
+            .package_is_source_bindable(package_path)
+        {
+            return Ok(());
+        }
+        Err(imports::invalid_import_path(
+            dependency.path,
+            InvalidImportPathReason::ImplicitPackage,
+            Some(dependency.span),
+        )
+        .into())
+    }
+
     /// Resolve one selection without the shared receiver-method policy.
     ///
     /// WHY: provider, package and source routes each return a target, so the receiver-method
@@ -1434,7 +1460,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         if let Some(target) =
-            self.resolve_external_package_selected_target(&selected_path, selection)?
+            self.resolve_external_package_selected_target(&selected_path, dependency, selection)?
         {
             return Ok(target);
         }
@@ -1558,6 +1584,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     fn resolve_external_package_selected_target(
         &mut self,
         selected_path: &PathId,
+        dependency: &RetainedDependencyPath,
         selection: &DependencySelection,
     ) -> BuilderResult<Option<ResolvedSelectedTarget>> {
         match resolve_external_package_symbol(ExternalPackageSymbolResolutionInput {
@@ -1569,6 +1596,13 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             ExternalPackageSymbolLookup::Found { symbol_id } => {
                 Ok(Some(ResolvedSelectedTarget::External { symbol_id }))
             }
+            // Changing the member cannot fix this, so the diagnostic names the package clause.
+            ExternalPackageSymbolLookup::ImplicitPackage => Err(imports::invalid_import_path(
+                dependency.path,
+                InvalidImportPathReason::ImplicitPackage,
+                Some(dependency.span),
+            )
+            .into()),
             ExternalPackageSymbolLookup::PackageFoundSymbolMissing {
                 package_path,
                 symbol_name,
@@ -2066,6 +2100,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             });
 
         if let Some(target) = namespace_target {
+            if let ResolvedNamespaceTarget::ExternalPackage { package_path } = &target {
+                // A bare clause names the package surface itself, which an implicit package does
+                // not publish either.
+                self.reject_implicit_package_dependency(
+                    &dependency.dependency,
+                    self.string_table.resolve(*package_path),
+                )?;
+            }
             return self.register_namespace_binding(
                 file_visibility,
                 registry,

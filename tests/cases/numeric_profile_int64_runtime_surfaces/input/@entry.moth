@@ -29,9 +29,12 @@ initial_length_checked = format_checked_offset(initial_length) catch:
     then "overflow"
 ;
 
-first = values.get(0) catch:
+first_alias = values.get(0) catch:
     then -1
 ;
+-- The `get` result is a shared alias of `values`. Copy it before the mutation so the
+-- later output read does not keep the collection borrowed across `set` and `push`.
+first = copy first_alias
 ~values.set(1, 21) catch:
 ;
 ~values.push(30)

@@ -107,7 +107,13 @@ return source_a
     validate_hir_module(&module, &type_environment, &registry)
         .expect("ordinary locals and explicit self-edge definitions should form valid HIR");
 
-    let checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);
+    let checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
     let function = module
         .functions
         .iter()
@@ -164,22 +170,14 @@ return source_a
     assert!(destination_a_state.mode.contains(LocalMode::SLOT));
     assert!(!destination_a_state.mode.contains(LocalMode::ALIAS));
     assert!(destination_a_state.value_roots.contains(root_b_index));
-    assert!(
-        destination_a_state
-            .direct_alias_roots
-            .contains(root_b_index)
-    );
+    assert!(destination_a_state.direct_alias_roots.is_empty());
     assert!(!destination_a_state.value_roots.contains(source_a_index));
 
     let destination_b_state = state.local_state(source_b_index);
     assert!(destination_b_state.mode.contains(LocalMode::SLOT));
     assert!(!destination_b_state.mode.contains(LocalMode::ALIAS));
     assert!(destination_b_state.value_roots.contains(root_a_index));
-    assert!(
-        destination_b_state
-            .direct_alias_roots
-            .contains(root_a_index)
-    );
+    assert!(destination_b_state.direct_alias_roots.is_empty());
     assert!(!destination_b_state.value_roots.contains(source_b_index));
 
     let slot_result = state.local_state(slot_destination_index);

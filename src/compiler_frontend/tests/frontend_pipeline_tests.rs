@@ -55,6 +55,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticBag, InvalidFallibleHandlingReason, PreparedFailure,
 };
 use crate::compiler_frontend::datatypes::CallableEvaluation;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::external_packages::external_returns;
@@ -345,6 +346,11 @@ struct FrontendProject {
     builder_root_slots: Option<BuilderRootSlotSchema>,
     entry_role: FileRole,
     build_profile: FrontendBuildProfile,
+    /// Environment paired with the most recent HIR lowering.
+    ///
+    /// WHY: borrow validation consumes semantic type classes, and tests lower HIR once then run
+    ///      several validation passes.
+    lowered_type_environment: Option<TypeEnvironment>,
 }
 
 impl FrontendProject {
@@ -430,6 +436,7 @@ impl FrontendProject {
             builder_root_slots: None,
             entry_role,
             build_profile: FrontendBuildProfile::Dev,
+            lowered_type_environment: None,
         }
     }
 
@@ -596,16 +603,42 @@ impl FrontendProject {
     }
 
     fn lower_ast_result(&mut self, ast: Ast) -> Result<HirModule, PreparedFailure> {
+        let lowered = self.frontend.with_compiler(|compiler| {
+            compiler.generate_hir(
+                ast,
+                HirFunctionOriginLookup::default(),
+                None,
+                Default::default(),
+            )
+        })?;
+        self.lowered_type_environment = Some(lowered.type_environment);
+        Ok(lowered.hir_module)
+    }
+
+    /// Runs borrow validation against the environment that owns the lowered HIR's type ids.
+    fn check_borrows(
+        &mut self,
+        hir_module: &HirModule,
+    ) -> Result<BorrowCheckReport, PreparedFailure> {
+        let type_environment = self
+            .lowered_type_environment
+            .as_ref()
+            .expect("HIR lowering must retain its type environment before borrow validation");
         self.frontend
-            .with_compiler(|compiler| {
-                compiler.generate_hir(
-                    ast,
-                    HirFunctionOriginLookup::default(),
-                    None,
-                    Default::default(),
-                )
-            })
-            .map(|result| result.hir_module)
+            .with_compiler(|compiler| compiler.check_borrows(hir_module, type_environment))
+    }
+
+    /// Runs borrow validation against an environment the caller still owns.
+    ///
+    /// WHY: tests that lower HIR directly, or install private lanes after lowering, hold the
+    ///      environment themselves and must pass its current state rather than a stale clone.
+    fn check_borrows_with(
+        &mut self,
+        hir_module: &HirModule,
+        type_environment: &TypeEnvironment,
+    ) -> Result<BorrowCheckReport, PreparedFailure> {
+        self.frontend
+            .with_compiler(|compiler| compiler.check_borrows(hir_module, type_environment))
     }
 
     /// Exercise the summary owner's semantic contract checks without claiming backend delivery.
@@ -626,7 +659,7 @@ impl FrontendProject {
         let hir = lowered.hir_module;
         let mut report = self
             .frontend
-            .with_compiler(|compiler| compiler.check_borrows(&hir))?;
+            .with_compiler(|compiler| compiler.check_borrows(&hir, &type_environment))?;
         crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
             &hir,
             &mut report,
@@ -676,8 +709,7 @@ impl FrontendProject {
     fn borrow_checked_hir(&mut self) -> (HirModule, BorrowCheckReport) {
         let hir = self.hir();
         let report = self
-            .frontend
-            .with_compiler(|compiler| compiler.check_borrows(&hir))
+            .check_borrows(&hir)
             .expect("borrow checking should succeed");
         (hir, report)
     }
@@ -1110,8 +1142,7 @@ fn frontend_diagnostics_preserve_source_spans() {
 
     let hir = project.hir();
     let prepared_failure = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows(&hir)
         .expect_err("multiple mutable borrows should fail borrow checking");
     let messages = freeze_prepared_failure(
         prepared_failure,
@@ -1855,8 +1886,7 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
     let mut hir = lowered.hir_module;
     let mut type_environment = lowered.type_environment;
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("ordinary numeric functions should pass borrow checking");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -1870,8 +1900,7 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
     )
     .expect("private failure lane must install");
     project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("installed failure edges must pass borrow checking");
     for (name, expected_escape) in [
         ("multiply", true),
@@ -1995,8 +2024,7 @@ fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
     let mut hir = lowered.hir_module;
     let mut type_environment = lowered.type_environment;
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("float integrity guards must pass borrow checking");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -2010,8 +2038,7 @@ fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
     )
     .expect("only implicit failures may join the private lane");
     project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("integrity guards and installed numeric lanes must pass borrow checking");
 
     for (name, expected_invoke, escapes) in [
@@ -2117,8 +2144,7 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
     let mut hir = lowered.hir_module;
     let mut type_environment = lowered.type_environment;
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("statement-owned checks must pass borrow checking");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -2132,8 +2158,7 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
     )
     .expect("statement-owned checks must join the private failure lane");
     project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("retargeted write-back and range edges must pass borrow checking");
 
     let bump = named_hir_function(&project, &hir, "bump");
@@ -2200,8 +2225,7 @@ fn private_failure_lane_marks_edge_locals_as_temps_without_weakening_fresh_mutab
     );
 
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("fresh mutable arguments must pass borrow checking before lane installation");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -2272,8 +2296,7 @@ fn private_failure_lane_marks_edge_locals_as_temps_without_weakening_fresh_mutab
         "checked arithmetic and private calls must introduce native error destinations"
     );
     project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("edge locals must not introduce exclusive aliases of fresh mutable roots");
 }
 
@@ -2332,8 +2355,7 @@ fn private_failure_lane_preserves_unrelated_fatal_fallible_edge() {
         *message = "Rendered conversion message may change".to_owned();
     }
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("fatal fallible edge must be legal HIR");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -3228,8 +3250,7 @@ fn implicit_failure_custom_catch_reports_handler_compatibility_before_protected_
         .expect("nested custom catches must defer compatibility until private summaries converge");
     let recover = named_hir_function(&project, &hir, "recover");
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows(&hir)
         .expect("nested recovery must pass borrow checking");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -4919,8 +4940,7 @@ fn implicit_failure_private_catch_routes_argument_failure_before_outer_call() {
         "lowering must record the pending catch edge for the private argument call"
     );
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("protected private calls must pass borrow checking before lane installation");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -4934,8 +4954,7 @@ fn implicit_failure_private_catch_routes_argument_failure_before_outer_call() {
     )
     .expect("private failure lane must install");
     project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("installed failure edges must pass borrow checking");
     assert!(
         hir.catch_protected_calls.is_empty(),
@@ -5033,8 +5052,7 @@ fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
         "lowering must record the pending catch edge for the private call"
     );
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("protected private calls must pass borrow checking before lane installation");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -5048,8 +5066,7 @@ fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
     )
     .expect("private failure lane must install");
     project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("installed failure edges must pass borrow checking");
     assert!(
         hir.catch_protected_calls.is_empty(),
@@ -5301,8 +5318,7 @@ fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
         "a typed callee routes through Invoke, not the private lane"
     );
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("protected RHS calls must pass borrow checking before lane installation");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -5316,8 +5332,7 @@ fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
     )
     .expect("private failure lane must install");
     project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("installed failure edges must pass borrow checking");
     assert!(
         hir.catch_protected_calls.is_empty(),
@@ -5753,8 +5768,7 @@ fn implicit_failure_same_module_cross_file_call_keeps_canonical_private_failure_
         )
     ));
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows(&hir)
         .expect("same-module numeric helper must pass borrow validation");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -5851,8 +5865,7 @@ fn dead_statement_tail_keeps_selected_call_evidence_without_failure_contributors
     );
 
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows(&hir)
         .expect("the dead statement tail must pass borrow validation");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,

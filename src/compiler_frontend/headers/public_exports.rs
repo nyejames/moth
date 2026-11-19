@@ -27,7 +27,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{
     CapacityResource, ImportPublicSurfaceType, InvalidDependencyClauseReason,
-    InvalidReceiverDeclarationReason, ReservedNameOwner, SourceSpanCapacityResource,
+    InvalidImportPathReason, InvalidReceiverDeclarationReason, ReservedNameOwner,
+    SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::{
@@ -642,6 +643,15 @@ fn resolve_public_export_dependency_or_provider(
                         Some(dependency.dependency.span),
                     ))
                 })?;
+            if !package.source_bindable {
+                return Err(HeaderParseFailure::Diagnostic(
+                    imports::invalid_import_path(
+                        dependency.dependency.path,
+                        InvalidImportPathReason::ImplicitPackage,
+                        Some(dependency.dependency.span),
+                    ),
+                ));
+            }
             let symbol_name = string_table.resolve(selection.source_name);
             let Some(symbol_id) =
                 external_package_registry.resolve_package_symbol(&package.path, symbol_name)
@@ -751,6 +761,15 @@ fn resolve_public_export_dependency(
     }) {
         ExternalPackageSymbolLookup::Found { symbol_id } => {
             return Ok(PublicExportTarget::External(symbol_id));
+        }
+        ExternalPackageSymbolLookup::ImplicitPackage => {
+            return Err(HeaderParseFailure::Diagnostic(
+                imports::invalid_import_path(
+                    dependency.dependency.path,
+                    InvalidImportPathReason::ImplicitPackage,
+                    Some(dependency.dependency.span),
+                ),
+            ));
         }
         ExternalPackageSymbolLookup::PackageFoundSymbolMissing {
             package_path,

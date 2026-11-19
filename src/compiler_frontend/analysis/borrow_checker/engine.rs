@@ -8,7 +8,7 @@ use crate::borrow_log;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
-    BorrowState, FunctionLayout, LocalState,
+    BorrowState, FunctionLayout, LocalState, RootSet,
 };
 use crate::compiler_frontend::analysis::borrow_checker::transfer::{
     BlockTransferStats, BorrowTransferContext, transfer_block,
@@ -17,6 +17,7 @@ use crate::compiler_frontend::analysis::borrow_checker::types::{
     BorrowCheckReport, BorrowCheckStats, BorrowDropSite, BorrowDropSiteKind, FunctionBorrowSummary,
     LocalMode, ValueBorrowFact,
 };
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId, RegionId};
@@ -35,6 +36,7 @@ mod invoke_edge_tests;
 
 pub(super) struct BorrowChecker<'a> {
     pub(super) module: &'a HirModule,
+    pub(super) type_environment: &'a TypeEnvironment,
     pub(super) external_package_registry: &'a ExternalPackageRegistry,
     pub(super) string_table: &'a StringTable,
     pub(super) path_fork: &'a PathInternerFork,
@@ -49,6 +51,7 @@ pub(super) struct BorrowChecker<'a> {
 impl<'a> BorrowChecker<'a> {
     pub(super) fn new(
         module: &'a HirModule,
+        type_environment: &'a TypeEnvironment,
         external_package_registry: &'a ExternalPackageRegistry,
         path_fork: &'a PathInternerFork,
         string_table: &'a StringTable,
@@ -67,6 +70,7 @@ impl<'a> BorrowChecker<'a> {
             .collect::<FxHashMap<_, _>>();
         Self {
             module,
+            type_environment,
             external_package_registry,
             string_table,
             path_fork,
@@ -543,9 +547,11 @@ impl<'a> BorrowChecker<'a> {
                     // Jump arguments enter the destination's binding slot. Preserve the source
                     // value's effective allocation provenance, including a plain source slot's
                     // own root, without turning the destination into a write-through alias view.
+                    // Cell identity belongs to the source binding; a fresh jump destination is a
+                    // new binding, so it must not inherit the source's direct alias cells.
                     LocalState::slot_with_value_roots(
                         successor_input.effective_roots(source_index),
-                        source_state.direct_alias_roots.clone(),
+                        RootSet::empty(layout.local_count()),
                     )
                 };
 

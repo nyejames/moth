@@ -509,7 +509,7 @@ template comment, valid only as a template-body child. Presentation-only roles c
             [: Supported]
             [: Broad source dependency, namespace, flat direct-selection, binding-backed package, public-surface, module-boundary, collision, continuation-diagnostic and legacy-import-migration coverage.]
             [: Frontend / HTML builder]
-            [: Source and module namespace records are shallow. External package namespace records support nested symbol paths such as [$html:<code>io.input.new</code>] and [$html:<code>io.input.Input</code>]. Direct symbol-path dependencies remain rejected. Cross-module and source-backed package access goes through the target root's [$html:<code>$export</code>] public surface.]
+            [: Source and module namespace records are shallow. External package namespace records support nested symbol paths such as [$html:<code>io.input.new</code>] and [$html:<code>io.input.Input</code>]. Direct symbol-path dependencies remain rejected. Cross-module and source-backed package access goes through the target root's [$html:<code>$export</code>] public surface. Authored clauses that name an implicit compiler package are rejected before member lookup. [$html:<code>@core/collections</code>] is currently the only such package: direct selections, namespace clauses, [$html:<code>$export</code>] re-exports and direct symbol paths report an invalid dependency path instead of binding a compiler-owned helper.]
         ]
 
         [data:

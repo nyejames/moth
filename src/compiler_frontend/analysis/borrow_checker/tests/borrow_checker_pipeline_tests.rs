@@ -238,6 +238,7 @@ fn successful_borrow_report_can_be_stored_on_module() {
         &mut path_fork,
         &external_package_registry,
     );
+    let executable_type_environment = hir.type_environment.clone();
     let borrow_analysis =
         run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
             .expect("borrow checking should pass");
@@ -247,10 +248,9 @@ fn successful_borrow_report_can_be_stored_on_module() {
 
     let module = Module {
         executable: ModuleExecutable {
-            hir,
+            hir: hir.hir_module,
             resource_table: ModuleResourceTable::new(),
-            type_environment:
-                crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
+            type_environment: executable_type_environment,
             borrow_analysis,
             numeric_proofs:
                 crate::compiler_frontend::analysis::numeric_proofs::NumericProofs::default(),

@@ -781,6 +781,9 @@ pub enum InvalidImportPathReason {
     EscapesSourcePackageRoot,
     /// A proven intermediate dependency-path component names a hidden source directory.
     HiddenDirectory,
+    /// A dependency clause names a compiler-owned implicit package with no source-visible
+    /// dependency surface.
+    ImplicitPackage,
     CaseMismatch {
         provided: StringId,
         expected: StringId,

@@ -733,6 +733,7 @@ impl<'a> CompilerFrontend<'a> {
     ) -> Result<BorrowCheckReport, PreparedFailure> {
         match run_borrow_checker(
             hir_module,
+            type_environment,
             self.external_package_registry.as_ref(),
             &self.path_fork,
             &self.string_table,
@@ -767,9 +768,11 @@ impl<'a> CompilerFrontend<'a> {
     pub(in crate::compiler_frontend) fn check_borrows(
         &self,
         hir_module: &HirModule,
+        type_environment: &TypeEnvironment,
     ) -> Result<BorrowCheckReport, PreparedFailure> {
         match run_borrow_checker(
             hir_module,
+            type_environment,
             self.external_package_registry.as_ref(),
             &self.path_fork,
             &self.string_table,

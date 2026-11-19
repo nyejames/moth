@@ -32,7 +32,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::borrow_fixture_support::{
-    assert_borrow_error_view, assert_invalid_mutable_access_reason, run_borrow_checker,
+    assert_borrow_error_view, assert_invalid_mutable_access_reason, run_borrow_checker_with_types,
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
@@ -69,7 +69,7 @@ sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut string_table);
-    let (module, _) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+    let (module, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
         .expect("the update fixture should lower");
     let function = module
         .functions
@@ -82,7 +82,13 @@ sentinel = 0\n\
                 .is_some_and(|name| string_table.resolve(name) == "probe")
         })
         .expect("the fixture function should lower to HIR");
-    let checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);
+    let checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
     let reachable = checker
         .collect_reachable_blocks(function)
         .expect("fixture CFG should be reachable");
@@ -135,8 +141,9 @@ sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut string_table);
-    let (mut module, _) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
-        .expect("the dedicated update fixture should lower");
+    let (mut module, type_environment) =
+        lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+            .expect("the dedicated update fixture should lower");
     let target = local_named(&module, &path_fork, &string_table, "target");
     let argument = local_named(&module, &path_fork, &string_table, "argument");
     let (call_block_id, call_statement_id, call_result) = module
@@ -186,7 +193,13 @@ sentinel = 0\n\
                 .is_some_and(|name| string_table.resolve(name) == "probe")
         })
         .expect("the fixture function should lower to HIR");
-    let mut checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);
+    let mut checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
     checker
         .build_public_call_summaries()
         .expect("the identity call summary should be available");
@@ -250,8 +263,9 @@ sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut string_table);
-    let (mut module, _) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
-        .expect("the immutable update fixture should lower");
+    let (mut module, type_environment) =
+        lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+            .expect("the immutable update fixture should lower");
     let target = local_named(&module, &path_fork, &string_table, "target");
     let argument = local_named(&module, &path_fork, &string_table, "argument");
     let mutable_root = local_named(&module, &path_fork, &string_table, "mutable_root");
@@ -300,7 +314,13 @@ sentinel = 0\n\
                 .is_some_and(|name| string_table.resolve(name) == "probe")
         })
         .expect("the fixture function should lower to HIR");
-    let mut checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);
+    let mut checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
     checker
         .build_public_call_summaries()
         .expect("the identity call summary should be available");
@@ -359,7 +379,7 @@ sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut string_table);
-    let (module, _) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+    let (module, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
         .expect("the definition fixture should lower");
     let function = module
         .functions
@@ -372,7 +392,13 @@ sentinel = 0\n\
                 .is_some_and(|name| string_table.resolve(name) == "probe")
         })
         .expect("the fixture function should lower to HIR");
-    let checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);
+    let checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
     let reachable = checker
         .collect_reachable_blocks(function)
         .expect("fixture CFG should be reachable");
@@ -435,8 +461,9 @@ sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut string_table);
-    let (mut module, _) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
-        .expect("the immutable update fixture should lower");
+    let (mut module, type_environment) =
+        lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+            .expect("the immutable update fixture should lower");
     let mutable = local_named(&module, &path_fork, &string_table, "mutable_target");
     let immutable = local_named(&module, &path_fork, &string_table, "immutable_target");
     let mutable_root = local_named(&module, &path_fork, &string_table, "mutable_root");
@@ -482,7 +509,13 @@ sentinel = 0\n\
                 .is_some_and(|name| string_table.resolve(name) == "probe")
         })
         .expect("the fixture function should lower to HIR");
-    let checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);
+    let checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
     let reachable = checker
         .collect_reachable_blocks(function)
         .expect("fixture CFG should be reachable");
@@ -557,7 +590,13 @@ observed = copy observer\n\
                 .is_some_and(|name| string_table.resolve(name) == "probe")
         })
         .expect("the fixture function should lower");
-    let checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);
+    let checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
     let reachable = checker
         .collect_reachable_blocks(function)
         .expect("fixture CFG should be reachable");
@@ -712,7 +751,13 @@ observed = copy observer\n\
                 .is_some_and(|name| string_table.resolve(name) == "probe")
         })
         .expect("the fixture function should lower");
-    let mut checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);
+    let mut checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
     checker
         .build_public_call_summaries()
         .expect("the identity call summary should be available");
@@ -798,8 +843,14 @@ after = second
         validate_hir_module(&module, &type_environment, &registry)
             .expect("the complete fixture should be structurally valid HIR");
 
-        let error = run_borrow_checker(&module, &registry, &path_fork, &string_table)
-            .expect_err("a write through an aliased binding cell must be rejected");
+        let error = run_borrow_checker_with_types(
+            &module,
+            &type_environment,
+            &registry,
+            &path_fork,
+            &string_table,
+        )
+        .expect_err("a write through an aliased binding cell must be rejected");
         assert_invalid_mutable_access_reason(
             error,
             InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
@@ -843,8 +894,14 @@ after = returned
         validate_hir_module(&module, &type_environment, &registry)
             .expect("the complete fixture should be structurally valid HIR");
 
-        run_borrow_checker(&module, &registry, &path_fork, &string_table)
-            .expect("a dead or copied alias must not block the whole-binding write");
+        run_borrow_checker_with_types(
+            &module,
+            &type_environment,
+            &registry,
+            &path_fork,
+            &string_table,
+        )
+        .expect("a dead or copied alias must not block the whole-binding write");
     }
 }
 

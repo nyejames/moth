@@ -495,6 +495,9 @@ pub(crate) fn invalid_import_path_message(
         InvalidImportPathReason::HiddenDirectory => format!(
             "Dependency path '{path_text}' enters a directory whose name starts with '_'. Such directories are excluded from the project's source tree and cannot be imported."
         ),
+        InvalidImportPathReason::ImplicitPackage => format!(
+            "Dependency path '{path_text}' names a compiler-owned implicit package. That package carries no source-visible dependency surface, so it cannot be imported."
+        ),
         InvalidImportPathReason::CaseMismatch { provided, expected } => format!(
             "Dependency path case mismatch: '{}' should be '{}'.",
             context.string_table.resolve(provided),

@@ -36,7 +36,7 @@ fn lower_source(source: &str) -> (HirModule, PathInternerFork, StringTable) {
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
-    (hir, path_fork, string_table)
+    (hir.hir_module, path_fork, string_table)
 }
 
 fn function_id_by_name(

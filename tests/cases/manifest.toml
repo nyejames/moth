@@ -4789,6 +4789,83 @@ contract = "language.bindings.mutable_slot_branch_join_alias_immutable_referent_
 role = "primary"
 
 [[case]]
+id = "mutable_slot_collection_get_alias_immutable_referent_rejected"
+path = "mutable_slot_collection_get_alias_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics", "collections"]
+contract = "language.bindings.mutable_slot_collection_get_alias_immutable_referent_rejected"
+role = "primary"
+
+[[case]]
+id = "returned_collection_get_alias_immutable_referent_rejected"
+path = "returned_collection_get_alias_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics", "collections", "functions"]
+contract = "language.bindings.returned_collection_get_alias_immutable_referent_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_slot_collection_get_alias_accepted"
+path = "mutable_scalar_slot_collection_get_alias_accepted"
+tags = ["integration", "borrows", "collections", "functions"]
+contract = "language.bindings.mutable_scalar_slot_collection_get_alias_accepted"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_slot_value_provenance_accepted"
+path = "mutable_scalar_slot_value_provenance_accepted"
+tags = ["integration", "borrows", "functions"]
+contract = "language.bindings.mutable_scalar_slot_value_provenance_accepted"
+role = "primary"
+
+[[case]]
+id = "collection_get_copied_receiver_independent_accepted"
+path = "collection_get_copied_receiver_independent_accepted"
+tags = ["integration", "borrows", "collections"]
+contract = "language.bindings.collection_get_copied_receiver_independent_accepted"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_slot_alias_view_blocks_call_rejected"
+path = "mutable_scalar_slot_alias_view_blocks_call_rejected"
+tags = ["integration", "borrows", "diagnostics", "functions"]
+contract = "language.bindings.mutable_scalar_slot_alias_view_blocks_call_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_slot_alias_writer_blocks_call_rejected"
+path = "mutable_scalar_slot_alias_writer_blocks_call_rejected"
+tags = ["integration", "borrows", "diagnostics", "functions"]
+contract = "language.bindings.mutable_scalar_slot_alias_writer_blocks_call_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_slot_alias_view_blocks_direct_write_rejected"
+path = "mutable_scalar_slot_alias_view_blocks_direct_write_rejected"
+tags = ["integration", "borrows", "diagnostics"]
+contract = "language.bindings.mutable_scalar_slot_alias_view_blocks_direct_write_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_slot_same_call_shared_argument_rejected"
+path = "mutable_scalar_slot_same_call_shared_argument_rejected"
+tags = ["integration", "borrows", "diagnostics", "functions"]
+contract = "language.bindings.mutable_scalar_slot_same_call_shared_argument_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_slot_alias_snapshot_fresh_accepted"
+path = "mutable_scalar_slot_alias_snapshot_fresh_accepted"
+tags = ["integration", "borrows", "functions"]
+contract = "language.bindings.mutable_scalar_slot_alias_snapshot_fresh_accepted"
+role = "primary"
+
+[[case]]
+id = "mutable_slot_retained_result_does_not_write_immutable_input_accepted"
+path = "mutable_slot_retained_result_does_not_write_immutable_input_accepted"
+tags = ["integration", "borrows", "functions"]
+contract = "language.bindings.mutable_slot_retained_result_does_not_write_immutable_input_accepted"
+role = "primary"
+
+[[case]]
 id = "mutable_alias_live_blocks_whole_binding_write"
 path = "mutable_alias_live_blocks_whole_binding_write"
 tags = ["integration", "borrows", "diagnostics"]
@@ -5711,6 +5788,41 @@ path = "dependency_public_root_rejected"
 tags = ["integration", "language", "dependencies", "paths", "diagnostics"]
 contract = "language.dependencies.public_root_dependency_rejection"
 role = "primary"
+
+[[case]]
+id = "core_collections_dependency_selection_rejected"
+path = "core_collections_dependency_selection_rejected"
+tags = ["integration", "language", "dependencies", "packages", "diagnostics"]
+contract = "language.dependencies.implicit_package_rejection"
+role = "primary"
+
+[[case]]
+id = "core_collections_dependency_namespace_rejected"
+path = "core_collections_dependency_namespace_rejected"
+tags = ["integration", "language", "dependencies", "packages", "diagnostics"]
+contract = "language.dependencies.implicit_package_rejection"
+role = "boundary"
+
+[[case]]
+id = "core_collections_dependency_symbol_path_rejected"
+path = "core_collections_dependency_symbol_path_rejected"
+tags = ["integration", "language", "dependencies", "packages", "diagnostics"]
+contract = "language.dependencies.implicit_package_rejection"
+role = "boundary"
+
+[[case]]
+id = "core_collections_dependency_misspelled_member_rejected"
+path = "core_collections_dependency_misspelled_member_rejected"
+tags = ["integration", "language", "dependencies", "packages", "diagnostics"]
+contract = "language.dependencies.implicit_package_rejection"
+role = "boundary"
+
+[[case]]
+id = "core_collections_dependency_export_rejected"
+path = "core_collections_dependency_export_rejected"
+tags = ["integration", "language", "dependencies", "packages", "diagnostics"]
+contract = "language.dependencies.implicit_package_rejection"
+role = "boundary"
 
 [[case]]
 id = "dependency_current_directory_provider_rejected"

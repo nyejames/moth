@@ -1,0 +1,14 @@
+-- A copied receiver is an independent value graph. The shared `get` alias points into the
+-- copy, not into the source collection, so mutating the source while the result is still
+-- used must not conflict with the copied receiver's evaluation.
+
+probe || -> String:
+    rows ~= {{1}}
+    element = (copy rows).get(0) catch:
+        then {0}
+    ;
+    ~rows.push({2})
+    return [:copied_receiver element=[element.length()] rows=[rows.length()]]
+;
+
+io.line([: [probe()]])

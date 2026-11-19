@@ -1,0 +1,12 @@
+-- A collection `get` result is a shared alias to storage in the receiver's allocation. A mutable
+-- slot that stores the alias cannot be passed by `~` for mutation while the immutable `rows`
+-- binding still owns that storage. The catch fallback stores a fresh collection, but the joined
+-- slot still aliases `rows` on the success path.
+mutate_param |rows {{I32}}|:
+    slot ~{I32} = {0}
+    ~slot = rows.get(0) catch:
+        then {7}
+    ;
+    ~slot.push(4)
+;
+mutate_param({{9}})

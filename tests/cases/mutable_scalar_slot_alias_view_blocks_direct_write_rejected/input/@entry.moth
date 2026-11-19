@@ -1,0 +1,18 @@
+-- A direct write to a definite scalar slot rebinds the slot's own cell. An alias made from
+-- that slot before the write must keep the write rejected while the alias is live.
+
+identity |value I32| -> I32:
+    return value
+;
+
+probe || -> I32:
+    original = 5
+    slot ~= 0
+    ~slot = identity(original)
+    view = slot
+    ~slot = 8
+    return view
+;
+
+result = probe()
+io.line([: view result=[result]])

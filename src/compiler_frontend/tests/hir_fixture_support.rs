@@ -14,6 +14,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrBuilder, TemplateIrStore, TemplateIrSummary, TemplateTirPhase, TemplateTirReference,
     TemplateViewContext,
 };
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirLocal;
@@ -33,13 +34,43 @@ use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+/// One lowered fixture module paired with the environment that owns its semantic type ids.
+///
+/// WHAT: dereferences to the HIR module so ordinary fixture code keeps treating the result as a
+///       module while borrow-validation tests can pass the defining environment.
+/// WHY: hand-built and parsed fixtures discard their `TypeEnvironment` at the lowering seam, but
+///      type-class queries are only correct against the defining environment.
+#[derive(Clone)]
+pub(crate) struct LoweredHirFixture {
+    pub(crate) hir_module: HirModule,
+    pub(crate) type_environment: TypeEnvironment,
+}
+
+impl std::ops::Deref for LoweredHirFixture {
+    type Target = HirModule;
+
+    fn deref(&self) -> &Self::Target {
+        &self.hir_module
+    }
+}
+
+impl std::ops::DerefMut for LoweredHirFixture {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.hir_module
+    }
+}
+
 pub(crate) fn lower_hir(
     ast: Ast,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     external_packages: &ExternalPackageRegistry,
-) -> HirModule {
-    lower_hir_result(ast, string_table, path_fork, external_packages).hir_module
+) -> LoweredHirFixture {
+    let lowered = lower_hir_result(ast, string_table, path_fork, external_packages);
+    LoweredHirFixture {
+        hir_module: lowered.hir_module,
+        type_environment: lowered.type_environment,
+    }
 }
 
 /// Lowers one parsed fixture and keeps the paired type environment.
