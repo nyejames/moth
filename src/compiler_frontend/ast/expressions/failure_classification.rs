@@ -44,8 +44,8 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIrStore, TemplateTirReference, TirView, walk_expression_payloads_with_nested_tir_views,
-    walk_tir_view_expression_payloads,
+    LoopFailureSite, TemplateIrStore, TemplatePayload, TemplateTirReference, TirView,
+    walk_tir_view_failure_payloads,
 };
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -194,10 +194,45 @@ pub(crate) fn pending_body_failure_facts<'a>(
     Ok(facts)
 }
 
+#[cfg(test)]
 pub(crate) fn pending_expression_failure_facts<'a>(
     expression: ExpressionView<'_>,
     template_ir_store: &TemplateIrStore,
     expression_builder: impl Into<FailureClassificationExpressions<'a>>,
+) -> Result<ExpressionFailureFacts, InfrastructureFailure> {
+    pending_expression_failure_facts_with_options(
+        expression,
+        template_ir_store,
+        expression_builder,
+        false,
+    )
+}
+
+/// Collects pending facts for one assertion message.
+///
+/// WHAT: omits generated loop guards while keeping authored expression and call contributors.
+/// WHY: normalization decides whether a message folds away or becomes an owned runtime handoff.
+///      The early check runs while the template is still a building value, so it defers every
+///      generated loop guard; the post-normalization escape check classifies the guard when the
+///      message survives as runtime work.
+pub(crate) fn pending_assertion_message_failure_facts<'a>(
+    expression: ExpressionView<'_>,
+    template_ir_store: &TemplateIrStore,
+    expression_builder: impl Into<FailureClassificationExpressions<'a>>,
+) -> Result<ExpressionFailureFacts, InfrastructureFailure> {
+    pending_expression_failure_facts_with_options(
+        expression,
+        template_ir_store,
+        expression_builder,
+        true,
+    )
+}
+
+fn pending_expression_failure_facts_with_options<'a>(
+    expression: ExpressionView<'_>,
+    template_ir_store: &TemplateIrStore,
+    expression_builder: impl Into<FailureClassificationExpressions<'a>>,
+    suppress_generated_loop_failures: bool,
 ) -> Result<ExpressionFailureFacts, InfrastructureFailure> {
     let expression_builder = expression_builder.into();
     expression_builder.validate_view(expression)?;
@@ -205,6 +240,7 @@ pub(crate) fn pending_expression_failure_facts<'a>(
         TraversalPurpose::PendingSummary(ExpressionFailureFacts::default()),
         expression_builder,
     );
+    state.suppress_generated_loop_failures = suppress_generated_loop_failures;
     classify_expression(expression, template_ir_store, &mut state)?;
 
     // Traversal mutates the selected job's result, never replaces its purpose.
@@ -652,6 +688,8 @@ struct TraversalState<'a> {
     ///      skipped evidence, so their control transfers cannot keep a tail reachable that
     ///      lowering omits.
     exit_scratch: ControlFlowExitScratch,
+    /// Whether generated loop guards are deferred to the post-normalization escape check.
+    suppress_generated_loop_failures: bool,
 }
 
 impl<'a> TraversalState<'a> {
@@ -672,6 +710,7 @@ impl<'a> TraversalState<'a> {
             expression_steps: Vec::new(),
             constants: None,
             exit_scratch: ControlFlowExitScratch::for_emitted_work(),
+            suppress_generated_loop_failures: false,
         }
     }
 
@@ -723,6 +762,7 @@ impl<'a> TraversalState<'a> {
         state.known_function_paths = self.known_function_paths;
         state.summary_dependencies = self.summary_dependencies;
         state.constants = self.constants;
+        state.suppress_generated_loop_failures = self.suppress_generated_loop_failures;
         state
     }
 
@@ -1298,32 +1338,41 @@ fn enter_expression<'a>(
                 return Ok(None);
             }
             let mut effect = None;
-            let classifies_exits = state.classifies_exits();
             let expression_builder = state.expression_builder.builder()?;
-            let mut visit = |nested_expression: ExpressionView<'_>| {
+            // A building template is still pre-handoff, so its generated loop failures are
+            // classified here from the effective render edges the walk resolves. Assertion
+            // message escape checks use the same walk, so they cannot miss a loop HIR lowers.
+            let reference = template.tir_reference;
+            let view = TirView::new(
+                template_ir_store,
+                reference.root,
+                reference.phase,
+                reference.context,
+            )?;
+            let mut visit = |payload: TemplatePayload<'_>| {
                 if effect.is_none() {
-                    effect = classify_expression(nested_expression, template_ir_store, state)?;
+                    effect = match payload {
+                        TemplatePayload::Expression(nested_expression) => {
+                            classify_expression(nested_expression, template_ir_store, state)?
+                        }
+                        // The early assertion-message check and its pending facts defer every
+                        // generated loop guard: normalization decides whether the message folds
+                        // away or becomes a runtime handoff, and only the latter owns emitted
+                        // guards. Authored exits above stay checked early.
+                        TemplatePayload::LoopFailure(_)
+                            if state.suppress_generated_loop_failures
+                                || matches!(state.purpose, TraversalPurpose::AssertionMessage) =>
+                        {
+                            None
+                        }
+                        TemplatePayload::LoopFailure(site) => {
+                            classify_loop_failure_site(site, state)?
+                        }
+                    };
                 }
                 Ok(())
             };
-            if classifies_exits {
-                walk_expression_payloads_with_nested_tir_views(
-                    expression,
-                    template_ir_store,
-                    expression_builder,
-                    &mut visit,
-                )?;
-            } else {
-                // Projection keeps wrapper origins, unlike the predicate-oriented nested walker.
-                let reference = template.tir_reference;
-                let view = TirView::new(
-                    template_ir_store,
-                    reference.root,
-                    reference.phase,
-                    reference.context,
-                )?;
-                walk_tir_view_expression_payloads(&view, expression_builder, &mut visit)?;
-            }
+            walk_tir_view_failure_payloads(&view, expression_builder, &mut visit)?;
             finish_expression(exit(false), template_ir_store, state)?;
             Ok(effect)
         }
@@ -2194,23 +2243,20 @@ fn classify_loop_header(
             {
                 return Ok(Some(effect));
             }
-            let span = match range.step {
-                Some(step) => state.expression_builder.view(step)?.span(),
-                None => None,
-            }
-            .or(state.expression_builder.view(range.start)?.span());
-            // Template loop bodies are owned TIR handoffs, not AST statement sequences, so this
-            // pre-HIR classifier cannot run the emitted-work body exit rule. A bound ordinal keeps
-            // the checked update HIR emits for a render body; statement loops use the shared
-            // `range_ordinal_update_is_emitted` owner at their own call site.
-            Ok(classify_range_failure(
-                range.domain,
-                range.fast_math,
-                bindings.index.is_some(),
-                range.step.is_some(),
-                span,
+            // Template loop bodies are owned TIR render handoffs, not AST statement sequences,
+            // so this pre-HIR classifier cannot run `range_ordinal_update_is_emitted`. Template
+            // bodies cannot break or return, so a bound ordinal always reaches the step block;
+            // that binding-only rule matches statement loops whose body always falls through.
+            classify_loop_failure_site(
+                LoopFailureSite::Range {
+                    domain: range.domain,
+                    fast_math: range.fast_math,
+                    has_index_binding: bindings.index.is_some(),
+                    start: range.start,
+                    step: range.step,
+                },
                 state,
-            ))
+            )
         }
         TemplateLoopHeader::Collection { iterable, step, .. } => {
             if let Some(effect) = classify_expression(
@@ -2220,22 +2266,60 @@ fn classify_loop_header(
             )? {
                 return Ok(Some(effect));
             }
-            if let Some(step) = step {
-                let step_span = state.expression_builder.view(*step)?.span();
-                if let Some(effect) = classify_expression(
+            if let Some(step) = step
+                && let Some(effect) = classify_expression(
                     state.expression_builder.view(*step)?,
                     template_ir_store,
                     state,
-                )? {
-                    return Ok(Some(effect));
-                }
-                // The step value is fully evaluated before the loop checks it for zero.
-                if let Some(effect) = classify_collection_step_failure(step_span, state) {
-                    return Ok(Some(effect));
-                }
+                )?
+            {
+                return Ok(Some(effect));
             }
-            Ok(None)
+            // The step value is fully evaluated before the loop checks it for zero.
+            classify_loop_failure_site(LoopFailureSite::Collection { step: *step }, state)
         }
+    }
+}
+
+/// Classifies the generated failure a loop header owns after its operands are evaluated.
+///
+/// WHAT: reads the effective header expressions for the failure span, then applies the shared
+///       range or collection step policy.
+/// WHY: committed runtime handoffs and building templates must synthesize the same loop failures.
+fn classify_loop_failure_site(
+    site: LoopFailureSite,
+    state: &mut TraversalState<'_>,
+) -> Result<Option<EnclosingExitEffect>, InfrastructureFailure> {
+    match site {
+        LoopFailureSite::Range {
+            domain,
+            fast_math,
+            has_index_binding,
+            start,
+            step,
+        } => {
+            // The walk errors on a header/site step-shape mismatch, so the effective step is
+            // present exactly when the header authored one.
+            let has_explicit_step = step.is_some();
+            let span = match step {
+                Some(step) => state.expression_builder.view(step)?.span(),
+                None => None,
+            }
+            .or(state.expression_builder.view(start)?.span());
+            Ok(classify_range_failure(
+                domain,
+                fast_math,
+                has_index_binding,
+                has_explicit_step,
+                span,
+                state,
+            ))
+        }
+        LoopFailureSite::Collection { step: Some(step) } => {
+            let span = state.expression_builder.view(step)?.span();
+            Ok(classify_collection_step_failure(span, state))
+        }
+        LoopFailureSite::Collection { step: None } => Ok(None),
     }
 }
 

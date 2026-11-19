@@ -1,0 +1,8 @@
+render_items |count I32| -> String:
+    return [loop 0 to count by 1 |i|: [i]]
+;
+
+$export
+show |count I32| -> String:
+    return render_items(count)
+;

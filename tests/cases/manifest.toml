@@ -13904,6 +13904,62 @@ contract = "language.numeric.exported_private_failure_witness_bounded"
 role = "boundary"
 
 [[case]]
+id = "implicit_failure_private_template_loop_rejected"
+path = "implicit_failure_private_template_loop_rejected"
+tags = ["integration", "language", "numeric", "results", "templates", "loops", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.templates.exported_private_failure_through_runtime_loop_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_private_template_slot_loop_rejected"
+path = "implicit_failure_private_template_slot_loop_rejected"
+tags = ["integration", "language", "numeric", "results", "templates", "loops", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.templates.exported_private_failure_through_runtime_slot_loop_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_private_const_template_loop_rejected"
+path = "implicit_failure_private_const_template_loop_rejected"
+tags = ["integration", "language", "numeric", "results", "templates", "loops", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.templates.exported_private_failure_through_runtime_const_template_loop_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_private_const_template_loop_release_rejected"
+path = "implicit_failure_private_const_template_loop_release_rejected"
+tags = ["integration", "language", "numeric", "results", "templates", "loops", "diagnostics", "js-backend", "html-wasm", "release"]
+contract = "language.templates.exported_private_failure_through_runtime_const_template_loop_rejected"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_assertion_message_template_loop_rejected"
+path = "implicit_failure_assertion_message_template_loop_rejected"
+tags = ["integration", "language", "results", "templates", "loops", "diagnostics", "assertions", "js-backend", "html-wasm"]
+contract = "language.templates.assertion_message_rejects_runtime_loop_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_assertion_static_true_runtime_loop_rejected"
+path = "implicit_failure_assertion_static_true_runtime_loop_rejected"
+tags = ["integration", "language", "results", "templates", "loops", "diagnostics", "assertions", "js-backend", "html-wasm"]
+contract = "language.templates.assertion_message_rejects_static_true_runtime_loop"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_assertion_folded_open_slot_loop_success"
+path = "implicit_failure_assertion_folded_open_slot_loop_success"
+tags = ["integration", "language", "results", "templates", "loops", "assertions", "js-backend", "html-wasm"]
+contract = "language.templates.assertion_message_folds_open_slot_loop"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_assertion_absent_supplied_guard_success"
+path = "implicit_failure_assertion_absent_supplied_guard_success"
+tags = ["integration", "language", "results", "templates", "loops", "runtime", "assertions", "js-backend"]
+contract = "language.templates.absent_supplied_guard_owns_no_loop_failure"
+role = "boundary"
+
+[[case]]
 id = "implicit_failure_exported_operation"
 path = "implicit_failure_exported_operation"
 tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]

@@ -1,0 +1,10 @@
+card #= [:<div>[$slot title]</div>]
+
+render_cards |count I32| -> String:
+    return [card:[$in title: [loop 0 to count by 1 |i|:[i]]]]
+;
+
+$export
+show |count I32| -> String:
+    return render_cards(count)
+;

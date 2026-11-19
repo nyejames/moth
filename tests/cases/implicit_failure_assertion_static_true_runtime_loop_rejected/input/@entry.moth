@@ -1,0 +1,6 @@
+check |count I32| -> String:
+    assert(true, [loop 0 to count by 1 |i|:[i]])
+    return "ok"
+;
+
+~[:[check(2)]]

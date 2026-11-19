@@ -1,7 +1,8 @@
 //! Invariants for expression failure side data and recovered contributor boundaries.
 
 use crate::compiler_frontend::ast::ast_nodes::{
-    AstFunctionIdentity, AstNode, LoopBindings, NodeKind,
+    AstFunctionIdentity, AstNode, Declaration, DeclarationValue, LoopBindings, NodeKind,
+    RangeEndKind, RangeLoopSpec,
 };
 use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::assertion_message_effects::{
@@ -20,8 +21,12 @@ use crate::compiler_frontend::ast::expressions::failure_facts::{
     WitnessCandidates,
 };
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
+use crate::compiler_frontend::ast::templates::template::{Style, Template, TemplateType};
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopHeader;
-use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
+use crate::compiler_frontend::ast::templates::tir::{
+    TemplateIr, TemplateIrNode, TemplateIrNodeKind, TemplateIrStore, TemplateIrSummary,
+    TemplateTirPhase, TemplateTirReference, TemplateViewContext,
+};
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
@@ -33,6 +38,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{BuiltinFailureOriginKind, DiagnosticBag};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, function_node_by_name, node, runtime_template_handoff_expr,
@@ -1699,6 +1705,221 @@ fn collection_loop_step_failure_follows_the_header_operand_evaluation() {
     assert_eq!(witness.origin, BuiltinFailureOriginKind::Operation);
     assert_eq!(witness.origin_span, overflow_span);
     assert_eq!(witness.call_spans, vec![source_span]);
+}
+
+fn template_range_step_span() -> SourceSpan {
+    let mut extended = ExtendedSpanBuilder::new();
+    let local = LocalSpan::exact(9, 1, &mut extended).expect("short test span should fit");
+    SourceSpan::new(SourceId::from_index(2), local)
+}
+
+/// Builds one building-phase template value around a range loop.
+///
+/// WHAT: the expression stays `Template` (pre-handoff), as it does while a callable body
+///       completes and its infallibility proof runs.
+/// WHY: both pending failure facts and assertion-message escape checks must see the runtime
+///      template loop's generated zero-step guard before the AST/HIR handoff.
+fn building_template_range_loop_value()
+-> (TemplateIrStore, AstExpressionBuilder, ExprId, SourceSpan) {
+    building_template_range_loop_value_with_index(false)
+}
+
+/// Builds one building-phase template value around a range loop, optionally binding the ordinal.
+fn building_template_range_loop_value_with_index(
+    bind_index: bool,
+) -> (TemplateIrStore, AstExpressionBuilder, ExprId, SourceSpan) {
+    let mut constants = ConstValueStore::default();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let step_span = template_range_step_span();
+    let start = expressions
+        .fixed_scalar(
+            &mut constants,
+            FixedScalarValue::signed(FixedScalar::I32, 0).expect("zero fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("the range start should be complete")
+        .id();
+    let end = expressions
+        .fixed_scalar(
+            &mut constants,
+            FixedScalarValue::signed(FixedScalar::I32, 4).expect("four fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("the range end should be complete")
+        .id();
+    let step = expressions
+        .fixed_scalar(
+            &mut constants,
+            FixedScalarValue::signed(FixedScalar::I32, 1).expect("one fits I32"),
+            Some(step_span),
+            ValueMode::ImmutableOwned,
+        )
+        .expect("the range step should be complete")
+        .id();
+
+    let mut store = TemplateIrStore::new();
+    let loop_body = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Sequence {
+            children: Vec::new(),
+        },
+        None,
+    ));
+    let index = bind_index.then(|| Declaration {
+        id: crate::compiler_frontend::symbols::path_interner::PathId::ROOT,
+        type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        type_syntax: None,
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
+        binding_span: None,
+        config_contract: None,
+    });
+    let header = TemplateLoopHeader::Range {
+        bindings: Box::new(LoopBindings { item: None, index }),
+        range: Box::new(RangeLoopSpec {
+            start,
+            end,
+            end_kind: RangeEndKind::Exclusive,
+            step: Some(step),
+            domain: NumericScalar::Fixed(FixedScalar::I32),
+            fast_math: false,
+        }),
+    };
+    let header_sites = store.allocate_loop_header_expression_sites(&header);
+    let loop_node = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Loop {
+            header,
+            header_sites,
+            body: loop_body,
+            aggregate_wrapper: None,
+        },
+        None,
+    ));
+    let root = store.push_template(TemplateIr::new(
+        loop_node,
+        Style::default(),
+        TemplateType::String,
+        TemplateIrSummary::default(),
+        None,
+    ));
+    let template = Template {
+        tir_reference: TemplateTirReference {
+            root,
+            phase: TemplateTirPhase::Composed,
+            context: TemplateViewContext::default(),
+        },
+        span: None,
+        body_only_directive_span: None,
+    };
+    let expression = expressions
+        .template(template, ValueMode::ImmutableOwned)
+        .expect("the building template value should commit")
+        .id();
+    (store, expressions, expression, step_span)
+}
+
+#[test]
+fn building_template_range_loop_step_failure_contributes_to_pending_facts() {
+    let (store, expressions, expression, step_span) = building_template_range_loop_value();
+    let body = vec![node(NodeKind::Return(vec![expression]), None)];
+
+    let facts = pending_function_failure_facts(&body, &store, &expressions)
+        .expect("the building template should classify");
+    assert_eq!(facts.body.implicit.len(), 1);
+    assert_eq!(
+        facts.body.implicit[0].codes,
+        &[BuiltinErrorCode::InvalidLoopStep]
+    );
+    assert_eq!(
+        facts.body.implicit[0].source,
+        ImplicitFailureSource::NumericOperation
+    );
+    assert_eq!(facts.body.implicit[0].span, Some(step_span));
+}
+
+#[test]
+fn template_range_ordinal_update_follows_the_binding_only_rule() {
+    // Template bodies are render handoffs, so they cannot break or return to skip the step
+    // block. Binding the ordinal therefore owns the checked update, matching HIR.
+    for (bind_index, expected) in [
+        (false, &[BuiltinErrorCode::InvalidLoopStep][..]),
+        (
+            true,
+            &[
+                BuiltinErrorCode::IntOverflow,
+                BuiltinErrorCode::InvalidLoopStep,
+            ][..],
+        ),
+    ] {
+        let (store, expressions, expression, _) =
+            building_template_range_loop_value_with_index(bind_index);
+        let body = vec![node(NodeKind::Return(vec![expression]), None)];
+        let facts = pending_function_failure_facts(&body, &store, &expressions)
+            .expect("the building template should classify");
+        assert_eq!(facts.body.implicit.len(), 1);
+        assert_eq!(facts.body.implicit[0].codes, expected);
+        assert_eq!(
+            facts.body.implicit[0].source,
+            ImplicitFailureSource::NumericOperation
+        );
+    }
+}
+
+#[test]
+fn assertion_message_escape_check_defers_building_template_loop_failure() {
+    // WHAT: the early check runs while the message is still a building template.
+    // WHY: an open-slot template can fold without emitting a runtime guard, so the generated
+    //      failure is classified only after normalization proves the message renders.
+    let (store, expressions, expression, _) = building_template_range_loop_value();
+    let message = expressions
+        .view(expression)
+        .expect("the building template expression should exist");
+
+    assert_eq!(
+        classify_assertion_message_effect(message, &store, &expressions)
+            .expect("assertion message classification should succeed"),
+        None,
+    );
+}
+
+#[test]
+fn assertion_message_escape_check_classifies_runtime_template_loop_failure() {
+    // The same range loop after the template becomes an owned runtime handoff must still
+    // report its generated step failure on the assertion edge.
+    let mut constants = ConstValueStore::default();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let iterable = expressions
+        .fixed_scalar(
+            &mut constants,
+            FixedScalarValue::signed(FixedScalar::I32, 0).expect("zero fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("the collection source should be complete")
+        .id();
+    let step_span = template_collection_step_span();
+    let step = expressions
+        .fixed_scalar(
+            &mut constants,
+            FixedScalarValue::signed(FixedScalar::I32, 2).expect("two fits I32"),
+            Some(step_span),
+            ValueMode::ImmutableOwned,
+        )
+        .expect("the collection step should be complete")
+        .id();
+    let handoff = collection_loop_template_handoff(iterable, Some(step));
+    let expression =
+        runtime_template_handoff_expr(&mut expressions, handoff, None, ValueMode::ImmutableOwned);
+    let message = expressions
+        .view(expression)
+        .expect("the runtime handoff expression should exist");
+
+    assert_eq!(
+        classify_assertion_message_effect(message, &TemplateIrStore::new(), &expressions)
+            .expect("assertion message classification should succeed"),
+        Some(EnclosingExitEffect::InferredFailure(Some(step_span))),
+    );
 }
 
 /// Builds the minimal owned runtime handoff for one collection loop template.

@@ -1,0 +1,10 @@
+looped #= [:<ul>[loop 0 to 2 |i, n|:[$slot x][n]]</ul>]
+
+live_user |name String| -> String:
+    return [looped:[$in x: [name]]]
+;
+
+$export
+wrapper |name String| -> String:
+    return live_user(name)
+;
