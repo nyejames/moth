@@ -81,12 +81,67 @@ pub(super) enum FutureUseKind {
 
 impl FunctionLayout {
     pub(super) fn new(inputs: FunctionLayoutInputs) -> Self {
+        let local_count = inputs.local_ids.len();
+
+        // WHAT: every local-keyed column, per-block order array and reachability mask is indexed
+        // by the same dense local positions.
+        // WHY: the layout is columnar, so a column that disagrees with `local_ids` either panics
+        // when a short one is indexed or silently keeps facts no local owns when it is long. A
+        // `RootSet` mask of the wrong width is the quiet case: the set combinators zip words and
+        // would compare only the shared prefix in release builds.
+        debug_assert_eq!(
+            inputs.local_mutable.len(),
+            local_count,
+            "local_mutable must have one entry per local"
+        );
+        debug_assert_eq!(
+            inputs.local_has_in_place_mutation_surface.len(),
+            local_count,
+            "local_has_in_place_mutation_surface must have one entry per local"
+        );
+        debug_assert_eq!(
+            inputs.local_first_write_order.len(),
+            local_count,
+            "local_first_write_order must have one entry per local"
+        );
+        debug_assert_eq!(
+            inputs.local_last_use_order.len(),
+            local_count,
+            "local_last_use_order must have one entry per local"
+        );
+        debug_assert!(
+            inputs
+                .block_local_max_use_order
+                .values()
+                .all(|max_use_order| max_use_order.len() == local_count),
+            "block_local_max_use_order must have one entry per local for every block"
+        );
+        for (column, masks) in [
+            ("visible_locals_by_block", &inputs.visible_locals_by_block),
+            ("may_use_from_block", &inputs.may_use_from_block),
+            ("must_use_from_block", &inputs.must_use_from_block),
+            ("may_assign_from_block", &inputs.may_assign_from_block),
+        ] {
+            debug_assert!(
+                masks.values().all(|mask| mask.bit_len == local_count),
+                "{column} masks must span every local"
+            );
+        }
+
         let mut local_index_by_id =
-            FxHashMap::with_capacity_and_hasher(inputs.local_ids.len(), Default::default());
+            FxHashMap::with_capacity_and_hasher(local_count, Default::default());
 
         for (index, local_id) in inputs.local_ids.iter().enumerate() {
             local_index_by_id.insert(*local_id, index);
         }
+
+        // WHY: a duplicate local ID would silently last-win in the position map while the
+        // positional columns keep both rows, so every later lookup would read the wrong row.
+        debug_assert_eq!(
+            local_index_by_id.len(),
+            local_count,
+            "local_ids must not repeat a local"
+        );
 
         Self {
             local_ids: inputs.local_ids,

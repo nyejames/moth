@@ -182,50 +182,45 @@ impl HirModuleLinkFacts {
             .flat_map(|block| block.direct_facts.reachable_external_calls.iter())
     }
 
-    /// Return the validated HIR call targets with their owning function identities.
+    /// Return the validated HIR call targets in deterministic block and call-site order.
     ///
     /// WHAT: exposes the existing per-function link-fact call extraction to transient build
     ///       observations that need topology without rescanning HIR or source.
     /// WHY: convergence derives its read-only dependency model from the same validated call
-    ///      targets that already own backend reachability facts. The returned vector is a
-    ///      construction input, not a second retained call graph.
-    pub(crate) fn direct_call_targets(&self) -> Vec<(FunctionId, CallTarget)> {
-        let mut targets = Vec::new();
-        for block in &self.blocks {
-            targets.extend(
-                block
-                    .direct_facts
-                    .direct_user_calls
-                    .iter()
-                    .copied()
-                    .map(|function_id| (block.function_id, CallTarget::Local(function_id))),
-            );
-            targets.extend(
-                block
-                    .direct_facts
-                    .direct_cross_module_calls
-                    .iter()
-                    .cloned()
-                    .map(|origin| (block.function_id, CallTarget::CrossModule(origin))),
-            );
-            targets.extend(
-                block
-                    .direct_facts
-                    .direct_module_private_calls
-                    .iter()
-                    .cloned()
-                    .map(|identity| (block.function_id, CallTarget::ModulePrivate(identity))),
-            );
-            targets.extend(
-                block
-                    .direct_facts
-                    .direct_generated_calls
-                    .iter()
-                    .cloned()
-                    .map(|identity| (block.function_id, CallTarget::Generated(Box::new(identity)))),
-            );
-        }
-        targets
+    ///      targets that already own backend reachability facts. Yielding owned targets avoids an
+    ///      intermediate vector and a second retained call graph. Caller identity stays on the
+    ///      internal block facts because convergence models each module as one node; per-function
+    ///      ownership is validated through backend-selection reachability.
+    pub(crate) fn direct_call_targets(&self) -> impl Iterator<Item = CallTarget> + '_ {
+        self.blocks.iter().flat_map(|block| {
+            let facts = &block.direct_facts;
+            facts
+                .direct_user_calls
+                .iter()
+                .copied()
+                .map(CallTarget::Local)
+                .chain(
+                    facts
+                        .direct_cross_module_calls
+                        .iter()
+                        .cloned()
+                        .map(CallTarget::CrossModule),
+                )
+                .chain(
+                    facts
+                        .direct_module_private_calls
+                        .iter()
+                        .cloned()
+                        .map(CallTarget::ModulePrivate),
+                )
+                .chain(
+                    facts
+                        .direct_generated_calls
+                        .iter()
+                        .cloned()
+                        .map(|identity| CallTarget::Generated(Box::new(identity))),
+                )
+        })
     }
 }
 

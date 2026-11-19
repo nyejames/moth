@@ -16,7 +16,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::collections::HashSet;
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,7 +41,10 @@ pub(crate) struct MothTemplateSource {
     /// is `Path::has_root`, so a root without a drive prefix is a rooted identity on every host
     /// and follows the same common-ancestor rule as an absolute name. A name with no portable
     /// basis, such as a drive prefix without a root or a bare root or UNC share with no file
-    /// component, is rejected as input. Filesystem inputs carry canonical native paths instead.
+    /// component, is rejected as input. So is a directory-like name: `.` and `..` segments and a
+    /// trailing separator spell no portable source identity, and they would otherwise collapse a
+    /// distinct spelling onto another input's identity or fail late during URL conversion.
+    /// Filesystem inputs carry canonical native paths instead.
     pub(crate) display_path: PathBuf,
     pub(crate) source_text: String,
 }
@@ -148,7 +151,7 @@ fn assign_common_ancestor_relative_paths(
         };
 
     for unit in units.iter_mut() {
-        unit.relative_path = Some(relative_path_under(&ancestor, &unit.source_path).to_path_buf());
+        unit.relative_path = Some(relative_path_below_ancestor(&ancestor, &unit.source_path));
     }
 
     Ok(())
@@ -240,6 +243,12 @@ fn reject_derived_drive_relative_paths(
 /// share no ancestor directory. An input that empties the shared prefix is returned because the
 /// request diagnostic must name the input that eliminated the shared basis. An empty input set
 /// yields the empty path.
+///
+/// Ordinary Windows drive letters compare ASCII-case-insensitively because a drive letter is
+/// case-insensitive host syntax, so `C:/` and `c:/` still share one root. Every other component
+/// compares exactly, so authored directory spellings retain distinct module identities. Relative
+/// paths must be derived from the resulting shared component count rather than a textual prefix
+/// strip, because the ancestor is spelled with the first input's drive case.
 fn common_ancestor_directory<'a>(
     mut paths: impl Iterator<Item = &'a Path>,
 ) -> Result<PathBuf, &'a Path> {
@@ -253,7 +262,7 @@ fn common_ancestor_directory<'a>(
         let shared_length = shared
             .iter()
             .zip(components.iter())
-            .take_while(|(left, right)| left == right)
+            .take_while(|(left, right)| directory_components_match(**left, **right))
             .count();
         shared.truncate(shared_length);
 
@@ -262,20 +271,42 @@ fn common_ancestor_directory<'a>(
         }
     }
 
-    Ok(shared.into_iter().collect())
+    Ok(shared
+        .into_iter()
+        .map(|component| component.as_os_str())
+        .collect())
 }
 
 /// The directory components of one input, excluding its file component.
-fn directory_components(path: &Path) -> Vec<&std::ffi::OsStr> {
-    let mut components: Vec<&std::ffi::OsStr> = path
-        .components()
-        .map(|component| component.as_os_str())
-        .collect();
+fn directory_components(path: &Path) -> Vec<Component<'_>> {
+    let mut components: Vec<Component<'_>> = path.components().collect();
     components.pop();
     components
 }
 
+/// Whether two directory components name the same location for ancestor selection.
+///
+/// Only ordinary disk prefixes fold ASCII case. Other prefix kinds and ordinary name components
+/// compare exactly, so two authored directory spellings that differ in case keep distinct
+/// relative identities and module origins.
+fn directory_components_match(left: Component<'_>, right: Component<'_>) -> bool {
+    match (left, right) {
+        (Component::Prefix(left), Component::Prefix(right)) => match (left.kind(), right.kind()) {
+            (Prefix::Disk(left_drive), Prefix::Disk(right_drive)) => {
+                left_drive.eq_ignore_ascii_case(&right_drive)
+            }
+            (left_prefix, right_prefix) => left_prefix == right_prefix,
+        },
+        (left, right) => left == right,
+    }
+}
+
 /// Reject a request whose inputs cannot derive portable module identities.
+///
+/// Both inputs are interned whole because no request-relative identity exists before a shared
+/// ancestor is selected. A path whose whole native spelling is not UTF-8 therefore reports the
+/// identity failure instead of this diagnostic: naming it losslessly needs a native-path fact,
+/// and a lossy display string must not stand in for the input's identity.
 fn no_common_ancestor_failure(
     first_path: &Path,
     second_path: &Path,
@@ -315,9 +346,12 @@ fn no_common_ancestor_failure(
 /// identity once host parsing or downstream URL conversion reads it as a separator. A drive
 /// prefix without a root has no portable basis and is rejected here rather than reaching the
 /// relative branch and failing later as an internal logical-path error. A name with no file
-/// component below its root, such as a bare UNC share, is likewise rejected as input. Structural
-/// checks read native bytes, so they still apply beside a non-UTF-8 component. UTF-8 validation
-/// of the components that enter compiler identity belongs to `validate_source_path_identities`.
+/// component below its root, such as a bare UNC share, is likewise rejected as input. So are a
+/// `.` or `..` component and a trailing separator: they spell no portable source identity, and
+/// leaving them to later consumers would merge distinct spellings or surface as a URL-context
+/// failure. Structural checks read native bytes, so they still apply beside a non-UTF-8 component.
+/// UTF-8 validation of the components that enter compiler identity belongs to
+/// `validate_source_path_identities`.
 fn validate_in_memory_source_name(display_path: &Path) -> Result<(), PreparedFailure> {
     // A drive prefix without a root names a path relative to a drive's current directory, which
     // has no portable meaning. Only Windows parses a drive prefix, so this spelling is rejected
@@ -335,13 +369,13 @@ fn validate_in_memory_source_name(display_path: &Path) -> Result<(), PreparedFai
         .into());
     }
 
-    let remainder = path_after_native_structure(display_path);
+    let remainder = spelling_after_native_structure(display_path);
 
     // A name with nothing after its prefix and root has no source identity: `//server/share`
     // spells only a UNC prefix and its implicit root, while `/` and `C:\` spell only a root. The
-    // implicit root occupies no bytes of the spelling, so this must be rejected before any
-    // offset arithmetic and before module-root derivation.
-    if remainder.as_os_str().is_empty() {
+    // implicit root occupies no bytes of the spelling, so this must be rejected before module-root
+    // derivation.
+    if remainder.is_empty() {
         return Err(InfrastructureFailure::filesystem(
             CompilerStage::SourceLoading,
             display_path,
@@ -359,7 +393,7 @@ fn validate_in_memory_source_name(display_path: &Path) -> Result<(), PreparedFai
     // cannot be compared as text, while an ASCII backslash is unambiguous in the encoded spelling
     // on every host. The backslash rule must still cover the UTF-8 remainder beside such a
     // component.
-    if remainder.as_os_str().as_encoded_bytes().contains(&b'\\') {
+    if remainder.contains(&b'\\') {
         return Err(InfrastructureFailure::filesystem(
             CompilerStage::SourceLoading,
             display_path,
@@ -371,25 +405,69 @@ fn validate_in_memory_source_name(display_path: &Path) -> Result<(), PreparedFai
         .into());
     }
 
+    // `Path::components` normalises interior `.` segments away, so the raw remainder is checked
+    // here: `a/./b.mtf` would otherwise pass as an ordinary name and merge with `a/b.mtf` once
+    // compiler identity drops the segment. `..` segments and names that consist only of a dot
+    // family segment would likewise reach module-origin derivation as invalid components.
+    if remainder
+        .split(|byte| *byte == b'/')
+        .any(|segment| segment == b"." || segment == b"..")
+    {
+        return Err(InfrastructureFailure::filesystem(
+            CompilerStage::SourceLoading,
+            display_path,
+            format!(
+                "Moth template source name {display_path:?} contains a `.` or `..` path \
+                 component; in-memory names must name a file with ordinary path components."
+            ),
+        )
+        .into());
+    }
+
+    // A trailing separator spells a directory, not a source file. It would pass plain-text
+    // compilation under an empty module origin while resource-bearing content fails later on the
+    // empty URL-context component. On Windows a trailing backslash is a separator too, and stays
+    // rejected by the backslash rule above; on Unix it is a filename byte with the same outcome.
+    if remainder.ends_with(b"/") {
+        return Err(InfrastructureFailure::filesystem(
+            CompilerStage::SourceLoading,
+            display_path,
+            format!(
+                "Moth template source name {display_path:?} ends with a directory separator; \
+                 in-memory names must name a source file."
+            ),
+        )
+        .into());
+    }
+
     Ok(())
 }
 
-/// The spelling left after the native prefix and root components.
+/// The encoded spelling left after the native prefix and root components.
 ///
 /// A component-length sum cannot locate this boundary: a non-verbatim UNC share reports an
-/// implicit `RootDir` component that occupies no bytes of the spelling.
-fn path_after_native_structure(path: &Path) -> &Path {
-    let structural_components = path
-        .components()
-        .take_while(|component| matches!(component, Component::Prefix(_) | Component::RootDir))
-        .count();
+/// implicit `RootDir` component that occupies no bytes of the spelling. The raw suffix is returned
+/// instead of `Components::as_path`, which trims trailing separators and trailing `.` segments and
+/// would hide the malformed names validated here. One leading separator after the prefix, if
+/// present, is the physical root; any further leading separators remain in the suffix so the
+/// checks below see the authored spelling.
+fn spelling_after_native_structure(path: &Path) -> &[u8] {
+    let spelling = path.as_os_str().as_encoded_bytes();
 
-    let mut components = path.components();
-    for _ in 0..structural_components {
-        components.next();
+    let prefix_length = match path.components().next() {
+        Some(Component::Prefix(prefix)) => prefix.as_os_str().len(),
+        _ => 0,
+    };
+
+    let mut remainder_start = prefix_length;
+    if spelling
+        .get(remainder_start)
+        .is_some_and(|byte| std::path::is_separator(*byte as char))
+    {
+        remainder_start += 1;
     }
 
-    components.as_path()
+    &spelling[remainder_start..]
 }
 
 /// Validate every request-relative source identity through the typed UTF-8 identity lane.
@@ -564,32 +642,67 @@ fn canonicalize_path(path: &Path) -> Result<PathBuf, InfrastructureFailure> {
     })
 }
 
+/// Reject repeated canonical source paths and repeated request-relative identities.
+///
+/// Two inputs can collide in either way. A directory traversal can reach one canonical file
+/// through two entry spellings, while a rooted in-memory request can spell the same Windows drive
+/// letter with different ASCII case and still derive one identity. A repeated canonical path names
+/// the duplicated input exactly when it is UTF-8. When its ancestor is not representable, or only
+/// the identity repeated, the fact is the request-relative identity. Identity validation has
+/// already interned that spelling, so the fallback reuses existing path nodes.
 fn reject_duplicate_source_paths(
     units: &[MothTemplateSourceUnit],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), PreparedFailure> {
-    let mut seen_paths: HashSet<&Path> = HashSet::new();
+    let mut seen_source_paths: HashSet<&Path> = HashSet::new();
+    let mut seen_identities: HashSet<&Path> = HashSet::new();
     let mut diagnostics = DiagnosticBag::new();
     let mut has_duplicates = false;
 
     for unit in units {
-        if !seen_paths.insert(unit.source_path.as_path()) {
-            // The duplicate diagnostic names the canonical input path exactly, so this fact is
-            // the whole native path rather than a request-relative identity. A duplicate request
-            // whose ancestor above the selected root is non-UTF-8 therefore reports the identity
-            // failure instead of reaching this diagnostic.
-            let path = intern_filesystem_path_identity(
+        let repeated_source_path = !seen_source_paths.insert(unit.source_path.as_path());
+
+        // A unit without a relative path belongs to the single-file lane, which always carries
+        // exactly one unit and therefore cannot repeat another identity.
+        let Some(identity_path) = unit.relative_path.as_deref() else {
+            debug_assert_eq!(
+                units.len(),
+                1,
+                "only a single-file request may omit its request-relative identity"
+            );
+            continue;
+        };
+        let repeated_identity = !seen_identities.insert(identity_path);
+
+        if !repeated_source_path && !repeated_identity {
+            continue;
+        }
+
+        // Prefer the canonical native path when it is representable, because it names the
+        // duplicated input exactly. A non-UTF-8 ancestor above the selected root is host detail,
+        // and an identity-only collision has no single repeated native spelling, so both use the
+        // request-relative identity instead. That identity was interned by identity validation
+        // already, so the fallback cannot add a path node or fail UTF-8 conversion.
+        let path = if repeated_source_path && unit.source_path.to_str().is_some() {
+            intern_filesystem_path_identity(
                 &unit.source_path,
                 &unit.source_path,
                 path_fork,
                 string_table,
-            )?;
-            diagnostics.push(imports::duplicate_moth_template_input_path(
-                path, None, None,
-            ));
-            has_duplicates = true;
-        }
+            )?
+        } else {
+            intern_filesystem_path_identity(
+                identity_path,
+                &unit.source_path,
+                path_fork,
+                string_table,
+            )?
+        };
+        diagnostics.push(imports::duplicate_moth_template_input_path(
+            path, None, None,
+        ));
+        has_duplicates = true;
     }
 
     if !has_duplicates {
@@ -611,6 +724,19 @@ fn reject_duplicate_source_paths(
 /// identity boundary.
 fn relative_path_under<'a>(root: &Path, path: &'a Path) -> &'a Path {
     path.strip_prefix(root).unwrap_or(path)
+}
+
+/// The path's spelling below the selected common ancestor, preserving component boundaries.
+///
+/// `common_ancestor_directory` may accept a path whose drive letter is spelled with the other
+/// ASCII case, so the ancestor is not necessarily a textual prefix of the path. Skipping the
+/// shared component count applies exactly the prefix relationship the ancestor was selected with;
+/// `relative_path_under` would instead fall back to the whole rooted path and mint a module
+/// identity that downstream derivation rejects. Components are retained rather than reparsed as
+/// text, so a literal backslash on Unix stays inside one component.
+fn relative_path_below_ancestor(ancestor: &Path, path: &Path) -> PathBuf {
+    let ancestor_component_count = ancestor.components().count();
+    path.components().skip(ancestor_component_count).collect()
 }
 
 fn has_moth_template_extension(path: &Path) -> bool {

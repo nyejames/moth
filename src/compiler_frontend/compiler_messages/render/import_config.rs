@@ -814,7 +814,9 @@ pub(crate) fn duplicate_moth_template_input_path_message(
 ) -> String {
     let path_text = context.render_path(path);
     format!(
-        "Moth template input path `{path_text}` was provided more than once. Each file or in-memory display path in one direct compile request must be unique."
+        "Moth template input `{path_text}` duplicates another input in this direct compile \
+         request. Each file or in-memory display path must be unique and must resolve to a \
+         distinct request-relative identity."
     )
 }
 

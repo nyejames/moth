@@ -2028,8 +2028,7 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
                 .link_facts
                 .functions
                 .direct_call_targets()
-                .into_iter()
-                .any(|(_, target)| {
+                .any(|target| {
                     matches!(target, CallTarget::Generated(identity)
                 if identity.declaration().defining_name() == "message")
                 })
@@ -2490,9 +2489,6 @@ fn active_and_inert_generic_message_share_one_completed_service_identity() {
             .find(|(identity, _)| identity.defining_name() == "check")
             .map(|(_, function)| *function)
             .expect("the known-true assertion retains its checked function");
-        let start = base
-            .start_function
-            .expect("the active use belongs to the normal root");
         let check_entry = base
             .functions
             .iter()
@@ -2527,20 +2523,20 @@ fn active_and_inert_generic_message_share_one_completed_service_identity() {
                 .public_call_summaries[&root]
                 .escapes_builtin_failure
         );
-        let callers = artefacts[0]
+        let message_target_count = artefacts[0]
             .module
             .link_facts
             .functions
             .direct_call_targets()
-            .into_iter()
-            .filter_map(|(function, target)| {
-                matches!(&target, CallTarget::Generated(identity)
+            .filter(|target| {
+                matches!(target, CallTarget::Generated(identity)
                     if identity.as_ref() == &message.identity)
-                .then_some(function)
             })
-            .collect::<Vec<_>>();
-        assert_eq!(callers, [start]);
-        assert!(!callers.contains(&check));
+            .count();
+        assert_eq!(
+            message_target_count, 1,
+            "the completed identity has exactly one executable base call"
+        );
         let active_spans = base
             .blocks
             .iter()
@@ -2813,7 +2809,7 @@ fn final_generated_failure_lanes_keep_external_candidates_without_validation_onl
             frontend
                 .successful_module_views()
                 .flat_map(|module| module.link_facts.functions.direct_call_targets())
-                .filter_map(|(_, target)| match target {
+                .filter_map(|target| match target {
                     CallTarget::Generated(identity) => {
                         Some(identity.declaration().defining_name().to_owned())
                     }
@@ -2829,8 +2825,7 @@ fn final_generated_failure_lanes_keep_external_candidates_without_validation_onl
                     .link_facts
                     .functions
                     .direct_call_targets()
-                    .into_iter()
-                    .all(|(_, target)| !matches!(
+                    .all(|target| !matches!(
                         target,
                         CallTarget::Generated(identity)
                             if identity.declaration().defining_name() == "message"

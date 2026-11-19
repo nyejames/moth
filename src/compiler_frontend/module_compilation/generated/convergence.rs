@@ -179,9 +179,7 @@ impl ConvergenceModel {
             ConvergenceNodeId(0),
             base_public_origins,
             base_private_identities,
-            base.direct_call_targets()
-                .into_iter()
-                .map(|(_, target)| target),
+            base.direct_call_targets(),
         );
         for (identity, link_facts) in generated {
             let caller = ids_by_generated[identity];
@@ -192,10 +190,7 @@ impl ConvergenceModel {
                 caller,
                 base_public_origins,
                 base_private_identities,
-                link_facts
-                    .direct_call_targets()
-                    .into_iter()
-                    .map(|(_, target)| target),
+                link_facts.direct_call_targets(),
             );
         }
 
@@ -840,7 +835,7 @@ fn retain_live_call_summaries(hir: &mut HirModule, link_facts: &HirModuleLinkFac
     let mut live_imported = FxHashSet::default();
     let mut live_private = FxHashSet::default();
     let mut live_generated = FxHashSet::default();
-    for (_, target) in link_facts.direct_call_targets() {
+    for target in link_facts.direct_call_targets() {
         match target {
             CallTarget::CrossModule(identity) => {
                 live_imported.insert(identity);
@@ -871,8 +866,7 @@ fn reachable_generated_sidecars(
         .map(|(identity, link_facts)| {
             let callees = link_facts
                 .direct_call_targets()
-                .into_iter()
-                .filter_map(|(_, target)| match target {
+                .filter_map(|target| match target {
                     CallTarget::Generated(identity) => Some(*identity),
                     _ => None,
                 })
@@ -882,8 +876,7 @@ fn reachable_generated_sidecars(
         .collect::<FxHashMap<_, _>>();
     let mut pending = base_link_facts
         .direct_call_targets()
-        .into_iter()
-        .filter_map(|(_, target)| match target {
+        .filter_map(|target| match target {
             CallTarget::Generated(identity) => Some(*identity),
             _ => None,
         })

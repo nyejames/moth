@@ -48,6 +48,10 @@ fn require_initialized_update_target(
     diagnostics: &BorrowDiagnostics<'_>,
     span: Option<SourceSpan>,
 ) -> Result<(), BorrowCheckError> {
+    // WHY: an update rejects a possible-uninitialized target, unlike a read, which only rejects
+    // `is_definitely_uninit`. Replacing a binding that some path never created has no valid
+    // interpretation. This guard also keeps an `UNINIT | SLOT` join away from the slot predicates
+    // on both update paths.
     if state
         .local_state(local_index)
         .mode
@@ -81,6 +85,12 @@ fn check_local_update_access(
     // Slot writes replace the binding, alias writes target their referents, and a joined state
     // must check both possibilities. Both source assignments and dedicated call results use this
     // rule so neither operation can bypass update mutability checks.
+    //
+    // WHY: `contains(SLOT) && !contains(ALIAS)` differs from exact `mode == SLOT` only on an
+    // `UNINIT | SLOT` join, which `require_initialized_update_target` rejects first on both
+    // update paths. The question here is whether the fresh value replaces the binding cell
+    // itself, so only direct aliases of that cell can conflict, not whether the slot is
+    // definitely initialized.
     let replaces_definite_slot = rhs_is_fresh
         && local_state.mode.contains(LocalMode::SLOT)
         && !local_state.mode.contains(LocalMode::ALIAS);
@@ -598,6 +608,11 @@ fn mutable_argument_roots(
         // writes that cell; it cannot mutate the older allocation in place. Keep the slot's own
         // root so exclusive access still checks aliases of the binding. Heap-allocated types keep
         // their provenance roots because a stored aggregate or string can share storage.
+        //
+        // WHY: the exact `SLOT` test is deliberate. An `UNINIT | SLOT` join only proves that some
+        // path initialized the binding, and a `SLOT | ALIAS` join may have been an alias on the
+        // other path, so both stay on `roots_for_place`, which keeps the roots either alternative
+        // contributes; only a definite slot may replace them with its own cell.
         if place.projections.is_empty()
             && let Some(local_index) = layout.index_of(place.root)
             && state.local_state(local_index).mode == LocalMode::SLOT
