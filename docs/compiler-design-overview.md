@@ -493,6 +493,8 @@ For a standalone source it owns preparation through folding. For a Stage 0 conte
 
 The service owns the bundle's source database and live span builders through folding/extraction. It finalises tables after AST readers end. If discovery fails first, the preparation owner finalises its known snapshots at that terminal boundary. Aggregation retains each document's warning context even when a later document fails. Private discovery normalises source identities once before success or diagnosis, as specified by the data-layout authority.
 
+Duplicate inputs report their whole path when it fits the path table and reuse their validated request-relative identity otherwise. Inputs without a common ancestor have no relative identities to reuse. If either whole path cannot be represented, the native-path or logical-path capacity failure takes precedence over the common-ancestor diagnostic.
+
 #### Project config compilation service
 
 One named compiler service prepares the single authored config source, binds its permitted compiler surface, orders declarations and performs AST checking/folding. It applies the same exact numeric types and `I32`/`F64` defaults as source compilation and returns only folded values, with no HIR, borrow facts, link facts or public module interface.

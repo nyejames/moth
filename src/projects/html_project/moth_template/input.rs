@@ -303,25 +303,23 @@ fn directory_components_match(left: Component<'_>, right: Component<'_>) -> bool
 
 /// Reject a request whose inputs cannot derive portable module identities.
 ///
-/// Both inputs are interned whole because no request-relative identity exists before a shared
-/// ancestor is selected. A path whose whole native spelling is not UTF-8 therefore reports the
-/// identity failure instead of this diagnostic: naming it losslessly needs a native-path fact,
-/// and a lossy display string must not stand in for the input's identity.
+/// No request-relative identity exists before a shared ancestor is selected. Intern both whole
+/// paths in diagnostic order. If a path cannot be interned, its native-path or capacity
+/// failure takes precedence; lossy display text cannot stand in for its identity.
 fn no_common_ancestor_failure(
     first_path: &Path,
     second_path: &Path,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> PreparedFailure {
-    let first_interned =
-        intern_filesystem_path_identity(first_path, first_path, path_fork, string_table);
-    let second_interned =
-        intern_filesystem_path_identity(second_path, second_path, path_fork, string_table);
-    let (first_interned, second_interned) = match (first_interned, second_interned) {
-        (Ok(first), Ok(second)) => (first, second),
-        (Err(failure), _) | (_, Err(failure)) => {
-            return failure;
-        }
+    let paths = intern_filesystem_path_identity(first_path, first_path, path_fork, string_table)
+        .and_then(|first| {
+            intern_filesystem_path_identity(second_path, second_path, path_fork, string_table)
+                .map(|second| (first, second))
+        });
+    let (first_interned, second_interned) = match paths {
+        Ok(paths) => paths,
+        Err(failure) => return failure,
     };
     let diagnostic = imports::moth_template_inputs_share_no_common_ancestor(
         first_interned,
@@ -513,35 +511,43 @@ fn intern_filesystem_path_identity(
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<PathId, PreparedFailure> {
-    path_fork
-        .try_intern_filesystem_path(identity_path, string_table)
-        .map_err(|error| match error {
-            PathInternError::NonUtf8(_) => InfrastructureFailure::filesystem(
-                CompilerStage::SourceLoading,
-                host_path,
-                format!(
-                    "Moth template source path {host_path:?} contains a non-UTF-8 component; Moth \
-                         identity requires UTF-8 paths."
-                ),
-            )
-            .into(),
-            PathInternError::TableFull => PreparedFailure::capture_diagnosed(
-                DiagnosticBag::from(token_lexical::source_span_capacity(
-                    0,
-                    u32::MAX,
-                    SourceSpanCapacityResource::LogicalPath,
-                    None,
-                )),
-                string_table.take_for_handoff(),
-                None,
-                Some(Arc::new(path_fork.shared_table())),
+    let path = path_fork.try_intern_filesystem_path(identity_path, string_table);
+    path.map_err(|error| path_identity_failure(error, host_path, path_fork, string_table))
+}
+
+fn path_identity_failure(
+    error: PathInternError,
+    host_path: &Path,
+    path_fork: &PathInternerFork,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    match error {
+        PathInternError::NonUtf8(_) => InfrastructureFailure::filesystem(
+            CompilerStage::SourceLoading,
+            host_path,
+            format!(
+                "Moth template source path {host_path:?} contains a non-UTF-8 component; Moth \
+                 identity requires UTF-8 paths."
             ),
-            PathInternError::BaseMismatch { .. } => InfrastructureFailure::internal(
-                CompilerStage::ProjectBuildAssembly,
-                "logical path merge base is not a structural prefix of the destination table",
-            )
-            .into(),
-        })
+        )
+        .into(),
+        PathInternError::TableFull => PreparedFailure::capture_diagnosed(
+            DiagnosticBag::from(token_lexical::source_span_capacity(
+                0,
+                u32::MAX,
+                SourceSpanCapacityResource::LogicalPath,
+                None,
+            )),
+            string_table.take_for_handoff(),
+            None,
+            Some(Arc::new(path_fork.shared_table())),
+        ),
+        PathInternError::BaseMismatch { .. } => InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            "logical path merge base is not a structural prefix of the destination table",
+        )
+        .into(),
+    }
 }
 
 fn collect_moth_template_paths_in_directory(
@@ -679,25 +685,33 @@ fn reject_duplicate_source_paths(
             continue;
         }
 
-        // Prefer the canonical native path when it is representable, because it names the
-        // duplicated input exactly. A non-UTF-8 ancestor above the selected root is host detail,
-        // and an identity-only collision has no single repeated native spelling, so both use the
-        // request-relative identity instead. That identity was interned by identity validation
-        // already, so the fallback cannot add a path node or fail UTF-8 conversion.
-        let path = if repeated_source_path && unit.source_path.to_str().is_some() {
-            intern_filesystem_path_identity(
-                &unit.source_path,
-                &unit.source_path,
-                path_fork,
-                string_table,
-            )?
+        // A whole path is optional detail. Relative identities were interned by validation, so
+        // reuse one when the whole path is unrepresentable or would require an unavailable node.
+        // Identity-only collisions have no single repeated native spelling.
+        let whole_path = if repeated_source_path && unit.source_path.to_str().is_some() {
+            match path_fork.try_intern_filesystem_path(&unit.source_path, string_table) {
+                Ok(path) => Some(path),
+                Err(PathInternError::NonUtf8(_) | PathInternError::TableFull) => None,
+                Err(error @ PathInternError::BaseMismatch { .. }) => {
+                    return Err(path_identity_failure(
+                        error,
+                        &unit.source_path,
+                        path_fork,
+                        string_table,
+                    ));
+                }
+            }
         } else {
-            intern_filesystem_path_identity(
+            None
+        };
+        let path = match whole_path {
+            Some(path) => path,
+            None => intern_filesystem_path_identity(
                 identity_path,
                 &unit.source_path,
                 path_fork,
                 string_table,
-            )?
+            )?,
         };
         diagnostics.push(imports::duplicate_moth_template_input_path(
             path, None, None,

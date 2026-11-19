@@ -11,7 +11,6 @@ use crate::build_system::create_project_modules::resource_inputs::{
 use crate::compiler_frontend::compiler_errors::{
     CompilationOutcome, CompilationResult, InfrastructureErrors, InfrastructureFailureKind,
 };
-use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::DuplicateMothTemplateInputPathView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
@@ -22,6 +21,7 @@ use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server::render_compilation_result_html,
     terse::format_terse_diagnostic_reports,
 };
+use crate::compiler_frontend::compiler_messages::{CompilerStage, PreparedFailure};
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceOutcome;
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
@@ -33,7 +33,7 @@ use crate::compiler_frontend::single_source_compilation::{
     MothTemplateCompilationRequest, compile_moth_template_source,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{ForcedExhaustionGuard, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::projects::html_project::moth_template::{
@@ -1343,6 +1343,45 @@ fn duplicate_files_under_a_non_utf8_ancestor_stay_duplicate_diagnostics() {
         rendered.contains("page.mtf") && !rendered.contains("non-UTF-8"),
         "the duplicate should render its request-relative identity, not an identity failure: \
          {rendered}",
+    );
+}
+
+#[test]
+fn duplicate_files_reuse_the_relative_path_when_the_path_table_is_full() {
+    let temp_dir = temp_project(&[("page.mtf", "# Page")]);
+    let source_path = temp_dir.path().join("page.mtf");
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    path_fork
+        .try_intern_filesystem_path(Path::new("page.mtf"), &mut string_table)
+        .expect("the request-relative path should fit before exhaustion");
+
+    let input = MothTemplateInput::Files(vec![source_path.clone(), source_path]);
+    let failure = {
+        let _guard = ForcedExhaustionGuard::new();
+        input.collect_sources(&mut string_table, &mut path_fork)
+    };
+    let Err(PreparedFailure::Diagnosed(batch)) = failure else {
+        panic!("a duplicate should remain a diagnosed rejection");
+    };
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    let reports = accumulator
+        .finish(InstallMode::Unfrozen)
+        .expect("the duplicate diagnostic should freeze");
+    let (report, view) = reports.iter().next().expect("missing duplicate diagnostic");
+    assert_eq!(view.descriptor().code, "MOTH-IMPORT-0028");
+    let facts = view
+        .family_view::<DuplicateMothTemplateInputPathView>()
+        .expect("duplicate diagnostic should carry its path");
+    let context = DiagnosticRenderContext::for_report(report);
+    assert_eq!(
+        context.path_table().unwrap().render_native_frozen(
+            facts.path,
+            report.context().strings(),
+            &mut Vec::new(),
+        ),
+        PathBuf::from("page.mtf"),
     );
 }
 
