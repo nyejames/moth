@@ -18,6 +18,7 @@ use crate::compiler_frontend::paths::file_references::{
     ResolvedFileReferenceFailure, ResolvedFileReferenceOutcome, ResolvedFileReferenceTarget,
     ResourceSourceId,
 };
+use crate::compiler_frontend::paths::path_normalization::path_has_hidden_component_below;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
@@ -25,6 +26,7 @@ use crate::compiler_frontend::source_packages::root_file::file_name_is_module_ro
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::projects::settings::CONFIG_FILE_NAME;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
@@ -66,6 +68,7 @@ enum PhysicalInvalidReason {
     EscapesSymlink,
     TargetIsDirectory,
     TargetNotRegular,
+    ReservedConfigFile,
 }
 
 enum LexicalCaseCheck {
@@ -111,7 +114,8 @@ impl<'a> FileReferenceResolver<'a> {
             .root;
 
         // `.moth` values, including `@config.moth`, are never physical targets: AST owns their
-        // `MothFileHasNoValue` rejection. A `@config.moth` directory component is rejected below.
+        // `MothFileHasNoValue` rejection. A directory with the same name is ordinary topology;
+        // only a canonical file alias to the exact name is rejected by physical resolution.
         match reference.class {
             PreparedFileReferenceClass::SiteRoot | PreparedFileReferenceClass::Extensionless => {
                 return Ok(ResolvedFileReference {
@@ -203,20 +207,14 @@ impl<'a> FileReferenceResolver<'a> {
                 // watcher edge.
                 let hidden_missing_target =
                     watch_path.parent().is_some_and(|parent| {
-                        super::source_tree_index::path_has_hidden_component_below(
-                            parent,
-                            self.source_tree_index.entry_root(),
-                        )
+                        path_has_hidden_component_below(parent, self.source_tree_index.entry_root())
                     }) || canonical_ancestor.as_deref().is_some_and(|ancestor| {
-                        super::source_tree_index::path_has_hidden_component_below(
+                        path_has_hidden_component_below(
                             ancestor,
                             self.source_tree_index.entry_root(),
                         )
                     }) || missing_directory_prefix.as_deref().is_some_and(|prefix| {
-                        super::source_tree_index::path_has_hidden_component_below(
-                            prefix,
-                            self.source_tree_index.entry_root(),
-                        )
+                        path_has_hidden_component_below(prefix, self.source_tree_index.entry_root())
                     });
                 if hidden_missing_target {
                     return Ok(self.diagnostic_outcome(
@@ -247,10 +245,7 @@ impl<'a> FileReferenceResolver<'a> {
         // Canonical directory ancestry catches a visible symlink alias whose physical target lies
         // inside an excluded `_` subtree. The terminal file name is not a directory component.
         if canonical.parent().is_some_and(|parent| {
-            super::source_tree_index::path_has_hidden_component_below(
-                parent,
-                self.source_tree_index.entry_root(),
-            )
+            path_has_hidden_component_below(parent, self.source_tree_index.entry_root())
         }) {
             return Ok(self.diagnostic_outcome(
                 source_file,
@@ -498,6 +493,11 @@ fn resolve_physical_target_cached(
                         PhysicalResolution::Invalid(PhysicalInvalidReason::TargetIsDirectory)
                     } else if !metadata.is_file() {
                         PhysicalResolution::Invalid(PhysicalInvalidReason::TargetNotRegular)
+                    } else if path_names_reserved_config_file(&canonical) {
+                        // An authored extension can alias the build-only config file through a
+                        // symlink. The canonical name decides the reservation, so neither source
+                        // nor resource dispatch may observe the target.
+                        PhysicalResolution::Invalid(PhysicalInvalidReason::ReservedConfigFile)
                     } else {
                         PhysicalResolution::Target(canonical)
                     }
@@ -513,6 +513,12 @@ fn resolve_physical_target_cached(
                     .is_some_and(|ancestor| !ancestor.starts_with(containment_root))
                 {
                     PhysicalResolution::Invalid(PhysicalInvalidReason::EscapesSymlink)
+                } else if missing.missing_directory_prefix.is_none()
+                    && path_names_reserved_config_file(&missing.watch_path)
+                {
+                    // A dangling alias whose terminal physical spelling is the config file stays
+                    // reserved; it must not publish a watch interest either.
+                    PhysicalResolution::Invalid(PhysicalInvalidReason::ReservedConfigFile)
                 } else {
                     PhysicalResolution::Missing {
                         watch_path: missing.watch_path,
@@ -689,6 +695,16 @@ fn join_components(root: &Path, components: &[String]) -> PathBuf {
     candidate
 }
 
+/// Whether a physical path names the build-only config file.
+///
+/// Only the exact final filename is reserved. A directory with the same name follows ordinary
+/// rules, and a file such as `@Config.moth` stays an ordinary invalid marker spelling handled by
+/// discovery.
+fn path_names_reserved_config_file(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name == CONFIG_FILE_NAME)
+}
+
 /// Check authored lexical spelling before canonicalization follows any symlink.
 fn lexical_case_check(
     root_directory: &Path,
@@ -772,6 +788,9 @@ fn invalid_reason(
         PhysicalInvalidReason::EscapesSymlink => InvalidCompileTimePathReason::EscapesSymlink,
         PhysicalInvalidReason::TargetIsDirectory => InvalidCompileTimePathReason::TargetIsDirectory,
         PhysicalInvalidReason::TargetNotRegular => InvalidCompileTimePathReason::TargetNotRegular,
+        PhysicalInvalidReason::ReservedConfigFile => {
+            InvalidCompileTimePathReason::ReservedConfigFile
+        }
     }
 }
 
@@ -811,7 +830,7 @@ fn invalid_components_failure(
 /// Report the source-tree exclusion an authored path's directory prefix enters.
 ///
 /// Only non-final components are proven directories: a final `_helper.moth` is an ordinary source
-/// file and a final `@config.moth` is a source-kind value owned by AST. The check stays lexical so
+/// file and a final `.moth` is a source-kind value owned by AST. The check stays lexical so
 /// resolution rejects the path before an unindexed target reaches the source index or an excluded
 /// subtree gains a resource record or missing-target watch.
 fn authored_directory_exclusion(components: &[String]) -> Option<InvalidCompileTimePathReason> {
@@ -916,8 +935,9 @@ impl<'a> SingleFileReferenceResolver<'a> {
         };
 
         // The build-only config spelling is `SourceKindNoFileValue` like any other `.moth` value;
-        // AST owns that rejection (`MothFileHasNoValue`). Only a `@config.moth` directory
-        // component is rejected by Stage 0, below.
+        // AST owns that rejection (`MothFileHasNoValue`). A directory with the same name follows
+        // ordinary topology; only a canonical file alias to the exact name is rejected by physical
+        // resolution.
         match reference.class {
             PreparedFileReferenceClass::SiteRoot | PreparedFileReferenceClass::Extensionless => {
                 return Ok(result);
@@ -999,23 +1019,13 @@ impl<'a> SingleFileReferenceResolver<'a> {
                         ..result
                     });
                 }
-                let hidden_missing_target =
-                    watch_path.parent().is_some_and(|parent| {
-                        super::source_tree_index::path_has_hidden_component_below(
-                            parent,
-                            &self.containment_root,
-                        )
-                    }) || canonical_ancestor.as_deref().is_some_and(|ancestor| {
-                        super::source_tree_index::path_has_hidden_component_below(
-                            ancestor,
-                            &self.containment_root,
-                        )
-                    }) || missing_directory_prefix.as_deref().is_some_and(|prefix| {
-                        super::source_tree_index::path_has_hidden_component_below(
-                            prefix,
-                            &self.containment_root,
-                        )
-                    });
+                let hidden_missing_target = watch_path.parent().is_some_and(|parent| {
+                    path_has_hidden_component_below(parent, &self.containment_root)
+                }) || canonical_ancestor.as_deref().is_some_and(
+                    |ancestor| path_has_hidden_component_below(ancestor, &self.containment_root),
+                ) || missing_directory_prefix.as_deref().is_some_and(
+                    |prefix| path_has_hidden_component_below(prefix, &self.containment_root),
+                );
                 if hidden_missing_target {
                     return Ok(SingleFileResolvedReference {
                         outcome: invalid_path_outcome(
@@ -1048,12 +1058,10 @@ impl<'a> SingleFileReferenceResolver<'a> {
             }
         };
 
-        if canonical.parent().is_some_and(|parent| {
-            super::source_tree_index::path_has_hidden_component_below(
-                parent,
-                &self.containment_root,
-            )
-        }) {
+        if canonical
+            .parent()
+            .is_some_and(|parent| path_has_hidden_component_below(parent, &self.containment_root))
+        {
             return Ok(SingleFileResolvedReference {
                 outcome: invalid_path_outcome(
                     authored_path,

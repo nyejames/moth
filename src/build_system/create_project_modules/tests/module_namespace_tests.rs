@@ -3,9 +3,9 @@ use crate::build_system::create_project_modules::module_identity::{
     ModuleIdentityRecord, ModuleIdentityTable,
 };
 use crate::build_system::create_project_modules::source_tree_index::SourceTreeProjectContext;
-use crate::builder_surface::SourceFileKindRegistry;
 use crate::builder_surface::SourcePackageRegistry;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
+use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootFiles, ModuleRootRole, StablePackageIdentity,
 };
@@ -173,6 +173,57 @@ fn entry_root_file_is_not_a_same_module_namespace_entry() {
         namespace.entries.len(),
         1,
         "only the helper source should enter the same-module namespace"
+    );
+}
+
+#[test]
+fn config_named_template_publishes_reserved_key_as_same_module_source() {
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = std::fs::canonicalize(temp.path()).expect("project root should canonicalize");
+    std::fs::write(root.join("@entry.moth"), "").expect("should write entry root");
+    std::fs::write(root.join("@config.moth.mtf"), "reserved key fixture")
+        .expect("should write config-named template");
+
+    let config = Config::new(root.clone());
+    let mut string_table = StringTable::new();
+    let index = SourceTreeIndex::discover(
+        root.clone(),
+        SourceTreeProjectContext {
+            project_root: &root,
+            validated_output_settings: None,
+        },
+        &config,
+        &SourcePackageRegistry::default(),
+        &SourceFileKindRegistry::default(),
+        &ExternalImportProviderRegistry::default(),
+        &mut string_table,
+    )
+    .expect("source tree index should build");
+    let module_id = index
+        .module_identities()
+        .module_ids()
+        .next()
+        .expect("the root directory should be one structural module");
+
+    let mut namespace = ModuleNamespace::new();
+    populate_same_module_entries(&mut namespace, &index, module_id);
+
+    assert!(
+        matches!(
+            namespace.entries.get("@config.moth"),
+            Some(NamespaceEntry::SameModuleSource {
+                source_kind: SourceFileKind::MothTemplate,
+                ..
+            })
+        ),
+        "the ordinary template must publish the reserved spelling as a same-module source key"
+    );
+    assert!(
+        !matches!(
+            namespace.entries.get("@config.moth"),
+            Some(NamespaceEntry::CrossModule { .. })
+        ),
+        "a same-module template must never masquerade as a cross-module facade"
     );
 }
 

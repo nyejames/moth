@@ -1,0 +1,4 @@
+$export
+answer || -> I64:
+    return 42
+;

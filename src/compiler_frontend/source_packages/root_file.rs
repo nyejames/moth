@@ -110,11 +110,13 @@ pub(crate) fn file_name_is_invalid_module_root_marker(file_name: &str) -> bool {
     stem.starts_with('@') || stem.starts_with('+') || stem.starts_with('#')
 }
 
-/// Whether a dependency path names the build-only project config file.
+/// Whether a dependency path's final component is the reserved project config spelling.
 ///
-/// WHAT: matches only the exact reserved filename, at any depth. A dependency stem such as
-///       `config` is an ordinary helper name that resolves `config.moth`, never the build-only
-///       config source.
+/// WHAT: matches only the exact reserved filename at the end of the path, at any depth. The match
+///       is lexical: a directory with that name can publish an ordinary module surface, so Stage 0
+///       decides whether the spelling names that surface or the reserved source. A dependency stem
+///       such as `config` is an ordinary helper name that resolves `config.moth`, never the
+///       build-only config source.
 pub(crate) fn dependency_path_references_config_file(
     path: PathId,
     path_fork: &PathInternerFork,

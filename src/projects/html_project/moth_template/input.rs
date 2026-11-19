@@ -11,6 +11,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{imports, token_lexical};
 use crate::compiler_frontend::compiler_messages::{PreparedFailure, SourceSpanCapacityResource};
+use crate::compiler_frontend::paths::path_normalization::path_has_hidden_component_below;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternError, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
@@ -561,11 +562,7 @@ fn collect_moth_template_paths_in_directory(
         if path.is_dir() {
             // `_` directories are excluded from the project source tree, so recursive template
             // collection must not reintroduce their files.
-            if recursive
-                && !crate::build_system::create_project_modules::path_has_hidden_component_below(
-                    &path, directory,
-                )
-            {
+            if recursive && !path_has_hidden_component_below(&path, directory) {
                 collect_moth_template_paths_in_directory(&path, recursive, paths)?;
             }
         } else if path.is_file() && has_moth_template_extension(&path) {

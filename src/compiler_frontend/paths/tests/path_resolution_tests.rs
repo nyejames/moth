@@ -25,7 +25,9 @@ use crate::compiler_frontend::paths::dependency_resolution::{
     DependencyPathBase, DependencyPathResolutionError,
 };
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_resolution::{
+    ProjectPathResolver, explicit_dependency_source_kind,
+};
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -431,6 +433,94 @@ fn single_file_dependencies_do_not_select_config_as_a_source_candidate() {
             "MOTH-IMPORT-0008"
         );
     }
+}
+
+#[test]
+fn config_spelling_never_counts_as_an_explicit_source_extension() {
+    let mut h = TestHarness::new();
+
+    let config_directory = h.make_path(&["docs", "@config.moth"]);
+    assert_eq!(
+        explicit_dependency_source_kind(config_directory, &h.path_fork, &h.string_table),
+        None
+    );
+
+    // An earlier explicit source extension stays invalid on the way to that surface.
+    let extended_prefix = h.make_path(&["docs.mtf", "@config.moth"]);
+    assert_eq!(
+        explicit_dependency_source_kind(extended_prefix, &h.path_fork, &h.string_table),
+        Some(SourceFileKind::MothTemplate)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn synthetic_dependencies_reject_hidden_canonical_ancestry_behind_config_directory_alias() {
+    // `@config.moth` is an ordinary directory spelling, so a visible directory alias may point at
+    // a hidden physical subtree. The lexical hidden check sees only the authored components and
+    // the final file name, so canonical ancestry must be checked before the hidden source is
+    // queued.
+    use std::os::unix::fs::symlink;
+
+    let mut h = TestHarness::new();
+    let root = h.project_root.join("src");
+    let hidden_directory = root.join("_private/@config.moth");
+    fs::create_dir_all(&hidden_directory).expect("hidden directory should be created");
+    fs::write(hidden_directory.join("helper.moth"), "").expect("hidden helper should be created");
+    symlink("_private/@config.moth", root.join("@config.moth"))
+        .expect("visible config-directory alias should be created");
+
+    let declaring_source = h.declaring_source();
+    let path = h.make_path(&["@config.moth", "helper"]);
+    let error = h
+        .resolver
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
+        .expect_err("a visible alias must not import a hidden helper");
+
+    let diagnostics = typed_dependency_diagnostic(error);
+    let diagnostic = dependency_view(&diagnostics);
+    let facts = diagnostic
+        .family_view::<InvalidImportPathView>()
+        .expect("the diagnostic is an invalid import path");
+    assert_eq!(facts.reason, InvalidImportPathCode::HiddenDirectory);
+    let rendered = rendered_error_msg(diagnostic, &h.string_table, &h.path_fork);
+    assert!(
+        rendered.contains("starts with '_'"),
+        "expected a hidden-directory diagnostic, got: {rendered}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn canonical_hidden_ancestry_check_exempts_the_selected_base_directory() {
+    let mut h = TestHarness::new();
+    let selected_root = h.project_root.join("src/_prototype");
+    fs::create_dir_all(&selected_root).expect("selected root should be created");
+    let declaring_source = selected_root.join("index.moth");
+    fs::write(&declaring_source, "").expect("declaring source should be created");
+    fs::write(selected_root.join("helper.moth"), "").expect("helper should be created");
+
+    let path = h.make_path(&[".", "helper"]);
+    let resolved = h
+        .resolver
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
+        .expect("the explicitly selected hidden base is exempt");
+
+    assert_eq!(
+        resolved.path,
+        fs::canonicalize(selected_root.join("helper.moth"))
+            .expect("helper path should canonicalize")
+    );
 }
 
 #[test]

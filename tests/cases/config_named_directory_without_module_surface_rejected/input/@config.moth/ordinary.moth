@@ -1,0 +1,3 @@
+ordinary ||:
+    io.line("ordinary")
+;

@@ -10,6 +10,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
+use crate::compiler_frontend::paths::path_normalization::path_has_hidden_component_below;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::projects::settings::CONFIG_FILE_NAME;
 use std::fs;
@@ -44,7 +45,8 @@ pub(crate) struct DependencyPathBase {
     pub(crate) matched_components: usize,
 }
 
-/// Reject physical targets outside their owning boundary or reserved as build-only config.
+/// Reject physical targets outside their owning boundary, reserved as build-only config, or
+/// behind a canonical hidden directory.
 pub(crate) fn validate_dependency_boundary(
     canonical_file: &Path,
     base: &DependencyPathBase,
@@ -84,6 +86,20 @@ fn validate_dependency_boundary_against_base(
         return Err(DependencyPathResolutionError::Diagnostic(
             imports::direct_special_file_import(dependency_path, None),
         ));
+    }
+    // A visible symlink alias can enter an excluded `_` subtree. Check the canonical directory
+    // ancestry after containment so the chosen base itself stays exempt, and check the parent so
+    // the terminal file name keeps ordinary `_`-prefixed-file eligibility.
+    if target_path
+        .parent()
+        .is_some_and(|parent| path_has_hidden_component_below(parent, canonical_base))
+    {
+        let diagnostic = imports::invalid_import_path(
+            dependency_path,
+            InvalidImportPathReason::HiddenDirectory,
+            None,
+        );
+        return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
     }
     Ok(())
 }

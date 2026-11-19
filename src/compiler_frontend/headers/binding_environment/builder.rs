@@ -32,7 +32,7 @@ use crate::compiler_frontend::public_interface::{
     ProviderInterfaceId, PublicDeclarationSemantics, ResolvedDependencyClause,
     SourceProviderDependencySet,
 };
-use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
+use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginDeclarationId};
 use crate::compiler_frontend::source::{SourceDatabase, SourceKind, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
@@ -43,6 +43,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use super::external_imports::ExternalImportInput;
+use super::public_export_resolution::effective_module_boundary_path;
 use super::source_dependencies::SourceDependencyInput;
 use super::{
     BindingEnvironmentError, DependencyTargetResolutionInput, ExternalPackageSymbolLookup,
@@ -483,15 +484,25 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .get(source_file)
         {
             for dependency in dependencies {
-                // Reject a direct dependency on the build-only `@config.moth` before the general
-                // source-edge and extension checks, so the reserved reason wins. An unquoted `@`
-                // component cannot spell the reserved filename, but a quoted component could
-                // otherwise resolve it as an ordinary source name.
+                // Retain the reserved-file reason only when Stage 0 found no module surface for
+                // the exact `@config.moth` spelling. Directory compilation carries that decision
+                // as a resolved provider clause; bounded synthetic compilation has no provider
+                // edge, so its prepared Normal module boundary is the same Stage 0 authority. An
+                // unquoted `@` component cannot spell the reserved filename, but a quoted
+                // component could otherwise resolve it as an ordinary source name.
                 if dependency_path_references_config_file(
                     dependency.dependency.path,
                     &*self.path_fork,
                     self.string_table,
-                ) {
+                ) && self
+                    .source_provider_dependencies
+                    .resolve_clause(dependency.dependency.dependency_shell_id)
+                    .is_none()
+                    && !self.dependency_names_prepared_normal_module_surface(
+                        &dependency.dependency.path,
+                        source_file,
+                    )?
+                {
                     return Err(super::diagnostics::direct_special_file_dependency(
                         &dependency.dependency.path,
                         Some(dependency.dependency.span),
@@ -1337,6 +1348,40 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .and_then(|record| record.kind),
             Some(SourceKind::Compiler(SourceFileKind::MothTemplate))
         )
+    }
+
+    /// Whether the reserved config spelling names a prepared Normal module surface.
+    ///
+    /// WHAT: derives the consumer's effective module-boundary path and matches it exactly against
+    ///       a prepared Normal facade boundary.
+    /// WHY: synthetic single-file binding has no provider edge to consult, yet its bounded Stage 0
+    ///      inventory already owns the same module-root boundary facts. Matching those facts keeps
+    ///      directory and synthetic binding on one authority without a binder filesystem probe.
+    ///      Same-module sources, providers and package identities never create these boundaries.
+    fn dependency_names_prepared_normal_module_surface(
+        &mut self,
+        dependency_path: &PathId,
+        source_file: &PathId,
+    ) -> BuilderResult<bool> {
+        let effective_path = effective_module_boundary_path(
+            source_file,
+            dependency_path,
+            &self.module_symbols.file_module_membership,
+            &self.module_symbols.module_root_boundaries,
+            &mut *self.path_fork,
+        )?;
+        Ok(self
+            .module_symbols
+            .module_root_boundaries
+            .iter()
+            .any(|boundary| {
+                boundary.surface == ModuleRootRole::Normal
+                    && boundary.dependency_prefix == effective_path
+                    && self
+                        .module_symbols
+                        .module_file_paths
+                        .contains(&boundary.root_file)
+            }))
     }
 
     /// Resolve and register one clause's direct selections.

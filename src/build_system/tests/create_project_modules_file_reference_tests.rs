@@ -49,6 +49,18 @@ fn has_invalid_path_reason(
     }
 }
 
+fn has_resolved_outcome_reason(
+    outcome: ResolvedFileReferenceOutcome,
+    expected: InvalidCompileTimePathCode,
+) -> bool {
+    match outcome {
+        ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
+            invalid_path_reason(diagnostic) == Some(expected)
+        }
+        _ => false,
+    }
+}
+
 #[test]
 fn case_mismatch_evidence_is_sorted_and_unicode_lowercased() {
     let mut ambiguous = vec!["data".to_owned(), "Data".to_owned()];
@@ -328,6 +340,164 @@ fn directory_resolution_accepts_targets_inside_a_config_named_directory() {
     );
     assert_eq!(resource_inputs.records().len(), 1);
     assert!(discovered_content_sources.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn directory_physical_aliases_to_config_file_are_rejected_before_dispatch() {
+    // Discovery omits the canonical config target, so dispatch would report an internal failure
+    // for content and publish the config file as a resource. The shared physical resolver must
+    // reject the canonical name first.
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().expect("test root should be created");
+    let root = temp.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("source root should be created");
+    fs::write(src.join("@entry.moth"), "").expect("entry root should be created");
+    fs::write(src.join("@config.moth"), "value #= 1").expect("config should be created");
+    symlink("@config.moth", src.join("alias.md")).expect("content alias should be created");
+    symlink("@config.moth", src.join("alias.svg")).expect("resource alias should be created");
+
+    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
+    let canonical_src = fs::canonicalize(&src).expect("entry root should canonicalize");
+    let mut discovery_strings = StringTable::new();
+    let mut config = Config::new(canonical_root.clone());
+    config.project_name = String::from("config_file_alias_fixture");
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    let source_packages = SourcePackageRegistry::default();
+    let external_import_providers = ExternalImportProviderRegistry::default();
+    let index = SourceTreeIndex::discover(
+        canonical_src.clone(),
+        SourceTreeProjectContext {
+            project_root: &canonical_root,
+            validated_output_settings: None,
+        },
+        &config,
+        &source_packages,
+        &source_file_kinds,
+        &external_import_providers,
+        &mut discovery_strings,
+    )
+    .expect("source tree index should build");
+    let consumer_module = index
+        .module_identities()
+        .module_id_for_directory(&canonical_src)
+        .expect("the selected entry root should be a module");
+
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let source_files = SourceDatabase::empty();
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut path_syntax = PathSyntaxTable::new();
+    let mut discovered_content_sources = Vec::new();
+
+    let mut resolve = |authored: &str, class: PreparedFileReferenceClass| {
+        let path = path_fork
+            .try_intern_portable_path(authored, &mut strings)
+            .expect("test path fits");
+        let path_syntax_id = path_syntax
+            .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+            .expect("test path syntax row should fit");
+        let reference = PreparedFileReference {
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            source_file: SourceId::COMPILATION_ROOT,
+            path_syntax: path_syntax_id,
+            class,
+        };
+        FileReferenceResolver::new(&index, &mut resource_inputs)
+            .resolve(
+                consumer_module,
+                &path_syntax,
+                &reference,
+                &source_files,
+                &mut strings,
+                &path_fork,
+                &mut discovered_content_sources,
+            )
+            .expect("a config-file alias should stay a typed outcome")
+    };
+
+    for (authored, class) in [
+        ("alias.md", PreparedFileReferenceClass::ContentSource),
+        ("alias.svg", PreparedFileReferenceClass::ResourceFile),
+    ] {
+        assert!(
+            has_resolved_outcome_reason(
+                resolve(authored, class).outcome,
+                InvalidCompileTimePathCode::ReservedConfigFile
+            ),
+            "{authored} must not dispatch to its authored extension"
+        );
+    }
+
+    assert!(resource_inputs.records().is_empty());
+    assert!(resource_inputs.missing_watch_interests().is_empty());
+    assert!(discovered_content_sources.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn synthetic_physical_aliases_to_config_file_are_rejected_before_dispatch() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().expect("test root should be created");
+    let root = fs::canonicalize(temp.path()).expect("test root should canonicalize");
+    fs::write(root.join("@config.moth"), "value #= 1").expect("config should be created");
+    symlink("@config.moth", root.join("alias.md")).expect("content alias should be created");
+    symlink("@config.moth", root.join("alias.svg")).expect("resource alias should be created");
+    // A dangling alias whose terminal physical spelling is the config file must not publish a
+    // missing-target watch either.
+    fs::create_dir_all(root.join("other")).expect("other directory should be created");
+    symlink("other/@config.moth", root.join("alias-missing.md"))
+        .expect("dangling content alias should be created");
+
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let mut resolver =
+        SingleFileReferenceResolver::new(root.clone(), &source_file_kinds, &mut resource_inputs);
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut path_syntax = PathSyntaxTable::new();
+    let owner = root.join("main.moth");
+
+    let mut resolve = |authored: &str, class: PreparedFileReferenceClass| {
+        let path = path_fork
+            .try_intern_portable_path(authored, &mut strings)
+            .expect("test path fits");
+        let path_syntax_id = path_syntax
+            .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+            .expect("test path syntax row should fit");
+        let reference = PreparedFileReference {
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            source_file: SourceId::COMPILATION_ROOT,
+            path_syntax: path_syntax_id,
+            class,
+        };
+        resolver
+            .resolve(&owner, &path_syntax, &reference, &mut strings, &path_fork)
+            .expect("a config-file alias should stay a typed outcome")
+    };
+
+    for (authored, class) in [
+        ("alias.md", PreparedFileReferenceClass::ContentSource),
+        ("alias.svg", PreparedFileReferenceClass::ResourceFile),
+        (
+            "alias-missing.md",
+            PreparedFileReferenceClass::ContentSource,
+        ),
+    ] {
+        assert!(
+            has_invalid_path_reason(
+                resolve(authored, class).outcome,
+                InvalidCompileTimePathCode::ReservedConfigFile
+            ),
+            "{authored} must not dispatch to its authored extension"
+        );
+    }
+
+    assert!(resource_inputs.records().is_empty());
+    assert!(resource_inputs.missing_watch_interests().is_empty());
 }
 
 #[test]

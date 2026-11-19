@@ -31,6 +31,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 #[cfg(test)]
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
+use crate::compiler_frontend::paths::path_normalization::directory_name_is_hidden;
 use crate::compiler_frontend::project_globals::claims_project_globals_name;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootFiles, ModuleRootRole, StableModuleOriginIdentity, StableOwnedSourceIdentity,
@@ -195,31 +196,6 @@ impl SourceTreeSkipPolicy {
                 .iter()
                 .any(|output_root| directory == output_root || directory.starts_with(output_root))
     }
-}
-
-/// Whether a directory name is hidden from source discovery by the `_` prefix.
-///
-/// Only directory components are hidden. A file such as `_helper.moth` in a visible directory
-/// remains eligible source.
-fn directory_name_is_hidden(name: &str) -> bool {
-    name.starts_with('_')
-}
-
-/// Whether a canonical directory path contains a hidden component below the selected root.
-///
-/// The selected root itself is exempt: `moth check website/_prototype/` compiles that root, while
-/// any `_` descendant stays excluded. Canonical ancestry means a visible symlink alias cannot
-/// reveal a hidden physical subtree.
-pub(crate) fn path_has_hidden_component_below(path: &Path, selected_root: &Path) -> bool {
-    let Ok(relative) = path.strip_prefix(selected_root) else {
-        return false;
-    };
-    relative.components().any(|component| {
-        component
-            .as_os_str()
-            .to_str()
-            .is_some_and(directory_name_is_hidden)
-    })
 }
 
 /// One root file discovered inside a traversed directory, with its structural role.

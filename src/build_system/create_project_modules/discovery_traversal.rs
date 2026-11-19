@@ -22,13 +22,14 @@ use crate::compiler_frontend::compiler_messages::DependencyClauseKind;
 use crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
-    project_config, token_lexical,
+    imports, project_config, token_lexical,
 };
 use crate::compiler_frontend::paths::path_normalization::{
     is_relative_dependency_path, join_and_normalize_path,
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
 use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternerFork,
 };
@@ -811,6 +812,17 @@ fn resolve_module_root_bare_dependency(
     if let Some(root_file) = project_path_resolver
         .module_root_file_for_directory_surface(&root_candidate, ModuleRootRole::Normal)
     {
+        // The config spelling is importable only as a child module surface. The root of the
+        // candidate's parent chain must be the consumer; an intervening module owns access to
+        // its descendants in directory mode and must do so in the bounded synthetic lane too.
+        if dependency_path_references_config_file(provider, path_fork, string_table)
+            && project_path_resolver
+                .module_root_for_file(&root_candidate)
+                .as_ref()
+                != Some(&module_root)
+        {
+            return Err(imports::direct_special_file_import(provider, None).into());
+        }
         return Ok(Some(ResolvedDependencyFile {
             path: root_file,
             kind: SourceFileKind::Moth,

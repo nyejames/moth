@@ -21913,3 +21913,24 @@ path = "implicit_failure_erased_handler_break_dead_template_release_accepted"
 tags = ["integration", "language", "results", "diagnostics", "functions", "templates", "release"]
 contract = "language.results.erased_handler_break_does_not_keep_omitted_tail_live"
 role = "boundary"
+
+[[case]]
+id = "config_named_directory_module_surface"
+path = "config_named_directory_module_surface"
+tags = ["integration", "paths", "dependencies", "modules"]
+contract = "language.dependencies.config_named_directory_module_surface_resolves"
+role = "primary"
+
+[[case]]
+id = "config_named_directory_without_module_surface_rejected"
+path = "config_named_directory_without_module_surface_rejected"
+tags = ["integration", "paths", "dependencies", "modules", "diagnostics"]
+contract = "language.dependencies.config_named_directory_without_module_surface_is_reserved"
+role = "boundary"
+
+[[case]]
+id = "config_named_template_source_reserved_rejected"
+path = "config_named_template_source_reserved_rejected"
+tags = ["integration", "paths", "dependencies", "modules", "diagnostics"]
+contract = "language.dependencies.config_named_template_key_is_reserved"
+role = "boundary"

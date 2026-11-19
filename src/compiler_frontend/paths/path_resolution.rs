@@ -463,7 +463,12 @@ impl ProjectPathResolver {
     }
 }
 
-/// Check explicit source extensions, treating a non-final config spelling as a directory.
+/// Check explicit source extensions.
+///
+/// WHAT: ignores the reserved config spelling in every position while every other component
+///       keeps the ordinary explicit-extension rejection.
+/// WHY: callers classify the exact reserved filename before extension rejection; a directory
+///      with that name is an ordinary module surface, not a source file.
 pub(crate) fn explicit_dependency_source_kind(
     dependency_path: PathId,
     path_fork: &PathInternerFork,
@@ -471,16 +476,13 @@ pub(crate) fn explicit_dependency_source_kind(
 ) -> Option<SourceFileKind> {
     let mut scratch = Vec::new();
     let components = path_fork.resolve_components(dependency_path, &mut scratch);
-    components
-        .iter()
-        .enumerate()
-        .find_map(|(index, &component)| {
-            let name = string_table.resolve(component);
-            if name == CONFIG_FILE_NAME && index + 1 < components.len() {
-                return None;
-            }
-            SourceFileKind::from_extension(Path::new(name).extension()?.to_str()?)
-        })
+    components.iter().find_map(|&component| {
+        let name = string_table.resolve(component);
+        if name == CONFIG_FILE_NAME {
+            return None;
+        }
+        SourceFileKind::from_extension(Path::new(name).extension()?.to_str()?)
+    })
 }
 
 fn existing_dependency_candidates(candidates: &[DependencyCandidate]) -> Vec<&DependencyCandidate> {

@@ -806,6 +806,9 @@ pub enum InvalidCompileTimePathReason {
     EscapesProjectRoot,
     /// The target lies inside a `_`-prefixed directory excluded from source discovery.
     HiddenPath,
+    /// The target is the exact reserved `@config.moth` file, reached either directly or through a
+    /// physical alias such as a symlink.
+    ReservedConfigFile,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

@@ -10,6 +10,32 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::projects::settings::CONFIG_FILE_NAME;
 use std::path::{Path, PathBuf};
 
+/// Whether a directory name is hidden from source discovery by the `_` prefix.
+///
+/// Only directory components are hidden. A file such as `_helper.moth` in a visible directory
+/// remains eligible source.
+pub(crate) fn directory_name_is_hidden(name: &str) -> bool {
+    name.starts_with('_')
+}
+
+/// Whether a canonical directory path contains a hidden component below the selected root.
+///
+/// The selected root itself is exempt: `moth check website/_prototype/` compiles that root, while
+/// any `_` descendant stays excluded. Canonical ancestry means a visible symlink alias cannot
+/// reveal a hidden physical subtree. Callers pass a directory path, so a terminal file name is not
+/// interpreted as a hidden directory.
+pub(crate) fn path_has_hidden_component_below(path: &Path, selected_root: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(selected_root) else {
+        return false;
+    };
+    relative.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(directory_name_is_hidden)
+    })
+}
+
 /// A source-file dependency candidate derived from one extensionless dependency path.
 ///
 /// WHAT: carries the concrete filesystem candidate plus its typed source kind.

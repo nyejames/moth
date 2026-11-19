@@ -449,9 +449,12 @@ impl ModuleNamespaceSet {
     ///
     /// WHAT: determines the declaring file's boundary and owning module from the project or
     /// package index, rejects obsolete `@./` and parent traversal, rejects explicit source
-    /// extensions, resolves source-backed package surfaces, and looks up the dependency path in
-    /// the owning module's namespace. Returns a tagged `ResolvedDependency` carrying the canonical
-    /// path as the IO handle and the boundary-local `ModuleId` for project graph edges.
+    /// extensions except the reserved config spelling, resolves source-backed package surfaces,
+    /// and looks up the dependency path in the owning module's namespace. A config-named
+    /// directory resolves through that namespace like any other module surface; an unresolved
+    /// reserved spelling keeps the direct special-file diagnostic. Returns a tagged
+    /// `ResolvedDependency` carrying the canonical path as the IO handle and the boundary-local
+    /// `ModuleId` for project graph edges.
     /// WHY: the indexed source-tree facts are the single owner of filesystem-backed source
     /// surfaces and candidate resolution.
     #[allow(
@@ -470,8 +473,13 @@ impl ModuleNamespaceSet {
     ) -> Result<ResolvedDependency, DiagnosticDraft> {
         let dependency_path = provider.path;
         let dependency_span = Some(provider.span);
+        // The exact reserved spelling is deferred to the indexed namespace: a directory with
+        // that name publishes an ordinary module surface, while an unresolved spelling retains
+        // the direct reserved-file reason below. Every other explicit source extension keeps
+        // its ordinary rejection.
+        let config_named_dependency =
+            dependency_path_references_config_file(dependency_path, path_fork, string_table);
         reject_invalid_path_components(dependency_path, dependency_span, string_table, path_fork)?;
-        reject_direct_special_file_dependency(provider, string_table, path_fork)?;
         reject_explicit_source_extension(
             dependency_path,
             dependency_span,
@@ -504,6 +512,35 @@ impl ModuleNamespaceSet {
         };
 
         let key = portable_dependency_key(prefix_components, string_table);
+
+        // Only an actual cross-module facade may claim the reserved spelling. A same-module
+        // source or provider with the same extensionless key, an ambiguous key, and any package
+        // identity stay outside this spelling's source namespace.
+        if config_named_dependency {
+            let entry = namespace.entries.get(&key).filter(|entry| {
+                matches!(entry, NamespaceEntry::CrossModule { .. }) && !namespace.is_ambiguous(&key)
+            });
+            let Some(entry) = entry else {
+                return Err(imports::direct_special_file_import(
+                    dependency_path,
+                    dependency_span,
+                ));
+            };
+            reject_hidden_directory_components(
+                dependency_path,
+                dependency_span,
+                string_table,
+                path_fork,
+            )?;
+            return resolve_entry(
+                entry,
+                source_tree_index,
+                consumer_module_id,
+                dependency_path,
+                dependency_span,
+                string_table,
+            );
+        }
 
         if namespace.is_ambiguous(&key) {
             return Err(imports::ambiguous_import_target(
@@ -668,29 +705,37 @@ impl ModuleNamespaceSet {
         path_fork: &PathInternerFork,
     ) -> Result<Option<ResolvedDependency>, DiagnosticDraft> {
         let dependency_span = Some(provider.span);
+        // The exact reserved spelling may name an ordinary module facade in the bounded synthetic
+        // topology. Let it reach the prepared Normal-root lookup instead of treating the spelling
+        // as a package identity. The filesystem resolver retains the direct special-file
+        // diagnostic when no facade owns the directory.
+        let config_named_dependency =
+            dependency_path_references_config_file(provider.path, path_fork, string_table);
         reject_invalid_path_components(provider.path, dependency_span, string_table, path_fork)?;
-        reject_direct_special_file_dependency(provider, string_table, path_fork)?;
         reject_explicit_source_extension(
             provider.path,
             dependency_span,
             &mut DiagnosticStringBuilder::new(string_table),
             path_fork,
         )?;
-        let mut scratch = Vec::new();
-        let components = path_fork.resolve_components(provider.path, &mut scratch);
-        let key = portable_dependency_key(components, string_table);
-        let owning_root = project_path_resolver
-            .module_root_for_file(declaring_canonical_path)
-            .unwrap_or_else(|| project_path_resolver.entry_root().to_path_buf());
-        let local_keys = self
-            .single_file_dependency_keys
-            .get(&owning_root)
-            .into_iter()
-            .flatten()
-            .map(String::as_str);
-        // Synthetic traversal belongs to the sole consumer in its one-node graph.
-        let package =
-            self.resolve_package_dependency(provider, ModuleId::from_index(0), local_keys, &key)?;
+        let package = if config_named_dependency {
+            None
+        } else {
+            let mut scratch = Vec::new();
+            let components = path_fork.resolve_components(provider.path, &mut scratch);
+            let key = portable_dependency_key(components, string_table);
+            let owning_root = project_path_resolver
+                .module_root_for_file(declaring_canonical_path)
+                .unwrap_or_else(|| project_path_resolver.entry_root().to_path_buf());
+            let local_keys = self
+                .single_file_dependency_keys
+                .get(&owning_root)
+                .into_iter()
+                .flatten()
+                .map(String::as_str);
+            // Synthetic traversal belongs to the sole consumer in its one-node graph.
+            self.resolve_package_dependency(provider, ModuleId::from_index(0), local_keys, &key)?
+        };
         if package.is_none() {
             reject_hidden_directory_components(
                 provider.path,
@@ -1208,26 +1253,6 @@ fn resolve_entry(
     }
 }
 
-/// Reject a dependency that directly names the build-only `@config.moth` source.
-///
-/// WHAT: runs before namespace absence so the reserved-file reason wins over a missing import.
-/// WHY: ordinary `config` dependencies resolve the `config.moth` helper instead; only the exact
-///      reserved filename is not importable.
-fn reject_direct_special_file_dependency(
-    provider: &RetainedDependencyPath,
-    string_table: &StringTable,
-    path_fork: &PathInternerFork,
-) -> Result<(), DiagnosticDraft> {
-    if dependency_path_references_config_file(provider.path, path_fork, string_table) {
-        return Err(imports::direct_special_file_import(
-            provider.path,
-            Some(provider.span),
-        ));
-    }
-
-    Ok(())
-}
-
 /// Reject path components that cannot participate in a module-root-relative dependency.
 fn reject_invalid_path_components(
     dependency_path: PathId,
@@ -1290,7 +1315,7 @@ fn reject_hidden_directory_components(
     Ok(())
 }
 
-/// Reject explicit compiler-semantic source extensions after direct special files are classified.
+/// Reject explicit compiler-semantic source extensions.
 fn reject_explicit_source_extension(
     dependency_path: PathId,
     dependency_span: Option<SourceSpan>,
