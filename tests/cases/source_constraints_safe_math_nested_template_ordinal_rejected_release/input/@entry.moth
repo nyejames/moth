@@ -1,0 +1,19 @@
+card #= [:<div>[$slot title]</div>]
+always_false || -> Bool:
+    return false
+;
+
+$fast_math $safe_math
+render_if |limit I32, show Bool| -> String:
+    assert(always_false())
+    return [: [if show: [loop 0 to limit |item, ordinal|:[ordinal]]]]
+;
+
+$fast_math $safe_math
+render_slot |limit I32| -> String:
+    assert(always_false())
+    return [card:[$in title: [loop 0 to limit |item, ordinal|:[ordinal]]]]
+;
+
+~[render_if(2, true)]
+~[render_slot(2)]

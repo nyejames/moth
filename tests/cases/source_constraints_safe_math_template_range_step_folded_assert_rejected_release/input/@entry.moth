@@ -1,0 +1,14 @@
+-- An explicit template range step owns a generated zero-step guard even without an ordinal
+-- binding. Release folding discards the loop-lowering tail, so the pre-fold ledger must keep the
+-- authored step's fast guard row in both profiles.
+always_false || -> Bool:
+    return false
+;
+
+$fast_math $safe_math
+render_step |limit I32| -> String:
+    assert(always_false())
+    return [: [loop 0 to limit by 2 |item|:<p>[item]</p>;] ]
+;
+
+~[render_step(2)]

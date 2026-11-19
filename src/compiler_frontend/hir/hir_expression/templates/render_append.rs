@@ -361,14 +361,14 @@ impl<'a> HirBuilder<'a> {
                 header,
                 body,
                 aggregate_wrapper,
-                ..
+                span,
             } => self.append_owned_runtime_template_loop(
                 header,
                 body,
                 aggregate_wrapper.as_deref(),
                 append_context,
                 aggregate_local,
-                span_ref,
+                span,
             ),
 
             OwnedRuntimeTemplateNode::AggregateOutput => {

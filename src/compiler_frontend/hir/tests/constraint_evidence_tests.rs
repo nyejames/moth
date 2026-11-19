@@ -255,6 +255,36 @@ wrapped || -> U8:
 }
 
 #[test]
+fn nested_template_range_ordinals_have_one_authored_witness_each() {
+    let source = "\
+card #= [:<div>[$slot title]</div>]
+$fast_math
+render |limit I32, show Bool| -> String:
+    return [: [if show: [loop 0 to limit |item, ordinal|:[ordinal]]] [card:[$in title: [loop 0 to limit |item, ordinal|:[ordinal]]]]]
+;
+";
+    let (hir, paths, strings) = lower_source(source);
+    let facts = facts_by_name(&hir, &paths, &strings, "render");
+    let guards: Vec<_> = facts
+        .constraint
+        .fast_use
+        .iter()
+        .filter(|witness| witness.provenance == HirFastUseProvenance::RangeGuard)
+        .collect();
+    assert_eq!(
+        guards.len(),
+        2,
+        "each loop must have one deduplicated witness: {guards:?}"
+    );
+    for guard in guards {
+        let span = guard
+            .span
+            .expect("template loops retain their authored span");
+        assert!(source_text(source, span).contains("loop"));
+    }
+}
+
+#[test]
 fn a_generated_fast_range_guard_is_a_witness_without_authored_arithmetic() {
     let source = "\
 $fast_math

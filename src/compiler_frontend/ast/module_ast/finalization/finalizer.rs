@@ -37,6 +37,12 @@ use crate::compiler_frontend::ast::statements::terminality::{
     validate_function_body_terminality, validate_function_body_terminality_with_exits,
 };
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
+use crate::compiler_frontend::ast::templates::runtime_handoff::{
+    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
+    visit_node_expression_ids, walk_owned_runtime_slot_application_handoff,
+    walk_owned_runtime_template_handoff,
+};
+use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopHeader;
 use crate::compiler_frontend::ast::templates::top_level_templates::collect_const_top_level_fragments;
 use crate::compiler_frontend::ast::{
     Ast, AstBuildResult, AstChoiceDefinition, AstFastOperationSource, AstFastOperationWitness,
@@ -57,7 +63,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidFallibleHandlingReason, InvalidTraitConformanceReason, PreparedFailure,
 };
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
-use crate::compiler_frontend::source::FrozenIdentityHandle;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::CoreTraitKind;
@@ -393,16 +399,9 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // operation and duplicates or unordered rows are resolved once, after every emitter and
         // this pre-fold walk have contributed.
         {
-            let expressions = self.context.expression_builder.store();
-            record_pre_fold_range_ordinal_witnesses(
-                &emitted.validated_generic_template_bodies,
-                expressions,
-                &self.context.const_values,
-                &mut fast_operation_witnesses,
-            );
             record_pre_fold_range_ordinal_witnesses(
                 &emitted.ast,
-                expressions,
+                self.context.expression_builder.store(),
                 &self.context.const_values,
                 &mut fast_operation_witnesses,
             );
@@ -1233,13 +1232,16 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
     }
 }
 
-/// Records range-ordinal rows on the pre-fold fast-operation ledger.
+/// Records range-guard rows on the pre-fold fast-operation ledger.
 ///
-/// WHAT: walks each callable body's authored statement tree and records one row per `$fast_math`
-///       range loop whose header binds the ordinal and whose body reaches the step block.
-/// WHY: release folding can prove an authored assertion false and discard the step block before
-///      HIR. The ordinal update is still selected source, so the pre-fold ledger keeps the same
-///      row in debug and release; retained HIR adds a duplicate row in debug that dedup removes.
+/// WHAT: walks each callable body's statement tree and owned runtime template handoffs,
+///       recording generated `$fast_math` range guards that HIR would lower. A template body
+///       cannot break or return, so a bound ordinal always reaches its checked update; an
+///       authored template step always owns its zero-step guard.
+/// WHY: release folding can prove an authored assertion false and discard the step block or the
+///      template-lowering tail before HIR. Those guards are still selected source, so the pre-fold
+///      ledger keeps the same row in debug and release; retained HIR adds a duplicate row in debug
+///      that dedup removes.
 fn record_pre_fold_range_ordinal_witnesses(
     nodes: &[AstNode],
     expressions: &ExpressionStore,
@@ -1351,14 +1353,74 @@ impl<'a> RangeOrdinalWalk<'a> {
             let Ok(view) = expressions.view(id) else {
                 continue;
             };
-            if let ExpressionOperationView::ValueBlock(block) = view.operation() {
-                push_value_block_headers(block, &mut pending);
-                self.record_value_block(block);
-            } else {
-                // A view that cannot enumerate its children contributes no further work; the
-                // sibling expression walkers treat the same store error as a dead end.
-                let _ = view.visit_child_ids(&mut |child| pending.push(child));
+            match view.operation() {
+                ExpressionOperationView::ValueBlock(block) => {
+                    push_value_block_headers(block, &mut pending);
+                    self.record_value_block(block);
+                }
+                ExpressionOperationView::RuntimeTemplate(handoff) => {
+                    self.record_runtime_template_handoff(handoff, &mut pending);
+                }
+                ExpressionOperationView::RuntimeSlotApplication(handoff) => {
+                    self.record_runtime_slot_application_handoff(handoff, &mut pending);
+                }
+                _ => {
+                    // A view that cannot enumerate its children contributes no further work; the
+                    // sibling expression walkers treat the same store error as a dead end.
+                    let _ = view.visit_child_ids(&mut |child| pending.push(child));
+                }
             }
+        }
+    }
+
+    /// Records range guards and expression roots in one owned-handoff walk.
+    fn record_runtime_template_handoff(
+        &mut self,
+        handoff: &OwnedRuntimeTemplateHandoff,
+        pending: &mut Vec<ExprId>,
+    ) {
+        let _ = walk_owned_runtime_template_handoff(handoff, &mut |node| {
+            visit_node_expression_ids(node, &mut |id| pending.push(id));
+            self.record_owned_template_loop_evidence(node);
+            Ok::<(), std::convert::Infallible>(())
+        });
+    }
+
+    /// Records range guards and expression roots in one slot-application walk.
+    fn record_runtime_slot_application_handoff(
+        &mut self,
+        handoff: &OwnedRuntimeSlotApplicationHandoff,
+        pending: &mut Vec<ExprId>,
+    ) {
+        let _ = walk_owned_runtime_slot_application_handoff(handoff, &mut |node| {
+            visit_node_expression_ids(node, &mut |id| pending.push(id));
+            self.record_owned_template_loop_evidence(node);
+            Ok::<(), std::convert::Infallible>(())
+        });
+    }
+
+    /// Records one owned runtime loop's fast range-guard rows.
+    fn record_owned_template_loop_evidence(&mut self, node: &OwnedRuntimeTemplateNode) {
+        let OwnedRuntimeTemplateNode::Loop { header, span, .. } = node else {
+            return;
+        };
+        let TemplateLoopHeader::Range { bindings, range } = header else {
+            return;
+        };
+        if !range.fast_math {
+            return;
+        }
+        if bindings.index.is_some() {
+            push_range_guard_witness(self.witnesses, self.function, *span);
+        }
+        if let Some(step) = range.step {
+            // HIR labels the generated zero-step guard with the authored step's own span.
+            let step_span = self
+                .expressions
+                .view(step)
+                .ok()
+                .and_then(|expression| expression.span());
+            push_range_guard_witness(self.witnesses, self.function, step_span);
         }
     }
 
@@ -1387,4 +1449,18 @@ impl<'a> RangeOrdinalWalk<'a> {
             }
         }
     }
+}
+
+/// Pushes one selected `$fast_math` range guard row onto the pre-fold ledger.
+fn push_range_guard_witness(
+    witnesses: &mut Vec<AstFastOperationWitness>,
+    function: AstFunctionIdentity,
+    span: Option<SourceSpan>,
+) {
+    witnesses.push(AstFastOperationWitness {
+        function,
+        scope: PathId::ROOT,
+        span,
+        source: AstFastOperationSource::RangeOrdinal,
+    });
 }

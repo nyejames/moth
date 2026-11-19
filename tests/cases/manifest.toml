@@ -21348,6 +21348,48 @@ contract = "language.directives.safe_math_rejects_release_folded_fast_range_ordi
 role = "boundary"
 
 [[case]]
+id = "source_constraints_safe_math_nested_template_ordinal_rejected"
+path = "source_constraints_safe_math_nested_template_ordinal_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "templates"]
+contract = "language.directives.safe_math_rejects_nested_template_ordinal"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_nested_template_ordinal_rejected_release"
+path = "source_constraints_safe_math_nested_template_ordinal_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "templates", "release"]
+contract = "language.directives.safe_math_rejects_nested_template_ordinal"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_safe_math_template_ordinal_folded_assert_rejected"
+path = "source_constraints_safe_math_template_ordinal_folded_assert_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
+contract = "language.directives.safe_math_rejects_release_folded_fast_template_range_ordinal"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_template_ordinal_folded_assert_rejected_release"
+path = "source_constraints_safe_math_template_ordinal_folded_assert_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "release"]
+contract = "language.directives.safe_math_rejects_release_folded_fast_template_range_ordinal"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_safe_math_template_range_step_folded_assert_rejected"
+path = "source_constraints_safe_math_template_range_step_folded_assert_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
+contract = "language.directives.safe_math_rejects_release_folded_fast_template_range_step"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_template_range_step_folded_assert_rejected_release"
+path = "source_constraints_safe_math_template_range_step_folded_assert_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "release"]
+contract = "language.directives.safe_math_rejects_release_folded_fast_template_range_step"
+role = "boundary"
+
+[[case]]
 id = "source_constraints_safe_math_range_ordinal_unreached_accepted"
 path = "source_constraints_safe_math_range_ordinal_unreached_accepted"
 tags = ["integration", "directives", "numeric", "constraints"]

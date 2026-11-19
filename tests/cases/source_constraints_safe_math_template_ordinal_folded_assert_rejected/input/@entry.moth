@@ -1,0 +1,14 @@
+-- Release folding proves the assertion false and discards the tail that lowers the template
+-- loop. The generated ordinal update is still selected source, so both profiles must reject the
+-- fast guard; the pre-fold ledger keeps the row from the runtime template handoff.
+always_false || -> Bool:
+    return false
+;
+
+$fast_math $safe_math
+render_loop |limit I32| -> String:
+    assert(always_false())
+    return [: [loop 0 to limit |item, index|:<p>[index]</p>;] ]
+;
+
+~[render_loop(2)]
