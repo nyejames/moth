@@ -27,13 +27,6 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: a selected `@entry.moth` or `@mod.moth` builds a `ProjectModuleGraph` and project namespaces only to validate reserved-root claims, then discards them. The registered-prefix collision probe for an ordinary selected file can list the same parent directories again for each registered source package prefix. No user-visible cost has been measured.
 - Investigate only if measurements show a material cost. Bounded single-file mode uses the graph and namespaces to validate reserved-root claims, then discards them. Later synthetic traversal resolves dependencies from inventory keys and filesystem facts, so there are no later project namespaces to reuse. For ordinary files, the prefix probe already shares the root listing. Measure repeated listings below that root before grouping prefixes by shared parents.
 
-### Scaffold `cd` instruction is not shell-quoted
-
-- Found: portable path display hardening inventory, 2026-11.
-- Where: `render_summary` in `crates/moth-cli/src/scaffold/mod.rs` (`format!("  cd {}", report.project_path.display())`) and `crates/moth-cli/src/scaffold/tests/summary_tests.rs`.
-- Observed: the printed next-step command interpolates the native display spelling with no quoting. Spaces, quotes and shell metacharacters break or alter the pasted command. Control characters pass through to the terminal and a non-UTF-8 directory prints a lossy path that cannot address the directory.
-- Investigate: a CLI-owned shell quoting operation with a stated POSIX and Windows contract, control-character handling and no runnable command for an unrepresentable path. Portable path display is the wrong operation here.
-
 ### HTML `origin` has no URL encoding contract
 
 - Found: portable path display hardening dev-server URL review, 2026-11.

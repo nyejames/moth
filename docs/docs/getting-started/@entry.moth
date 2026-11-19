@@ -239,6 +239,8 @@ init_docs_sidebar()!
         moth check .
         moth dev .
     ]
+
+    The success summary prints a quoted directory command for POSIX shells or Windows PowerShell. If it asks you to open the project directory manually, do that before running either Moth command.
 ]
 
 [section, $md:
