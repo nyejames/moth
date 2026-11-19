@@ -6,13 +6,6 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 ## Open
 
-### A symlink alias into a `@config.moth` directory bypasses its exclusion
-
-- Found: reserved config directory fix, 2026-11. Reproduced with throwaway Unix symlink tests, 2026-11.
-- Where: `SourceTreeSkipPolicy::canonical_directory_is_skipped` in `src/build_system/create_project_modules/source_tree_index.rs` and `authored_directory_exclusion` in `file_reference_resolution.rs`. The dependency-clause message is `direct_special_file_import_message` in `src/compiler_frontend/compiler_messages/render/payload.rs`, reached through `dependency_path_references_config_file` in `module_namespace.rs`, which matches any path component.
-- Observed: discovery skips a `@config.moth` directory only by its listed name, and the resolvers reject it only by authored components. With `src/alias -> src/@config.moth`, discovery indexes `@config.moth/notes.mtf` under the alias, and `alias/logo.png` resolves as a resource. Hidden `_` directories have canonical-ancestry checks in both places for this case. Canonical docs (`docs/build-system-design.md`, `project-layout.mtf`, `module-roots.mtf`) define `@config.moth` only as a reserved filename that is inert when nested. No doc makes a config-named directory an excluded subtree. The directory skip came from `37102dfc4` without a doc change. Separately, dependency clauses that enter a `@config.moth` directory are rejected, but the message says the import names `@config.moth` itself.
-- Investigate: decide the rule. Either document a config-named directory as an excluded subtree and extend the hidden-ancestry predicate to return the applicable reason in discovery and both resolvers, or delete the undocumented directory skip and the config branch of `authored_directory_exclusion`. Then reword the message for a non-final component. The user-visible reason `ReservedConfigDirectory` (stable key `invalid_compile_time_path.reserved_config_directory`, added in `1c387b7ec`) follows whichever rule is chosen. Document it with the subtree rule, or delete it with the skip.
-
 ### Damaged package set classification is path-only
 
 - Found: Core/Builder package namespace and config filename work, 2026-11.

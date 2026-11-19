@@ -11,6 +11,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::projects::settings::CONFIG_FILE_NAME;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -43,8 +44,7 @@ pub(crate) struct DependencyPathBase {
     pub(crate) matched_components: usize,
 }
 
-/// WHAT: rejects dependency paths that escape their resolved base directory.
-/// WHY: dependencies must stay within the project root (relative/entry) or package root.
+/// Reject physical targets outside their owning boundary or reserved as build-only config.
 pub(crate) fn validate_dependency_boundary(
     canonical_file: &Path,
     base: &DependencyPathBase,
@@ -76,6 +76,14 @@ fn validate_dependency_boundary_against_base(
         };
         let diagnostic = imports::invalid_import_path(dependency_path, reason, None);
         return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
+    }
+    if target_path
+        .file_name()
+        .is_some_and(|name| name == CONFIG_FILE_NAME)
+    {
+        return Err(DependencyPathResolutionError::Diagnostic(
+            imports::direct_special_file_import(dependency_path, None),
+        ));
     }
     Ok(())
 }

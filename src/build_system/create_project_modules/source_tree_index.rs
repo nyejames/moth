@@ -44,7 +44,7 @@ use crate::compiler_frontend::source_packages::root_file::{
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::counter_observation;
-use crate::projects::settings::Config;
+use crate::projects::settings::{CONFIG_FILE_NAME, Config};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
@@ -686,12 +686,6 @@ impl SourceTreeIndex {
                     // not a traversable module directory. An invalid marker name stays a closed
                     // vocabulary error even when it is not a regular file.
                     if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
-                        // The build-only config filename is reserved at every depth but is not a
-                        // root role. A nested directory sharing that name stays inert rather than
-                        // becoming an ordinary folder claim.
-                        if file_name_is_config_file(file_name) {
-                            continue;
-                        }
                         if file_name_is_invalid_module_root_marker(file_name) {
                             return Err(invalid_module_root_file_name_error(
                                 &directory,
@@ -852,11 +846,14 @@ impl SourceTreeIndex {
                 // A file symlink can point outside the selected boundary or into an excluded
                 // subtree even when its visible spelling looks eligible. Directory ancestry
                 // decides exclusion; an underscore-prefixed file name remains valid source.
-                // Ordinary sources outside the boundary stay silently excluded. An authored root
-                // marker, however, must resolve to a source owned by its structural module, so a
-                // filtered root target is a structural failure rather than a missing root.
+                // Build-only config stays outside module ownership even through a file alias.
+                // An excluded root target is a structural failure rather than a missing root;
+                // other excluded targets stay silent.
                 let canonical_parent = canonical_path.parent();
                 if !canonical_path.starts_with(&entry_root)
+                    || canonical_path
+                        .file_name()
+                        .is_some_and(|name| name == CONFIG_FILE_NAME)
                     || canonical_parent.is_some_and(|parent| {
                         skip_policy.canonical_ancestor_is_skipped(parent, &entry_root)
                     })
@@ -2099,18 +2096,6 @@ fn eligible_single_file_entry(
     if !is_directory && !is_file {
         return Ok(None);
     }
-    // A directory sharing the reserved build-only config filename is inert at every depth,
-    // exactly as the directory traversal treats it. Descending would let its children become
-    // importable synthetic namespace claims or registered-prefix collisions that directory
-    // compilation never sees.
-    if is_directory
-        && path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(file_name_is_config_file)
-    {
-        return Ok(None);
-    }
     let directory_identity = if is_directory {
         match listed_type {
             Some(_) => {
@@ -2139,6 +2124,9 @@ fn eligible_single_file_entry(
                 return Ok(None);
             };
             if !canonical_file.starts_with(source_root)
+                || canonical_file
+                    .file_name()
+                    .is_some_and(|name| name == CONFIG_FILE_NAME)
                 || skip_policy.canonical_ancestor_is_skipped(canonical_parent, source_root)
             {
                 return Ok(None);

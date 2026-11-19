@@ -356,7 +356,6 @@ define_stable_reason_keys! {
         &InvalidCompileTimePathCode::EscapesSymlink => "invalid_compile_time_path.escapes_symlink",
         &InvalidCompileTimePathCode::EscapesProjectRoot => "invalid_compile_time_path.escapes_project_root",
         &InvalidCompileTimePathCode::HiddenPath => "invalid_compile_time_path.hidden_path",
-        &InvalidCompileTimePathCode::ReservedConfigDirectory => "invalid_compile_time_path.reserved_config_directory",
     },
 
     InvalidTypeAnnotationReason => {

@@ -120,17 +120,7 @@ pub(crate) fn dependency_path_references_config_file(
     path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> bool {
-    // Walk parent links instead of materialising the component list: this predicate runs once per
-    // dependency path that passes through header validation and file-reference resolution.
-    let mut current = path;
-    while let Some(component) = path_fork.component(current) {
-        if file_name_is_config_file(string_table.resolve(component)) {
-            return true;
-        }
-        let Some(parent) = path_fork.try_parent(current) else {
-            break;
-        };
-        current = parent;
-    }
-    false
+    path_fork
+        .component(path)
+        .is_some_and(|component| file_name_is_config_file(string_table.resolve(component)))
 }

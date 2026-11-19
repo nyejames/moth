@@ -126,16 +126,15 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     fs::write(nested.join("@entry.moth"), "").expect("should write nested root");
     fs::write(nested.join("@config.moth"), "not source")
         .expect("should write nested reserved config");
-    // A directory sharing the reserved config filename is inert too: it is neither traversed nor
-    // claimed as an ordinary folder. Keep it under a different parent so the file and directory
-    // cases can coexist.
+    // A config-named directory is ordinary topology. Keep it under a different parent so the
+    // reserved file and traversable directory can coexist.
     let reserved_directory_parent = entry_root.join("reserved_directory_parent");
     fs::create_dir_all(&reserved_directory_parent)
         .expect("should create reserved directory parent");
     let nested_config_directory = reserved_directory_parent.join("@config.moth");
     fs::create_dir_all(&nested_config_directory).expect("should create reserved config directory");
     fs::write(nested_config_directory.join("@entry.moth"), "")
-        .expect("should write unreachable root");
+        .expect("should write a normally discovered root");
 
     let mut config = Config::new(root.clone());
     config.project_name = String::from("docs");
@@ -185,28 +184,26 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
         .iter()
         .map(|module_id| graph.node(*module_id).root_file().to_path_buf())
         .collect();
-    assert_eq!(entry_root_files.len(), 4);
+    assert_eq!(entry_root_files.len(), 5);
     assert!(entry_root_files[0].ends_with("@entry.moth"));
     assert!(entry_root_files[1].ends_with("dev/@entry.moth"));
     assert!(entry_root_files[2].ends_with("nested/@entry.moth"));
     assert!(entry_root_files[3].ends_with("release/@entry.moth"));
-    assert_eq!(index.stats().dirs_visited, 5);
+    assert!(entry_root_files[4].ends_with("reserved_directory_parent/@config.moth/@entry.moth"));
+    assert_eq!(index.stats().dirs_visited, 6);
     assert_eq!(index.stats().dirs_skipped, 6);
-    assert_eq!(index.stats().files_seen, 6);
+    assert_eq!(index.stats().files_seen, 7);
     assert_eq!(index.stats().normal_root_files_seen, 0);
-    assert_eq!(index.stats().entry_root_files_seen, 4);
-    assert_eq!(index.stats().module_roots_found, 4);
+    assert_eq!(index.stats().entry_root_files_seen, 5);
+    assert_eq!(index.stats().module_roots_found, 5);
     assert!(
         index.sources().iter().all(|source| {
             source
                 .canonical_path()
                 .file_name()
                 .is_some_and(|name| name != "@config.moth")
-                && !source
-                    .canonical_path()
-                    .starts_with(&nested_config_directory)
         }),
-        "a nested @config.moth file or directory is reserved and must not enter source inventory"
+        "a nested @config.moth file must not enter source inventory"
     );
 
     let module_roots = index.module_roots();

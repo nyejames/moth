@@ -19,6 +19,7 @@ use crate::compiler_frontend::headers::module_symbols::PublicExportEntry;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::projects::settings::CONFIG_FILE_NAME;
 use rustc_hash::FxHashSet;
 
 /// Resolved target of a single dependency path.
@@ -456,62 +457,34 @@ fn source_components_match(
     requested: &[StringId],
     string_table: &StringTable,
 ) -> bool {
-    components_match_with_optional_moth_extension(candidate, requested, string_table)
-        || components_match_with_optional_content_file_extension(candidate, requested, string_table)
-}
-
-fn components_match_with_optional_moth_extension(
-    candidate_components: &[crate::compiler_frontend::symbols::string_interning::StringId],
-    requested_components: &[crate::compiler_frontend::symbols::string_interning::StringId],
-    string_table: &StringTable,
-) -> bool {
-    if candidate_components.len() != requested_components.len() {
+    if candidate.len() != requested.len() {
         return false;
     }
 
-    candidate_components
-        .iter()
-        .zip(requested_components.iter())
-        .all(|(candidate_component, requested_component)| {
-            if candidate_component == requested_component {
-                return true;
-            }
-
-            let candidate_str = string_table.resolve(*candidate_component);
-            let requested_str = string_table.resolve(*requested_component);
-
-            candidate_str.strip_suffix(SourceFileKind::Moth.extension_suffix())
-                == Some(requested_str)
-                || requested_str.strip_suffix(SourceFileKind::Moth.extension_suffix())
-                    == Some(candidate_str)
-        })
-}
-
-fn components_match_with_optional_content_file_extension(
-    candidate_components: &[StringId],
-    requested_components: &[StringId],
-    string_table: &StringTable,
-) -> bool {
-    if candidate_components.len() != requested_components.len() {
-        return false;
+    let mut code_match = true;
+    let mut content_match = true;
+    for (&candidate, &requested) in candidate.iter().zip(requested) {
+        if candidate == requested {
+            continue;
+        }
+        let candidate = string_table.resolve(candidate);
+        let requested = string_table.resolve(requested);
+        // A config-named directory needs its full spelling; it is not a source file stem.
+        if candidate == CONFIG_FILE_NAME || requested == CONFIG_FILE_NAME {
+            return false;
+        }
+        let moth_suffix = SourceFileKind::Moth.extension_suffix();
+        code_match &= candidate.strip_suffix(moth_suffix) == Some(requested)
+            || requested.strip_suffix(moth_suffix) == Some(candidate);
+        content_match &= candidate.strip_suffix(SourceFileKind::MothTemplate.extension_suffix())
+            == Some(requested)
+            || candidate.strip_suffix(SourceFileKind::PlainMarkdown.extension_suffix())
+                == Some(requested);
+        if !code_match && !content_match {
+            return false;
+        }
     }
-
-    candidate_components
-        .iter()
-        .zip(requested_components.iter())
-        .all(|(candidate_component, requested_component)| {
-            if candidate_component == requested_component {
-                return true;
-            }
-
-            let candidate_str = string_table.resolve(*candidate_component);
-            let requested_str = string_table.resolve(*requested_component);
-
-            candidate_str.strip_suffix(SourceFileKind::MothTemplate.extension_suffix())
-                == Some(requested_str)
-                || candidate_str.strip_suffix(SourceFileKind::PlainMarkdown.extension_suffix())
-                    == Some(requested_str)
-        })
+    true
 }
 
 // --------------------------
@@ -573,18 +546,4 @@ pub(crate) fn resolve_namespace_target(
     }
 
     None
-}
-
-/// True when any component of the dependency path ends with `.moth`.
-///
-pub(crate) fn has_explicit_moth_extension(
-    path: &PathId,
-    string_table: &StringTable,
-    path_fork: &PathInternerFork,
-) -> bool {
-    let mut components = Vec::new();
-    path_fork
-        .resolve_components(*path, &mut components)
-        .iter()
-        .any(|&component| string_table.resolve(component).ends_with(".moth"))
 }

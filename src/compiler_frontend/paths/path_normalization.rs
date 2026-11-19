@@ -7,6 +7,7 @@
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::projects::settings::CONFIG_FILE_NAME;
 use std::path::{Path, PathBuf};
 
 /// A source-file dependency candidate derived from one extensionless dependency path.
@@ -104,8 +105,12 @@ pub(crate) fn candidate_dependency_files_for_source_kinds(
         source_file_kinds,
     );
 
+    // The reserved config spelling can only be a directory on the way to another source.
     if dependency_component_len > 1
         && let Some(parent) = normalized_dependency_path.parent()
+        && parent
+            .file_name()
+            .is_none_or(|name| name != CONFIG_FILE_NAME)
     {
         add_source_kind_candidates(
             &mut candidates,
@@ -126,6 +131,13 @@ fn add_source_kind_candidates(
 ) {
     for recognized in SourceFileKind::recognized_kinds() {
         let path = with_extension(base_path.clone(), recognized.extension);
+        // An extensionless quoted stem must not select the build-only config source either.
+        if path
+            .file_name()
+            .is_some_and(|name| name == CONFIG_FILE_NAME)
+        {
+            continue;
+        }
         let support = if source_file_kinds
             .kind_for_extension(recognized.extension)
             .is_some()

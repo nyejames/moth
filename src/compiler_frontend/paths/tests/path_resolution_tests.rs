@@ -377,6 +377,63 @@ fn extensionless_dependency_resolves_compiler_supported_moth_template_candidate(
 }
 
 #[test]
+fn single_file_dependencies_do_not_select_config_as_a_source_candidate() {
+    let mut h = TestHarness::new();
+    let root = h.project_root.join("src");
+    fs::create_dir_all(root.join("docs/@config.moth")).unwrap();
+    fs::write(root.join("docs/@config.moth/@config.moth"), "value #= 1").unwrap();
+    fs::write(root.join("docs/@config.mtf"), "unrelated content").unwrap();
+    fs::write(root.join("@config.moth"), "value #= 2").unwrap();
+    let declaring_source = h.declaring_source();
+
+    for components in [
+        ["docs", "@config.moth", "@config"].as_slice(),
+        ["docs", "@config.moth", "missing"].as_slice(),
+        ["@config.moth", "value"].as_slice(),
+    ] {
+        let path = h.make_path(components);
+        let error = h
+            .resolver
+            .resolve_dependency_to_source_file(
+                path,
+                &h.path_fork,
+                &declaring_source,
+                &mut h.string_table,
+            )
+            .expect_err("reserved config is not a dependency candidate");
+        let diagnostics = typed_dependency_diagnostic(error);
+        assert_eq!(
+            dependency_view(&diagnostics).descriptor().code,
+            "MOTH-IMPORT-0005"
+        );
+    }
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(
+            "../../@config.moth",
+            root.join("docs/@config.moth/alias.moth"),
+        )
+        .unwrap();
+        let path = h.make_path(&["docs", "@config.moth", "alias"]);
+        let error = h
+            .resolver
+            .resolve_dependency_to_source_file(
+                path,
+                &h.path_fork,
+                &declaring_source,
+                &mut h.string_table,
+            )
+            .expect_err("a symlink must not import the reserved config source");
+        let diagnostics = typed_dependency_diagnostic(error);
+        assert_eq!(
+            dependency_view(&diagnostics).descriptor().code,
+            "MOTH-IMPORT-0008"
+        );
+    }
+}
+
+#[test]
 fn direct_moth_template_extension_dependency_is_rejected_as_source_extension() {
     let mut h = TestHarness::new();
     fs::create_dir_all(h.project_root.join("src/docs")).unwrap();

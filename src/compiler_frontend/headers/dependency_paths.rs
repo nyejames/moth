@@ -5,13 +5,15 @@
 //! validation belongs to the header stage rather than AST body parsing. Until a real
 //! normalisation transform exists, the retained path is the validated authored path.
 
+use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::InvalidImportPathReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::projects::settings::CONFIG_FILE_NAME;
 
 pub(super) fn validate_dependency_path(
     dependency_path: PathId,
@@ -39,11 +41,8 @@ pub(super) fn validate_dependency_path(
     }
 
     let mut components = Vec::new();
-    path_fork.resolve_components(dependency_path, &mut components);
-    if components
-        .iter()
-        .any(|component| string_table.resolve(*component).ends_with(".moth"))
-    {
+    let components = path_fork.resolve_components(dependency_path, &mut components);
+    if has_explicit_moth_extension(components, string_table) {
         return Err(imports::explicit_moth_extension(
             dependency_path,
             Some(*path_span),
@@ -76,4 +75,13 @@ pub(super) fn validate_dependency_path(
     }
 
     Ok(())
+}
+
+/// True for an explicit `.moth` extension, excluding config-named directories.
+pub(super) fn has_explicit_moth_extension(components: &[StringId], strings: &StringTable) -> bool {
+    components.iter().enumerate().any(|(index, &component)| {
+        let name = strings.resolve(component);
+        name.ends_with(SourceFileKind::Moth.extension_suffix())
+            && (name != CONFIG_FILE_NAME || index + 1 == components.len())
+    })
 }

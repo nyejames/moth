@@ -30,6 +30,7 @@ use crate::compiler_frontend::source_packages::root_file::{
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
+use crate::projects::settings::CONFIG_FILE_NAME;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -324,13 +325,13 @@ impl ProjectPathResolver {
                 imports::direct_special_file_import(dependency_path, None),
             ));
         }
-        if let Some(extension) =
-            explicit_source_extension(dependency_path, path_fork, strings.strings())
+        if let Some(kind) =
+            explicit_dependency_source_kind(dependency_path, path_fork, strings.strings())
         {
-            let diagnostic = if extension == SourceFileKind::Moth.extension() {
+            let diagnostic = if kind == SourceFileKind::Moth {
                 imports::explicit_moth_extension(dependency_path.to_owned(), None)
             } else {
-                let extension_id = strings.intern(&extension);
+                let extension_id = strings.intern(kind.extension());
                 imports::explicit_source_extension(dependency_path.to_owned(), extension_id, None)
             };
             return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
@@ -461,27 +462,25 @@ impl ProjectPathResolver {
         SourceFileKind::from_extension(extension)
     }
 }
-fn explicit_source_extension(
+
+/// Check explicit source extensions, treating a non-final config spelling as a directory.
+pub(crate) fn explicit_dependency_source_kind(
     dependency_path: PathId,
     path_fork: &PathInternerFork,
     string_table: &StringTable,
-) -> Option<String> {
+) -> Option<SourceFileKind> {
     let mut scratch = Vec::new();
-    for component in path_fork.resolve_components(dependency_path, &mut scratch) {
-        let segment = string_table.resolve(*component);
-        let Some(extension) = Path::new(segment)
-            .extension()
-            .and_then(|extension| extension.to_str())
-        else {
-            continue;
-        };
-
-        if SourceFileKind::from_extension(extension).is_some() {
-            return Some(extension.to_owned());
-        }
-    }
-
-    None
+    let components = path_fork.resolve_components(dependency_path, &mut scratch);
+    components
+        .iter()
+        .enumerate()
+        .find_map(|(index, &component)| {
+            let name = string_table.resolve(component);
+            if name == CONFIG_FILE_NAME && index + 1 < components.len() {
+                return None;
+            }
+            SourceFileKind::from_extension(Path::new(name).extension()?.to_str()?)
+        })
 }
 
 fn existing_dependency_candidates(candidates: &[DependencyCandidate]) -> Vec<&DependencyCandidate> {

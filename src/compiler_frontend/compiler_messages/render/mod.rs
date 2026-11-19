@@ -1330,7 +1330,7 @@ pub(crate) fn invalid_expression_message(reason: InvalidExpressionReason) -> Str
 
 /// Determine which special file name is referenced by a dependency path.
 ///
-/// WHAT: inspects path components to find the reserved build-only config filename.
+/// WHAT: checks the last component for the reserved build-only config filename.
 /// WHY: the direct-special-file diagnostic covers `@config.moth`, and renderers should name that
 /// file when possible so the author knows which spelling to stop binding directly. Ordinary `@`
 /// root references are caught earlier by the path parser's `LeadingAtInPathComponent` rejection.
@@ -1339,7 +1339,11 @@ pub(crate) fn special_file_name_from_path(
     context: DiagnosticRenderContext<'_>,
 ) -> &'static str {
     let path_text = context.render_path(path);
-    if path_text.split('/').any(file_name_is_config_file) {
+    if path_text
+        .rsplit('/')
+        .next()
+        .is_some_and(file_name_is_config_file)
+    {
         return CONFIG_FILE_NAME;
     }
     "special file"

@@ -43,7 +43,9 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_resolution::{
+    ProjectPathResolver, explicit_dependency_source_kind,
+};
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
@@ -1295,41 +1297,19 @@ fn reject_explicit_source_extension(
     strings: &mut DiagnosticStringBuilder<'_>,
     path_fork: &PathInternerFork,
 ) -> Result<(), DiagnosticDraft> {
-    if let Some(extension) =
-        explicit_source_extension(dependency_path, strings.strings(), path_fork)
+    if let Some(kind) =
+        explicit_dependency_source_kind(dependency_path, path_fork, strings.strings())
     {
-        let diagnostic = if extension == SourceFileKind::Moth.extension() {
+        let diagnostic = if kind == SourceFileKind::Moth {
             imports::explicit_moth_extension(dependency_path, dependency_span)
         } else {
-            let extension_id = strings.intern(&extension);
+            let extension_id = strings.intern(kind.extension());
             imports::explicit_source_extension(dependency_path, extension_id, dependency_span)
         };
         return Err(diagnostic);
     }
 
     Ok(())
-}
-
-/// Check whether any path component carries a recognised source-file extension.
-fn explicit_source_extension(
-    dependency_path: PathId,
-    string_table: &StringTable,
-    path_fork: &PathInternerFork,
-) -> Option<String> {
-    let mut scratch = Vec::new();
-    for component in path_fork.resolve_components(dependency_path, &mut scratch) {
-        let segment = string_table.resolve(*component);
-        let Some(extension) = Path::new(segment)
-            .extension()
-            .and_then(|extension| extension.to_str())
-        else {
-            continue;
-        };
-        if SourceFileKind::from_extension(extension).is_some() {
-            return Some(extension.to_owned());
-        }
-    }
-    None
 }
 
 /// Convert dependency-path components to a portable forward-slash namespace key.

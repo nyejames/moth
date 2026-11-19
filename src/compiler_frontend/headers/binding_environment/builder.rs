@@ -54,9 +54,10 @@ use super::{
     ResolvedQualifiedTarget, SourceDeclarationTarget, SourceDependencyAccess, SourceFunctionTarget,
     SourcePackageBoundaryCheckInput, VisibleNameBinding, VisibleNameRegistry,
     check_alias_case_warning, check_module_boundary, check_source_package_boundary,
-    has_explicit_moth_extension, resolve_dependency_target, resolve_external_package_symbol,
-    resolve_namespace_target, resolve_public_export_boundary,
+    resolve_dependency_target, resolve_external_package_symbol, resolve_namespace_target,
+    resolve_public_export_boundary,
 };
+use crate::compiler_frontend::headers::dependency_paths::has_explicit_moth_extension;
 
 /// Result for the binding-environment builder family.
 ///
@@ -2050,11 +2051,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         source_file: &PathId,
     ) -> BuilderResult<()> {
         // Reject explicit `.moth` extension in dependency paths.
-        if has_explicit_moth_extension(
-            &dependency.dependency.path,
-            self.string_table,
-            &*self.path_fork,
-        ) {
+        let mut components = Vec::new();
+        let components = self
+            .path_fork
+            .resolve_components(dependency.dependency.path, &mut components);
+        if has_explicit_moth_extension(components, self.string_table) {
             return Err(imports::explicit_moth_extension(
                 dependency.dependency.path,
                 Some(dependency.dependency.span),

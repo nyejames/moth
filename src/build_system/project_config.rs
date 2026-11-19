@@ -134,10 +134,15 @@ pub fn load_project_config(
     }
 
     let config_exists = match std::fs::symlink_metadata(&config_path) {
-        // Case-insensitive filesystems resolve `@config.moth` to a differently-cased sibling.
-        // The reserved filename is exact, so only an exactly-named child selects the config.
-        // A case variant falls through to discovery's invalid-root-marker diagnostic.
-        Ok(_) => exact_config_entry_exists(&config.entry_dir)?,
+        Ok(metadata) => {
+            // The reserved filename does not apply to a directory or a directory symlink.
+            if metadata.is_dir() || (metadata.is_symlink() && config_path.is_dir()) {
+                false
+            } else {
+                // The reserved spelling is exact even on case-insensitive filesystems.
+                exact_config_entry_exists(&config.entry_dir)?
+            }
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => {
             return Err(PreparedFailure::from(InfrastructureFailure::filesystem(

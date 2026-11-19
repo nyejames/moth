@@ -48,6 +48,8 @@ A rooted directory has one `ModuleId`, one compilation and one atomic publish-or
 
 A directory containing only `@config.moth` is not rooted. `@config.moth` remains the optional build-only project config and stays outside the module graph. It publishes no API and cannot be imported. A nested `@config.moth` is inert.
 
+The reservation applies to files. A directory named `@config.moth` follows the ordinary directory rules.
+
 A root marker may be a symlink, but every root must resolve to a distinct physical file owned by its module. The visible symlink name decides the role. Two markers cannot alias one file, and a root cannot resolve into another structural module.
 
 ### The root vocabulary is closed

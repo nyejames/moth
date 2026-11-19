@@ -1600,28 +1600,30 @@ fn dangling_config_symlink_diagnoses_instead_of_defaulting() {
 }
 
 #[test]
-fn directory_at_the_selected_config_path_diagnoses_instead_of_defaulting() {
+fn directory_at_the_selected_config_path_uses_defaults() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().join("docs");
     fs::create_dir_all(root.join(settings::CONFIG_FILE_NAME))
         .expect("should create a directory at the config path");
 
     let (config, result) = load_config_for_path_test(&root);
-    assert_config_path_infrastructure_error(
-        result.expect_err("a directory at the config path must not use defaults"),
-        "Error reading file when adding new moth files to parse",
-    );
-    assert_eq!(
-        config.project_name, "",
-        "a non-regular config source must not invent a project name"
-    );
     assert!(
-        fs::metadata(root.join(settings::CONFIG_FILE_NAME))
-            .expect("config path metadata should be readable")
-            .file_type()
-            .is_dir(),
-        "the failure must come from the selected non-regular config entry"
+        result.is_ok(),
+        "a config-named directory is not a config source"
     );
+    assert_eq!(config.project_name, "docs");
+
+    #[cfg(unix)]
+    {
+        let config_path = root.join(settings::CONFIG_FILE_NAME);
+        let target = root.join("ordinary");
+        fs::rename(&config_path, &target).unwrap();
+        std::os::unix::fs::symlink(&target, &config_path).unwrap();
+
+        let (config, result) = load_config_for_path_test(&root);
+        assert!(result.is_ok(), "a directory symlink is not a config source");
+        assert_eq!(config.project_name, "docs");
+    }
 }
 
 #[cfg(unix)]

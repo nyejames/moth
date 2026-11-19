@@ -21,9 +21,7 @@ use crate::compiler_frontend::paths::file_references::{
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
-use crate::compiler_frontend::source_packages::root_file::{
-    file_name_is_config_file, file_name_is_module_root_file,
-};
+use crate::compiler_frontend::source_packages::root_file::file_name_is_module_root_file;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -809,16 +807,9 @@ fn invalid_components_failure(
 /// Only non-final components are proven directories: a final `_helper.moth` is an ordinary source
 /// file and a final `@config.moth` is a source-kind value owned by AST. The check stays lexical so
 /// resolution rejects the path before an unindexed target reaches the source index or an excluded
-/// subtree gains a resource record or missing-target watch. The reserved config directory is
-/// tested first because it is the more specific reason when both rules match.
+/// subtree gains a resource record or missing-target watch.
 fn authored_directory_exclusion(components: &[String]) -> Option<InvalidCompileTimePathReason> {
     let (_, directories) = components.split_last()?;
-    if directories
-        .iter()
-        .any(|component| file_name_is_config_file(component))
-    {
-        return Some(InvalidCompileTimePathReason::ReservedConfigDirectory);
-    }
     if directories
         .iter()
         .any(|component| component.starts_with('_'))
