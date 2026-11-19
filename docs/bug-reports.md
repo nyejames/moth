@@ -27,13 +27,6 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: a selected `@entry.moth` or `@mod.moth` builds a `ProjectModuleGraph` and project namespaces only to validate reserved-root claims, then discards them. The registered-prefix collision probe for an ordinary selected file can list the same parent directories again for each registered source package prefix. No user-visible cost has been measured.
 - Investigate only if measurements show a material cost. Bounded single-file mode uses the graph and namespaces to validate reserved-root claims, then discards them. Later synthetic traversal resolves dependencies from inventory keys and filesystem facts, so there are no later project namespaces to reuse. For ordinary files, the prefix probe already shares the root listing. Measure repeated listings below that root before grouping prefixes by shared parents.
 
-### HTML `origin` has no URL encoding contract
-
-- Found: portable path display hardening dev-server URL review, 2026-11.
-- Where: `validate_origin`, `prefix_origin`, `strip_origin_prefix` and `origin_root_url` in `src/projects/routing.rs`. The dev server strips the origin from the raw request path in `src/projects/dev_server/http.rs` before percent-decoding the site-local path.
-- Observed: validation accepts spaces, Unicode and `%` in the `origin` setting. Emitted URLs use the authored spelling verbatim, so a browser requests `/caf%C3%A9/...` for origin `/café` and the dev server's literal prefix match returns 404. It is undefined whether an authored `%20` is already encoded text or a literal percent.
-- Investigate: choose one rule, either restrict origin segments to URL-safe characters or treat the authored origin as decoded text and encode it on emission. Apply the same rule to the dev server prefix match and add loopback coverage.
-
 ### Mutable alias declarations accept an immutable source
 
 - Found: mutable `~` summary fix review, 2026-11. Design conflict between canonical docs and implementation.

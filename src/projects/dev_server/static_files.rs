@@ -5,7 +5,7 @@
 //! the request URL boundary: request paths are percent-decoded once before lookup and redirect
 //! locations re-encode the decoded page name.
 
-use crate::build_system::output::{parse_native_relative_path, percent_encode_url_segment};
+use crate::build_system::output::{parse_native_relative_path, percent_encode_url_path};
 use crate::projects::dev_server::dev_client::{DEV_CLIENT_MARKER, dev_client_snippet};
 use crate::projects::dev_server::state::{ServedArtifactSnapshot, ServedHtmlEntrySnapshot};
 use crate::projects::routing::{HtmlSiteConfig, PageUrlStyle, prefix_origin};
@@ -232,22 +232,6 @@ fn hex_digit_value(byte: u8) -> Option<u8> {
     }
 }
 
-/// Encode one decoded site-local URL path for a redirect `Location` header.
-///
-/// WHAT: percent-encodes every path segment while preserving `/` separators.
-/// WHY: redirects echo a decoded request path, but browsers require the encoded URL spelling for
-/// names containing spaces, `%`, `#` or non-ASCII characters.
-fn encode_url_path(decoded_path: &str) -> String {
-    let mut encoded = String::with_capacity(decoded_path.len());
-    for (index, segment) in decoded_path.split('/').enumerate() {
-        if index > 0 {
-            encoded.push('/');
-        }
-        encoded.push_str(&percent_encode_url_segment(segment));
-    }
-    encoded
-}
-
 /// Resolve a request using the effective HTML routing policy from the latest successful build.
 ///
 /// WHAT: decodes the raw site-local request path once, applies strict path sanitization, exact-file
@@ -434,7 +418,7 @@ fn canonical_redirect_target(
     } else {
         Some(prefix_origin(
             origin,
-            &encode_url_path(&site_local_canonical),
+            &percent_encode_url_path(&site_local_canonical),
         ))
     }
 }
@@ -458,7 +442,7 @@ fn index_alias_redirect_target(page_base: &str, style: PageUrlStyle, origin: &st
         }
     };
 
-    prefix_origin(origin, &encode_url_path(&site_local_target))
+    prefix_origin(origin, &percent_encode_url_path(&site_local_target))
 }
 
 fn directory_url(page_base: &str) -> String {

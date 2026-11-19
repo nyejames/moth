@@ -9,5 +9,5 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["href=\"/moth/\"", "href=\"/moth/docs/\""]
-must_not_contain = ["/moth/moth/", "href=\"/docs/\""]
+must_contain = ["href=\"/caf%C3%A9%20docs/%2520/\"", "href=\"/caf%C3%A9%20docs/%2520/docs/\""]
+must_not_contain = ["/caf%C3%A9%20docs/%2520/caf%C3%A9%20docs/%2520/", "href=\"/docs/\""]

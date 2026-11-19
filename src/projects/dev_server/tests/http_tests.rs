@@ -1,8 +1,12 @@
 //! Tests for dev-server HTTP routing during successful and failed builds.
 
 use super::{PreparedResponse, handle_connection_with_timeouts, prepare_static_response};
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_support::await_worker_completion;
 use crate::projects::dev_server::state::{BuildState, DevServerState};
+use crate::projects::routing::parse_html_site_config;
+use crate::projects::settings::Config;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -355,7 +359,16 @@ fn encoded_loopback_targets_resolve_and_redirect_with_encoded_locations() {
     fs::create_dir_all(output_dir.join("about us")).expect("should create page dir");
     fs::write(output_dir.join("about us/index.html"), "<h1>about</h1>").expect("should write page");
 
-    let build_state = configure_build_state(&output_dir, Some(PathBuf::from("index.html")), true);
+    let mut build_state =
+        configure_build_state(&output_dir, Some(PathBuf::from("index.html")), true);
+    let mut config = Config::new(root);
+    config
+        .builder_settings
+        .set_string("html", "origin", String::from("/Café docs/%20"), None);
+    let mut strings = StringTable::new();
+    build_state.html_site_config =
+        parse_html_site_config(&config, &mut DiagnosticStringBuilder::new(&mut strings))
+            .expect("decoded origin should parse");
     let state = DevServerState::new(output_dir);
     *state
         .build_state
@@ -365,7 +378,7 @@ fn encoded_loopback_targets_resolve_and_redirect_with_encoded_locations() {
 
     let server_state = Arc::clone(&state);
     let server_thread = thread::spawn(move || {
-        for _ in 0..3 {
+        for _ in 0..5 {
             let (stream, _) = listener.accept().expect("should accept client");
             handle_connection_with_timeouts(
                 stream,
@@ -377,27 +390,39 @@ fn encoded_loopback_targets_resolve_and_redirect_with_encoded_locations() {
         }
     });
 
-    let asset_response = loopback_get(address, "/docs/hello%20world.txt");
+    let asset_response = loopback_get(address, "/Caf%c3%a9%20docs/%2520/docs/hello%20world.txt");
     assert!(
         asset_response.starts_with("HTTP/1.1 200 OK"),
         "{asset_response}"
     );
     assert!(asset_response.ends_with("spaced asset"), "{asset_response}");
 
-    let redirect_response = loopback_get(address, "/about%20us");
+    let redirect_response = loopback_get(address, "/Caf%C3%A9%20docs/%2520/about%20us");
     assert!(
         redirect_response.starts_with("HTTP/1.1 302 FOUND"),
         "{redirect_response}"
     );
     assert!(
-        redirect_response.contains("Location: /about%20us/\r\n"),
+        redirect_response.contains("Location: /Caf%C3%A9%20docs/%2520/about%20us/\r\n"),
         "{redirect_response}"
     );
 
-    let malformed_response = loopback_get(address, "/bad%FF.txt");
+    let malformed_response = loopback_get(address, "/Caf%C3%A9%20docs/%2520/bad%FF.txt");
     assert!(
         malformed_response.starts_with("HTTP/1.1 400 BAD REQUEST"),
         "{malformed_response}"
+    );
+
+    let root_response = loopback_get(address, "/");
+    assert!(
+        root_response.contains("Location: /Caf%C3%A9%20docs/%2520/\r\n"),
+        "{root_response}"
+    );
+
+    let outside_origin = loopback_get(address, "/Caf%C3%A9%20docs/%2520%2Fdocs/hello%20world.txt");
+    assert!(
+        outside_origin.starts_with("HTTP/1.1 404 NOT FOUND"),
+        "{outside_origin}"
     );
 
     server_thread.join().expect("server thread should finish");

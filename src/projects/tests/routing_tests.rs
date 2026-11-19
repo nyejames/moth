@@ -156,6 +156,13 @@ fn parser_rejects_invalid_origin() {
         .builder_settings
         .set_string("html", "origin", String::from("/?x=1"), None);
     assert_origin_value_rejection(&config, &mut string_table, "/?x=1");
+
+    for invalid_value in ["//host", "/nested//empty", "/a/./b", "/../b", "/a\nb"] {
+        config
+            .builder_settings
+            .set_string("html", "origin", invalid_value.to_owned(), None);
+        assert_origin_value_rejection(&config, &mut string_table, invalid_value);
+    }
 }
 
 #[test]
