@@ -70,16 +70,11 @@ eval_tokens |tokens {Token}| -> F64:
 
 apply_binary |stack ~{F64}, op_name String|:
     if stack.length() >= 2:
-        b = stack.get(1) catch:
+        -- `get` results alias stack storage, so take the operands from `remove`.
+        b = ~stack.remove(1) catch:
             then 0.0
         ;
-        a = stack.get(0) catch:
-            then 0.0
-        ;
-        removed_b = ~stack.remove(1) catch:
-            then 0.0
-        ;
-        removed_a = ~stack.remove(0) catch:
+        a = ~stack.remove(0) catch:
             then 0.0
         ;
         result = compute_binary(a, b, op_name)
@@ -108,10 +103,7 @@ compute_binary |a F64, b F64, op_name String| -> F64:
 
 apply_neg |stack ~{F64}|:
     if stack.length() > 0:
-        a = stack.get(0) catch:
-            then 0.0
-        ;
-        removed = ~stack.remove(0) catch:
+        a = ~stack.remove(0) catch:
             then 0.0
         ;
         ~stack.push(0.0 - a)
