@@ -124,8 +124,12 @@ fn summary_directory_command_round_trips_in_powershell() {
     std::fs::create_dir(&report.project_path).unwrap();
     // A marker proves the shell reached the project directory without comparing path spellings:
     // a CI temp directory can sit under an 8.3 short name such as `RUNNER~1`, which PowerShell
-    // need not report in the spelling the path was created with.
-    std::fs::write(report.project_path.join("moth-test-marker"), "").unwrap();
+    // need not report in the spelling the path was created with. The probe resolves the marker
+    // with .NET from PowerShell's provider path rather than through a relative PowerShell path:
+    // Windows PowerShell resolves relative paths against a current location containing `[`, `]`
+    // or a backtick through wildcard-aware code, which can miss a file that exists.
+    let marker = "moth-test-marker";
+    std::fs::write(report.project_path.join(marker), "").unwrap();
 
     let summary = render_summary(&report, Some(temp.path()));
     let command = summary
@@ -134,17 +138,29 @@ fn summary_directory_command_round_trips_in_powershell() {
         .unwrap();
     let script = format!(
         "$ErrorActionPreference = 'Stop'; {command}; \
-         if (-not (Test-Path -LiteralPath 'moth-test-marker' -PathType Leaf)) {{ \
-         [Console]::Error.WriteLine((Get-Location).ProviderPath); exit 1 }}"
+         $location = (Get-Location).ProviderPath; \
+         if (-not [System.IO.File]::Exists([System.IO.Path]::Combine($location, '{marker}'))) {{ \
+         [Console]::Error.WriteLine(($location.ToCharArray() | ForEach-Object {{ [int]$_ }}) -join ' '); \
+         [System.IO.Directory]::GetFileSystemEntries($location) | ForEach-Object {{ [Console]::Error.WriteLine($_) }}; \
+         exit 1 }}"
     );
     let output = std::process::Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", &script])
         .current_dir(temp.path())
         .output()
         .unwrap();
+    let expected_code_points = report
+        .project_path
+        .to_str()
+        .unwrap()
+        .encode_utf16()
+        .map(|unit| unit.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
     assert!(
         output.status.success(),
-        "stdout: {}\nstderr: {}",
+        "command: {command}\nexpected UTF-16 code units: {expected_code_points}\n\
+         stdout: {}\nstderr (location UTF-16 code units, then entries): {}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
