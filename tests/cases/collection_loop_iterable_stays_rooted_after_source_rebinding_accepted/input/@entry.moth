@@ -1,0 +1,14 @@
+-- A collection loop captures its iterable storage once. Rebinding the holder inside the body must
+-- not switch later iterations to the replacement field.
+
+Holder = | rows {{I32}} |
+
+probe ||:
+    holder ~= Holder({{1}, {2, 3}})
+    loop holder.rows |row, index|:
+        ~holder = Holder({{4, 5}, {6, 7, 8}})
+        io.line([:row [index] has [row.length()]])
+    ;
+;
+
+probe()

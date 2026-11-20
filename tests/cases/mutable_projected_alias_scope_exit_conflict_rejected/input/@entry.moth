@@ -1,0 +1,25 @@
+-- A projected alias declared inside a branch keeps observing the allocation its holder held at
+-- binding time even after the block-local binding that introduced that allocation leaves scope.
+-- The holder and alias survive the branch, so the allocation is still reachable and a later
+-- write through the holder conflicts with the alias.
+
+Pair = | first {I32}, second {I32} |
+
+identity |value Pair| -> Pair:
+    return value
+;
+
+probe |flag Bool| -> I32:
+    holder ~= Pair({9}, {0})
+    writer ~= {3}
+    if flag:
+        scoped ~= Pair({1}, {0})
+        ~holder = identity(scoped)
+        ~writer = holder.first
+    ;
+    ~holder.first = {2, 3}
+    return writer.length()
+;
+
+result = probe(flag = true)
+io.line([: [result]])

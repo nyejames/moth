@@ -43,21 +43,6 @@ impl<'hir> JsEmitter<'hir> {
             })
     }
 
-    pub(crate) fn local_is_mutable(
-        &self,
-        local_id: LocalId,
-    ) -> Result<bool, InfrastructureFailure> {
-        self.local_mutable_by_id
-            .get(&local_id)
-            .copied()
-            .ok_or_else(|| {
-                InfrastructureFailure::internal(
-                    CompilerStage::BackendLowering,
-                    format!("JavaScript backend: missing local mutability for {local_id:?}"),
-                )
-            })
-    }
-
     pub(crate) fn field_name(&self, field_id: FieldId) -> Result<&str, InfrastructureFailure> {
         self.field_name_by_id
             .get(&field_id)

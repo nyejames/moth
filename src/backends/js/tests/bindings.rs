@@ -818,7 +818,7 @@ fn computed_place_read_composes_with_bs_read() {
 // Projected place definition tests [computed] [alias]
 // ---------------------------------------------------------------------------
 
-/// One lowered definition of a local from a projected struct place.
+/// One lowered definition of a local from a projected place.
 struct ProjectedDefinitionLowering {
     source: String,
     alias_name: String,
@@ -826,15 +826,14 @@ struct ProjectedDefinitionLowering {
     field_names: Vec<String>,
 }
 
-/// Lowers a definition whose value is a projected place over one struct holder.
+/// Lowers a definition whose value is a projected place over one holder.
 ///
-/// WHY: the projected-definition tests differ only in destination mutability, projection depth
-/// and scalar or collection destination, so one scaffold keeps the module, symbol and field setup
-/// in one place.
+/// WHAT: `projected_fields` names the field chain; `None` lowers an index projection instead.
+/// WHY: field, nested-field and index definitions share the module, symbol and field setup, and
+///      one rooting rule must cover every projection shape.
 fn lower_projected_definition(
-    destination_mutable: bool,
     destination_type: impl FnOnce(&TypeIds) -> TypeId,
-    projected_fields: &[FieldId],
+    projected_fields: Option<&[FieldId]>,
 ) -> ProjectedDefinitionLowering {
     let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
@@ -843,10 +842,20 @@ fn lower_projected_definition(
 
     let destination_type = destination_type(&types);
     let mut place = HirPlace::local(LocalId(0));
-    for field in projected_fields {
-        place = place
-            .with_field(*field, &mut expressions, None)
-            .expect("test field projection should fit");
+    match projected_fields {
+        Some(fields) => {
+            for field in fields {
+                place = place
+                    .with_field(*field, &mut expressions, None)
+                    .expect("test field projection should fit");
+            }
+        }
+        None => {
+            let index = i32_expression(0, types.i32, RegionId(0), &mut expressions);
+            place = place
+                .with_index(index, &mut expressions, None)
+                .expect("test index projection should fit");
+        }
     }
 
     let assignment = statement(
@@ -863,13 +872,13 @@ fn lower_projected_definition(
         },
     );
 
-    let mut alias_local = local(1, destination_type, RegionId(0));
-    alias_local.mutable = destination_mutable;
-
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![local(0, types.i32, RegionId(0)), alias_local],
+        locals: vec![
+            local(0, types.i32, RegionId(0)),
+            local(1, destination_type, RegionId(0)),
+        ],
         statements: vec![assignment],
         terminator: HirTerminator::Return(HirValueRange::empty()),
     };
@@ -894,20 +903,22 @@ fn lower_projected_definition(
         &[(LocalId(0), "holder"), (LocalId(1), "alias")],
     );
 
-    module.structs = vec![HirStruct {
-        id: StructId(0),
-        frontend_type_id: types.i32,
-        fields: projected_fields
-            .iter()
-            .map(|field| HirField {
-                id: *field,
-                ty: destination_type,
-            })
-            .collect(),
-    }];
+    if let Some(fields) = projected_fields {
+        module.structs = vec![HirStruct {
+            id: StructId(0),
+            frontend_type_id: types.i32,
+            fields: fields
+                .iter()
+                .map(|field| HirField {
+                    id: *field,
+                    ty: destination_type,
+                })
+                .collect(),
+        }];
+    }
 
     let mut field_names = Vec::new();
-    for (index, field) in projected_fields.iter().enumerate() {
+    for (index, field) in projected_fields.unwrap_or(&[]).iter().enumerate() {
         let leaf_name = format!("field{index}");
         module.side_table.bind_field_name(
             *field,
@@ -936,25 +947,10 @@ fn lower_projected_definition(
     }
 }
 
-/// Verifies that an immutable definition from a projected place snapshots the field storage. [computed]
+/// Verifies that a projected field definition keeps a rooted computed alias. [computed]
 #[test]
-fn immutable_projected_definition_snapshots_storage() {
-    let lowered = lower_projected_definition(false, |types| types.collection_i32, &[FieldId(0)]);
-    let field_name = &lowered.field_names[0];
-
-    assert!(
-        lowered.source.contains(&format!(
-            "{} = __moth_binding(__moth_read(__moth_field({}, \"{field_name}\")));",
-            lowered.alias_name, lowered.holder_name
-        )),
-        "an immutable projected definition must read the referenced storage once at binding time"
-    );
-}
-
-/// Verifies that a mutable definition from a projected place keeps the computed alias. [computed]
-#[test]
-fn mutable_projected_definition_keeps_computed_alias() {
-    let lowered = lower_projected_definition(true, |types| types.collection_i32, &[FieldId(0)]);
+fn projected_field_definition_keeps_rooted_computed_alias() {
+    let lowered = lower_projected_definition(|types| types.collection_i32, Some(&[FieldId(0)]));
     let field_name = &lowered.field_names[0];
 
     assert!(
@@ -962,41 +958,39 @@ fn mutable_projected_definition_keeps_computed_alias() {
             "{} = __moth_alias_binding(__moth_field({}, \"{field_name}\"));",
             lowered.alias_name, lowered.holder_name
         )),
-        "a mutable projected definition must keep resolving its referent for write-through"
+        "a projected definition must alias the computed place that captured its base storage"
     );
 }
 
-/// Verifies that a nested projection snapshots the innermost field. [computed]
+/// Verifies that a nested projection aliases the innermost captured field storage. [computed]
 #[test]
-fn immutable_nested_projected_definition_snapshots_storage() {
+fn nested_projected_definition_keeps_rooted_computed_alias() {
     let lowered = lower_projected_definition(
-        false,
         |types| types.collection_i32,
-        &[FieldId(0), FieldId(1)],
+        Some(&[FieldId(0), FieldId(1)]),
     );
     let outer_field = &lowered.field_names[0];
     let inner_field = &lowered.field_names[1];
 
     assert!(
         lowered.source.contains(&format!(
-            "{} = __moth_binding(__moth_read(__moth_field(__moth_field({}, \"{outer_field}\"), \"{inner_field}\")));",
+            "{} = __moth_alias_binding(__moth_field(__moth_field({}, \"{outer_field}\"), \"{inner_field}\"));",
             lowered.alias_name, lowered.holder_name
         )),
-        "a nested immutable projection must snapshot the innermost field value"
+        "a nested projection must compose rooted field references to the innermost storage"
     );
 }
 
-/// Verifies that a scalar field definition snapshots the scalar value. [computed]
+/// Verifies that an index-projected definition keeps a rooted computed alias. [computed]
 #[test]
-fn immutable_scalar_field_definition_snapshots_value() {
-    let lowered = lower_projected_definition(false, |types| types.i32, &[FieldId(0)]);
-    let field_name = &lowered.field_names[0];
+fn index_projected_definition_keeps_rooted_computed_alias() {
+    let lowered = lower_projected_definition(|types| types.collection_i32, None);
 
     assert!(
         lowered.source.contains(&format!(
-            "{} = __moth_binding(__moth_read(__moth_field({}, \"{field_name}\")));",
+            "{} = __moth_alias_binding(__moth_index({}, 0));",
             lowered.alias_name, lowered.holder_name
         )),
-        "an immutable scalar projection must snapshot the copied scalar value"
+        "an index-projected definition must alias the computed element that captured its base"
     );
 }

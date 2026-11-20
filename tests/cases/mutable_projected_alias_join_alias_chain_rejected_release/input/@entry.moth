@@ -1,0 +1,27 @@
+-- A whole-binding alias transports the holder value through one more binding. A joined fresh
+-- alternative cannot be named through that transport, so the projected write target keeps the
+-- holder cell as the conservative identity. The shared read then conflicts with the live alias.
+
+Pair = | first {I32}, second {I32} |
+
+identity |value Pair| -> Pair:
+    return value
+;
+
+probe |flag Bool| -> I32:
+    original ~= Pair({4}, {0})
+    holder ~= identity(original)
+    snap ~= Pair({9}, {0})
+    if flag:
+        ~holder = Pair({1}, {0})
+        ~snap = identity(holder)
+    ;
+    other ~= holder
+    writer ~= other.first
+    view = snap.first
+    ~writer = {2, 3, 4}
+    return view.length()
+;
+
+result = probe(flag = true)
+io.line([: [result]])

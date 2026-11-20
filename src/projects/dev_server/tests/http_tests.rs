@@ -449,7 +449,7 @@ fn bare_origin_redirects_to_the_trailing_slash_root_and_keeps_the_query() {
 
     let state = state_with_origin(root, &output_dir, "/café docs");
     let server_thread =
-        spawn_loopback_request_server(listener, state, 5, Duration::from_millis(200));
+        spawn_loopback_request_server(listener, state, 6, Duration::from_millis(200));
 
     // Lowercase escape spelling is valid in a request and redirects to the canonical origin.
     let bare_response = loopback_get(address, "/caf%c3%a9%20docs");
@@ -470,6 +470,17 @@ fn bare_origin_redirects_to_the_trailing_slash_root_and_keeps_the_query() {
     assert!(
         query_response.contains("Location: /caf%C3%A9%20docs/?tab=docs\r\n"),
         "{query_response}"
+    );
+
+    // Percent-encoded query data is valid request text and must survive the redirect unchanged.
+    let encoded_query_response = loopback_get(address, "/caf%C3%A9%20docs?tab=a%20b&ref=caf%C3%A9");
+    assert!(
+        encoded_query_response.starts_with("HTTP/1.1 302 FOUND"),
+        "{encoded_query_response}"
+    );
+    assert!(
+        encoded_query_response.contains("Location: /caf%C3%A9%20docs/?tab=a%20b&ref=caf%C3%A9\r\n"),
+        "{encoded_query_response}"
     );
 
     let origin_root_response = loopback_get(address, "/caf%C3%A9%20docs/");
@@ -498,6 +509,40 @@ fn bare_origin_redirects_to_the_trailing_slash_root_and_keeps_the_query() {
         unrelated_root_response.contains("Location: /caf%C3%A9%20docs/\r\n"),
         "{unrelated_root_response}"
     );
+
+    server_thread.join().expect("server thread should finish");
+}
+
+#[test]
+fn raw_control_characters_in_request_targets_are_rejected() {
+    let Some(listener) = bind_loopback_listener() else {
+        return;
+    };
+    let address = listener
+        .local_addr()
+        .expect("listener should report bound address");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let output_dir = root.join("dev");
+    fs::create_dir_all(&output_dir).expect("should create output dir");
+    fs::write(output_dir.join("index.html"), "<html></html>").expect("should write root page");
+
+    let state = state_with_origin(root, &output_dir, "/café docs");
+    let server_thread =
+        spawn_loopback_request_server(listener, state, 2, Duration::from_millis(200));
+
+    // Both targets are bare-origin redirects whose query would otherwise reach the `Location`
+    // header with the raw control byte intact.
+    for request_target in [
+        "/caf%C3%A9%20docs?tab=a\u{0}b",
+        "/caf%C3%A9%20docs?tab=a\u{7f}b",
+    ] {
+        let response = loopback_get(address, request_target);
+        assert!(
+            response.starts_with("HTTP/1.1 400 BAD REQUEST"),
+            "{request_target:?} should be rejected: {response:?}"
+        );
+    }
 
     server_thread.join().expect("server thread should finish");
 }

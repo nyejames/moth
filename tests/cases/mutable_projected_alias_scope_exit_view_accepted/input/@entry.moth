@@ -1,0 +1,23 @@
+-- A projected alias survives the block that introduced its allocation. The view stays usable
+-- after the block-local binding leaves scope because the value is still reachable through the
+-- surviving holder and alias.
+
+Pair = | first {I32}, second {I32} |
+
+identity |value Pair| -> Pair:
+    return value
+;
+
+probe || -> I32:
+    holder ~= Pair({9}, {0})
+    writer ~= {3}
+    if true:
+        scoped ~= Pair({1}, {0})
+        ~holder = identity(scoped)
+        ~writer = holder.first
+    ;
+    return writer.length()
+;
+
+result = probe()
+io.line([: [result]])

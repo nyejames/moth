@@ -2,7 +2,7 @@ Project and builder settings are ordinary top-level compile-time constants in an
 
 `@config.moth` is one self-contained compile-time source at the selected project root. It has no source dependencies, package resolution or authored file-value paths. A nested `@config.moth` is inert to an enclosing build.
 
-`@config.moth` is a reserved compiler filename, not a module root. It has no normal or support facade, entry, export surface or importable namespace. Selecting it for single-file compilation is rejected. Case variants such as `@Config.moth` are invalid. An ordinary helper named `config.moth` keeps ordinary source rules, so a dependency path such as `@config` resolves that helper and never the build-only file.
+`@config.moth` is a reserved compiler filename, not a module root. It has no normal or support facade, entry, export surface or importable namespace. Selecting it for single-file compilation is rejected. Case variants such as `@Config.moth` are invalid. An ordinary helper named `config.moth` keeps ordinary source rules, so a dependency path such as `@config` resolves that helper and never the build-only file. When `@config.moth` is a symlink to another file in the project, such as `actual_config.moth`, that target is the config source, not an ordinary module or helper. File-value references that resolve to it are rejected as reserved (`MOTH-RULE-0063`).
 
 ### Named project and builder records
 

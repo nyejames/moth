@@ -1,0 +1,31 @@
+-- A loop back edge can introduce a freshly built holder value on one path. The joined value
+-- cannot name every alternative precisely, so the projected write target keeps the holder cell
+-- and the later shared read conflicts with the live alias.
+
+Pair = | first {I32}, second {I32} |
+
+identity |value Pair| -> Pair:
+    return value
+;
+
+probe |flag Bool| -> I32:
+    original ~= Pair({4}, {0})
+    holder ~= identity(original)
+    snap ~= Pair({9}, {0})
+    step ~= 0
+    loop step < 1:
+        if flag:
+            ~holder = Pair({1}, {0})
+            ~snap = identity(holder)
+        ;
+        ~step += 1
+    ;
+    other ~= holder
+    writer ~= other.first
+    view = snap.first
+    ~writer = {2, 3, 4}
+    return view.length()
+;
+
+result = probe(flag = true)
+io.line([: [result]])

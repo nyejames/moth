@@ -96,8 +96,6 @@ impl<'hir> JsEmitter<'hir> {
 
         for block in &self.hir.blocks {
             for local in &block.locals {
-                self.local_mutable_by_id.insert(local.id, local.mutable);
-
                 let raw_name = self
                     .hir
                     .side_table

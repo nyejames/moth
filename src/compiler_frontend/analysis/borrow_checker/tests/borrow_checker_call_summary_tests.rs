@@ -647,8 +647,8 @@ read_view || -> I32:
 /// look-up can silently assert against the wrong function.
 fn named_function_parameter_mutations(
     source: &str,
-    function_names: [&str; 2],
-) -> [Vec<PublicCallMutationEffect>; 2] {
+    function_names: &[&str],
+) -> Vec<Vec<PublicCallMutationEffect>> {
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = path_fork
         .try_intern_portable_path("@entry.moth", &mut string_table)
@@ -663,30 +663,33 @@ fn named_function_parameter_mutations(
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("named function summary fixture should validate");
 
-    function_names.map(|name| {
-        let name_path = path_fork
-            .try_intern_child(entry_path, string_table.intern(name))
-            .expect("test path fits");
-        let function_id = hir
-            .functions
-            .iter()
-            .find(|function| {
-                hir.side_table
-                    .function_name_path(function.id)
-                    .is_some_and(|path| path == name_path)
-            })
-            .unwrap_or_else(|| panic!("{name} should lower to HIR"))
-            .id;
-        report
-            .analysis
-            .public_call_summaries
-            .get(&function_id)
-            .unwrap_or_else(|| panic!("{name} should have a retained call summary"))
-            .parameters
-            .iter()
-            .map(|parameter| parameter.mutation)
-            .collect()
-    })
+    function_names
+        .iter()
+        .map(|name| {
+            let name_path = path_fork
+                .try_intern_child(entry_path, string_table.intern(name))
+                .expect("test path fits");
+            let function_id = hir
+                .functions
+                .iter()
+                .find(|function| {
+                    hir.side_table
+                        .function_name_path(function.id)
+                        .is_some_and(|path| path == name_path)
+                })
+                .unwrap_or_else(|| panic!("{name} should lower to HIR"))
+                .id;
+            report
+                .analysis
+                .public_call_summaries
+                .get(&function_id)
+                .unwrap_or_else(|| panic!("{name} should have a retained call summary"))
+                .parameters
+                .iter()
+                .map(|parameter| parameter.mutation)
+                .collect()
+        })
+        .collect()
 }
 
 fn local_call_mutation_summary_in_order(
@@ -700,7 +703,9 @@ fn local_call_mutation_summary_in_order(
     } else {
         format!("{wrapper}\n{callee}")
     };
-    let [mutator, wrapper] = named_function_parameter_mutations(&source, ["mutator", "wrapper"]);
+    let mut mutations = named_function_parameter_mutations(&source, &["mutator", "wrapper"]);
+    let wrapper = mutations.pop().expect("wrapper summary exists");
+    let mutator = mutations.pop().expect("mutator summary exists");
 
     (mutator[0], wrapper[0])
 }
@@ -741,9 +746,9 @@ fn slot_rebind_of_mutable_parameter_publishes_no_write() {
 
 // WHAT: a write through a mutable binding that may alias a projected parameter field on one
 //       control-flow path publishes a write to that parameter.
-// WHY: the alias's referent is the projection's base cell even though its value provenance is
-//      the old field allocation. Losing that write target at the join would let callers treat
-//      the parameter as read-only and keep a shared alias live across the call.
+// WHY: the alias targets the containing allocation `pair` observed when the assignment stored
+//      the projected value. Losing that target at the join would publish NoWrite and hide the
+//      parameter mutation from summary propagation.
 #[test]
 fn projected_alias_write_at_join_publishes_parameter_mutation() {
     let source = r#"Pair = | first I32, second I32 |
@@ -770,7 +775,8 @@ control |flag Bool, pair ~Pair| -> I32:
     ~writer = 6
     return pair.first
 ;"#;
-    let [shape, control] = named_function_parameter_mutations(source, ["shape", "control"]);
+    let mutations = named_function_parameter_mutations(source, &["shape", "control"]);
+    let (shape, control) = (mutations[0].as_slice(), mutations[1].as_slice());
 
     assert_eq!(
         shape,
@@ -786,6 +792,42 @@ control |flag Bool, pair ~Pair| -> I32:
             PublicCallMutationEffect::NoWrite
         ]
     );
+}
+
+// WHAT: a write through a projected alias of a call-returned holder publishes a write to the
+//       parameter whose allocation the projection is rooted in, and a forwarding wrapper
+//       inherits it.
+// WHY: the holder owns only its binding cell; the containing allocation is the parameter's.
+//      Recording the holder cell publishes NoWrite and loses the mutation in summary
+//      propagation. A whole-cell replacement of the holder stores a new value in that cell and
+//      must stay NoWrite: it does not mutate the value it replaces.
+#[test]
+fn projected_write_through_call_returned_holder_publishes_parameter_mutation() {
+    let source = r#"Pair = | first {I32}, second {I32} |
+
+identity |value Pair| -> Pair:
+    return value
+;
+
+mutator |input ~Pair|:
+    holder ~= identity(input)
+    writer ~= holder.first
+    ~writer = {2, 3}
+;
+
+rebind |input ~Pair|:
+    holder ~= identity(input)
+    ~holder = Pair({2}, {3})
+;
+
+wrapper |value ~Pair|:
+    mutator(~value)
+;"#;
+    let mutations = named_function_parameter_mutations(source, &["mutator", "rebind", "wrapper"]);
+
+    assert_eq!(mutations[0], [PublicCallMutationEffect::Writes]);
+    assert_eq!(mutations[1], [PublicCallMutationEffect::NoWrite]);
+    assert_eq!(mutations[2], [PublicCallMutationEffect::Writes]);
 }
 
 #[test]

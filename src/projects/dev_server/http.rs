@@ -209,6 +209,13 @@ fn parse_request(reader: &mut BufReader<TcpStream>) -> io::Result<Option<HttpReq
         return Err(malformed_request());
     }
 
+    // Request targets reach `Location` headers through the bare-origin and static redirects, so
+    // a raw control character must fail here rather than corrupt the response. Percent-encoded
+    // queries carry the same data without raw control bytes and still pass through unchanged.
+    if path.chars().any(char::is_control) {
+        return Err(malformed_request());
+    }
+
     let mut request = HttpRequest {
         method: method.to_owned(),
         path: path.to_owned(),

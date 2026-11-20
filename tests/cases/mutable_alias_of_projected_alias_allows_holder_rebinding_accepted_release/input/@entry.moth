@@ -1,0 +1,23 @@
+-- The inherited identity is projected storage, not the holder's whole binding cell. A fresh
+-- whole-binding replacement of `holder` remains legal while the alias chain is live, and the old
+-- alias keeps observing the old field while the rebound holder sees its own.
+
+Pair = | first {I32}, second {I32} |
+
+same_pair |value Pair| -> Pair:
+    return value
+;
+
+probe || -> I32:
+    original ~= Pair({1}, {0})
+    holder ~= same_pair(original)
+    writer ~= holder.first
+    view = writer
+    ~holder = Pair({2, 3}, {4})
+    assert(view.length() is 1, "the old view still observes one element")
+    assert(holder.first.length() is 2, "the rebound holder reads its own field")
+    return view.length()
+;
+
+result = probe()
+io.line([: result=[result]])

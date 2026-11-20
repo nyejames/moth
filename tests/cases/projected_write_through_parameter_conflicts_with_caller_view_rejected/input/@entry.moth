@@ -1,0 +1,28 @@
+-- The call mutates `p.first` through a projected alias inside the callee, so a shared view of
+-- that field held by the caller may not remain in use across the call.
+
+Pair = | first {I32}, second {I32} |
+
+identity |value Pair| -> Pair:
+    return value
+;
+
+mutate |parameter ~Pair|:
+    holder ~= identity(parameter)
+    writer ~= holder.first
+    ~writer = {2, 3}
+;
+
+wrap |value ~Pair|:
+    mutate(~value)
+;
+
+caller || -> I32:
+    p ~= Pair(first = {1}, second = {0})
+    view = p.first
+    wrap(~p)
+    return view.length()
+;
+
+result = caller()
+io.line([: [result]])

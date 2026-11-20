@@ -329,6 +329,23 @@ impl BorrowState {
             || (includes_value_roots && self.locals[local_index].value_roots.contains(root_index))
     }
 
+    /// Alias derivation ledger a value read from `source_index` carries into a new binding.
+    ///
+    /// WHAT: the source binding's transitive derivation chain, including the source itself when
+    ///       it is a pure alias.
+    /// WHY: jump arguments and call results transport the same value into a fresh slot. Keeping
+    ///      the ledger on that slot lets reads through it stay exempt from the exclusive alias
+    ///      they derive from instead of looking like foreign accesses. The ledger is a must-set,
+    ///      so a path that did not derive still loses the exemption at a join.
+    pub(super) fn derived_roots_from_source(&self, source_index: usize) -> RootSet {
+        let source_state = &self.locals[source_index];
+        let mut roots = source_state.derived_from_roots.clone();
+        if source_state.is_alias_only() {
+            roots.insert(source_index);
+        }
+        roots
+    }
+
     /// Which sources of `effective_roots` apply to a local: its own allocation root, and its
     /// value roots. The set builder and the membership test both read this one rule.
     fn effective_root_sources(&self, local_index: usize) -> (bool, bool) {
@@ -344,11 +361,11 @@ impl BorrowState {
 
     /// Cells a place rooted at `local_index` designates for access.
     ///
-    /// WHAT: the binding's own cell when it owns storage, plus the cells it aliases and the cells
-    ///       its writes target or inherits as projected overlap identity.
-    /// WHY: a definite slot designates its own cell, an alias designates its referents, and an
-    ///      alias chain of a projected field designates the projection's base cell even though
-    ///      the projected value itself observes an older allocation.
+    /// WHAT: the binding's own cell when it owns storage, plus the cells it aliases and the
+    ///       storage its writes target.
+    /// WHY: a definite slot designates its own cell, a whole-binding alias designates its
+    ///      referents, and a mutable alias of a projection designates the containing allocation
+    ///      observed when it was formed.
     pub(super) fn designated_cells(&self, local_index: usize) -> RootSet {
         let state = &self.locals[local_index];
         let mut cells = RootSet::empty(self.locals.len());
@@ -488,12 +505,15 @@ pub(super) struct LocalState {
     // Binding-cell overlap: the definite slots this binding aliases as a whole binding. These
     // cells decide whole-binding exclusivity and need not be contained in `value_roots`.
     pub direct_alias_roots: RootSet,
-    // Cells a write through this binding targets, plus projected referent cells an immutable
-    // alias inherits from a projection-free alias chain as overlap identity. An alias of a
-    // projection targets the projection's base cell even though the projected value it reads
-    // observes an older allocation, so this is a separate fact from `direct_alias_roots`.
-    // Immutable bindings cannot write through, but inherited targets still identify the storage
-    // they overlap when a mutable alias replaces it.
+    // Storage a write through this binding targets, plus targets an immutable alias inherits
+    // from a projection-free alias chain as overlap identity. A whole-binding alias target is the
+    // source binding cell. A projected alias target is the union of the source binding cell and
+    // the containing allocations the source value observed when the alias formed: the cell keeps
+    // the pre-correction conservative identity (a fresh allocation is represented by its owning
+    // cell or by empty provenance, and that identity does not survive every join or transport),
+    // while the allocation roots publish and overlap the containing allocation family. Immutable
+    // bindings cannot write through, but inherited targets still identify the storage they
+    // overlap when a mutable alias of the chain replaces it.
     pub write_target_roots: RootSet,
     // Must-set of alias bindings this binding was created through, with the full transitive
     // chain. Reads through a derived binding are not foreign accesses to a mutably active alias
@@ -546,8 +566,8 @@ impl LocalState {
 
     /// An alias whose write target differs from its whole-binding overlap identity.
     ///
-    /// WHY: an alias created from a projected place writes through to the projection's base cell
-    /// while its value observes the older allocation under that projection.
+    /// WHY: a whole-binding alias writes through the source binding cells, while an alias created
+    /// from a projected place writes into the containing allocation it observed at binding time.
     pub(super) fn alias_with_cells(
         value_roots: RootSet,
         direct_alias_roots: RootSet,

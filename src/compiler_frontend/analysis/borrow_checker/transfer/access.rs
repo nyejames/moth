@@ -91,11 +91,12 @@ fn check_local_update_access(
     local_state: &LocalState,
     rhs_is_fresh: bool,
 ) -> Result<RootSet, BorrowCheckError> {
-    // Slot writes rebind the binding cell, alias writes target the referent cells recorded for
-    // writes, which include a projected field's base cell, and a joined state must check both
-    // possibilities. Replacing a value does not mutate the value it replaces, so old provenance
-    // never participates in this check. Both source assignments and dedicated call results use
-    // this rule so neither operation can bypass update mutability checks.
+    // Slot writes rebind the binding cell, alias writes target the storage recorded for writes
+    // (a whole-binding cell, or a projection's cell and containing allocation), and a joined
+    // state must check both possibilities. Replacing a value does not mutate the value it
+    // replaces, so old provenance never participates in this check. Both source assignments and
+    // dedicated call results use this rule so neither operation can bypass update mutability
+    // checks.
     //
     // WHY: `contains(SLOT) && !contains(ALIAS)` differs from exact `mode == SLOT` only on an
     // `UNINIT | SLOT` join, which `require_initialized_update_target` rejects first on both
@@ -311,7 +312,7 @@ fn transfer_assign_target(
                 )
             });
             let rhs_write_target_roots = rhs_roots.as_ref().map(|_| {
-                write_target_cells_from_expression(
+                mutable_alias_write_targets_from_expression(
                     layout,
                     state,
                     transfer_context.expressions,
@@ -394,9 +395,10 @@ fn transfer_assign_target(
                                     .unwrap_or_else(|| RootSet::empty(layout.local_count()))
                             } else {
                                 // An immutable alias cannot write through, but a projection-free
-                                // alias of another alias must keep the same projected referent as
-                                // overlap identity. A projected load is different: it captures the
-                                // older allocation, not the base binding cell.
+                                // alias of another alias must keep the same write targets as
+                                // overlap identity. A projected load is different: it observes its
+                                // containing allocation through value provenance, not the base
+                                // binding cell.
                                 inherited_alias_targets_from_expression(
                                     layout,
                                     state,
@@ -961,21 +963,17 @@ fn alias_derivation_roots_from_expression(
     let Some(source_index) = layout.index_of(place.root) else {
         return RootSet::empty(layout.local_count());
     };
-    let source_state = state.local_state(source_index);
-    let mut roots = source_state.derived_from_roots.clone();
-    if source_state.is_alias_only() {
-        roots.insert(source_index);
-    }
-    roots
+    state.derived_roots_from_source(source_index)
 }
 
-/// Projected referent cells an immutable alias inherits from another alias.
+/// Write targets an immutable alias inherits from another alias.
 ///
 /// WHAT: the source alias's write targets for a projection-free load; empty for a projected load
 ///       or a slot source.
-/// WHY: `view = writer` observes the same projected storage as `writer`, so a replacement through
-///      `writer` must see the live view. `old = holder.first` captures the older allocation, not
-///      the holder binding cell, so it must not inherit that overlap identity.
+/// WHY: `view = writer` observes the storage `writer` writes through, so a replacement through
+///      `writer` must see the live view. `old = holder.first` observes its containing allocation
+///      through value provenance rather than the holder binding cell, so it inherits no cell
+///      identity.
 fn inherited_alias_targets_from_expression(
     layout: &FunctionLayout,
     state: &BorrowState,
@@ -996,31 +994,41 @@ fn inherited_alias_targets_from_expression(
     }
 }
 
-/// Cells a write through this expression's place targets.
+/// Storage a mutable alias acquired from this expression writes through.
 ///
-/// WHAT: the source place's designated cells, ignoring any projection that selects a field or
-///       element inside the base.
-/// WHY: a write through an alias of `pair.first` writes the field of whatever value `pair`
-///      currently holds, so the base cell is the target. The projected value the alias reads still
-///      observes the older allocation, which is why this is separate from `direct_alias_roots`.
-fn write_target_cells_from_expression(
+/// WHAT: a whole-binding load targets the source binding's designated cells; a projected load
+///       targets those same cells plus the containing allocation(s) the source value observed at
+///       binding time.
+/// WHY: the cell is the pre-correction conservative identity. A fresh allocation's identity is
+///      encoded as its owning cell or as empty provenance, and that identity cannot be carried
+///      accurately through every join, alias chain, call or scope exit, so keeping the cell
+///      retains the rejections that guard those paths. The allocation roots add the containing
+///      allocation family, which publishes a write through a call-returned holder to the
+///      parameter that owns it and overlaps other holders of the same allocation. A whole-binding
+///      alias always writes through the source binding cells, so it keeps just the cell identity.
+fn mutable_alias_write_targets_from_expression(
     layout: &FunctionLayout,
     state: &BorrowState,
     expressions: &HirExpressionStore,
     expression_id: HirValueId,
 ) -> RootSet {
-    let Some((source_index, _)) = place_load_source(layout, expressions, expression_id) else {
+    let Some((source_index, place)) = place_load_source(layout, expressions, expression_id) else {
         return RootSet::empty(layout.local_count());
     };
-    state.designated_cells(source_index)
+    let mut targets = state.designated_cells(source_index);
+    if !place.projections.is_empty() {
+        targets.union_with(&state.effective_roots(source_index));
+    }
+    targets
 }
 
 /// Roots a shared access to `place` must check for overlap.
 ///
 /// WHAT: the place's value provenance plus the cells it designates for access.
-/// WHY: value provenance alone leaves a cell-only alias with no roots after pruning, and a
-///      projected read designates its base cell even though the projected value observes an older
-///      allocation. Value flow keeps using `roots_for_place`; these roots only feed access checks.
+/// WHY: value provenance alone leaves a cell-only alias with no roots after pruning, and a place
+///      reached through a projected or whole-binding alias also designates the storage that alias
+///      writes through. Value flow keeps using `roots_for_place`; these roots only feed access
+///      checks.
 fn access_roots_for_place(
     layout: &FunctionLayout,
     state: &BorrowState,
@@ -1233,10 +1241,10 @@ fn check_shared_place_read(
     value_span: Option<SourceSpan>,
 ) -> Result<RootSet, BorrowCheckError> {
     // Value facts keep reporting the allocation the read observed. Access overlap also includes
-    // the place's cells. The active-exclusive scan is limited to those binding cells: value
-    // provenance names an allocation the read observes, not a cell it accesses, so a shared alias
-    // derived through an exclusive alias remains readable while that alias is live. Mutating
-    // through the derived alias still conflicts at the mutation's overlap check.
+    // the place's cells. The active-exclusive scan covers both the provenance roots the read
+    // observes and the binding cells the place designates, so a live exclusive alias of either
+    // conflicts unless this read provably derives through it. Mutating through a derived alias
+    // still conflicts at the mutation's overlap check.
     let value_roots = roots_for_place(
         env.layout,
         env.state,

@@ -548,11 +548,18 @@ impl<'a> BorrowChecker<'a> {
                     // value's effective allocation provenance, including a plain source slot's
                     // own root, without turning the destination into a write-through alias view.
                     // Cell identity belongs to the source binding; a fresh jump destination is a
-                    // new binding, so it must not inherit the source's direct alias cells.
-                    LocalState::slot_with_value_roots(
+                    // new binding, so it must not inherit the source's direct alias cells or write
+                    // targets. The derivation ledger travels with the transported value: a read
+                    // through the joined destination still derives from the exclusive alias the
+                    // branch produced it from. The join intersects it, so a path that did not
+                    // derive loses the exemption.
+                    let mut destination = LocalState::slot_with_value_roots(
                         successor_input.effective_roots(source_index),
                         RootSet::empty(layout.local_count()),
-                    )
+                    );
+                    destination.derived_from_roots =
+                        successor_input.derived_roots_from_source(source_index);
+                    destination
                 };
 
                 Ok(destination_state)

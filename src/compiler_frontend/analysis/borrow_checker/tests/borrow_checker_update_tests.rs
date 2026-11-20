@@ -940,6 +940,35 @@ return old.length()
     }
 }
 
+// WHAT: a projected mutable alias keeps the holder cell as a conservative write identity even
+//       when the containing allocation roots are recorded. Rebinding the holder to a fresh value
+//       does not retarget the alias, but reading the rebound holder while the alias is live is
+//       conservatively rejected.
+// WHY: a fresh allocation's identity is its owning cell or empty provenance, and that identity
+//      cannot be transported precisely through joins, alias chains, calls or scope exits. The
+//      holder cell keeps those conflicts rather than losing a live alias. Track the fresh
+//      allocation as an explicit transported root to relax this.
+#[test]
+fn mutable_projected_alias_conservatively_blocks_rebound_holder_read() {
+    let source = r#"
+Pair = | first {I32}, second {I32} |
+same_pair |value Pair| -> Pair:
+return value
+;
+probe || -> I32:
+original ~= Pair(first = {1}, second = {0})
+holder ~= same_pair(original)
+writer ~= holder.first
+~holder = Pair(first = {2}, second = {3})
+read_after = holder.first.length()
+return read_after + writer.length()
+;
+"#;
+    let error = check_source(source)
+        .expect_err("the conservative holder-cell identity must reject the live-alias read");
+    assert_borrow_error_view::<SharedMutableConflictView>(error);
+}
+
 // WHAT: a mutable alias writes through to its referent cell, so its value provenance is not the
 //       destination whose mutability and exclusivity govern the write.
 // WHY: consulting provenance rejected a legal scalar write when the slot stored a produced value

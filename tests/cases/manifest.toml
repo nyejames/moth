@@ -384,6 +384,13 @@ contract = "language.bindings.projected_alias_chain_does_not_alias_whole_binding
 role = "primary"
 
 [[case]]
+id = "mutable_alias_of_projected_alias_allows_holder_rebinding_accepted_release"
+path = "mutable_alias_of_projected_alias_allows_holder_rebinding_accepted_release"
+tags = ["integration", "borrows", "aliases", "release"]
+contract = "language.bindings.projected_alias_chain_does_not_alias_whole_binding"
+role = "boundary"
+
+[[case]]
 id = "mutable_alias_ancestor_view_read_accepted"
 path = "mutable_alias_ancestor_view_read_accepted"
 tags = ["integration", "borrows", "aliases"]
@@ -423,6 +430,62 @@ id = "mutable_alias_source_read_in_shared_call_rejected"
 path = "mutable_alias_source_read_in_shared_call_rejected"
 tags = ["integration", "borrows", "aliases", "diagnostics"]
 contract = "language.bindings.alias_source_read_conflicts_with_live_alias"
+role = "boundary"
+
+[[case]]
+id = "projected_write_through_parameter_visible_to_caller_accepted"
+path = "projected_write_through_parameter_visible_to_caller_accepted"
+tags = ["integration", "borrows", "aliases", "structs"]
+contract = "language.bindings.projected_write_through_parameter_visible_to_caller"
+role = "primary"
+
+[[case]]
+id = "projected_write_through_parameter_visible_to_caller_accepted_release"
+path = "projected_write_through_parameter_visible_to_caller_accepted_release"
+tags = ["integration", "borrows", "aliases", "structs", "release"]
+contract = "language.bindings.projected_write_through_parameter_visible_to_caller"
+role = "boundary"
+
+[[case]]
+id = "projected_write_through_parameter_conflicts_with_caller_view_rejected"
+path = "projected_write_through_parameter_conflicts_with_caller_view_rejected"
+tags = ["integration", "borrows", "aliases", "structs", "diagnostics"]
+contract = "language.bindings.projected_write_through_parameter_conflicts_with_caller_view"
+role = "boundary"
+
+[[case]]
+id = "projected_write_through_parameter_conflicts_with_caller_view_rejected_release"
+path = "projected_write_through_parameter_conflicts_with_caller_view_rejected_release"
+tags = ["integration", "borrows", "aliases", "structs", "diagnostics", "release"]
+contract = "language.bindings.projected_write_through_parameter_conflicts_with_caller_view"
+role = "boundary"
+
+[[case]]
+id = "typed_value_if_derived_alias_read_accepted"
+path = "typed_value_if_derived_alias_read_accepted"
+tags = ["integration", "borrows", "aliases", "control-flow"]
+contract = "language.bindings.typed_value_if_derived_alias_read"
+role = "primary"
+
+[[case]]
+id = "typed_value_if_derived_alias_read_accepted_release"
+path = "typed_value_if_derived_alias_read_accepted_release"
+tags = ["integration", "borrows", "aliases", "control-flow", "release"]
+contract = "language.bindings.typed_value_if_derived_alias_read"
+role = "boundary"
+
+[[case]]
+id = "typed_value_if_mixed_derivation_read_rejected"
+path = "typed_value_if_mixed_derivation_read_rejected"
+tags = ["integration", "borrows", "aliases", "control-flow", "diagnostics"]
+contract = "language.bindings.typed_value_if_mixed_derivation_read_rejected"
+role = "boundary"
+
+[[case]]
+id = "typed_value_if_mixed_derivation_read_rejected_release"
+path = "typed_value_if_mixed_derivation_read_rejected_release"
+tags = ["integration", "borrows", "aliases", "control-flow", "diagnostics", "release"]
+contract = "language.bindings.typed_value_if_mixed_derivation_read_rejected"
 role = "boundary"
 
 [[case]]
@@ -5055,6 +5118,13 @@ contract = "language.bindings.mutable_scalar_alias_write_through_accepted"
 role = "primary"
 
 [[case]]
+id = "mutable_scalar_alias_write_through_accepted_release"
+path = "mutable_scalar_alias_write_through_accepted_release"
+tags = ["integration", "borrows", "functions", "release"]
+contract = "language.bindings.mutable_scalar_alias_write_through_accepted"
+role = "boundary"
+
+[[case]]
 id = "projected_alias_survives_source_rebinding_accepted"
 path = "projected_alias_survives_source_rebinding_accepted"
 tags = ["integration", "borrows", "structs"]
@@ -5062,11 +5132,116 @@ contract = "language.bindings.projected_alias_survives_source_rebinding_accepted
 role = "primary"
 
 [[case]]
+id = "projected_alias_survives_source_rebinding_accepted_release"
+path = "projected_alias_survives_source_rebinding_accepted_release"
+tags = ["integration", "borrows", "structs", "release"]
+contract = "language.bindings.projected_alias_survives_source_rebinding_accepted"
+role = "boundary"
+
+[[case]]
 id = "projected_alias_fresh_write_replaces_shared_origin_accepted"
 path = "projected_alias_fresh_write_replaces_shared_origin_accepted"
 tags = ["integration", "borrows", "collections", "structs"]
 contract = "language.bindings.projected_alias_fresh_write_replaces_shared_origin_accepted"
 role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_stays_rooted_after_rebinding_accepted"
+path = "mutable_projected_alias_stays_rooted_after_rebinding_accepted"
+tags = ["integration", "borrows", "aliases", "structs"]
+contract = "language.bindings.mutable_projected_alias_stays_rooted_after_rebinding"
+role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_stays_rooted_after_rebinding_accepted_release"
+path = "mutable_projected_alias_stays_rooted_after_rebinding_accepted_release"
+tags = ["integration", "borrows", "aliases", "structs", "release"]
+contract = "language.bindings.mutable_projected_alias_stays_rooted_after_rebinding"
+role = "boundary"
+
+[[case]]
+id = "mutable_projected_alias_scope_exit_conflict_rejected"
+path = "mutable_projected_alias_scope_exit_conflict_rejected"
+tags = ["integration", "borrows", "aliases", "structs", "diagnostics"]
+contract = "language.bindings.mutable_projected_alias_scope_exit_conflict"
+role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_scope_exit_conflict_rejected_release"
+path = "mutable_projected_alias_scope_exit_conflict_rejected_release"
+tags = ["integration", "borrows", "aliases", "structs", "diagnostics", "release"]
+contract = "language.bindings.mutable_projected_alias_scope_exit_conflict"
+role = "boundary"
+
+[[case]]
+id = "mutable_projected_alias_scope_exit_view_accepted"
+path = "mutable_projected_alias_scope_exit_view_accepted"
+tags = ["integration", "borrows", "aliases", "structs"]
+contract = "language.bindings.mutable_projected_alias_scope_exit_view"
+role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_scope_exit_view_accepted_release"
+path = "mutable_projected_alias_scope_exit_view_accepted_release"
+tags = ["integration", "borrows", "aliases", "structs", "release"]
+contract = "language.bindings.mutable_projected_alias_scope_exit_view"
+role = "boundary"
+
+[[case]]
+id = "mutable_projected_alias_join_fresh_alternative_rejected"
+path = "mutable_projected_alias_join_fresh_alternative_rejected"
+tags = ["integration", "borrows", "aliases", "structs", "control-flow", "diagnostics"]
+contract = "language.bindings.mutable_projected_alias_join_fresh_alternative"
+role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_join_fresh_alternative_rejected_release"
+path = "mutable_projected_alias_join_fresh_alternative_rejected_release"
+tags = ["integration", "borrows", "aliases", "structs", "control-flow", "diagnostics", "release"]
+contract = "language.bindings.mutable_projected_alias_join_fresh_alternative"
+role = "boundary"
+
+[[case]]
+id = "mutable_projected_alias_join_alias_chain_rejected"
+path = "mutable_projected_alias_join_alias_chain_rejected"
+tags = ["integration", "borrows", "aliases", "structs", "control-flow", "diagnostics"]
+contract = "language.bindings.mutable_projected_alias_join_alias_chain"
+role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_join_alias_chain_rejected_release"
+path = "mutable_projected_alias_join_alias_chain_rejected_release"
+tags = ["integration", "borrows", "aliases", "structs", "control-flow", "diagnostics", "release"]
+contract = "language.bindings.mutable_projected_alias_join_alias_chain"
+role = "boundary"
+
+[[case]]
+id = "mutable_projected_alias_loop_back_edge_rejected"
+path = "mutable_projected_alias_loop_back_edge_rejected"
+tags = ["integration", "borrows", "aliases", "structs", "control-flow", "diagnostics"]
+contract = "language.bindings.mutable_projected_alias_loop_back_edge"
+role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_loop_back_edge_rejected_release"
+path = "mutable_projected_alias_loop_back_edge_rejected_release"
+tags = ["integration", "borrows", "aliases", "structs", "control-flow", "diagnostics", "release"]
+contract = "language.bindings.mutable_projected_alias_loop_back_edge"
+role = "boundary"
+
+[[case]]
+id = "mutable_projected_alias_rebound_holder_while_writer_live_rejected"
+path = "mutable_projected_alias_rebound_holder_while_writer_live_rejected"
+tags = ["integration", "borrows", "aliases", "structs", "diagnostics"]
+contract = "language.bindings.mutable_projected_alias_rebound_holder_while_writer_live"
+role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_rebound_holder_while_writer_live_rejected_release"
+path = "mutable_projected_alias_rebound_holder_while_writer_live_rejected_release"
+tags = ["integration", "borrows", "aliases", "structs", "diagnostics", "release"]
+contract = "language.bindings.mutable_projected_alias_rebound_holder_while_writer_live"
+role = "boundary"
 
 [[case]]
 id = "mutable_alias_live_blocks_whole_binding_write"
@@ -5241,6 +5416,13 @@ id = "loop_body_bindings_rebind_each_iteration"
 path = "loop_body_bindings_rebind_each_iteration"
 tags = ["integration", "control-flow", "collections", "borrows"]
 contract = "language.loops.body_bindings_rebind_each_iteration"
+role = "primary"
+
+[[case]]
+id = "collection_loop_iterable_stays_rooted_after_source_rebinding_accepted"
+path = "collection_loop_iterable_stays_rooted_after_source_rebinding_accepted"
+tags = ["integration", "control-flow", "collections", "borrows", "loops"]
+contract = "language.loops.iterable_stays_rooted_after_source_rebinding"
 role = "primary"
 
 [[case]]

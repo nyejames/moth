@@ -216,7 +216,9 @@ impl<'hir> JsEmitter<'hir> {
     /// WHAT: maps `HirPlace` variants (local, field, index) to the corresponding JS runtime
     /// helper calls (`__moth_field`, `__moth_index`) or a direct local name.
     /// WHY: the JS backend uses runtime helpers for field and index access to preserve its
-    /// reference and aliasing semantics.
+    /// reference and aliasing semantics. Each helper captures the object its base held when it was
+    /// constructed, so a nested `a.b.c` chain roots in the innermost containing object (`a.b`)
+    /// rather than re-resolving the outer binding on every access.
     pub(crate) fn lower_place(
         &mut self,
         place: &HirPlace,
