@@ -40,6 +40,23 @@ Backing is semantic, not a file-format choice. Precompiling or emitting a `MothS
 
 Origin and backing don't change dependency clause syntax or module visibility. Source-backed packages publish their public surface with `$export`. Binding-backed packages expose typed external symbols registered by the builder.
 
+### Foreign implementation trust
+
+Binding-backed implementations have a third independent classification:
+untrusted user-provided code or compiler-authorised trusted code. Trust is
+granted only to official compiler-maintained packages or approved vendored
+Rust libraries exposed through an official Moth package API. It is never
+inferred from Core or Builder naming, SDK registration,
+using Lappet, signatures, a file location or managed package certification.
+
+Trusted implementations declare closed constraint evidence per callable.
+They may explicitly permit fast arithmetic, traps or recoverable failure.
+Unknown user bindings cannot self-declare these guarantees. The compiler
+checks `$safe_math` and `$infallible` through reachable calls, not by excluding
+an entire package because one foreign function is imported. MothSource
+packages remain analysable regardless of where they are distributed. See
+@../directives/constraints (Constraints).
+
 ### Package names and source facades
 
 Core and Builder names sit in reserved namespaces. Core registrations live below `@core/`. Builder registrations live below `@builder/` at an explicit path the builder chooses, such as `web/site` or `game`. The exact `@core` and `@builder` roots are not importable package surfaces. ProjectLocal and Dependency packages cannot claim either root. Registration compares names case-insensitively, so case-only variants fail along with equal or ancestor/descendant overlaps for every backing.

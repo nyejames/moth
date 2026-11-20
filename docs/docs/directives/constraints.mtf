@@ -79,8 +79,8 @@ instance. A dormant generic template has no executable body, so it publishes no
 guarantee until an instance is materialised.
 
 An unclassified external call rejects `$safe_math` because its fast behaviour
-cannot be certified absent. Inspect or replace the callable, or register a
-trusted closed numeric contract for it.
+cannot be certified absent. Replace the callable or use an officially trusted
+implementation whose closed numeric contract proves the required absence.
 
 `$safe_math` does not guarantee that arithmetic succeeds. An ordinary checked
 operation can still fail, and a boundary can still return an error or trap for
@@ -154,12 +154,29 @@ re-exports preserve the guarantee.
 
 ### External calls and trusted providers
 
-Moth-source packages are analysed normally. Opaque foreign JavaScript or native
-bindings cannot establish the absence of fast operations or traps by virtue of
-their type signature. Only an explicit compiler or builder registration
-provides trusted closed evidence for a callable. A wrapper around an unknown
-binding cannot launder its behaviour, and an unclassified provider callable
-counts as unknown rather than certified safe.
+Moth-source packages are analysed normally. User-authored Rust host, browser
+JavaScript, WAT and WIT/component bindings cannot establish the absence of fast
+operations, traps or escaping failures from a type signature or package claim.
+Only compiler-maintained packages and approved vendored Rust libraries
+may have trusted evidence, issued through a compiler-controlled registration.
+Ordinary builder SDK and source registrations cannot grant that authority.
+
+Trust belongs to a known implementation, while the closed numeric contract
+belongs to each callable. An approved implementation must declare which
+behaviours are possible rather than receiving `$safe_math` or `$infallible`
+automatically. A trusted callable with known fast behaviour fails `$safe_math`.
+A trusted callable with possible traps or escaping errors fails `$infallible`.
+An unknown callable fails both guarantees when reachable, including through a
+Moth-source wrapper. Unused foreign imports do not taint unrelated functions.
+The compiler propagates the evidence through ordinary call summaries, facades
+and public interfaces before target optimisation can discard it.
+
+This evidence concerns Moth semantic traps and recoverable errors, including
+required compiler-generated foreign value guards. Native host panics,
+operational adapter faults and external termination remain separate runtime
+faults outside the `$infallible` proof. Approval of a Rust implementation
+requires separate review of those risks rather than treating the directive as
+a promise that arbitrary Rust execution cannot panic.
 
 Declared guarantees, known positive hazards, proved absence and provisional or
 unknown summaries stay distinct. An unknown summary cannot prove absence for

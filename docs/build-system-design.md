@@ -4,6 +4,8 @@
 
 The build system selects commands/capabilities, bootstraps configuration, discovers source, constructs project/package graphs, schedules compiler services, plans linked artefacts and owns output writing.
 
+Official execution is limited to Lappet-hosted native Wasm and browser JavaScript/HTML5 with integrated Wasm where useful. A future full-stack builder composes these two environments. Check, LSP and other compiler tools are overlays, not additional execution backends. The SDK can compose supported capabilities, packages and outputs, but it is not an open runtime or compiler-backend plugin system.
+
 `docs/compiler-design-overview.md` owns semantic identities, compiler stages, artefact contents, generated semantics, fingerprint domains and validation. Its authority rules and companion references apply here. This document owns orchestration and build policy, not another definition of compiler facts.
 
 Accepted plans resolve design gaps and explicit supersession. Implementation behaviour never overrides them. Preserve unique accepted contracts in permanent owners before retiring a plan. Exact public configuration-directive signatures belong in the canonical project-structure references; directive grammar and extension limits belong in `docs/docs/directives/directives.mtf`; architecture and consequential validation rules stay here.
@@ -39,6 +41,7 @@ Use `index.md` and owning module entry points for code locations. Source-path in
 - Compiler expression stores end at their owning semantic handoff. Build aggregation consumes owned values and validated artefacts with their required identity contexts, never AST expression IDs or live parser/TIR authority.
 - Entry activation, package assembly and target partitioning consume compiled facts without deferred source compilation.
 - Moth-source packages remain Moth-linked when emitted as Wasm. WIT supplies foreign bindings, not native semantic interfaces.
+- Binding-backed code is classified independently by compiler-authorised trust provenance and per-callable constraint facts. Custom builder registration cannot attest that user foreign code is safe.
 - Physical file references establish conservative graph/input membership before executable selection. Exact output liveness does not change that membership.
 - Compiler-owned resource origins/uses are distinct from build-owned byte sources, placement and URL contexts. Builders never rediscover resources by scanning rendered strings.
 - Ordinary `$config` and static `if` do not change source graphs, declarations, exports or package topology. Structural `$feature` selection has a separate pre-graph contract.
@@ -73,6 +76,8 @@ owns optimisation goals and the separate Moth-profile/native-strategy choices.
 Frontend names and builtins remain authoritative, and a builder supplies no directive names. Unknown directives, wrong-context uses and recognised unavailable capabilities receive distinct diagnostics rather than silent acceptance. Registries grant constrained powers, not arbitrary semantic callbacks.
 
 Builder globals express stable semantic configuration. They never reveal a physical target, backend, OS or architecture through `$config`. Command target intent stays outside source-visible configuration. Tooling overlays extend analysis without becoming competing artefact builders.
+
+The native builder emits core Wasm and Lappet owns its Rust host boundary. The HTML builder selects JavaScript or Wasm for reachable functions, then generates the needed JavaScript/Wasm interoperation. Static HTML/CSS output belongs to web build policy, not an extra language backend. Full-stack orchestration reuses these implementations without introducing server-only language semantics. Target-specific optimisation and validation use these fixed families.
 
 ## Project bootstrap
 
@@ -389,6 +394,8 @@ Package origin and backing are independent:
 | Backing | MothSource, ExternalBinding or HostBinding. |
 
 ExternalBinding and HostBinding packages are both binding-backed and share the external package registry. A backend lowers or provides every ExternalBinding symbol itself. A HostBinding package is implemented by native Rust host functions registered through the builder SDK, so host requirement production names only HostBinding packages as native host imports.
+
+Trust is a third, independent property of foreign implementation registration. Ordinary Rust host, browser JavaScript, WAT and WIT bindings are untrusted for absence-of-hazard proofs. Only compiler-maintained providers or approved vendored Rust libraries can carry trusted evidence, granted by a sealed compiler-controlled path and checked per callable. Trust alone promises no constraint: a callable can still use fast semantics, trap or fail. Source packages remain subject to ordinary Moth analysis. Trust does not change package origin, backing, managed package certification or an SDK builder's Core eligibility.
 
 For example, `@core/html` and `@core/css` are Core/MothSource, `@builder/web/site` is Builder/MothSource, `@builder/web/canvas` is Builder/ExternalBinding, a builder SDK host package such as `@builder/game/platform` is Builder/HostBinding, a virtual Core IO package is Core/ExternalBinding, a support facade is ProjectLocal/MothSource and an annotated project JavaScript file is ProjectLocal/ExternalBinding.
 

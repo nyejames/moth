@@ -37,6 +37,8 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 - [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued: consume delivered shared MON syntax, exact numeric types and bounded known-leaf inference. Wait for the required compact typed-expression and ordinary-struct construction capabilities. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
 
+- [Official foreign-binding trust and constraint evidence](./plans/official-foreign-binding-trust-and-constraints-foundation-plan.md) - Queued: secure the compiler-controlled distinction between user foreign packages and approved vendored implementations. Extend the existing Core-only per-callable evidence through registration, linking and public summaries so `$safe_math` and `$infallible` remain accurate across foreign calls.
+
 - [Reusable generics, type-parametric Core bindings and file-backed JS/WAT](./plans/generics-core-bindings-and-file-backed-js-wat-plan.md) - Queued: file-private reusable generic declarations, closed numeric-family limits, bounded nested-call context, trusted scalar-parametric Core bindings and file-backed JS/WAT implementations. Deliver generic min, max, clamp and uniformly fallible abs. Consume exact numeric semantics and existing backend capabilities without waiting for the later mixed-Wasm implementation.
 
 - TODO plan: Struct layout directives. Consume the delivered numeric scalar sizes, natural alignment and element strides. Define compiler-owned $layout contracts, permitted field types, aggregate alignment/padding, target validation and semantic/interface fingerprints before physical memory-layout decisions and Wasm struct lowering consume them. The nominal type model stays unchanged.
@@ -189,7 +191,7 @@ performs semantic symbol resolution or syntax diagnostics.
 - cross-page browser chunk sharing beyond physical variant reuse
 - direct normal-sibling dependencies if real project evidence justifies them
 - later Wiring observation, route application and UI/runtime design beyond the bounded foundation
-- additional target builders and capability surfaces
+- additional builder compositions and capability surfaces within the official native-Wasm and browser JavaScript/Wasm execution families
 - profiling-backed frontend optimisations and the deferred post-TIR template investigations linked above
 - future Component Model integration
 - external non-scalar constant design: string slices, collections and opaque-type external constants in const contexts

@@ -2,7 +2,7 @@
 
 > **Final design only.** This document specifies accepted compiler design, regardless of implementation progress. Status, migration steps and backend coverage belong in the roadmap and progress matrices. `V1` identifies a deliberately bounded feature contract, not unfinished implementation. Mark genuinely unsettled design explicitly.
 
-Moth is a high-level language with first-class string templates. Its compiler is a staged, backend-neutral library used by project tools, development servers, tooling overlays and builders.
+Moth is a high-level language with first-class string templates. Its compiler is a staged, backend-neutral library used by project tools, development servers, tooling overlays and builders. Backend neutrality preserves one source meaning across a closed set of official execution families: native Wasm hosted by Lappet, and browser JavaScript/HTML5 with optional integrated Wasm. The future full-stack environment composes these families. A native machine-code backend or arbitrary third-party runtime is not an official design target.
 
 This document owns core compiler architecture, semantic ownership and cross-stage contracts. `docs/build-system-design.md` owns bootstrap, Stage 0 graphs, project and package topology, command policy, linking and output orchestration. Read both for cross-boundary work.
 
@@ -60,6 +60,7 @@ For every compiler task, read the authority text and `Architectural invariants`.
 - Shared argument parsing supports distinct signature-slot and record-field routing. Sharing punctuation never merges their semantic contracts.
 - Cross-module facts use stable origins and canonical types, not donor-local indexes. Published module artefacts and generated sidecars are immutable.
 - Moth-source modules and packages use Moth semantic interfaces even when emitted as Wasm. WIT is a foreign component boundary, not a replacement interface.
+- Semantic stages and validated HIR serve the official native-Wasm and browser-JavaScript/Wasm families. Target-specific analysis and optimisation may exploit this finite set after shared language meaning is fixed. Tooling overlays reuse the compiler without defining another execution target.
 - Ordinary static `if` validates both branches before selecting executable work and preserves the selected lexical scope. Structural `$feature` selection is a separate pre-graph contract.
 - Authored physical file references establish graph/input validity before executable reachability. Exact output liveness neither creates nor retracts graph membership.
 - File values are `String`, with structural resource and site-root pieces until builder placement. Semantic origins, authored uses, byte sources and rendered URLs remain distinct.
@@ -350,6 +351,8 @@ A public interface contains the complete semantic facts observable by consumers:
 - project-context provenance for every affected exported fact
 
 Per-function calls, capabilities, resource uses and other backend-planning facts live in `ModuleLinkFacts`, not the semantic interface. Constraint guarantees ride the existing call summary and its existing interface equality. They add no separate fingerprint domain. Exported resources carry stable origins, never donor-local IDs, output paths, routes or rendered URLs. Receiver methods stay attached to their type's exported source surface and cannot be bound, aliased or re-exported independently.
+
+Foreign callable evidence enters these summaries only through compiler-authorised implementation provenance. The existing closed external numeric contract records fast semantics, possible semantic traps and possible recoverable failure independently. An opaque user-provided binding has unknown absence facts, even when its signature has no `Error!` slot. Official compiler-maintained packages and approved vendored Rust libraries may supply checked per-callable facts, including known hazards, without certifying their entire package as `$safe_math` or `$infallible`. Builder registrations cannot promote themselves to trusted evidence. See the [constraints reference](docs/directives/constraints.mtf) for the guarantees checked over reachable calls.
 
 ### Public-surface and package-export validation
 
@@ -1237,6 +1240,8 @@ A lowerer receives only explicit validated inputs:
 `ValidatedMemoryPlan` is the sole authority for aggregate layouts, memory strategies, cleanup, inferred/declared-region operations, REC and concrete ownership/count transitions. Source and generated functions follow the same handoff. Missing compiler-owned boundary classifications or required plan facts are compiler bugs, not invitations to infer a fallback.
 
 Lowerers implement language-owned operations with native instructions or helpers only when they preserve the full contract. They never load/parse source, rebuild visibility, infer generics, reconstruct traits, fold templates, interpret TIR, choose entry/route policy or write final project outputs. They cannot weaken numeric checks, finite-value validation, cast failure, map behaviour, error propagation or Wiring semantics. A target may elide a numeric predicate only when its paired proof establishes safety and the lowerer preserves evaluation order, failure semantics and required carriers. A lowerer consumes the selected numeric mode from validated HIR, preserves fast trap delivery and never reconstructs fast semantics from a proof table or target carrier.
+
+Lowerers are selected from the official native Wasm and browser JavaScript/Wasm implementations. They can specialise validated operations for those targets, including generated JavaScript-to-Wasm call glue, without exposing open-ended backend semantics or an LLVM-style native target SDK. The build system retains its constrained project-builder interface for composing supported targets and output policy.
 
 Lowerers consume `HirTerminator::NeverCall` and `HirFunctionReturnContract::Never`, not result absence. A Never function has a zero-result ABI. JavaScript emits the call exactly once, then throws `Moth \`-> !\` function returned unexpectedly`. External Never glue wrappers throw if the import returns. JavaScript lowering covers local, cross-module, generated and binding-backed Never targets. Current Wasm emits a result-less `call` followed by `unreachable` for targets that pass its ordinary call-target validation. Structured LIR must not invent Never from missing results.
 
