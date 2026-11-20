@@ -1,7 +1,7 @@
 //! Symbol map construction for the JavaScript backend.
 //!
 //! Builds deterministic JS identifier names for selected HIR functions, locals and fields before
-//! code emission begins.
+//! code emission begins, and indexes the published local mutability that definitions consume.
 
 use crate::backends::js::JsEmitter;
 use crate::backends::js::identifiers::{is_js_reserved, sanitize_identifier};
@@ -96,6 +96,8 @@ impl<'hir> JsEmitter<'hir> {
 
         for block in &self.hir.blocks {
             for local in &block.locals {
+                self.local_mutable_by_id.insert(local.id, local.mutable);
+
                 let raw_name = self
                     .hir
                     .side_table

@@ -2329,6 +2329,35 @@ result = old
 }
 
 #[test]
+fn boracle_source_projected_alias_through_intermediate_alias_keeps_old_origin() {
+    let report = solve_source(
+        r#"
+Pair = |
+    first {I32},
+    second {I32},
+|
+
+pair ~= Pair({1}, {2})
+view = pair
+old = view.first
+~pair = Pair({3}, {4})
+~pair.first = {5}
+result = old
+"#,
+    );
+
+    let function = report
+        .functions()
+        .first()
+        .expect("source should have a function");
+    assert!(
+        !function.report.has_conflicts(),
+        "a projection through an intermediate alias must keep the old allocation after rebinding: {:?}",
+        function.report.loans.conflicts()
+    );
+}
+
+#[test]
 fn boracle_source_distinct_projected_fields_remain_disjoint() {
     let report = solve_source(
         r#"

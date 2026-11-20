@@ -1,0 +1,23 @@
+-- Passing a mutable alias and the same scalar slot as a shared argument in one call overlaps
+-- the alias's referent cell. The callee writes through the alias and observes through the
+-- shared argument, so the call must stay rejected.
+
+identity |value I32| -> I32:
+    return value
+;
+
+mutate_and_read |target ~I32, observed I32| -> I32:
+    ~target = 9
+    return observed
+;
+
+probe || -> I32:
+    original = 5
+    slot ~= 0
+    ~slot = identity(original)
+    writer ~= slot
+    return mutate_and_read(~writer, writer)
+;
+
+result = probe()
+io.line([: mutable_scalar_alias_same_call_shared_argument result=[result]])

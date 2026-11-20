@@ -20,7 +20,9 @@ use super::{
 };
 
 // WHAT: Validates shared-root reads against statement-local and active mutable conflicts.
-// WHY: Shared reads must be blocked when the same root is mutably active.
+// WHY: Shared reads must be blocked when a root they access is mutably active. A read through a
+//      binding that provably derives from the exclusive alias is not a foreign access, so
+//      `active_mutable_alias_for_root` exempts those candidates.
 pub(super) fn check_shared_access(
     check: &mut AccessCheckContext<'_, '_>,
     roots: &RootSet,
@@ -35,7 +37,6 @@ pub(super) fn check_shared_access(
         current_order: check.current_order,
         preserve_cfg_future_use_activity,
     };
-
     for root_index in roots.iter_ones() {
         check.stats.conflicts_checked += 1;
 
@@ -275,6 +276,22 @@ struct AliasActivityContext<'a> {
     preserve_cfg_future_use_activity: bool,
 }
 
+/// Whether the acting binding writes through `root_index` as an alias.
+///
+/// WHY: the actor's referent cells, not its value provenance, say which cell it mutates. A
+/// provenance root is an allocation the actor observes, not the cell it writes through.
+fn actor_aliases_root(
+    activity: &AliasActivityContext<'_>,
+    actor_index: usize,
+    root_index: usize,
+) -> bool {
+    let actor_state = activity.state.local_state(actor_index);
+    actor_index != root_index
+        && actor_state.is_alias_only()
+        && (actor_state.direct_alias_roots.contains(root_index)
+            || actor_state.write_target_roots.contains(root_index))
+}
+
 fn active_alias_count_for_root(
     activity: &AliasActivityContext<'_>,
     root_index: usize,
@@ -283,10 +300,7 @@ fn active_alias_count_for_root(
     direct_alias_only: bool,
 ) -> u32 {
     let mut count = 0u32;
-    let actor_state = activity.state.local_state(actor_index);
-    let actor_is_alias_for_root = actor_index != root_index
-        && actor_state.is_alias_only()
-        && actor_state.value_roots.contains(root_index);
+    let actor_is_alias_for_root = actor_aliases_root(activity, actor_index, root_index);
 
     for candidate_index in 0..activity.layout.local_count() {
         if actor_is_alias_for_root && candidate_index == root_index {
@@ -347,12 +361,24 @@ fn active_mutable_alias_for_root(
         // run first: the diagnostics lookup and the liveness check cost more, and this scan
         // visits every local on every mutable access.
         let candidate_state = activity.state.local_state(candidate_index);
-        if !candidate_state.mode.contains(LocalMode::ALIAS) || !candidate_state.has_value_aliases()
-        {
+        if !candidate_state.mode.contains(LocalMode::ALIAS) || !candidate_state.has_alias_roots() {
             continue;
         }
 
         if !candidate_contains_root(activity, candidate_index, root_index) {
+            continue;
+        }
+
+        // A read through a binding that provably derives from this exclusive alias is the same
+        // access path, not a foreign one. The derivation set is a must fact, so a may-join does
+        // not exempt a candidate that only some incoming paths derived from.
+        if actor_index_hint.is_some_and(|reader| {
+            activity
+                .state
+                .local_state(reader)
+                .derived_from_roots
+                .contains(candidate_index)
+        }) {
             continue;
         }
 
@@ -384,10 +410,7 @@ fn conflicting_active_local_for_root(
     strict_move_exclusivity: bool,
     direct_alias_only: bool,
 ) -> Option<usize> {
-    let actor_state = activity.state.local_state(actor_index);
-    let actor_is_alias_for_root = actor_index != root_index
-        && actor_state.is_alias_only()
-        && actor_state.value_roots.contains(root_index);
+    let actor_is_alias_for_root = actor_aliases_root(activity, actor_index, root_index);
 
     for candidate_index in 0..activity.layout.local_count() {
         if actor_is_alias_for_root && candidate_index == root_index {
@@ -424,28 +447,28 @@ fn conflicting_active_local_for_root(
     None
 }
 
-// WHAT: Whether a candidate observes the root's cell or allocation, for alias scans.
+// WHAT: Whether a candidate observes or writes the root's cell or allocation, for alias scans.
 // WHY: direct aliases of a value-backed slot keep the cell in `direct_alias_roots` while their
-//      value provenance names only older allocation roots; either form participates.
+//      value provenance names only older allocation roots; an alias of a projection keeps only a
+//      write target. Every form participates.
 fn candidate_contains_root(
     activity: &AliasActivityContext<'_>,
     candidate_index: usize,
     root_index: usize,
 ) -> bool {
+    let candidate = activity.state.local_state(candidate_index);
     activity
         .state
         .effective_root_contains(candidate_index, root_index)
-        || activity
-            .state
-            .local_state(candidate_index)
-            .direct_alias_roots
-            .contains(root_index)
+        || candidate.direct_alias_roots.contains(root_index)
+        || candidate.write_target_roots.contains(root_index)
 }
 
 // WHAT: Decides whether a candidate alias observes a write to the root of this binding cell.
 // WHY: a definite-slot rebinding to a fresh value replaces the slot's value provenance. Only an
 // alias of the cell itself (a direct source alias) sees that replacement, while a slot-backed
-// value alias keeps pointing at the older allocation.
+// value alias keeps pointing at the older allocation. An alias of a projection writes the base
+// cell but observes the field value, so it is not a direct observer either.
 fn alias_observes_cell_write(
     activity: &AliasActivityContext<'_>,
     root_index: usize,
@@ -491,7 +514,7 @@ fn is_local_active_for_alias_conflict(
             .layout
             .local_is_expired(local_index, activity.current_order)
         {
-            if !local_state.has_value_aliases() || !activity.preserve_cfg_future_use_activity {
+            if !local_state.has_alias_roots() || !activity.preserve_cfg_future_use_activity {
                 return true;
             }
 
@@ -505,7 +528,7 @@ fn is_local_active_for_alias_conflict(
             }
         }
 
-        if !local_state.has_value_aliases() {
+        if !local_state.has_alias_roots() {
             return false;
         }
 
@@ -549,7 +572,7 @@ fn is_local_active_for_alias_conflict(
         return false;
     }
 
-    if !local_state.has_value_aliases() {
+    if !local_state.has_alias_roots() {
         return false;
     }
 
@@ -613,7 +636,7 @@ fn local_alias_never_read(
     local_index: usize,
 ) -> bool {
     let local_state = state.local_state(local_index);
-    if !local_state.has_value_aliases() {
+    if !local_state.has_alias_roots() {
         return false;
     }
 

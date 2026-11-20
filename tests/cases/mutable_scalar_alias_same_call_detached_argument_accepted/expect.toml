@@ -1,0 +1,4 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["mutable_scalar_alias_same_call_detached_argument result=5"]

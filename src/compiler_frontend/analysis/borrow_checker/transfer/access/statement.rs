@@ -300,12 +300,14 @@ pub(crate) fn transfer_statement(
                 Some(*candidate_result),
                 &FunctionReturnAliasSummary::Fresh,
                 &[],
+                &[],
                 false,
             )?;
             transfer_call_result_alias(
                 &mut result_transfer,
                 Some(*in_range_result),
                 &FunctionReturnAliasSummary::Fresh,
+                &[],
                 &[],
                 false,
             )?;
@@ -623,8 +625,10 @@ fn transfer_call_arguments_and_result(
     // WHY: `Fresh` results and calls without a result never inspect them, so building the sets
     //      would walk every argument expression for no consumer.
     let mut arg_value_roots = Vec::new();
+    let mut arg_derived_roots = Vec::new();
     if retains_result && !matches!(&return_alias, FunctionReturnAliasSummary::Fresh) {
         arg_value_roots.reserve(args.len());
+        arg_derived_roots.reserve(args.len());
         for arg in args {
             let argument_location = input
                 .context
@@ -637,6 +641,14 @@ fn transfer_call_arguments_and_result(
                 arg.argument,
                 argument_location,
             )?);
+            // The derivation ledger travels with the value, so a result derived through an alias
+            // keeps the same exemption from that alias's exclusivity.
+            arg_derived_roots.push(alias_derivation_roots_from_expression(
+                input.layout,
+                input.state,
+                input.context.expressions,
+                arg.argument,
+            ));
         }
     }
 
@@ -699,6 +711,7 @@ fn transfer_call_arguments_and_result(
             Some(result),
             &return_alias,
             &arg_value_roots,
+            &arg_derived_roots,
             edge_local,
         )?;
     }
@@ -807,17 +820,14 @@ fn record_call_argument_reads(
     argument_location: &Option<SourceSpan>,
     arg_roots: &mut RootSet,
 ) -> Result<(), BorrowCheckError> {
-    // WHAT: a direct place argument also overlaps the source slot's binding cell.
-    // WHY: the mutable-argument check asks about the cell, while the shared argument's value
-    //      provenance names only its allocation. Recording the cell here makes same-call overlap
-    //      and the shared/mutable conflict see both spellings of the same binding.
-    let cell_roots = direct_place_from_expression(input.context.expressions, argument)
-        .and_then(|place| place_cell_root(input.layout, input.state, &place))
-        .map(|cell_index| {
-            let mut roots = RootSet::empty(input.layout.local_count());
-            roots.insert(cell_index);
-            roots
-        });
+    // WHAT: a direct place argument also overlaps the cells its root local designates.
+    // WHY: the mutable-argument check asks about those cells, while the shared argument's value
+    //      provenance names only its allocation. Recording the cells here makes same-call overlap
+    //      and the shared/mutable conflict see both spellings of the same binding, including an
+    //      alias whose only surviving identity is a referent cell.
+    let direct_place = direct_place_from_expression(input.context.expressions, argument);
+    let direct_root_index = direct_place.and_then(|place| input.layout.index_of(place.root));
+    let cell_roots = direct_root_index.map(|root_index| input.state.designated_cells(root_index));
     if let Some(cell_roots) = &cell_roots
         && matches!(effect, ArgEffect::SharedBorrow)
     {
@@ -830,7 +840,7 @@ fn record_call_argument_reads(
             location: *argument_location,
             span: input.context.expressions.expression(argument).span,
             stats: input.stats,
-            actor_index_hint: None,
+            actor_index_hint: direct_root_index,
             current_order: input.current_order,
         };
         check_shared_access(&mut check, cell_roots)?;
@@ -839,7 +849,7 @@ fn record_call_argument_reads(
     if matches!(
         effect,
         ArgEffect::MutableBorrow | ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable
-    ) && let Some(place) = direct_place_from_expression(input.context.expressions, argument)
+    ) && let Some(place) = direct_place
     {
         let mut read_env = SharedReadEnv {
             context: input.context,
@@ -859,7 +869,7 @@ fn record_call_argument_reads(
             *argument_location,
             &mut place_read_roots,
         )?;
-        let place_roots = roots_for_place(
+        let place_roots = access_roots_for_place(
             input.layout,
             input.state,
             &place,
@@ -1229,6 +1239,7 @@ fn transfer_call_result_alias(
     result: Option<HirLocalDestination>,
     return_alias: &FunctionReturnAliasSummary,
     arg_value_roots: &[RootSet],
+    arg_derived_roots: &[RootSet],
     edge_local: bool,
 ) -> Result<(), BorrowCheckError> {
     let Some(destination) = result else {
@@ -1243,36 +1254,44 @@ fn transfer_call_result_alias(
         )));
     };
 
-    let alias_roots = match return_alias {
-        FunctionReturnAliasSummary::Fresh => None,
+    let local_count = input.layout.local_count();
+    let mut alias_roots = RootSet::empty(local_count);
+    let mut derived_roots = RootSet::empty(local_count);
+
+    // The result's value provenance and derivation ledger follow the same return-alias argument
+    // selection, so one pass fills both and validates each selected index once.
+    match return_alias {
+        FunctionReturnAliasSummary::Fresh => {}
         FunctionReturnAliasSummary::AliasParams(arg_indices) => {
-            let mut roots = RootSet::empty(input.layout.local_count());
             for arg_index in arg_indices {
-                let Some(arg_value_root_set) = arg_value_roots.get(*arg_index) else {
-                    return Err(input.context.diagnostics.internal_error(
-                        format!(
-                            "Borrow checker found out-of-range return-alias index {arg_index} at call site"
-                        ),
-                    ));
+                let Some((arg_value_root_set, arg_derivation)) = arg_value_roots
+                    .get(*arg_index)
+                    .zip(arg_derived_roots.get(*arg_index))
+                else {
+                    return Err(input.context.diagnostics.internal_error(format!(
+                        "Borrow checker found out-of-range return-alias index {arg_index} at call site"
+                    )));
                 };
-                roots.union_with(arg_value_root_set);
+                alias_roots.union_with(arg_value_root_set);
+                derived_roots.union_with(arg_derivation);
             }
-            Some(roots)
         }
         FunctionReturnAliasSummary::Unknown => {
-            let mut roots = RootSet::empty(input.layout.local_count());
-            for arg_value_root_set in arg_value_roots {
-                roots.union_with(arg_value_root_set);
+            for (arg_value_root_set, arg_derivation) in
+                arg_value_roots.iter().zip(arg_derived_roots)
+            {
+                alias_roots.union_with(arg_value_root_set);
+                derived_roots.union_with(arg_derivation);
             }
-            Some(roots)
         }
-    };
+    }
 
-    let new_local_state = match alias_roots {
-        Some(roots) if !roots.is_empty() => {
-            LocalState::slot_with_value_roots(roots, RootSet::empty(input.layout.local_count()))
-        }
-        _ => LocalState::slot(input.layout.local_count()),
+    let new_local_state = if alias_roots.is_empty() {
+        LocalState::slot(local_count)
+    } else {
+        let mut state = LocalState::slot_with_value_roots(alias_roots, RootSet::empty(local_count));
+        state.derived_from_roots = derived_roots.clone();
+        state
     };
     if edge_local {
         input
@@ -1312,20 +1331,32 @@ fn transfer_call_result_alias(
         )?;
 
         if previous_state.mode.contains(LocalMode::ALIAS) {
+            // The call result is stored through the alias on every path that follows the alias
+            // branch, so this binding and its referent cells now observe the result's provenance.
+            let observed = refresh_alias_referents(
+                input.state,
+                local_index,
+                &previous_state,
+                Some(&new_local_state.value_roots),
+            );
+
             if previous_state.is_alias_only() {
+                // The binding itself is not rebound, so its derivation ledger stays unchanged.
                 return Ok(());
             }
 
-            let mut value_roots = previous_state.value_roots;
-            value_roots.union_with(&new_local_state.value_roots);
-            let mut direct_alias_roots = previous_state.direct_alias_roots;
-            direct_alias_roots.union_with(&new_local_state.direct_alias_roots);
+            // A joined state holds the result on both alternatives. Keep the union of cells but
+            // record the observed value, and update the cells the alias path writes through.
+            let mut derived_from_roots = previous_state.derived_from_roots;
+            derived_from_roots.intersect_with(&derived_roots);
             input.state.update_local_state(
                 local_index,
                 LocalState {
                     mode: previous_state.mode,
-                    value_roots,
-                    direct_alias_roots,
+                    value_roots: observed,
+                    direct_alias_roots: previous_state.direct_alias_roots,
+                    write_target_roots: previous_state.write_target_roots,
+                    derived_from_roots,
                 },
             );
             return Ok(());

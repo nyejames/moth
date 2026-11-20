@@ -924,7 +924,9 @@ sentinel = 0\n\
         .expect("the sentinel entry should contain the updated destination");
     assert!(target_after.mode.contains(LocalMode::SLOT));
     assert!(target_after.mode.contains(LocalMode::ALIAS));
-    assert!(target_after.alias_roots.contains(&source_local));
+    // The alias path still writes through the source cell even though this write stored a fresh
+    // value, so the write-through identity must survive the update.
+    assert!(target_after.write_targets.contains(&source_local));
 }
 
 #[test]
@@ -1055,7 +1057,9 @@ sentinel = 0\n\
         .expect("the returned value has an independent source root");
     assert!(state.mode.contains(LocalMode::SLOT));
     assert!(state.mode.contains(LocalMode::ALIAS));
-    assert!(state.alias_roots.contains(&source));
+    // The call result provides the new observed value; the earlier alias path still writes
+    // through its source cell.
+    assert!(state.write_targets.contains(&source));
     assert!(state.alias_roots.contains(&argument));
 }
 

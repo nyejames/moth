@@ -1,0 +1,20 @@
+-- The same write through a collection alias is legal once the shared origin alias has no later
+-- use: the push mutates storage that only the mutable alias still refers to.
+
+identity |value {I32}| -> {I32}:
+    return value
+;
+
+probe || -> I32:
+    original ~= {1, 2}
+    view = original
+    size = view.length()
+    slot ~= {0}
+    writer ~= slot
+    ~writer = identity(original)
+    ~writer.push(4)
+    return size
+;
+
+result = probe()
+io.line([: mutable_collection_alias_write_through result=[result]])

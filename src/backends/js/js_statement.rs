@@ -735,7 +735,26 @@ impl<'hir> JsEmitter<'hir> {
                     );
                 };
                 let source = self.lower_place(place)?;
-                self.emit_line(&format!("{local_name} = __moth_alias_binding({source});"));
+                // A computed place re-reads its base on every access, so a projected definition
+                // would follow a later rebinding of the source binding cell. An immutable
+                // destination cannot write through and borrow validation permits the root to be
+                // rebound, so read the referenced storage once instead. The binding keeps object
+                // identity and copies scalars. Unprojected and mutable destinations keep the
+                // alias, which preserves write-through semantics.
+                let source_is_projected = !self
+                    .hir
+                    .expressions
+                    .projections(place.projections)
+                    .is_empty();
+                let snapshots_projected_storage =
+                    source_is_projected && !self.local_is_mutable(local)?;
+                if snapshots_projected_storage {
+                    self.emit_line(&format!(
+                        "{local_name} = __moth_binding(__moth_read({source}));"
+                    ));
+                } else {
+                    self.emit_line(&format!("{local_name} = __moth_alias_binding({source});"));
+                }
             }
             ValueKind::RValue | ValueKind::Const => {
                 let lowered = self.lower_expression_for_use(value, JsValueUse::AssignmentValue)?;

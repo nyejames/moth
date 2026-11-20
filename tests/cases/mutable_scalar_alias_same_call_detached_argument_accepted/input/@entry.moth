@@ -1,0 +1,23 @@
+-- Passing a detached copy as the shared argument keeps the call legal: the copy shares no
+-- storage with the mutable alias's referent cell.
+
+identity |value I32| -> I32:
+    return value
+;
+
+mutate_and_read |target ~I32, observed I32| -> I32:
+    ~target = 9
+    return observed
+;
+
+probe || -> I32:
+    original = 5
+    slot ~= 0
+    ~slot = identity(original)
+    observed = copy slot
+    writer ~= slot
+    return mutate_and_read(~writer, observed)
+;
+
+result = probe()
+io.line([: mutable_scalar_alias_same_call_detached_argument result=[result]])

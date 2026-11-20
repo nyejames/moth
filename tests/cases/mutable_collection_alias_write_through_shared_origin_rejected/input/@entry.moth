@@ -1,0 +1,20 @@
+-- Writing a returned collection through a mutable alias stores its shared origin in the
+-- referent. Pushing through the alias then mutates storage that an earlier shared alias still
+-- reads, so the push must stay rejected.
+
+identity |value {I32}| -> {I32}:
+    return value
+;
+
+probe || -> I32:
+    original ~= {1, 2}
+    view = original
+    slot ~= {0}
+    writer ~= slot
+    ~writer = identity(original)
+    ~writer.push(4)
+    return view.length()
+;
+
+result = probe()
+io.line([: mutable_collection_alias_write_through result=[result]])

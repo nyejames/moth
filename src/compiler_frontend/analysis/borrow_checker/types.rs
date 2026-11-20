@@ -216,6 +216,8 @@ pub(crate) struct LocalBorrowSnapshot {
     pub local: LocalId,
     pub mode: LocalMode,
     pub alias_roots: Vec<LocalId>,
+    /// Cells a write through this binding targets. Separate from observed value provenance.
+    pub write_targets: Vec<LocalId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

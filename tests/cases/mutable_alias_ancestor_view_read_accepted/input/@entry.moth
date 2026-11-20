@@ -1,0 +1,22 @@
+-- A shared view created from the mutable child alias, directly or as a call result, is derived
+-- from it. Reading either view while the child is live is not a foreign access; the later
+-- mutation goes through the child.
+
+identity |value {I32}| -> {I32}:
+    return value
+;
+
+probe || -> I32:
+    slot ~= {1}
+    parent ~= slot
+    child ~= parent
+    view = child
+    copied = identity(child)
+    first = view.length()
+    second = copied.length()
+    ~child.push(2)
+    return first + second
+;
+
+result = probe()
+io.line([: result=[result]])

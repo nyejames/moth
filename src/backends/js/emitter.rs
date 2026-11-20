@@ -62,6 +62,11 @@ pub(crate) struct JsEmitter<'hir> {
     pub(crate) indent: usize,
     pub(crate) function_name_by_id: HashMap<FunctionId, String>,
     pub(crate) local_name_by_id: HashMap<LocalId, String>,
+    /// Published HIR destination mutability, keyed by local.
+    ///
+    /// Definitions from projected places snapshot their storage only when this is `false`;
+    /// mutable destinations keep the computed reference that supports write-through.
+    pub(crate) local_mutable_by_id: HashMap<LocalId, bool>,
     pub(crate) field_name_by_id: HashMap<FieldId, String>,
     pub(crate) current_function: Option<FunctionId>,
     pub(crate) used_identifiers: HashSet<String>,
@@ -113,6 +118,7 @@ impl<'hir> JsEmitter<'hir> {
             indent: 0,
             function_name_by_id: HashMap::new(),
             local_name_by_id: HashMap::new(),
+            local_mutable_by_id: HashMap::new(),
             field_name_by_id: HashMap::new(),
             current_function: None,
             used_identifiers: HashSet::new(),

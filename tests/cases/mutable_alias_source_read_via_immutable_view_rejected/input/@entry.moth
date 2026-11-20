@@ -1,0 +1,15 @@
+-- An immutable view derived from `parent` is not derived from `child`; the live child alias
+-- still blocks the read.
+
+probe || -> I32:
+    slot ~= {1}
+    parent ~= slot
+    child ~= parent
+    view = parent
+    n = view.length()
+    ~child.push(2)
+    return n
+;
+
+result = probe()
+io.line([: [result]])

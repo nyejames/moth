@@ -307,6 +307,125 @@ contract = "language.bindings.mutable_alias_blocks_later_source_access"
 role = "primary"
 
 [[case]]
+id = "mutable_alias_branch_merge_blocks_source_access_rejected"
+path = "mutable_alias_branch_merge_blocks_source_access_rejected"
+tags = ["integration", "borrows", "diagnostics", "control-flow"]
+contract = "language.bindings.mutable_alias_blocks_later_source_access"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_branch_merge_control_accepted"
+path = "mutable_alias_branch_merge_control_accepted"
+tags = ["integration", "borrows", "control-flow"]
+contract = "language.bindings.mutable_alias_branch_merge_control_accepted"
+role = "primary"
+
+[[case]]
+id = "mutable_alias_branch_merge_slot_path_keeps_origin_rejected"
+path = "mutable_alias_branch_merge_slot_path_keeps_origin_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.mutable_alias_joined_referent_is_not_definite"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_branch_merge_projected_path_keeps_origin_rejected"
+path = "mutable_alias_branch_merge_projected_path_keeps_origin_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.mutable_alias_joined_referent_is_not_definite"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_single_referent_replaces_origin_accepted"
+path = "mutable_alias_single_referent_replaces_origin_accepted"
+tags = ["integration", "borrows", "aliases"]
+contract = "language.bindings.mutable_alias_definite_referent_replaces_origin"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_alias_derived_view_read_accepted"
+path = "mutable_scalar_alias_derived_view_read_accepted"
+tags = ["integration", "borrows", "aliases"]
+contract = "language.bindings.mutable_alias_derived_view_read"
+role = "primary"
+
+[[case]]
+id = "mutable_alias_of_projected_alias_replacement_rejected"
+path = "mutable_alias_of_projected_alias_replacement_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.projected_alias_chain_keeps_referent_overlap"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_of_projected_field_replacement_rejected"
+path = "mutable_alias_of_projected_field_replacement_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.projected_alias_chain_keeps_referent_overlap"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_of_projected_alias_chain_replacement_rejected"
+path = "mutable_alias_of_projected_alias_chain_replacement_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.projected_alias_chain_keeps_referent_overlap"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_of_projected_alias_dead_view_accepted"
+path = "mutable_alias_of_projected_alias_dead_view_accepted"
+tags = ["integration", "borrows", "aliases"]
+contract = "language.bindings.projected_alias_chain_dead_view_replacement"
+role = "primary"
+
+[[case]]
+id = "mutable_alias_of_projected_alias_allows_holder_rebinding_accepted"
+path = "mutable_alias_of_projected_alias_allows_holder_rebinding_accepted"
+tags = ["integration", "borrows", "aliases"]
+contract = "language.bindings.projected_alias_chain_does_not_alias_whole_binding"
+role = "primary"
+
+[[case]]
+id = "mutable_alias_ancestor_view_read_accepted"
+path = "mutable_alias_ancestor_view_read_accepted"
+tags = ["integration", "borrows", "aliases"]
+contract = "language.bindings.derived_view_does_not_conflict_with_source_alias"
+role = "primary"
+
+[[case]]
+id = "mutable_alias_source_read_blocks_live_child_rejected"
+path = "mutable_alias_source_read_blocks_live_child_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.alias_source_read_conflicts_with_live_alias"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_source_read_via_immutable_view_rejected"
+path = "mutable_alias_source_read_via_immutable_view_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.alias_source_read_conflicts_with_live_alias"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_source_read_after_join_rejected"
+path = "mutable_alias_source_read_after_join_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.alias_source_read_conflicts_with_live_alias"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_source_read_in_loop_rejected"
+path = "mutable_alias_source_read_in_loop_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.alias_source_read_conflicts_with_live_alias"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_source_read_in_shared_call_rejected"
+path = "mutable_alias_source_read_in_shared_call_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.alias_source_read_conflicts_with_live_alias"
+role = "boundary"
+
+[[case]]
 id = "optional_transfer_path_dependent_call"
 path = "optional_transfer_path_dependent_call"
 tags = ["integration", "borrows", "control-flow"]
@@ -2911,6 +3030,20 @@ contract = "language.collections.mutation_through_mutable_alias"
 role = "primary"
 
 [[case]]
+id = "mutable_collection_alias_write_through_shared_origin_rejected"
+path = "mutable_collection_alias_write_through_shared_origin_rejected"
+tags = ["integration", "collections", "borrows", "diagnostics"]
+contract = "language.bindings.mutable_collection_alias_write_through_shared_origin_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_collection_alias_write_through_dead_origin_alias_accepted"
+path = "mutable_collection_alias_write_through_dead_origin_alias_accepted"
+tags = ["integration", "collections", "borrows"]
+contract = "language.bindings.mutable_collection_alias_write_through_dead_origin_alias_accepted"
+role = "primary"
+
+[[case]]
 id = "collection_negative_index_fallback"
 path = "collection_negative_index_fallback"
 tags = ["integration", "collections", "js-backend"]
@@ -4803,6 +4936,34 @@ contract = "language.bindings.returned_collection_get_alias_immutable_referent_r
 role = "primary"
 
 [[case]]
+id = "returned_collection_get_alias_write_through_immutable_referent_rejected"
+path = "returned_collection_get_alias_write_through_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics", "collections", "functions"]
+contract = "language.bindings.returned_collection_get_alias_immutable_referent_rejected"
+role = "boundary"
+
+[[case]]
+id = "returned_collection_get_alias_mutable_call_immutable_referent_rejected"
+path = "returned_collection_get_alias_mutable_call_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics", "collections", "functions"]
+contract = "language.bindings.returned_collection_get_alias_immutable_referent_rejected"
+role = "boundary"
+
+[[case]]
+id = "returned_collection_get_alias_write_through_mutable_origin_accepted"
+path = "returned_collection_get_alias_write_through_mutable_origin_accepted"
+tags = ["integration", "borrows", "collections", "functions"]
+contract = "language.bindings.returned_collection_get_alias_write_through_mutable_origin_accepted"
+role = "primary"
+
+[[case]]
+id = "returned_collection_get_alias_mutable_call_mutable_origin_accepted"
+path = "returned_collection_get_alias_mutable_call_mutable_origin_accepted"
+tags = ["integration", "borrows", "collections", "functions"]
+contract = "language.bindings.returned_collection_get_alias_mutable_call_mutable_origin_accepted"
+role = "primary"
+
+[[case]]
 id = "mutable_scalar_slot_collection_get_alias_accepted"
 path = "mutable_scalar_slot_collection_get_alias_accepted"
 tags = ["integration", "borrows", "collections", "functions"]
@@ -4852,6 +5013,27 @@ contract = "language.bindings.mutable_scalar_slot_same_call_shared_argument_reje
 role = "primary"
 
 [[case]]
+id = "mutable_scalar_alias_same_call_shared_argument_rejected"
+path = "mutable_scalar_alias_same_call_shared_argument_rejected"
+tags = ["integration", "borrows", "diagnostics", "functions"]
+contract = "language.bindings.mutable_scalar_slot_same_call_shared_argument_rejected"
+role = "boundary"
+
+[[case]]
+id = "mutable_scalar_alias_same_call_detached_argument_accepted"
+path = "mutable_scalar_alias_same_call_detached_argument_accepted"
+tags = ["integration", "borrows", "functions"]
+contract = "language.bindings.mutable_scalar_alias_same_call_detached_argument_accepted"
+role = "primary"
+
+[[case]]
+id = "mutable_projection_alias_same_call_overlap_rejected"
+path = "mutable_projection_alias_same_call_overlap_rejected"
+tags = ["integration", "borrows", "diagnostics", "functions"]
+contract = "language.bindings.mutable_projection_alias_same_call_overlap_rejected"
+role = "primary"
+
+[[case]]
 id = "mutable_scalar_slot_alias_snapshot_fresh_accepted"
 path = "mutable_scalar_slot_alias_snapshot_fresh_accepted"
 tags = ["integration", "borrows", "functions"]
@@ -4863,6 +5045,27 @@ id = "mutable_slot_retained_result_does_not_write_immutable_input_accepted"
 path = "mutable_slot_retained_result_does_not_write_immutable_input_accepted"
 tags = ["integration", "borrows", "functions"]
 contract = "language.bindings.mutable_slot_retained_result_does_not_write_immutable_input_accepted"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_alias_write_through_accepted"
+path = "mutable_scalar_alias_write_through_accepted"
+tags = ["integration", "borrows", "functions"]
+contract = "language.bindings.mutable_scalar_alias_write_through_accepted"
+role = "primary"
+
+[[case]]
+id = "projected_alias_survives_source_rebinding_accepted"
+path = "projected_alias_survives_source_rebinding_accepted"
+tags = ["integration", "borrows", "structs"]
+contract = "language.bindings.projected_alias_survives_source_rebinding_accepted"
+role = "primary"
+
+[[case]]
+id = "projected_alias_fresh_write_replaces_shared_origin_accepted"
+path = "projected_alias_fresh_write_replaces_shared_origin_accepted"
+tags = ["integration", "borrows", "collections", "structs"]
+contract = "language.bindings.projected_alias_fresh_write_replaces_shared_origin_accepted"
 role = "primary"
 
 [[case]]

@@ -1,0 +1,29 @@
+-- The other branch points the same alias at a projected field. The joined alias therefore has
+-- one direct cell but a second possible write target, so it cannot strongly replace that cell;
+-- `original` stays observable through `slot` and must not be mutated.
+
+Pair = | first {I32} |
+
+identity |value {I32}| -> {I32}:
+    return value
+;
+
+probe |flag Bool| -> I32:
+    original ~= {1}
+    slot ~= {0}
+    pair ~= Pair(first = {0})
+    writer ~= {0}
+    if flag:
+        ~writer = slot
+        ~writer = identity(original)
+    else
+        ~writer = pair.first
+    ;
+    ~writer = {3}
+    observed = identity(slot)
+    ~original.push(4)
+    return observed.length()
+;
+
+result = probe(false)
+io.line([: [result]])

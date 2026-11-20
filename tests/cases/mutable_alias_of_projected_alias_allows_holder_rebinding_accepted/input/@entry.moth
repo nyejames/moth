@@ -1,0 +1,20 @@
+-- The inherited identity is projected storage, not the holder's whole binding cell. A fresh
+-- whole-binding replacement of `holder` remains legal while the alias chain is live.
+
+Pair = | first {I32}, second {I32} |
+
+same_pair |value Pair| -> Pair:
+    return value
+;
+
+probe || -> I32:
+    original ~= Pair({1}, {0})
+    holder ~= same_pair(original)
+    writer ~= holder.first
+    view = writer
+    ~holder = Pair({2}, {3})
+    return view.length()
+;
+
+result = probe()
+io.line([: result=[result]])

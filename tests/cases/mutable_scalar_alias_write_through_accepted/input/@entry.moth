@@ -1,0 +1,25 @@
+-- A mutable alias of a scalar slot writes through to the slot's own cell. The slot's value
+-- provenance may name an immutable source; that origin is not the write target, so the write and
+-- a mutable call through the alias stay legal. The final increment depends on the call's result,
+-- so dropping either write-through step changes the observed value.
+
+identity |value I32| -> I32:
+    return value
+;
+
+set_six |value ~I32|:
+    ~value = 6
+;
+
+probe || -> I32:
+    original = 5
+    slot ~= 0
+    ~slot = identity(original)
+    writer ~= slot
+    set_six(~writer)
+    ~writer = writer + 1
+    return slot
+;
+
+result = probe()
+io.line([: mutable_scalar_alias_write_through slot=[result]])

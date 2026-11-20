@@ -292,11 +292,22 @@ impl BorrowState {
         &self.locals[local_index]
     }
 
-    /// The roots a local's current binding keeps alive.
+    /// Mutable access for transfer rules that rewrite a binding's observed value.
+    ///
+    /// WHY: a write through an alias replaces the value stored in the referent cell, so both the
+    /// alias and the cell must observe the same new value provenance.
+    pub(super) fn local_state_mut(&mut self, local_index: usize) -> &mut LocalState {
+        &mut self.locals[local_index]
+    }
+
+    /// The value-provenance roots a local's current binding keeps alive.
     ///
     /// A definite slot stores the current value in its own binding cell. If that value aliases an
     /// older allocation, the older roots replace the slot's own allocation root. A SLOT | ALIAS
     /// join remains conservative because either binding representation may have reached the join.
+    /// These roots describe allocation provenance for value and lifetime reasoning. Binding-cell
+    /// overlap and write targets are separate facts in `direct_alias_roots` and
+    /// `write_target_roots`, and are not reported here.
     pub(super) fn effective_roots(&self, local_index: usize) -> RootSet {
         let (includes_self, includes_value_roots) = self.effective_root_sources(local_index);
         let mut roots = RootSet::empty(self.locals.len());
@@ -331,6 +342,37 @@ impl BorrowState {
         )
     }
 
+    /// Cells a place rooted at `local_index` designates for access.
+    ///
+    /// WHAT: the binding's own cell when it owns storage, plus the cells it aliases and the cells
+    ///       its writes target or inherits as projected overlap identity.
+    /// WHY: a definite slot designates its own cell, an alias designates its referents, and an
+    ///      alias chain of a projected field designates the projection's base cell even though
+    ///      the projected value itself observes an older allocation.
+    pub(super) fn designated_cells(&self, local_index: usize) -> RootSet {
+        let state = &self.locals[local_index];
+        let mut cells = RootSet::empty(self.locals.len());
+        if state.mode.contains(LocalMode::SLOT) {
+            cells.insert(local_index);
+        }
+        cells.union_with(&state.direct_alias_roots);
+        cells.union_with(&state.write_target_roots);
+        cells
+    }
+
+    /// Cells a write through `local_index` treats as its storage.
+    ///
+    /// WHY: a produced alias has no recorded referent cell, so its value provenance names the
+    /// storage it would write. Both the update check and write-through state refresh need this
+    /// one fallback.
+    pub(super) fn write_storage_cells(&self, local_index: usize) -> RootSet {
+        let mut cells = self.designated_cells(local_index);
+        if cells.is_empty() {
+            cells.union_with(&self.locals[local_index].value_roots);
+        }
+        cells
+    }
+
     pub(super) fn update_local_state(&mut self, local_index: usize, new_state: LocalState) {
         self.locals[local_index] = new_state;
     }
@@ -349,6 +391,13 @@ impl BorrowState {
             changed |= left
                 .direct_alias_roots
                 .union_with(&right.direct_alias_roots);
+            changed |= left
+                .write_target_roots
+                .union_with(&right.write_target_roots);
+            // Derivation is a must fact: every incoming path must have derived from the alias.
+            changed |= left
+                .derived_from_roots
+                .intersect_with(&right.derived_from_roots);
         }
         changed
     }
@@ -356,9 +405,13 @@ impl BorrowState {
     /// Reset locals outside the lexical visibility mask and drop their roots from visible locals.
     ///
     /// WHY: runs on every CFG edge, so it rewrites each local in place rather than cloning and
-    /// comparing every local's root sets. Transfer keeps a local's direct-alias roots within its
-    /// value roots, so joining two states narrowed to one mask stays narrowed. The engine relies
-    /// on that to store narrowed block inputs without narrowing them again before transfer.
+    /// comparing every local's root sets. Value provenance, direct alias cells, write targets and
+    /// the derivation ledger are independent facts: a projected value keeps provenance from a
+    /// rebindable cell without observing that cell, and an alias of a scalar cell can name an
+    /// immutable origin. A root from any set that left visibility must go, and a binding with no
+    /// observable root has nothing left to observe even if its ledger names a visible binding.
+    /// Joining two states already narrowed to one mask stays narrowed because no set regains a
+    /// pruned bit.
     pub(super) fn kill_invisible(&mut self, visible_mask: &RootSet) {
         // WHY: the sweep is O(locals) and runs on every CFG edge. A mask that covers every local
         // (a function whose blocks all sit in one lexical region) hides none and keeps every root,
@@ -373,13 +426,19 @@ impl BorrowState {
                 continue;
             }
 
-            // Locals without value roots keep their direct-alias roots untouched.
-            if local.value_roots.is_empty() {
+            // A local with no root in any set has nothing to prune, so keep its recorded binding
+            // modes: a reset here would drop the rootless SLOT | ALIAS alternative the merge
+            // established, and no root evidence rules it out.
+            if !local.has_alias_roots() && local.derived_from_roots.is_empty() {
                 continue;
             }
+
             local.value_roots.intersect_with(visible_mask);
             local.direct_alias_roots.intersect_with(visible_mask);
-            if local.value_roots.is_empty() {
+            local.write_target_roots.intersect_with(visible_mask);
+            local.derived_from_roots.intersect_with(visible_mask);
+
+            if !local.has_alias_roots() {
                 let mode = if local.mode.contains(LocalMode::SLOT) {
                     LocalMode::SLOT
                 } else {
@@ -400,11 +459,17 @@ impl BorrowState {
                 .iter_ones()
                 .map(|root_index| local_ids[root_index])
                 .collect::<Vec<_>>();
+            let write_targets = local_state
+                .write_target_roots
+                .iter_ones()
+                .map(|root_index| local_ids[root_index])
+                .collect::<Vec<_>>();
 
             locals.push(LocalBorrowSnapshot {
                 local: local_ids[index],
                 mode: local_state.mode,
                 alias_roots,
+                write_targets,
             });
         }
 
@@ -417,40 +482,83 @@ pub(super) struct LocalState {
     // Binding storage mode and value provenance are deliberately separate. A call result has a
     // SLOT binding even when its current value aliases roots owned by an argument.
     pub mode: LocalMode,
+    // Allocation provenance: the older allocations this binding's value observes. Lifetime and
+    // value analysis follow these roots.
     pub value_roots: RootSet,
+    // Binding-cell overlap: the definite slots this binding aliases as a whole binding. These
+    // cells decide whole-binding exclusivity and are not contained in `value_roots`.
     pub direct_alias_roots: RootSet,
+    // Cells a write through this binding targets, plus projected referent cells an immutable
+    // alias inherits from a projection-free alias chain as overlap identity. An alias of a
+    // projection targets the projection's base cell even though the projected value it reads
+    // observes an older allocation, so this is a separate fact from `direct_alias_roots`.
+    // Immutable bindings cannot write through, but inherited targets still identify the storage
+    // they overlap when a mutable alias replaces it.
+    pub write_target_roots: RootSet,
+    // Must-set of alias bindings this binding was created through, with the full transitive
+    // chain. Reads through a derived binding are not foreign accesses to a mutably active alias
+    // in that chain. Joins intersect this set: a path that did not derive from the alias loses
+    // the exemption.
+    pub derived_from_roots: RootSet,
 }
 
 impl LocalState {
-    pub(super) fn uninit(local_count: usize) -> Self {
+    /// A binding of `mode` with no roots over `local_count` locals.
+    fn root_free(mode: LocalMode, local_count: usize) -> Self {
         Self {
-            mode: LocalMode::UNINIT,
+            mode,
             value_roots: RootSet::empty(local_count),
             direct_alias_roots: RootSet::empty(local_count),
+            write_target_roots: RootSet::empty(local_count),
+            derived_from_roots: RootSet::empty(local_count),
         }
+    }
+
+    pub(super) fn uninit(local_count: usize) -> Self {
+        Self::root_free(LocalMode::UNINIT, local_count)
     }
 
     pub(super) fn slot(local_count: usize) -> Self {
-        Self {
-            mode: LocalMode::SLOT,
-            value_roots: RootSet::empty(local_count),
-            direct_alias_roots: RootSet::empty(local_count),
-        }
+        Self::root_free(LocalMode::SLOT, local_count)
     }
 
     pub(super) fn slot_with_value_roots(value_roots: RootSet, direct_alias_roots: RootSet) -> Self {
+        let local_count = value_roots.bit_len();
         Self {
-            mode: LocalMode::SLOT,
             value_roots,
             direct_alias_roots,
+            ..Self::root_free(LocalMode::SLOT, local_count)
         }
     }
 
+    /// A projection-free alias: it observes the source binding cell, so its write target is that
+    /// same cell. Test fixtures seed joins with this shape.
+    #[cfg(test)]
     pub(super) fn alias_with_direct(value_roots: RootSet, direct_alias_roots: RootSet) -> Self {
+        let local_count = value_roots.bit_len();
         Self {
-            mode: LocalMode::ALIAS,
+            value_roots,
+            direct_alias_roots: direct_alias_roots.clone(),
+            write_target_roots: direct_alias_roots,
+            ..Self::root_free(LocalMode::ALIAS, local_count)
+        }
+    }
+
+    /// An alias whose write target differs from its whole-binding overlap identity.
+    ///
+    /// WHY: an alias created from a projected place writes through to the projection's base cell
+    /// while its value observes the older allocation under that projection.
+    pub(super) fn alias_with_cells(
+        value_roots: RootSet,
+        direct_alias_roots: RootSet,
+        write_target_roots: RootSet,
+    ) -> Self {
+        let local_count = value_roots.bit_len();
+        Self {
             value_roots,
             direct_alias_roots,
+            write_target_roots,
+            ..Self::root_free(LocalMode::ALIAS, local_count)
         }
     }
 
@@ -459,10 +567,17 @@ impl LocalState {
         self.mode = mode;
         self.value_roots.clear();
         self.direct_alias_roots.clear();
+        self.write_target_roots.clear();
+        self.derived_from_roots.clear();
     }
 
-    pub(super) fn has_value_aliases(&self) -> bool {
+    /// Whether this binding observes any allocation root: value provenance, a whole-binding cell
+    /// or a write target. Cell-only aliases still take part in access and liveness checks. The
+    /// derivation ledger is not an observed allocation, so it does not keep a binding alive.
+    pub(super) fn has_alias_roots(&self) -> bool {
         !self.value_roots.is_empty()
+            || !self.direct_alias_roots.is_empty()
+            || !self.write_target_roots.is_empty()
     }
 
     pub(super) fn is_alias_only(&self) -> bool {
@@ -635,15 +750,16 @@ impl RootSet {
         changed
     }
 
-    pub(super) fn intersect_with(&mut self, other: &Self) {
+    /// Keep only roots `other` also holds, reporting whether any root was removed.
+    pub(super) fn intersect_with(&mut self, other: &Self) -> bool {
         // WHY: an empty set has nothing to mask, and an empty mask leaves no bit, so neither case
         // reads or copies words.
         if self.words.is_none() {
-            return;
+            return false;
         }
         let Some(other_words) = other.words.as_ref() else {
             self.words = None;
-            return;
+            return true;
         };
 
         // WHY: an unshared buffer is masked in place; only shared words need the removal test
@@ -655,20 +771,24 @@ impl RootSet {
                 .zip(other_words.iter())
                 .any(|(left, right)| left & !right != 0);
             if !removes_bits {
-                return;
+                return false;
             }
         }
 
         // WHY: a mask can remove every bit, so the surviving bits are gathered while masking; an
         // empty result drops the buffer, keeping `None` as the only empty representation.
         let mut surviving = 0u64;
+        let mut removed = false;
         for (left, right) in self.words_mut().iter_mut().zip(other_words.iter()) {
-            *left &= *right;
-            surviving |= *left;
+            let next = *left & *right;
+            removed |= next != *left;
+            *left = next;
+            surviving |= next;
         }
         if surviving == 0 {
             self.words = None;
         }
+        removed
     }
 
     /// Whether the two sets share a root, without building their intersection.
@@ -726,6 +846,11 @@ impl RootSet {
 
     pub(super) fn is_empty(&self) -> bool {
         self.words.is_none()
+    }
+
+    /// Width of the universe this set indexes.
+    pub(super) fn bit_len(&self) -> usize {
+        self.bit_len
     }
 
     pub(super) fn iter_ones(&self) -> RootSetIter<'_> {

@@ -1,0 +1,22 @@
+-- The same branch merge without installing the mutable alias: the slot's value survives the
+-- branch-local seed, and reading it after the merge is legal.
+
+identity |value I32| -> I32:
+    return value
+;
+
+probe |flag Bool| -> Bool:
+    slot ~= 0
+    writer ~= 0
+    if flag:
+        seed ~= 5
+        ~slot = identity(seed)
+    else
+        return false
+    ;
+    snapshot = copy slot
+    return writer is snapshot
+;
+
+result = probe(flag = true)
+io.line([: mutable_alias_branch_merge result=[result]])
