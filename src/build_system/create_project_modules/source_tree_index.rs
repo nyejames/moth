@@ -15,6 +15,7 @@
 //! inventory/ownership owner and later consumers resolve source data through it rather than
 //! through duplicated per-module records.
 use super::module_identity::{ModuleId, ModuleIdentityRecord, ModuleIdentityTable};
+use super::source_loading::io_kind_indicates_damaged_install;
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::definition::damaged_package_set_report;
 use crate::builder_surface::external_import_providers::provider::ExternalFileExtension;
@@ -667,6 +668,7 @@ impl SourceTreeIndex {
         } = boundary;
         let config_canonical_path = config_source.and_then(|source| source.canonical_path());
         let config_source_id = config_source.map(|source| source.source_id);
+        let damaged_package = DamagedPackageBoundary::for_boundary(kind, package_set_membership);
         // One stable package identity shared by every structural module in this boundary:
         // normal roots, support roots and their role-neutral helper origin. It is derived from
         // the configured project name (project boundary) or the registry's `PackageOrigin` plus
@@ -683,8 +685,9 @@ impl SourceTreeIndex {
             // Symlink aliases are one physical subtree; canonicalize before indexing so aliases
             // cannot duplicate source identities, and do not traverse aliases outside this
             // boundary.
-            let directory = fs::canonicalize(&directory)
-                .map_err(|error| Self::directory_read_error(&directory, error))?;
+            let directory = fs::canonicalize(&directory).map_err(|error| {
+                Self::directory_read_error(&directory, error, damaged_package.as_ref())
+            })?;
             if !directory.starts_with(&entry_root)
                 || !visited_directories.insert(directory.clone())
                 || skip_policy.canonical_ancestor_is_skipped(&directory, &entry_root)
@@ -693,7 +696,7 @@ impl SourceTreeIndex {
             }
             stats.dirs_visited += 1;
 
-            let entries = Self::sorted_directory_entries(&directory)?;
+            let entries = Self::sorted_directory_entries(&directory, damaged_package.as_ref())?;
 
             let mut subdirectories = Vec::new();
             let mut source_files_by_stem: BTreeMap<String, String> = BTreeMap::new();
@@ -727,8 +730,7 @@ impl SourceTreeIndex {
                         }
                         if file_name_is_module_root_file(file_name) {
                             return Err(reject_non_regular_module_root(
-                                kind,
-                                package_set_membership,
+                                damaged_package.as_ref(),
                                 file_name,
                                 &directory,
                                 &path,
@@ -790,8 +792,7 @@ impl SourceTreeIndex {
                         }
                         if file_name_is_module_root_file(file_name) {
                             return Err(reject_non_regular_module_root(
-                                kind,
-                                package_set_membership,
+                                damaged_package.as_ref(),
                                 file_name,
                                 &directory,
                                 &path,
@@ -1073,7 +1074,7 @@ impl SourceTreeIndex {
                         &directory,
                         &mut directory_roots,
                         package_prefix,
-                        package_set_membership,
+                        damaged_package.as_ref(),
                         string_table,
                     )?
                 }
@@ -1183,7 +1184,7 @@ impl SourceTreeIndex {
         // One classified pass supplies every fact: files own helper keys and claim spellings, while
         // directories own namespace keys, reserved-root claims and the roots registered-prefix
         // probing descends from.
-        for entry in Self::sorted_directory_entries(source_root)? {
+        for entry in Self::sorted_directory_entries(source_root, None)? {
             let Some(entry) = eligible_single_file_entry(&skip_policy, source_root, &entry)? else {
                 continue;
             };
@@ -1429,27 +1430,36 @@ impl SourceTreeIndex {
 
     fn sorted_directory_entries(
         directory: &Path,
+        damaged_package: Option<&DamagedPackageBoundary<'_>>,
     ) -> Result<Vec<fs::DirEntry>, InfrastructureFailure> {
         let mut entries = fs::read_dir(directory)
-            .map_err(|error| Self::directory_read_error(directory, error))?
+            .map_err(|error| Self::directory_read_error(directory, error, damaged_package))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| {
-                InfrastructureFailure::filesystem(
+                let io_kind = error.kind();
+                let failure = InfrastructureFailure::filesystem(
                     CompilerStage::ProjectBuildAssembly,
                     directory,
                     format!("Failed to read directory entry while indexing source tree: {error}"),
-                )
+                );
+                explain_damaged_directory(failure, io_kind, damaged_package)
             })?;
         entries.sort_by_key(|entry| entry.path());
         Ok(entries)
     }
 
-    fn directory_read_error(directory: &Path, error: std::io::Error) -> InfrastructureFailure {
-        InfrastructureFailure::filesystem(
+    fn directory_read_error(
+        directory: &Path,
+        error: std::io::Error,
+        damaged_package: Option<&DamagedPackageBoundary<'_>>,
+    ) -> InfrastructureFailure {
+        let io_kind = error.kind();
+        let failure = InfrastructureFailure::filesystem(
             CompilerStage::ProjectBuildAssembly,
             directory,
             format!("Failed to read directory while indexing source tree: {error}"),
-        )
+        );
+        explain_damaged_directory(failure, io_kind, damaged_package)
     }
 }
 
@@ -1635,51 +1645,91 @@ fn module_root_outside_claim_error(
     ))
 }
 
+/// Package prefix and damaged-set report of one compiler-shipped package boundary.
+///
+/// WHAT: present only for a package boundary registered as part of the compiler-shipped set;
+///       project and ordinary package boundaries have none.
+/// WHY: registration provenance decides the lane, never the installation path, so a damaged
+///      shipped installation does not surface as an author error while a custom package under the
+///      installed `packages/` directory stays authored. One value per boundary serves every
+///      traversal failure site.
+struct DamagedPackageBoundary<'a> {
+    package_prefix: &'a str,
+    report: String,
+}
+
+impl<'a> DamagedPackageBoundary<'a> {
+    fn for_boundary(
+        kind: SourceTreeBoundaryKind<'a>,
+        package_set_membership: PackageSetMembership,
+    ) -> Option<Self> {
+        let SourceTreeBoundaryKind::Package { package_prefix } = kind else {
+            return None;
+        };
+        damaged_package_set_report(package_set_membership).map(|report| Self {
+            package_prefix,
+            report,
+        })
+    }
+}
+
+/// Explain one failed directory read inside a shipped package boundary as installation damage.
+///
+/// WHAT: a cause that contradicts the installed layout, such as a package directory replaced by
+///       a regular file, names the package and appends the damaged-set report while keeping the
+///       original OS cause. Transient I/O and every authored boundary keep the failure unchanged.
+fn explain_damaged_directory(
+    mut failure: InfrastructureFailure,
+    io_kind: std::io::ErrorKind,
+    damaged_package: Option<&DamagedPackageBoundary<'_>>,
+) -> InfrastructureFailure {
+    let Some(damaged_package) =
+        damaged_package.filter(|_| io_kind_indicates_damaged_install(io_kind))
+    else {
+        return failure;
+    };
+    failure.message = format!(
+        "Source package @{} cannot read its installed source directory: {}. {}",
+        damaged_package.package_prefix, failure.message, damaged_package.report
+    )
+    .into_boxed_str();
+    failure
+}
+
 /// Reject one reserved module-root name that is not a regular file in this boundary.
 ///
 /// WHAT: resolves the visible marker first. A compiler-shipped package registration whose marker
 ///       cannot resolve, or resolves to a non-file entry, reports the incomplete installed set
 ///       with the original cause; every authored registration keeps its existing filesystem
 ///       failure or structure diagnostic.
-/// WHY: registration provenance decides the lane, never the installation path, so a damaged
-///       shipped facade does not surface as an author error while a custom package under the
-///       installed `packages/` directory stays authored. The original OS error stays visible.
+/// WHY: a damaged shipped facade is not an author error. The original OS error stays visible.
 fn reject_non_regular_module_root(
-    kind: SourceTreeBoundaryKind<'_>,
-    package_set_membership: PackageSetMembership,
+    damaged_package: Option<&DamagedPackageBoundary<'_>>,
     file_name: &str,
     directory: &Path,
     visible_root_file: &Path,
     string_table: &mut StringTable,
 ) -> PreparedFailure {
-    let damaged_package = match kind {
-        SourceTreeBoundaryKind::Package { package_prefix } => {
-            damaged_package_set_report(package_set_membership)
-                .map(|report| (package_prefix, report))
-        }
-        SourceTreeBoundaryKind::Project { .. } => None,
-    };
-
     let canonical_target = match canonicalize_source_path(visible_root_file) {
         Ok(canonical_target) => canonical_target,
         Err(error) => {
             // Resolution can fail before classification when a symlinked facade target becomes
             // unsearchable, so the original OS error is retained in the shipped message.
-            let Some((package_prefix, report)) = damaged_package else {
+            let Some(damaged_package) = damaged_package else {
                 return error.into();
             };
             let mut error = error;
             error.message = format!(
-                "Source package @{package_prefix} cannot resolve its '{file_name}' module root \
-                 from the installed package set: {}. {report}",
-                error.message
+                "Source package @{} cannot resolve its '{file_name}' module root \
+                 from the installed package set: {}. {}",
+                damaged_package.package_prefix, error.message, damaged_package.report
             )
             .into_boxed_str();
             return error.into();
         }
     };
 
-    let Some((package_prefix, report)) = damaged_package else {
+    let Some(damaged_package) = damaged_package else {
         return module_root_not_regular_file_error(
             directory,
             visible_root_file,
@@ -1691,8 +1741,9 @@ fn reject_non_regular_module_root(
         CompilerStage::ProjectBuildAssembly,
         visible_root_file,
         format!(
-            "Source package @{package_prefix} has a reserved module-root name that is not a \
-             regular file: '{file_name}'. {report}"
+            "Source package @{} has a reserved module-root name that is not a \
+             regular file: '{file_name}'. {}",
+            damaged_package.package_prefix, damaged_package.report
         ),
     )
     .into()
@@ -1763,7 +1814,7 @@ fn classify_package_root_directory(
     directory: &Path,
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
     package_prefix: &str,
-    package_set_membership: PackageSetMembership,
+    damaged_package: Option<&DamagedPackageBoundary<'_>>,
     string_table: &mut StringTable,
 ) -> Result<ClassifiedDirectoryRoots, PreparedFailure> {
     // The support facade is the only package-facing surface. A normal root alone is an internal
@@ -1772,11 +1823,14 @@ fn classify_package_root_directory(
         .iter()
         .any(|root| root.role == ModuleRootRole::Support);
     if !has_support_facade {
-        if let Some(report) = damaged_package_set_report(package_set_membership) {
+        if let Some(damaged_package) = damaged_package {
             return Err(InfrastructureFailure::filesystem(
                 CompilerStage::ProjectBuildAssembly,
                 directory,
-                format!("Source package @{package_prefix} has no '@package.moth' support facade root. {report}"),
+                format!(
+                    "Source package @{package_prefix} has no '@package.moth' support facade root. {}",
+                    damaged_package.report
+                ),
             )
             .into());
         }
@@ -2303,7 +2357,7 @@ fn eligible_child_directories(
     skip_policy: &SourceTreeSkipPolicy,
 ) -> Result<Vec<EligibleDirectoryEntry>, PreparedFailure> {
     let mut directories = Vec::new();
-    for entry in SourceTreeIndex::sorted_directory_entries(directory)? {
+    for entry in SourceTreeIndex::sorted_directory_entries(directory, None)? {
         let Some(entry) = eligible_single_file_entry(skip_policy, source_root, &entry)? else {
             continue;
         };
@@ -2441,7 +2495,7 @@ fn reserved_root_directory_claim(
     let mut helper_source = None;
     let mut subdirectories = Vec::new();
 
-    for entry in SourceTreeIndex::sorted_directory_entries(directory)? {
+    for entry in SourceTreeIndex::sorted_directory_entries(directory, None)? {
         let Some(entry) = eligible_single_file_entry(skip_policy, source_root, &entry)? else {
             continue;
         };

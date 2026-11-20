@@ -328,29 +328,26 @@ impl SelectedSourceTextMap {
 
 /// Classify one selected-source read, explaining a shipped package's damaged installation.
 ///
-/// WHAT: reads the operating-system cause before classification consumes it. A filesystem cause
-///       that means a registered installed asset is missing or unreadable rewrites the failure to
-///       name the package and append its damaged-set report; invalid UTF-8 and transient I/O such
-///       as descriptor exhaustion pass through unchanged.
+/// WHAT: reads the operating-system cause before classification consumes it. A cause that means
+///       a registered installed asset is missing, unreadable or undecodable rewrites the failure
+///       to name the package and append its damaged-set report; transient I/O such as descriptor
+///       exhaustion passes through unchanged, and every ordinary boundary keeps invalid UTF-8 as
+///       its authored `NonUtf8` outcome.
 /// WHY: `SelectedSourceTextMap::load` is the exact registered-source read site, so its known I/O
-///      cause can prove an incomplete shipped installation. Unrelated discovery, provider and
-///      file-value failures never pass through this function.
+///      cause can prove an incomplete shipped installation. Shipped sources are UTF-8 by
+///      construction, so invalid bytes there are installation damage, not something the author
+///      can edit. Unrelated discovery, provider and file-value failures never pass through here.
 fn classify_selected_source_read(
     file_path: &Path,
     error: std::io::Error,
     damaged_source_set: Option<&DamagedSourceSet>,
 ) -> SourceReadError {
-    let io_kind = error.kind();
-    let classified = classify_source_read_error(file_path, error);
-    let Some(damaged_source_set) = damaged_source_set else {
-        return classified;
+    let Some(damaged_source_set) =
+        damaged_source_set.filter(|_| io_kind_indicates_damaged_install(error.kind()))
+    else {
+        return classify_source_read_error(file_path, error);
     };
-    let SourceReadError::Infrastructure(mut failure) = classified else {
-        return SourceReadError::NonUtf8;
-    };
-    if !io_kind_indicates_damaged_install(io_kind) {
-        return SourceReadError::Infrastructure(failure);
-    }
+    let mut failure = source_read_error(file_path, error);
     failure.message = format!(
         "Source package @{} could not be read from its installed source set: {}. {}",
         damaged_source_set.package_prefix, failure.message, damaged_source_set.report
@@ -359,17 +356,19 @@ fn classify_selected_source_read(
     SourceReadError::Infrastructure(failure)
 }
 
-/// Whether one read cause means a registered installed asset is missing or unreadable.
+/// Whether one read cause means a registered installed asset is missing, unreadable or corrupt.
 ///
 /// Transient conditions such as descriptor exhaustion stay ordinary operational errors; only a
 /// cause that contradicts the installed package layout explains the shipped set as incomplete.
-fn io_kind_indicates_damaged_install(io_kind: std::io::ErrorKind) -> bool {
+/// `InvalidData` is how `read_to_string` reports bytes that are not UTF-8.
+pub(crate) fn io_kind_indicates_damaged_install(io_kind: std::io::ErrorKind) -> bool {
     matches!(
         io_kind,
         std::io::ErrorKind::NotFound
             | std::io::ErrorKind::PermissionDenied
             | std::io::ErrorKind::IsADirectory
             | std::io::ErrorKind::NotADirectory
+            | std::io::ErrorKind::InvalidData
     )
 }
 
@@ -496,12 +495,18 @@ mod tests {
             failure.message
         );
 
+        let SourceReadError::Infrastructure(failure) =
+            classified(std::io::ErrorKind::InvalidData, Some(&damaged))
+        else {
+            panic!("undecodable shipped source text is installation damage");
+        };
+        assert!(
+            failure.message.contains("@core/html") && failure.message.contains("incomplete"),
+            "invalid UTF-8 in a shipped source names the damaged set: {}",
+            failure.message
+        );
         assert!(matches!(
-            classify_selected_source_read(
-                Path::new("/invalid-source"),
-                std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid utf-8"),
-                Some(&damaged),
-            ),
+            classified(std::io::ErrorKind::InvalidData, None),
             SourceReadError::NonUtf8
         ));
     }
@@ -535,5 +540,20 @@ mod tests {
             1
         );
         assert!(!selected.contains_successful(&invalid_path));
+
+        // The same bytes in a compiler-shipped boundary are installation damage, not an
+        // authored decoding diagnostic.
+        let mut shipped = SelectedSourceTextMap::for_package_boundary(
+            PackageSetMembership::CompilerShipped,
+            "core/html",
+        );
+        let Err(SourceReadError::Infrastructure(failure)) = shipped.load(&invalid_path) else {
+            panic!("invalid UTF-8 in a shipped source must be an infrastructure failure");
+        };
+        assert!(
+            failure.message.contains("@core/html") && failure.message.contains("incomplete"),
+            "the shipped decoding failure names the damaged set: {}",
+            failure.message
+        );
     }
 }

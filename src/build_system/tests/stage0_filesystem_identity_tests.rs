@@ -1129,6 +1129,60 @@ mod source_package_boundary_indexes_tests {
     }
 
     #[test]
+    fn shipped_package_root_replaced_by_a_file_reports_a_damaged_set() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let package_parent = root.join("installation/packages/core");
+        fs::create_dir_all(&package_parent).expect("should create package parent");
+        let package_root = package_parent.join("html");
+        fs::write(&package_root, "not a directory").expect("should replace the root with a file");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        source_packages
+            .register_compiler_shipped_filesystem_root(
+                "core/html",
+                package_root,
+                crate::builder_surface::PackageOrigin::Core,
+            )
+            .expect("test shipped source root should register");
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("a shipped package directory replaced by a file is a damaged package set");
+        let error = primary_infrastructure_error(failure);
+        assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
+        assert!(
+            error.message.contains("Source package @core/html")
+                && error.message.contains("Failed to read directory")
+                && error.message.contains("incomplete"),
+            "the shipped root keeps its OS cause and names the damaged set: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn ordinary_package_root_replaced_by_a_file_stays_operational() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let package_root = _tmp_root.path().join("pkg");
+        fs::write(&package_root, "not a directory").expect("should create a file package root");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        register_pkg(&mut source_packages, &package_root);
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("an ordinary package root that is a file cannot be indexed");
+        let error = primary_infrastructure_error(failure);
+        assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
+        assert!(
+            error.message.contains("Failed to read directory")
+                && !error.message.contains("incomplete"),
+            "an ordinary registration keeps its operational read failure: {}",
+            error.message
+        );
+    }
+
+    #[test]
     fn custom_registration_with_the_official_builder_prefix_stays_authored() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
