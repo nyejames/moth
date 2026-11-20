@@ -122,6 +122,10 @@ fn summary_directory_command_round_trips_in_powershell() {
     let mut report = dummy_report();
     report.project_path = temp.path().join("Priya's $site `draft` [1] ’notes’");
     std::fs::create_dir(&report.project_path).unwrap();
+    // A marker proves the shell reached the project directory without comparing path spellings:
+    // a CI temp directory can sit under an 8.3 short name such as `RUNNER~1`, which PowerShell
+    // need not report in the spelling the path was created with.
+    std::fs::write(report.project_path.join("moth-test-marker"), "").unwrap();
 
     let summary = render_summary(&report, Some(temp.path()));
     let command = summary
@@ -130,15 +134,20 @@ fn summary_directory_command_round_trips_in_powershell() {
         .unwrap();
     let script = format!(
         "$ErrorActionPreference = 'Stop'; {command}; \
-         if ((Get-Location).ProviderPath -cne $env:MOTH_TEST_PROJECT) {{ exit 1 }}"
+         if (-not (Test-Path -LiteralPath 'moth-test-marker' -PathType Leaf)) {{ \
+         [Console]::Error.WriteLine((Get-Location).ProviderPath); exit 1 }}"
     );
     let output = std::process::Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .env("MOTH_TEST_PROJECT", &report.project_path)
         .current_dir(temp.path())
         .output()
         .unwrap();
-    assert!(output.status.success(), "{:?}", output.stderr);
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
