@@ -7,7 +7,34 @@
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::projects::settings::CONFIG_FILE_NAME;
 use std::path::{Path, PathBuf};
+
+/// Whether a directory name is hidden from source discovery by the `_` prefix.
+///
+/// Only directory components are hidden. A file such as `_helper.moth` in a visible directory
+/// remains eligible source.
+pub(crate) fn directory_name_is_hidden(name: &str) -> bool {
+    name.starts_with('_')
+}
+
+/// Whether a canonical directory path contains a hidden component below the selected root.
+///
+/// The selected root itself is exempt: `moth check website/_prototype/` compiles that root, while
+/// any `_` descendant stays excluded. Canonical ancestry means a visible symlink alias cannot
+/// reveal a hidden physical subtree. Callers pass a directory path, so a terminal file name is not
+/// interpreted as a hidden directory.
+pub(crate) fn path_has_hidden_component_below(path: &Path, selected_root: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(selected_root) else {
+        return false;
+    };
+    relative.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(directory_name_is_hidden)
+    })
+}
 
 /// A source-file dependency candidate derived from one extensionless dependency path.
 ///
@@ -104,8 +131,12 @@ pub(crate) fn candidate_dependency_files_for_source_kinds(
         source_file_kinds,
     );
 
+    // The reserved config spelling can only be a directory on the way to another source.
     if dependency_component_len > 1
         && let Some(parent) = normalized_dependency_path.parent()
+        && parent
+            .file_name()
+            .is_none_or(|name| name != CONFIG_FILE_NAME)
     {
         add_source_kind_candidates(
             &mut candidates,
@@ -126,6 +157,13 @@ fn add_source_kind_candidates(
 ) {
     for recognized in SourceFileKind::recognized_kinds() {
         let path = with_extension(base_path.clone(), recognized.extension);
+        // An extensionless quoted stem must not select the build-only config source either.
+        if path
+            .file_name()
+            .is_some_and(|name| name == CONFIG_FILE_NAME)
+        {
+            continue;
+        }
         let support = if source_file_kinds
             .kind_for_extension(recognized.extension)
             .is_some()

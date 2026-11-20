@@ -1,0 +1,5 @@
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_contains = ["mutable_scalar_alias_write_through slot=7"]

@@ -61,6 +61,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_infrastructure_error_contains, assert_invalid_mutable_access_reason, run_borrow_checker,
+    run_borrow_checker_with_types,
 };
 use crate::compiler_frontend::tests::external_package_support::{
     default_external_package_registry, register_external_function,
@@ -502,6 +503,195 @@ mutator(shared, ~mutable)
     );
 }
 
+#[test]
+fn parameter_alias_definition_does_not_publish_a_parameter_write() {
+    // Issuing a mutation-capable alias records an exclusive access on the source parameter.
+    // A definition cannot write the parameter, so the summary must stay read-only even when the
+    // parameter is mutable and the alias is the only thing that touches it.
+    let source = r#"reader |divisor ~I32| -> I32:
+    n ~I32 = divisor
+    return n
+;"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let entry_path = path_fork
+        .try_intern_portable_path("@entry.moth", &mut string_table)
+        .expect("test entry path fits");
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("reading through a mutable alias of a mutable parameter should validate");
+
+    let reader_name = path_fork
+        .try_intern_child(entry_path, string_table.intern("reader"))
+        .expect("test path fits");
+    let reader_id = hir
+        .functions
+        .iter()
+        .find(|function| {
+            hir.side_table
+                .function_name_path(function.id)
+                .is_some_and(|path| path == reader_name)
+        })
+        .expect("reader function should lower to HIR")
+        .id;
+    let summary = report
+        .analysis
+        .public_call_summaries
+        .get(&reader_id)
+        .expect("reader should have a retained call summary");
+
+    assert_eq!(
+        summary.parameters[0].access,
+        PublicCallParameterAccess::Mutable
+    );
+    assert_eq!(
+        summary.parameters[0].mutation,
+        PublicCallMutationEffect::NoWrite
+    );
+    assert_eq!(
+        summary.parameters[0].transfer_effect,
+        PublicCallTransferEffect::MayConsume
+    );
+}
+
+#[test]
+fn mutable_alias_acquisition_rejects_read_only_source_places() {
+    for source in [
+        r#"reader |divisor I32| -> I32:
+    n ~I32 = divisor
+    return n
+;"#,
+        r#"reader |divisor ~I32| -> I32:
+    shared = divisor
+    n ~= shared
+    return n
+;"#,
+        r#"reader || -> I32:
+    total ~= 0
+    loop 1 to 3 |value, ordinal|:
+        ~total = ordinal
+    ;
+    return total
+;"#,
+    ] {
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+        let external_package_registry = default_external_package_registry(&mut string_table);
+        let hir = lower_hir(
+            ast,
+            &mut string_table,
+            &mut path_fork,
+            &external_package_registry,
+        );
+        let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+            .expect_err("a read-only source place cannot grant mutable access");
+        assert_invalid_mutable_access_reason(error, InvalidMutableAccessReason::ImmutablePlace);
+    }
+}
+
+#[test]
+fn mutable_scalar_reborrow_distinguishes_overlap_from_immutable_provenance() {
+    let source = r#"identity |value I32| -> I32:
+    return value
+;
+
+read_join |condition Bool| -> I32:
+    original = 5
+    slot ~= 0
+    candidate ~= 0
+    ~candidate = identity(original)
+    if condition:
+        ~candidate = slot
+    ;
+    writer ~= candidate
+    return writer
+;"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
+    run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+        .expect("both reaching source cells are mutable");
+
+    let source = r#"identity |value I32| -> I32:
+    return value
+;
+
+read_view || -> I32:
+    original = 5
+    slot ~= 0
+    ~slot = identity(original)
+    view = slot
+    writer ~= slot
+    snapshot = copy writer
+    return snapshot + view
+;"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
+    let error = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+        .expect_err("the shared view still overlaps acquisition of the writer");
+    assert_invalid_mutable_access_reason(
+        error,
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+    );
+}
+
+/// Borrow-check `source` and return each named function's published parameter mutation effects,
+/// in the order the names appear.
+///
+/// WHY: the summary tests repeat the same parse, lower and look-up pipeline, and an inline
+/// look-up can silently assert against the wrong function.
+fn named_function_parameter_mutations(
+    source: &str,
+    function_names: &[&str],
+) -> Vec<Vec<PublicCallMutationEffect>> {
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let entry_path = path_fork
+        .try_intern_portable_path("@entry.moth", &mut string_table)
+        .expect("test entry path fits");
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("named function summary fixture should validate");
+
+    function_names
+        .iter()
+        .map(|name| {
+            let name_path = path_fork
+                .try_intern_child(entry_path, string_table.intern(name))
+                .expect("test path fits");
+            let function_id = hir
+                .functions
+                .iter()
+                .find(|function| {
+                    hir.side_table
+                        .function_name_path(function.id)
+                        .is_some_and(|path| path == name_path)
+                })
+                .unwrap_or_else(|| panic!("{name} should lower to HIR"))
+                .id;
+            report
+                .analysis
+                .public_call_summaries
+                .get(&function_id)
+                .unwrap_or_else(|| panic!("{name} should have a retained call summary"))
+                .parameters
+                .iter()
+                .map(|parameter| parameter.mutation)
+                .collect()
+        })
+        .collect()
+}
+
 fn local_call_mutation_summary_in_order(
     callee_body: &str,
     callee_declared_first: bool,
@@ -513,62 +703,11 @@ fn local_call_mutation_summary_in_order(
     } else {
         format!("{wrapper}\n{callee}")
     };
-    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
-    let entry_path = path_fork
-        .try_intern_portable_path("@entry.moth", &mut string_table)
-        .expect("test entry path fits");
-    let external_package_registry = default_external_package_registry(&mut string_table);
-    let hir = lower_hir(
-        ast,
-        &mut string_table,
-        &mut path_fork,
-        &external_package_registry,
-    );
-    let mutator_name = path_fork
-        .try_intern_child(entry_path, string_table.intern("mutator"))
-        .expect("test path fits");
-    let wrapper_name = path_fork
-        .try_intern_child(entry_path, string_table.intern("wrapper"))
-        .expect("test path fits");
-    let mutator_id = hir
-        .functions
-        .iter()
-        .find(|function| {
-            hir.side_table
-                .function_name_path(function.id)
-                .is_some_and(|path| path == mutator_name)
-        })
-        .expect("mutator function should lower to HIR")
-        .id;
-    let wrapper_id = hir
-        .functions
-        .iter()
-        .find(|function| {
-            hir.side_table
-                .function_name_path(function.id)
-                .is_some_and(|path| path == wrapper_name)
-        })
-        .expect("wrapper function should lower to HIR")
-        .id;
-    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-        .expect("local mutation summary fixture should validate");
+    let mut mutations = named_function_parameter_mutations(&source, &["mutator", "wrapper"]);
+    let wrapper = mutations.pop().expect("wrapper summary exists");
+    let mutator = mutations.pop().expect("mutator summary exists");
 
-    let mutator_mutation = report
-        .analysis
-        .public_call_summaries
-        .get(&mutator_id)
-        .expect("mutator should have a retained call summary")
-        .parameters[0]
-        .mutation;
-    let wrapper_mutation = report
-        .analysis
-        .public_call_summaries
-        .get(&wrapper_id)
-        .expect("wrapper should have a retained call summary")
-        .parameters[0]
-        .mutation;
-
-    (mutator_mutation, wrapper_mutation)
+    (mutator[0], wrapper[0])
 }
 
 #[test]
@@ -589,6 +728,106 @@ fn local_mutation_summary_propagates_writes_order_independently() {
         assert_eq!(mutator_mutation, PublicCallMutationEffect::Writes);
         assert_eq!(wrapper_mutation, PublicCallMutationEffect::Writes);
     }
+}
+
+#[test]
+fn slot_rebind_of_mutable_parameter_publishes_no_write() {
+    // The slot rebind reads `input` to acquire a mutation-capable alias of it. That exclusive
+    // access must not be published as a write, nor inherited by callers through the wrapper.
+    for callee_declared_first in [true, false] {
+        let (mutator_mutation, wrapper_mutation) = local_call_mutation_summary_in_order(
+            "    slot ~I32 = 0\n    ~slot = input",
+            callee_declared_first,
+        );
+        assert_eq!(mutator_mutation, PublicCallMutationEffect::NoWrite);
+        assert_eq!(wrapper_mutation, PublicCallMutationEffect::NoWrite);
+    }
+}
+
+// WHAT: a write through a mutable binding that may alias a projected parameter field on one
+//       control-flow path publishes a write to that parameter.
+// WHY: the alias targets the containing allocation `pair` observed when the assignment stored
+//      the projected value. Losing that target at the join would publish NoWrite and hide the
+//      parameter mutation from summary propagation.
+#[test]
+fn projected_alias_write_at_join_publishes_parameter_mutation() {
+    let source = r#"Pair = | first I32, second I32 |
+
+shape |flag Bool, pair ~Pair|:
+    cell ~= 0
+    writer ~= 0
+    if flag:
+        ~writer = cell
+    else
+        ~writer = pair.first
+    ;
+    ~writer = 6
+;
+
+control |flag Bool, pair ~Pair| -> I32:
+    cell ~= 0
+    writer ~= 0
+    if flag:
+        ~writer = cell
+    else
+        ~writer = cell
+    ;
+    ~writer = 6
+    return pair.first
+;"#;
+    let mutations = named_function_parameter_mutations(source, &["shape", "control"]);
+    let (shape, control) = (mutations[0].as_slice(), mutations[1].as_slice());
+
+    assert_eq!(
+        shape,
+        [
+            PublicCallMutationEffect::NoWrite,
+            PublicCallMutationEffect::Writes
+        ]
+    );
+    assert_eq!(
+        control,
+        [
+            PublicCallMutationEffect::NoWrite,
+            PublicCallMutationEffect::NoWrite
+        ]
+    );
+}
+
+// WHAT: a write through a projected alias of a call-returned holder publishes a write to the
+//       parameter whose allocation the projection is rooted in, and a forwarding wrapper
+//       inherits it.
+// WHY: the holder owns only its binding cell; the containing allocation is the parameter's.
+//      Recording the holder cell publishes NoWrite and loses the mutation in summary
+//      propagation. A whole-cell replacement of the holder stores a new value in that cell and
+//      must stay NoWrite: it does not mutate the value it replaces.
+#[test]
+fn projected_write_through_call_returned_holder_publishes_parameter_mutation() {
+    let source = r#"Pair = | first {I32}, second {I32} |
+
+identity |value Pair| -> Pair:
+    return value
+;
+
+mutator |input ~Pair|:
+    holder ~= identity(input)
+    writer ~= holder.first
+    ~writer = {2, 3}
+;
+
+rebind |input ~Pair|:
+    holder ~= identity(input)
+    ~holder = Pair({2}, {3})
+;
+
+wrapper |value ~Pair|:
+    mutator(~value)
+;"#;
+    let mutations = named_function_parameter_mutations(source, &["mutator", "rebind", "wrapper"]);
+
+    assert_eq!(mutations[0], [PublicCallMutationEffect::Writes]);
+    assert_eq!(mutations[1], [PublicCallMutationEffect::NoWrite]);
+    assert_eq!(mutations[2], [PublicCallMutationEffect::Writes]);
 }
 
 #[test]
@@ -3585,14 +3824,26 @@ fn catch_private_call_return_alias_unions_success_and_parameter_derived_handler(
     let (mut hir, mut type_environment) =
         lower_ast(ast, &mut string_table, &mut path_fork, &registry)
             .expect("a direct private catch must lower");
-    let mut initial = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
-        .expect("the pre-installation HIR must be legal");
+    let mut initial = run_borrow_checker_with_types(
+        &hir,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    )
+    .expect("the pre-installation HIR must be legal");
     infer_builtin_failure_summaries(&hir, &mut initial);
     install_private_failure_lanes(&mut hir, &initial, &mut type_environment, &registry)
         .expect("the inferred call must install a real handler edge");
     assert!(hir.catch_protected_calls.is_empty());
-    let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
-        .expect("return provenance must remain legal after error edges are installed");
+    let report = run_borrow_checker_with_types(
+        &hir,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    )
+    .expect("return provenance must remain legal after error edges are installed");
     let recover_name = path_fork
         .try_intern_child(entry_path, string_table.intern("recover"))
         .expect("the test path fits");

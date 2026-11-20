@@ -534,14 +534,7 @@ impl PathTable {
         scratch: &mut Vec<StringId>,
     ) -> String {
         let components = self.resolve_components(path, scratch);
-        let mut rendered = String::new();
-        for (index, component) in components.iter().enumerate() {
-            if index > 0 {
-                rendered.push('/');
-            }
-            rendered.push_str(string_table.resolve(*component));
-        }
-        rendered
+        super::render_portable_components(components, string_table)
     }
 
     /// Render a path as a native `PathBuf` by pushing each resolved component.
@@ -573,18 +566,7 @@ impl PathTable {
         scratch: &mut Vec<StringId>,
     ) -> PathBuf {
         let components = self.resolve_components(path, scratch);
-
-        if components.is_empty() {
-            return PathBuf::new();
-        }
-
-        let mut native = PathBuf::new();
-
-        for component in components {
-            native.push(string_table.resolve(*component));
-        }
-
-        native
+        super::render_native_components(components, string_table)
     }
 }
 #[cfg(feature = "data_layout_memory_probe")]

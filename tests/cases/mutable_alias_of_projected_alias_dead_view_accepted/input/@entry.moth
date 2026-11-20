@@ -1,0 +1,21 @@
+-- The alias chain only blocks the replacement while the view can still be used. The view is read
+-- before the write, so the write is legal.
+
+Pair = | first {I32}, second {I32} |
+
+same_pair |value Pair| -> Pair:
+    return value
+;
+
+probe || -> I32:
+    original ~= Pair({1}, {0})
+    holder ~= same_pair(original)
+    writer ~= holder.first
+    view = writer
+    size = view.length()
+    ~writer = {2, 3}
+    return size
+;
+
+result = probe()
+io.line([: result=[result]])

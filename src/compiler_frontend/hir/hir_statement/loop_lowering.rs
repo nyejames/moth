@@ -47,8 +47,9 @@ use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass, FixedSc
 /// explains why the source of each edge is read live instead of stored here.
 #[derive(Clone, Copy)]
 struct RangeLoopBlocks {
-    step_zero_check: BlockId,
-    step_zero_failure: BlockId,
+    /// The evaluated-step zero guard exists only for an authored step; the implicit `+1` step
+    /// cannot be zero.
+    step_zero_guard: Option<RangeLoopGuardBlocks>,
     /// Receives the non-zero step, records `ascending = step > 0` and selects the header edge.
     header_selector: BlockId,
     header_ascending: BlockId,
@@ -58,13 +59,14 @@ struct RangeLoopBlocks {
     step: BlockId,
     step_candidate: BlockId,
     /// Binary-float counters alone need the rounded-result no-progress guard.
-    step_stall: Option<RangeLoopStallBlocks>,
+    step_stall: Option<RangeLoopGuardBlocks>,
     step_commit: BlockId,
     exit: BlockId,
 }
 
+/// A generated two-block guard: the test and the block it selects on failure.
 #[derive(Clone, Copy)]
-struct RangeLoopStallBlocks {
+struct RangeLoopGuardBlocks {
     check: BlockId,
     failure: BlockId,
 }
@@ -75,7 +77,8 @@ struct RangeLoopLocals {
     end: LocalId,
     step: LoopStepOperand,
     ascending: LocalId,
-    iteration_index: LocalId,
+    /// Present exactly when the header declares the second (ordinal) binding.
+    iteration_index: Option<LocalId>,
     next_value: LocalId,
     candidate_in_range: LocalId,
 }
@@ -233,6 +236,18 @@ impl<'a> HirBuilder<'a> {
         span_ref: &Option<SourceSpan>,
         span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
+        // A statement loop the folded-Bool authority decided false before release folding never
+        // enters its body in any profile. Skipping the body here matches the pre-fold exit
+        // analysis and release speculation, so a failing call in the body neither demands a
+        // private failure lane nor reaches the CFG. Its selected call and fast-use evidence still
+        // needs recording, exactly like a skipped catch handler.
+        //
+        // The pre-fold fact matters: a loop whose condition only release folding made false must
+        // lower normally so its live branches keep the trap evidence a debug build sees.
+        if self.pre_fold_bool_condition(condition.id()) == Some(false) {
+            self.record_skipped_statement_evidence(expressions, body)?;
+            return Ok(());
+        }
         self.lower_while_with_body_emitter(
             condition,
             LoopExitPolicy::Statement,
@@ -267,11 +282,13 @@ impl<'a> HirBuilder<'a> {
 
         self.set_current_block(header_block)?;
 
-        // Read the same AST constant-store fact the exit analysis used, before lowering the
-        // condition. Recognising only HIR's lowered literal would disagree with a named or
-        // body-local folded Bool and leave an accepted non-exiting body unterminated.
+        // Read the same pre-fold Bool fact the exit analysis used, before lowering the condition.
+        // Recognising only HIR's lowered literal would disagree with a named or body-local folded
+        // Bool and leave an accepted non-exiting body unterminated. A condition that only release
+        // folding made true stays an ordinary two-way header so the post-loop statements a debug
+        // build lowers keep their evidence.
         let condition_is_folded_true = exit_policy == LoopExitPolicy::Statement
-            && self.expression_constant_bool(condition) == Some(true);
+            && self.pre_fold_bool_condition(condition.id()) == Some(true);
 
         let condition_value = self.lower_expression_value_to_current_block(condition)?;
         let condition_block = self.current_block_id_or_error()?;
@@ -384,14 +401,20 @@ impl<'a> HirBuilder<'a> {
         mut emit_body: impl FnMut(&mut HirBuilder<'_>) -> Result<(), HirConstructionFailure>,
     ) -> Result<(), HirConstructionFailure> {
         // Build a CFG pipeline so each update is produced only if a next item remains:
-        // zero-step guard -> step-sign direction -> direction header -> candidate update.
+        // an authored step's zero guard -> step-sign direction -> direction header -> candidate
+        // update.
         let parent_region = self.current_region_or_error()?;
         // Integer candidate addition is exact, so only a binary-float counter can round a
         // candidate back onto the current value and needs the no-progress guard.
-        let uses_stall_guard = range.domain.is_binary_float();
-        let blocks = self.create_range_loop_blocks(parent_region, span_ref, uses_stall_guard);
+        let uses_stall_guard = range.has_no_progress_guard();
+        let blocks = self.create_range_loop_blocks(
+            parent_region,
+            span_ref,
+            uses_stall_guard,
+            range.has_zero_step_guard(),
+        );
         let (types, step_type) = self.resolve_range_loop_types(expressions, range)?;
-        let locals = self.allocate_range_loop_locals(types, step_type)?;
+        let locals = self.allocate_range_loop_locals(types, step_type, bindings.index.is_some())?;
         let runtime = RangeLoopRuntime {
             blocks,
             locals,
@@ -400,26 +423,35 @@ impl<'a> HirBuilder<'a> {
 
         self.initialize_range_loop_state(expressions, range, runtime, span_ref)?;
 
-        // Dynamic `by` expressions still need a runtime zero check before any bounds check.
-        self.emit_jump_from_current_block(runtime.blocks.step_zero_check, span_ref, "for.enter")?;
-
         let step_span = range
             .step
             .map(|id| expressions.view(id))
             .transpose()?
             .and_then(|step| step.span());
         let guard_semantics = range_guard_semantics(range);
-        self.emit_loop_zero_step_guard(
-            runtime.locals.step,
-            runtime.blocks.step_zero_check,
-            runtime.blocks.step_zero_failure,
-            runtime.blocks.header_selector,
-            guard_semantics,
-            span_ref,
-            &step_span,
-            "for.step.zero",
-            "for.step.non_zero",
-        )?;
+
+        // Only an authored step can evaluate to zero; the implicit `+1` step needs no guard.
+        if let Some(zero_guard) = runtime.blocks.step_zero_guard {
+            self.emit_jump_from_current_block(zero_guard.check, span_ref, "for.enter")?;
+
+            self.emit_loop_zero_step_guard(
+                runtime.locals.step,
+                zero_guard.check,
+                zero_guard.failure,
+                runtime.blocks.header_selector,
+                guard_semantics,
+                span_ref,
+                &step_span,
+                "for.step.zero",
+                "for.step.non_zero",
+            )?;
+        } else {
+            self.emit_jump_from_current_block(
+                runtime.blocks.header_selector,
+                span_ref,
+                "for.enter",
+            )?;
+        }
         self.emit_range_loop_direction(runtime, span_ref)?;
         self.emit_range_loop_header_checks(expressions, range, runtime, span_ref, span)?;
         let step_block_is_reachable =
@@ -444,9 +476,12 @@ impl<'a> HirBuilder<'a> {
         parent_region: RegionId,
         span_ref: &Option<SourceSpan>,
         uses_stall_guard: bool,
+        has_explicit_step: bool,
     ) -> RangeLoopBlocks {
-        let step_zero_check = self.create_block(parent_region, span_ref, "for-step-zero-check");
-        let step_zero_failure = self.create_block(parent_region, span_ref, "for-step-zero-failure");
+        let step_zero_guard = has_explicit_step.then(|| RangeLoopGuardBlocks {
+            check: self.create_block(parent_region, span_ref, "for-step-zero-check"),
+            failure: self.create_block(parent_region, span_ref, "for-step-zero-failure"),
+        });
         let header_selector = self.create_block(parent_region, span_ref, "for-header-selector");
         let header_ascending = self.create_block(parent_region, span_ref, "for-header-ascending");
         let header_descending = self.create_block(parent_region, span_ref, "for-header-descending");
@@ -454,7 +489,7 @@ impl<'a> HirBuilder<'a> {
         let body = self.create_block(body_region, span_ref, "for-body");
         let step = self.create_block(parent_region, span_ref, "for-step");
         let step_candidate = self.create_block(parent_region, span_ref, "for-step-candidate");
-        let step_stall = uses_stall_guard.then(|| RangeLoopStallBlocks {
+        let step_stall = uses_stall_guard.then(|| RangeLoopGuardBlocks {
             check: self.create_block(parent_region, span_ref, "for-step-stall-check"),
             failure: self.create_block(parent_region, span_ref, "for-step-stall-failure"),
         });
@@ -462,8 +497,7 @@ impl<'a> HirBuilder<'a> {
         let exit = self.create_block(parent_region, span_ref, "for-exit");
 
         RangeLoopBlocks {
-            step_zero_check,
-            step_zero_failure,
+            step_zero_guard,
             header_selector,
             header_ascending,
             header_descending,
@@ -565,6 +599,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         types: RangeLoopTypes,
         step_type: LoopStepType,
+        has_index_binding: bool,
     ) -> Result<RangeLoopLocals, HirConstructionFailure> {
         // Allocation order is observable in HIR snapshots and must remain stable.
         let current = self.allocate_temp_local(types.binding, None)?;
@@ -575,7 +610,13 @@ impl<'a> HirBuilder<'a> {
             scalar: step_type.scalar,
         };
         let ascending = self.allocate_temp_local(types.bool_type, None)?;
-        let iteration_index = self.allocate_temp_local(types.int_type, None)?;
+        // Nothing can observe an ordinal the header does not bind, and its checked `I32` update
+        // would otherwise add a recoverable numeric failure producer to an infallible loop.
+        let iteration_index = if has_index_binding {
+            Some(self.allocate_temp_local(types.int_type, None)?)
+        } else {
+            None
+        };
         let next_value = self.allocate_temp_local(types.binding, None)?;
         let candidate_in_range = self.allocate_temp_local(types.bool_type, None)?;
 
@@ -680,24 +721,28 @@ impl<'a> HirBuilder<'a> {
             )?;
         }
 
-        let index_region = self.current_region_or_error()?;
-        let zero_index = self.make_expression(
-            span_ref,
-            HirExpressionKind::FixedScalar(
-                FixedScalarValue::signed(FixedScalar::I32, 0)
-                    .expect("zero is representable in I32"),
-            ),
-            types.int_type,
-            ValueKind::Const,
-            index_region,
-        )?;
-        self.emit_statement_kind(
-            HirStatementKind::Write {
-                target: HirWriteTarget::DefineLocal(locals.iteration_index),
-                value: zero_index,
-            },
-            span_ref,
-        )
+        if let Some(iteration_index) = locals.iteration_index {
+            let index_region = self.current_region_or_error()?;
+            let zero_index = self.make_expression(
+                span_ref,
+                HirExpressionKind::FixedScalar(
+                    FixedScalarValue::signed(FixedScalar::I32, 0)
+                        .expect("zero is representable in I32"),
+                ),
+                types.int_type,
+                ValueKind::Const,
+                index_region,
+            )?;
+            self.emit_statement_kind(
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(iteration_index),
+                    value: zero_index,
+                },
+                span_ref,
+            )?;
+        }
+
+        Ok(())
     }
 
     /// Fails a dynamic zero step before any loop bound or emptiness check.
@@ -760,7 +805,7 @@ impl<'a> HirBuilder<'a> {
     /// Records the loop direction once from the evaluated non-zero step.
     ///
     /// WHY: the step sign alone selects the header and candidate bounds. The loop never infers a
-    ///      direction from its start and end bounds, and the zero guard has already run.
+    ///      direction from its start and end bounds, and any authored zero guard has already run.
     fn emit_range_loop_direction(
         &mut self,
         runtime: RangeLoopRuntime,
@@ -965,9 +1010,15 @@ impl<'a> HirBuilder<'a> {
         }
 
         if let Some(index_binding) = &bindings.index {
+            let Some(iteration_index) = locals.iteration_index else {
+                crate::compiler_bug!(
+                    CompilerStage::HirConstruction,
+                    "Range-loop ordinal binding has no allocated ordinal local",
+                );
+            };
             let index_value = self.make_expression(
                 span_ref,
-                HirExpressionKind::Copy(HirPlace::local(locals.iteration_index)),
+                HirExpressionKind::Copy(HirPlace::local(iteration_index)),
                 types.int_type,
                 ValueKind::RValue,
                 body_region_id,
@@ -1146,36 +1197,39 @@ impl<'a> HirBuilder<'a> {
             span_ref,
         )?;
 
-        let index_current = self.emit_loop_local_load(
-            locals.iteration_index,
-            types.int_type,
-            span_ref,
-            commit_region,
-        )?;
-        let index_delta = self.make_expression(
-            span_ref,
-            HirExpressionKind::FixedScalar(
-                FixedScalarValue::signed(FixedScalar::I32, 1).expect("one is representable in I32"),
-            ),
-            types.int_type,
-            ValueKind::Const,
-            commit_region,
-        )?;
-        self.emit_checked_numeric_assignment(
-            HirLocalDestination::Update(locals.iteration_index),
-            HirNumericOp {
-                operator: NumericOperator::Add,
-                domain: NumericScalar::Fixed(FixedScalar::I32),
-                // The ordinal is generated bookkeeping, not authored arithmetic: under
-                // `$fast_math` its overflow must fail fatally (D11), so it keeps ordinary
-                // checked semantics and the caller forces fatal delivery.
-                semantics: NumericSemantics::Ordinary,
-            },
-            index_current,
-            index_delta,
-            range_ordinal_delivery(semantics),
-            span_ref,
-        )?;
+        if let Some(iteration_index) = locals.iteration_index {
+            let index_current = self.emit_loop_local_load(
+                iteration_index,
+                types.int_type,
+                span_ref,
+                commit_region,
+            )?;
+            let index_delta = self.make_expression(
+                span_ref,
+                HirExpressionKind::FixedScalar(
+                    FixedScalarValue::signed(FixedScalar::I32, 1)
+                        .expect("one is representable in I32"),
+                ),
+                types.int_type,
+                ValueKind::Const,
+                commit_region,
+            )?;
+            self.emit_checked_numeric_assignment(
+                HirLocalDestination::Update(iteration_index),
+                HirNumericOp {
+                    operator: NumericOperator::Add,
+                    domain: NumericScalar::Fixed(FixedScalar::I32),
+                    // The ordinal is generated bookkeeping, not authored arithmetic: under
+                    // `$fast_math` its overflow must fail fatally (D11), so it keeps ordinary
+                    // checked semantics and the caller forces fatal delivery.
+                    semantics: NumericSemantics::Ordinary,
+                },
+                index_current,
+                index_delta,
+                range_ordinal_delivery(semantics),
+                span_ref,
+            )?;
+        }
         // The candidate already proved the bound in the step direction, so the next iteration
         // re-enters the body directly instead of repeating the header test.
         self.emit_jump_from_current_block(blocks.body, span_ref, "for.backedge")

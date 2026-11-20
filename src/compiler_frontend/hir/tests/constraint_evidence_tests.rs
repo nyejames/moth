@@ -21,7 +21,7 @@ fn lower_source(source: &str) -> (HirModule, PathInternerFork, StringTable) {
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
-    (hir, path_fork, string_table)
+    (hir.hir_module, path_fork, string_table)
 }
 
 fn function_id_by_name(
@@ -255,12 +255,42 @@ wrapped || -> U8:
 }
 
 #[test]
+fn nested_template_range_ordinals_have_one_authored_witness_each() {
+    let source = "\
+card #= [:<div>[$slot title]</div>]
+$fast_math
+render |limit I32, show Bool| -> String:
+    return [: [if show: [loop 0 to limit |item, ordinal|:[ordinal]]] [card:[$in title: [loop 0 to limit |item, ordinal|:[ordinal]]]]]
+;
+";
+    let (hir, paths, strings) = lower_source(source);
+    let facts = facts_by_name(&hir, &paths, &strings, "render");
+    let guards: Vec<_> = facts
+        .constraint
+        .fast_use
+        .iter()
+        .filter(|witness| witness.provenance == HirFastUseProvenance::RangeGuard)
+        .collect();
+    assert_eq!(
+        guards.len(),
+        2,
+        "each loop must have one deduplicated witness: {guards:?}"
+    );
+    for guard in guards {
+        let span = guard
+            .span
+            .expect("template loops retain their authored span");
+        assert!(source_text(source, span).contains("loop"));
+    }
+}
+
+#[test]
 fn a_generated_fast_range_guard_is_a_witness_without_authored_arithmetic() {
     let source = "\
 $fast_math
 guarded_range || -> I32:
     value ~= 0
-    loop 0 to 3 |item|:
+    loop 0 to 3 by 1 |item|:
         ~value = item
     ;
     return value
@@ -295,11 +325,11 @@ guarded_range || -> I32:
     );
     let guard_span = facts.constraint.fast_use[0]
         .span
-        .expect("the generated guard is attributed to its authored loop header");
+        .expect("the generated guard is attributed to its authored step position");
     assert_eq!(
         source_text(source, guard_span),
-        "loop",
-        "the guard belongs to the loop statement/header, not to its first body statement"
+        "1",
+        "the guard is attributed to the authored step position, not to its first body statement"
     );
 }
 
@@ -425,7 +455,7 @@ fn skipped_handler_range_guard_is_selected_evidence() {
 $fast_math
 literal_handler || -> I32:
     result I32 = 10 // 2 catch |error|:
-        loop 0 to 3:
+        loop 0 to 3 by 1:
             io.line(\"x\")
         ;
         return 0
@@ -463,7 +493,7 @@ $fast_math $safe_math
 dead_after_return |limit I32| -> I32:
     return 0
     value I32 = witness(1)
-    loop 0 to limit:
+    loop 0 to limit by 1:
         io.line(\"x\")
     ;
 ;
@@ -492,5 +522,34 @@ dead_after_return |limit I32| -> I32:
         source_text(source, span),
         "loop",
         "the skipped guard is attributed to the loop header it belongs to"
+    );
+}
+
+#[test]
+fn skipped_range_without_generated_checks_selects_no_guard_evidence() {
+    // WHAT: a `$fast_math` loop after a terminator, with no authored step and no ordinal binding.
+    // WHY: lowering emits no zero guard, no float no-progress guard and no ordinal update for this
+    //      shape, and the skipped-source walker must use the same rule. Recording a guard here
+    //      would reject `$safe_math` for a loop that is accepted when it is live.
+    let source = "\
+$fast_math
+dead_unstepped |limit I32| -> I32:
+    return 0
+    loop 0 to limit:
+        io.line(\"x\")
+    ;
+;
+";
+    let (hir, path_fork, string_table) = lower_source(source);
+    let facts = facts_by_name(&hir, &path_fork, &string_table, "dead_unstepped");
+
+    assert!(
+        !facts
+            .constraint
+            .fast_use
+            .iter()
+            .any(|witness| witness.provenance == HirFastUseProvenance::RangeGuard),
+        "a skipped loop with no generated range check must select no guard: {:?}",
+        facts.constraint.fast_use
     );
 }

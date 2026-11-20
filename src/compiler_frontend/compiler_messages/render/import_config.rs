@@ -495,6 +495,9 @@ pub(crate) fn invalid_import_path_message(
         InvalidImportPathReason::HiddenDirectory => format!(
             "Dependency path '{path_text}' enters a directory whose name starts with '_'. Such directories are excluded from the project's source tree and cannot be imported."
         ),
+        InvalidImportPathReason::ImplicitPackage => format!(
+            "Dependency path '{path_text}' names a compiler-owned implicit package. That package carries no source-visible dependency surface, so it cannot be imported."
+        ),
         InvalidImportPathReason::CaseMismatch { provided, expected } => format!(
             "Dependency path case mismatch: '{}' should be '{}'.",
             context.string_table.resolve(provided),
@@ -559,7 +562,7 @@ pub(crate) fn invalid_compile_time_path_message(
             "Compile-time path '{path_text}' enters a directory whose name starts with '_'. Such directories are excluded from the project's source tree, so they cannot be imported or used as resources."
         ),
         InvalidCompileTimePathReason::ReservedConfigFile => format!(
-            "Compile-time path '{path_text}' names '@config.moth'. That file is a build-owned configuration source, not a module helper, so it cannot be imported or used as a resource."
+            "Compile-time path '{path_text}' resolves to the reserved '@config.moth' file. That file is a build-owned configuration source, not a module helper, so it cannot be imported or used as a resource or content value."
         ),
     }
 }
@@ -811,7 +814,9 @@ pub(crate) fn duplicate_moth_template_input_path_message(
 ) -> String {
     let path_text = context.render_path(path);
     format!(
-        "Moth template input path `{path_text}` was provided more than once. Each file or in-memory display path in one direct compile request must be unique."
+        "Moth template input `{path_text}` duplicates another input in this direct compile \
+         request. Each file or in-memory display path must be unique and must resolve to a \
+         distinct request-relative identity."
     )
 }
 

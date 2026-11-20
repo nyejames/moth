@@ -9,7 +9,8 @@
 //! downstream consumers to re-sort.
 
 use crate::builder_surface::package_metadata::{
-    PackageMetadata, PackageOrigin, package_paths_overlap, validate_package_path,
+    PackageMetadata, PackageOrigin, PackageSetMembership, package_paths_overlap,
+    validate_package_path,
 };
 
 use std::collections::BTreeMap;
@@ -64,6 +65,40 @@ impl SourcePackageRegistry {
         root: PathBuf,
         origin: PackageOrigin,
     ) -> Result<(), SourcePackageRegistryError> {
+        self.register_filesystem_root_with_membership(
+            package_prefix,
+            root,
+            origin,
+            PackageSetMembership::Ordinary,
+        )
+    }
+
+    /// Register one filesystem root the compiler ships as part of its package set.
+    ///
+    /// Only compiler code that owns a fixed release-archive package may call this. A custom
+    /// builder package, dependency or project-local package is ordinary regardless of where its
+    /// root lives or which prefix it uses.
+    pub(crate) fn register_compiler_shipped_filesystem_root(
+        &mut self,
+        package_prefix: impl Into<String>,
+        root: PathBuf,
+        origin: PackageOrigin,
+    ) -> Result<(), SourcePackageRegistryError> {
+        self.register_filesystem_root_with_membership(
+            package_prefix,
+            root,
+            origin,
+            PackageSetMembership::CompilerShipped,
+        )
+    }
+
+    fn register_filesystem_root_with_membership(
+        &mut self,
+        package_prefix: impl Into<String>,
+        root: PathBuf,
+        origin: PackageOrigin,
+        package_set_membership: PackageSetMembership,
+    ) -> Result<(), SourcePackageRegistryError> {
         let prefix = package_prefix.into();
         if let Err(reason) = validate_package_path(&prefix, origin) {
             return Err(SourcePackageRegistryError::new(format!(
@@ -85,6 +120,7 @@ impl SourcePackageRegistry {
                 package_prefix: prefix,
                 root: ProvidedSourceRoot::Filesystem(root),
                 metadata: PackageMetadata::source(origin),
+                package_set_membership,
             },
         );
         Ok(())
@@ -107,6 +143,8 @@ pub struct SourcePackageRoot {
     pub package_prefix: String,
     pub root: ProvidedSourceRoot,
     pub metadata: PackageMetadata,
+    /// Registration provenance that decides damaged-installation reporting for this boundary.
+    pub(crate) package_set_membership: PackageSetMembership,
 }
 
 /// Where a source-backed package's files live.

@@ -1,0 +1,9 @@
+-- A statement-level `$safe_math` boundary must see the generated ordinal's fast trap even though
+-- the loop authors no step and the checked addition keeps ordinary semantics.
+$fast_math
+statement_ordinal |start I64, finish I64| -> I64, Error!:
+    $safe_math
+    loop start to finish |value, ordinal|:
+    ;
+    return start
+;

@@ -1,0 +1,18 @@
+-- The source read inside the loop still sees the live child alias created before it.
+
+probe || -> I32:
+    slot ~= {1}
+    parent ~= slot
+    child ~= parent
+    flag ~= true
+    n ~= 0
+    loop flag:
+        ~n = parent.length()
+        ~child.push(2)
+        ~flag = false
+    ;
+    return n
+;
+
+result = probe()
+io.line([: [result]])

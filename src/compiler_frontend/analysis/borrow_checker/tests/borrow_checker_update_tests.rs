@@ -14,7 +14,7 @@ use crate::compiler_frontend::analysis::borrow_checker::transfer::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
-    InvalidMutableAccessView, UseOfUninitializedLocalView,
+    InvalidMutableAccessView, SharedMutableConflictView, UseOfUninitializedLocalView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
@@ -32,7 +32,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::borrow_fixture_support::{
-    assert_borrow_error_view, assert_invalid_mutable_access_reason, run_borrow_checker,
+    assert_borrow_error_view, assert_invalid_mutable_access_reason, run_borrow_checker_with_types,
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
@@ -69,7 +69,7 @@ sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut string_table);
-    let (module, _) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+    let (module, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
         .expect("the update fixture should lower");
     let function = module
         .functions
@@ -82,7 +82,13 @@ sentinel = 0\n\
                 .is_some_and(|name| string_table.resolve(name) == "probe")
         })
         .expect("the fixture function should lower to HIR");
-    let checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);
+    let checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
     let reachable = checker
         .collect_reachable_blocks(function)
         .expect("fixture CFG should be reachable");
@@ -114,6 +120,8 @@ sentinel = 0\n\
                 mode,
                 value_roots: RootSet::empty(local_count),
                 direct_alias_roots: RootSet::empty(local_count),
+                write_target_roots: RootSet::empty(local_count),
+                derived_from_roots: RootSet::empty(local_count),
             },
         );
         let error = transfer_isolated_statement(&checker, &layout, block, update, &mut state)
@@ -135,8 +143,9 @@ sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut string_table);
-    let (mut module, _) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
-        .expect("the dedicated update fixture should lower");
+    let (mut module, type_environment) =
+        lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+            .expect("the dedicated update fixture should lower");
     let target = local_named(&module, &path_fork, &string_table, "target");
     let argument = local_named(&module, &path_fork, &string_table, "argument");
     let (call_block_id, call_statement_id, call_result) = module
@@ -186,7 +195,13 @@ sentinel = 0\n\
                 .is_some_and(|name| string_table.resolve(name) == "probe")
         })
         .expect("the fixture function should lower to HIR");
-    let mut checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);
+    let mut checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
     checker
         .build_public_call_summaries()
         .expect("the identity call summary should be available");
@@ -225,6 +240,8 @@ sentinel = 0\n\
                 mode,
                 value_roots: RootSet::empty(local_count),
                 direct_alias_roots: RootSet::empty(local_count),
+                write_target_roots: RootSet::empty(local_count),
+                derived_from_roots: RootSet::empty(local_count),
             },
         );
         let error =
@@ -250,8 +267,9 @@ sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut string_table);
-    let (mut module, _) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
-        .expect("the immutable update fixture should lower");
+    let (mut module, type_environment) =
+        lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+            .expect("the immutable update fixture should lower");
     let target = local_named(&module, &path_fork, &string_table, "target");
     let argument = local_named(&module, &path_fork, &string_table, "argument");
     let mutable_root = local_named(&module, &path_fork, &string_table, "mutable_root");
@@ -300,7 +318,13 @@ sentinel = 0\n\
                 .is_some_and(|name| string_table.resolve(name) == "probe")
         })
         .expect("the fixture function should lower to HIR");
-    let mut checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);
+    let mut checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
     checker
         .build_public_call_summaries()
         .expect("the identity call summary should be available");
@@ -359,7 +383,7 @@ sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut string_table);
-    let (module, _) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+    let (module, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
         .expect("the definition fixture should lower");
     let function = module
         .functions
@@ -372,7 +396,13 @@ sentinel = 0\n\
                 .is_some_and(|name| string_table.resolve(name) == "probe")
         })
         .expect("the fixture function should lower to HIR");
-    let checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);
+    let checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
     let reachable = checker
         .collect_reachable_blocks(function)
         .expect("fixture CFG should be reachable");
@@ -435,8 +465,9 @@ sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut string_table);
-    let (mut module, _) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
-        .expect("the immutable update fixture should lower");
+    let (mut module, type_environment) =
+        lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+            .expect("the immutable update fixture should lower");
     let mutable = local_named(&module, &path_fork, &string_table, "mutable_target");
     let immutable = local_named(&module, &path_fork, &string_table, "immutable_target");
     let mutable_root = local_named(&module, &path_fork, &string_table, "mutable_root");
@@ -482,7 +513,13 @@ sentinel = 0\n\
                 .is_some_and(|name| string_table.resolve(name) == "probe")
         })
         .expect("the fixture function should lower to HIR");
-    let checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);
+    let checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
     let reachable = checker
         .collect_reachable_blocks(function)
         .expect("fixture CFG should be reachable");
@@ -557,7 +594,13 @@ observed = copy observer\n\
                 .is_some_and(|name| string_table.resolve(name) == "probe")
         })
         .expect("the fixture function should lower");
-    let checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);
+    let checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
     let reachable = checker
         .collect_reachable_blocks(function)
         .expect("fixture CFG should be reachable");
@@ -712,7 +755,13 @@ observed = copy observer\n\
                 .is_some_and(|name| string_table.resolve(name) == "probe")
         })
         .expect("the fixture function should lower");
-    let mut checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);
+    let mut checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
     checker
         .build_public_call_summaries()
         .expect("the identity call summary should be available");
@@ -798,8 +847,14 @@ after = second
         validate_hir_module(&module, &type_environment, &registry)
             .expect("the complete fixture should be structurally valid HIR");
 
-        let error = run_borrow_checker(&module, &registry, &path_fork, &string_table)
-            .expect_err("a write through an aliased binding cell must be rejected");
+        let error = run_borrow_checker_with_types(
+            &module,
+            &type_environment,
+            &registry,
+            &path_fork,
+            &string_table,
+        )
+        .expect_err("a write through an aliased binding cell must be rejected");
         assert_invalid_mutable_access_reason(
             error,
             InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
@@ -843,9 +898,648 @@ after = returned
         validate_hir_module(&module, &type_environment, &registry)
             .expect("the complete fixture should be structurally valid HIR");
 
-        run_borrow_checker(&module, &registry, &path_fork, &string_table)
-            .expect("a dead or copied alias must not block the whole-binding write");
+        run_borrow_checker_with_types(
+            &module,
+            &type_environment,
+            &registry,
+            &path_fork,
+            &string_table,
+        )
+        .expect("a dead or copied alias must not block the whole-binding write");
     }
+}
+
+// WHAT: a projected load through an intermediate alias observes the value's allocation, not the
+//       alias binding cell that can later receive a fresh value.
+// WHY: treating the projected result as a direct alias of the binding cell made the whole-binding
+//      replacement an overlapping mutation and rejected legal source.
+#[test]
+fn projected_load_through_an_alias_keeps_the_old_allocation() {
+    for source in [
+        r#"
+Pair = | first {I32}, second {I32} |
+probe || -> I32:
+pair ~= Pair(first = {1}, second = {2})
+view = pair
+old = view.first
+~pair = Pair(first = {3, 4}, second = {5})
+return old.length()
+;
+"#,
+        r#"
+Pair = | first {I32}, second {I32} |
+probe || -> I32:
+pair ~= Pair(first = {1}, second = {2})
+old = pair.first
+~pair = Pair(first = {3, 4}, second = {5})
+return old.length()
+;
+"#,
+    ] {
+        check_source(source).expect("a projected value must survive rebinding its source binding");
+    }
+}
+
+// WHAT: a projected mutable alias keeps the holder cell as a conservative write identity even
+//       when the containing allocation roots are recorded. Rebinding the holder to a fresh value
+//       does not retarget the alias, but reading the rebound holder while the alias is live is
+//       conservatively rejected.
+// WHY: a fresh allocation's identity is its owning cell or empty provenance, and that identity
+//      cannot be transported precisely through joins, alias chains, calls or scope exits. The
+//      holder cell keeps those conflicts rather than losing a live alias. Track the fresh
+//      allocation as an explicit transported root to relax this.
+#[test]
+fn mutable_projected_alias_conservatively_blocks_rebound_holder_read() {
+    let source = r#"
+Pair = | first {I32}, second {I32} |
+same_pair |value Pair| -> Pair:
+return value
+;
+probe || -> I32:
+original ~= Pair(first = {1}, second = {0})
+holder ~= same_pair(original)
+writer ~= holder.first
+~holder = Pair(first = {2}, second = {3})
+read_after = holder.first.length()
+return read_after + writer.length()
+;
+"#;
+    let error = check_source(source)
+        .expect_err("the conservative holder-cell identity must reject the live-alias read");
+    assert_borrow_error_view::<SharedMutableConflictView>(error);
+}
+
+// WHAT: a mutable alias writes through to its referent cell, so its value provenance is not the
+//       destination whose mutability and exclusivity govern the write.
+// WHY: consulting provenance rejected a legal scalar write when the slot stored a produced value
+//      from an immutable origin.
+#[test]
+fn alias_write_through_uses_the_referent_cell() {
+    let source = r#"
+identity |value I32| -> I32:
+return value
+;
+set_six |value ~I32|:
+~value = 6
+;
+probe || -> I32:
+original = 5
+slot ~= 0
+~slot = identity(original)
+writer ~= slot
+~writer = 6
+set_six(~writer)
+return slot
+;
+"#;
+    check_source(source)
+        .expect("a write and mutable call through a scalar alias must target its mutable referent");
+}
+
+// WHAT: a live shared alias of the referent cell blocks both a write through a mutable alias and
+//       a mutable call through it.
+// WHY: an earlier version of the write-through rule checked only the alias's value provenance, so
+//      a second alias of the referent stayed invisible to the write. The shared alias is created
+//      through the mutable alias here, which keeps alias acquisition itself legal; the positive
+//      controls below differ only in dropping the final read, so they prove the rejection lands on
+//      the write/call rather than on acquisition.
+#[test]
+fn alias_write_through_checks_live_referent_aliases_at_the_write() {
+    for source in [
+        r#"
+probe || -> I32:
+slot ~= 0
+writer ~= slot
+view = writer
+~writer = 6
+return view
+;
+"#,
+        r#"
+set_six |value ~I32|:
+~value = 6
+;
+probe || -> I32:
+slot ~= 0
+writer ~= slot
+view = writer
+set_six(~writer)
+return view
+;
+"#,
+    ] {
+        let error = check_source(source)
+            .expect_err("a live shared alias of the referent must block alias write-through");
+        assert_invalid_mutable_access_reason(
+            error,
+            InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+        );
+    }
+
+    for source in [
+        r#"
+probe || -> I32:
+slot ~= 0
+writer ~= slot
+view = writer
+~writer = 6
+return slot
+;
+"#,
+        r#"
+set_six |value ~I32|:
+~value = 6
+;
+probe || -> I32:
+slot ~= 0
+writer ~= slot
+view = writer
+set_six(~writer)
+return slot
+;
+"#,
+    ] {
+        check_source(source).expect("a dead shared alias must not block alias write-through");
+    }
+}
+
+// WHAT: an alias whose only overlap fact is value provenance checks that provenance on a write.
+// WHY: a produced alias has no referent cell to check, so the write falls back to the provenance
+//      roots. The seeded state isolates that rule from the alias-acquisition checks.
+#[test]
+fn alias_without_recorded_cells_checks_provenance_on_update() {
+    let source = r#"
+probe ||:
+source ~= {1, 2}
+target ~{I32} = {0}
+observer = source
+~target = {4}
+after = observer.length()
+;
+"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let registry = default_external_package_registry(&mut string_table);
+    let (module, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+        .expect("fixture source should lower");
+    validate_hir_module(&module, &type_environment, &registry)
+        .expect("the complete fixture should be structurally valid HIR");
+    let function = module
+        .functions
+        .iter()
+        .find(|function| {
+            module
+                .side_table
+                .function_name_path(function.id)
+                .and_then(|path| path_fork.component(path))
+                .is_some_and(|name| string_table.resolve(name) == "probe")
+        })
+        .expect("the fixture function should lower");
+    let checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
+    let reachable = checker
+        .collect_reachable_blocks(function)
+        .expect("fixture CFG should be reachable");
+    let layout = checker
+        .build_function_layout(function, &reachable)
+        .expect("fixture local layout should build");
+    let target = local_named(&module, &path_fork, &string_table, "target");
+    let source = local_named(&module, &path_fork, &string_table, "source");
+    let observer = local_named(&module, &path_fork, &string_table, "observer");
+    let (block, update) = module
+        .blocks
+        .iter()
+        .find_map(|block| {
+            block
+                .statements
+                .iter()
+                .find(|statement| is_local_update(&module, statement, target))
+                .map(|statement| (block, statement))
+        })
+        .expect("the fixture should contain the fresh-value update");
+    let target_index = layout
+        .index_of(target)
+        .expect("target should be in the layout");
+    let source_index = layout
+        .index_of(source)
+        .expect("source should be in the layout");
+    let observer_index = layout
+        .index_of(observer)
+        .expect("observer should be in the layout");
+    assert!(layout.local_mutable[target_index]);
+    let local_count = layout.local_count();
+    let mut source_roots = RootSet::empty(local_count);
+    source_roots.insert(source_index);
+
+    let mut state = BorrowState::new_uninitialized(local_count);
+    state.update_local_state(source_index, LocalState::slot(local_count));
+    state.update_local_state(
+        target_index,
+        LocalState::alias_with_cells(
+            source_roots.clone(),
+            RootSet::empty(local_count),
+            RootSet::empty(local_count),
+        ),
+    );
+    state.update_local_state(
+        observer_index,
+        LocalState::alias_with_direct(source_roots.clone(), source_roots.clone()),
+    );
+    let error = transfer_isolated_statement(&checker, &layout, block, update, &mut state)
+        .expect_err("a cell-free alias write must check its provenance roots");
+    assert_invalid_mutable_access_reason(
+        error,
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+    );
+
+    // Positive control: the same seeded alias is writable while nothing observes its provenance.
+    let mut state = BorrowState::new_uninitialized(local_count);
+    state.update_local_state(source_index, LocalState::slot(local_count));
+    state.update_local_state(
+        target_index,
+        LocalState::alias_with_cells(
+            source_roots,
+            RootSet::empty(local_count),
+            RootSet::empty(local_count),
+        ),
+    );
+    state.update_local_state(observer_index, LocalState::slot(local_count));
+    transfer_isolated_statement(&checker, &layout, block, update, &mut state)
+        .expect("a dead provenance observer must not block the alias write");
+}
+
+// WHAT: a fresh value written through an alias is owned by the referent cell, so a later value
+//       alias of the alias observes that storage.
+// WHY: clearing the alias's value roots made the fresh allocation invisible; the push then failed
+//      to see the live shared view and was accepted.
+#[test]
+fn fresh_alias_write_records_referent_storage_for_later_aliases() {
+    let source = r#"
+probe || -> I32:
+slot ~= {0}
+writer ~= slot
+~writer = {1}
+view = writer
+~writer.push(2)
+return view.length()
+;
+"#;
+    let error = check_source(source)
+        .expect_err("a shared view of a fresh alias value must block a later push");
+    assert_invalid_mutable_access_reason(
+        error,
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+    );
+}
+
+// WHAT: the same referent-storage identity must reach a projected mutable argument.
+// WHY: a projected argument's roots come from value provenance; after a fresh write that set was
+//      empty, so one call could mutate and read the same field without an overlap diagnostic.
+#[test]
+fn fresh_alias_write_records_referent_storage_for_projected_same_call_arguments() {
+    let source = r#"
+Pair = | first I32, second I32 |
+
+mutate_and_read |target ~I32, observed I32| -> I32:
+~target = 9
+return observed
+;
+
+probe || -> I32:
+pair ~= Pair(1, 2)
+writer ~= pair
+~writer = Pair(3, 4)
+return mutate_and_read(~writer.first, writer.first)
+;
+"#;
+    let error = check_source(source)
+        .expect_err("a mutable and shared projection argument must overlap after a fresh write");
+    assert_borrow_error_view::<SharedMutableConflictView>(error);
+}
+
+// WHAT: a write through an alias on a loop backedge records the referent storage as well.
+// WHY: the view is created in one iteration and must still block the next iteration's mutation;
+//      dropping the fresh value identity at the backedge would let the loop-carried view escape.
+#[test]
+fn fresh_alias_write_records_referent_storage_across_a_loop_backedge() {
+    let source = r#"
+identity |value {I32}| -> {I32}:
+    return value
+;
+probe || -> I32:
+    slot ~= {1, 2}
+    writer ~= slot
+    view ~= {9}
+    size ~= 0
+    flag ~= true
+    loop flag:
+        ~writer.push(3)
+        ~size = view.length()
+        ~writer = {4}
+        ~view = identity(writer)
+        ~flag = false
+    ;
+    return size
+;
+"#;
+    let error = check_source(source)
+        .expect_err("a loop-carried view must block the next iteration's mutation");
+    assert_invalid_mutable_access_reason(
+        error,
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+    );
+}
+
+// WHAT: one direct cell is not a definite referent when another path writes the alias's own slot.
+// WHY: strong-updating the direct cell dropped its old value, so a shared observer of the slot
+//      missed the still-live original and its later mutation was accepted.
+#[test]
+fn joined_alias_with_a_slot_path_keeps_the_referent_value() {
+    let source = r#"
+identity |value {I32}| -> {I32}:
+    return value
+;
+probe |flag Bool| -> I32:
+    original ~= {1}
+    slot ~= {0}
+    writer ~= {0}
+    if flag:
+        ~writer = slot
+        ~writer = identity(original)
+    else
+        ~slot = identity(original)
+    ;
+    ~writer = {3}
+    observed = identity(slot)
+    ~original.push(4)
+    return observed.length()
+;
+"#;
+    let error =
+        check_source(source).expect_err("the joined alias may leave the old value in the slot");
+    assert_invalid_mutable_access_reason(
+        error,
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+    );
+}
+
+// WHAT: a shared view derived through a mutable alias does not conflict with that alias.
+// WHY: value provenance names an allocation, not a binding cell; treating it as a foreign cell
+//      access rejected a view that is dead before the alias's later mutation.
+#[test]
+fn derived_shared_view_read_is_not_a_foreign_slot_access() {
+    let source = r#"
+identity |value {I32}| -> {I32}:
+    return value
+;
+probe || -> I32:
+    slot ~= {0}
+    writer ~= slot
+    ~writer = {1}
+    view = identity(writer)
+    size = view.length()
+    ~writer.push(2)
+    return size
+;
+"#;
+    check_source(source)
+        .expect("reading a derived view must not conflict with the alias that produced it");
+}
+
+// WHAT: the same restriction must still reject a read of the slot itself while the alias is live.
+// WHY: the alias scan moved to binding cells, so the source binding's own cell must remain an
+//      active-exclusive conflict.
+#[test]
+fn source_slot_read_still_conflicts_with_the_mutable_alias() {
+    let source = r#"
+identity |value {I32}| -> {I32}:
+    return value
+;
+probe || -> I32:
+    slot ~= {0}
+    writer ~= slot
+    ~writer = {1}
+    view = identity(writer)
+    size = view.length()
+    snapshot = slot
+    ~writer.push(2)
+    return size + snapshot.length()
+;
+"#;
+    let error = check_source(source)
+        .expect_err("the source slot must stay unreadable while the alias is live");
+    assert_borrow_error_view::<SharedMutableConflictView>(error);
+}
+
+// WHAT: a projection-free alias of a projected mutable alias keeps the projected referent as
+//       overlap identity through the chain.
+// WHY: the replacement checks only written storage, so dropping the inherited target let the
+//      live view escape even though the field storage is replaced through `writer`.
+#[test]
+fn projected_alias_chain_keeps_referent_overlap_for_replacement() {
+    let source = r#"
+Pair = | first {I32}, second {I32} |
+
+same_pair |value Pair| -> Pair:
+    return value
+;
+
+probe || -> I32:
+    original ~= Pair({1}, {0})
+    holder ~= same_pair(original)
+    writer ~= holder.first
+    view = writer
+    ~writer = {2, 3}
+    return view.length()
+;
+"#;
+    let error = check_source(source)
+        .expect_err("a projection-free alias chain must keep the projected referent overlap");
+    assert_invalid_mutable_access_reason(
+        error,
+        InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+    );
+}
+
+// WHAT: replacing a projected field's value must not require mutability of the replaced value's
+//       origin; only the storage that receives the write must be mutable.
+// WHY: the old-value provenance was passed with `require_root_mutable`, so an immutable origin
+//      rejected a legal field replacement.
+#[test]
+fn projected_alias_fresh_write_checks_mutability_of_storage_only() {
+    let source = r#"
+Pair = | first {I32}, second {I32} |
+
+identity |value {I32}| -> {I32}:
+return value
+;
+
+probe || -> I32:
+original = {1, 2}
+slot ~= Pair(first = {0}, second = {0})
+writer ~{I32} = {0}
+~writer = slot.first
+~writer = identity(original)
+~writer = {3}
+return original.length()
+;
+"#;
+    check_source(source)
+        .expect("replacing a field must not require mutability of the replaced value's origin");
+}
+
+// WHAT: a join of a mutable alias into more than one referent cell must weakly update those
+//       cells on a write-through, not replace their provenance.
+// WHY: a strong update cleared the old value of a possible referent, so a value read from that
+//      cell after the write appeared independent of the old allocation.
+#[test]
+fn joined_alias_fresh_write_weakly_updates_possible_referents() {
+    let source = r#"
+identity |value {I32}| -> {I32}:
+return value
+;
+
+probe |flag Bool| -> I32:
+original ~= {1, 2}
+slot ~= {0}
+~slot = identity(original)
+spare ~= {5}
+writer ~{I32} = {0}
+if flag:
+    ~writer = slot
+else
+    ~writer = spare
+;
+~writer = {3}
+observed = identity(slot)
+~original.push(4)
+return observed.length()
+;
+"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let registry = default_external_package_registry(&mut string_table);
+    let (module, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+        .expect("fixture source should lower");
+    validate_hir_module(&module, &type_environment, &registry)
+        .expect("the complete fixture should be structurally valid HIR");
+    let function = module
+        .functions
+        .iter()
+        .find(|function| {
+            module
+                .side_table
+                .function_name_path(function.id)
+                .and_then(|path| path_fork.component(path))
+                .is_some_and(|name| string_table.resolve(name) == "probe")
+        })
+        .expect("the fixture function should lower");
+    let checker = BorrowChecker::new(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    );
+    let reachable = checker
+        .collect_reachable_blocks(function)
+        .expect("fixture CFG should be reachable");
+    let layout = checker
+        .build_function_layout(function, &reachable)
+        .expect("fixture local layout should build");
+    let original = local_named(&module, &path_fork, &string_table, "original");
+    let slot = local_named(&module, &path_fork, &string_table, "slot");
+    let spare = local_named(&module, &path_fork, &string_table, "spare");
+    let writer = local_named(&module, &path_fork, &string_table, "writer");
+    let indices = [original, slot, spare, writer].map(|local| {
+        layout
+            .index_of(local)
+            .expect("seeded local should be in the layout")
+    });
+    let [original_index, slot_index, spare_index, writer_index] = indices;
+    let (block, write) = module
+        .blocks
+        .iter()
+        .find_map(|block| {
+            block
+                .statements
+                .iter()
+                .find(|statement| {
+                    is_local_update(&module, statement, writer)
+                        && matches!(
+                            &statement.kind,
+                            HirStatementKind::Write { value, .. }
+                                if !matches!(
+                                    &module.expressions.expression(*value).kind,
+                                    HirExpressionKind::Load(_)
+                                )
+                        )
+                })
+                .map(|statement| (block, statement))
+        })
+        .expect("the joined fresh write should lower");
+
+    let local_count = layout.local_count();
+    let mut original_roots = RootSet::empty(local_count);
+    original_roots.insert(original_index);
+    let mut referent_cells = RootSet::empty(local_count);
+    referent_cells.insert(slot_index);
+    referent_cells.insert(spare_index);
+    let mut joined_value_roots = original_roots.clone();
+    joined_value_roots.insert(spare_index);
+
+    let mut state = BorrowState::new_uninitialized(local_count);
+    state.update_local_state(original_index, LocalState::slot(local_count));
+    state.update_local_state(
+        slot_index,
+        LocalState::slot_with_value_roots(original_roots.clone(), RootSet::empty(local_count)),
+    );
+    state.update_local_state(spare_index, LocalState::slot(local_count));
+    state.update_local_state(
+        writer_index,
+        LocalState::alias_with_cells(joined_value_roots, referent_cells.clone(), referent_cells),
+    );
+
+    transfer_isolated_statement(&checker, &layout, block, write, &mut state)
+        .expect("a fresh write through a joined alias is legal");
+
+    let writer_roots = state
+        .local_state(writer_index)
+        .value_roots
+        .iter_ones()
+        .collect::<Vec<_>>();
+    assert_eq!(writer_roots, vec![slot_index, spare_index]);
+    assert!(
+        state
+            .local_state(slot_index)
+            .value_roots
+            .contains(original_index),
+        "a possible referent must keep its old value provenance"
+    );
+    assert!(
+        state.local_state(spare_index).value_roots.is_empty(),
+        "a referent that did not hold the old value gains no provenance"
+    );
+}
+
+fn check_source(source: &str) -> Result<(), BorrowCheckError> {
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let registry = default_external_package_registry(&mut string_table);
+    let (module, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+        .expect("fixture source should lower");
+    validate_hir_module(&module, &type_environment, &registry)
+        .expect("the complete fixture should be structurally valid HIR");
+    run_borrow_checker_with_types(
+        &module,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    )
+    .map(|_| ())
 }
 
 fn local_named(
@@ -913,6 +1607,8 @@ fn seed_mixed_target_with_observer(
             mode: LocalMode::SLOT.union(LocalMode::ALIAS),
             value_roots: source_roots.clone(),
             direct_alias_roots: source_roots.clone(),
+            write_target_roots: source_roots.clone(),
+            derived_from_roots: RootSet::empty(local_count),
         },
     );
     let observer_state = if observer_holds_source {

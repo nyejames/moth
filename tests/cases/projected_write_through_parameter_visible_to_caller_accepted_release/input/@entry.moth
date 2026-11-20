@@ -1,0 +1,30 @@
+-- A write through a projected alias mutates the containing allocation of its holder. When that
+-- holder is a call-returned alias of a mutable parameter, the caller observes the changed field,
+-- both directly and through a forwarding wrapper.
+
+Pair = | first {I32}, second {I32} |
+
+identity |value Pair| -> Pair:
+    return value
+;
+
+mutate |parameter ~Pair|:
+    holder ~= identity(parameter)
+    writer ~= holder.first
+    ~writer = {2, 3}
+;
+
+wrap |value ~Pair|:
+    mutate(~value)
+;
+
+caller ||:
+    p ~= Pair(first = {1}, second = {0})
+    mutate(~p)
+    io.line([:direct=[p.first.length()]])
+    q ~= Pair(first = {1}, second = {0})
+    wrap(~q)
+    io.line([:wrapped=[q.first.length()]])
+;
+
+caller()

@@ -4,14 +4,17 @@
 //! dependency-specific boundary error and validation rules that are independent of resolver state.
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::InvalidImportPathReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
+use crate::compiler_frontend::paths::path_normalization::path_has_hidden_component_below;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::projects::settings::CONFIG_FILE_NAME;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Failure while resolving a dependency path.
 ///
@@ -42,8 +45,8 @@ pub(crate) struct DependencyPathBase {
     pub(crate) matched_components: usize,
 }
 
-/// WHAT: rejects dependency paths that escape their resolved base directory.
-/// WHY: dependencies must stay within the project root (relative/entry) or package root.
+/// Reject physical targets outside their owning boundary, reserved as build-only config, or
+/// behind a canonical hidden directory.
 pub(crate) fn validate_dependency_boundary(
     canonical_file: &Path,
     base: &DependencyPathBase,
@@ -76,12 +79,35 @@ fn validate_dependency_boundary_against_base(
         let diagnostic = imports::invalid_import_path(dependency_path, reason, None);
         return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
     }
+    if target_path
+        .file_name()
+        .is_some_and(|name| name == CONFIG_FILE_NAME)
+    {
+        return Err(DependencyPathResolutionError::Diagnostic(
+            imports::direct_special_file_import(dependency_path, None),
+        ));
+    }
+    // A visible symlink alias can enter an excluded `_` subtree. Check the canonical directory
+    // ancestry after containment so the chosen base itself stays exempt, and check the parent so
+    // the terminal file name keeps ordinary `_`-prefixed-file eligibility.
+    if target_path
+        .parent()
+        .is_some_and(|parent| path_has_hidden_component_below(parent, canonical_base))
+    {
+        let diagnostic = imports::invalid_import_path(
+            dependency_path,
+            InvalidImportPathReason::HiddenDirectory,
+            None,
+        );
+        return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
+    }
     Ok(())
 }
 
 /// WHAT: validates that the dependency path casing matches the on-disk filesystem casing.
 /// WHY: dependency paths are logically case-sensitive even on case-insensitive filesystems.
-///
+///      A canonical component that has no UTF-8 spelling cannot enter Moth identity, so it fails
+///      through the filesystem lane instead of being dropped from the comparison.
 pub(crate) fn validate_dependency_case_sensitivity(
     dependency_path: PathId,
     path_fork: &PathInternerFork,
@@ -96,8 +122,20 @@ pub(crate) fn validate_dependency_case_sensitivity(
         Err(_) => return Ok(()),
     };
 
-    let relative_canonical = relative_canonical.with_extension("");
-    let canonical_components = canonical_normal_components(&relative_canonical);
+    // Authored components are UTF-8 strings, so only a canonical component below the base can be
+    // unrepresentable. It cannot enter Moth identity, and comparing around it would silently
+    // shorten or misalign the component lists.
+    let Some(canonical_components) = canonical_normal_components(relative_canonical) else {
+        return Err(DependencyPathResolutionError::Infrastructure(
+            InfrastructureFailure::filesystem(
+                CompilerStage::DependencyResolution,
+                canonical_file,
+                format!(
+                    "Resolved dependency target {canonical_file:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
+                ),
+            ),
+        ));
+    };
 
     let mut path_components = Vec::new();
     let path_components = path_fork.resolve_components(dependency_path, &mut path_components);
@@ -135,8 +173,8 @@ pub(crate) fn validate_dependency_case_sensitivity(
         first_case_mismatch(user_file_components, &canonical_components)
     {
         let reason = InvalidImportPathReason::CaseMismatch {
-            provided: strings.intern(&provided),
-            expected: strings.intern(&expected),
+            provided: strings.intern(provided),
+            expected: strings.intern(expected),
         };
         let diagnostic = imports::invalid_import_path(dependency_path, reason, None);
         return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
@@ -145,43 +183,37 @@ pub(crate) fn validate_dependency_case_sensitivity(
     Ok(())
 }
 
-/// Compare an authored module-root-relative spelling with a canonical filesystem path.
+/// Collects the UTF-8 normal components of the canonical relative `path`, dropping the final
+/// file-name extension.
 ///
-/// WHAT: centralizes the exact-case policy shared by extensionless dependency candidates and
-///       explicit file-value paths. The dependency path caller strips its selected extension
-///       before calling this helper; file-value callers retain the complete filename.
-/// WHY: case-insensitive hosts must not turn two distinct authored spellings into one graph fact.
-#[cfg(test)]
-pub(crate) fn exact_case_mismatch_for_components(
-    authored_components: &[String],
-    canonical_base: &Path,
-    canonical_file: &Path,
-    strip_final_extension: bool,
-) -> Option<(String, String)> {
-    let relative = canonical_file.strip_prefix(canonical_base).ok()?;
-    let relative = if strip_final_extension {
-        relative.with_extension("")
-    } else {
-        relative.to_path_buf()
-    };
-    let canonical_components = canonical_normal_components(&relative);
-    first_case_mismatch(authored_components, &canonical_components)
+/// `None` reports a normal component with no UTF-8 spelling: authored path components are strings,
+/// so such a component cannot enter Moth identity and must not disappear from the comparison.
+fn canonical_normal_components(path: &Path) -> Option<Vec<String>> {
+    let mut components = Vec::new();
+    for component in path.components() {
+        if let Component::Normal(segment) = component {
+            components.push(segment.to_str()?.to_owned());
+        }
+    }
+
+    if let Some(file_name) = components.last_mut() {
+        // The complete file name is already known to be UTF-8; removing an extension only
+        // truncates it, so the remaining spelling stays UTF-8.
+        let without_extension = Path::new(file_name.as_str()).with_extension("");
+        let stripped_len = without_extension
+            .to_str()
+            .expect("removing an extension cannot make a UTF-8 file name invalid")
+            .len();
+        file_name.truncate(stripped_len);
+    }
+
+    Some(components)
 }
 
-fn canonical_normal_components(path: &Path) -> Vec<String> {
-    path.components()
-        .filter_map(|component| match component {
-            std::path::Component::Normal(segment) => segment.to_str(),
-            _ => None,
-        })
-        .map(str::to_owned)
-        .collect()
-}
-
-fn first_case_mismatch(
-    authored_components: &[String],
-    canonical_components: &[String],
-) -> Option<(String, String)> {
+fn first_case_mismatch<'a>(
+    authored_components: &'a [String],
+    canonical_components: &'a [String],
+) -> Option<(&'a str, &'a str)> {
     if authored_components.len() != canonical_components.len() {
         return None;
     }
@@ -190,6 +222,6 @@ fn first_case_mismatch(
         .iter()
         .zip(canonical_components)
         .find_map(|(authored, canonical)| {
-            (authored != canonical).then(|| (authored.clone(), canonical.clone()))
+            (authored != canonical).then_some((authored.as_str(), canonical.as_str()))
         })
 }

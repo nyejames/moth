@@ -38,6 +38,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
+use crate::compiler_frontend::ast::statements::control_flow_exits::collect_unexecuted_expression_roots;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
 use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
@@ -157,6 +158,19 @@ pub(crate) fn rewrite_release_calls(
         return Ok((Vec::new(), Vec::new()));
     }
 
+    // Authored-dead statements and statically pruned catch handlers keep their runtime
+    // expressions. HIR lowering omits exactly that source and records its selected evidence, so a
+    // debug build never executes it either. A per-statement decision also keeps a const
+    // template's shared definition spans from hiding a live call: the same authored call can be
+    // dead in one use and live in another.
+    let mut unexecuted_expression_roots = FxHashSet::default();
+    collect_unexecuted_expression_roots(
+        ast,
+        builder.store(),
+        constants,
+        &mut unexecuted_expression_roots,
+    );
+
     let mut services = ConstExecutionServices {
         builder,
         constants,
@@ -187,11 +201,11 @@ pub(crate) fn rewrite_release_calls(
             let mut value_bindings = FrameBindings::default();
             let outcome = {
                 let mut interpreter = services.interpreter(&mut budget, &mut state);
-                interpreter.rewrite_with_bindings(
+                interpreter.rewrite_release_with_bindings(
                     *expression,
-                    RewriteMode::Release,
                     &release_provenances,
                     &mut value_bindings,
+                    &unexecuted_expression_roots,
                 )
             };
             let committed = match outcome {
@@ -366,6 +380,13 @@ struct RewriteWalk<'walk, 'services> {
     interpreter: &'walk mut ConstInterpreter<'services>,
     bindings: &'walk mut FrameBindings,
     release_provenances: &'walk FxHashMap<PathId, SyntheticInterfaceProvenance>,
+    /// Expression roots that release rewriting must leave untouched because no profile executes
+    /// them.
+    ///
+    /// WHY: skipping a dead statement's whole graph keeps the runtime call that a debug build
+    ///      would have lowered (and that HIR lowering omits with its selected evidence) instead
+    ///      of recording a live erased call.
+    unexecuted_expression_roots: Option<&'walk FxHashSet<ExprId>>,
     mode: RewriteMode,
     root: ExprId,
     steps: Vec<RewriteStep>,
@@ -389,10 +410,39 @@ impl ConstInterpreter<'_> {
         release_provenances: &FxHashMap<PathId, SyntheticInterfaceProvenance>,
         bindings: &mut FrameBindings,
     ) -> Result<ExprId, ConstantFoldError> {
+        self.rewrite_inner(root, mode, release_provenances, bindings, None)
+    }
+
+    /// Rewrite one release expression tree without folding roots that no profile executes.
+    pub(super) fn rewrite_release_with_bindings(
+        &mut self,
+        root: ExprId,
+        release_provenances: &FxHashMap<PathId, SyntheticInterfaceProvenance>,
+        bindings: &mut FrameBindings,
+        unexecuted_expression_roots: &FxHashSet<ExprId>,
+    ) -> Result<ExprId, ConstantFoldError> {
+        self.rewrite_inner(
+            root,
+            RewriteMode::Release,
+            release_provenances,
+            bindings,
+            Some(unexecuted_expression_roots),
+        )
+    }
+
+    fn rewrite_inner(
+        &mut self,
+        root: ExprId,
+        mode: RewriteMode,
+        release_provenances: &FxHashMap<PathId, SyntheticInterfaceProvenance>,
+        bindings: &mut FrameBindings,
+        unexecuted_expression_roots: Option<&FxHashSet<ExprId>>,
+    ) -> Result<ExprId, ConstantFoldError> {
         let mut walk = RewriteWalk {
             interpreter: self,
             bindings,
             release_provenances,
+            unexecuted_expression_roots,
             mode,
             root,
             steps: vec![RewriteStep::Enter {
@@ -564,6 +614,16 @@ impl RewriteWalk<'_, '_> {
         let ExpressionOperationView::Call(call) = view.operation() else {
             return Ok(None);
         };
+        let span = view.span();
+        // Every ledger row carries its authored call site so HIR can attribute and order it beside
+        // authored and skipped evidence. A spanless row could not be attributed, which would let
+        // release accept or reject `$infallible` source differently from debug, so release
+        // speculation declines a spanless call and keeps the runtime call in both profiles. No
+        // legal source or materialised callable produces one today; this owns the invariant
+        // permanently at the ledger's producer.
+        if self.mode.is_release() && span.is_none() {
+            return Ok(None);
+        }
         // A direct catch subject owns the recovery facts its enclosing catch validates. Replacing
         // it with a constant would erase that recovery channel and leave an invalid catch block, so
         // release speculation leaves the call at runtime. Calls merely nested inside a handled
@@ -600,7 +660,7 @@ impl RewriteWalk<'_, '_> {
         })?;
         Ok(Some(ConstCallSite {
             path,
-            span: view.span(),
+            span,
             value_mode: view.value_mode(),
             result_type,
             failure_caught,
@@ -628,6 +688,17 @@ impl RewriteWalk<'_, '_> {
         fold_auxiliary: bool,
         failure_caught: bool,
     ) -> Result<(), ConstantFoldError> {
+        // Authored-dead statements and statically pruned catch handlers keep their runtime
+        // expressions byte-for-byte. HIR lowering omits exactly that source and preserves its
+        // selected evidence, so folding here would only invent a live erased call from code no
+        // profile executes.
+        if self
+            .unexecuted_expression_roots
+            .is_some_and(|dead_roots| dead_roots.contains(&expression))
+        {
+            self.results.push((expression, expression));
+            return Ok(());
+        }
         let view = self.interpreter.builder.view(expression)?;
         self.interpreter.budget.span = view.span();
         if let Some(projected) = self.root_substitution(&view)? {
@@ -956,9 +1027,17 @@ impl RewriteWalk<'_, '_> {
         // build that keeps the runtime call does. Nested candidate execution runs interpreted
         // walks, so a callee's internal folds are never recorded against this caller.
         if self.mode.is_release() {
+            // `const_call_site` only recognises a release call whose expression carries an
+            // authored span, and the record's span is that same view span.
+            let Some(span) = call.span else {
+                crate::compiler_bug!(
+                    CompilerStage::ConstantEvaluation,
+                    "release erased a call site without an authored span"
+                );
+            };
             self.interpreter.state.release_erased_calls.push((
                 call.path,
-                call.span,
+                span,
                 call.failure_caught,
             ));
         }

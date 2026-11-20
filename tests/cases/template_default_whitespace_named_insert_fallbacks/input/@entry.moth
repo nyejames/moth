@@ -30,5 +30,10 @@ emptied = [card:
 ]
 head_whitespace = [box, " ":[$in title:Space]]
 head_empty = [box, "":[$in title:Empty]]
+padded_before = [box: [$in title:Chosen] Body]
+padded_after = [box:[$in title:Chosen] Body]
+authored_before = [box: Body [$in title:Chosen]]
+padded_trailing = [box: Body [$in title:Chosen] ]
+tight_trailing = [box:Body[$in title:Chosen] ]
 
-~[:named=[named]|default=[default_fallback]|paired=[paired]|box_paired=[box_paired]|runtime=[runtime]|emptied=[emptied]|space=[head_whitespace]|empty=[head_empty]]
+~[:named=[named]|default=[default_fallback]|paired=[paired]|box_paired=[box_paired]|runtime=[runtime]|emptied=[emptied]|space=[head_whitespace]|empty=[head_empty]|padded_before=[padded_before]|padded_after=[padded_after]|authored_before=[authored_before]|padded_trailing=[padded_trailing]|tight_trailing=[tight_trailing]]

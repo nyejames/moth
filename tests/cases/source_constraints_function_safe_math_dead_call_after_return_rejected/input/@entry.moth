@@ -1,0 +1,14 @@
+$fast_math
+flaky_fast type T |value I32, witness T| -> I32:
+    marker I32 = value + 1
+    return marker
+;
+
+$safe_math
+probe || -> I32:
+    return 4
+    dead I32 = flaky_fast(1, 2)
+    return dead
+;
+
+~[: ok=probe() ]

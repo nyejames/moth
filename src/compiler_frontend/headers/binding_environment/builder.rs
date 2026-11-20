@@ -11,6 +11,7 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType;
+use crate::compiler_frontend::compiler_messages::InvalidImportPathReason;
 use crate::compiler_frontend::compiler_messages::InvalidReceiverDeclarationReason;
 use crate::compiler_frontend::compiler_messages::NameNamespace;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
@@ -31,7 +32,7 @@ use crate::compiler_frontend::public_interface::{
     ProviderInterfaceId, PublicDeclarationSemantics, ResolvedDependencyClause,
     SourceProviderDependencySet,
 };
-use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
+use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginDeclarationId};
 use crate::compiler_frontend::source::{SourceDatabase, SourceKind, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
@@ -42,6 +43,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use super::external_imports::ExternalImportInput;
+use super::public_export_resolution::effective_module_boundary_path;
 use super::source_dependencies::SourceDependencyInput;
 use super::{
     BindingEnvironmentError, DependencyTargetResolutionInput, ExternalPackageSymbolLookup,
@@ -53,9 +55,10 @@ use super::{
     ResolvedQualifiedTarget, SourceDeclarationTarget, SourceDependencyAccess, SourceFunctionTarget,
     SourcePackageBoundaryCheckInput, VisibleNameBinding, VisibleNameRegistry,
     check_alias_case_warning, check_module_boundary, check_source_package_boundary,
-    has_explicit_moth_extension, resolve_dependency_target, resolve_external_package_symbol,
-    resolve_namespace_target, resolve_public_export_boundary,
+    resolve_dependency_target, resolve_external_package_symbol, resolve_namespace_target,
+    resolve_public_export_boundary,
 };
+use crate::compiler_frontend::headers::dependency_paths::has_explicit_moth_extension;
 
 /// Result for the binding-environment builder family.
 ///
@@ -481,15 +484,25 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .get(source_file)
         {
             for dependency in dependencies {
-                // Reject a direct dependency on the build-only `@config.moth` before the general
-                // source-edge and extension checks, so the reserved reason wins. An unquoted `@`
-                // component cannot spell the reserved filename, but a quoted component could
-                // otherwise resolve it as an ordinary source name.
+                // Retain the reserved-file reason only when Stage 0 found no module surface for
+                // the exact `@config.moth` spelling. Directory compilation carries that decision
+                // as a resolved provider clause; bounded synthetic compilation has no provider
+                // edge, so its prepared Normal module boundary is the same Stage 0 authority. An
+                // unquoted `@` component cannot spell the reserved filename, but a quoted
+                // component could otherwise resolve it as an ordinary source name.
                 if dependency_path_references_config_file(
                     dependency.dependency.path,
                     &*self.path_fork,
                     self.string_table,
-                ) {
+                ) && self
+                    .source_provider_dependencies
+                    .resolve_clause(dependency.dependency.dependency_shell_id)
+                    .is_none()
+                    && !self.dependency_names_prepared_normal_module_surface(
+                        &dependency.dependency.path,
+                        source_file,
+                    )?
+                {
                     return Err(super::diagnostics::direct_special_file_dependency(
                         &dependency.dependency.path,
                         Some(dependency.dependency.span),
@@ -1337,6 +1350,40 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         )
     }
 
+    /// Whether the reserved config spelling names a prepared Normal module surface.
+    ///
+    /// WHAT: derives the consumer's effective module-boundary path and matches it exactly against
+    ///       a prepared Normal facade boundary.
+    /// WHY: synthetic single-file binding has no provider edge to consult, yet its bounded Stage 0
+    ///      inventory already owns the same module-root boundary facts. Matching those facts keeps
+    ///      directory and synthetic binding on one authority without a binder filesystem probe.
+    ///      Same-module sources, providers and package identities never create these boundaries.
+    fn dependency_names_prepared_normal_module_surface(
+        &mut self,
+        dependency_path: &PathId,
+        source_file: &PathId,
+    ) -> BuilderResult<bool> {
+        let effective_path = effective_module_boundary_path(
+            source_file,
+            dependency_path,
+            &self.module_symbols.file_module_membership,
+            &self.module_symbols.module_root_boundaries,
+            &mut *self.path_fork,
+        )?;
+        Ok(self
+            .module_symbols
+            .module_root_boundaries
+            .iter()
+            .any(|boundary| {
+                boundary.surface == ModuleRootRole::Normal
+                    && boundary.dependency_prefix == effective_path
+                    && self
+                        .module_symbols
+                        .module_file_paths
+                        .contains(&boundary.root_file)
+            }))
+    }
+
     /// Resolve and register one clause's direct selections.
     ///
     /// WHAT: every selection goes through the shared target resolution, then the clause publishes
@@ -1396,6 +1443,31 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         Ok(target)
     }
 
+    /// Reject a dependency clause that names a compiler-owned implicit package.
+    ///
+    /// WHAT: keeps the package registered for compiler-owned syntax while refusing authored
+    ///       bindings from it.
+    /// WHY: implicit packages carry no source-visible dependency surface, and a dependency clause
+    ///      is the only way an author can claim their symbols.
+    fn reject_implicit_package_dependency(
+        &self,
+        dependency: &RetainedDependencyPath,
+        package_path: &str,
+    ) -> BuilderResult<()> {
+        if self
+            .external_package_registry
+            .package_is_source_bindable(package_path)
+        {
+            return Ok(());
+        }
+        Err(imports::invalid_import_path(
+            dependency.path,
+            InvalidImportPathReason::ImplicitPackage,
+            Some(dependency.span),
+        )
+        .into())
+    }
+
     /// Resolve one selection without the shared receiver-method policy.
     ///
     /// WHY: provider, package and source routes each return a target, so the receiver-method
@@ -1434,7 +1506,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         if let Some(target) =
-            self.resolve_external_package_selected_target(&selected_path, selection)?
+            self.resolve_external_package_selected_target(&selected_path, dependency, selection)?
         {
             return Ok(target);
         }
@@ -1558,6 +1630,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     fn resolve_external_package_selected_target(
         &mut self,
         selected_path: &PathId,
+        dependency: &RetainedDependencyPath,
         selection: &DependencySelection,
     ) -> BuilderResult<Option<ResolvedSelectedTarget>> {
         match resolve_external_package_symbol(ExternalPackageSymbolResolutionInput {
@@ -1569,6 +1642,13 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             ExternalPackageSymbolLookup::Found { symbol_id } => {
                 Ok(Some(ResolvedSelectedTarget::External { symbol_id }))
             }
+            // Changing the member cannot fix this, so the diagnostic names the package clause.
+            ExternalPackageSymbolLookup::ImplicitPackage => Err(imports::invalid_import_path(
+                dependency.path,
+                InvalidImportPathReason::ImplicitPackage,
+                Some(dependency.span),
+            )
+            .into()),
             ExternalPackageSymbolLookup::PackageFoundSymbolMissing {
                 package_path,
                 symbol_name,
@@ -2016,11 +2096,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         source_file: &PathId,
     ) -> BuilderResult<()> {
         // Reject explicit `.moth` extension in dependency paths.
-        if has_explicit_moth_extension(
-            &dependency.dependency.path,
-            self.string_table,
-            &*self.path_fork,
-        ) {
+        let mut components = Vec::new();
+        let components = self
+            .path_fork
+            .resolve_components(dependency.dependency.path, &mut components);
+        if has_explicit_moth_extension(components, self.string_table) {
             return Err(imports::explicit_moth_extension(
                 dependency.dependency.path,
                 Some(dependency.dependency.span),
@@ -2066,6 +2146,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             });
 
         if let Some(target) = namespace_target {
+            if let ResolvedNamespaceTarget::ExternalPackage { package_path } = &target {
+                // A bare clause names the package surface itself, which an implicit package does
+                // not publish either.
+                self.reject_implicit_package_dependency(
+                    &dependency.dependency,
+                    self.string_table.resolve(*package_path),
+                )?;
+            }
             return self.register_namespace_binding(
                 file_visibility,
                 registry,

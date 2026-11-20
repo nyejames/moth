@@ -68,7 +68,7 @@ lowered_handler_guard |divisor I32, limit I32| -> I32:
 $fast_math $safe_math
 dead_guard_after_return |limit I32| -> I32:
     return 0
-    loop 0 to limit:
+    loop 0 to limit by 1:
         io.line("x")
     ;
 ;

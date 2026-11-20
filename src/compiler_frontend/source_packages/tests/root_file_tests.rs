@@ -163,7 +163,11 @@ fn config_dependency_classification_matches_only_the_reserved_filename() {
         &string_table
     ));
 
-    let nested_config_folder = path(&["config", "settings"], &mut string_table, &mut path_fork);
+    let nested_config_folder = path(
+        &["@config.moth", "settings"],
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(!dependency_path_references_config_file(
         nested_config_folder,
         &path_fork,

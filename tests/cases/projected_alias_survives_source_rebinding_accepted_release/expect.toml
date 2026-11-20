@@ -1,0 +1,5 @@
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = "projected_alias_survives_source_rebinding old=1 direct=1 pair=2"

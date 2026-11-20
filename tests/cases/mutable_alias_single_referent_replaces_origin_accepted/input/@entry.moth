@@ -1,0 +1,19 @@
+-- A pure alias of exactly one whole cell definitely replaces that cell's value on a fresh write,
+-- so the old origin is no longer observed through the slot and may be mutated.
+
+identity |value {I32}| -> {I32}:
+    return value
+;
+
+probe || -> I32:
+    original ~= {1}
+    slot ~= {0}
+    writer ~= slot
+    ~writer = {3}
+    observed = identity(slot)
+    ~original.push(4)
+    return observed.length()
+;
+
+result = probe()
+io.line([: result=[result]])

@@ -1,0 +1,21 @@
+-- A scalar returned from an alias made from a slot is a fresh binding. The alias observes
+-- the slot's cell, but that cell is not value provenance, so a later slot rebinding cannot
+-- conflict with the returned scalar still being read.
+
+identity |value I32| -> I32:
+    return value
+;
+
+probe || -> I32:
+    original = 5
+    other = 7
+    slot ~= 0
+    ~slot = identity(original)
+    view = slot
+    snapshot = identity(view)
+    ~slot = identity(other)
+    return snapshot
+;
+
+result = probe()
+io.line([: snapshot result=[result]])

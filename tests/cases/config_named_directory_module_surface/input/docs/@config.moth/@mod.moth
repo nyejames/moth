@@ -1,0 +1,4 @@
+$export
+nested_answer || -> I64:
+    return 7
+;

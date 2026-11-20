@@ -1,0 +1,22 @@
+-- A mutable alias made from a definite scalar slot targets the slot's own cell. A waived
+-- mutable call on the slot must stay rejected while the alias is live.
+
+identity |value I32| -> I32:
+    return value
+;
+
+set_two |value ~I32|:
+    ~value = 2
+;
+
+probe || -> I32:
+    original = 5
+    slot ~= 0
+    ~slot = identity(original)
+    writer ~= slot
+    set_two(~slot)
+    return writer
+;
+
+result = probe()
+io.line([: writer result=[result]])

@@ -55,6 +55,11 @@ impl<'a> BenchmarkExecutionContext<'a> {
         }
     }
 
+    /// The CLI compiler binary, absent from frontend-only contexts.
+    pub(crate) fn compiler_binary(&self) -> Option<&Path> {
+        self.compiler_binary
+    }
+
     /// Resolve one CLI invocation through the run workspace.
     ///
     /// File-entry cases receive an isolated working directory below

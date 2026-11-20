@@ -241,6 +241,34 @@ pub struct RangeLoopSpec {
     pub fast_math: bool,
 }
 
+impl RangeLoopSpec {
+    /// Whether lowering emits the evaluated-step zero guard.
+    ///
+    /// WHY: only an authored step can evaluate to zero; the implicit `+1` step cannot.
+    pub(crate) fn has_zero_step_guard(&self) -> bool {
+        self.step.is_some()
+    }
+
+    /// Whether lowering emits the binary-float rounded-result no-progress guard.
+    ///
+    /// WHY: integer candidate addition is exact; only a floating candidate can round back onto
+    ///      the current value.
+    pub(crate) fn has_no_progress_guard(&self) -> bool {
+        self.domain.is_binary_float()
+    }
+
+    /// Whether lowering emits any generated range check that constraint evidence observes.
+    ///
+    /// WHAT: the zero-step guard, the binary-float no-progress guard, or the checked ordinal
+    ///       update when `emits_ordinal_update` is true.
+    /// WHY: the skipped-source evidence walker must select exactly the checks lowering emits.
+    ///      Selecting a guard for a shape lowering never checks falsely rejects `$safe_math`, and
+    ///      missing the ordinal lets a `$fast_math` ordinal trap escape `$safe_math`.
+    pub(crate) fn has_generated_range_check(&self, emits_ordinal_update: bool) -> bool {
+        self.has_zero_step_guard() || self.has_no_progress_guard() || emits_ordinal_update
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatchExhaustiveness {
     /// The match has an explicit `else =>` arm.

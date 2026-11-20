@@ -1,6 +1,6 @@
 # Audit Reports
 
-One report per audit run: one kind, one area. Read the [audit guide](../audit-guide.md) first.
+Formal audit kinds use one report per run: one kind, one area. New **Correctness** audits instead record bugs in [bug reports](../../bug-reports.md) and coverage in the [audit log](../audit-log.md), with no report or `AUD-####` ID. Historical Correctness reports remain archived here. Read the [audit guide](../audit-guide.md) first.
 
 - [open_audits](./open_audits/) contains runs in progress and completed runs with unresolved findings.
 - [closed_audits](./closed_audits/) contains runs whose findings have all been resolved, rejected or superseded, plus clean runs.

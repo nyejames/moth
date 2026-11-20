@@ -25,6 +25,7 @@
 
 use crate::bench_time::BenchmarkTimestamp;
 use crate::bench_types::{BenchmarkMeasurementIdentity, BenchmarkMetric};
+use crate::command_line::markdown_command_block;
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,10 +36,10 @@ use super::options::ProfileFilterMode;
 use super::parse::ProfileShapeDump;
 
 /// Current on-disk format version for detailed observations.
-const OBSERVATIONS_FORMAT_VERSION: u32 = 2;
+const OBSERVATIONS_FORMAT_VERSION: u32 = 3;
 
 /// Current on-disk format version for the root run manifest.
-const RUN_MANIFEST_FORMAT_VERSION: u32 = 4;
+const RUN_MANIFEST_FORMAT_VERSION: u32 = 5;
 
 /// Current on-disk format version for per-case hotspot data.
 const HOTSPOTS_FORMAT_VERSION: u32 = 1;
@@ -99,8 +100,8 @@ pub(crate) struct ProfileCaseManifest {
     pub(crate) case_id: String,
     pub(crate) identity: BenchmarkMeasurementIdentity,
     pub(crate) group_name: String,
-    pub(crate) command: String,
-    pub(crate) args: Vec<String>,
+    /// POSIX-shell-quoted command line recorded for this case.
+    pub(crate) posix_shell_command_line: String,
     pub(crate) observation_wall_ms: f64,
     pub(crate) profile_path: String,
     pub(crate) stdout_path: String,
@@ -404,7 +405,7 @@ struct DetailedObservationsFile {
     format_version: u32,
     case_id: String,
     group: String,
-    command: Vec<String>,
+    posix_shell_command_line: String,
     wall_ms: f64,
     stage_timings: Vec<BenchmarkMetric>,
     counters: Vec<BenchmarkMetric>,
@@ -412,15 +413,11 @@ struct DetailedObservationsFile {
 
 impl From<&ProfileObservation> for DetailedObservationsFile {
     fn from(observation: &ProfileObservation) -> Self {
-        let mut command = Vec::with_capacity(observation.command_args.len() + 1);
-        command.push(observation.command.clone());
-        command.extend(observation.command_args.iter().cloned());
-
         Self {
             format_version: OBSERVATIONS_FORMAT_VERSION,
             case_id: observation.case_id.clone(),
             group: observation.group_name.clone(),
-            command,
+            posix_shell_command_line: observation.posix_shell_command_line(),
             wall_ms: observation.wall_ms,
             stage_timings: observation.observations.stage_timings.clone(),
             counters: observation.observations.counters.clone(),
@@ -450,8 +447,7 @@ struct RunManifestCase {
     source_fingerprint: String,
     measurement_fingerprint: String,
     timing_schema_version: u32,
-    command: String,
-    args: Vec<String>,
+    posix_shell_command_line: String,
     observation_wall_ms: f64,
     profile_path: String,
     stdout_path: String,
@@ -489,8 +485,7 @@ impl From<&ProfileCaseManifest> for RunManifestCase {
             source_fingerprint: case.identity.source_fingerprint.clone(),
             measurement_fingerprint: case.identity.measurement_fingerprint.clone(),
             timing_schema_version: case.identity.timing_schema_version,
-            command: case.command.clone(),
-            args: case.args.clone(),
+            posix_shell_command_line: case.posix_shell_command_line.clone(),
             observation_wall_ms: case.observation_wall_ms,
             profile_path: case.profile_path.clone(),
             stdout_path: case.stdout_path.clone(),
@@ -624,23 +619,17 @@ fn format_index_md(
         lines.push(String::new());
         for case in cases {
             lines.push(format!(
-                "- **{}** — `{}` (~{:.0}ms)",
-                case.case_id,
-                format_command(&case.command, &case.args),
-                case.observation_wall_ms,
+                "- **{}** (~{:.0}ms) — POSIX shell command:",
+                case.case_id, case.observation_wall_ms,
             ));
+            lines.push(String::new());
+            lines.push(markdown_command_block(&case.posix_shell_command_line));
+            lines.push(String::new());
         }
         lines.push(String::new());
     }
 
     lines.join("\n")
-}
-
-/// Format a command with args for display.
-fn format_command(command: &str, args: &[String]) -> String {
-    let mut parts = vec![command.to_string()];
-    parts.extend(args.iter().cloned());
-    parts.join(" ")
 }
 
 // ---------------------------------------------------------------------------

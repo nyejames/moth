@@ -8,6 +8,7 @@
 use crate::build_system::build::{FileKind, OutputFile};
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
+use crate::builder_surface::package_metadata::PackageSetMembership;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -263,6 +264,7 @@ pub(crate) fn js_runtime_asset_import(
         &logical_source_path,
         canonical_source_path,
         None,
+        PackageSetMembership::Ordinary,
     )
     .expect("fixture JS runtime asset identity should be internally valid")
 }
@@ -289,6 +291,7 @@ pub(crate) fn non_js_runtime_asset_import(
                 .expect("fixture foreign asset path should be valid"),
         ),
         canonical_source_path,
+        package_set_membership: PackageSetMembership::Ordinary,
         source_span: None,
         asset_kind: asset_kind.to_owned(),
     }

@@ -75,6 +75,7 @@ use super::source_discovery::{
     ExternalImportDiscoveryState, ResolvedDependencyEdge, ResolvedSourcePackageDependency,
 };
 use super::source_loading::SelectedSourceTextMap;
+use super::source_tree_index::{ProjectConfigSource, SourceTreeProjectContext};
 
 mod canonical;
 mod deferred_check_only;
@@ -1082,7 +1083,10 @@ pub(super) fn discover_source_package_inventories(
             string_table,
         )?;
         let mut package_sources = SourceDatabaseBuilder::new(package_source_files);
-        let mut package_selected_source_texts = SelectedSourceTextMap::default();
+        let mut package_selected_source_texts = SelectedSourceTextMap::for_package_boundary(
+            package_index.package_set_membership(),
+            dependency_prefix,
+        );
         let path_interner = package_sources.sources_mut().fork_path_builder();
         let (package_source_files, mut package_source_spans) = package_sources.split();
         let package_path_fork = path_interner.fork_source().fork_for_module();
@@ -1224,7 +1228,10 @@ pub(super) fn prepare_source_package_check_only_jobs(
             &package_path_fork,
         );
         let (_, mut source_spans) = inventory.source_files.split();
-        let mut selected_source_texts = SelectedSourceTextMap::default();
+        let mut selected_source_texts = SelectedSourceTextMap::for_package_boundary(
+            package_index.package_set_membership(),
+            inventory.dependency_prefix.as_str(),
+        );
         let preparation_result = inventory.schedule.prepare_check_only_jobs(
             style_directives,
             &mut source_spans,
@@ -1640,9 +1647,21 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
     // 1. Setup path resolution based on config settings.
     // `build_project_path_resolver_with_index` returns the typed premerge lane; retain it
     // beside the finished source owner and convert once at the outer tail.
+    // Resolve the bootstrap config identity through the builder that owns it. Discovery excludes
+    // this canonical target from ordinary-source admission.
+    let project_config_source = project_sources
+        .config_source_id()
+        .filter(|source_id| project_sources.sources().get(*source_id).is_some())
+        .map(|source_id| ProjectConfigSource {
+            source_id,
+            source_files: project_sources.sources().as_ref(),
+        });
     let mut project_setup = match project_roots::build_project_path_resolver_with_index(
         config,
-        validated_output_settings,
+        SourceTreeProjectContext {
+            validated_output_settings,
+            config_source: project_config_source,
+        },
         &builder_surface.source_packages,
         &builder_surface.source_file_kinds,
         &builder_surface.external_import_providers,

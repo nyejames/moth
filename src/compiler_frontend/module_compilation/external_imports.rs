@@ -153,6 +153,11 @@ fn check_runtime_metadata_compatibility(
         (Some(left), Some(right)) if left.asset_kind != right.asset_kind => {
             Some("runtime asset kind")
         }
+        (Some(left), Some(right))
+            if left.package_set_membership != right.package_set_membership =>
+        {
+            Some("runtime asset package-set membership")
+        }
         (Some(left), Some(right)) if left.canonical_source_path != right.canonical_source_path => {
             Some("runtime asset canonical byte-source path")
         }

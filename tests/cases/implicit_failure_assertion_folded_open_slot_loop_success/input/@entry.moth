@@ -1,0 +1,6 @@
+check || -> String:
+    assert(true, [loop 0 to 2 by 1 |i|:[$slot x]])
+    return "ok"
+;
+
+~[:[check()]]

@@ -72,6 +72,7 @@ fn serialize(
     let layout = FunctionLayout::new(FunctionLayoutInputs {
         local_ids: vec![LocalId(0)],
         local_mutable: vec![true],
+        local_has_in_place_mutation_surface: vec![true],
         local_first_write_order: vec![-1],
         local_last_use_order: vec![-1],
         statement_order_by_id: FxHashMap::default(),

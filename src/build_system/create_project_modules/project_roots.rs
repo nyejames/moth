@@ -9,7 +9,6 @@
 //! from the single source-tree traversal so entry classification and dependency ordering have one
 //! structural owner instead of a parallel entry-candidate path.
 
-use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -55,7 +54,10 @@ pub(super) fn build_project_path_resolver(
     let binding_packages = ExternalPackageRegistry::new();
     build_project_path_resolver_with_index(
         config,
-        None,
+        SourceTreeProjectContext {
+            validated_output_settings: None,
+            config_source: None,
+        },
         builder_source_packages,
         source_file_kinds,
         &external_import_providers,
@@ -71,7 +73,7 @@ pub(super) fn build_project_path_resolver(
 /// it in one owner keeps config interpretation out of later module inventory and frontend paths.
 pub(super) fn build_project_path_resolver_with_index(
     config: &Config,
-    validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
+    project_context: SourceTreeProjectContext<'_>,
     builder_source_packages: &SourcePackageRegistry,
     source_file_kinds: &SourceFileKindRegistry,
     external_import_providers: &ExternalImportProviderRegistry,
@@ -91,10 +93,7 @@ pub(super) fn build_project_path_resolver_with_index(
 
     let source_tree_index = SourceTreeIndex::discover(
         project_root.clone(),
-        SourceTreeProjectContext {
-            project_root: &project_root,
-            validated_output_settings,
-        },
+        project_context,
         config,
         builder_source_packages,
         source_file_kinds,

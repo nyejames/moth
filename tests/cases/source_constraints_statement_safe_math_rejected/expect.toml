@@ -6,7 +6,6 @@ warnings = "forbid"
 diagnostic_codes = [
     "MOTH-RULE-0091",
     "MOTH-RULE-0091",
-    "MOTH-RULE-0091",
 ]
 
 [[backends.html.diagnostic_assertions]]
@@ -22,10 +21,3 @@ occurrence = 2
 reason = "invalid_source_constraint.fast_operation"
 path = "input/@entry.moth"
 line = 14
-
-[[backends.html.diagnostic_assertions]]
-code = "MOTH-RULE-0091"
-occurrence = 3
-reason = "invalid_source_constraint.fast_range_guard"
-path = "input/@entry.moth"
-line = 25

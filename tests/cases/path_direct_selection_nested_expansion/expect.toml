@@ -7,4 +7,4 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["Intro content fixture.", "A quoted path fixture.", "B quoted path fixture.", "C quoted path fixture."]
+must_contain = ["Intro content fixture.", "A quoted path fixture.", "B quoted path fixture.", "C quoted path fixture.", "Config-named directory content fixture."]

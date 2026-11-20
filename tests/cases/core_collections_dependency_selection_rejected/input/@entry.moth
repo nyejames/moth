@@ -1,0 +1,3 @@
+@core/collections __moth_collection_get
+
+values {I32} = {1}

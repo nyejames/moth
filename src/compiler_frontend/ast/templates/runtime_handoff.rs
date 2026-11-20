@@ -209,7 +209,10 @@ impl OwnedRuntimeSlotApplicationHandoff {
     }
 }
 
-fn visit_node_expression_ids(node: &OwnedRuntimeTemplateNode, visitor: &mut dyn FnMut(ExprId)) {
+pub(crate) fn visit_node_expression_ids(
+    node: &OwnedRuntimeTemplateNode,
+    visitor: &mut dyn FnMut(ExprId),
+) {
     match node {
         OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => visitor(*expression),
         OwnedRuntimeTemplateNode::Conditional { selector, .. } => {

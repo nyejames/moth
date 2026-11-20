@@ -551,8 +551,8 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &project_root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -1085,14 +1085,13 @@ fn build_namespace_set_for_test(
     source_packages: &crate::builder_surface::SourcePackageRegistry,
 ) -> Result<ModuleNamespaceSet, PreparedFailure> {
     let mut string_table = StringTable::new();
-    let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let external_import_providers = ExternalImportProviderRegistry::default();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &project_root,
             validated_output_settings: None,
+            config_source: None,
         },
         config,
         source_packages,
@@ -1227,6 +1226,63 @@ fn registered_source_package_rejects_importable_claims_below_reserved_package_ro
             .unwrap_or_else(|| panic!("{case}: package reserved-root claim must be rejected"));
         assert_reserved_package_claim_failure(failure, expected_root, expected_source_suffix);
     }
+}
+
+#[test]
+fn compiler_shipped_package_reserved_claim_reports_a_damaged_set() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    let package_root = root.join("elsewhere/packages/core/html");
+    fs::create_dir_all(&src).expect("should create src dir");
+    fs::create_dir_all(&package_root).expect("should create package dir");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@entry.moth"), "[:entry]\n").expect("should write entry");
+    fs::write(package_root.join("@package.moth"), "$export\nvalue #= 1\n")
+        .expect("should write package facade");
+    fs::write(package_root.join("@mod.moth"), "$export\nvalue #= 1\n")
+        .expect("should write internal normal root");
+    fs::write(package_root.join("core.moth"), "value #= 1\n")
+        .expect("should write reserved-root claim");
+
+    let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
+    source_packages
+        .register_compiler_shipped_filesystem_root("core/html", package_root, PackageOrigin::Core)
+        .expect("test shipped source root should register");
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let result = build_namespace_set_for_test(&config, &resolver, &source_packages);
+    let Err(failure) = result else {
+        panic!("a shipped registration's reserved-root claim must fail");
+    };
+    let PreparedFailure::Infrastructure(errors) = failure else {
+        panic!("a shipped package claim must use the infrastructure lane: {failure:?}");
+    };
+    assert_eq!(
+        errors.primary.kind,
+        crate::compiler_frontend::compiler_errors::InfrastructureFailureKind::Filesystem
+    );
+    assert!(
+        errors
+            .primary
+            .message
+            .contains("Source package publishes an importable claim")
+            && errors.primary.message.contains("incomplete"),
+        "the shipped claim must report its damaged package set: {}",
+        errors.primary.message
+    );
 }
 
 #[test]

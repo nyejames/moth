@@ -103,7 +103,7 @@ fn declaration_expression<'a>(
 fn lower_source(source: &str) -> HirModule {
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let registry = default_external_package_registry(&mut string_table);
-    lower_hir(ast, &mut string_table, &mut path_fork, &registry)
+    lower_hir(ast, &mut string_table, &mut path_fork, &registry).hir_module
 }
 
 fn numeric_op_statements(module: &HirModule) -> Vec<(HirNumericOp, NumericFailureMode)> {
@@ -304,7 +304,7 @@ zero_step || -> I32:
 ;
 
 $fast_math
-loop 0 to 3 by zero_step() |item|:
+loop 0 to 3 by zero_step() |item, ordinal|:
     marker = item
 ;
 ";

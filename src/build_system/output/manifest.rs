@@ -24,6 +24,8 @@ use crate::compiler_frontend::utilities::basic::normalize_windows_verbatim_path;
 use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 
 use std::collections::{BTreeSet, HashSet};
+#[cfg(windows)]
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -1013,17 +1015,26 @@ fn remove_empty_parent_dirs(
 /// concern. Visible to sibling output tests so Windows share-root and case-fold handling can be
 /// asserted directly, without network access or reliance on the host's stored casing.
 pub(super) fn is_dangerous_system_path(path: &Path) -> bool {
-    let mut component_count = 0;
-    let mut has_normal_component = false;
-    for component in path.components() {
-        component_count += 1;
-        has_normal_component |= matches!(component, Component::Normal(_));
+    #[cfg(windows)]
+    {
+        let system_locations = WindowsSystemLocations::from_process_environment();
+        is_dangerous_system_path_with_locations(path, &system_locations)
     }
 
-    // WHAT: reject a single-component path or a path with no normal component.
-    // WHY: `/`, `C:\`, `\\?\C:\` and a `\\server\share` UNC root contain only a prefix and/or a
-    // root separator. Cleanup must never treat any filesystem or share root as an output root.
-    if component_count < 2 || !has_normal_component {
+    #[cfg(not(windows))]
+    {
+        is_dangerous_system_path_with_fixed_roots(path)
+    }
+}
+
+/// Check a path against filesystem roots and the fixed Unix protected directories.
+///
+/// WHY: Unix protected roots are stable paths, so they need no runtime location input. The
+/// Windows named roots follow the system drive and live in
+/// `is_dangerous_system_path_with_locations`.
+#[cfg(not(windows))]
+fn is_dangerous_system_path_with_fixed_roots(path: &Path) -> bool {
+    if is_filesystem_root(path) {
         return true;
     }
 
@@ -1042,33 +1053,212 @@ pub(super) fn is_dangerous_system_path(path: &Path) -> bool {
         }
     }
 
-    #[cfg(windows)]
-    {
-        // WHAT: strip the verbatim prefix that canonicalisation adds before comparing.
-        // WHY: `\\?\C:\Windows` and `C:\Windows` are one Windows identity, but `Path` equality
-        // distinguishes their prefix kinds. This normalisation is for comparison only; the native
-        // path stays authoritative for IO and containment.
-        let comparison_path = normalize_windows_verbatim_path(path);
-        // WHAT: named system directories under the system drive.
-        // WHY: drive and UNC share roots are already rejected by the root rule above, so this
-        // list owns only protected directories that contain normal components.
-        const DANGEROUS_WINDOWS_ROOTS: &[&str] = &[
-            r"C:\Windows",
-            r"C:\Program Files",
-            r"C:\Program Files (x86)",
-            r"C:\Users",
-            r"C:\System32",
-        ];
+    false
+}
 
-        if DANGEROUS_WINDOWS_ROOTS
-            .iter()
-            .any(|dangerous| windows_paths_equal(&comparison_path, Path::new(dangerous)))
-        {
-            return true;
+/// Check a path against protected Windows roots derived from runtime system locations.
+///
+/// WHAT: rejects filesystem and share roots plus the Windows installation directory, its
+/// `System32` subdirectory and the named system directories on the system drive.
+/// WHY: a Windows installation can live on any drive, so hard-coded `C:` roots leave equivalent
+/// directories on the system drive unprotected. Tests inject locations because edition 2024
+/// `std::env::set_var` is unsafe and process-global mutation races under parallel tests.
+#[cfg(windows)]
+pub(super) fn is_dangerous_system_path_with_locations(
+    path: &Path,
+    system_locations: &WindowsSystemLocations,
+) -> bool {
+    if is_filesystem_root(path) {
+        return true;
+    }
+
+    // WHAT: strip the verbatim prefix that canonicalisation adds before comparing.
+    // WHY: `\\?\D:\Windows` and `D:\Windows` are one Windows identity, but `Path` equality
+    // distinguishes their prefix kinds. This normalisation is for comparison only; the native
+    // path stays authoritative for IO and containment.
+    let comparison_path = normalize_windows_verbatim_path(path);
+    system_locations
+        .protected_roots()
+        .any(|protected_root| windows_paths_equal(&comparison_path, &protected_root))
+}
+
+/// Reject a single-component path or a path with no normal component.
+///
+/// WHAT: `/`, `C:\`, `\\?\C:\` and a `\\server\share` UNC root contain only a prefix and/or a
+/// root separator.
+/// WHY: cleanup must never treat any filesystem or share root as an output root.
+fn is_filesystem_root(path: &Path) -> bool {
+    let mut component_count = 0;
+    let mut has_normal_component = false;
+    for component in path.components() {
+        component_count += 1;
+        has_normal_component |= matches!(component, Component::Normal(_));
+    }
+
+    component_count < 2 || !has_normal_component
+}
+
+/// Runtime locations that place the protected Windows directories.
+///
+/// WHAT: captures `SystemRoot` (authoritative Windows directory) and `SystemDrive` (drive root)
+/// once for one output-root validation.
+/// WHY: protected directories live beside and under the operating system installation, which is
+/// not always on `C:`. Injecting the captured values keeps tests deterministic without mutating
+/// process-global environment state.
+#[cfg(windows)]
+pub(super) struct WindowsSystemLocations {
+    system_root: Option<OsString>,
+    system_drive: Option<OsString>,
+}
+
+#[cfg(windows)]
+impl WindowsSystemLocations {
+    /// Capture the runtime locations that own the protected Windows directories.
+    pub(super) fn from_process_environment() -> Self {
+        Self {
+            system_root: std::env::var_os("SystemRoot"),
+            system_drive: std::env::var_os("SystemDrive"),
         }
     }
 
-    false
+    /// Construct locations from explicit values instead of the process environment.
+    #[cfg(test)]
+    pub(super) fn from_parts(system_root: Option<&str>, system_drive: Option<&str>) -> Self {
+        Self {
+            system_root: system_root.map(OsString::from),
+            system_drive: system_drive.map(OsString::from),
+        }
+    }
+
+    /// Directory roots that must never become an output root.
+    ///
+    /// WHAT: the Windows installation directory and its `System32` subdirectory plus
+    /// `Program Files`, `Program Files (x86)` and `Users` on the system drive, unioned with the
+    /// same layout spelled from `C:`.
+    /// WHY: `System32` lives below the installation directory, which is usually but not always
+    /// below the drive root, so it must follow `SystemRoot`. The literal `C:` roots keep the
+    /// previous protection when the resolved drive differs, so a relocated installation cannot
+    /// silently drop a named root. Both sets come from `protected_roots_for`, so their spellings
+    /// cannot drift apart. The drive root comes from
+    /// `SystemDrive` or `SystemRoot`'s disk prefix, never from `SystemRoot`'s parent directory.
+    /// Every derived path is built from a rooted drive path because
+    /// `PathBuf::from("D:").join("Windows")` is the drive-relative `D:Windows`.
+    pub(super) fn protected_roots(&self) -> impl Iterator<Item = PathBuf> {
+        let windows_directory = self
+            .system_root
+            .as_deref()
+            .and_then(rooted_windows_directory);
+        let drive_root = self
+            .system_drive
+            .as_deref()
+            .and_then(rooted_system_drive)
+            .or_else(|| windows_directory.as_deref().and_then(rooted_drive_path))
+            .unwrap_or_else(|| PathBuf::from(r"C:\"));
+
+        let windows_directory = windows_directory.unwrap_or_else(|| drive_root.join("Windows"));
+
+        protected_roots_for(&drive_root, &windows_directory)
+            .into_iter()
+            .chain(protected_roots_for(
+                Path::new(r"C:\"),
+                Path::new(r"C:\Windows"),
+            ))
+    }
+}
+
+/// The protected roots that belong to one Windows installation.
+///
+/// WHAT: the installation directory, its `System32` subdirectory and the named system directories
+/// on `drive_root`.
+/// WHY: the runtime-derived roots and the literal `C:` mirror share this layout, so a protected
+/// directory cannot drift between them. `System32` sits below the installation directory, which
+/// can itself be a drive root. `drive_root` must already be rooted because
+/// `PathBuf::from("D:").join("Windows")` is the drive-relative `D:Windows`.
+#[cfg(windows)]
+fn protected_roots_for(drive_root: &Path, windows_directory: &Path) -> [PathBuf; 5] {
+    [
+        windows_directory.to_path_buf(),
+        windows_directory.join("System32"),
+        drive_root.join("Program Files"),
+        drive_root.join("Program Files (x86)"),
+        drive_root.join("Users"),
+    ]
+}
+
+/// Parse the authoritative Windows installation directory from `SystemRoot`.
+///
+/// WHAT: requires an ordinary rooted disk path. A bare drive root such as `D:\` is valid.
+/// WHY: Windows can install at the drive root, where `System32` is `D:\System32`. Rejecting that
+/// `SystemRoot` would fall back to `D:\Windows` and leave the real system directory unprotected.
+/// Drive-relative `D:Windows`, UNC shares and device paths cannot name the installation directory
+/// or the local disk that owns its named system directories.
+#[cfg(windows)]
+fn rooted_windows_directory(raw: &OsStr) -> Option<PathBuf> {
+    use std::path::Prefix;
+
+    let path = Path::new(raw);
+    let mut components = path.components();
+    let Component::Prefix(prefix) = components.next()? else {
+        return None;
+    };
+    if !matches!(prefix.kind(), Prefix::Disk(_)) {
+        return None;
+    }
+
+    let mut is_rooted = false;
+    for component in components {
+        match component {
+            Component::RootDir => is_rooted = true,
+            Component::Normal(_) => {}
+            Component::Prefix(_) | Component::CurDir | Component::ParentDir => return None,
+        }
+    }
+
+    is_rooted.then(|| path.to_path_buf())
+}
+
+/// Parse `SystemDrive` as a rooted drive path such as `D:\`.
+///
+/// WHAT: accepts `D:`, `D:\` and `D:/`, and rejects relative, UNC and deeper paths.
+/// WHY: derived roots must start from a path that already has a root, or joining a directory name
+/// produces a drive-relative spelling that never matches the canonical output path.
+#[cfg(windows)]
+fn rooted_system_drive(raw: &OsStr) -> Option<PathBuf> {
+    let path = Path::new(raw);
+    let mut components = path.components();
+    let Component::Prefix(_) = components.next()? else {
+        return None;
+    };
+
+    match (components.next(), components.next()) {
+        (None, None) | (Some(Component::RootDir), None) => {}
+        _ => return None,
+    }
+
+    rooted_drive_path(path)
+}
+
+/// Build the rooted drive path (`D:\`) that contains an ordinary local disk path.
+///
+/// WHAT: accepts only `Prefix::Disk` paths; UNC, device and verbatim prefixes name no local
+/// drive root.
+/// WHY: `PathBuf::from("D:").join("Windows")` is drive-relative `D:Windows`, so derived roots
+/// must start from a rooted path. Deriving from `SystemRoot`'s disk prefix also keeps a nested
+/// installation such as `D:\OS\Windows` on drive `D:` instead of treating `D:\OS` as its root.
+#[cfg(windows)]
+fn rooted_drive_path(path: &Path) -> Option<PathBuf> {
+    use std::path::Prefix;
+
+    let Component::Prefix(prefix) = path.components().next()? else {
+        return None;
+    };
+    if !matches!(prefix.kind(), Prefix::Disk(_)) {
+        return None;
+    }
+
+    let mut drive_root = PathBuf::from(prefix.as_os_str());
+    drive_root.push(std::path::MAIN_SEPARATOR_STR);
+    Some(drive_root)
 }
 
 /// Compare a canonical candidate against one protected Unix root in both its literal and

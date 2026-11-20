@@ -735,6 +735,10 @@ impl<'hir> JsEmitter<'hir> {
                     );
                 };
                 let source = self.lower_place(place)?;
+                // A computed place captures the storage its base held when it was constructed, so
+                // the definition stays rooted in the allocation the projection named here even if
+                // the source binding cell is rebound later. Binding through an alias preserves
+                // write-through to that captured field or element.
                 self.emit_line(&format!("{local_name} = __moth_alias_binding({source});"));
             }
             ValueKind::RValue | ValueKind::Const => {

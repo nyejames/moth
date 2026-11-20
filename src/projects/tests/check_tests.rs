@@ -515,6 +515,9 @@ result I32 = choose_generic(1)
 
 #[test]
 fn check_accepts_a_directory_with_only_an_api_facade() {
+    // `run_check_command` opens a command timing session in timed builds, so it shares the
+    // process-global collector with every timing test.
+    let _test_guard = crate::timing::lock_instrumentation_tests();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
     fs::write(root.join("@config.moth"), DEFAULT_PAGE_CONFIG).expect("should write project config");
@@ -541,6 +544,8 @@ fn check_accepts_a_directory_with_only_an_api_facade() {
 
 #[test]
 fn check_counts_infrastructure_failure_as_one_error() {
+    // `run_check_command` opens a command timing session in timed builds.
+    let _test_guard = crate::timing::lock_instrumentation_tests();
     let temporary = tempfile::tempdir().expect("should create temporary directory");
     let missing = temporary.path().join("missing.moth");
     let completion = run_check_command(

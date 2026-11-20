@@ -1,0 +1,25 @@
+-- A collection `get` result is a shared alias of storage in the receiver's allocation. Storing
+-- that alias through a mutable alias and then pushing through the same alias must still respect
+-- the immutable referent's storage.
+
+Pair = | first {I32} |
+
+first |rows {{I32}}| -> {I32}, Error!:
+    return rows.get(0)!
+;
+
+overwrite |rows {{I32}}| -> I32:
+    data ~= {1, 2}
+    pair ~= Pair(first = data)
+    writer ~{I32} = {0}
+    ~writer = pair.first
+    ~writer = first(rows) catch:
+        then {7}
+    ;
+    ~writer.push(4)
+    return rows.length()
+;
+
+entry_data {{I32}} = {{9}}
+size = overwrite(entry_data)
+io.line([: returned_collection_get_alias_mutable_call size=[size]])

@@ -307,6 +307,188 @@ contract = "language.bindings.mutable_alias_blocks_later_source_access"
 role = "primary"
 
 [[case]]
+id = "mutable_alias_branch_merge_blocks_source_access_rejected"
+path = "mutable_alias_branch_merge_blocks_source_access_rejected"
+tags = ["integration", "borrows", "diagnostics", "control-flow"]
+contract = "language.bindings.mutable_alias_blocks_later_source_access"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_branch_merge_control_accepted"
+path = "mutable_alias_branch_merge_control_accepted"
+tags = ["integration", "borrows", "control-flow"]
+contract = "language.bindings.mutable_alias_branch_merge_control_accepted"
+role = "primary"
+
+[[case]]
+id = "mutable_alias_branch_merge_slot_path_keeps_origin_rejected"
+path = "mutable_alias_branch_merge_slot_path_keeps_origin_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.mutable_alias_joined_referent_is_not_definite"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_branch_merge_projected_path_keeps_origin_rejected"
+path = "mutable_alias_branch_merge_projected_path_keeps_origin_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.mutable_alias_joined_referent_is_not_definite"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_single_referent_replaces_origin_accepted"
+path = "mutable_alias_single_referent_replaces_origin_accepted"
+tags = ["integration", "borrows", "aliases"]
+contract = "language.bindings.mutable_alias_definite_referent_replaces_origin"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_alias_derived_view_read_accepted"
+path = "mutable_scalar_alias_derived_view_read_accepted"
+tags = ["integration", "borrows", "aliases"]
+contract = "language.bindings.mutable_alias_derived_view_read"
+role = "primary"
+
+[[case]]
+id = "mutable_alias_of_projected_alias_replacement_rejected"
+path = "mutable_alias_of_projected_alias_replacement_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.projected_alias_chain_keeps_referent_overlap"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_of_projected_field_replacement_rejected"
+path = "mutable_alias_of_projected_field_replacement_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.projected_alias_chain_keeps_referent_overlap"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_of_projected_alias_chain_replacement_rejected"
+path = "mutable_alias_of_projected_alias_chain_replacement_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.projected_alias_chain_keeps_referent_overlap"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_of_projected_alias_dead_view_accepted"
+path = "mutable_alias_of_projected_alias_dead_view_accepted"
+tags = ["integration", "borrows", "aliases"]
+contract = "language.bindings.projected_alias_chain_dead_view_replacement"
+role = "primary"
+
+[[case]]
+id = "mutable_alias_of_projected_alias_allows_holder_rebinding_accepted"
+path = "mutable_alias_of_projected_alias_allows_holder_rebinding_accepted"
+tags = ["integration", "borrows", "aliases"]
+contract = "language.bindings.projected_alias_chain_does_not_alias_whole_binding"
+role = "primary"
+
+[[case]]
+id = "mutable_alias_of_projected_alias_allows_holder_rebinding_accepted_release"
+path = "mutable_alias_of_projected_alias_allows_holder_rebinding_accepted_release"
+tags = ["integration", "borrows", "aliases", "release"]
+contract = "language.bindings.projected_alias_chain_does_not_alias_whole_binding"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_ancestor_view_read_accepted"
+path = "mutable_alias_ancestor_view_read_accepted"
+tags = ["integration", "borrows", "aliases"]
+contract = "language.bindings.derived_view_does_not_conflict_with_source_alias"
+role = "primary"
+
+[[case]]
+id = "mutable_alias_source_read_blocks_live_child_rejected"
+path = "mutable_alias_source_read_blocks_live_child_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.alias_source_read_conflicts_with_live_alias"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_source_read_via_immutable_view_rejected"
+path = "mutable_alias_source_read_via_immutable_view_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.alias_source_read_conflicts_with_live_alias"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_source_read_after_join_rejected"
+path = "mutable_alias_source_read_after_join_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.alias_source_read_conflicts_with_live_alias"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_source_read_in_loop_rejected"
+path = "mutable_alias_source_read_in_loop_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.alias_source_read_conflicts_with_live_alias"
+role = "boundary"
+
+[[case]]
+id = "mutable_alias_source_read_in_shared_call_rejected"
+path = "mutable_alias_source_read_in_shared_call_rejected"
+tags = ["integration", "borrows", "aliases", "diagnostics"]
+contract = "language.bindings.alias_source_read_conflicts_with_live_alias"
+role = "boundary"
+
+[[case]]
+id = "projected_write_through_parameter_visible_to_caller_accepted"
+path = "projected_write_through_parameter_visible_to_caller_accepted"
+tags = ["integration", "borrows", "aliases", "structs"]
+contract = "language.bindings.projected_write_through_parameter_visible_to_caller"
+role = "primary"
+
+[[case]]
+id = "projected_write_through_parameter_visible_to_caller_accepted_release"
+path = "projected_write_through_parameter_visible_to_caller_accepted_release"
+tags = ["integration", "borrows", "aliases", "structs", "release"]
+contract = "language.bindings.projected_write_through_parameter_visible_to_caller"
+role = "boundary"
+
+[[case]]
+id = "projected_write_through_parameter_conflicts_with_caller_view_rejected"
+path = "projected_write_through_parameter_conflicts_with_caller_view_rejected"
+tags = ["integration", "borrows", "aliases", "structs", "diagnostics"]
+contract = "language.bindings.projected_write_through_parameter_conflicts_with_caller_view"
+role = "boundary"
+
+[[case]]
+id = "projected_write_through_parameter_conflicts_with_caller_view_rejected_release"
+path = "projected_write_through_parameter_conflicts_with_caller_view_rejected_release"
+tags = ["integration", "borrows", "aliases", "structs", "diagnostics", "release"]
+contract = "language.bindings.projected_write_through_parameter_conflicts_with_caller_view"
+role = "boundary"
+
+[[case]]
+id = "typed_value_if_derived_alias_read_accepted"
+path = "typed_value_if_derived_alias_read_accepted"
+tags = ["integration", "borrows", "aliases", "control-flow"]
+contract = "language.bindings.typed_value_if_derived_alias_read"
+role = "primary"
+
+[[case]]
+id = "typed_value_if_derived_alias_read_accepted_release"
+path = "typed_value_if_derived_alias_read_accepted_release"
+tags = ["integration", "borrows", "aliases", "control-flow", "release"]
+contract = "language.bindings.typed_value_if_derived_alias_read"
+role = "boundary"
+
+[[case]]
+id = "typed_value_if_mixed_derivation_read_rejected"
+path = "typed_value_if_mixed_derivation_read_rejected"
+tags = ["integration", "borrows", "aliases", "control-flow", "diagnostics"]
+contract = "language.bindings.typed_value_if_mixed_derivation_read_rejected"
+role = "boundary"
+
+[[case]]
+id = "typed_value_if_mixed_derivation_read_rejected_release"
+path = "typed_value_if_mixed_derivation_read_rejected_release"
+tags = ["integration", "borrows", "aliases", "control-flow", "diagnostics", "release"]
+contract = "language.bindings.typed_value_if_mixed_derivation_read_rejected"
+role = "boundary"
+
+[[case]]
 id = "optional_transfer_path_dependent_call"
 path = "optional_transfer_path_dependent_call"
 tags = ["integration", "borrows", "control-flow"]
@@ -2911,6 +3093,20 @@ contract = "language.collections.mutation_through_mutable_alias"
 role = "primary"
 
 [[case]]
+id = "mutable_collection_alias_write_through_shared_origin_rejected"
+path = "mutable_collection_alias_write_through_shared_origin_rejected"
+tags = ["integration", "collections", "borrows", "diagnostics"]
+contract = "language.bindings.mutable_collection_alias_write_through_shared_origin_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_collection_alias_write_through_dead_origin_alias_accepted"
+path = "mutable_collection_alias_write_through_dead_origin_alias_accepted"
+tags = ["integration", "collections", "borrows"]
+contract = "language.bindings.mutable_collection_alias_write_through_dead_origin_alias_accepted"
+role = "primary"
+
+[[case]]
 id = "collection_negative_index_fallback"
 path = "collection_negative_index_fallback"
 tags = ["integration", "collections", "js-backend"]
@@ -4754,6 +4950,300 @@ contract = "language.bindings.mutable_update_alias_immutable_referent_rejected"
 role = "primary"
 
 [[case]]
+id = "parameter_mutable_alias_argument_rejected"
+path = "parameter_mutable_alias_argument_rejected"
+tags = ["integration", "borrows", "diagnostics", "functions"]
+contract = "language.bindings.mutable_argument_alias_immutable_referent_rejected"
+role = "primary"
+
+[[case]]
+id = "parameter_mutable_alias_read_only_success"
+path = "parameter_mutable_alias_read_only_success"
+tags = ["integration", "borrows", "functions"]
+contract = "language.bindings.parameter_alias_and_copy_read_success"
+role = "primary"
+
+[[case]]
+id = "mutable_slot_aggregate_alias_immutable_referent_rejected"
+path = "mutable_slot_aggregate_alias_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics"]
+contract = "language.bindings.mutable_slot_aggregate_alias_immutable_referent_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_slot_struct_alias_immutable_referent_rejected"
+path = "mutable_slot_struct_alias_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics"]
+contract = "language.bindings.mutable_slot_struct_alias_immutable_referent_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_slot_branch_join_alias_immutable_referent_rejected"
+path = "mutable_slot_branch_join_alias_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics"]
+contract = "language.bindings.mutable_slot_branch_join_alias_immutable_referent_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_slot_collection_get_alias_immutable_referent_rejected"
+path = "mutable_slot_collection_get_alias_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics", "collections"]
+contract = "language.bindings.mutable_slot_collection_get_alias_immutable_referent_rejected"
+role = "primary"
+
+[[case]]
+id = "returned_collection_get_alias_immutable_referent_rejected"
+path = "returned_collection_get_alias_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics", "collections", "functions"]
+contract = "language.bindings.returned_collection_get_alias_immutable_referent_rejected"
+role = "primary"
+
+[[case]]
+id = "returned_collection_get_alias_write_through_immutable_referent_rejected"
+path = "returned_collection_get_alias_write_through_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics", "collections", "functions"]
+contract = "language.bindings.returned_collection_get_alias_immutable_referent_rejected"
+role = "boundary"
+
+[[case]]
+id = "returned_collection_get_alias_mutable_call_immutable_referent_rejected"
+path = "returned_collection_get_alias_mutable_call_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics", "collections", "functions"]
+contract = "language.bindings.returned_collection_get_alias_immutable_referent_rejected"
+role = "boundary"
+
+[[case]]
+id = "returned_collection_get_alias_write_through_mutable_origin_accepted"
+path = "returned_collection_get_alias_write_through_mutable_origin_accepted"
+tags = ["integration", "borrows", "collections", "functions"]
+contract = "language.bindings.returned_collection_get_alias_write_through_mutable_origin_accepted"
+role = "primary"
+
+[[case]]
+id = "returned_collection_get_alias_mutable_call_mutable_origin_accepted"
+path = "returned_collection_get_alias_mutable_call_mutable_origin_accepted"
+tags = ["integration", "borrows", "collections", "functions"]
+contract = "language.bindings.returned_collection_get_alias_mutable_call_mutable_origin_accepted"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_slot_collection_get_alias_accepted"
+path = "mutable_scalar_slot_collection_get_alias_accepted"
+tags = ["integration", "borrows", "collections", "functions"]
+contract = "language.bindings.mutable_scalar_slot_collection_get_alias_accepted"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_slot_value_provenance_accepted"
+path = "mutable_scalar_slot_value_provenance_accepted"
+tags = ["integration", "borrows", "functions"]
+contract = "language.bindings.mutable_scalar_slot_value_provenance_accepted"
+role = "primary"
+
+[[case]]
+id = "collection_get_copied_receiver_independent_accepted"
+path = "collection_get_copied_receiver_independent_accepted"
+tags = ["integration", "borrows", "collections"]
+contract = "language.bindings.collection_get_copied_receiver_independent_accepted"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_slot_alias_view_blocks_call_rejected"
+path = "mutable_scalar_slot_alias_view_blocks_call_rejected"
+tags = ["integration", "borrows", "diagnostics", "functions"]
+contract = "language.bindings.mutable_scalar_slot_alias_view_blocks_call_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_slot_alias_writer_blocks_call_rejected"
+path = "mutable_scalar_slot_alias_writer_blocks_call_rejected"
+tags = ["integration", "borrows", "diagnostics", "functions"]
+contract = "language.bindings.mutable_scalar_slot_alias_writer_blocks_call_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_slot_alias_view_blocks_direct_write_rejected"
+path = "mutable_scalar_slot_alias_view_blocks_direct_write_rejected"
+tags = ["integration", "borrows", "diagnostics"]
+contract = "language.bindings.mutable_scalar_slot_alias_view_blocks_direct_write_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_slot_same_call_shared_argument_rejected"
+path = "mutable_scalar_slot_same_call_shared_argument_rejected"
+tags = ["integration", "borrows", "diagnostics", "functions"]
+contract = "language.bindings.mutable_scalar_slot_same_call_shared_argument_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_alias_same_call_shared_argument_rejected"
+path = "mutable_scalar_alias_same_call_shared_argument_rejected"
+tags = ["integration", "borrows", "diagnostics", "functions"]
+contract = "language.bindings.mutable_scalar_slot_same_call_shared_argument_rejected"
+role = "boundary"
+
+[[case]]
+id = "mutable_scalar_alias_same_call_detached_argument_accepted"
+path = "mutable_scalar_alias_same_call_detached_argument_accepted"
+tags = ["integration", "borrows", "functions"]
+contract = "language.bindings.mutable_scalar_alias_same_call_detached_argument_accepted"
+role = "primary"
+
+[[case]]
+id = "mutable_projection_alias_same_call_overlap_rejected"
+path = "mutable_projection_alias_same_call_overlap_rejected"
+tags = ["integration", "borrows", "diagnostics", "functions"]
+contract = "language.bindings.mutable_projection_alias_same_call_overlap_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_slot_alias_snapshot_fresh_accepted"
+path = "mutable_scalar_slot_alias_snapshot_fresh_accepted"
+tags = ["integration", "borrows", "functions"]
+contract = "language.bindings.mutable_scalar_slot_alias_snapshot_fresh_accepted"
+role = "primary"
+
+[[case]]
+id = "mutable_slot_retained_result_does_not_write_immutable_input_accepted"
+path = "mutable_slot_retained_result_does_not_write_immutable_input_accepted"
+tags = ["integration", "borrows", "functions"]
+contract = "language.bindings.mutable_slot_retained_result_does_not_write_immutable_input_accepted"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_alias_write_through_accepted"
+path = "mutable_scalar_alias_write_through_accepted"
+tags = ["integration", "borrows", "functions"]
+contract = "language.bindings.mutable_scalar_alias_write_through_accepted"
+role = "primary"
+
+[[case]]
+id = "mutable_scalar_alias_write_through_accepted_release"
+path = "mutable_scalar_alias_write_through_accepted_release"
+tags = ["integration", "borrows", "functions", "release"]
+contract = "language.bindings.mutable_scalar_alias_write_through_accepted"
+role = "boundary"
+
+[[case]]
+id = "projected_alias_survives_source_rebinding_accepted"
+path = "projected_alias_survives_source_rebinding_accepted"
+tags = ["integration", "borrows", "structs"]
+contract = "language.bindings.projected_alias_survives_source_rebinding_accepted"
+role = "primary"
+
+[[case]]
+id = "projected_alias_survives_source_rebinding_accepted_release"
+path = "projected_alias_survives_source_rebinding_accepted_release"
+tags = ["integration", "borrows", "structs", "release"]
+contract = "language.bindings.projected_alias_survives_source_rebinding_accepted"
+role = "boundary"
+
+[[case]]
+id = "projected_alias_fresh_write_replaces_shared_origin_accepted"
+path = "projected_alias_fresh_write_replaces_shared_origin_accepted"
+tags = ["integration", "borrows", "collections", "structs"]
+contract = "language.bindings.projected_alias_fresh_write_replaces_shared_origin_accepted"
+role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_stays_rooted_after_rebinding_accepted"
+path = "mutable_projected_alias_stays_rooted_after_rebinding_accepted"
+tags = ["integration", "borrows", "aliases", "structs"]
+contract = "language.bindings.mutable_projected_alias_stays_rooted_after_rebinding"
+role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_stays_rooted_after_rebinding_accepted_release"
+path = "mutable_projected_alias_stays_rooted_after_rebinding_accepted_release"
+tags = ["integration", "borrows", "aliases", "structs", "release"]
+contract = "language.bindings.mutable_projected_alias_stays_rooted_after_rebinding"
+role = "boundary"
+
+[[case]]
+id = "mutable_projected_alias_scope_exit_conflict_rejected"
+path = "mutable_projected_alias_scope_exit_conflict_rejected"
+tags = ["integration", "borrows", "aliases", "structs", "diagnostics"]
+contract = "language.bindings.mutable_projected_alias_scope_exit_conflict"
+role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_scope_exit_conflict_rejected_release"
+path = "mutable_projected_alias_scope_exit_conflict_rejected_release"
+tags = ["integration", "borrows", "aliases", "structs", "diagnostics", "release"]
+contract = "language.bindings.mutable_projected_alias_scope_exit_conflict"
+role = "boundary"
+
+[[case]]
+id = "mutable_projected_alias_scope_exit_view_accepted"
+path = "mutable_projected_alias_scope_exit_view_accepted"
+tags = ["integration", "borrows", "aliases", "structs"]
+contract = "language.bindings.mutable_projected_alias_scope_exit_view"
+role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_scope_exit_view_accepted_release"
+path = "mutable_projected_alias_scope_exit_view_accepted_release"
+tags = ["integration", "borrows", "aliases", "structs", "release"]
+contract = "language.bindings.mutable_projected_alias_scope_exit_view"
+role = "boundary"
+
+[[case]]
+id = "mutable_projected_alias_join_fresh_alternative_rejected"
+path = "mutable_projected_alias_join_fresh_alternative_rejected"
+tags = ["integration", "borrows", "aliases", "structs", "control-flow", "diagnostics"]
+contract = "language.bindings.mutable_projected_alias_join_fresh_alternative"
+role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_join_fresh_alternative_rejected_release"
+path = "mutable_projected_alias_join_fresh_alternative_rejected_release"
+tags = ["integration", "borrows", "aliases", "structs", "control-flow", "diagnostics", "release"]
+contract = "language.bindings.mutable_projected_alias_join_fresh_alternative"
+role = "boundary"
+
+[[case]]
+id = "mutable_projected_alias_join_alias_chain_rejected"
+path = "mutable_projected_alias_join_alias_chain_rejected"
+tags = ["integration", "borrows", "aliases", "structs", "control-flow", "diagnostics"]
+contract = "language.bindings.mutable_projected_alias_join_alias_chain"
+role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_join_alias_chain_rejected_release"
+path = "mutable_projected_alias_join_alias_chain_rejected_release"
+tags = ["integration", "borrows", "aliases", "structs", "control-flow", "diagnostics", "release"]
+contract = "language.bindings.mutable_projected_alias_join_alias_chain"
+role = "boundary"
+
+[[case]]
+id = "mutable_projected_alias_loop_back_edge_rejected"
+path = "mutable_projected_alias_loop_back_edge_rejected"
+tags = ["integration", "borrows", "aliases", "structs", "control-flow", "diagnostics"]
+contract = "language.bindings.mutable_projected_alias_loop_back_edge"
+role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_loop_back_edge_rejected_release"
+path = "mutable_projected_alias_loop_back_edge_rejected_release"
+tags = ["integration", "borrows", "aliases", "structs", "control-flow", "diagnostics", "release"]
+contract = "language.bindings.mutable_projected_alias_loop_back_edge"
+role = "boundary"
+
+[[case]]
+id = "mutable_projected_alias_rebound_holder_while_writer_live_rejected"
+path = "mutable_projected_alias_rebound_holder_while_writer_live_rejected"
+tags = ["integration", "borrows", "aliases", "structs", "diagnostics"]
+contract = "language.bindings.mutable_projected_alias_rebound_holder_while_writer_live"
+role = "primary"
+
+[[case]]
+id = "mutable_projected_alias_rebound_holder_while_writer_live_rejected_release"
+path = "mutable_projected_alias_rebound_holder_while_writer_live_rejected_release"
+tags = ["integration", "borrows", "aliases", "structs", "diagnostics", "release"]
+contract = "language.bindings.mutable_projected_alias_rebound_holder_while_writer_live"
+role = "boundary"
+
+[[case]]
 id = "mutable_alias_live_blocks_whole_binding_write"
 path = "mutable_alias_live_blocks_whole_binding_write"
 tags = ["integration", "borrows", "diagnostics"]
@@ -4926,6 +5416,13 @@ id = "loop_body_bindings_rebind_each_iteration"
 path = "loop_body_bindings_rebind_each_iteration"
 tags = ["integration", "control-flow", "collections", "borrows"]
 contract = "language.loops.body_bindings_rebind_each_iteration"
+role = "primary"
+
+[[case]]
+id = "collection_loop_iterable_stays_rooted_after_source_rebinding_accepted"
+path = "collection_loop_iterable_stays_rooted_after_source_rebinding_accepted"
+tags = ["integration", "control-flow", "collections", "borrows", "loops"]
+contract = "language.loops.iterable_stays_rooted_after_source_rebinding"
 role = "primary"
 
 [[case]]
@@ -5676,6 +6173,41 @@ path = "dependency_public_root_rejected"
 tags = ["integration", "language", "dependencies", "paths", "diagnostics"]
 contract = "language.dependencies.public_root_dependency_rejection"
 role = "primary"
+
+[[case]]
+id = "core_collections_dependency_selection_rejected"
+path = "core_collections_dependency_selection_rejected"
+tags = ["integration", "language", "dependencies", "packages", "diagnostics"]
+contract = "language.dependencies.implicit_package_rejection"
+role = "primary"
+
+[[case]]
+id = "core_collections_dependency_namespace_rejected"
+path = "core_collections_dependency_namespace_rejected"
+tags = ["integration", "language", "dependencies", "packages", "diagnostics"]
+contract = "language.dependencies.implicit_package_rejection"
+role = "boundary"
+
+[[case]]
+id = "core_collections_dependency_symbol_path_rejected"
+path = "core_collections_dependency_symbol_path_rejected"
+tags = ["integration", "language", "dependencies", "packages", "diagnostics"]
+contract = "language.dependencies.implicit_package_rejection"
+role = "boundary"
+
+[[case]]
+id = "core_collections_dependency_misspelled_member_rejected"
+path = "core_collections_dependency_misspelled_member_rejected"
+tags = ["integration", "language", "dependencies", "packages", "diagnostics"]
+contract = "language.dependencies.implicit_package_rejection"
+role = "boundary"
+
+[[case]]
+id = "core_collections_dependency_export_rejected"
+path = "core_collections_dependency_export_rejected"
+tags = ["integration", "language", "dependencies", "packages", "diagnostics"]
+contract = "language.dependencies.implicit_package_rejection"
+role = "boundary"
 
 [[case]]
 id = "dependency_current_directory_provider_rejected"
@@ -6977,6 +7509,13 @@ id = "template_runtime_loop_slot_application"
 path = "template_runtime_loop_slot_application"
 tags = ["integration","templates"]
 contract = "language.templates.runtime_loop_slot_application"
+role = "primary"
+
+[[case]]
+id = "template_runtime_const_range_loop"
+path = "template_runtime_const_range_loop"
+tags = ["integration","templates","loops","wasm"]
+contract = "language.templates.runtime_const_range_loop"
 role = "primary"
 
 [[case]]
@@ -13673,6 +14212,20 @@ contract = "language.results.custom_catch_rejects_mixed_implicit_failure"
 role = "primary"
 
 [[case]]
+id = "implicit_failure_custom_mixed_dead_tail_rejected"
+path = "implicit_failure_custom_mixed_dead_tail_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend"]
+contract = "language.results.custom_catch_rejects_mixed_implicit_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_custom_mixed_dead_tail_rejected_release"
+path = "implicit_failure_custom_mixed_dead_tail_rejected_release"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "release"]
+contract = "language.results.custom_catch_rejects_mixed_implicit_failure"
+role = "boundary"
+
+[[case]]
 id = "implicit_failure_custom_catch_infallible_private"
 path = "implicit_failure_custom_catch_infallible_private"
 tags = ["integration", "language", "numeric", "results", "runtime", "js-backend"]
@@ -13859,6 +14412,62 @@ id = "implicit_failure_exported_private_chain_bounded"
 path = "implicit_failure_exported_private_chain_bounded"
 tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
 contract = "language.numeric.exported_private_failure_witness_bounded"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_private_template_loop_rejected"
+path = "implicit_failure_private_template_loop_rejected"
+tags = ["integration", "language", "numeric", "results", "templates", "loops", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.templates.exported_private_failure_through_runtime_loop_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_private_template_slot_loop_rejected"
+path = "implicit_failure_private_template_slot_loop_rejected"
+tags = ["integration", "language", "numeric", "results", "templates", "loops", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.templates.exported_private_failure_through_runtime_slot_loop_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_private_const_template_loop_rejected"
+path = "implicit_failure_private_const_template_loop_rejected"
+tags = ["integration", "language", "numeric", "results", "templates", "loops", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.templates.exported_private_failure_through_runtime_const_template_loop_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_private_const_template_loop_release_rejected"
+path = "implicit_failure_private_const_template_loop_release_rejected"
+tags = ["integration", "language", "numeric", "results", "templates", "loops", "diagnostics", "js-backend", "html-wasm", "release"]
+contract = "language.templates.exported_private_failure_through_runtime_const_template_loop_rejected"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_assertion_message_template_loop_rejected"
+path = "implicit_failure_assertion_message_template_loop_rejected"
+tags = ["integration", "language", "results", "templates", "loops", "diagnostics", "assertions", "js-backend", "html-wasm"]
+contract = "language.templates.assertion_message_rejects_runtime_loop_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_assertion_static_true_runtime_loop_rejected"
+path = "implicit_failure_assertion_static_true_runtime_loop_rejected"
+tags = ["integration", "language", "results", "templates", "loops", "diagnostics", "assertions", "js-backend", "html-wasm"]
+contract = "language.templates.assertion_message_rejects_static_true_runtime_loop"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_assertion_folded_open_slot_loop_success"
+path = "implicit_failure_assertion_folded_open_slot_loop_success"
+tags = ["integration", "language", "results", "templates", "loops", "assertions", "js-backend", "html-wasm"]
+contract = "language.templates.assertion_message_folds_open_slot_loop"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_assertion_absent_supplied_guard_success"
+path = "implicit_failure_assertion_absent_supplied_guard_success"
+tags = ["integration", "language", "results", "templates", "loops", "runtime", "assertions", "js-backend"]
+contract = "language.templates.absent_supplied_guard_owns_no_loop_failure"
 role = "boundary"
 
 [[case]]
@@ -21110,6 +21719,104 @@ contract = "language.directives.safe_math_rejects_direct_fast_use"
 role = "primary"
 
 [[case]]
+id = "source_constraints_safe_math_fast_range_ordinal_rejected"
+path = "source_constraints_safe_math_fast_range_ordinal_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
+contract = "language.directives.safe_math_rejects_fast_range_ordinal_trap"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_fast_range_ordinal_rejected_release"
+path = "source_constraints_safe_math_fast_range_ordinal_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "release"]
+contract = "language.directives.safe_math_rejects_fast_range_ordinal_trap"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_safe_math_assertion_folded_ordinal_rejected"
+path = "source_constraints_safe_math_assertion_folded_ordinal_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
+contract = "language.directives.safe_math_rejects_release_folded_fast_range_ordinal"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_assertion_folded_ordinal_rejected_release"
+path = "source_constraints_safe_math_assertion_folded_ordinal_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "release"]
+contract = "language.directives.safe_math_rejects_release_folded_fast_range_ordinal"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_safe_math_nested_template_ordinal_rejected"
+path = "source_constraints_safe_math_nested_template_ordinal_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "templates"]
+contract = "language.directives.safe_math_rejects_nested_template_ordinal"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_nested_template_ordinal_rejected_release"
+path = "source_constraints_safe_math_nested_template_ordinal_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "templates", "release"]
+contract = "language.directives.safe_math_rejects_nested_template_ordinal"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_safe_math_template_ordinal_folded_assert_rejected"
+path = "source_constraints_safe_math_template_ordinal_folded_assert_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
+contract = "language.directives.safe_math_rejects_release_folded_fast_template_range_ordinal"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_template_ordinal_folded_assert_rejected_release"
+path = "source_constraints_safe_math_template_ordinal_folded_assert_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "release"]
+contract = "language.directives.safe_math_rejects_release_folded_fast_template_range_ordinal"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_safe_math_template_range_step_folded_assert_rejected"
+path = "source_constraints_safe_math_template_range_step_folded_assert_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
+contract = "language.directives.safe_math_rejects_release_folded_fast_template_range_step"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_template_range_step_folded_assert_rejected_release"
+path = "source_constraints_safe_math_template_range_step_folded_assert_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "release"]
+contract = "language.directives.safe_math_rejects_release_folded_fast_template_range_step"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_safe_math_range_ordinal_unreached_accepted"
+path = "source_constraints_safe_math_range_ordinal_unreached_accepted"
+tags = ["integration", "directives", "numeric", "constraints"]
+contract = "language.directives.safe_math_accepts_unreached_range_ordinal"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_range_ordinal_unreached_accepted_release"
+path = "source_constraints_safe_math_range_ordinal_unreached_accepted_release"
+tags = ["integration", "directives", "numeric", "constraints", "release"]
+contract = "language.directives.safe_math_accepts_unreached_range_ordinal"
+role = "boundary"
+
+[[case]]
+id = "range_ordinal_unreached_exported_accepted"
+path = "range_ordinal_unreached_exported_accepted"
+tags = ["integration", "numeric"]
+contract = "language.loops.range_ordinal_update_omitted_when_body_exits"
+role = "primary"
+
+[[case]]
+id = "range_ordinal_unreached_pruned_handler_accepted"
+path = "range_ordinal_unreached_pruned_handler_accepted"
+tags = ["integration", "directives", "numeric"]
+contract = "language.loops.range_ordinal_update_omitted_for_pruned_handler"
+role = "primary"
+
+[[case]]
 id = "source_constraints_safe_math_rejected"
 path = "source_constraints_safe_math_rejected"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints"]
@@ -21313,6 +22020,13 @@ contract = "language.directives.statement_safe_math_checks_every_call_site"
 role = "primary"
 
 [[case]]
+id = "source_constraints_statement_safe_math_fast_range_ordinal_rejected"
+path = "source_constraints_statement_safe_math_fast_range_ordinal_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "statements"]
+contract = "language.directives.statement_safe_math_rejects_fast_range_ordinal_trap"
+role = "primary"
+
+[[case]]
 id = "source_constraints_statement_safe_math_skipped_handler_rejected"
 path = "source_constraints_statement_safe_math_skipped_handler_rejected"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "statements"]
@@ -21360,3 +22074,451 @@ path = "source_constraints_exported_annotation_unused_rejected"
 tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "exports"]
 contract = "language.directives.exported_annotations_are_verified_without_a_caller"
 role = "primary"
+
+[[case]]
+id = "implicit_failure_dead_call_after_return_accepted"
+path = "implicit_failure_dead_call_after_return_accepted"
+tags = ["integration", "language", "numeric", "results", "runtime", "generics"]
+contract = "language.results.dead_statement_tail_contributes_no_implicit_failure"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_dead_call_after_return_accepted_release"
+path = "implicit_failure_dead_call_after_return_accepted_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "generics", "release"]
+contract = "language.results.dead_statement_tail_contributes_no_implicit_failure"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_function_infallible_dead_call_after_return_accepted"
+path = "source_constraints_function_infallible_dead_call_after_return_accepted"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "functions", "generics"]
+contract = "language.directives.function_infallible_ignores_dead_failure_tail"
+role = "primary"
+
+[[case]]
+id = "source_constraints_function_infallible_dead_call_after_return_accepted_release"
+path = "source_constraints_function_infallible_dead_call_after_return_accepted_release"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "functions", "generics", "release"]
+contract = "language.directives.function_infallible_ignores_dead_failure_tail"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_function_infallible_dead_nested_call_after_return_accepted"
+path = "source_constraints_function_infallible_dead_nested_call_after_return_accepted"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "functions"]
+contract = "language.directives.function_infallible_ignores_dead_nested_call_tail"
+role = "primary"
+
+[[case]]
+id = "source_constraints_function_infallible_dead_nested_call_after_return_accepted_release"
+path = "source_constraints_function_infallible_dead_nested_call_after_return_accepted_release"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "functions", "release"]
+contract = "language.directives.function_infallible_ignores_dead_nested_call_tail"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_function_safe_math_dead_call_after_return_rejected"
+path = "source_constraints_function_safe_math_dead_call_after_return_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "generics"]
+contract = "language.directives.function_safe_math_sees_selected_fast_use_after_a_terminator"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_dead_template_payload_accepted"
+path = "implicit_failure_dead_template_payload_accepted"
+tags = ["integration", "language", "results", "runtime", "generics", "templates"]
+contract = "language.results.dead_template_payload_in_dormant_generic_contributes_no_implicit_failure"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_dead_template_payload_accepted_release"
+path = "implicit_failure_dead_template_payload_accepted_release"
+tags = ["integration", "language", "results", "runtime", "generics", "templates", "release"]
+contract = "language.results.dead_template_payload_in_dormant_generic_contributes_no_implicit_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_false_loop_body_accepted"
+path = "implicit_failure_folded_false_loop_body_accepted"
+tags = ["integration", "language", "numeric", "results", "runtime", "generics", "loops"]
+contract = "language.results.folded_false_loop_body_contributes_no_implicit_failure"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_folded_false_loop_body_accepted_release"
+path = "implicit_failure_folded_false_loop_body_accepted_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "generics", "loops", "release"]
+contract = "language.results.folded_false_loop_body_contributes_no_implicit_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_false_loop_catch_rejected"
+path = "implicit_failure_folded_false_loop_catch_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "generics", "loops"]
+contract = "language.results.folded_false_loop_body_keeps_catch_eligibility_validation"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_folded_false_loop_catch_rejected_release"
+path = "implicit_failure_folded_false_loop_catch_rejected_release"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "generics", "loops", "release"]
+contract = "language.results.folded_false_loop_body_keeps_catch_eligibility_validation"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_function_safe_math_folded_false_loop_rejected"
+path = "source_constraints_function_safe_math_folded_false_loop_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "loops"]
+contract = "language.directives.function_safe_math_sees_selected_fast_use_in_folded_false_loop"
+role = "primary"
+
+[[case]]
+id = "source_constraints_function_infallible_folded_false_loop_accepted"
+path = "source_constraints_function_infallible_folded_false_loop_accepted"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "functions", "loops"]
+contract = "language.directives.function_infallible_ignores_folded_false_loop_failure_body"
+role = "primary"
+
+[[case]]
+id = "source_constraints_function_infallible_folded_false_loop_accepted_release"
+path = "source_constraints_function_infallible_folded_false_loop_accepted_release"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "functions", "loops", "release"]
+contract = "language.directives.function_infallible_ignores_folded_false_loop_failure_body"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_function_infallible_release_folded_false_loop_rejected"
+path = "source_constraints_function_infallible_release_folded_false_loop_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "loops"]
+contract = "language.directives.function_infallible_sees_assertion_in_release_folded_false_loop"
+role = "primary"
+
+[[case]]
+id = "source_constraints_function_infallible_release_folded_false_loop_rejected_release"
+path = "source_constraints_function_infallible_release_folded_false_loop_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "loops", "release"]
+contract = "language.directives.function_infallible_sees_assertion_in_release_folded_false_loop"
+role = "boundary"
+
+[[case]]
+id = "folded_constant_if_branches_success"
+path = "folded_constant_if_branches_success"
+tags = ["integration", "language", "runtime", "branches", "functions"]
+contract = "language.lowering.folded_constant_if_lowers_as_runtime_branch"
+role = "primary"
+
+[[case]]
+id = "folded_constant_if_branches_success_release"
+path = "folded_constant_if_branches_success_release"
+tags = ["integration", "language", "runtime", "branches", "functions", "release"]
+contract = "language.lowering.folded_constant_if_lowers_as_runtime_branch"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_function_infallible_folded_true_assert_rejected"
+path = "source_constraints_function_infallible_folded_true_assert_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "assertions"]
+contract = "language.directives.function_infallible_sees_assertion_on_folded_true_call"
+role = "primary"
+
+[[case]]
+id = "source_constraints_function_infallible_folded_true_assert_rejected_release"
+path = "source_constraints_function_infallible_folded_true_assert_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "assertions", "release"]
+contract = "language.directives.function_infallible_sees_assertion_on_folded_true_call"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_function_infallible_folded_true_loop_tail_assert_rejected"
+path = "source_constraints_function_infallible_folded_true_loop_tail_assert_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "loops", "assertions"]
+contract = "language.directives.function_infallible_sees_assertion_after_folded_true_loop"
+role = "primary"
+
+[[case]]
+id = "source_constraints_function_infallible_folded_true_loop_tail_assert_rejected_release"
+path = "source_constraints_function_infallible_folded_true_loop_tail_assert_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "loops", "assertions", "release"]
+contract = "language.directives.function_infallible_sees_assertion_after_folded_true_loop"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_safe_math_template_ordinal_dead_tail_rejected"
+path = "source_constraints_safe_math_template_ordinal_dead_tail_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "templates"]
+contract = "language.directives.safe_math_sees_template_range_guard_in_dead_tail"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_template_ordinal_dead_tail_rejected_release"
+path = "source_constraints_safe_math_template_ordinal_dead_tail_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "templates", "release"]
+contract = "language.directives.safe_math_sees_template_range_guard_in_dead_tail"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_safe_math_skipped_handler_folded_assert_ordinal_rejected"
+path = "source_constraints_safe_math_skipped_handler_folded_assert_ordinal_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "loops", "assertions"]
+contract = "language.directives.safe_math_sees_skipped_handler_ordinal_across_folded_assert"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_skipped_handler_folded_assert_ordinal_rejected_release"
+path = "source_constraints_safe_math_skipped_handler_folded_assert_ordinal_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "loops", "assertions", "release"]
+contract = "language.directives.safe_math_sees_skipped_handler_ordinal_across_folded_assert"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_safe_math_skipped_handler_folded_loop_ordinal_rejected"
+path = "source_constraints_safe_math_skipped_handler_folded_loop_ordinal_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "loops"]
+contract = "language.directives.safe_math_sees_skipped_handler_ordinal_across_folded_loop"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_skipped_handler_folded_loop_ordinal_rejected_release"
+path = "source_constraints_safe_math_skipped_handler_folded_loop_ordinal_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "functions", "loops", "release"]
+contract = "language.directives.safe_math_sees_skipped_handler_ordinal_across_folded_loop"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_safe_math_template_step_dead_tail_slot_rejected"
+path = "source_constraints_safe_math_template_step_dead_tail_slot_rejected"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "templates", "slots"]
+contract = "language.directives.safe_math_sees_template_step_guard_in_dead_slot"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_template_step_dead_tail_slot_rejected_release"
+path = "source_constraints_safe_math_template_step_dead_tail_slot_rejected_release"
+tags = ["integration", "directives", "numeric", "diagnostics", "constraints", "templates", "slots", "release"]
+contract = "language.directives.safe_math_sees_template_step_guard_in_dead_slot"
+role = "boundary"
+
+[[case]]
+id = "source_constraints_safe_math_skipped_handler_authored_false_ordinal_accepted"
+path = "source_constraints_safe_math_skipped_handler_authored_false_ordinal_accepted"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "functions", "loops", "assertions"]
+contract = "language.directives.safe_math_ignores_unreachable_skipped_handler_ordinal"
+role = "primary"
+
+[[case]]
+id = "source_constraints_safe_math_skipped_handler_authored_false_ordinal_accepted_release"
+path = "source_constraints_safe_math_skipped_handler_authored_false_ordinal_accepted_release"
+tags = ["integration", "directives", "numeric", "runtime", "constraints", "functions", "loops", "assertions", "release"]
+contract = "language.directives.safe_math_ignores_unreachable_skipped_handler_ordinal"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_dead_arithmetic_and_range_after_return_closed_boundary_accepted"
+path = "implicit_failure_dead_arithmetic_and_range_after_return_closed_boundary_accepted"
+tags = ["integration", "language", "numeric", "results", "runtime", "exports"]
+contract = "language.results.dead_statement_tail_contributes_no_implicit_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_assertion_checked_rejected"
+path = "implicit_failure_folded_assertion_checked_rejected"
+tags = ["integration", "language", "numeric", "results", "exports", "assertions"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_folded_assertion_checked_release_rejected"
+path = "implicit_failure_folded_assertion_checked_release_rejected"
+tags = ["integration", "language", "numeric", "results", "exports", "assertions", "release"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_assertion_generated_call_rejected"
+path = "implicit_failure_folded_assertion_generated_call_rejected"
+tags = ["integration", "language", "numeric", "results", "exports", "assertions", "generics"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_assertion_generated_call_release_rejected"
+path = "implicit_failure_folded_assertion_generated_call_release_rejected"
+tags = ["integration", "language", "numeric", "results", "exports", "assertions", "generics", "release"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_dead_catch_generated_candidate_accepted"
+path = "implicit_failure_dead_catch_generated_candidate_accepted"
+tags = ["integration", "language", "numeric", "results", "runtime", "generics"]
+contract = "language.results.dead_statement_tail_contributes_no_implicit_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_dead_catch_generated_candidate_accepted_release"
+path = "implicit_failure_dead_catch_generated_candidate_accepted_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "generics", "release"]
+contract = "language.results.dead_statement_tail_contributes_no_implicit_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_dead_catch_generated_candidate_rejected"
+path = "implicit_failure_dead_catch_generated_candidate_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "generics"]
+contract = "language.results.dead_source_keeps_catch_eligibility_validation"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_dead_catch_generated_candidate_rejected_release"
+path = "implicit_failure_dead_catch_generated_candidate_rejected_release"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "generics", "release"]
+contract = "language.results.dead_source_keeps_catch_eligibility_validation"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_release_erased_call_liveness_rejected"
+path = "implicit_failure_release_erased_call_liveness_rejected"
+tags = ["integration", "language", "numeric", "results", "exports", "assertions"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_release_erased_call_liveness_release_rejected"
+path = "implicit_failure_release_erased_call_liveness_release_rejected"
+tags = ["integration", "language", "numeric", "results", "exports", "assertions", "release"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_erased_handler_contributor_accepted"
+path = "implicit_failure_erased_handler_contributor_accepted"
+tags = ["integration", "language", "numeric", "results", "runtime", "exports"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_erased_handler_contributor_accepted_release"
+path = "implicit_failure_erased_handler_contributor_accepted_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "exports", "release"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_assertion_erased_handler_accepted"
+path = "implicit_failure_folded_assertion_erased_handler_accepted"
+tags = ["integration", "language", "numeric", "results", "runtime", "exports", "assertions"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_assertion_erased_handler_accepted_release"
+path = "implicit_failure_folded_assertion_erased_handler_accepted_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "exports", "assertions", "release"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_assertion_erased_handler_nested_accepted"
+path = "implicit_failure_folded_assertion_erased_handler_nested_accepted"
+tags = ["integration", "language", "numeric", "results", "runtime", "exports", "assertions"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_assertion_erased_handler_nested_accepted_release"
+path = "implicit_failure_folded_assertion_erased_handler_nested_accepted_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "exports", "assertions", "release"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_pruned_handler_erased_call_accepted"
+path = "implicit_failure_pruned_handler_erased_call_accepted"
+tags = ["integration", "language", "numeric", "results", "runtime", "exports", "constraints"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_pruned_handler_erased_call_accepted_release"
+path = "implicit_failure_pruned_handler_erased_call_accepted_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "exports", "constraints", "release"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_erased_call_witness_order_rejected"
+path = "implicit_failure_erased_call_witness_order_rejected"
+tags = ["integration", "language", "numeric", "diagnostics", "results", "exports"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_erased_call_witness_order_release_rejected"
+path = "implicit_failure_erased_call_witness_order_release_rejected"
+tags = ["integration", "language", "numeric", "diagnostics", "results", "exports", "release"]
+contract = "language.results.failure_liveness_is_profile_independent"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_const_template_dead_use_cross_function_rejected"
+path = "implicit_failure_const_template_dead_use_cross_function_rejected"
+tags = ["integration", "language", "results", "diagnostics", "functions", "templates"]
+contract = "language.results.const_template_dead_use_does_not_hide_live_failure"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_const_template_dead_use_cross_function_release_rejected"
+path = "implicit_failure_const_template_dead_use_cross_function_release_rejected"
+tags = ["integration", "language", "results", "diagnostics", "functions", "templates", "release"]
+contract = "language.results.const_template_dead_use_does_not_hide_live_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_const_template_dead_use_same_function_rejected"
+path = "implicit_failure_const_template_dead_use_same_function_rejected"
+tags = ["integration", "language", "results", "diagnostics", "functions", "templates"]
+contract = "language.results.const_template_dead_use_does_not_hide_live_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_const_template_dead_use_same_function_release_rejected"
+path = "implicit_failure_const_template_dead_use_same_function_release_rejected"
+tags = ["integration", "language", "results", "diagnostics", "functions", "templates", "release"]
+contract = "language.results.const_template_dead_use_does_not_hide_live_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_erased_handler_break_dead_template_accepted"
+path = "implicit_failure_erased_handler_break_dead_template_accepted"
+tags = ["integration", "language", "results", "diagnostics", "functions", "templates"]
+contract = "language.results.erased_handler_break_does_not_keep_omitted_tail_live"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_erased_handler_break_dead_template_release_accepted"
+path = "implicit_failure_erased_handler_break_dead_template_release_accepted"
+tags = ["integration", "language", "results", "diagnostics", "functions", "templates", "release"]
+contract = "language.results.erased_handler_break_does_not_keep_omitted_tail_live"
+role = "boundary"
+
+[[case]]
+id = "config_named_directory_module_surface"
+path = "config_named_directory_module_surface"
+tags = ["integration", "paths", "dependencies", "modules"]
+contract = "language.dependencies.config_named_directory_module_surface_resolves"
+role = "primary"
+
+[[case]]
+id = "config_named_directory_without_module_surface_rejected"
+path = "config_named_directory_without_module_surface_rejected"
+tags = ["integration", "paths", "dependencies", "modules", "diagnostics"]
+contract = "language.dependencies.config_named_directory_without_module_surface_is_reserved"
+role = "boundary"
+
+[[case]]
+id = "config_named_template_source_reserved_rejected"
+path = "config_named_template_source_reserved_rejected"
+tags = ["integration", "paths", "dependencies", "modules", "diagnostics"]
+contract = "language.dependencies.config_named_template_key_is_reserved"
+role = "boundary"

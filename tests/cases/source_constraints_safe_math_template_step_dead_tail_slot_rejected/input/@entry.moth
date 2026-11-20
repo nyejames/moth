@@ -1,0 +1,12 @@
+-- The runtime template handoff sits after an authored terminator. Its range loop authors a step
+-- but no ordinal, so the generated zero-step guard is the only fast range evidence; both profiles
+-- must reject it under `$safe_math`.
+card #= [:<h1>[$slot text]</h1>]
+
+$fast_math $safe_math
+render_dead_step |limit I32| -> String:
+    assert(false)
+    return [card:[$in text: [loop 0 to limit by 2 |item|:<p>[item]</p>;] ]]
+;
+
+~[render_dead_step(2)]

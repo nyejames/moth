@@ -226,6 +226,46 @@ fn register_filesystem_root_rejects_reserved_roots_and_malformed_prefixes() {
 }
 
 #[test]
+fn registration_membership_is_explicit_and_independent_of_origin() {
+    use crate::builder_surface::package_metadata::PackageSetMembership;
+
+    let mut registry = SourcePackageRegistry::new();
+    register(
+        &mut registry,
+        "builder/custom",
+        "/tmp/custom",
+        PackageOrigin::Builder,
+    );
+    assert_eq!(
+        registry
+            .get_root("builder/custom")
+            .expect("ordinary root")
+            .package_set_membership,
+        PackageSetMembership::Ordinary,
+        "public builder registration never joins the compiler-shipped set"
+    );
+
+    registry
+        .register_compiler_shipped_filesystem_root(
+            "builder/web/site",
+            std::path::PathBuf::from("/tmp/official-site"),
+            PackageOrigin::Builder,
+        )
+        .expect("an internal shipped Builder root should register");
+    let shipped = registry.get_root("builder/web/site").expect("shipped root");
+    assert_eq!(
+        shipped.package_set_membership,
+        PackageSetMembership::CompilerShipped,
+        "shipped membership comes from the registration call, not the Builder prefix"
+    );
+    assert_eq!(
+        shipped.metadata,
+        PackageMetadata::source(PackageOrigin::Builder),
+        "membership is orthogonal to origin and backing"
+    );
+}
+
+#[test]
 fn get_root_locates_registered_root() {
     let mut registry = SourcePackageRegistry::new();
     register(
@@ -314,6 +354,11 @@ fn mandatory_core_registers_official_source_package_roots() {
                 backing: PackageBacking::MothSource,
             },
             "@{prefix} must stay Core/MothSource"
+        );
+        assert_eq!(
+            root.package_set_membership,
+            crate::builder_surface::package_metadata::PackageSetMembership::CompilerShipped,
+            "@{prefix} is registered by the compiler as part of its shipped package set"
         );
         let ProvidedSourceRoot::Filesystem(path) = &root.root;
         assert_eq!(

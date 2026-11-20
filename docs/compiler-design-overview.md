@@ -493,6 +493,8 @@ For a standalone source it owns preparation through folding. For a Stage 0 conte
 
 The service owns the bundle's source database and live span builders through folding/extraction. It finalises tables after AST readers end. If discovery fails first, the preparation owner finalises its known snapshots at that terminal boundary. Aggregation retains each document's warning context even when a later document fails. Private discovery normalises source identities once before success or diagnosis, as specified by the data-layout authority.
 
+Duplicate inputs report their whole path when it fits the path table and reuse their validated request-relative identity otherwise. Inputs without a common ancestor have no relative identities to reuse. If either whole path cannot be represented, the native-path or logical-path capacity failure takes precedence over the common-ancestor diagnostic.
+
 #### Project config compilation service
 
 One named compiler service prepares the single authored config source, binds its permitted compiler surface, orders declarations and performs AST checking/folding. It applies the same exact numeric types and `I32`/`F64` defaults as source compilation and returns only folded values, with no HIR, borrow facts, link facts or public module interface.
@@ -762,7 +764,7 @@ Ordinary statement and value-producing `if` use the normal folded Bool authority
 
 A known `true` selects the `then` branch. A known `false` selects the `else` branch or an empty scoped result when absent. Preserve the selected lexical scope. Runtime or unknown conditions remain ordinary `if`.
 
-Terminality, declared Never validation and durable executable summaries use the active specialised AST. Inactive code publishes no generated request, HIR, effect, project-context, link or target fact. Every `if` remaining in HIR has a runtime condition. This rule adds no match folding, loop unrolling or general control-flow partial evaluator.
+Terminality, declared Never validation and durable executable summaries use the active specialised AST. Inactive code publishes no generated request, HIR, effect, project-context, link or target fact. Every `if` remaining in HIR lowers a two-way runtime branch. A condition that only release folding makes constant reaches HIR as a constant, so both branches and their evidence survive. This rule adds no match folding, loop unrolling or general control-flow partial evaluator.
 
 Structural references were already graph-active before selection. Frontend errors in inactive ordinary branches remain errors. Structural `$feature` exclusion is a different earlier contract.
 
@@ -946,8 +948,11 @@ before expression freezing and HIR lowering. Stage 4 emission prepares eligible 
 while their canonical scope facts are live. One whole-body classifier decides declaration
 eligibility and speculative candidacy with different refusal policy. A successful candidate replaces
 the call expression transactionally; a refused, failing or budget-limited candidate leaves the
-authored call and every runtime check intact. Debug does not run speculation. HIR receives only the
-final folded AST and never adapts itself back into typed expressions.
+authored call and every runtime check intact. Speculation leaves authored-dead statements and
+statically pruned catch handlers unfolded, so they keep their calls and fast operations. Debug does
+not run speculation. HIR receives the final folded AST together with the
+pre-fold conditions static selection decided, the pre-fold semantic failure contributors and the
+erased-call ledger. It never adapts itself back into typed expressions.
 
 ### Stage 5: HIR and validation
 
@@ -971,7 +976,7 @@ HIR functions carry `HirFunctionReturnContract::Returns` or `HirFunctionReturnCo
 
 Effectful expression work is linearised into ordered statement preludes and temporary locals before its final value is used. Plain binary expressions remain valid for booleans and comparisons. Scalar arithmetic and negation use explicit checked numeric operations. Template strings use explicit append operations. Validation rejects work left in the wrong representation.
 
-Range loops and explicitly stepped collection loops commit their next counter or source index through one `RangeCandidate` statement rather than an ordinary checked arithmetic operation. It carries `current` and `end` in the counter domain, `step` in its own signed type, the static `inclusive` flag and the counter domain. The step sign selects the direction-specific header test, so a wrong-direction range is empty. The candidate guard proves each later successor lies within the bound before the commit, so no out-of-domain successor is materialised. A range loop also binds a zero-based `I32` ordinal, while a collection loop's second binding is the actual `I32` source index rather than a visit ordinal. Operand widening keeps the step at its own width, so signed minima, full-width unsigned distances and both endpoints are compared exactly before any counter update. A zero step fails through the loop-step failure channel rather than a trap.
+Range loops and explicitly stepped collection loops commit their next counter or source index through one `RangeCandidate` statement rather than an ordinary checked arithmetic operation. It carries `current` and `end` in the counter domain, `step` in its own signed type, the static `inclusive` flag and the counter domain. The step sign selects the direction-specific header test, so a wrong-direction range is empty. The candidate guard proves each later successor lies within the bound before the commit, so no out-of-domain successor is materialised. A range loop optionally binds a zero-based `I32` ordinal. Its checked update is emitted only when the header binds the ordinal and the body can reach the step block by falling through or executing `continue`. A collection loop's second binding is the actual `I32` source index rather than a visit ordinal. Operand widening keeps the step at its own width, so signed minima, full-width unsigned distances and both endpoints are compared exactly before any counter update. A dynamic zero step fails through the loop-step failure channel. In a range loop, an in-range no-progress candidate and an `I32` ordinal overflow fail at runtime too, and under `$fast_math` all three trap instead. A stepped collection loop keeps the ordinary zero-step failure under `$fast_math`. A literal zero step stays a compile-time diagnostic in both loop forms.
 
 HIR contains no unresolved generic/trait work, TIR, compile-time entry fragments, config evaluation, target-selected source branches, absolute source paths, HTML URL routes, rendered URLs, content hashes, output paths or builder names. It does not choose lifetime topology, runtime ownership or physical layout.
 

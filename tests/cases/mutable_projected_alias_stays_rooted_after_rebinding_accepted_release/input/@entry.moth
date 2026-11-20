@@ -1,0 +1,29 @@
+-- A mutable projected alias stays rooted in the allocation its base held at binding time.
+-- Rebinding `pair` must not retarget reads or write-through through `writer`: the old view keeps
+-- observing the old field, and write-through must leave the rebound pair's field unchanged. A
+-- nested projection roots in the innermost containing object captured at binding time.
+
+Pair = | first {I32}, second {I32} |
+Inner = | first {I32}, second {I32} |
+Outer = | inner Inner, label {I32} |
+
+probe ||:
+    pair ~= Pair({1}, {2})
+    writer ~= pair.first
+    view = writer
+    ~pair = Pair({3, 4}, {5})
+    assert(view.length() is 1, "the old view still observes one element")
+    ~writer = {7, 8, 9}
+    assert(writer.length() is 3, "write-through reached the captured old field")
+    assert(pair.first.length() is 2, "write-through left the rebound pair unchanged")
+
+    outer ~= Outer(Inner({1}, {2}), {3})
+    outer_writer ~= outer.inner.first
+    outer_view = outer_writer
+    ~outer = Outer(Inner({4, 5}, {6}), {7})
+    assert(outer_view.length() is 1, "the nested old view still observes one element")
+    assert(outer.inner.first.length() is 2, "the rebound outer reads its own nested field")
+;
+
+probe()
+io.line("mutable projected alias rooted")

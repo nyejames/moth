@@ -14,6 +14,28 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 // Runtime helper contract tests
 // ---------------------------------------------------------------------------
 
+/// Verifies that computed-place helpers root reads and writes in the base storage captured at
+/// construction. [computed]
+#[test]
+fn computed_place_helpers_capture_base_storage() {
+    let source = lower_minimal_module("main");
+    let field = helper_source(&source, "__moth_field");
+    let index = helper_source(&source, "__moth_index");
+
+    assert!(
+        field.contains("const base = __moth_read(baseRef);")
+            && field.contains("return base[field];")
+            && field.contains("base[field] = value;"),
+        "__moth_field must capture its base storage once so a rebound base slot cannot retarget it"
+    );
+    assert!(
+        index.contains("const base = __moth_read(baseRef);")
+            && index.contains("return base[index];")
+            && index.contains("base[index] = value;"),
+        "__moth_index must capture its base storage once so a rebound base slot cannot retarget it"
+    );
+}
+
 /// Verifies that `__moth_clone_value` deep-copies arrays via `.map(__moth_clone_value)`. [clone]
 #[test]
 fn clone_value_uses_map_for_arrays() {

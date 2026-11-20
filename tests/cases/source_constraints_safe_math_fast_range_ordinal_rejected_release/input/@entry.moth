@@ -1,0 +1,9 @@
+-- The ordinal update is generated bookkeeping. Under `$fast_math` its checked I32 increment
+-- traps instead of returning through the function's Error! slot, even though the loop authors no
+-- step and the addition keeps ordinary semantics. `$safe_math` must still reject the boundary.
+$fast_math $safe_math
+ordinal_walk |start I64, finish I64| -> I64, Error!:
+    loop start to finish |value, ordinal|:
+    ;
+    return start
+;

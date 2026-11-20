@@ -41,8 +41,8 @@ pub(crate) use qualified_targets::{
 pub(crate) use target_resolution::{
     DependencyTargetResolutionInput, ExternalPackageSymbolLookup,
     ExternalPackageSymbolResolutionInput, NamespaceTargetResolutionInput, ResolvedDependencyTarget,
-    ResolvedNamespaceTarget, SourceDependencyAccess, has_explicit_moth_extension,
-    resolve_dependency_target, resolve_external_package_symbol, resolve_namespace_target,
+    ResolvedNamespaceTarget, SourceDependencyAccess, resolve_dependency_target,
+    resolve_external_package_symbol, resolve_namespace_target,
 };
 pub(crate) use visible_names::{VisibleNameBinding, VisibleNameRegistry, check_alias_case_warning};
 

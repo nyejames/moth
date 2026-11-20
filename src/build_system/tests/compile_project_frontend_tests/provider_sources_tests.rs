@@ -1,5 +1,6 @@
 use super::super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
 use super::*;
+use crate::builder_surface::package_metadata::PackageSetMembership;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
@@ -124,6 +125,8 @@ fn fixture_dummy_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAsse
                 .expect("fixture asset logical path should be valid"),
         ),
         canonical_source_path,
+        package_set_membership:
+            crate::builder_surface::package_metadata::PackageSetMembership::Ordinary,
         asset_kind: "js".to_owned(),
         source_span: None,
     }
@@ -1249,6 +1252,91 @@ fn builder_surface_with_html_js_provider() -> BuilderSurface {
             crate::projects::html_project::external_js::js_import_provider::JsExternalImportProvider::new(),
         ));
     frontend_surface
+}
+
+#[test]
+fn package_local_provider_asset_carries_boundary_membership() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+
+    for (prefix, membership) in [
+        (
+            "builder/test/shipped_provider",
+            PackageSetMembership::CompilerShipped,
+        ),
+        (
+            "builder/test/ordinary_provider",
+            PackageSetMembership::Ordinary,
+        ),
+    ] {
+        let project = tempfile::tempdir().expect("should create project temp dir");
+        let package = tempfile::tempdir().expect("should create package temp dir");
+        let dir = project.path().to_path_buf();
+        let package_root = package.path().to_path_buf();
+
+        fs::write(
+            dir.join("@config.moth"),
+            "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+        )
+        .expect("should write config");
+        fs::write(
+            dir.join("@entry.moth"),
+            format!("@{prefix} helper\nvalue = helper()\n"),
+        )
+        .expect("should write page");
+        fs::write(
+            package_root.join("@package.moth"),
+            "@drawing.js draw as render\n$export\nhelper || -> I32:\n    return render()\n;\n",
+        )
+        .expect("should write package facade");
+        let js_path = package_root.join("drawing.js");
+        fs::write(
+            &js_path,
+            "/**\n * @moth.sig draw || -> I32\n */\nexport function draw() { return 1; }\n",
+        )
+        .expect("should write package-local JS");
+
+        let mut config = Config::new(dir);
+        let style_directives = StyleDirectiveRegistry::built_ins();
+        let mut warning_owner = fresh_warning_owner();
+        let mut frontend_surface = builder_surface_with_html_js_provider();
+        match membership {
+            PackageSetMembership::CompilerShipped => frontend_surface
+                .source_packages
+                .register_compiler_shipped_filesystem_root(
+                    prefix,
+                    package_root,
+                    PackageOrigin::Builder,
+                )
+                .expect("test shipped source root should register"),
+            PackageSetMembership::Ordinary => frontend_surface
+                .source_packages
+                .register_filesystem_root(prefix, package_root, PackageOrigin::Builder)
+                .expect("test ordinary source root should register"),
+        }
+
+        let modules = successful_compilation_value(compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &style_directives,
+            &mut frontend_surface,
+            &mut warning_owner,
+        ));
+        let canonical_js =
+            fs::canonicalize(&js_path).expect("package-local JS should canonicalize");
+        let asset = modules
+            .successful_module_views()
+            .flat_map(|module| module.link_facts.external_import_candidates.iter())
+            .filter_map(|candidate| candidate.runtime_asset.as_ref())
+            .find(|asset| asset.canonical_source_path == canonical_js)
+            .unwrap_or_else(|| {
+                panic!("package-local provider asset for {prefix:?} should be retained")
+            });
+        assert_eq!(
+            asset.package_set_membership, membership,
+            "provider admission must stamp the owning package boundary's membership for {prefix:?}"
+        );
+    }
 }
 
 #[test]

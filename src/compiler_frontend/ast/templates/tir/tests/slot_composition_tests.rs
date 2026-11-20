@@ -1654,6 +1654,100 @@ fn named_only_slots_discard_loose_whitespace_around_insert_contributions() {
 }
 
 #[test]
+fn explicit_insert_discards_preceding_body_whitespace_before_following_text() {
+    let mut string_table = StringTable::new();
+    let name = string_table.intern("title");
+
+    let mut store = TemplateIrStore::new();
+    let wrapper =
+        build_wrapper_with_slots(&mut store, vec![SlotKey::Named(name), SlotKey::Default]);
+    let insert_template = build_slot_insert_template(
+        &mut store,
+        SlotKey::Named(name),
+        "insert",
+        &mut string_table,
+    );
+
+    let leading_whitespace = build_text_node(
+        &mut store,
+        &mut string_table,
+        " ",
+        TemplateSegmentOrigin::Body,
+    );
+    let following_text = build_text_node(
+        &mut store,
+        &mut string_table,
+        " Body",
+        TemplateSegmentOrigin::Body,
+    );
+    let mut builder = TemplateIrBuilder::new(&mut store);
+    let insert_node = builder.push_insert_contribution_node(insert_template, None);
+    let fill = build_fill_template(
+        &mut store,
+        vec![leading_whitespace, insert_node, following_text],
+    );
+
+    let routed = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
+        .expect("formatting whitespace before an insert is not loose content");
+
+    // The formatting space before the insert must not merge with the authored
+    // text after it, which would render both spaces.
+    let insert_body_node = template_root_node_id(insert_template, &store);
+    assert_eq!(
+        routed.nodes_for_slot(&SlotKey::Named(name)),
+        &[insert_body_node]
+    );
+    assert_eq!(routed.nodes_for_slot(&SlotKey::Default), &[following_text]);
+}
+
+#[test]
+fn explicit_insert_discards_trailing_body_whitespace_after_preceding_text() {
+    let mut string_table = StringTable::new();
+    let name = string_table.intern("title");
+
+    let mut store = TemplateIrStore::new();
+    let wrapper =
+        build_wrapper_with_slots(&mut store, vec![SlotKey::Named(name), SlotKey::Default]);
+    let insert_template = build_slot_insert_template(
+        &mut store,
+        SlotKey::Named(name),
+        "insert",
+        &mut string_table,
+    );
+
+    let preceding_text = build_text_node(
+        &mut store,
+        &mut string_table,
+        " Body ",
+        TemplateSegmentOrigin::Body,
+    );
+    let trailing_whitespace = build_text_node(
+        &mut store,
+        &mut string_table,
+        " ",
+        TemplateSegmentOrigin::Body,
+    );
+    let mut builder = TemplateIrBuilder::new(&mut store);
+    let insert_node = builder.push_insert_contribution_node(insert_template, None);
+    let fill = build_fill_template(
+        &mut store,
+        vec![preceding_text, insert_node, trailing_whitespace],
+    );
+
+    let routed = route_fill_against_wrapper(&store, wrapper, fill, &string_table)
+        .expect("formatting whitespace after an insert is not loose content");
+
+    // The formatting run after the insert must not merge backward into the
+    // authored text before it, which would render an extra trailing space.
+    let insert_body_node = template_root_node_id(insert_template, &store);
+    assert_eq!(
+        routed.nodes_for_slot(&SlotKey::Named(name)),
+        &[insert_body_node]
+    );
+    assert_eq!(routed.nodes_for_slot(&SlotKey::Default), &[preceding_text]);
+}
+
+#[test]
 fn extra_loose_content_beyond_positional_capacity_produces_diagnostic() {
     let mut string_table = StringTable::new();
 

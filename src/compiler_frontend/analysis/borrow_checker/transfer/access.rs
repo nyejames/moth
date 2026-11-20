@@ -48,6 +48,10 @@ fn require_initialized_update_target(
     diagnostics: &BorrowDiagnostics<'_>,
     span: Option<SourceSpan>,
 ) -> Result<(), BorrowCheckError> {
+    // WHY: an update rejects a possible-uninitialized target, unlike a read, which only rejects
+    // `is_definitely_uninit`. Replacing a binding that some path never created has no valid
+    // interpretation. This guard also keeps an `UNINIT | SLOT` join away from the slot predicates
+    // on both update paths.
     if state
         .local_state(local_index)
         .mode
@@ -59,6 +63,15 @@ fn require_initialized_update_target(
         ));
     }
 
+    require_mutable_local(layout, local_index, diagnostics, span)
+}
+
+fn require_mutable_local(
+    layout: &FunctionLayout,
+    local_index: usize,
+    diagnostics: &BorrowDiagnostics<'_>,
+    span: Option<SourceSpan>,
+) -> Result<(), BorrowCheckError> {
     if !layout.local_mutable[local_index] {
         return Err(diagnostics.invalid_mutable_access(
             diagnostics.local_place(layout.local_ids[local_index]),
@@ -78,24 +91,27 @@ fn check_local_update_access(
     local_state: &LocalState,
     rhs_is_fresh: bool,
 ) -> Result<RootSet, BorrowCheckError> {
-    // Slot writes replace the binding, alias writes target their referents, and a joined state
-    // must check both possibilities. Both source assignments and dedicated call results use this
-    // rule so neither operation can bypass update mutability checks.
+    // Slot writes rebind the binding cell, alias writes target the storage recorded for writes
+    // (a whole-binding cell, or a projection's cell and containing allocation), and a joined
+    // state must check both possibilities. Replacing a value does not mutate the value it
+    // replaces, so old provenance never participates in this check. Both source assignments and
+    // dedicated call results use this rule so neither operation can bypass update mutability
+    // checks.
+    //
+    // WHY: `contains(SLOT) && !contains(ALIAS)` differs from exact `mode == SLOT` only on an
+    // `UNINIT | SLOT` join, which `require_initialized_update_target` rejects first on both
+    // update paths. The question here is whether the fresh value replaces the binding cell
+    // itself, so only direct aliases of that cell can conflict, not whether the slot is
+    // definitely initialized.
     let replaces_definite_slot = rhs_is_fresh
         && local_state.mode.contains(LocalMode::SLOT)
         && !local_state.mode.contains(LocalMode::ALIAS);
-    let mut write_roots = RootSet::empty(check.layout.local_count());
-    if local_state.mode.contains(LocalMode::SLOT) {
-        write_roots.insert(local_index);
-    }
-    if local_state.mode.contains(LocalMode::ALIAS) && local_state.has_value_aliases() {
-        write_roots.union_with(&local_state.value_roots);
-    }
+    let storage_roots = check.state.write_storage_cells(local_index);
 
-    if !write_roots.is_empty() {
+    if !storage_roots.is_empty() {
         check_mutable_access(
             check,
-            &write_roots,
+            &storage_roots,
             MutableAccessPolicy {
                 allow_prior_shared: true,
                 require_root_mutable: true,
@@ -109,7 +125,7 @@ fn check_local_update_access(
         )?;
     }
 
-    Ok(write_roots)
+    Ok(storage_roots)
 }
 
 // WHAT: These helper contexts split statement transfer into two concerns:
@@ -287,13 +303,20 @@ fn transfer_assign_target(
                 value_expression.span,
                 &transfer_context.diagnostics,
             )?;
-            let rhs_direct_alias_roots = rhs_roots.as_ref().map(|roots| {
+            let rhs_direct_alias_roots = rhs_roots.as_ref().map(|_| {
                 direct_root_aliases_from_expression(
                     layout,
                     state,
                     transfer_context.expressions,
                     value,
-                    roots,
+                )
+            });
+            let rhs_write_target_roots = rhs_roots.as_ref().map(|_| {
+                mutable_alias_write_targets_from_expression(
+                    layout,
+                    state,
+                    transfer_context.expressions,
+                    value,
                 )
             });
 
@@ -337,11 +360,7 @@ fn transfer_assign_target(
                         // WHY: treating scratch-to-scratch alias transfer as a source mutation
                         //      produced a false AliasedValueRequiresExclusiveAccess at the producing
                         //      get and stopped the alias before it could reach the user binding.
-                        if target_is_mutable
-                            && !rhs_roots.is_empty()
-                            && rhs_is_place
-                            && !target_is_compiler_owned_scratch
-                        {
+                        if target_is_mutable && rhs_is_place && !target_is_compiler_owned_scratch {
                             let mut check = AccessCheckContext {
                                 context: transfer_context,
                                 layout,
@@ -354,12 +373,14 @@ fn transfer_assign_target(
                                 actor_index_hint: Some(local_index),
                                 current_order,
                             };
+                            let require_root_mutable =
+                                check_mutable_alias_source(&check, &value_expression.kind)?;
                             check_mutable_access(
                                 &mut check,
                                 &rhs_roots,
                                 MutableAccessPolicy {
                                     allow_prior_shared: true,
-                                    require_root_mutable: false,
+                                    require_root_mutable,
                                     strict_move_exclusivity: false,
                                     alias_exclusivity: AliasExclusivity::All,
                                 },
@@ -368,11 +389,41 @@ fn transfer_assign_target(
 
                         let direct_roots = rhs_direct_alias_roots
                             .unwrap_or_else(|| RootSet::empty(layout.local_count()));
-                        let new_state = if rhs_is_place {
-                            LocalState::alias_with_direct(rhs_roots, direct_roots)
+                        let write_target_roots = if rhs_is_place {
+                            if target_is_mutable {
+                                rhs_write_target_roots
+                                    .unwrap_or_else(|| RootSet::empty(layout.local_count()))
+                            } else {
+                                // An immutable alias cannot write through, but a projection-free
+                                // alias of another alias must keep the same write targets as
+                                // overlap identity. A projected load is different: it observes its
+                                // containing allocation through value provenance, not the base
+                                // binding cell.
+                                inherited_alias_targets_from_expression(
+                                    layout,
+                                    state,
+                                    transfer_context.expressions,
+                                    value,
+                                )
+                            }
+                        } else {
+                            RootSet::empty(layout.local_count())
+                        };
+                        let mut new_state = if rhs_is_place {
+                            LocalState::alias_with_cells(
+                                rhs_roots,
+                                direct_roots,
+                                write_target_roots,
+                            )
                         } else {
                             LocalState::slot_with_value_roots(rhs_roots, direct_roots)
                         };
+                        new_state.derived_from_roots = alias_derivation_roots_from_expression(
+                            layout,
+                            state,
+                            transfer_context.expressions,
+                            value,
+                        );
                         state.update_local_state(local_index, new_state);
                     }
                     None => {
@@ -400,6 +451,7 @@ fn transfer_assign_target(
             };
             let write_roots =
                 check_local_update_access(&mut check, local_index, &local_state, rhs_is_fresh)?;
+            tracker.record_write(&write_roots);
 
             if is_direct_self_update {
                 // The ordinary write check above covers this place. Rebinding it to itself adds
@@ -445,64 +497,100 @@ fn transfer_assign_target(
                 }
             }
 
+            let rhs_derivation = alias_derivation_roots_from_expression(
+                layout,
+                state,
+                transfer_context.expressions,
+                value,
+            );
+
             match (
                 local_state.mode.contains(LocalMode::SLOT),
                 local_state.mode.contains(LocalMode::ALIAS),
             ) {
                 (false, true) => {
-                    // Alias-view writes through to referent and does not rebind.
+                    // The write goes through to the referent cells and does not rebind this
+                    // alias. The alias and the cells it writes now observe the replacement value.
+                    let _ = refresh_alias_referents(
+                        state,
+                        local_index,
+                        &local_state,
+                        rhs_roots.as_ref(),
+                    );
                 }
 
                 (true, false) => match rhs_roots {
                     Some(rhs_roots) if rhs_is_place => {
                         let direct_roots = rhs_direct_alias_roots
                             .unwrap_or_else(|| RootSet::empty(layout.local_count()));
-                        state.update_local_state(
-                            local_index,
-                            LocalState::alias_with_direct(rhs_roots, direct_roots),
+                        let write_target_roots = rhs_write_target_roots
+                            .unwrap_or_else(|| RootSet::empty(layout.local_count()));
+                        let mut new_state = LocalState::alias_with_cells(
+                            rhs_roots,
+                            direct_roots,
+                            write_target_roots,
                         );
+                        new_state.derived_from_roots = rhs_derivation;
+                        state.update_local_state(local_index, new_state);
                     }
-                    rhs_roots => apply_slot_rebinding(
-                        state,
-                        layout.local_count(),
-                        local_index,
-                        rhs_roots,
-                        rhs_direct_alias_roots,
-                    ),
+                    rhs_roots => {
+                        apply_slot_rebinding(
+                            state,
+                            layout.local_count(),
+                            local_index,
+                            rhs_roots,
+                            rhs_direct_alias_roots,
+                        );
+                        state.local_state_mut(local_index).derived_from_roots = rhs_derivation;
+                    }
                 },
 
                 (true, true) => {
-                    // The incoming value replaces the slot on its slot path, but the joined
-                    // state has no per-path root partition. Keep the union because it still
-                    // contains the referent roots on the alias path, where this write goes
-                    // through instead of replacing the binding.
-                    let mut value_roots = local_state.value_roots;
+                    // Both alternatives hold the incoming value after this write: the slot path
+                    // rebinds, and the alias path stores the value in its referent cell. The
+                    // joined state has no per-path root partition, so keep every alternative's
+                    // cells and record the value both alternatives now observe.
+                    let observed = refresh_alias_referents(
+                        state,
+                        local_index,
+                        &local_state,
+                        rhs_roots.as_ref(),
+                    );
                     let mut direct_alias_roots = local_state.direct_alias_roots;
-                    if let Some(rhs_roots) = rhs_roots {
-                        value_roots.union_with(&rhs_roots);
-                    }
+                    let mut write_target_roots = local_state.write_target_roots;
                     if let Some(rhs_direct_roots) = rhs_direct_alias_roots {
                         direct_alias_roots.union_with(&rhs_direct_roots);
                     }
+                    if let Some(rhs_target_roots) = rhs_write_target_roots {
+                        write_target_roots.union_with(&rhs_target_roots);
+                    }
 
+                    let mut derived_from_roots = local_state.derived_from_roots;
+                    derived_from_roots.intersect_with(&rhs_derivation);
                     state.update_local_state(
                         local_index,
                         LocalState {
                             mode: LocalMode::SLOT.union(LocalMode::ALIAS),
-                            value_roots,
+                            value_roots: observed,
                             direct_alias_roots,
+                            write_target_roots,
+                            derived_from_roots,
                         },
                     );
                 }
 
                 (false, false) => {
-                    state.update_local_state(local_index, LocalState::slot(layout.local_count()));
+                    let mut new_state = LocalState::slot(layout.local_count());
+                    new_state.derived_from_roots = rhs_derivation;
+                    state.update_local_state(local_index, new_state);
                 }
             }
         }
 
         false => {
-            let roots = roots_for_place(
+            // The projection writes through the base binding. Cell roots decide mutability and
+            // cell overlap; value provenance still names whatever allocation the place observes.
+            let roots = access_roots_for_place(
                 layout,
                 state,
                 target,
@@ -510,6 +598,7 @@ fn transfer_assign_target(
                 span,
                 &transfer_context.diagnostics,
             )?;
+            tracker.record_write(&roots);
             let mut check = AccessCheckContext {
                 context: transfer_context,
                 layout,
@@ -564,22 +653,106 @@ fn apply_slot_rebinding(
     rhs_roots: Option<RootSet>,
     rhs_direct_alias_roots: Option<RootSet>,
 ) {
-    match rhs_roots {
-        Some(roots) if !roots.is_empty() => {
+    match rhs_roots.filter(|roots| !roots.is_empty()) {
+        Some(roots) => {
             let direct_roots =
                 rhs_direct_alias_roots.unwrap_or_else(|| RootSet::empty(local_count));
             state.update_local_state(
                 local_index,
                 LocalState::slot_with_value_roots(roots, direct_roots),
-            )
+            );
         }
         None => state.update_local_state(local_index, LocalState::slot(local_count)),
-        Some(_) => state.update_local_state(local_index, LocalState::slot(local_count)),
     }
 }
 
 fn place_root_local_index(layout: &FunctionLayout, place: &HirPlace) -> Option<usize> {
     layout.index_of(place.root)
+}
+
+/// Record the value a write through an alias stores in its referent cells and return the value
+/// the alias now observes.
+///
+/// WHAT: a non-fresh write stores the incoming provenance. A fresh write stores an allocation
+///       owned by the referent storage, so the alias observes the designated cells themselves.
+/// WHY: a previous projection observed an older allocation stored in the cell, and an alias-only
+///      binding has no own root in `effective_roots`. Without recording the referent storage, a
+///      returned value or projected argument of the fresh write observed nothing and missed later
+///      exclusive accesses. A write through a joined state can reach its own slot or several
+///      referents, so it only unions provenance into the possible cells. Only a pure alias of
+///      exactly one whole cell, with no other write target, definitely replaces that cell's value.
+///      A projected-origin alias writes one field of the base value, so the base's allocation
+///      provenance stays unchanged.
+fn refresh_alias_referents(
+    state: &mut BorrowState,
+    local_index: usize,
+    alias_state: &LocalState,
+    new_value_roots: Option<&RootSet>,
+) -> RootSet {
+    let provenance = new_value_roots.filter(|roots| !roots.is_empty());
+    let storage_identity = state.write_storage_cells(local_index);
+    let observed = match provenance {
+        Some(roots) => roots.clone(),
+        None => storage_identity,
+    };
+    state.local_state_mut(local_index).value_roots = observed.clone();
+
+    // WHAT: A definite referent means every path writes one whole cell.
+    // WHY: one direct cell is not definite when the joined state also carries its own slot or a
+    //      write target for another cell; that path leaves the direct cell's value untouched.
+    let mut direct_cells = alias_state.direct_alias_roots.iter_ones();
+    let definite_referent = match (direct_cells.next(), direct_cells.next()) {
+        (Some(cell_index), None)
+            if alias_state.mode.contains(LocalMode::ALIAS)
+                && !alias_state.mode.contains(LocalMode::SLOT)
+                && alias_state
+                    .write_target_roots
+                    .iter_ones()
+                    .all(|target| target == cell_index) =>
+        {
+            Some(cell_index)
+        }
+        _ => None,
+    };
+
+    if let Some(cell_index) = definite_referent {
+        update_referent_value(state, cell_index, local_index, provenance);
+    } else if let Some(roots) = provenance {
+        for cell_index in alias_state.direct_alias_roots.iter_ones() {
+            if cell_index != local_index
+                && state.local_state(cell_index).mode.contains(LocalMode::SLOT)
+            {
+                state
+                    .local_state_mut(cell_index)
+                    .value_roots
+                    .union_with(roots);
+            }
+        }
+    }
+
+    observed
+}
+
+/// Store the value provenance a definite referent cell now holds.
+///
+/// WHY: one cell is a strong update. A fresh value is owned by that cell, so its provenance
+///      clears; an aliased value keeps the incoming provenance.
+fn update_referent_value(
+    state: &mut BorrowState,
+    cell_index: usize,
+    local_index: usize,
+    provenance: Option<&RootSet>,
+) {
+    if cell_index == local_index || !state.local_state(cell_index).mode.contains(LocalMode::SLOT) {
+        return;
+    }
+    let local_count = state.local_state(cell_index).value_roots.bit_len();
+    match provenance {
+        Some(roots) => state.local_state_mut(cell_index).value_roots = roots.clone(),
+        None => {
+            state.local_state_mut(cell_index).value_roots = RootSet::empty(local_count);
+        }
+    }
 }
 
 fn mutable_argument_roots(
@@ -592,6 +765,27 @@ fn mutable_argument_roots(
 ) -> Result<RootSet, BorrowCheckError> {
     let expression = context.expressions.expression(expression_id);
     if let HirExpressionKind::Load(place) = &expression.kind {
+        // A mutable parameter may write the caller's binding cell and, for a heap-allocated
+        // value, mutate shared storage. Cell roots decide mutability and cell overlap; value
+        // provenance decides allocation overlap.
+        //
+        // WHAT: designated cells always participate; value provenance participates only when the
+        //       type has an in-place mutation surface.
+        // WHY: a scalar value copied into a definite slot owns its own cell, so immutable
+        //      provenance does not weaken the write check. Mixed `SLOT | ALIAS` states need the
+        //      alias branch's cells too, which `effective_roots` does not report.
+        if place.projections.is_empty()
+            && let Some(local_index) = layout.index_of(place.root)
+        {
+            let mut roots = state.designated_cells(local_index);
+            if layout.local_has_in_place_mutation_surface[local_index] {
+                roots.union_with(&state.local_state(local_index).value_roots);
+            }
+            if !roots.is_empty() {
+                return Ok(roots);
+            }
+        }
+
         return roots_for_place(
             layout,
             state,
@@ -625,6 +819,46 @@ fn direct_place_from_expression(
     }
 }
 
+/// The source binding index and place a place-valued load names.
+///
+/// WHY: the identity helpers below must agree on which expressions are places, and they all need
+/// the source binding index. One check keeps their preambles from drifting apart.
+fn place_load_source(
+    layout: &FunctionLayout,
+    expressions: &HirExpressionStore,
+    expression_id: HirValueId,
+) -> Option<(usize, HirPlace)> {
+    let expression = expressions.expression(expression_id);
+    if expression.value_kind != ValueKind::Place {
+        return None;
+    }
+    let HirExpressionKind::Load(place) = &expression.kind else {
+        return None;
+    };
+    Some((layout.index_of(place.root)?, *place))
+}
+
+/// A shared binding cannot grant exclusive access. For a whole scalar cell, value roots
+/// still govern overlap but can include immutable provenance unrelated to cell mutability.
+fn check_mutable_alias_source(
+    check: &AccessCheckContext<'_, '_>,
+    source: &HirExpressionKind,
+) -> Result<bool, BorrowCheckError> {
+    if let HirExpressionKind::Load(place) = source
+        && let Some(local_index) = place_root_local_index(check.layout, place)
+    {
+        require_mutable_local(
+            check.layout,
+            local_index,
+            &check.context.diagnostics,
+            check.span.or(check.location),
+        )?;
+        return Ok(!place.projections.is_empty()
+            || check.layout.local_has_in_place_mutation_surface[local_index]);
+    }
+    Ok(true)
+}
+
 fn direct_value_roots_from_expression(
     layout: &FunctionLayout,
     state: &BorrowState,
@@ -653,36 +887,52 @@ fn direct_value_roots_from_expression(
     }
 }
 
+/// Cell index of a projection-free definite slot, for overlap identity.
+///
+/// WHAT: reports the slot's own binding cell, never allocation provenance.
+/// WHY: exclusivity and same-call overlap ask which cells a place touches, while value
+///      provenance asks which immutable origins a value came from. Keeping them separate
+///      prevents a cell bit from travelling through call results into fresh scalars.
+fn place_cell_root(
+    layout: &FunctionLayout,
+    state: &BorrowState,
+    place: &HirPlace,
+) -> Option<usize> {
+    if !place.projections.is_empty() {
+        return None;
+    }
+    let local_index = layout.index_of(place.root)?;
+    let mode = state.local_state(local_index).mode;
+    (mode.contains(LocalMode::SLOT) && !mode.contains(LocalMode::ALIAS)).then_some(local_index)
+}
+
 fn direct_root_aliases_from_expression(
     layout: &FunctionLayout,
     state: &BorrowState,
     expressions: &HirExpressionStore,
     expression_id: HirValueId,
-    rhs_roots: &RootSet,
 ) -> RootSet {
     let mut direct_roots = RootSet::empty(layout.local_count());
-    let expression = expressions.expression(expression_id);
-
-    if expression.value_kind != ValueKind::Place {
-        return direct_roots;
-    }
-
-    let HirExpressionKind::Load(place) = &expression.kind else {
+    let Some((source_index, place)) = place_load_source(layout, expressions, expression_id) else {
         return direct_roots;
     };
 
+    // A projected load observes the value stored under a projection: the older allocation, which
+    // a later rebinding of the source binding cannot replace. Only the source place's value
+    // provenance records that observation, so a projection must not inherit the source cell's
+    // direct alias identity. A later whole-binding replacement then stays legal while the
+    // projected value is live.
     if !place.projections.is_empty() {
         return direct_roots;
     }
 
-    let Some(source_index) = layout.index_of(place.root) else {
-        return direct_roots;
-    };
-
-    let source_state = state.local_state(source_index);
-    if source_state.mode.contains(LocalMode::SLOT) && rhs_roots.contains(source_index) {
-        direct_roots.insert(source_index);
+    // A place load binds the source place's own cell when that source is a definite slot. Cell
+    // identity is overlap information only; it must not enter the value's provenance roots or a
+    // returned scalar would inherit a later slot write.
+    if let Some(cell_index) = place_cell_root(layout, state, &place) {
+        direct_roots.insert(cell_index);
     }
+    let source_state = state.local_state(source_index);
     if source_state.mode.contains(LocalMode::ALIAS) {
         // An alias source carries the referent cells through to the new binding. Chained aliases
         // must keep observing the same cells, while a slot-backed value alias contributes no
@@ -691,6 +941,120 @@ fn direct_root_aliases_from_expression(
     }
 
     direct_roots
+}
+
+/// Alias bindings a value expression was provably created through.
+///
+/// WHAT: the source binding's transitive derivation chain, including the source itself when it is
+///       a pure alias.
+/// WHY: a read through a binding derived from a mutably active alias is not a foreign access to
+///      that alias. Recording the full chain as a must fact lets joins drop paths that did not
+///      derive.
+fn alias_derivation_roots_from_expression(
+    layout: &FunctionLayout,
+    state: &BorrowState,
+    expressions: &HirExpressionStore,
+    expression_id: HirValueId,
+) -> RootSet {
+    let expression = expressions.expression(expression_id);
+    let HirExpressionKind::Load(place) = &expression.kind else {
+        return RootSet::empty(layout.local_count());
+    };
+    let Some(source_index) = layout.index_of(place.root) else {
+        return RootSet::empty(layout.local_count());
+    };
+    state.derived_roots_from_source(source_index)
+}
+
+/// Write targets an immutable alias inherits from another alias.
+///
+/// WHAT: the source alias's write targets for a projection-free load; empty for a projected load
+///       or a slot source.
+/// WHY: `view = writer` observes the storage `writer` writes through, so a replacement through
+///      `writer` must see the live view. `old = holder.first` observes its containing allocation
+///      through value provenance rather than the holder binding cell, so it inherits no cell
+///      identity.
+fn inherited_alias_targets_from_expression(
+    layout: &FunctionLayout,
+    state: &BorrowState,
+    expressions: &HirExpressionStore,
+    expression_id: HirValueId,
+) -> RootSet {
+    let Some((source_index, place)) = place_load_source(layout, expressions, expression_id) else {
+        return RootSet::empty(layout.local_count());
+    };
+    if !place.projections.is_empty() {
+        return RootSet::empty(layout.local_count());
+    }
+    let source_state = state.local_state(source_index);
+    if source_state.mode.contains(LocalMode::ALIAS) {
+        source_state.write_target_roots.clone()
+    } else {
+        RootSet::empty(layout.local_count())
+    }
+}
+
+/// Storage a mutable alias acquired from this expression writes through.
+///
+/// WHAT: a whole-binding load targets the source binding's designated cells; a projected load
+///       targets those same cells plus the containing allocation(s) the source value observed at
+///       binding time.
+/// WHY: the cell is the pre-correction conservative identity. A fresh allocation's identity is
+///      encoded as its owning cell or as empty provenance, and that identity cannot be carried
+///      accurately through every join, alias chain, call or scope exit, so keeping the cell
+///      retains the rejections that guard those paths. The allocation roots add the containing
+///      allocation family, which publishes a write through a call-returned holder to the
+///      parameter that owns it and overlaps other holders of the same allocation. A whole-binding
+///      alias always writes through the source binding cells, so it keeps just the cell identity.
+fn mutable_alias_write_targets_from_expression(
+    layout: &FunctionLayout,
+    state: &BorrowState,
+    expressions: &HirExpressionStore,
+    expression_id: HirValueId,
+) -> RootSet {
+    let Some((source_index, place)) = place_load_source(layout, expressions, expression_id) else {
+        return RootSet::empty(layout.local_count());
+    };
+    let mut targets = state.designated_cells(source_index);
+    if !place.projections.is_empty() {
+        targets.union_with(&state.effective_roots(source_index));
+    }
+    targets
+}
+
+/// Roots a shared access to `place` must check for overlap.
+///
+/// WHAT: the place's value provenance plus the cells it designates for access.
+/// WHY: value provenance alone leaves a cell-only alias with no roots after pruning, and a place
+///      reached through a projected or whole-binding alias also designates the storage that alias
+///      writes through. Value flow keeps using `roots_for_place`; these roots only feed access
+///      checks.
+fn access_roots_for_place(
+    layout: &FunctionLayout,
+    state: &BorrowState,
+    place: &HirPlace,
+    location: Option<SourceSpan>,
+    span: Option<SourceSpan>,
+    diagnostics: &BorrowDiagnostics<'_>,
+) -> Result<RootSet, BorrowCheckError> {
+    let mut roots = roots_for_place(layout, state, place, location, span, diagnostics)?;
+    include_designated_cells(layout, state, place, &mut roots);
+    Ok(roots)
+}
+
+/// Add the cells a place designates for access to an existing root set.
+///
+/// WHY: value facts and access checks share one rule for turning a place into cell roots, so a
+///      cell-only alias cannot be visible to one caller and invisible to another.
+fn include_designated_cells(
+    layout: &FunctionLayout,
+    state: &BorrowState,
+    place: &HirPlace,
+    roots: &mut RootSet,
+) {
+    if let Some(local_index) = layout.index_of(place.root) {
+        roots.union_with(&state.designated_cells(local_index));
+    }
 }
 
 fn roots_for_place(
@@ -876,7 +1240,12 @@ fn check_shared_place_read(
     place: &HirPlace,
     value_span: Option<SourceSpan>,
 ) -> Result<RootSet, BorrowCheckError> {
-    let place_roots = roots_for_place(
+    // Value facts keep reporting the allocation the read observed. Access overlap also includes
+    // the place's cells. The active-exclusive scan covers both the provenance roots the read
+    // observes and the binding cells the place designates, so a live exclusive alias of either
+    // conflicts unless this read provably derives through it. Mutating through a derived alias
+    // still conflicts at the mutation's overlap check.
+    let value_roots = roots_for_place(
         env.layout,
         env.state,
         place,
@@ -884,6 +1253,8 @@ fn check_shared_place_read(
         value_span,
         &env.context.diagnostics,
     )?;
+    let mut access_roots = value_roots.clone();
+    include_designated_cells(env.layout, env.state, place, &mut access_roots);
     let actor_index_hint = place_root_local_index(env.layout, place);
     let mut check = AccessCheckContext {
         context: env.context,
@@ -897,8 +1268,8 @@ fn check_shared_place_read(
         actor_index_hint,
         current_order: env.current_order,
     };
-    check_shared_access(&mut check, &place_roots)?;
-    Ok(place_roots)
+    check_shared_access(&mut check, &access_roots)?;
+    Ok(value_roots)
 }
 
 /// WHAT: records the shared-read classification of an expression from the accumulated roots.

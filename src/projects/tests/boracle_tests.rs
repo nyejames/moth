@@ -2280,7 +2280,7 @@ Pair = |
 
 pair ~= Pair({1}, {2})
 shared = pair
-pair.first = {3}
+~pair.first = {3}
 result = shared
 "#,
     );
@@ -2311,8 +2311,8 @@ Pair = |
 
 pair ~= Pair({1}, {2})
 old = pair.first
-pair = Pair({3}, {4})
-pair.first = {5}
+~pair = Pair({3}, {4})
+~pair.first = {5}
 result = old
 "#,
     );
@@ -2329,6 +2329,35 @@ result = old
 }
 
 #[test]
+fn boracle_source_projected_alias_through_intermediate_alias_keeps_old_origin() {
+    let report = solve_source(
+        r#"
+Pair = |
+    first {I32},
+    second {I32},
+|
+
+pair ~= Pair({1}, {2})
+view = pair
+old = view.first
+~pair = Pair({3}, {4})
+~pair.first = {5}
+result = old
+"#,
+    );
+
+    let function = report
+        .functions()
+        .first()
+        .expect("source should have a function");
+    assert!(
+        !function.report.has_conflicts(),
+        "a projection through an intermediate alias must keep the old allocation after rebinding: {:?}",
+        function.report.loans.conflicts()
+    );
+}
+
+#[test]
 fn boracle_source_distinct_projected_fields_remain_disjoint() {
     let report = solve_source(
         r#"
@@ -2339,7 +2368,7 @@ Pair = |
 
 pair ~= Pair({1}, {2})
 first = pair.first
-pair.second = {3}
+~pair.second = {3}
 result = first
 "#,
     );
@@ -2365,9 +2394,9 @@ Pair = |
 |
 
 pair ~= Pair({1}, {2})
-pair.first = {3}
+~pair.first = {3}
 shared = pair
-pair.first = {4}
+~pair.first = {4}
 result = shared
 "#,
     );
@@ -3082,9 +3111,10 @@ fn dead_exclusive_selection() -> BoracleRuleSelection {
 fn successful_value<T>(result: CompilationResult<T>) -> T {
     match result {
         Ok(CompilationOutcome::Success { value, .. }) => value,
-        Ok(CompilationOutcome::Diagnosed(reports)) => {
-            panic!("source should compile without user diagnostics: {reports:?}")
-        }
+        Ok(CompilationOutcome::Diagnosed(reports)) => panic!(
+            "source should compile without user diagnostics:\n{}",
+            terse::format_terse_diagnostic_reports(&reports).join("\n")
+        ),
         Err(errors) => panic!("source should compile without infrastructure failures: {errors:?}"),
     }
 }

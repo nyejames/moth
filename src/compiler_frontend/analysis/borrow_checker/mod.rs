@@ -57,17 +57,26 @@ pub(crate) use problem::{
 pub(crate) use problem::{BindingDestination, RebindValue, TerminatorEventKind, UseKind};
 
 use crate::compiler_frontend::analysis::borrow_checker::engine::BorrowChecker;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(in crate::compiler_frontend) fn check_borrows(
     module: &HirModule,
+    type_environment: &TypeEnvironment,
     external_package_registry: &ExternalPackageRegistry,
     path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> Result<BorrowCheckReport, BorrowCheckError> {
-    BorrowChecker::new(module, external_package_registry, path_fork, string_table).run()
+    BorrowChecker::new(
+        module,
+        type_environment,
+        external_package_registry,
+        path_fork,
+        string_table,
+    )
+    .run()
 }
 
 #[cfg(test)]

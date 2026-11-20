@@ -59,6 +59,7 @@ unit_code! {
         EscapesSourcePackageRoot = 5,
         CaseMismatch = 6,
         HiddenDirectory = 7,
+        ImplicitPackage = 8,
     }
 }
 
@@ -320,6 +321,7 @@ impl InvalidImportPathCode {
             InvalidImportPathReason::EscapesProjectRoot => Self::EscapesProjectRoot,
             InvalidImportPathReason::EscapesSourcePackageRoot => Self::EscapesSourcePackageRoot,
             InvalidImportPathReason::HiddenDirectory => Self::HiddenDirectory,
+            InvalidImportPathReason::ImplicitPackage => Self::ImplicitPackage,
             InvalidImportPathReason::CaseMismatch { .. } => Self::CaseMismatch,
         }
     }
@@ -349,6 +351,7 @@ impl InvalidImportPathCode {
             Self::EscapesProjectRoot => InvalidImportPathReason::EscapesProjectRoot,
             Self::EscapesSourcePackageRoot => InvalidImportPathReason::EscapesSourcePackageRoot,
             Self::HiddenDirectory => InvalidImportPathReason::HiddenDirectory,
+            Self::ImplicitPackage => InvalidImportPathReason::ImplicitPackage,
             Self::CaseMismatch => InvalidImportPathReason::CaseMismatch {
                 provided: provided?,
                 expected: expected?,

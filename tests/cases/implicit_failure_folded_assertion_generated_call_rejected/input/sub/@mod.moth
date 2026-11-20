@@ -1,0 +1,13 @@
+always_false || -> Bool:
+    return false
+;
+
+flaky type T |value T, divisor I32| -> I32:
+    return divisor + 1
+;
+
+$export
+probe |value I32| -> I32:
+    assert(always_false())
+    return flaky(value, 2)
+;

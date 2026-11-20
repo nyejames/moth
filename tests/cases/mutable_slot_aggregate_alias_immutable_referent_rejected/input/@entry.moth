@@ -1,0 +1,19 @@
+-- A mutable slot whose stored aggregate value aliases an immutable allocation cannot be
+-- passed by `~` to a callee that may mutate that allocation. The callee would push into
+-- storage the immutable `original` binding still owns.
+
+identity |value {I32}| -> {I32}:
+    return value
+;
+add_one |items ~{I32}|:
+    ~items.push(4)
+;
+original {I32} = {1, 2, 3}
+outer {{I32}} = {original}
+slot ~{I32} = {0}
+~slot = identity(original)
+add_one(~slot)
+first = outer.get(0) catch:
+    then {0}
+;
+io.line([: mutable_slot_aggregate out=[first.length()]])

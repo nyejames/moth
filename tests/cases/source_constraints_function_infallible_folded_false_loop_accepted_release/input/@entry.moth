@@ -1,0 +1,13 @@
+failing |value I32| -> I32:
+    return value + 1
+;
+
+$infallible
+probe |value I32| -> I32:
+    loop false:
+        marker I32 = failing(value)
+    ;
+    return 0
+;
+
+~[: [probe(1)]]

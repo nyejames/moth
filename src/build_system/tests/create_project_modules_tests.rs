@@ -153,8 +153,8 @@ fn configured_resolver_with_source_file_kinds(
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root.clone(),
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &project_root,
             validated_output_settings: None,
+            config_source: None,
         },
         config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -661,13 +661,12 @@ fn discover_modules_for_test_with_resource_inputs(
     SourceDatabase,
 )> {
     let mut string_table = StringTable::new();
-    let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let source_tree_index = match super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &project_root,
             validated_output_settings: None,
+            config_source: None,
         },
         config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -796,13 +795,12 @@ fn discover_modules_for_test_with_providers(
     external_import_providers: &ExternalImportProviderRegistry,
 ) -> CompilationResult<ModuleCompilationSchedule> {
     let mut string_table = StringTable::new();
-    let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let source_tree_index = match super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &project_root,
             validated_output_settings: None,
+            config_source: None,
         },
         config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -925,15 +923,14 @@ fn with_namespace_resolution(
 ) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let external_import_providers =
         crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &project_root,
             validated_output_settings: None,
+            config_source: None,
         },
         config,
         source_packages,
@@ -1287,13 +1284,12 @@ pub(super) fn discover_modules_and_graph_for_test_with_check_only(
     StringTable,
 ) {
     let mut string_table = StringTable::new();
-    let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &project_root,
             validated_output_settings: None,
+            config_source: None,
         },
         config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -1631,6 +1627,8 @@ fn fixture_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAssetIdent
                 .expect("fixture asset logical path should be valid"),
         ),
         canonical_source_path,
+        package_set_membership:
+            crate::builder_surface::package_metadata::PackageSetMembership::Ordinary,
         asset_kind: "js".to_owned(),
         source_span: None,
     }

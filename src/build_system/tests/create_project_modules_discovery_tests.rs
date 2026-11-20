@@ -1188,6 +1188,100 @@ fn compile_single_file_frontend_retains_ordinary_boundary_registry() {
 }
 
 #[test]
+fn single_file_entry_resolves_config_named_normal_module_directory() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = fs::canonicalize(_tmp_root.path()).expect("test root should canonicalize");
+    let config_directory = root.join("docs/@config.moth");
+    fs::create_dir_all(&config_directory).expect("should create config-named directory");
+    fs::write(
+        config_directory.join("@mod.moth"),
+        "$export\nanswer || -> I64:\n    return 42\n;\n",
+    )
+    .expect("should write normal facade");
+    let entry = root.join("@entry.moth");
+    fs::write(
+        &entry,
+        "@docs/\"@config.moth\" answer\n\
+         @docs/\"@config.moth\" as api\n\
+         value = answer()\n\
+         namespaced = api.answer()\n\
+         qualified = @docs/\"@config.moth\" answer()\n",
+    )
+    .expect("should write synthetic entry");
+
+    let compile_entry = || {
+        let config = Config::new(entry.clone());
+        let mut builder_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+        let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+        let mut project_source_files = None;
+        super::compilation::compile_single_file_frontend_with_inputs(
+            &config,
+            crate::compiler_frontend::FrontendBuildProfile::Dev,
+            &test_style_directives(),
+            &mut builder_surface,
+            entry.extension().expect("entry should have an extension"),
+            &mut warning_owner,
+            &mut project_source_files,
+            &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
+            crate::build_system::create_project_modules::FrontendCompilationMode::Canonical,
+        )
+    };
+
+    successful_compilation_value(compile_entry());
+
+    fs::write(root.join("docs/@mod.moth"), "").expect("should root the intervening module");
+    let result = compile_entry();
+    let reports = diagnosed_reports(&result);
+    let rendered = crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_reports(reports).join("\n");
+    assert!(
+        rendered.contains("MOTH-IMPORT-0008"),
+        "a dependency cannot bypass an intervening module: {rendered}"
+    );
+}
+
+#[test]
+fn single_file_entry_without_config_normal_facade_keeps_direct_special_diagnostic() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = fs::canonicalize(_tmp_root.path()).expect("test root should canonicalize");
+    let config_directory = root.join("@config.moth");
+    fs::create_dir_all(&config_directory).expect("should create config-named directory");
+    fs::write(
+        config_directory.join("ordinary.moth"),
+        "ordinary || -> I64:\n    return 7\n;\n",
+    )
+    .expect("should write ordinary helper");
+    let entry = root.join("@entry.moth");
+    fs::write(&entry, "value = @\"@config.moth\" ordinary\n")
+        .expect("should write synthetic entry");
+
+    let config = Config::new(entry.clone());
+    let mut builder_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    let string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
+    let mut project_source_files = None;
+    let result = super::compilation::compile_single_file_frontend_with_inputs(
+        &config,
+        crate::compiler_frontend::FrontendBuildProfile::Dev,
+        &test_style_directives(),
+        &mut builder_surface,
+        entry.extension().expect("entry should have an extension"),
+        &mut warning_owner,
+        &mut project_source_files,
+        &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
+        crate::build_system::create_project_modules::FrontendCompilationMode::Canonical,
+    );
+
+    let reports = diagnosed_reports(&result);
+    let rendered = crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_reports(reports).join("\n");
+    assert!(
+        rendered.contains("MOTH-IMPORT-0008"),
+        "the reserved config spelling without a module facade must keep its direct special-file diagnostic: {rendered}"
+    );
+}
+
+#[test]
 fn directory_stage0_reaches_content_reference_fixed_point() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();

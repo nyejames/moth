@@ -1,0 +1,26 @@
+-- One branch writes through the joined alias and the other writes the slot directly. The fresh
+-- write can land in the alias's own cell or in the slot, so the slot may still hold `original`;
+-- the later mutation of `original` must stay rejected while the observed alias is live.
+
+identity |value {I32}| -> {I32}:
+    return value
+;
+
+probe |flag Bool| -> I32:
+    original ~= {1}
+    slot ~= {0}
+    writer ~= {0}
+    if flag:
+        ~writer = slot
+        ~writer = identity(original)
+    else
+        ~slot = identity(original)
+    ;
+    ~writer = {3}
+    observed = identity(slot)
+    ~original.push(4)
+    return observed.length()
+;
+
+result = probe(false)
+io.line([: [result]])

@@ -1,0 +1,13 @@
+quiet |value I32| -> I32:
+    return value
+;
+
+risky |value I32| -> I32:
+    return value + 1
+;
+
+$export
+probe |value I32| -> I64:
+    wide I64 = cast quiet(value) catch then cast risky(1)
+    return wide
+;

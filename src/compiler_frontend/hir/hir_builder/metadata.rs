@@ -9,11 +9,9 @@
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, NodeKind};
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
-use crate::compiler_frontend::ast::expressions::failure_classification::AstBuiltinFailureSummaries;
 use crate::compiler_frontend::ast::expressions::failure_facts::{
     ImplicitFailureContributor, ImplicitFailureSource,
 };
-use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
@@ -25,11 +23,12 @@ use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureContributor, HirBuiltinFailureSource,
     HirConstraintBoundary, HirConstraintEvidence, HirDeferredCustomCatchCheck,
     HirFastUseProvenance, HirFastUseWitness, HirFunctionFailureFacts, HirLiveErasedCallSite,
-    HirSelectedCallSite, HirSelectedCallSiteLedger, HirSkippedSourceEvidence,
+    HirSelectedCallSite, HirSelectedCallSiteLedger,
 };
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirStableFunctionOrigin};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
+use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::hir::utils::{collect_reachable_blocks, for_each_terminator_target};
@@ -160,26 +159,24 @@ impl<'a> HirBuilder<'a> {
         Ok(())
     }
 
-    /// Freeze expression-owned failure facts while the completed AST is still available.
-    /// Exact exportedness is joined by origin assignment after this body projection.
+    /// Project pre-fold failure facts and constraint evidence onto HIR functions.
+    ///
+    /// WHAT: reads the authored-order contributors, deferred catches and assertion-message calls
+    ///       finalization retained on the AST, then freezes the same function's constraint evidence.
+    /// WHY: release folding runs before HIR, so reclassifying the post-fold AST would let erasure
+    ///      add, remove or reorder a failure fact. The AST classifier is the single owner of that
+    ///      decision; this pass only resolves its facts onto HIR call targets.
     pub(super) fn project_function_failure_facts(
         &mut self,
         ast: &Ast,
         span_sources: SpanResolutionSources<'_>,
     ) -> Result<(), HirConstructionFailure> {
-        let mut constraint_evidence = self.project_constraint_evidence(ast, span_sources)?;
+        let mut constraint_evidence = self.project_constraint_evidence(ast, &span_sources)?;
         let builtin_error_type =
             self.type_environment
                 .type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
                     CanonicalBuiltinType::Error,
                 ));
-        // Completed AST contains owned runtime handoffs, never unresolved TIR references.
-        let template_ir_store = TemplateIrStore::new();
-        let summaries = AstBuiltinFailureSummaries::compute(
-            &[&ast.nodes],
-            &template_ir_store,
-            &ast.expressions,
-        )?;
 
         for node in &ast.nodes {
             let signature = match &node.kind {
@@ -217,12 +214,13 @@ impl<'a> HirBuilder<'a> {
                     None => HirBuiltinFailureBoundary::InferPrivate,
                 }
             };
-            let pending = summaries.function_facts(identity).ok_or_else(|| {
+            let pending = ast.pre_fold_failure_facts.get(&identity).ok_or_else(|| {
                 InfrastructureFailure::internal(
                     CompilerStage::HirConstruction,
-                    "completed function has no converged AST failure facts",
+                    "completed function has no pre-fold failure facts",
                 )
             })?;
+            let constraint = constraint_evidence.remove(&function_id).unwrap_or_default();
             let contributors = self.project_failure_contributors(&pending.body.implicit)?;
             // Inert messages still carry private-call obligations. The module service installs
             // canonical generated contracts for these validation-only roots before AST release;
@@ -254,7 +252,7 @@ impl<'a> HirBuilder<'a> {
                     contributors,
                     assertion_message_calls,
                     deferred_custom_catches,
-                    constraint: constraint_evidence.remove(&function_id).unwrap_or_default(),
+                    constraint,
                 },
             );
         }
@@ -275,7 +273,7 @@ impl<'a> HirBuilder<'a> {
     fn project_constraint_evidence(
         &self,
         ast: &Ast,
-        span_sources: SpanResolutionSources<'_>,
+        span_sources: &SpanResolutionSources<'_>,
     ) -> Result<FxHashMap<FunctionId, HirConstraintEvidence>, HirConstructionFailure> {
         let mut evidence = self
             .module
@@ -284,8 +282,8 @@ impl<'a> HirBuilder<'a> {
             .map(|function| (function.id, HirConstraintEvidence::default()))
             .collect::<FxHashMap<_, _>>();
 
-        self.project_authored_constraint_evidence(ast, &span_sources, &mut evidence);
-        self.project_selected_hir_evidence(ast, &span_sources, &mut evidence)?;
+        self.project_authored_constraint_evidence(ast, span_sources, &mut evidence);
+        self.project_selected_hir_evidence(ast, span_sources, &mut evidence)?;
 
         for function_evidence in evidence.values_mut() {
             function_evidence.fast_use.sort_unstable();
@@ -399,8 +397,9 @@ impl<'a> HirBuilder<'a> {
                     })
                 })
             };
+            let skipped_source = self.skipped_source_evidence.get(&function.id);
             let mut skipped_call_sites = Vec::new();
-            if let Some(skipped) = self.skipped_source_evidence.get(&function.id) {
+            if let Some(skipped) = skipped_source {
                 // The omitted statements still have authored source. Drop evidence that lives only
                 // in an inactive static-`if` branch, using the same pruned regions and span rule as
                 // the authored evidence ledger.
@@ -425,47 +424,24 @@ impl<'a> HirBuilder<'a> {
             // Release folding erased these calls before HIR existed, but they were selected source.
             // Adding the row here makes callee summary bits and witness hops identical to a debug
             // build that keeps the runtime call. Resolution uses the ordinary call-target mapping
-            // rather than a second AST-path translation. The live subset also feeds
-            // liveness-conditioned trap and escaping-failure analysis.
-            let skipped_spans = self
-                .skipped_source_evidence
-                .get(&function.id)
-                .map(HirSkippedSourceEvidence::skipped_spans)
-                .unwrap_or_default();
+            // rather than a second AST-path translation. The rows also feed liveness-conditioned
+            // trap and escaping-failure analysis.
             for site in &ast.release_erased_call_sites {
-                if identity != Some(site.function) || is_pruned(site.span) {
+                if identity != Some(site.function) || is_pruned(Some(site.span)) {
                     continue;
                 }
                 let target = self.resolve_call_target_or_error(&site.target)?;
-                // A spanless call cannot be matched against skipped source. Treating it as live is
-                // the conservative direction: trap evidence may reject source that debug accepts,
-                // never the reverse.
-                let live = match site.span {
-                    None => true,
-                    Some(span) => !skipped_spans
-                        .iter()
-                        .any(|skipped| span_sources.span_within(span, *skipped, *skipped)),
-                };
-                if live {
-                    insert_live_erased_site_in_source_order(
-                        &mut live_erased_call_sites,
-                        HirLiveErasedCallSite {
-                            target,
-                            span: site.span,
-                            failure_caught: site.failure_caught,
-                        },
-                        span_sources,
-                    );
-                } else {
-                    insert_selected_site_in_source_order(
-                        &mut skipped_call_sites,
-                        HirSelectedCallSite {
-                            target,
-                            span: site.span,
-                        },
-                        span_sources,
-                    );
-                }
+                // Release speculation skips authored-dead statements and statically pruned catch
+                // handlers, so every row it records belongs to source HIR lowered.
+                insert_live_erased_site_in_source_order(
+                    &mut live_erased_call_sites,
+                    HirLiveErasedCallSite {
+                        target,
+                        span: site.span,
+                        failure_caught: site.failure_caught,
+                    },
+                    span_sources,
+                );
             }
             let mut live_sites = live_selected_call_sites.into_sites();
             for site in &live_erased_call_sites {
@@ -473,7 +449,7 @@ impl<'a> HirBuilder<'a> {
                     &mut live_sites,
                     HirSelectedCallSite {
                         target: site.target.clone(),
-                        span: site.span,
+                        span: Some(site.span),
                     },
                     span_sources,
                 );
@@ -540,6 +516,19 @@ impl<'a> HirBuilder<'a> {
                 HirStatementKind::NumericOp { op, .. } if op.semantics.is_fast() => {
                     fast_use.push(HirFastUseWitness {
                         provenance: HirFastUseProvenance::AuthoredArithmetic,
+                        span: statement.span,
+                    });
+                }
+                // A generated `$fast_math` range ordinal keeps ordinary checked semantics (so it
+                // never wraps) but delivers its overflow fatally. Fast authored operations hit
+                // the arm above, so a fatal operation here is the generated ordinal; it must still
+                // count as fast range evidence or `$safe_math` accepts a trapping loop.
+                HirStatementKind::NumericOp {
+                    failure_mode: NumericFailureMode::Fatal,
+                    ..
+                } => {
+                    fast_use.push(HirFastUseWitness {
+                        provenance: HirFastUseProvenance::RangeGuard,
                         span: statement.span,
                     });
                 }
@@ -666,15 +655,10 @@ fn insert_live_erased_site_in_source_order(
     site: HirLiveErasedCallSite,
     sources: &SpanResolutionSources<'_>,
 ) {
-    let Some(site_span) = site.span else {
-        sites.push(site);
-        return;
-    };
-    let position = sites.iter().position(|existing| {
-        existing
-            .span
-            .is_some_and(|existing| site_precedes(site_span, existing, sources))
-    });
+    let site_span = site.span;
+    let position = sites
+        .iter()
+        .position(|existing| site_precedes(site_span, existing.span, sources));
     match position {
         Some(index) => sites.insert(index, site),
         None => sites.push(site),

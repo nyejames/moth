@@ -3,6 +3,7 @@
 use crate::build_system::create_project_modules::resource_inputs::{
     ResourceContentState, ResourceInputRegistry,
 };
+use crate::builder_surface::package_metadata::PackageSetMembership;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
@@ -143,6 +144,94 @@ fn resource_read_failure_reports_portable_host_path() {
         Some(missing_path.as_path()),
         "the structured host path must stay native"
     );
+    assert!(
+        !failure.message.contains("incomplete"),
+        "an ordinary resource read failure must not claim a damaged package set: {}",
+        failure.message
+    );
+}
+
+#[test]
+fn duplicate_registration_preserves_shipped_membership_in_either_order() {
+    let directory = tempfile::tempdir().expect("should create resource input directory");
+    let missing_path = directory.path().join("missing-runtime-asset.js");
+
+    for registrations in [
+        [
+            PackageSetMembership::CompilerShipped,
+            PackageSetMembership::Ordinary,
+        ],
+        [
+            PackageSetMembership::Ordinary,
+            PackageSetMembership::CompilerShipped,
+        ],
+    ] {
+        let mut registry = ResourceInputRegistry::new();
+        let mut source_ids = Vec::new();
+        for membership in registrations {
+            source_ids
+                .push(registry.register_source_with_membership(missing_path.clone(), membership));
+        }
+        // A later ordinary registration must not erase positive shipped provenance.
+        source_ids.push(registry.register_source(missing_path.clone()));
+
+        assert!(
+            source_ids.windows(2).all(|pair| pair[0] == pair[1]),
+            "one physical source must keep one shared source ID"
+        );
+        assert_eq!(
+            registry.records().len(),
+            1,
+            "duplicate registrations must not add a second read record"
+        );
+
+        let failure = registry
+            .hash_source(source_ids[0])
+            .expect_err("the shared missing source should fail its only read");
+        assert!(
+            failure.message.contains("incomplete"),
+            "shipped membership must survive duplicate registration in either order: {}",
+            failure.message
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn unresolved_pending_aliases_do_not_form_a_redirect_chain() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir().expect("should create resource input directory");
+    let root = fs::canonicalize(directory.path()).expect("fixture root should canonicalize");
+    let canonical_target = root.join("c.js");
+    let middle = root.join("b.js");
+    let alias = root.join("a.js");
+    symlink(&canonical_target, &middle).expect("middle symlink should be created");
+    symlink(&middle, &alias).expect("alias symlink should be created");
+
+    let mut registry = ResourceInputRegistry::new();
+    let target_source = registry.register_source(canonical_target.clone());
+    let middle_source = registry.register_deferred_shipped_source(middle.clone());
+    let alias_source = registry.register_deferred_shipped_source(alias.clone());
+    assert_ne!(target_source, middle_source);
+    assert_ne!(middle_source, alias_source);
+
+    let failure = registry
+        .hash_source(alias_source)
+        .expect_err("the dangling alias should fail its first read");
+    assert!(
+        failure.message.contains("incomplete"),
+        "the shipped dangling alias reports its own damaged set: {}",
+        failure.message
+    );
+    assert_eq!(
+        failure.host_path.as_deref(),
+        Some(alias.as_path()),
+        "an unresolvable provisional key must leave the alias on its own host path"
+    );
+    registry
+        .validate()
+        .expect("a provisional pending key must not become a second redirect hop");
 }
 
 #[test]

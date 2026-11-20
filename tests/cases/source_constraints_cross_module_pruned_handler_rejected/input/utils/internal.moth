@@ -5,7 +5,7 @@ calm |value I32| -> I32:
 $fast_math
 guard_pruned |limit I32| -> Bool:
     result = calm(1) < calm(2) catch |error|:
-        loop 0 to limit:
+        loop 0 to limit by 1:
             io.line("x")
         ;
         return false

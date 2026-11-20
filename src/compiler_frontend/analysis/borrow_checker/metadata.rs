@@ -8,11 +8,12 @@
 use super::engine::BorrowChecker;
 use super::state::{FunctionLayout, FunctionLayoutInputs, RootSet};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalAccessKind};
-
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
@@ -73,6 +74,16 @@ enum BlockPropagation {
     EveryPath,
     /// MAY direct assignment reachability, without definition kills.
     AnyAssignment,
+}
+
+/// Per-local facts gathered while the dense local index is built.
+///
+/// WHY: the layout projects three parallel per-local vectors from these facts, and positional
+///      access to two adjacent booleans makes the projection easy to misread.
+struct LocalLayoutFacts {
+    mutable: bool,
+    region: RegionId,
+    has_in_place_mutation_surface: bool,
 }
 
 impl<'a> BorrowChecker<'a> {
@@ -290,6 +301,11 @@ impl<'a> BorrowChecker<'a> {
         }
 
         let mut mutation_positions = FxHashSet::default();
+        let mut record_parameter_mutation = |root: &LocalId| {
+            if let Some(position) = parameter_positions.get(root) {
+                mutation_positions.insert(*position);
+            }
+        };
         for block_id in reachable_blocks {
             let block = self.block_by_id_or_error(*block_id, function.id)?;
             for statement in &block.statements {
@@ -303,16 +319,17 @@ impl<'a> BorrowChecker<'a> {
                     ));
                 };
 
-                let mut mutates_parameter = |root: &LocalId| {
-                    if let Some(position) = parameter_positions.get(root) {
-                        mutation_positions.insert(*position);
-                    }
-                };
-
                 match &statement.kind {
-                    HirStatementKind::Write { .. } => {
-                        for root in &statement_fact.mutable_roots {
-                            mutates_parameter(root);
+                    // Only a write to an existing place mutates a parameter. HIR validation keeps
+                    // definitions off parameter locals. `written_roots` excludes roots accessed
+                    // exclusively to issue a mutation-capable alias, so a slot rebind does not
+                    // publish a write to its source.
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::AssignPlace(_),
+                        ..
+                    } => {
+                        for root in &statement_fact.written_roots {
+                            record_parameter_mutation(root);
                         }
                     }
                     HirStatementKind::Call { target, args, .. } => {
@@ -334,7 +351,7 @@ impl<'a> BorrowChecker<'a> {
                                 ));
                             };
                             for root in &argument_fact.roots {
-                                mutates_parameter(root);
+                                record_parameter_mutation(root);
                             }
                         }
                     }
@@ -350,7 +367,7 @@ impl<'a> BorrowChecker<'a> {
                             ));
                         };
                         for root in &receiver_fact.roots {
-                            mutates_parameter(root);
+                            record_parameter_mutation(root);
                         }
                     }
                     _ => {}
@@ -375,9 +392,7 @@ impl<'a> BorrowChecker<'a> {
                         ));
                     };
                     for root in &fact.roots {
-                        if let Some(position) = parameter_positions.get(root) {
-                            mutation_positions.insert(*position);
-                        }
+                        record_parameter_mutation(root);
                     }
                 }
             }
@@ -394,9 +409,7 @@ impl<'a> BorrowChecker<'a> {
                 };
                 // Map keys and stored values are borrowed inputs, not mutated parameters.
                 for root in &fact.roots {
-                    if let Some(position) = parameter_positions.get(root) {
-                        mutation_positions.insert(*position);
-                    }
+                    record_parameter_mutation(root);
                 }
             }
         }
@@ -522,6 +535,19 @@ impl<'a> BorrowChecker<'a> {
         }
     }
 
+    /// Classifies one local's type for mutable-access root selection.
+    ///
+    /// WHY: production HIR always registers its type ids. An unregistered id means the layout
+    ///      consumer was handed a module without its defining `TypeEnvironment`, which is an
+    ///      infrastructure failure rather than a conservative semantic answer.
+    fn local_has_in_place_mutation_surface(
+        &self,
+        type_id: TypeId,
+    ) -> Result<bool, BorrowCheckError> {
+        let class = classify_hir_type(type_id, self.type_environment)?;
+        Ok(class.has_in_place_mutation_surface())
+    }
+
     pub(super) fn build_function_layout(
         &self,
         function: &HirFunction,
@@ -534,7 +560,15 @@ impl<'a> BorrowChecker<'a> {
         for block_id in reachable_blocks {
             let block = self.block_by_id_or_error(*block_id, function.id)?;
             for local in &block.locals {
-                local_info_by_id.insert(local.id, (local.mutable, local.region));
+                local_info_by_id.insert(
+                    local.id,
+                    LocalLayoutFacts {
+                        mutable: local.mutable,
+                        region: local.region,
+                        has_in_place_mutation_surface: self
+                            .local_has_in_place_mutation_surface(local.ty)?,
+                    },
+                );
             }
         }
 
@@ -553,11 +587,15 @@ impl<'a> BorrowChecker<'a> {
 
         let local_mutable = local_ids
             .iter()
-            .map(|local_id| local_info_by_id[local_id].0)
+            .map(|local_id| local_info_by_id[local_id].mutable)
+            .collect::<Vec<_>>();
+        let local_has_in_place_mutation_surface = local_ids
+            .iter()
+            .map(|local_id| local_info_by_id[local_id].has_in_place_mutation_surface)
             .collect::<Vec<_>>();
         let local_regions = local_ids
             .iter()
-            .map(|local_id| local_info_by_id[local_id].1)
+            .map(|local_id| local_info_by_id[local_id].region)
             .collect::<Vec<_>>();
         let mut local_index_by_id = FxHashMap::default();
         for (index, local_id) in local_ids.iter().enumerate() {
@@ -745,6 +783,7 @@ impl<'a> BorrowChecker<'a> {
         Ok(FunctionLayout::new(FunctionLayoutInputs {
             local_ids,
             local_mutable,
+            local_has_in_place_mutation_surface,
             local_first_write_order,
             local_last_use_order,
             statement_order_by_id,

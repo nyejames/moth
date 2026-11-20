@@ -114,7 +114,8 @@ pub(crate) use expression_overlays::{
     collect_reachable_expression_sites, replace_expression_overlay_entries,
 };
 pub(crate) use expression_sites::{
-    walk_expression_payloads_with_nested_tir_views, walk_tir_view_expression_payloads,
+    LoopFailureSite, TemplatePayload, walk_expression_payloads_with_nested_tir_views,
+    walk_tir_view_expression_payloads, walk_tir_view_failure_payloads,
 };
 
 #[cfg(test)]

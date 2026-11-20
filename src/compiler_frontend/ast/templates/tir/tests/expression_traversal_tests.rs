@@ -10,11 +10,13 @@ use super::super::expression_overlays::{
     collect_tir_expression_overlay_payloads, replace_expression_overlay_entries,
 };
 use super::super::expression_sites::{
-    walk_expression_payloads_with_nested_tir_views, walk_tir_view_expression_payloads,
+    TemplatePayload, walk_expression_payloads_with_nested_tir_views,
+    walk_tir_view_expression_payloads, walk_tir_view_failure_payloads,
 };
 use super::super::ids::{ExpressionSiteId, TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId};
 use super::super::node::{
     TemplateIr, TemplateIrNode, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
+    TirSlotPlaceholder,
 };
 use super::super::overlays::{
     TemplateViewContext, TirExpressionOverlay, TirSlotResolutionOverlayId, TirWrapperContext,
@@ -963,6 +965,267 @@ fn collects_runtime_slot_plan_wrapper_source_and_site_render_piece_dynamic_paylo
         .expect("expression overlay collection should succeed");
 
     assert_eq!(payloads.len(), 3);
+}
+
+#[test]
+fn view_walker_collects_runtime_slot_plan_roots_in_handoff_order() {
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let wrapper_root = dynamic_node(&mut store, &mut expressions, &mut const_values, 1);
+    let source_root = dynamic_node(&mut store, &mut expressions, &mut const_values, 2);
+    let site_render_root = dynamic_node(&mut store, &mut expressions, &mut const_values, 3);
+    let slot_plan_id = runtime_slot_plan_store(&mut store, source_root, site_render_root);
+
+    let mut runtime_template = TemplateIr::new(
+        wrapper_root,
+        Style::default(),
+        TemplateType::StringFunction,
+        TemplateIrSummary::default(),
+        None,
+    );
+    runtime_template.runtime_slot_plan = Some(slot_plan_id);
+    let runtime_template_id = store.push_template(runtime_template);
+    let view = TirView::with_minimum_phase(
+        &store,
+        runtime_template_id,
+        TemplateTirPhase::Finalized,
+        TemplateTirPhase::Finalized,
+        TemplateViewContext::default(),
+    )
+    .expect("view should construct");
+
+    let payloads = collect_view(&view, &expressions).expect("view walk should succeed");
+
+    assert_eq!(payloads.len(), 3);
+    assert!(is_i32_literal(&expressions, &const_values, payloads[0], 1));
+    assert!(is_i32_literal(&expressions, &const_values, payloads[1], 2));
+    assert!(is_i32_literal(&expressions, &const_values, payloads[2], 3));
+}
+
+#[test]
+fn failure_walker_skips_absent_supplied_guard_body_but_payload_walker_keeps_it() {
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let body = dynamic_node(&mut store, &mut expressions, &mut const_values, 1);
+    let guard = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::SuppliedGuard {
+            key: SlotKey::Default,
+            body,
+        },
+        None,
+    ));
+    let template_id = push_template(&mut store, guard, TemplateType::StringFunction);
+    let view = TirView::with_minimum_phase(
+        &store,
+        template_id,
+        TemplateTirPhase::Finalized,
+        TemplateTirPhase::Finalized,
+        TemplateViewContext::default(),
+    )
+    .expect("view should construct");
+
+    // Authored validation still reaches guard bodies so unselected code stays type-checked.
+    let payloads = collect_view(&view, &expressions).expect("view walk should succeed");
+    assert_eq!(payloads.len(), 1);
+
+    // Executable failure classification treats an unselected guard as absent output.
+    let mut failure_payloads = Vec::new();
+    walk_tir_view_failure_payloads(&view, &expressions, &mut |payload| {
+        if let TemplatePayload::Expression(expression) = payload {
+            failure_payloads.push(expression.id());
+        }
+        Ok(())
+    })
+    .expect("failure walk should succeed");
+    assert!(failure_payloads.is_empty());
+}
+
+#[test]
+fn view_walker_appends_child_after_slotless_wrapper() {
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+
+    let wrapper_expression = dynamic_node(&mut store, &mut expressions, &mut const_values, 1);
+    let wrapper_template = push_template(&mut store, wrapper_expression, TemplateType::String);
+    let wrapper_set = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+        wrapper_template,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )]);
+
+    let child_expression = dynamic_node(&mut store, &mut expressions, &mut const_values, 2);
+    let child_template = push_template(&mut store, child_expression, TemplateType::String);
+    let occurrence_id = store.next_child_template_occurrence_id();
+    let root = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: TemplateTirChildReference::new(
+                child_template,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            ),
+            occurrence_id,
+        },
+        None,
+    ));
+    let template_id = push_template(&mut store, root, TemplateType::String);
+    let wrapper_overlay = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
+            contexts: vec![(
+                occurrence_id,
+                TirWrapperContext {
+                    inherited_wrapper_set: Some(wrapper_set),
+                    ..Default::default()
+                },
+            )],
+        })
+        .expect("slotless wrapper overlay should allocate");
+    let view = TirView::with_minimum_phase(
+        &store,
+        template_id,
+        TemplateTirPhase::Finalized,
+        TemplateTirPhase::Finalized,
+        TemplateViewContext {
+            wrapper_context: Some(wrapper_overlay),
+            ..Default::default()
+        },
+    )
+    .expect("view should construct");
+
+    let payloads = collect_view(&view, &expressions).expect("view walk should succeed");
+
+    assert_eq!(payloads.len(), 2);
+    assert!(is_i32_literal(&expressions, &const_values, payloads[0], 1));
+    assert!(is_i32_literal(&expressions, &const_values, payloads[1], 2));
+}
+
+#[test]
+fn view_walker_keeps_repeated_wrapper_injections_at_their_nested_slot() {
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+
+    let first_child_expression = dynamic_node(&mut store, &mut expressions, &mut const_values, 1);
+    let first_child = push_template(&mut store, first_child_expression, TemplateType::String);
+    let second_child_expression = dynamic_node(&mut store, &mut expressions, &mut const_values, 2);
+    let second_child = push_template(&mut store, second_child_expression, TemplateType::String);
+
+    let fill_occurrence = store.next_slot_occurrence_id();
+    let placeholder = TirSlotPlaceholder::with_wrapper_sets(
+        SlotKey::Default,
+        fill_occurrence,
+        None,
+        None,
+        None,
+        false,
+    );
+    let fill_root = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Slot { placeholder },
+        None,
+    ));
+    let fill_template = push_template(&mut store, fill_root, TemplateType::String);
+
+    let prefix = dynamic_node(&mut store, &mut expressions, &mut const_values, 3);
+    let suffix = dynamic_node(&mut store, &mut expressions, &mut const_values, 4);
+    let fill_child_occurrence = store.next_child_template_occurrence_id();
+    let fill_child = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: TemplateTirChildReference::new(
+                fill_template,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            ),
+            occurrence_id: fill_child_occurrence,
+        },
+        None,
+    ));
+    let wrapper_root = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Sequence {
+            children: vec![prefix, fill_child, suffix],
+        },
+        None,
+    ));
+    let wrapper_template = push_template(&mut store, wrapper_root, TemplateType::String);
+    let wrapper_set = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+        wrapper_template,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )]);
+
+    let first_occurrence = store.next_child_template_occurrence_id();
+    let second_occurrence = store.next_child_template_occurrence_id();
+    let first_node = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: TemplateTirChildReference::new(
+                first_child,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            ),
+            occurrence_id: first_occurrence,
+        },
+        None,
+    ));
+    let second_node = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: TemplateTirChildReference::new(
+                second_child,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            ),
+            occurrence_id: second_occurrence,
+        },
+        None,
+    ));
+    let root = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Sequence {
+            children: vec![first_node, second_node],
+        },
+        None,
+    ));
+    let template_id = push_template(&mut store, root, TemplateType::String);
+    let wrapper_overlay = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
+            contexts: vec![
+                (
+                    first_occurrence,
+                    TirWrapperContext {
+                        inherited_wrapper_set: Some(wrapper_set),
+                        ..Default::default()
+                    },
+                ),
+                (
+                    second_occurrence,
+                    TirWrapperContext {
+                        inherited_wrapper_set: Some(wrapper_set),
+                        ..Default::default()
+                    },
+                ),
+            ],
+        })
+        .expect("repeated wrapper overlay should allocate");
+    let view = TirView::with_minimum_phase(
+        &store,
+        template_id,
+        TemplateTirPhase::Finalized,
+        TemplateTirPhase::Finalized,
+        TemplateViewContext {
+            wrapper_context: Some(wrapper_overlay),
+            ..Default::default()
+        },
+    )
+    .expect("view should construct");
+
+    let payloads = collect_view(&view, &expressions).expect("view walk should succeed");
+
+    assert_eq!(payloads.len(), 6);
+    for (index, expected) in [3, 1, 4, 3, 2, 4].into_iter().enumerate() {
+        assert!(
+            is_i32_literal(&expressions, &const_values, payloads[index], expected),
+            "payload {index} must be the expected wrapped-child position"
+        );
+    }
 }
 
 #[test]

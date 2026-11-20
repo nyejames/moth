@@ -1,0 +1,9 @@
+-- A const template whose body holds an open range loop is re-expanded inline when a runtime
+-- fragment renders it. The loop has no ordinal binding and no explicit step, so its generated
+-- ordinal update and zero-step guard would be unobservable failure producers.
+looped #= [:<ul>[loop 0 to 2 |i|:[$slot x]]</ul>]
+
+name = "Priya"
+
+~[:[name]|[looped]]
+~[:[looped:[$in x:"*"]]]

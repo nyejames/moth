@@ -39,7 +39,7 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_node, make_test_variable, node,
 };
-use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
+use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker_with_types;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
@@ -268,8 +268,9 @@ fn lower_with_converged_summaries(
     .expect("HIR lowering should succeed");
     let hir = lowered.hir_module;
     let type_environment = lowered.type_environment;
-    let mut report = run_borrow_checker(
+    let mut report = run_borrow_checker_with_types(
         &hir,
+        &type_environment,
         &default_external_package_registry(string_table),
         path_fork,
         string_table,

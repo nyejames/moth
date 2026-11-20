@@ -1,8 +1,12 @@
 //! Tests for dev-server HTTP routing during successful and failed builds.
 
 use super::{PreparedResponse, handle_connection_with_timeouts, prepare_static_response};
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_support::await_worker_completion;
 use crate::projects::dev_server::state::{BuildState, DevServerState};
+use crate::projects::routing::parse_html_site_config;
+use crate::projects::settings::Config;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -55,6 +59,43 @@ fn configure_failed_build_state(
     build_state.last_error_html = Some(last_error_html.to_owned());
     build_state.last_build_version = 9;
     build_state
+}
+
+/// Publish a successful build state whose HTML site config uses `origin`.
+fn state_with_origin(root: PathBuf, output_dir: &Path, origin: &str) -> Arc<DevServerState> {
+    let mut build_state =
+        configure_build_state(output_dir, Some(PathBuf::from("index.html")), true);
+    let mut config = Config::new(root);
+    config
+        .builder_settings
+        .set_string("html", "origin", String::from(origin), None);
+    let mut strings = StringTable::new();
+    build_state.html_site_config =
+        parse_html_site_config(&config, &mut DiagnosticStringBuilder::new(&mut strings))
+            .expect("decoded origin should parse");
+
+    let state = DevServerState::new(output_dir.to_path_buf());
+    *state
+        .build_state
+        .lock()
+        .expect("build-state lock should be available") = build_state;
+    Arc::new(state)
+}
+
+/// Serve exactly `request_count` loopback requests from one state.
+fn spawn_loopback_request_server(
+    listener: TcpListener,
+    state: Arc<DevServerState>,
+    request_count: usize,
+    timeout: Duration,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        for _ in 0..request_count {
+            let (stream, _) = listener.accept().expect("should accept client");
+            handle_connection_with_timeouts(stream, Arc::clone(&state), timeout, timeout)
+                .expect("request should succeed");
+        }
+    })
 }
 
 #[cfg(unix)]
@@ -264,21 +305,12 @@ fn rapid_loopback_ping_requests_do_not_stall_request_handling() {
     let address = listener
         .local_addr()
         .expect("listener should report bound address");
-    let state = Arc::new(DevServerState::new(PathBuf::from("dev")));
-
-    let server_state = Arc::clone(&state);
-    let server_thread = thread::spawn(move || {
-        for _ in 0..5 {
-            let (stream, _) = listener.accept().expect("should accept client");
-            handle_connection_with_timeouts(
-                stream,
-                Arc::clone(&server_state),
-                Duration::from_millis(100),
-                Duration::from_millis(100),
-            )
-            .expect("ping request should succeed");
-        }
-    });
+    let server_thread = spawn_loopback_request_server(
+        listener,
+        Arc::new(DevServerState::new(PathBuf::from("dev"))),
+        5,
+        Duration::from_millis(100),
+    );
 
     for _ in 0..5 {
         let response = loopback_get(address, "/__moth/ping");
@@ -355,50 +387,162 @@ fn encoded_loopback_targets_resolve_and_redirect_with_encoded_locations() {
     fs::create_dir_all(output_dir.join("about us")).expect("should create page dir");
     fs::write(output_dir.join("about us/index.html"), "<h1>about</h1>").expect("should write page");
 
-    let build_state = configure_build_state(&output_dir, Some(PathBuf::from("index.html")), true);
-    let state = DevServerState::new(output_dir);
-    *state
-        .build_state
-        .lock()
-        .expect("build-state lock should be available") = build_state;
-    let state = Arc::new(state);
+    let state = state_with_origin(root, &output_dir, "/Café docs/%20");
+    let server_thread =
+        spawn_loopback_request_server(listener, state, 5, Duration::from_millis(200));
 
-    let server_state = Arc::clone(&state);
-    let server_thread = thread::spawn(move || {
-        for _ in 0..3 {
-            let (stream, _) = listener.accept().expect("should accept client");
-            handle_connection_with_timeouts(
-                stream,
-                Arc::clone(&server_state),
-                Duration::from_millis(200),
-                Duration::from_millis(200),
-            )
-            .expect("request should succeed");
-        }
-    });
-
-    let asset_response = loopback_get(address, "/docs/hello%20world.txt");
+    let asset_response = loopback_get(address, "/Caf%c3%a9%20docs/%2520/docs/hello%20world.txt");
     assert!(
         asset_response.starts_with("HTTP/1.1 200 OK"),
         "{asset_response}"
     );
     assert!(asset_response.ends_with("spaced asset"), "{asset_response}");
 
-    let redirect_response = loopback_get(address, "/about%20us");
+    let redirect_response = loopback_get(address, "/Caf%C3%A9%20docs/%2520/about%20us");
     assert!(
         redirect_response.starts_with("HTTP/1.1 302 FOUND"),
         "{redirect_response}"
     );
     assert!(
-        redirect_response.contains("Location: /about%20us/\r\n"),
+        redirect_response.contains("Location: /Caf%C3%A9%20docs/%2520/about%20us/\r\n"),
         "{redirect_response}"
     );
 
-    let malformed_response = loopback_get(address, "/bad%FF.txt");
+    let malformed_response = loopback_get(address, "/Caf%C3%A9%20docs/%2520/bad%FF.txt");
     assert!(
         malformed_response.starts_with("HTTP/1.1 400 BAD REQUEST"),
         "{malformed_response}"
     );
+
+    let root_response = loopback_get(address, "/");
+    assert!(
+        root_response.contains("Location: /Caf%C3%A9%20docs/%2520/\r\n"),
+        "{root_response}"
+    );
+
+    let outside_origin = loopback_get(address, "/Caf%C3%A9%20docs/%2520%2Fdocs/hello%20world.txt");
+    assert!(
+        outside_origin.starts_with("HTTP/1.1 404 NOT FOUND"),
+        "{outside_origin}"
+    );
+
+    server_thread.join().expect("server thread should finish");
+}
+
+#[test]
+fn bare_origin_redirects_to_the_trailing_slash_root_and_keeps_the_query() {
+    let Some(listener) = bind_loopback_listener() else {
+        return;
+    };
+    let address = listener
+        .local_addr()
+        .expect("listener should report bound address");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let output_dir = root.join("dev");
+    fs::create_dir_all(&output_dir).expect("should create output dir");
+    fs::write(
+        output_dir.join("index.html"),
+        "<html><body><a href=\"docs/\">docs</a></body></html>",
+    )
+    .expect("should write root page");
+
+    let state = state_with_origin(root, &output_dir, "/café docs");
+    let server_thread =
+        spawn_loopback_request_server(listener, state, 6, Duration::from_millis(200));
+
+    // Lowercase escape spelling is valid in a request and redirects to the canonical origin.
+    let bare_response = loopback_get(address, "/caf%c3%a9%20docs");
+    assert!(
+        bare_response.starts_with("HTTP/1.1 302 FOUND"),
+        "{bare_response}"
+    );
+    assert!(
+        bare_response.contains("Location: /caf%C3%A9%20docs/\r\n"),
+        "{bare_response}"
+    );
+
+    let query_response = loopback_get(address, "/caf%C3%A9%20docs?tab=docs");
+    assert!(
+        query_response.starts_with("HTTP/1.1 302 FOUND"),
+        "{query_response}"
+    );
+    assert!(
+        query_response.contains("Location: /caf%C3%A9%20docs/?tab=docs\r\n"),
+        "{query_response}"
+    );
+
+    // Percent-encoded query data is valid request text and must survive the redirect unchanged.
+    let encoded_query_response = loopback_get(address, "/caf%C3%A9%20docs?tab=a%20b&ref=caf%C3%A9");
+    assert!(
+        encoded_query_response.starts_with("HTTP/1.1 302 FOUND"),
+        "{encoded_query_response}"
+    );
+    assert!(
+        encoded_query_response.contains("Location: /caf%C3%A9%20docs/?tab=a%20b&ref=caf%C3%A9\r\n"),
+        "{encoded_query_response}"
+    );
+
+    let origin_root_response = loopback_get(address, "/caf%C3%A9%20docs/");
+    assert!(
+        origin_root_response.starts_with("HTTP/1.1 200 OK"),
+        "{origin_root_response}"
+    );
+    assert!(
+        origin_root_response.contains("<a href=\"docs/\">docs</a>"),
+        "{origin_root_response}"
+    );
+
+    // A longer path is outside the origin, not a bare-origin redirect candidate.
+    let outside_origin_response = loopback_get(address, "/caf%C3%A9%20docsx");
+    assert!(
+        outside_origin_response.starts_with("HTTP/1.1 404 NOT FOUND"),
+        "{outside_origin_response}"
+    );
+
+    let unrelated_root_response = loopback_get(address, "/");
+    assert!(
+        unrelated_root_response.starts_with("HTTP/1.1 302 FOUND"),
+        "{unrelated_root_response}"
+    );
+    assert!(
+        unrelated_root_response.contains("Location: /caf%C3%A9%20docs/\r\n"),
+        "{unrelated_root_response}"
+    );
+
+    server_thread.join().expect("server thread should finish");
+}
+
+#[test]
+fn raw_control_characters_in_request_targets_are_rejected() {
+    let Some(listener) = bind_loopback_listener() else {
+        return;
+    };
+    let address = listener
+        .local_addr()
+        .expect("listener should report bound address");
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let output_dir = root.join("dev");
+    fs::create_dir_all(&output_dir).expect("should create output dir");
+    fs::write(output_dir.join("index.html"), "<html></html>").expect("should write root page");
+
+    let state = state_with_origin(root, &output_dir, "/café docs");
+    let server_thread =
+        spawn_loopback_request_server(listener, state, 2, Duration::from_millis(200));
+
+    // Both targets are bare-origin redirects whose query would otherwise reach the `Location`
+    // header with the raw control byte intact.
+    for request_target in [
+        "/caf%C3%A9%20docs?tab=a\u{0}b",
+        "/caf%C3%A9%20docs?tab=a\u{7f}b",
+    ] {
+        let response = loopback_get(address, request_target);
+        assert!(
+            response.starts_with("HTTP/1.1 400 BAD REQUEST"),
+            "{request_target:?} should be rejected: {response:?}"
+        );
+    }
 
     server_thread.join().expect("server thread should finish");
 }

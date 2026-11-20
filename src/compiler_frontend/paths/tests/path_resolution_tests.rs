@@ -25,7 +25,9 @@ use crate::compiler_frontend::paths::dependency_resolution::{
     DependencyPathBase, DependencyPathResolutionError,
 };
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_resolution::{
+    ProjectPathResolver, explicit_dependency_source_kind,
+};
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -374,6 +376,151 @@ fn extensionless_dependency_resolves_compiler_supported_moth_template_candidate(
 
     assert_eq!(result.kind, SourceFileKind::MothTemplate);
     assert!(result.path.ends_with("src/docs/intro.mtf"));
+}
+
+#[test]
+fn single_file_dependencies_do_not_select_config_as_a_source_candidate() {
+    let mut h = TestHarness::new();
+    let root = h.project_root.join("src");
+    fs::create_dir_all(root.join("docs/@config.moth")).unwrap();
+    fs::write(root.join("docs/@config.moth/@config.moth"), "value #= 1").unwrap();
+    fs::write(root.join("docs/@config.mtf"), "unrelated content").unwrap();
+    fs::write(root.join("@config.moth"), "value #= 2").unwrap();
+    let declaring_source = h.declaring_source();
+
+    for components in [
+        ["docs", "@config.moth", "@config"].as_slice(),
+        ["docs", "@config.moth", "missing"].as_slice(),
+        ["@config.moth", "value"].as_slice(),
+    ] {
+        let path = h.make_path(components);
+        let error = h
+            .resolver
+            .resolve_dependency_to_source_file(
+                path,
+                &h.path_fork,
+                &declaring_source,
+                &mut h.string_table,
+            )
+            .expect_err("reserved config is not a dependency candidate");
+        let diagnostics = typed_dependency_diagnostic(error);
+        assert_eq!(
+            dependency_view(&diagnostics).descriptor().code,
+            "MOTH-IMPORT-0005"
+        );
+    }
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(
+            "../../@config.moth",
+            root.join("docs/@config.moth/alias.moth"),
+        )
+        .unwrap();
+        let path = h.make_path(&["docs", "@config.moth", "alias"]);
+        let error = h
+            .resolver
+            .resolve_dependency_to_source_file(
+                path,
+                &h.path_fork,
+                &declaring_source,
+                &mut h.string_table,
+            )
+            .expect_err("a symlink must not import the reserved config source");
+        let diagnostics = typed_dependency_diagnostic(error);
+        assert_eq!(
+            dependency_view(&diagnostics).descriptor().code,
+            "MOTH-IMPORT-0008"
+        );
+    }
+}
+
+#[test]
+fn config_spelling_never_counts_as_an_explicit_source_extension() {
+    let mut h = TestHarness::new();
+
+    let config_directory = h.make_path(&["docs", "@config.moth"]);
+    assert_eq!(
+        explicit_dependency_source_kind(config_directory, &h.path_fork, &h.string_table),
+        None
+    );
+
+    // An earlier explicit source extension stays invalid on the way to that surface.
+    let extended_prefix = h.make_path(&["docs.mtf", "@config.moth"]);
+    assert_eq!(
+        explicit_dependency_source_kind(extended_prefix, &h.path_fork, &h.string_table),
+        Some(SourceFileKind::MothTemplate)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn synthetic_dependencies_reject_hidden_canonical_ancestry_behind_config_directory_alias() {
+    // `@config.moth` is an ordinary directory spelling, so a visible directory alias may point at
+    // a hidden physical subtree. The lexical hidden check sees only the authored components and
+    // the final file name, so canonical ancestry must be checked before the hidden source is
+    // queued.
+    use std::os::unix::fs::symlink;
+
+    let mut h = TestHarness::new();
+    let root = h.project_root.join("src");
+    let hidden_directory = root.join("_private/@config.moth");
+    fs::create_dir_all(&hidden_directory).expect("hidden directory should be created");
+    fs::write(hidden_directory.join("helper.moth"), "").expect("hidden helper should be created");
+    symlink("_private/@config.moth", root.join("@config.moth"))
+        .expect("visible config-directory alias should be created");
+
+    let declaring_source = h.declaring_source();
+    let path = h.make_path(&["@config.moth", "helper"]);
+    let error = h
+        .resolver
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
+        .expect_err("a visible alias must not import a hidden helper");
+
+    let diagnostics = typed_dependency_diagnostic(error);
+    let diagnostic = dependency_view(&diagnostics);
+    let facts = diagnostic
+        .family_view::<InvalidImportPathView>()
+        .expect("the diagnostic is an invalid import path");
+    assert_eq!(facts.reason, InvalidImportPathCode::HiddenDirectory);
+    let rendered = rendered_error_msg(diagnostic, &h.string_table, &h.path_fork);
+    assert!(
+        rendered.contains("starts with '_'"),
+        "expected a hidden-directory diagnostic, got: {rendered}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn canonical_hidden_ancestry_check_exempts_the_selected_base_directory() {
+    let mut h = TestHarness::new();
+    let selected_root = h.project_root.join("src/_prototype");
+    fs::create_dir_all(&selected_root).expect("selected root should be created");
+    let declaring_source = selected_root.join("index.moth");
+    fs::write(&declaring_source, "").expect("declaring source should be created");
+    fs::write(selected_root.join("helper.moth"), "").expect("helper should be created");
+
+    let path = h.make_path(&[".", "helper"]);
+    let resolved = h
+        .resolver
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
+        .expect("the explicitly selected hidden base is exempt");
+
+    assert_eq!(
+        resolved.path,
+        fs::canonicalize(selected_root.join("helper.moth"))
+            .expect("helper path should canonicalize")
+    );
 }
 
 #[test]
@@ -1107,6 +1254,60 @@ fn dependency_case_sensitive_symbol_mismatch_rejected() {
             "case mismatch should fail on case-sensitive filesystems"
         );
     }
+}
+
+/// A file name that cannot be represented as UTF-8.
+///
+/// APFS rejects such names, so only other Unix hosts can create the fixture.
+#[cfg(all(unix, not(target_vendor = "apple")))]
+fn non_utf8_file_name() -> std::ffi::OsString {
+    use std::os::unix::ffi::OsStringExt;
+    std::ffi::OsString::from_vec(b"invalid-\xFF".to_vec())
+}
+
+#[cfg(all(unix, not(target_vendor = "apple")))]
+#[test]
+fn non_utf8_canonical_component_reports_the_typed_identity_failure() {
+    let mut h = TestHarness::new();
+    let target_dir = h.project_root.join("src/nested").join(non_utf8_file_name());
+    fs::create_dir_all(&target_dir).expect("non-UTF-8 directory should be created");
+    let target = target_dir.join("page.moth");
+    fs::write(&target, b"").expect("target should be written");
+    let canonical_target = fs::canonicalize(&target).expect("target should canonicalize");
+
+    // The authored alias is UTF-8, so resolution only reaches the non-UTF-8 component after
+    // canonicalization. The target is deeper than the alias, which made the pre-fix component
+    // lists differ in length and silently skip the case check.
+    let alias = h.project_root.join("src/alias.moth");
+    std::os::unix::fs::symlink(&target, &alias).expect("alias symlink should be created");
+    let declaring_source = h.declaring_source();
+    let path = h.make_path(&["alias"]);
+
+    let error = h
+        .resolver
+        .resolve_dependency_to_source_file(
+            path,
+            &h.path_fork,
+            &declaring_source,
+            &mut h.string_table,
+        )
+        .expect_err("a non-UTF-8 canonical component cannot enter Moth identity");
+    let DependencyPathResolutionError::Infrastructure(error) = error else {
+        panic!("a non-UTF-8 canonical component must stay on the infrastructure lane");
+    };
+
+    assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(
+        error.stage,
+        crate::compiler_frontend::compiler_messages::CompilerStage::DependencyResolution
+    );
+    assert_eq!(error.host_path.as_deref(), Some(canonical_target.as_path()));
+    assert_eq!(
+        error.message(),
+        format!(
+            "Resolved dependency target {canonical_target:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
+        )
+    );
 }
 
 // -----------------------------------------------------------------------

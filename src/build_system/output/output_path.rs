@@ -155,9 +155,21 @@ pub(crate) fn normalize_directory_output_relative_path(
 /// Unreserved ASCII bytes remain readable; every other UTF-8 byte is emitted as an uppercase
 /// percent escape. URL spelling deliberately preserves authored character case.
 pub(crate) fn percent_encode_url_segment(segment: &str) -> String {
-    let mut encoded = String::with_capacity(segment.len());
-    for byte in segment.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+    percent_encode_url(segment, false)
+}
+
+/// Percent-encode a decoded URL path, preserving slash separators.
+pub(crate) fn percent_encode_url_path(path: &str) -> String {
+    percent_encode_url(path, true)
+}
+
+fn percent_encode_url(text: &str, preserve_slashes: bool) -> String {
+    let mut encoded = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric()
+            || matches!(byte, b'-' | b'.' | b'_' | b'~')
+            || (preserve_slashes && byte == b'/')
+        {
             encoded.push(byte as char);
         } else {
             let _ = write!(encoded, "%{byte:02X}");

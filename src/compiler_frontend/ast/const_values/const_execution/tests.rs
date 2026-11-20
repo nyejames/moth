@@ -31,6 +31,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::module_compilation::DEFAULT_CONST_EXECUTION_MEMORY_LIMIT_BYTES;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
@@ -69,6 +70,99 @@ fn release_candidate(
             body_provenance: provenance,
         },
     }
+}
+
+/// One release rewrite of a no-argument call to a literal-returning const callee.
+struct ReleaseCallRewrite {
+    builder: AstExpressionBuilder,
+    authored: ExprId,
+    rewritten: ExprId,
+    callee: PathId,
+    erased: Vec<(PathId, SourceSpan, bool)>,
+}
+
+/// Rewrite one ordinary call to a literal-returning const callee in release mode.
+///
+/// WHAT: prepares the callee, attaches project-context provenance and runs the release walk.
+/// WHY: the span-present and spanless cases differ only in the call's authored span, so one
+///      fixture keeps the producer invariant and the provenance transfer on the same shape.
+fn release_rewrite_of_literal_call(call_span: Option<SourceSpan>) -> ReleaseCallRewrite {
+    let mut strings = StringTable::new();
+    let mut constants = ConstValueStore::default();
+    let mut builder = AstExpressionBuilder::new().expect("builder");
+    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let returned = builder
+        .fixed_scalar(
+            &mut constants,
+            FixedScalarValue::signed(FixedScalar::I32, 7).expect("I32 literal"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("returned literal")
+        .id();
+    let callee = PathId::try_from_index(4).expect("callee path");
+    let executable = ConstFunctionExecutable {
+        parameters: Vec::new(),
+        return_slots: vec![i32_type],
+        instructions: Rc::from(vec![ConstInstruction {
+            kind: ConstInstructionKind::Return(vec![returned]),
+            span: None,
+        }]),
+        handler_bodies: Rc::new(FxHashMap::default()),
+    };
+    let mut executables = FxHashMap::default();
+    executables.insert(callee, executable);
+    let provenance = SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "project",
+        "name",
+    ));
+    let mut release_provenances = FxHashMap::default();
+    release_provenances.insert(callee, provenance);
+    let authored = builder
+        .function_call_with_typed_arguments(callee, vec![], vec![i32_type], call_span)
+        .expect("ordinary call")
+        .id();
+    let scope = empty_module_scope();
+    let paths = PathInternerFork::empty();
+    let mut state = ExecutionState::default();
+    let types = TypeEnvironment::default();
+    let rewritten = {
+        let mut budget = ExecutionBudget::new(constants.execution_meter());
+        let mut services = ConstExecutionServices {
+            builder: &mut builder,
+            constants: &mut constants,
+            executables: &executables,
+            scope: &scope,
+            string_table: &mut strings,
+            types: &types,
+            path_fork: &paths,
+        };
+        let mut interpreter = services.interpreter(&mut budget, &mut state);
+        interpreter
+            .rewrite_with_bindings(
+                authored,
+                RewriteMode::Release,
+                &release_provenances,
+                &mut FrameBindings::default(),
+            )
+            .expect("the literal-returning ordinary call is release-eligible")
+    };
+    ReleaseCallRewrite {
+        builder,
+        authored,
+        rewritten,
+        callee,
+        erased: state.release_erased_calls,
+    }
+}
+
+/// A short authored span distinguishable from the empty source-start span.
+fn call_site_span() -> SourceSpan {
+    SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact_inline(12, 20).expect("a short call span fits the inline encoding"),
+    )
 }
 
 #[test]
@@ -391,71 +485,11 @@ fn release_candidate_graph_removes_cyclic_components() {
 
 #[test]
 fn release_call_replacement_inherits_candidate_provenance() {
-    use crate::compiler_frontend::synthetic_interface_provenance::{
-        SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
-    };
-
-    let mut strings = StringTable::new();
-    let mut constants = ConstValueStore::default();
-    let mut builder = AstExpressionBuilder::new().expect("builder");
-    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-    let returned = builder
-        .fixed_scalar(
-            &mut constants,
-            FixedScalarValue::signed(FixedScalar::I32, 7).expect("I32 literal"),
-            None,
-            ValueMode::ImmutableOwned,
-        )
-        .expect("returned literal")
-        .id();
-    let callee = PathId::try_from_index(4).expect("callee path");
-    let executable = ConstFunctionExecutable {
-        parameters: Vec::new(),
-        return_slots: vec![i32_type],
-        instructions: Rc::from(vec![ConstInstruction {
-            kind: ConstInstructionKind::Return(vec![returned]),
-            span: None,
-        }]),
-        handler_bodies: Rc::new(FxHashMap::default()),
-    };
-    let mut executables = FxHashMap::default();
-    executables.insert(callee, executable);
-    let member = SyntheticInterfaceMemberIdentity::new(
-        SyntheticInterfaceClass::ProjectContext,
-        "project",
-        "name",
-    );
-    let mut release_provenances = FxHashMap::default();
-    release_provenances.insert(callee, SyntheticInterfaceProvenance::single(member));
-    let call = builder
-        .function_call_with_typed_arguments(callee, vec![], vec![i32_type], None)
-        .expect("ordinary call")
-        .id();
-    let scope = empty_module_scope();
-    let paths = PathInternerFork::empty();
-    let mut budget = ExecutionBudget::new(constants.execution_meter());
-    let mut state = ExecutionState::default();
-    let types = TypeEnvironment::default();
-    let mut services = ConstExecutionServices {
-        builder: &mut builder,
-        constants: &mut constants,
-        executables: &executables,
-        scope: &scope,
-        string_table: &mut strings,
-        types: &types,
-        path_fork: &paths,
-    };
-    let mut interpreter = services.interpreter(&mut budget, &mut state);
-    let rewritten = interpreter
-        .rewrite_with_bindings(
-            call,
-            RewriteMode::Release,
-            &release_provenances,
-            &mut FrameBindings::default(),
-        )
-        .expect("the literal-returning ordinary call folds in release");
-    let facts = builder
-        .view(rewritten)
+    let span = call_site_span();
+    let rewrite = release_rewrite_of_literal_call(Some(span));
+    let facts = rewrite
+        .builder
+        .view(rewrite.rewritten)
         .expect("rewritten call")
         .occurrence_facts()
         .expect("replacement provenance");
@@ -466,9 +500,43 @@ fn release_call_replacement_inherits_candidate_provenance() {
         "the release replacement must inherit the candidate's transitive provenance"
     );
     assert_eq!(
-        state.release_erased_calls,
-        vec![(callee, None, false)],
-        "release rewriting must record the erased call site for HIR constraint evidence"
+        rewrite.erased,
+        vec![(rewrite.callee, span, false)],
+        "release rewriting must record the erased call site with its authored span"
+    );
+}
+
+/// Release speculation must never erase a call whose liveness cannot be decided.
+///
+/// WHAT: a spanless ordinary call stays at runtime and records no erased-call row.
+/// WHY: HIR decides whether an erased call was live from authored source spans. Guessing on an
+///      absent span could reject `$infallible` source that debug accepts, breaking debug/release
+///      verdict parity. No legal source or materialised callable produces a spanless call today,
+///      so this unit test pins the producer invariant that the required ledger span now encodes.
+#[test]
+fn release_rewrite_declines_a_spanless_call() {
+    use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
+
+    let rewrite = release_rewrite_of_literal_call(None);
+    assert_eq!(
+        rewrite.rewritten, rewrite.authored,
+        "a spanless call must stay at runtime in release"
+    );
+    assert!(
+        matches!(
+            rewrite
+                .builder
+                .view(rewrite.rewritten)
+                .expect("retained call")
+                .operation(),
+            ExpressionOperationView::Call(_)
+        ),
+        "the retained expression must still be the authored call"
+    );
+    assert!(
+        rewrite.erased.is_empty(),
+        "a spanless call must not enter the erased-call ledger: {:?}",
+        rewrite.erased
     );
 }
 

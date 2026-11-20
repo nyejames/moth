@@ -2,7 +2,7 @@ Project and builder settings are ordinary top-level compile-time constants in an
 
 `@config.moth` is one self-contained compile-time source at the selected project root. It has no source dependencies, package resolution or authored file-value paths. A nested `@config.moth` is inert to an enclosing build.
 
-`@config.moth` is a reserved compiler filename, not a module root. It has no normal or support facade, entry, export surface or importable namespace. Selecting it for single-file compilation is rejected. Case variants such as `@Config.moth` are invalid. An ordinary helper named `config.moth` keeps ordinary source rules, so a dependency path such as `@config` resolves that helper and never the build-only file.
+`@config.moth` is a reserved compiler filename, not a module root. It has no normal or support facade, entry, export surface or importable namespace. Selecting it for single-file compilation is rejected. Case variants such as `@Config.moth` are invalid. An ordinary helper named `config.moth` keeps ordinary source rules, so a dependency path such as `@config` resolves that helper and never the build-only file. When `@config.moth` is a symlink to another file in the project, such as `actual_config.moth`, that target is the config source, not an ordinary module or helper. File-value references that resolve to it are rejected as reserved (`MOTH-RULE-0063`).
 
 ### Named project and builder records
 
@@ -206,6 +206,8 @@ The recognised setting names and defaults are:
         [: `""`]
     ]
 ]
+
+`origin` takes decoded path text such as `"/café docs"`. Moth encodes it as `/caf%C3%A9%20docs` in generated URLs and dev-server redirects. A literal `%20` in the setting becomes `%2520` in a URL. The dev server redirects a request for the bare prefix to its trailing-slash root and keeps the query, so relative links resolve inside the origin. Use `/` for the site root. Other prefixes must start with `/` and cannot contain empty or dot segments, a query, a fragment, a backslash or control characters.
 
 `page_url_style` accepts `trailing_slash`, `no_trailing_slash` or `ignore`. `html_favicon` accepts a compile-time String containing an untracked URL, not necessarily a string literal. Tracked file resources belong in a direct root builder slot because `@config.moth` rejects authored file-value paths.
 

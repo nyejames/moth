@@ -1,0 +1,20 @@
+-- The catch handler is statically pruned because the division cannot fail. Its fast range loop
+-- still selects the generated ordinal update: the folded assertion lowers as a runtime check, so
+-- the body reaches the step block and `$safe_math` must reject the guard in both profiles.
+always_false || -> Bool:
+    return false
+;
+
+$safe_math
+skipped_assert_guard |limit I32| -> I32:
+    result I32 = 10 // 2 catch |error|:
+        $fast_math
+        loop 0 to limit |value, ordinal|:
+            assert(always_false())
+        ;
+        return 0
+    ;
+    return result
+;
+
+~[: [skipped_assert_guard(2)]]

@@ -781,6 +781,9 @@ pub enum InvalidImportPathReason {
     EscapesSourcePackageRoot,
     /// A proven intermediate dependency-path component names a hidden source directory.
     HiddenDirectory,
+    /// A dependency clause names a compiler-owned implicit package with no source-visible
+    /// dependency surface.
+    ImplicitPackage,
     CaseMismatch {
         provided: StringId,
         expected: StringId,
@@ -803,7 +806,8 @@ pub enum InvalidCompileTimePathReason {
     EscapesProjectRoot,
     /// The target lies inside a `_`-prefixed directory excluded from source discovery.
     HiddenPath,
-    /// The target is the reserved `@config.moth` source, which is not a module helper.
+    /// The target is the exact reserved `@config.moth` file, reached either directly or through a
+    /// physical alias such as a symlink.
     ReservedConfigFile,
 }
 

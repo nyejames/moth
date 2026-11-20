@@ -13,6 +13,7 @@
 //! - Parsing benchmark protocol output (see `benchmark_status.rs` and `bench_observations.rs`)
 //! - Orchestration of preflight and measured iterations (see `bench.rs`)
 
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
@@ -41,6 +42,26 @@ pub struct ProcessRun {
     pub stdout: String,
 }
 
+/// Environment every benchmark subprocess receives.
+///
+/// One definition serves the child processes and the replay command lines recorded for reports,
+/// so a recorded line always reproduces the environment its run actually used.
+pub(crate) const BENCHMARK_ENVIRONMENT: &[(&str, &str)] = &[
+    // Stable machine-readable timing lines for benchmark parsing.
+    // The subprocess is built with the concise `timers` feature, so `bench` emits the final
+    // MOTH_BENCH timing aggregate records without verbose human prose.
+    ("MOTH_TIMERS", "bench"),
+    // Suppress counter output so normal benchmark runs stay low-noise.
+    ("MOTH_COUNTERS", "off"),
+    // Request the exact diagnostic-count record checked by benchmark execution.
+    ("MOTH_BENCH_STATUS", "1"),
+];
+
+/// Apply the shared benchmark environment to one child command.
+pub(crate) fn apply_benchmark_environment(command: &mut Command) {
+    command.envs(BENCHMARK_ENVIRONMENT.iter().copied());
+}
+
 /// Run a moth compiler command as a timed subprocess
 ///
 /// Spawns the moth binary, measures wall-clock time, and captures output.
@@ -50,7 +71,7 @@ pub struct ProcessRun {
 /// * `moth_path` - Path to the moth binary (e.g., target/release/moth)
 /// * `current_directory` - Canonical repository root for resolving manifest paths
 /// * `command` - The subcommand to execute (e.g., "check", "build")
-/// * `args` - Arguments to pass to the subcommand
+/// * `args` - Native arguments to pass to the subcommand
 ///
 /// # Returns
 ///
@@ -59,32 +80,22 @@ pub fn run_moth_command(
     moth_path: &Path,
     current_directory: &Path,
     command: &str,
-    args: &[String],
+    args: &[OsString],
 ) -> Result<ProcessRun, String> {
     let start = Instant::now();
 
-    let output = Command::new(moth_path)
-        .current_dir(current_directory)
-        .arg(command)
-        .args(args)
-        // Stable machine-readable timing lines for benchmark parsing.
-        // The subprocess is built with the concise `timers` feature, so
-        // MOTH_TIMERS=bench emits the final MOTH_BENCH timing aggregate records without verbose
-        // human prose. MOTH_COUNTERS=off suppresses counter output so
-        // normal benchmark runs stay low-noise. MOTH_BENCH_STATUS=1 requests
-        // the exact diagnostic-count record checked by benchmark execution.
-        .env("MOTH_TIMERS", "bench")
-        .env("MOTH_COUNTERS", "off")
-        .env("MOTH_BENCH_STATUS", "1")
-        .output()
-        .map_err(|e| {
-            format!(
-                "Failed to execute moth binary at '{}' from '{}': {}",
-                moth_path.display(),
-                current_directory.display(),
-                e
-            )
-        })?;
+    let mut child = Command::new(moth_path);
+    child.current_dir(current_directory).arg(command).args(args);
+    apply_benchmark_environment(&mut child);
+
+    let output = child.output().map_err(|e| {
+        format!(
+            "Failed to execute moth binary at '{}' from '{}': {}",
+            moth_path.display(),
+            current_directory.display(),
+            e
+        )
+    })?;
 
     let elapsed = start.elapsed();
     let duration_ms = elapsed.as_secs_f64() * 1000.0;

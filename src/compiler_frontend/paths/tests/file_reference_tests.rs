@@ -4,7 +4,6 @@ use super::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
     ResolvedFileReferenceTable, ResolvedFileReferenceTarget, classify_prepared_file_references,
 };
-use crate::compiler_frontend::paths::dependency_resolution::exact_case_mismatch_for_components;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -224,17 +223,4 @@ fn resolved_reference_validation_rejects_class_outcome_mismatch() {
         .expect("first composite key should be unique");
 
     assert!(table.validate().is_err());
-}
-
-#[test]
-fn exact_case_policy_reports_component_mismatches_for_full_filenames() {
-    let authored = vec!["Assets".to_owned(), "logo.svg".to_owned()];
-    let mismatch = exact_case_mismatch_for_components(
-        &authored,
-        std::path::Path::new("/project"),
-        std::path::Path::new("/project/assets/logo.svg"),
-        false,
-    );
-
-    assert_eq!(mismatch, Some(("Assets".to_owned(), "assets".to_owned())));
 }

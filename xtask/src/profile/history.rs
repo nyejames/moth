@@ -95,6 +95,9 @@ pub struct HistoryCaseRecord {
     /// The command executed (e.g., "check", "build").
     pub command: String,
     /// Arguments passed to the command.
+    ///
+    /// A non-UTF-8 argument is recorded as its explicit marker rather than
+    /// lossy text, so a record never reads as a path the child did not receive.
     pub args: Vec<String>,
     /// Observation pass wall time in milliseconds.
     pub observation_wall_ms: f64,

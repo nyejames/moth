@@ -43,6 +43,51 @@ pub enum HirTypeClass {
     HeapAllocated,
 }
 
+impl HirTypeClass {
+    /// Classifies one registered type definition.
+    ///
+    /// WHAT: returns `None` for the compile-time-only anonymous const-record marker, which has no
+    ///       executable HIR representation.
+    /// WHY: the marker needs its own error at the `classify_hir_type` boundary, while the
+    ///      executable class rule stays in one place for every caller.
+    fn from_definition(definition: &TypeDefinition) -> Option<Self> {
+        match definition {
+            TypeDefinition::Builtin(builtin) => Some(match builtin.key {
+                BuiltinTypeKey::Bool => Self::Bool,
+                BuiltinTypeKey::Number(scale) => Self::Number(scale),
+                BuiltinTypeKey::Char => Self::Char,
+                BuiltinTypeKey::None => Self::Unit,
+                BuiltinTypeKey::FixedScalar(scalar) => Self::FixedScalar(scalar),
+                BuiltinTypeKey::String | BuiltinTypeKey::Range => Self::HeapAllocated,
+            }),
+
+            TypeDefinition::Struct(..)
+            | TypeDefinition::Choice(..)
+            | TypeDefinition::Constructed(..)
+            | TypeDefinition::External(..)
+            | TypeDefinition::GenericInstance(..)
+            | TypeDefinition::GenericParameter(..) => Some(Self::HeapAllocated),
+
+            TypeDefinition::Function(..) => Some(Self::Function),
+
+            TypeDefinition::AnonymousConstRecordMarker => None,
+        }
+    }
+
+    /// Whether mutating a place of this type can change storage another binding observes.
+    ///
+    /// WHAT: false for value classes whose mutable access replaces the place's own value.
+    ///       Bool, Char, None, fixed scalars and `Dec` scales have no in-place mutation surface.
+    /// WHY: a definite slot storing a produced value keeps its own binding cell even when the
+    ///      value's provenance aliases an older allocation. Writing that cell cannot reach the
+    ///      older allocation for a value class, while heap-allocated types (aggregates, maps,
+    ///      collections, strings and opaque resources) store shared references or expose mutable
+    ///      receivers, so a callee could mutate the aliased storage in place.
+    pub(crate) fn has_in_place_mutation_surface(self) -> bool {
+        matches!(self, Self::HeapAllocated | Self::Function)
+    }
+}
+
 /// Classifies a frontend `TypeId` into a backend-agnostic category.
 ///
 /// WHAT: queries `TypeEnvironment` for the definition behind `type_id` and maps it to the
@@ -60,28 +105,10 @@ pub fn classify_hir_type(
         ));
     };
 
-    match definition {
-        TypeDefinition::Builtin(builtin) => Ok(match builtin.key {
-            BuiltinTypeKey::Bool => HirTypeClass::Bool,
-            BuiltinTypeKey::Number(scale) => HirTypeClass::Number(scale),
-            BuiltinTypeKey::Char => HirTypeClass::Char,
-            BuiltinTypeKey::None => HirTypeClass::Unit,
-            BuiltinTypeKey::FixedScalar(scalar) => HirTypeClass::FixedScalar(scalar),
-            BuiltinTypeKey::String | BuiltinTypeKey::Range => HirTypeClass::HeapAllocated,
-        }),
-
-        TypeDefinition::Struct(..)
-        | TypeDefinition::Choice(..)
-        | TypeDefinition::Constructed(..)
-        | TypeDefinition::External(..)
-        | TypeDefinition::GenericInstance(..)
-        | TypeDefinition::GenericParameter(..) => Ok(HirTypeClass::HeapAllocated),
-
-        TypeDefinition::Function(..) => Ok(HirTypeClass::Function),
-
-        TypeDefinition::AnonymousConstRecordMarker => Err(InfrastructureFailure::internal(
+    HirTypeClass::from_definition(definition).ok_or_else(|| {
+        InfrastructureFailure::internal(
             CompilerStage::HirConstruction,
             "compile-time-only anonymous const-record marker reached executable HIR type classification",
-        )),
-    }
+        )
+    })
 }

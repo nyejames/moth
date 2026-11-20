@@ -1,0 +1,20 @@
+-- A collection `get` result is a shared alias to storage in the receiver's allocation.
+-- A definite scalar slot stores the copied value in its own cell, so mutating the slot
+-- cannot mutate the immutable `rows` collection. The stored provenance root must not
+-- turn the slot's own write into mutable access on `rows`.
+
+set_two |value ~I32|:
+    ~value = 2
+;
+
+probe || -> I32:
+    rows {I32} = {9}
+    x ~= rows.get(0) catch:
+        then 0
+    ;
+    set_two(~x)
+    return x
+;
+
+result = probe()
+io.line([: mutable_scalar_slot_collection_get result=[result]])

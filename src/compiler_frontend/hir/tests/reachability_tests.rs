@@ -153,7 +153,7 @@ fn direct_external_calls_retains_lowered_call_and_invoke_sites_in_order() {
     assert_ne!(calls[0].span, calls[1].span);
     assert_ne!(calls[1].span, calls[3].span);
     assert!(
-        facts.direct_call_targets().is_empty(),
+        facts.direct_call_targets().next().is_none(),
         "external calls must remain outside the convergence call-target contract"
     );
 }
@@ -2066,8 +2066,8 @@ fn invoke_calls_retain_call_facts_and_both_successors() {
     );
     let facts = collect_module_function_link_facts(&module).expect("Invoke facts should collect");
     assert_eq!(
-        facts.direct_call_targets(),
-        vec![(FunctionId(0), CallTarget::Local(FunctionId(1)))]
+        facts.direct_call_targets().collect::<Vec<_>>(),
+        vec![CallTarget::Local(FunctionId(1))]
     );
     let reachable = collect_reachability_from_function_link_facts(&facts, &[FunctionId(0)])
         .expect("Invoke successors and callee should remain reachable");

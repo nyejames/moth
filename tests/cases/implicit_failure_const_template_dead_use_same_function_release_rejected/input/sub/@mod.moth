@@ -1,0 +1,8 @@
+looped #= [:<ul>[loop 0 to 2 |i, n|:[$slot x][n]]</ul>]
+
+$export
+probe |name String| -> String:
+    return [looped:[$in x: [name]]]
+    s = [looped:[$in x: [name]]]
+    return s
+;

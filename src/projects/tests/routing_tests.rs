@@ -1,7 +1,8 @@
 //! Tests for shared routing policy parsing.
 
 use super::{
-    HtmlSiteConfig, PageUrlStyle, parse_html_site_config, prefix_origin, strip_origin_prefix,
+    HtmlSiteConfig, PageUrlStyle, is_bare_origin_request, parse_html_site_config, prefix_origin,
+    strip_origin_prefix,
 };
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
@@ -156,6 +157,13 @@ fn parser_rejects_invalid_origin() {
         .builder_settings
         .set_string("html", "origin", String::from("/?x=1"), None);
     assert_origin_value_rejection(&config, &mut string_table, "/?x=1");
+
+    for invalid_value in ["//host", "/nested//empty", "/a/./b", "/../b", "/a\nb"] {
+        config
+            .builder_settings
+            .set_string("html", "origin", invalid_value.to_owned(), None);
+        assert_origin_value_rejection(&config, &mut string_table, invalid_value);
+    }
 }
 
 #[test]
@@ -255,4 +263,22 @@ fn strip_origin_prefix_works() {
     );
     assert_eq!(strip_origin_prefix("/docs/", "/moth"), None);
     assert_eq!(strip_origin_prefix("/mothish/", "/moth"), None);
+}
+
+#[test]
+fn bare_origin_detection_requires_the_exact_origin_root() {
+    assert!(is_bare_origin_request("/moth", "/moth"));
+    assert!(is_bare_origin_request(
+        "/Caf%c3%a9%20docs/%2520",
+        "/Caf%C3%A9%20docs/%2520"
+    ));
+
+    assert!(!is_bare_origin_request("/moth/", "/moth"));
+    assert!(!is_bare_origin_request("/moth/docs", "/moth"));
+    assert!(!is_bare_origin_request("/mothish", "/moth"));
+    assert!(!is_bare_origin_request("/", "/"));
+    assert!(!is_bare_origin_request(
+        "/Caf%C3%A9%20docs/%2520/",
+        "/Caf%C3%A9%20docs/%2520"
+    ));
 }

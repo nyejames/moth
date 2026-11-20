@@ -3,6 +3,7 @@
 //! WHAT: parses routing-related `@config.moth` settings into typed values.
 //! WHY: keeping one parser avoids drift between builder validation and dev-server runtime behavior.
 
+use crate::build_system::output::percent_encode_url_path;
 use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::projects::settings::{Config, ProjectConfigError};
@@ -21,6 +22,7 @@ pub enum PageUrlStyle {
 /// Effective HTML site configuration used by builders and the dev server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HtmlSiteConfig {
+    /// Canonical, percent-encoded public path prefix, or `/` for the site root.
     pub origin: String,
     pub page_url_style: PageUrlStyle,
     pub redirect_index_html: bool,
@@ -68,7 +70,7 @@ fn parse_origin(
 
     validate_origin(config, raw_value, string_table)?;
 
-    Ok(raw_value.to_owned())
+    Ok(percent_encode_url_path(raw_value))
 }
 
 fn validate_origin(
@@ -116,6 +118,22 @@ fn validate_origin(
             "origin",
             origin,
             "a path prefix with forward slashes, for example '/docs'",
+            string_table,
+        ));
+    }
+
+    if origin != "/"
+        && origin[1..].split('/').any(|segment| {
+            segment.is_empty()
+                || matches!(segment, "." | "..")
+                || segment.chars().any(char::is_control)
+        })
+    {
+        return Err(config_value_error(
+            config,
+            "origin",
+            origin,
+            "a path prefix with nonempty segments and no dot segments or control characters",
             string_table,
         ));
     }
@@ -202,13 +220,10 @@ pub fn strip_origin_prefix(public_path: &str, origin: &str) -> Option<String> {
         return Some(public_path.to_owned());
     }
 
-    // Origin is like "/moth"
-    // Public path must start with "/moth"
-    if !public_path.starts_with(origin) {
+    let (prefix, stripped) = public_path.split_at_checked(origin.len())?;
+    if prefix != origin && !matches_origin_escape_spelling(prefix, origin) {
         return None;
     }
-
-    let stripped = &public_path[origin.len()..];
 
     // If public_path was "/moth", stripped is ""
     // If public_path was "/moth/", stripped is "/"
@@ -223,6 +238,38 @@ pub fn strip_origin_prefix(public_path: &str, origin: &str) -> Option<String> {
         // This handles cases like "/mothish" when origin is "/moth"
         None
     }
+}
+
+/// Returns whether the request addresses the origin root without its trailing slash.
+///
+/// The dev server redirects this form so relative links resolve under the origin instead of
+/// above it. An origin of `/` is already the canonical root, so it never matches and cannot
+/// redirect to itself. Origin matching keeps the same percent-escape spelling rules as
+/// `strip_origin_prefix`.
+pub fn is_bare_origin_request(request_path: &str, origin: &str) -> bool {
+    origin != "/"
+        && request_path.len() == origin.len()
+        && matches_origin_escape_spelling(request_path, origin)
+}
+
+/// Percent escapes may use lowercase hex, but literal path bytes are case-sensitive.
+/// Never decode here: an escaped slash must not become a prefix separator.
+fn matches_origin_escape_spelling(request: &str, origin: &str) -> bool {
+    let mut request = request.bytes();
+    let mut origin = origin.bytes();
+    while let Some(expected) = origin.next() {
+        if request.next() != Some(expected) {
+            return false;
+        }
+        if expected == b'%' {
+            for _ in 0..2 {
+                if request.next().map(|byte| byte.to_ascii_uppercase()) != origin.next() {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 /// Returns the canonical public URL for the site root.

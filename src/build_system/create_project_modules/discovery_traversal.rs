@@ -14,19 +14,22 @@ use super::discovery_provider_imports::{
 };
 use super::*;
 use crate::builder_surface::external_import_providers::provider_sources::ProviderSourceRegistrar;
-use crate::builder_surface::package_metadata::reserved_package_namespace_claim_root;
+use crate::builder_surface::package_metadata::{
+    PackageSetMembership, reserved_package_namespace_claim_root,
+};
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DependencyClauseKind;
 use crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
-    project_config, token_lexical,
+    imports, project_config, token_lexical,
 };
 use crate::compiler_frontend::paths::path_normalization::{
     is_relative_dependency_path, join_and_normalize_path,
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
 use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternerFork,
 };
@@ -809,6 +812,17 @@ fn resolve_module_root_bare_dependency(
     if let Some(root_file) = project_path_resolver
         .module_root_file_for_directory_surface(&root_candidate, ModuleRootRole::Normal)
     {
+        // The config spelling is importable only as a child module surface. The root of the
+        // candidate's parent chain must be the consumer; an intervening module owns access to
+        // its descendants in directory mode and must do so in the bounded synthetic lane too.
+        if dependency_path_references_config_file(provider, path_fork, string_table)
+            && project_path_resolver
+                .module_root_for_file(&root_candidate)
+                .as_ref()
+                != Some(&module_root)
+        {
+            return Err(imports::direct_special_file_import(provider, None).into());
+        }
         return Ok(Some(ResolvedDependencyFile {
             path: root_file,
             kind: SourceFileKind::Moth,
@@ -896,6 +910,12 @@ fn handle_provider_capable_dependency(
     // lookup and provider target resolution sees PathIds from the same domain the provider will
     // intern diagnostic paths into.
     let resolution = directory_dependency_resolution.map(|r| r.with_path_fork(&*path_fork));
+    // A directory boundary owns its provider sources. Synthetic traversal has no directory
+    // index; its filesystem lane resolves only the selected synthetic unit, and package-owned
+    // provider files compile through their own package boundary resolution.
+    let package_set_membership = resolution
+        .map(|resolution| resolution.source_tree_index().package_set_membership())
+        .unwrap_or(PackageSetMembership::Ordinary);
 
     // `@project` is a reserved synthetic provider, not a source/package path. Keep the exact
     // root out of filesystem discovery and external-package registration only for the owning
@@ -981,6 +1001,7 @@ fn handle_provider_capable_dependency(
                 raw_prefix: checked.raw_prefix(),
                 provider,
                 project_path_resolver,
+                package_set_membership,
                 path_fork,
                 provider_sources,
             };

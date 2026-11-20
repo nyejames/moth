@@ -1031,6 +1031,13 @@ fn compilation_root_slot() -> SourceSlot {
 #[derive(Debug)]
 pub(crate) struct SourceDatabaseBuilder {
     sources: Arc<SourceDatabase>,
+    /// Build-only identity of the selected `@config.moth` source slot.
+    ///
+    /// WHAT: retained only while this builder owns project source construction.
+    /// WHY: Stage 0 discovery needs the canonical path of the bootstrap config without copying it
+    ///      into long-lived build settings. The identity disappears with the builder and is not
+    ///      part of finalized source data.
+    config_source_id: Option<SourceId>,
     live_builders: Vec<SpanBuilderState>,
     pending_builders: FxHashMap<SourceId, PendingSpanBuilder>,
 }
@@ -1059,6 +1066,7 @@ impl SourceDatabaseBuilder {
     pub(crate) fn new(sources: SourceDatabase) -> Self {
         Self {
             sources: Arc::new(sources),
+            config_source_id: None,
             live_builders: Vec::new(),
             pending_builders: FxHashMap::default(),
         }
@@ -1066,6 +1074,21 @@ impl SourceDatabaseBuilder {
 
     pub(crate) fn sources(&self) -> &Arc<SourceDatabase> {
         &self.sources
+    }
+
+    /// The bootstrap-registered config source identity carried through Stage 0 construction.
+    pub(crate) fn config_source_id(&self) -> Option<SourceId> {
+        self.config_source_id
+    }
+
+    /// Record the bootstrap-registered config source identity for Stage 0 consumers.
+    pub(crate) fn set_config_source_id(&mut self, source_id: SourceId) {
+        self.config_source_id = Some(source_id);
+    }
+
+    /// Clear any previously selected config source before reloading project configuration.
+    pub(crate) fn clear_config_source_id(&mut self) {
+        self.config_source_id = None;
     }
 
     pub(crate) fn sources_mut(&mut self) -> &mut SourceDatabase {

@@ -1386,7 +1386,7 @@ fn pruned_catch_handler_publishes_no_materialisation_request_or_sidecar() {
             .project
             .successful_module_views()
             .flat_map(|module| module.link_facts.functions.direct_call_targets())
-            .any(|(_, target)| matches!(
+            .any(|target| matches!(
                 target,
                 CallTarget::Generated(identity)
                     if identity.declaration().defining_name() == "pruned_materialisation"

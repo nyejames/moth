@@ -1,0 +1,10 @@
+-- The loop body always returns before the step block, so lowering discards the generated
+-- ordinal update even though the header binds the ordinal. The exported no-slot function
+-- therefore cannot fail on it and needs no error slot.
+$export
+first_value |n I32| -> I32:
+    loop 0 to n |value, index|:
+        return index
+    ;
+    return 0
+;

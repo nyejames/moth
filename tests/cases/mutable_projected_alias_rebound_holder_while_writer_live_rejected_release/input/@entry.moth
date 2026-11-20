@@ -1,0 +1,21 @@
+-- A projected alias keeps the holder cell among its conservative write identities so a fresh
+-- rebinding of the holder cannot hide the older allocation. Reading the rebound holder while the
+-- alias is still live is conservatively rejected; see docs/bug-reports.md.
+
+Pair = | first {I32}, second {I32} |
+
+same_pair |value Pair| -> Pair:
+    return value
+;
+
+probe || -> I32:
+    original ~= Pair({1}, {0})
+    holder ~= same_pair(original)
+    writer ~= holder.first
+    ~holder = Pair({2, 3}, {4})
+    read = holder.first.length()
+    return read + writer.length()
+;
+
+result = probe()
+io.line([: [result]])

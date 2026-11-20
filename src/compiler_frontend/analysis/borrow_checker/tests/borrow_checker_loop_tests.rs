@@ -13,13 +13,12 @@ use crate::compiler_frontend::hir::expression_store::HirValueRange;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::LocalId;
-use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::validate_hir_module;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::borrow_fixture_support::{
-    assert_borrow_error_view, run_borrow_checker,
+    assert_borrow_error_view, run_borrow_checker, run_borrow_checker_with_types,
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::hir_fixture_support::{expression, lower_hir};
@@ -492,8 +491,14 @@ return 0
 
     validate_hir_module(&hir, &type_environment, &registry)
         .expect("loop re-entry definition should preserve HIR invariants");
-    let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
-        .expect("re-entry should retire the stale alias before the new value is installed");
+    let report = run_borrow_checker_with_types(
+        &hir,
+        &type_environment,
+        &registry,
+        &path_fork,
+        &string_table,
+    )
+    .expect("re-entry should retire the stale alias before the new value is installed");
 
     let definition_entry = report
         .analysis
@@ -611,7 +616,12 @@ fn projected_assignment_rooted_in_compiler_temp_uses_linear_expiry() {
         .expect("compiler-temporary projected mutation should use linear expiry");
 }
 
-fn projected_assignment_branch_fixture() -> (HirModule, StringTable, LocalId, PathInternerFork) {
+fn projected_assignment_branch_fixture() -> (
+    crate::compiler_frontend::tests::hir_fixture_support::LoweredHirFixture,
+    StringTable,
+    LocalId,
+    PathInternerFork,
+) {
     let source = r#"
 Point = |
     value I32,

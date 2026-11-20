@@ -156,8 +156,9 @@ use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, AstNode};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    AstExpressionBuilder, ExpressionStore,
+    AstExpressionBuilder, ExprId, ExpressionStore,
 };
+use crate::compiler_frontend::ast::expressions::failure_classification::PendingFunctionFailureFacts;
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::emission::AstEmitter;
 use crate::compiler_frontend::ast::module_ast::environment::{
@@ -200,6 +201,7 @@ use crate::compiler_frontend::traits::evidence::environment::InfallibleCastEvide
 use crate::timing_scope_attributed;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -304,7 +306,7 @@ pub(crate) struct AstConstraintPrunedRegion {
 
 /// One selected fast numeric operation recorded while resolving an authored expression.
 ///
-/// WHAT: the callable that owns the operation and the authored operator span, and nothing else.
+/// WHAT: the callable that owns the operation, its lexical scope and the authored operator span.
 /// WHY: `$safe_math` must still see a fast use after constant folding or dead-result elimination
 ///      removes the executable operation. Resolution records the selection before either
 ///      optimisation runs, so this sparse evidence outlives the node it describes. One record per
@@ -327,14 +329,14 @@ pub(crate) struct AstFastOperationWitness {
     pub(crate) span: Option<SourceSpan>,
 }
 
-/// Canonicalises a drained fast-operation witness ledger.
+/// Canonicalises a fast-operation witness ledger.
 ///
 /// WHAT: sorts by [`AstFastOperationWitness`]'s order and drops duplicate rows.
 /// WHY: recording is one push per selected operation, so an expression resolved twice by deferred
 ///      completion would otherwise carry two rows for one authored operation. Normalising once
-///      here, where the ledger leaves the emitter, keeps the recorder allocation-free per
-///      selection and replaces a linear membership scan per record with a single sort at the
-///      drain point.
+///      after every producer has contributed, rather than at each record, keeps the recorder
+///      allocation-free per selection and replaces a linear membership scan per record with a
+///      single sort.
 pub(crate) fn normalize_fast_operation_witnesses(witnesses: &mut Vec<AstFastOperationWitness>) {
     witnesses.sort_unstable();
     witnesses.dedup();
@@ -347,15 +349,18 @@ pub(crate) fn normalize_fast_operation_witnesses(witnesses: &mut Vec<AstFastOper
 ///      absent from every HIR block. The erased call is still selected source, though: its callee's
 ///      summary bits and fast-use witness must reach the caller exactly as they do in a debug build
 ///      that keeps the call. HIR projects each row through the same call-target mapping and
-///      inactive-static-branch filter as authored and skipped call evidence.
+///      inactive-static-branch filter as authored and skipped call evidence. The span is mandatory
+///      because every projected row carries its authored call site; the release producer declines
+///      to erase a spanless call instead. Authored-dead statements and statically pruned catch
+///      handlers are never folded, so every recorded row belongs to source HIR lowered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct AstReleaseErasedCallSite {
     /// The callable body whose expression release speculation folded.
     pub(crate) function: AstFunctionIdentity,
     /// The callee's ordered declaration path in this module's AST.
     pub(crate) target: PathId,
-    /// The authored span of the erased call expression; `None` for generated calls.
-    pub(crate) span: Option<SourceSpan>,
+    /// The authored span of the erased call expression.
+    pub(crate) span: SourceSpan,
     /// Whether an enclosing catch owns this call's recoverable failure.
     ///
     /// WHAT: recorded from the rewrite walk's catch-subject containment.
@@ -388,12 +393,13 @@ pub struct Ast {
 
     /// Selected fast numeric operations, in canonical ledger order.
     ///
-    /// WHAT: one sparse record per authored fast operation, kept from resolution through folding
+    /// WHAT: one sparse record per selected fast operation, kept from resolution through folding
     ///       and dead-result elimination.
     /// WHY: `$safe_math` and `$infallible` verification run after optimisation, so evidence of a
     ///      selected fast operation cannot live on the (possibly folded) expression node. The
-    ///      ledger is recorded beside the executable AST, ordered and deduplicated once on drain,
-    ///      then projected per function into HIR constraint evidence before the AST is dropped.
+    ///      ledger is recorded beside the executable AST and ordered and deduplicated once in
+    ///      finalization after every producer has contributed. HIR then projects it per function
+    ///      into constraint evidence before the AST is dropped.
     pub(crate) fast_operation_witnesses: Vec<AstFastOperationWitness>,
 
     /// Selected ordinary calls erased by release constant folding, in recording order.
@@ -404,6 +410,31 @@ pub struct Ast {
     ///      visible to HIR projection without retaining the erased expression tree or disabling a
     ///      profitable fold. It is empty in debug builds because no call is erased there.
     pub(crate) release_erased_call_sites: Vec<AstReleaseErasedCallSite>,
+
+    /// Pre-fold failure facts for every concrete callable in `nodes`, keyed by callable identity.
+    ///
+    /// WHAT: the implicit contributors, deferred custom catches and assertion-message calls the
+    ///       AST classifier decided before release folding. Authored-dead statement tails were
+    ///       excluded from executable contributors per occurrence, so each body's contributor
+    ///       lists keep authored order, but those tails still supply their validation-only
+    ///       obligations (deferred custom catches and assertion-message calls). The map itself is
+    ///       only a lookup. Dormant generic-template identities are dropped because HIR never
+    ///       reads them.
+    /// WHY: release folding must not add, remove or reorder failure facts. Finalization always
+    ///      computes these facts, even when no dormant template needs boundary validation, and HIR
+    ///      projects them instead of reclassifying the post-fold AST, so debug and release publish
+    ///      the same contributors and the same witness order.
+    pub(crate) pre_fold_failure_facts: HashMap<AstFunctionIdentity, PendingFunctionFailureFacts>,
+
+    /// Statement-owned `Bool` conditions the folded-Bool authority decided before release folding.
+    ///
+    /// WHAT: one row per `assert`, `if`, value-`if` and conditional-loop condition, keyed by its
+    ///       expression root.
+    /// WHY: HIR lowering classifies these conditions by the pre-optimisation selection fact. A
+    ///      release fold can replace an ordinary call with its constant result, and reading the
+    ///      post-fold store would then omit a loop body or a trap that a debug build keeps. A
+    ///      condition no profile folded has no row.
+    pub(crate) pre_fold_bool_conditions: FxHashMap<ExprId, bool>,
 
     /// Inactive static-`if` branches, retained so HIR projection can drop their evidence rows.
     ///

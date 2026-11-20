@@ -1,0 +1,16 @@
+-- A projected load observes the old allocation, not the source binding cell. Rebinding `pair` to
+-- a fresh struct must stay legal while the projected collection is still read. An intermediate
+-- alias and a direct projection both capture the referenced field storage at binding time.
+
+Pair = | first {I32}, second {I32} |
+
+probe ||:
+    pair ~= Pair(first = {1}, second = {2})
+    view = pair
+    old = view.first
+    direct_old = pair.first
+    ~pair = Pair(first = {3, 4}, second = {5})
+    io.line([:projected_alias_survives_source_rebinding old=[old.length()] direct=[direct_old.length()] pair=[pair.first.length()]])
+;
+
+probe()

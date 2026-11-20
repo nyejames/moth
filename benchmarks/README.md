@@ -543,7 +543,9 @@ Groups are public summary labels, not compiler architecture boundaries. The grou
 - Normal JSONL history format: 8
 - Profile protocol version: 2
 - Profile history format: 4
-- Profile run-manifest format: 4
+- Profile run-manifest format: 5
+- Profile detailed-observations format: 3
+- Profile summary/hotspots format: 4
 
 ## Summary Interpretation
 
@@ -668,6 +670,8 @@ benchmarks/local-data/
 ```
 
 Profile summaries include symbolication health. If most hot function names are raw `0x...` addresses, the summary marks symbolication as failed and function hotspots should not be treated as actionable. A failed-symbolication case also writes `profile-shape.txt`, which records the profile table shape, first function names, libraries, and native-symbol metadata for parser/debug-info investigation. Stage timings, plus any present counters, from the observation pass are still useful in that state.
+
+Recorded command lines are POSIX shell text. Each line names the profiling binary, recreates and enters the run directory with `mkdir -p <dir> && cd <dir> &&`, sets the benchmark environment `MOTH_TIMERS=bench MOTH_COUNTERS=off MOTH_BENCH_STATUS=1`, and runs the command. A replay still works after the profiling run removed that directory. Shell-safe arguments stay bare, every other argument is single-quoted, and a line is labelled non-runnable when an argument has no UTF-8 spelling.
 
 `profile-hotspots.json`, the root `agent-summary.md`, and each per-case
 `summary.md` identify the current timing schema alongside their schema-owned stage

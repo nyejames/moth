@@ -101,7 +101,11 @@ fn file_entry_case_resolves_to_absolute_entry_argument() {
         .expect("invocation should resolve");
 
     let expected_entry = directory.path().join("fixture.moth");
-    assert_eq!(invocation.args[0], expected_entry.display().to_string());
+    assert_eq!(
+        invocation.args,
+        vec![expected_entry.into_os_string()],
+        "the entry argument must stay the exact native path"
+    );
 }
 
 #[test]

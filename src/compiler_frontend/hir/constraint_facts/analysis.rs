@@ -376,7 +376,7 @@ pub(crate) fn analyze_function(
             note_live_call_hazards(
                 &mut analysis,
                 resolve_callee(&selected.target),
-                selected.span,
+                Some(selected.span),
                 None,
                 selected.failure_caught,
             );
@@ -457,17 +457,14 @@ pub(crate) fn analyze_statement_region(
     // the debug build retains, so it attributes to the region by its authored span.
     if let Some(facts) = hir.function_failure_facts.get(&function_id) {
         for selected in &facts.constraint.live_erased_call_sites {
-            let Some(span) = selected.span else {
-                continue;
-            };
-            if !sources.span_within(span, start, end) {
+            if !sources.span_within(selected.span, start, end) {
                 continue;
             }
             note_live_call_hazards(
                 &mut analysis,
                 resolve_callee(&selected.target),
-                Some(span),
-                Some(span),
+                Some(selected.span),
+                Some(selected.span),
                 selected.failure_caught,
             );
         }
@@ -596,6 +593,12 @@ fn retained_fast_operation_witness(
                 HirStatementKind::NumericOp { op, .. } if op.semantics.is_fast() => {
                     HirFastUseProvenance::AuthoredArithmetic
                 }
+                // The generated `$fast_math` ordinal keeps ordinary checked semantics but a fatal
+                // delivery; an authored fast operation matched above, so this is the ordinal.
+                HirStatementKind::NumericOp {
+                    failure_mode: NumericFailureMode::Fatal,
+                    ..
+                } => HirFastUseProvenance::RangeGuard,
                 HirStatementKind::LoopStepFailure { semantics, .. } if semantics.is_fast() => {
                     HirFastUseProvenance::RangeGuard
                 }

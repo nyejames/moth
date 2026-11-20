@@ -1,0 +1,13 @@
+always_false || -> Bool:
+    return false
+;
+
+risky |value I32| -> I32:
+    return value + 1
+;
+
+$export
+probe |value I32| -> I32:
+    assert(always_false())
+    return risky(1)
+;

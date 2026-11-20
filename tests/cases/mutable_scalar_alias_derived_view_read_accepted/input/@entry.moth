@@ -1,0 +1,24 @@
+-- Reading a shared view derived through the mutable alias is not a foreign access to the slot.
+-- The view is dead before the later mutation, so the mutation stays legal.
+
+identity |value {I32}| -> {I32}:
+    return value
+;
+
+show |items {I32}| -> I32:
+    return items.length()
+;
+
+probe || -> I32:
+    slot ~= {0}
+    writer ~= slot
+    ~writer = {1}
+    view = identity(writer)
+    size = view.length()
+    other = show(view)
+    ~writer.push(2)
+    return size + other
+;
+
+result = probe()
+io.line([: result=[result]])

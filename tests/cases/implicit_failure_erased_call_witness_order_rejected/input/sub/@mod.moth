@@ -1,0 +1,10 @@
+risky |value I32| -> I32:
+    return value + 1
+;
+
+$export
+probe |value I32| -> I32:
+    first I32 = risky(1)
+    second I32 = value + 1
+    return first + second
+;

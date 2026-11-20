@@ -9,7 +9,11 @@
 //!      without duplicating them in the larger orchestration suites.
 
 use super::*;
+#[cfg(unix)]
+use crate::build_system::create_project_modules::ProjectFrontendCompilation;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+#[cfg(unix)]
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::{DiagnosticSeverity, PreparedFailure};
@@ -101,6 +105,144 @@ fn assert_not_regular_file_marker_rejected(
             "diagnostic must name {expected}: {rendered:?}"
         );
     }
+}
+
+/// Assert one compile failed only because a shipped source read found a damaged installation.
+#[cfg(unix)]
+fn assert_damaged_shipped_set_failure(
+    result: CompilationResult<ProjectFrontendCompilation>,
+    package_prefix: &str,
+) {
+    let Err(errors) = result else {
+        panic!("an unreadable shipped source must be an infrastructure failure");
+    };
+    assert!(
+        errors.iter().any(|cause| {
+            cause.kind == InfrastructureFailureKind::Filesystem
+                && cause.message.contains(package_prefix)
+                && cause.message.contains("incomplete")
+        }),
+        "the shipped registration must report its damaged package set: {errors:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_shipped_facade_reports_a_damaged_set() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let project = tempfile::tempdir().expect("should create project temp dir");
+    let package = tempfile::tempdir().expect("should create package temp dir");
+    let root = project.path().to_path_buf();
+    let package_root = package.path().to_path_buf();
+    let prefix = "builder/test/shipped_unreadable";
+    fs::write(
+        root.join("@entry.moth"),
+        format!("@{prefix} value\nresult = value\n"),
+    )
+    .expect("should write the entry root");
+    let facade = package_root.join("@package.moth");
+    fs::write(&facade, "$export\nvalue #= 1\n").expect("should write the package facade");
+    fs::set_permissions(&facade, fs::Permissions::from_mode(0o000))
+        .expect("should remove facade permissions");
+    if fs::read_to_string(&facade).is_ok() {
+        fs::set_permissions(&facade, fs::Permissions::from_mode(0o600))
+            .expect("should restore facade permissions");
+        eprintln!("skipping unreadable-facade assertion: process can still read the file");
+        return;
+    }
+
+    let mut config = Config::new(root);
+    config.project_name = String::from("docs");
+    let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    frontend_surface
+        .source_packages
+        .register_compiler_shipped_filesystem_root(
+            prefix,
+            package_root,
+            crate::builder_surface::PackageOrigin::Builder,
+        )
+        .expect("test shipped source root should register");
+    let style_directives =
+        crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let result = super::compile_project_frontend(
+        &mut config,
+        crate::build_system::BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+    );
+    fs::set_permissions(&facade, fs::Permissions::from_mode(0o600))
+        .expect("should restore facade permissions");
+
+    assert_damaged_shipped_set_failure(result, prefix);
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_shipped_check_only_source_reports_a_damaged_set() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let project = tempfile::tempdir().expect("should create project temp dir");
+    let package = tempfile::tempdir().expect("should create package temp dir");
+    let root = project.path().to_path_buf();
+    let package_root = package.path().to_path_buf();
+    let prefix = "builder/test/shipped_orphan";
+    fs::write(
+        root.join("@entry.moth"),
+        format!("@{prefix} value\nresult = value\n"),
+    )
+    .expect("should write the entry root");
+    fs::write(package_root.join("@package.moth"), "$export\nvalue #= 1\n")
+        .expect("should write the package facade");
+    let orphan = package_root.join("orphan.moth");
+    fs::write(&orphan, "orphan = 1\n").expect("should write the unreachable source");
+    fs::set_permissions(&orphan, fs::Permissions::from_mode(0o000))
+        .expect("should remove orphan permissions");
+    if fs::read_to_string(&orphan).is_ok() {
+        fs::set_permissions(&orphan, fs::Permissions::from_mode(0o600))
+            .expect("should restore orphan permissions");
+        eprintln!("skipping unreadable check-only assertion: process can still read the file");
+        return;
+    }
+
+    let mut config = Config::new(root);
+    config.project_name = String::from("docs");
+    let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    frontend_surface
+        .source_packages
+        .register_compiler_shipped_filesystem_root(
+            prefix,
+            package_root,
+            crate::builder_surface::PackageOrigin::Builder,
+        )
+        .expect("test shipped source root should register");
+    let style_directives =
+        crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins();
+    let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let mut project_source_files = None;
+    let mut project_source_builder = None;
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let result = super::compile_project_frontend_with_inputs(
+        &mut config,
+        crate::build_system::BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+        &mut project_source_files,
+        &mut project_source_builder,
+        &build_config_inputs,
+        super::FrontendCompilationMode::Check,
+    );
+    fs::set_permissions(&orphan, fs::Permissions::from_mode(0o600))
+        .expect("should restore orphan permissions");
+
+    assert_damaged_shipped_set_failure(result, prefix);
 }
 
 #[cfg(unix)]
@@ -225,7 +367,6 @@ mod non_utf8_filesystem_identity {
         fs::write(&bad_file, "x ~= 1\n").expect("should write non-UTF-8 named file");
 
         let config = Config::new(root.clone());
-        let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
@@ -233,8 +374,8 @@ mod non_utf8_filesystem_identity {
         let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
-                project_root: &canonical_root,
                 validated_output_settings: None,
+                config_source: None,
             },
             &config,
             &crate::builder_surface::SourcePackageRegistry::default(),
@@ -259,7 +400,6 @@ mod non_utf8_filesystem_identity {
         fs::create_dir_all(&bad_folder).expect("should create non-UTF-8 named folder");
 
         let config = Config::new(root.clone());
-        let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
@@ -267,8 +407,8 @@ mod non_utf8_filesystem_identity {
         let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
-                project_root: &canonical_root,
                 validated_output_settings: None,
+                config_source: None,
             },
             &config,
             &crate::builder_surface::SourcePackageRegistry::default(),
@@ -295,7 +435,6 @@ mod non_utf8_filesystem_identity {
         fs::write(&bad_file, "x ~= 1\n").expect("should write non-UTF-8 named file");
 
         let config = Config::new(root.clone());
-        let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
@@ -303,8 +442,8 @@ mod non_utf8_filesystem_identity {
         let index = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
-                project_root: &canonical_root,
                 validated_output_settings: None,
+                config_source: None,
             },
             &config,
             &crate::builder_surface::SourcePackageRegistry::default(),
@@ -369,8 +508,8 @@ mod non_utf8_filesystem_identity {
         let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_root.clone(),
             super::source_tree_index::SourceTreeProjectContext {
-                project_root: &canonical_root,
                 validated_output_settings: None,
+                config_source: None,
             },
             &config,
             &crate::builder_surface::SourcePackageRegistry::default(),
@@ -568,6 +707,21 @@ mod source_package_boundary_indexes_tests {
         );
     }
 
+    /// Assert one shipped package boundary failed because its installed facade is incomplete.
+    fn assert_damaged_package_facade(failure: PreparedFailure, package_prefix: &str) {
+        let error = primary_infrastructure_error(failure);
+        assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
+        assert!(
+            error
+                .message
+                .contains(&format!("Source package @{package_prefix}"))
+                && error.message.contains("@package.moth")
+                && error.message.contains("incomplete"),
+            "the shipped registration must report its damaged package set: {}",
+            error.message
+        );
+    }
+
     /// Assert one typed config failure and that its rendered message names the required spelling.
     fn assert_invalid_config_reason_names(
         failure: PreparedFailure,
@@ -684,7 +838,7 @@ mod source_package_boundary_indexes_tests {
 
             let mut source_packages = SourcePackageRegistry::new();
             source_packages
-                .register_filesystem_root(prefix, package_root.clone(), origin)
+                .register_compiler_shipped_filesystem_root(prefix, package_root.clone(), origin)
                 .expect("the repository package root should register");
 
             let mut string_table = StringTable::new();
@@ -695,6 +849,11 @@ mod source_package_boundary_indexes_tests {
                 .next()
                 .expect("the repository package should own one boundary index");
             assert_eq!(registered_prefix, prefix);
+            assert_eq!(
+                index.package_set_membership(),
+                crate::builder_surface::package_metadata::PackageSetMembership::CompilerShipped,
+                "the shipped repository registration must reach its boundary index"
+            );
 
             let canonical_root =
                 fs::canonicalize(&package_root).expect("package root should canonicalize");
@@ -805,6 +964,241 @@ mod source_package_boundary_indexes_tests {
             "error message should mention canonicalization: {}",
             error.message,
         );
+    }
+
+    #[test]
+    fn shipped_registration_outside_the_installation_reports_a_damaged_set() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        // The old path-only rule would classify this authored-looking root as third-party.
+        // Registration provenance must keep it in the installed-set lane.
+        let package_root = root.join("elsewhere/packages/core/html");
+        fs::create_dir_all(&package_root).expect("should create package root");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        source_packages
+            .register_compiler_shipped_filesystem_root(
+                "core/html",
+                package_root,
+                crate::builder_surface::PackageOrigin::Core,
+            )
+            .expect("test shipped source root should register");
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("a shipped root without a support facade is a damaged package set");
+        let error = primary_infrastructure_error(failure);
+        assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
+        assert!(
+            error.message.contains("Source package @core/html")
+                && error.message.contains("incomplete"),
+            "the shipped registration must report its damaged package set: {}",
+            error.message
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shipped_root_symlinked_outside_the_installation_reports_a_damaged_set() {
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let outside = root.join("outside/core/html");
+        fs::create_dir_all(&outside).expect("should create outside package root");
+        let installed_parent = root.join("installation/packages/core");
+        fs::create_dir_all(&installed_parent).expect("should create installation package parent");
+        let installed_root = installed_parent.join("html");
+        symlink(&outside, &installed_root).expect("should create package-root symlink");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        source_packages
+            .register_compiler_shipped_filesystem_root(
+                "core/html",
+                installed_root,
+                crate::builder_surface::PackageOrigin::Core,
+            )
+            .expect("symlinked shipped source root should register");
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("a shipped symlink target without a support facade is damaged");
+        let error = primary_infrastructure_error(failure);
+        assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
+        assert!(
+            error.message.contains("incomplete"),
+            "the canonical symlink target outside the installation keeps shipped provenance: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn directory_named_like_shipped_package_facade_reports_a_damaged_set() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let package_root = root.join("installation/packages/core/html");
+        fs::create_dir_all(package_root.join("@package.moth"))
+            .expect("should create a directory at the shipped facade path");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        source_packages
+            .register_compiler_shipped_filesystem_root(
+                "core/html",
+                package_root,
+                crate::builder_surface::PackageOrigin::Core,
+            )
+            .expect("test shipped source root should register");
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("a shipped facade replaced by a directory is a damaged package set");
+        assert_damaged_package_facade(failure, "core/html");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_shipped_package_facade_reports_a_damaged_set() {
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let package_root = root.join("installation/packages/core/html");
+        fs::create_dir_all(&package_root).expect("should create package root");
+        symlink("missing-facade.moth", package_root.join("@package.moth"))
+            .expect("should create a dangling facade symlink");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        source_packages
+            .register_compiler_shipped_filesystem_root(
+                "core/html",
+                package_root,
+                crate::builder_surface::PackageOrigin::Core,
+            )
+            .expect("test shipped source root should register");
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("an unresolvable shipped facade is a damaged package set");
+        assert_damaged_package_facade(failure, "core/html");
+    }
+
+    #[test]
+    fn directory_named_like_ordinary_package_facade_stays_authored() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let package_root = root.join("pkg");
+        fs::create_dir_all(package_root.join("@package.moth"))
+            .expect("should create a directory at the ordinary facade path");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        register_pkg(&mut source_packages, &package_root);
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("an ordinary facade replaced by a directory is an authored structure");
+        assert_invalid_config_reason(failure, InvalidConfigCode::ModuleRootFileNotRegularFile);
+    }
+
+    #[test]
+    fn ordinary_registration_under_the_installation_path_is_not_a_damaged_set() {
+        let missing = crate::builder_surface::definition::BUILTIN_PACKAGES_ROOT
+            .join("__provenance_test_missing_custom_site__");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        source_packages
+            .register_filesystem_root(
+                "builder/web/site",
+                missing,
+                crate::builder_surface::PackageOrigin::Builder,
+            )
+            .expect("test source root should register");
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("a missing ordinary root is still a filesystem failure");
+        let error = primary_infrastructure_error(failure);
+        assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
+        assert!(
+            error.message.contains("canonicalize") && !error.message.contains("incomplete"),
+            "ordinary registration must stay operational even under the installed path: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn shipped_package_root_replaced_by_a_file_reports_a_damaged_set() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let package_parent = root.join("installation/packages/core");
+        fs::create_dir_all(&package_parent).expect("should create package parent");
+        let package_root = package_parent.join("html");
+        fs::write(&package_root, "not a directory").expect("should replace the root with a file");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        source_packages
+            .register_compiler_shipped_filesystem_root(
+                "core/html",
+                package_root,
+                crate::builder_surface::PackageOrigin::Core,
+            )
+            .expect("test shipped source root should register");
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("a shipped package directory replaced by a file is a damaged package set");
+        let error = primary_infrastructure_error(failure);
+        assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
+        assert!(
+            error.message.contains("Source package @core/html")
+                && error.message.contains("Failed to read directory")
+                && error.message.contains("incomplete"),
+            "the shipped root keeps its OS cause and names the damaged set: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn ordinary_package_root_replaced_by_a_file_stays_operational() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let package_root = _tmp_root.path().join("pkg");
+        fs::write(&package_root, "not a directory").expect("should create a file package root");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        register_pkg(&mut source_packages, &package_root);
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("an ordinary package root that is a file cannot be indexed");
+        let error = primary_infrastructure_error(failure);
+        assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
+        assert!(
+            error.message.contains("Failed to read directory")
+                && !error.message.contains("incomplete"),
+            "an ordinary registration keeps its operational read failure: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn custom_registration_with_the_official_builder_prefix_stays_authored() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let package_root = root.join("packages/builder/web/site");
+        fs::create_dir_all(&package_root).expect("should create package root");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        source_packages
+            .register_filesystem_root(
+                "builder/web/site",
+                package_root,
+                crate::builder_surface::PackageOrigin::Builder,
+            )
+            .expect("custom Builder source root should register");
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("a custom root without a support facade publishes no package surface");
+        assert_invalid_config_reason(failure, InvalidConfigCode::SourcePackageMissingRoot);
     }
 
     #[test]
@@ -1233,8 +1627,8 @@ mod module_identity_tests {
         let index = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root.clone(),
             super::source_tree_index::SourceTreeProjectContext {
-                project_root: &canonical_root,
                 validated_output_settings: None,
+                config_source: None,
             },
             &config,
             &SourcePackageRegistry::default(),
@@ -2589,7 +2983,6 @@ mod module_identity_tests {
 
         let entry_root = root.join("src");
         let config = Config::new(root.clone());
-        let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
@@ -2597,8 +2990,8 @@ mod module_identity_tests {
         let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
-                project_root: &canonical_root,
                 validated_output_settings: None,
+                config_source: None,
             },
             &config,
             &SourcePackageRegistry::default(),
@@ -2646,8 +3039,8 @@ mod module_identity_tests {
         let index = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root.clone(),
             super::source_tree_index::SourceTreeProjectContext {
-                project_root: &canonical_root,
                 validated_output_settings: None,
+                config_source: None,
             },
             &config,
             &SourcePackageRegistry::default(),
@@ -2998,7 +3391,6 @@ mod owned_source_inventory_tests {
         let mut config = Config::new(root.to_path_buf());
         config.project_name = String::from(project_name);
 
-        let canonical_root = fs::canonicalize(root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
@@ -3006,8 +3398,8 @@ mod owned_source_inventory_tests {
         SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
-                project_root: &canonical_root,
                 validated_output_settings: None,
+                config_source: None,
             },
             &config,
             &SourcePackageRegistry::default(),
@@ -3811,7 +4203,6 @@ mod owned_source_inventory_tests {
         let mut config = Config::new(root.to_path_buf());
         config.project_name = String::from(project_name);
 
-        let canonical_root = fs::canonicalize(root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
@@ -3821,8 +4212,8 @@ mod owned_source_inventory_tests {
         SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
-                project_root: &canonical_root,
                 validated_output_settings: None,
+                config_source: None,
             },
             &config,
             &SourcePackageRegistry::default(),
@@ -4023,8 +4414,8 @@ mod project_module_graph_tests {
         let index = SourceTreeIndex::discover(
             canonical_entry_root.clone(),
             super::source_tree_index::SourceTreeProjectContext {
-                project_root: &canonical_root,
                 validated_output_settings: None,
+                config_source: None,
             },
             &config,
             &SourcePackageRegistry::default(),

@@ -55,6 +55,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticBag, InvalidFallibleHandlingReason, PreparedFailure,
 };
 use crate::compiler_frontend::datatypes::CallableEvaluation;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::external_packages::external_returns;
@@ -344,6 +345,12 @@ struct FrontendProject {
     frontend: FrontendServices,
     builder_root_slots: Option<BuilderRootSlotSchema>,
     entry_role: FileRole,
+    build_profile: FrontendBuildProfile,
+    /// Environment paired with the most recent HIR lowering.
+    ///
+    /// WHY: borrow validation consumes semantic type classes, and tests lower HIR once then run
+    ///      several validation passes.
+    lowered_type_environment: Option<TypeEnvironment>,
 }
 
 impl FrontendProject {
@@ -428,12 +435,20 @@ impl FrontendProject {
             frontend,
             builder_root_slots: None,
             entry_role,
+            build_profile: FrontendBuildProfile::Dev,
+            lowered_type_environment: None,
         }
     }
 
     /// Registers the named destinations the frontend may route direct root contributions to.
     fn with_builder_root_slots(mut self, schema: BuilderRootSlotSchema) -> Self {
         self.builder_root_slots = Some(schema);
+        self
+    }
+
+    /// Select the build profile the AST request declares.
+    fn with_build_profile(mut self, build_profile: FrontendBuildProfile) -> Self {
+        self.build_profile = build_profile;
         self
     }
 
@@ -539,7 +554,7 @@ impl FrontendProject {
                     sorted,
                     module_anchor_path: &self.entry_file,
                     synthesizes_entry_start: matches!(self.entry_role, FileRole::ActiveEntryRoot),
-                    build_profile: FrontendBuildProfile::Dev,
+                    build_profile: self.build_profile,
                     capacity_estimate: Default::default(),
                     resolved_file_references: ResolvedFileReferenceTable::default(),
                     module_origin: None,
@@ -588,16 +603,42 @@ impl FrontendProject {
     }
 
     fn lower_ast_result(&mut self, ast: Ast) -> Result<HirModule, PreparedFailure> {
+        let lowered = self.frontend.with_compiler(|compiler| {
+            compiler.generate_hir(
+                ast,
+                HirFunctionOriginLookup::default(),
+                None,
+                Default::default(),
+            )
+        })?;
+        self.lowered_type_environment = Some(lowered.type_environment);
+        Ok(lowered.hir_module)
+    }
+
+    /// Runs borrow validation against the environment that owns the lowered HIR's type ids.
+    fn check_borrows(
+        &mut self,
+        hir_module: &HirModule,
+    ) -> Result<BorrowCheckReport, PreparedFailure> {
+        let type_environment = self
+            .lowered_type_environment
+            .as_ref()
+            .expect("HIR lowering must retain its type environment before borrow validation");
         self.frontend
-            .with_compiler(|compiler| {
-                compiler.generate_hir(
-                    ast,
-                    HirFunctionOriginLookup::default(),
-                    None,
-                    Default::default(),
-                )
-            })
-            .map(|result| result.hir_module)
+            .with_compiler(|compiler| compiler.check_borrows(hir_module, type_environment))
+    }
+
+    /// Runs borrow validation against an environment the caller still owns.
+    ///
+    /// WHY: tests that lower HIR directly, or install private lanes after lowering, hold the
+    ///      environment themselves and must pass its current state rather than a stale clone.
+    fn check_borrows_with(
+        &mut self,
+        hir_module: &HirModule,
+        type_environment: &TypeEnvironment,
+    ) -> Result<BorrowCheckReport, PreparedFailure> {
+        self.frontend
+            .with_compiler(|compiler| compiler.check_borrows(hir_module, type_environment))
     }
 
     /// Exercise the summary owner's semantic contract checks without claiming backend delivery.
@@ -618,7 +659,7 @@ impl FrontendProject {
         let hir = lowered.hir_module;
         let mut report = self
             .frontend
-            .with_compiler(|compiler| compiler.check_borrows(&hir))?;
+            .with_compiler(|compiler| compiler.check_borrows(&hir, &type_environment))?;
         crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
             &hir,
             &mut report,
@@ -668,8 +709,7 @@ impl FrontendProject {
     fn borrow_checked_hir(&mut self) -> (HirModule, BorrowCheckReport) {
         let hir = self.hir();
         let report = self
-            .frontend
-            .with_compiler(|compiler| compiler.check_borrows(&hir))
+            .check_borrows(&hir)
             .expect("borrow checking should succeed");
         (hir, report)
     }
@@ -1102,8 +1142,7 @@ fn frontend_diagnostics_preserve_source_spans() {
 
     let hir = project.hir();
     let prepared_failure = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows(&hir)
         .expect_err("multiple mutable borrows should fail borrow checking");
     let messages = freeze_prepared_failure(
         prepared_failure,
@@ -1847,8 +1886,7 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
     let mut hir = lowered.hir_module;
     let mut type_environment = lowered.type_environment;
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("ordinary numeric functions should pass borrow checking");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -1862,8 +1900,7 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
     )
     .expect("private failure lane must install");
     project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("installed failure edges must pass borrow checking");
     for (name, expected_escape) in [
         ("multiply", true),
@@ -1987,8 +2024,7 @@ fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
     let mut hir = lowered.hir_module;
     let mut type_environment = lowered.type_environment;
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("float integrity guards must pass borrow checking");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -2002,8 +2038,7 @@ fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
     )
     .expect("only implicit failures may join the private lane");
     project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("integrity guards and installed numeric lanes must pass borrow checking");
 
     for (name, expected_invoke, escapes) in [
@@ -2087,7 +2122,7 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
              return bump(amount)\n;\n\
          walk |start I32, end I32| -> I32:\n\
              seen ~I32 = 0\n\
-             loop start to & end |value|:\n\
+             loop start to & end by 1 |value, ordinal|:\n\
                  ~seen = copy value\n\
              ;\n\
              return seen\n;\n\
@@ -2109,8 +2144,7 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
     let mut hir = lowered.hir_module;
     let mut type_environment = lowered.type_environment;
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("statement-owned checks must pass borrow checking");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -2124,8 +2158,7 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
     )
     .expect("statement-owned checks must join the private failure lane");
     project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("retargeted write-back and range edges must pass borrow checking");
 
     let bump = named_hir_function(&project, &hir, "bump");
@@ -2192,8 +2225,7 @@ fn private_failure_lane_marks_edge_locals_as_temps_without_weakening_fresh_mutab
     );
 
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("fresh mutable arguments must pass borrow checking before lane installation");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -2264,8 +2296,7 @@ fn private_failure_lane_marks_edge_locals_as_temps_without_weakening_fresh_mutab
         "checked arithmetic and private calls must introduce native error destinations"
     );
     project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("edge locals must not introduce exclusive aliases of fresh mutable roots");
 }
 
@@ -2324,8 +2355,7 @@ fn private_failure_lane_preserves_unrelated_fatal_fallible_edge() {
         *message = "Rendered conversion message may change".to_owned();
     }
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("fatal fallible edge must be legal HIR");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -3220,8 +3250,7 @@ fn implicit_failure_custom_catch_reports_handler_compatibility_before_protected_
         .expect("nested custom catches must defer compatibility until private summaries converge");
     let recover = named_hir_function(&project, &hir, "recover");
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows(&hir)
         .expect("nested recovery must pass borrow checking");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -4130,6 +4159,96 @@ fn implicit_failure_assertion_message_rejects_inferred_call_even_when_inactive()
 }
 
 #[test]
+fn implicit_failure_assertion_message_rejects_inferred_call_in_unreachable_code() {
+    for (shape, source) in [
+        (
+            "unconditional return",
+            "message |left I32, right I32| -> String:\n    value = left * right\n    return [value]\n;\n\
+             validate |left I32, right I32|:\n\
+                 return\n\
+                 assert(true, message(left, right))\n\
+             ;\n",
+        ),
+        (
+            "folded-false loop body",
+            "message |left I32, right I32| -> String:\n    value = left * right\n    return [value]\n;\n\
+             validate |left I32, right I32|:\n\
+                 loop false:\n\
+                     assert(true, message(left, right))\n\
+                 ;\n\
+             ;\n",
+        ),
+    ] {
+        for build_profile in [FrontendBuildProfile::Dev, FrontendBuildProfile::Release] {
+            let mut project = FrontendProject::new(
+                &[("src/@entry.moth", source)],
+                "src/@entry.moth",
+                StyleDirectiveRegistry::built_ins(),
+            )
+            .with_build_profile(build_profile);
+            let messages = project
+                .failure_contract_boundary_result()
+                .expect_diagnosed(shape);
+            assert_fallible_reason(
+                &messages,
+                InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
+            );
+        }
+    }
+}
+
+#[test]
+fn inactive_assertion_message_obligations_report_the_first_authored_message() {
+    let source = "message_a |left I32, right I32| -> String:\n    value = left * right\n    return [value]\n;\n\
+                  message_b |left I32, right I32| -> String:\n    value = left * right\n    return [value]\n;\n\
+                  validate |left I32, right I32, ready Bool|:\n\
+                      return\n\
+                      if ready:\n\
+                          assert(true, message_a(left, right))\n\
+                      ;\n\
+                      assert(true, message_b(left, right))\n\
+                  ;\n";
+    let mut project = failure_project(source);
+    let failure = project
+        .failure_contract_boundary_result()
+        .expect_diagnosed("inactive assertion messages still reach convergence");
+    assert_fallible_reason(
+        &failure,
+        InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
+    );
+    let diagnostic = single_ast_error_view(&failure);
+    let span = diagnostic_primary_span(diagnostic).expect("message call span");
+    let range = span
+        .local()
+        .inline_range()
+        .expect("fixture messages sit in inline spans");
+    let first = source
+        .find("message_a(left, right)")
+        .expect("first message call") as u32;
+    let second = source
+        .find("message_b(left, right)")
+        .expect("second message call") as u32;
+    assert_eq!(
+        range.start(),
+        first,
+        "the nested message before the enclosing sequence resumes must be reported first"
+    );
+    assert!(
+        range.end() <= second,
+        "the diagnostic must not point at the later message"
+    );
+}
+
+#[test]
+fn inactive_assertion_message_walk_handles_long_flat_dead_tails() {
+    // Each later `return` used to spawn another throwaway projection over the remaining suffix.
+    // This flat tail has no source nesting but is deep enough to overflow the compiler stack.
+    let dead_returns = "    return\n".repeat(20_000);
+    let mut project = failure_project(&format!("validate ||:\n    return\n{dead_returns};\n"));
+    let _ = project.ast();
+}
+
+#[test]
 fn implicit_failure_assertion_message_rejects_template_range_runtime_step() {
     let mut project = failure_project(
         "validate |ready Bool, step I32|:\n\
@@ -4821,8 +4940,7 @@ fn implicit_failure_private_catch_routes_argument_failure_before_outer_call() {
         "lowering must record the pending catch edge for the private argument call"
     );
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("protected private calls must pass borrow checking before lane installation");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -4836,8 +4954,7 @@ fn implicit_failure_private_catch_routes_argument_failure_before_outer_call() {
     )
     .expect("private failure lane must install");
     project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("installed failure edges must pass borrow checking");
     assert!(
         hir.catch_protected_calls.is_empty(),
@@ -4935,8 +5052,7 @@ fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
         "lowering must record the pending catch edge for the private call"
     );
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("protected private calls must pass borrow checking before lane installation");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -4950,8 +5066,7 @@ fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
     )
     .expect("private failure lane must install");
     project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("installed failure edges must pass borrow checking");
     assert!(
         hir.catch_protected_calls.is_empty(),
@@ -5203,8 +5318,7 @@ fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
         "a typed callee routes through Invoke, not the private lane"
     );
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("protected RHS calls must pass borrow checking before lane installation");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -5218,8 +5332,7 @@ fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
     )
     .expect("private failure lane must install");
     project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows_with(&hir, &type_environment)
         .expect("installed failure edges must pass borrow checking");
     assert!(
         hir.catch_protected_calls.is_empty(),
@@ -5655,8 +5768,7 @@ fn implicit_failure_same_module_cross_file_call_keeps_canonical_private_failure_
         )
     ));
     let mut report = project
-        .frontend
-        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .check_borrows(&hir)
         .expect("same-module numeric helper must pass borrow validation");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir,
@@ -5664,6 +5776,183 @@ fn implicit_failure_same_module_cross_file_call_keeps_canonical_private_failure_
     );
     assert!(report.analysis.public_call_summaries[&helper.id].escapes_builtin_failure);
     assert!(!report.analysis.public_call_summaries[&caller.id].escapes_builtin_failure);
+}
+
+#[test]
+fn dead_statement_tail_keeps_selected_call_evidence_without_failure_contributors() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@entry.moth",
+            "failing |value I32| -> I32:\n    marker I32 = value + 1\n    return marker\n;\n\
+             probe |value I32| -> I32:\n    live I32 = failing(value)\n    return live\n\
+             dead I32 = failing(value)\n    return dead\n;\n\
+             dead_only |value I32| -> I32:\n    return 0\n    unused I32 = value + 1\n\
+             loop 0 to value:\n        marker = 0\n    ;\n    return unused\n;\n\
+             ~[: probe=[probe(1)] dead=[dead_only(1)] ]\n",
+        )],
+        "src/@entry.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+
+    let ast = project.ast();
+    let call_span = |view: ExpressionView<'_>| {
+        let ExpressionOperationView::Call(call) = view.operation() else {
+            panic!("expected a source call initializer");
+        };
+        call.metadata().span
+    };
+    let probe_body = named_function_body(&project, &ast, "probe");
+    let live_call_span = call_span(initializer(&ast, &probe_body[0]));
+    let dead_call_span = call_span(initializer(&ast, &probe_body[2]));
+    assert_ne!(live_call_span, dead_call_span);
+
+    let hir = project.hir();
+    let function_id = |name: &str| {
+        hir.functions
+            .iter()
+            .find(|function| {
+                hir.side_table
+                    .function_name_path(function.id)
+                    .and_then(|path| project.frontend.path_fork.component(path))
+                    .is_some_and(|component| {
+                        project.frontend.string_table.resolve(component) == name
+                    })
+            })
+            .unwrap_or_else(|| panic!("the module should lower {name}"))
+            .id
+    };
+    let failing = function_id("failing");
+    let probe = function_id("probe");
+    let dead_only = function_id("dead_only");
+    let facts = &hir.function_failure_facts[&probe];
+
+    // Both the live and dead statements select the callee for constraint evidence.
+    let failing_sites = facts
+        .constraint
+        .selected_call_sites
+        .iter()
+        .filter(|site| matches!(site.target, CallTarget::Local(target) if target == failing))
+        .map(|site| site.span)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        failing_sites.len(),
+        2,
+        "both the live and the dead call must stay in selected evidence: {failing_sites:?}"
+    );
+    assert!(failing_sites.contains(&live_call_span));
+    assert!(failing_sites.contains(&dead_call_span));
+
+    // Only the live call can execute. A target-only filter would also drop it.
+    let [contributor] = facts.contributors.as_slice() else {
+        panic!(
+            "the live call must be the only executable contributor: {:?}",
+            facts.contributors
+        );
+    };
+    assert!(matches!(
+        contributor.source,
+        HirBuiltinFailureSource::Call(CallTarget::Local(target)) if target == failing
+    ));
+    assert_eq!(contributor.span, live_call_span);
+    assert_ne!(contributor.span, dead_call_span);
+
+    // Dead arithmetic and a dead range loop are equally non-executable.
+    let dead_only_facts = &hir.function_failure_facts[&dead_only];
+    assert!(
+        dead_only_facts.contributors.is_empty(),
+        "dead arithmetic and range steps must project no executable contributor: {:?}",
+        dead_only_facts.contributors
+    );
+
+    let mut report = project
+        .check_borrows(&hir)
+        .expect("the dead statement tail must pass borrow validation");
+    crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
+        &hir,
+        &mut report,
+    );
+    assert!(report.analysis.public_call_summaries[&failing].escapes_builtin_failure);
+    assert!(report.analysis.public_call_summaries[&probe].escapes_builtin_failure);
+    assert!(!report.analysis.public_call_summaries[&dead_only].escapes_builtin_failure);
+}
+
+#[test]
+fn release_keeps_authored_dead_nested_call_as_skipped_evidence() {
+    let source = "assert_positive |value I32| -> I32:\n    assert(value > 0)\n    return value\n;\n\
+                  $infallible\n\
+                  probe |value I32| -> I32:\n    return 4\n\
+                  dead Bool = value is assert_positive(1)\n    return 0\n;\n\
+                  ~[: probe=[probe(1)] ]\n";
+    let mut debug = FrontendProject::new(
+        &[("src/@entry.moth", source)],
+        "src/@entry.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+    let mut release = FrontendProject::new(
+        &[("src/@entry.moth", source)],
+        "src/@entry.moth",
+        StyleDirectiveRegistry::built_ins(),
+    )
+    .with_build_profile(FrontendBuildProfile::Release);
+
+    // Anchor on the authored call nested inside the dead comparison. Debug keeps it at runtime
+    // and has no erased-call ledger.
+    let debug_ast = debug.ast();
+    let debug_body = named_function_body(&debug, &debug_ast, "probe");
+    let comparison = initializer(&debug_ast, &debug_body[1]);
+    let ExpressionOperationView::Compare { right, .. } = comparison.operation() else {
+        panic!("`value is call` must be a comparison expression");
+    };
+    let ExpressionOperationView::Call(call) = right.operation() else {
+        panic!("the comparison's right operand must be the nested call");
+    };
+    let authored_call_span = call
+        .metadata()
+        .span
+        .expect("every authored call carries its parse span");
+    assert!(
+        debug_ast.release_erased_call_sites.is_empty(),
+        "debug builds erase no call"
+    );
+
+    // Release speculation leaves every authored-dead statement unfolded. The nested call keeps
+    // its runtime expression, so the entry's live call to `probe` is the only foldable site and
+    // the dead call never reaches the erased-call ledger.
+    let release_ast = release.ast();
+    assert!(
+        release_ast
+            .release_erased_call_sites
+            .iter()
+            .all(|site| site.span != authored_call_span),
+        "release must not erase the authored-dead call at {authored_call_span:?}: {:?}",
+        release_ast.release_erased_call_sites
+    );
+
+    let hir = release
+        .lower_ast_result(release_ast)
+        .expect("release HIR lowering should succeed");
+    let probe = named_hir_function(&release, &hir, "probe").id;
+    let facts = &hir.function_failure_facts[&probe];
+    assert!(
+        facts.constraint.live_erased_call_sites.is_empty(),
+        "a dead nested call must not project a live erased site: {:?}",
+        facts.constraint.live_erased_call_sites
+    );
+    let skipped_selected = facts
+        .constraint
+        .selected_call_sites
+        .iter()
+        .filter(|site| site.span == Some(authored_call_span))
+        .count();
+    assert_eq!(
+        skipped_selected, 1,
+        "the dead call must still contribute selected fast-use evidence exactly once"
+    );
+    assert!(
+        facts.contributors.is_empty(),
+        "a dead nested call must not project an executable failure contributor: {:?}",
+        facts.contributors
+    );
 }
 
 #[test]

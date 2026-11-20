@@ -513,6 +513,13 @@ pub struct ExternalPackage {
     pub id: ExternalPackageId,
     pub path: String,
     pub metadata: crate::builder_surface::PackageMetadata,
+    /// Whether source dependency clauses may bind symbols from this package.
+    ///
+    /// WHAT: implicit compiler-owned packages back language-owned surfaces and carry no
+    ///       source-visible dependency surface.
+    /// WHY: receiver methods and other compiler-owned syntax resolve these packages directly, so
+    ///      the package must stay registered while authored dependency clauses stay rejected.
+    pub source_bindable: bool,
     /// Path-to-ID surface map for registered functions.
     ///
     /// WHAT: maps the full symbol path inside this package to its stable function ID.
@@ -532,6 +539,7 @@ impl Clone for ExternalPackage {
             id: self.id,
             path: self.path.clone(),
             metadata: self.metadata,
+            source_bindable: self.source_bindable,
             function_ids: self.function_ids.clone(),
             type_ids: self.type_ids.clone(),
             constant_ids: self.constant_ids.clone(),
@@ -544,11 +552,13 @@ impl ExternalPackage {
         id: ExternalPackageId,
         path: impl Into<String>,
         metadata: crate::builder_surface::PackageMetadata,
+        source_bindable: bool,
     ) -> Self {
         Self {
             id,
             path: path.into(),
             metadata,
+            source_bindable,
             function_ids: FxHashMap::default(),
             type_ids: FxHashMap::default(),
             constant_ids: FxHashMap::default(),

@@ -1,6 +1,7 @@
 //! Borrow-checker state invariant tests.
 //!
-//! WHAT: protects slot-backed alias rebinding, join growth reporting, visibility narrowing, the
+//! WHAT: protects slot-backed alias rebinding, independent value-provenance and direct-alias root
+//!       sets, must-joined alias derivation, join growth reporting, visibility narrowing, the
 //!       skip a covering visibility mask takes, and the membership shortcut that alias conflict
 //!       scans use in place of the set builder.
 //! WHY: these facts live in transfer state and cannot be inspected from rendered output.
@@ -53,10 +54,11 @@ fn join_reports_growth_for_each_fact_and_keeps_joined_facts() {
         LocalState::alias_with_direct(roots(local_count, &[0]), roots(local_count, &[0])),
     );
 
-    // Each incoming state grows exactly one fact of local 2: its mode, its value roots or its
-    // direct-alias roots. Worklist scheduling depends on every kind of growth being reported.
-    // Direct-alias roots stay within value roots, as in production, so direct growth comes
-    // last, after the joined value roots already hold its new root.
+    // Each incoming state grows exactly one fact of local 2: its mode, its value roots, its
+    // direct-alias roots or its write targets. Worklist scheduling depends on every kind of
+    // growth being reported. Each later state adds a root bit the earlier states do not hold,
+    // because the three root sets are independent facts and each joined bit must report growth
+    // on its own.
     let mut mode_growth = base.clone();
     mode_growth.update_local_state(
         2,
@@ -64,6 +66,8 @@ fn join_reports_growth_for_each_fact_and_keeps_joined_facts() {
             mode: LocalMode::SLOT,
             value_roots: roots(local_count, &[0]),
             direct_alias_roots: roots(local_count, &[0]),
+            write_target_roots: roots(local_count, &[0]),
+            derived_from_roots: RootSet::empty(local_count),
         },
     );
     let mut value_growth = base.clone();
@@ -74,11 +78,24 @@ fn join_reports_growth_for_each_fact_and_keeps_joined_facts() {
     let mut direct_growth = base.clone();
     direct_growth.update_local_state(
         2,
-        LocalState::alias_with_direct(roots(local_count, &[0, 1]), roots(local_count, &[0, 1])),
+        LocalState::alias_with_cells(
+            roots(local_count, &[0]),
+            roots(local_count, &[0, 2]),
+            roots(local_count, &[0]),
+        ),
+    );
+    let mut target_growth = base.clone();
+    target_growth.update_local_state(
+        2,
+        LocalState::alias_with_cells(
+            roots(local_count, &[0]),
+            roots(local_count, &[0]),
+            roots(local_count, &[0, 1]),
+        ),
     );
 
     let mut joined = base.clone();
-    for incoming in [&mode_growth, &value_growth, &direct_growth] {
+    for incoming in [&mode_growth, &value_growth, &direct_growth, &target_growth] {
         assert!(joined.join_in_place(incoming));
         assert!(
             !joined.join_in_place(incoming),
@@ -89,47 +106,245 @@ fn join_reports_growth_for_each_fact_and_keeps_joined_facts() {
     let local = joined.local_state(2);
     assert_eq!(local.mode, LocalMode::ALIAS.union(LocalMode::SLOT));
     assert_eq!(members(&local.value_roots), vec![0, 1]);
-    assert_eq!(members(&local.direct_alias_roots), vec![0, 1]);
+    assert_eq!(members(&local.direct_alias_roots), vec![0, 2]);
+    assert_eq!(members(&local.write_target_roots), vec![0, 1]);
 }
 
 #[test]
-fn visibility_narrowing_drops_only_invisible_roots_and_keeps_slot_storage() {
-    let local_count = 4;
-    let visible = roots(local_count, &[0, 1, 2]);
+fn join_intersects_derived_alias_facts() {
+    let local_count = 3;
+    let mut left = BorrowState::new_uninitialized(local_count);
+    let mut left_alias =
+        LocalState::alias_with_direct(roots(local_count, &[0]), roots(local_count, &[0]));
+    left_alias.derived_from_roots = roots(local_count, &[0, 2]);
+    left.update_local_state(1, left_alias);
+
+    let mut right = BorrowState::new_uninitialized(local_count);
+    let mut right_alias =
+        LocalState::alias_with_direct(roots(local_count, &[0]), roots(local_count, &[0]));
+    right_alias.derived_from_roots = roots(local_count, &[0, 1]);
+    right.update_local_state(1, right_alias);
+
+    assert!(left.join_in_place(&right));
+    assert_eq!(
+        members(&left.local_state(1).derived_from_roots),
+        vec![0],
+        "only an alias derived on every incoming path is a must fact"
+    );
+    assert!(!left.join_in_place(&right), "repeating a join adds nothing");
+}
+
+#[test]
+fn visibility_narrowing_prunes_each_root_set_independently() {
+    let local_count = 7;
+    let visible = roots(local_count, &[0, 1, 2, 4, 5]);
     let mut state = BorrowState::new_uninitialized(local_count);
     state.initialize_parameter(0);
     state.update_local_state(3, LocalState::slot(local_count));
-    // Local 1 keeps a visible root after narrowing; locals 2 and 0 lose their only root.
-    state.update_local_state(
-        1,
-        LocalState::alias_with_direct(roots(local_count, &[0, 3]), roots(local_count, &[3])),
+    // Local 1 keeps a visible root in each set after narrowing. The invisible bits differ, so
+    // no set may be pruned as a side effect of pruning another.
+    let mut partially_visible = LocalState::alias_with_cells(
+        roots(local_count, &[0, 3]),
+        roots(local_count, &[2, 3]),
+        roots(local_count, &[1, 3]),
     );
+    partially_visible.derived_from_roots = roots(local_count, &[0, 3]);
+    state.update_local_state(1, partially_visible);
+    // Local 2 loses every value root but still observes a visible referent cell. That cell is
+    // the alias view's remaining identity, so the binding must survive as an alias.
+    let mut cell_only =
+        LocalState::alias_with_direct(roots(local_count, &[3]), roots(local_count, &[1, 3]));
+    cell_only.derived_from_roots = roots(local_count, &[3, 4]);
+    state.update_local_state(2, cell_only);
+    // Local 0 keeps only value provenance after its direct cell leaves visibility.
+    let mut value_only =
+        LocalState::alias_with_direct(roots(local_count, &[1]), roots(local_count, &[3]));
+    value_only.derived_from_roots = roots(local_count, &[3]);
+    state.update_local_state(0, value_only);
+    // Local 4 keeps a slot's own storage but loses every root set.
     state.update_local_state(
-        2,
+        4,
         LocalState::slot_with_value_roots(roots(local_count, &[3]), roots(local_count, &[3])),
     );
+    // Local 5 has no value provenance or direct cell left, but a visible write target keeps it
+    // alive as an alias: it can still mutate that referent.
     state.update_local_state(
-        0,
-        LocalState::alias_with_direct(roots(local_count, &[3]), roots(local_count, &[3])),
+        5,
+        LocalState::alias_with_cells(
+            RootSet::empty(local_count),
+            RootSet::empty(local_count),
+            roots(local_count, &[1, 3]),
+        ),
     );
+    // Local 6 only remembers a derivation; it observes no allocation, so it cannot survive as an
+    // alias and its ledger is cleared with the binding.
+    let mut derived_only =
+        LocalState::alias_with_direct(RootSet::empty(local_count), RootSet::empty(local_count));
+    derived_only.derived_from_roots = roots(local_count, &[0, 3]);
+    state.update_local_state(6, derived_only);
 
     state.kill_invisible(&visible);
 
     let partially_visible = state.local_state(1);
     assert_eq!(partially_visible.mode, LocalMode::ALIAS);
     assert_eq!(members(&partially_visible.value_roots), vec![0]);
-    assert!(partially_visible.direct_alias_roots.is_empty());
+    assert_eq!(members(&partially_visible.direct_alias_roots), vec![2]);
+    assert_eq!(members(&partially_visible.write_target_roots), vec![1]);
+    assert_eq!(members(&partially_visible.derived_from_roots), vec![0]);
 
-    // Losing the final value root keeps a slot binding's own storage but not an alias view.
-    let slot_backed = state.local_state(2);
+    let cell_only = state.local_state(2);
+    assert_eq!(cell_only.mode, LocalMode::ALIAS);
+    assert!(cell_only.value_roots.is_empty());
+    assert_eq!(members(&cell_only.direct_alias_roots), vec![1]);
+    assert_eq!(members(&cell_only.derived_from_roots), vec![4]);
+
+    let value_only = state.local_state(0);
+    assert_eq!(value_only.mode, LocalMode::ALIAS);
+    assert_eq!(members(&value_only.value_roots), vec![1]);
+    assert!(value_only.direct_alias_roots.is_empty());
+    assert!(value_only.derived_from_roots.is_empty());
+
+    // Losing every root keeps a slot binding's own storage but leaves an alias view with nothing
+    // to observe.
+    let slot_backed = state.local_state(4);
     assert_eq!(slot_backed.mode, LocalMode::SLOT);
     assert!(slot_backed.value_roots.is_empty());
     assert!(slot_backed.direct_alias_roots.is_empty());
-    let alias_view = state.local_state(0);
-    assert_eq!(alias_view.mode, LocalMode::UNINIT);
-    assert!(alias_view.value_roots.is_empty());
+    assert!(slot_backed.write_target_roots.is_empty());
+
+    let derived_only = state.local_state(6);
+    assert_eq!(derived_only.mode, LocalMode::UNINIT);
+    assert!(derived_only.derived_from_roots.is_empty());
+
+    let target_only = state.local_state(5);
+    assert_eq!(target_only.mode, LocalMode::ALIAS);
+    assert!(target_only.value_roots.is_empty());
+    assert!(target_only.direct_alias_roots.is_empty());
+    assert_eq!(members(&target_only.write_target_roots), vec![1]);
 
     assert_eq!(state.local_state(3), &LocalState::uninit(local_count));
+}
+
+#[test]
+fn designated_cells_include_binding_ownership_and_write_targets() {
+    let local_count = 4;
+    let mut state = BorrowState::new_uninitialized(local_count);
+    state.update_local_state(
+        0,
+        LocalState {
+            mode: LocalMode::SLOT,
+            value_roots: roots(local_count, &[3]),
+            direct_alias_roots: roots(local_count, &[1]),
+            write_target_roots: roots(local_count, &[2]),
+            derived_from_roots: RootSet::empty(local_count),
+        },
+    );
+    state.update_local_state(
+        1,
+        LocalState::alias_with_cells(
+            roots(local_count, &[3]),
+            roots(local_count, &[1]),
+            roots(local_count, &[2]),
+        ),
+    );
+    state.update_local_state(
+        2,
+        LocalState::alias_with_cells(
+            roots(local_count, &[3]),
+            RootSet::empty(local_count),
+            RootSet::empty(local_count),
+        ),
+    );
+
+    // A slot owns its own cell; an alias designates only its referents, including a projection's
+    // base cell even though its value provenance is an older allocation.
+    assert_eq!(members(&state.designated_cells(0)), vec![0, 1, 2]);
+    assert_eq!(members(&state.designated_cells(1)), vec![1, 2]);
+    assert!(state.designated_cells(2).is_empty());
+}
+
+// WHAT: an alias whose every root set loses visibility has nothing left to observe, so a
+//       visibility sweep resets it to UNINIT even though the binding itself stays visible.
+// WHY: a cell-only alias carried across a merge must not survive as a rootless alias view.
+#[test]
+fn visible_alias_with_no_roots_left_becomes_uninit() {
+    let local_count = 4;
+    let mut state = BorrowState::new_uninitialized(local_count);
+    state.update_local_state(
+        1,
+        LocalState::alias_with_cells(
+            roots(local_count, &[3]),
+            roots(local_count, &[3]),
+            roots(local_count, &[3]),
+        ),
+    );
+    state.update_local_state(3, LocalState::slot(local_count));
+
+    // Local 1 is visible; every root it observes is local 3, which is not.
+    let visible = roots(local_count, &[0, 1, 2]);
+    state.kill_invisible(&visible);
+
+    assert_eq!(state.local_state(1), &LocalState::uninit(local_count));
+    assert_eq!(state.local_state(3), &LocalState::uninit(local_count));
+}
+
+// WHAT: a cell-only alias survives a join and a visibility edge while its referent cell is
+//       visible, then becomes UNINIT when the referent itself leaves visibility.
+// WHY: the cell is the alias's only remaining identity after a branch-local value root is gone;
+//       dropping the mode at either the join or the sweep loses the conflict the alias reports.
+#[test]
+fn cell_only_alias_survives_join_and_scope_narrowing() {
+    let local_count = 4;
+    let mut left = BorrowState::new_uninitialized(local_count);
+    left.update_local_state(
+        1,
+        LocalState::alias_with_cells(
+            RootSet::empty(local_count),
+            roots(local_count, &[0]),
+            RootSet::empty(local_count),
+        ),
+    );
+    let mut right = BorrowState::new_uninitialized(local_count);
+    right.update_local_state(
+        1,
+        LocalState::alias_with_cells(
+            RootSet::empty(local_count),
+            roots(local_count, &[0, 3]),
+            RootSet::empty(local_count),
+        ),
+    );
+
+    assert!(left.join_in_place(&right));
+    let joined = left.local_state(1);
+    assert_eq!(joined.mode, LocalMode::ALIAS);
+    assert!(joined.value_roots.is_empty());
+    assert_eq!(members(&joined.direct_alias_roots), vec![0, 3]);
+    assert!(joined.write_target_roots.is_empty());
+
+    // The branch-local referent cell leaves visibility; the outer one keeps the alias alive.
+    left.kill_invisible(&roots(local_count, &[0, 1, 2]));
+    let narrowed = left.local_state(1);
+    assert_eq!(narrowed.mode, LocalMode::ALIAS);
+    assert!(narrowed.value_roots.is_empty());
+    assert_eq!(members(&narrowed.direct_alias_roots), vec![0]);
+    assert!(narrowed.write_target_roots.is_empty());
+
+    // A merge with a path that never rebound the binding keeps the alias alternative.
+    let mut slot_branch = BorrowState::new_uninitialized(local_count);
+    slot_branch.update_local_state(1, LocalState::slot(local_count));
+    let mut merged = left.clone();
+    assert!(merged.join_in_place(&slot_branch));
+    assert!(merged.local_state(1).mode.contains(LocalMode::ALIAS));
+    merged.kill_invisible(&roots(local_count, &[0, 1, 2]));
+    let merged_state = merged.local_state(1);
+    assert!(merged_state.mode.contains(LocalMode::ALIAS));
+    assert!(merged_state.value_roots.is_empty());
+    assert_eq!(members(&merged_state.direct_alias_roots), vec![0]);
+
+    // Losing the last visible referent leaves nothing to observe.
+    let mut pruned = left.clone();
+    pruned.kill_invisible(&roots(local_count, &[1, 2, 3]));
+    assert_eq!(pruned.local_state(1), &LocalState::uninit(local_count));
 }
 
 #[test]
@@ -258,6 +473,8 @@ fn effective_root_contains_matches_effective_roots_membership() {
                         mode,
                         value_roots: value_roots.clone(),
                         direct_alias_roots: RootSet::empty(local_count),
+                        write_target_roots: RootSet::empty(local_count),
+                        derived_from_roots: RootSet::empty(local_count),
                     },
                 );
 

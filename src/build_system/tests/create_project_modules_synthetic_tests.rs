@@ -120,8 +120,8 @@ fn indexed_discovery_keeps_authored_kind_when_canonical_extension_disagrees() {
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &project_root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -179,8 +179,8 @@ fn stage0_source_ids_keep_module_origin_order_when_flat_portable_path_disagrees(
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &project_root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),

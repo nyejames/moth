@@ -103,7 +103,13 @@ fn install_lanes(
             "installation preserves numeric producer identity, span and success destination"
         );
     }
-    (hir, type_environment, report, path_fork, string_table)
+    (
+        hir.hir_module,
+        type_environment,
+        report,
+        path_fork,
+        string_table,
+    )
 }
 
 #[test]
@@ -350,7 +356,7 @@ fn fast_range_guards_and_ordinal_never_join_the_private_failure_lane() {
          $fast_math\n\
          looper |start F32, end F32, step F32, seed I32| -> I32:\n\
          \x20   bumped = failer(seed)\n\
-         \x20   loop start to end by step |i|:\n\
+         \x20   loop start to end by step |i, ordinal|:\n\
          \x20   ;\n\
          \x20   return bumped\n\
          ;\n";

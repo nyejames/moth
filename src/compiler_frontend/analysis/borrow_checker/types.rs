@@ -109,6 +109,12 @@ pub(crate) struct FunctionBorrowSummary {
 pub(crate) struct StatementBorrowFact {
     pub shared_roots: Vec<LocalId>,
     pub mutable_roots: Vec<LocalId>,
+    /// Roots whose storage this statement writes.
+    ///
+    /// WHAT: actual write effects, separate from `mutable_roots`' exclusive-access facts.
+    /// WHY: acquiring a mutation-capable alias takes exclusive access to its source root without
+    /// writing it, so mutation summaries must not treat every exclusive access as a write.
+    pub written_roots: Vec<LocalId>,
     pub conflicts_checked: usize,
 }
 
@@ -210,6 +216,8 @@ pub(crate) struct LocalBorrowSnapshot {
     pub local: LocalId,
     pub mode: LocalMode,
     pub alias_roots: Vec<LocalId>,
+    /// Cells a write through this binding targets. Separate from observed value provenance.
+    pub write_targets: Vec<LocalId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

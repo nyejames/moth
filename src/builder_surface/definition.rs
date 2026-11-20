@@ -15,7 +15,7 @@ use crate::builder_surface::external_import_providers::cache::ExternalImportProv
 use crate::builder_surface::external_import_providers::provider::BuilderRuntimePackageMetadata;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::builder_surface::package_metadata::package_paths_overlap;
+use crate::builder_surface::package_metadata::{PackageSetMembership, package_paths_overlap};
 use crate::builder_surface::source_file_kind_registry::SourceFileKindRegistry;
 use crate::builder_surface::source_package_registry::ProvidedSourceRoot;
 use crate::builder_surface::{PackageOrigin, SourcePackageRegistry};
@@ -31,7 +31,7 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::words::classify_source_word;
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 
 /// The complete builder surface a backend exposes to a project.
@@ -77,9 +77,10 @@ const BUILTIN_PACKAGES_DIR: &str = "packages";
 ///      is made once for the whole set, never per package or file, so an installation can't mix
 ///      its files with another version's from the checkout. Every registration, the
 ///      official-root check and asset reads join onto this one path. The selected directory is
-///      canonicalized once because package discovery canonicalizes each registered root before
-///      classifying it; an installed `packages/` symlink would otherwise make its own shipped
-///      package roots look like third-party roots.
+///      canonicalized once so every shipped registration and byte source shares one physical
+///      spelling. Classification follows explicit registration provenance, never path
+///      containment, so a symlinked installation does not turn its own shipped packages into
+///      third-party roots.
 pub(crate) static BUILTIN_PACKAGES_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
     let installed = std::env::current_exe()
         .and_then(fs::canonicalize)
@@ -91,14 +92,16 @@ pub(crate) static BUILTIN_PACKAGES_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
     fs::canonicalize(&selected).unwrap_or(selected)
 });
 
-/// Explains a failed read below [`BUILTIN_PACKAGES_ROOT`] as a damaged package set.
+/// Explains a failed read or missing structure for a compiler-shipped package registration.
 ///
-/// WHAT: returns the damaged-installation report for a path inside the selected package root,
-///       or `None` for any other path.
-/// WHY: the root is selected once for the whole set, so a missing file below it means that set
-///      is incomplete. Readers report it instead of looking for the file anywhere else.
-pub(crate) fn damaged_package_set_report(path: &Path) -> Option<String> {
-    path.starts_with(&*BUILTIN_PACKAGES_ROOT).then(|| {
+/// WHAT: returns the damaged-installation report for a registration the compiler contributes
+///       from its release package set, or `None` for every ordinary registration.
+/// WHY: one selected package root backs the whole shipped set, so a missing file registered as
+///      part of it means that set is incomplete. Registration provenance decides, never a path
+///      check: a custom or project-local package may live under the installed `packages/`
+///      directory or reach its root through a symlink without joining the shipped set.
+pub(crate) fn damaged_package_set_report(membership: PackageSetMembership) -> Option<String> {
+    membership.is_compiler_shipped().then(|| {
         format!(
             "The compiler-shipped package set at '{}' is incomplete. Reinstall Moth with the \
              complete `packages/` directory from its release archive beside the executable.",
@@ -126,7 +129,7 @@ impl BuilderSurface {
         let mut source_packages = SourcePackageRegistry::new();
         for prefix in CORE_SOURCE_PACKAGE_PREFIXES {
             source_packages
-                .register_filesystem_root(
+                .register_compiler_shipped_filesystem_root(
                     prefix,
                     Self::builtin_source_package_root(prefix),
                     PackageOrigin::Core,

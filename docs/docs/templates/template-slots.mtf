@@ -115,8 +115,20 @@ filled by `$in`.
 - Multiple contributions to one named slot concatenate in source order.
 - An unknown named insert target is diagnosed at the receiving template.
 - One application may combine named, positional and default contributions.
-- Formatting-only body whitespace around named inserts is not a loose contribution;
-  an explicitly supplied empty or whitespace String remains a contribution.
+- Formatting-only body whitespace around named inserts is not a loose contribution.
+  A whitespace-only body text run immediately before an explicit insert, or
+  immediately after an insert with nothing else following it, is dropped.
+  Whitespace inside a larger authored text run stays content. An explicitly
+  supplied empty or whitespace String remains a contribution.
+
+[codeblock, $code "moth":
+    plain #= [$html:<button>[$slot][$slot note]</button>]
+
+    [plain: [$in note:] Go]      -- <button> Go</button>
+    [plain:[$in note:] Go]       -- <button> Go</button>
+    [plain: Go[$in note:] ]      -- <button> Go</button>
+    [plain: Go [$in note:]]      -- <button> Go </button>
+]
 
 ### Presence guards
 

@@ -433,7 +433,7 @@ profile = "dev"
     let cli_invocation = workspace
         .resolve_cli_invocation(&manifest, &manifest.cases[0])
         .expect("CLI invocation should resolve");
-    assert!(cli_invocation.args[0].ends_with("first.moth"));
+    assert!(Path::new(&cli_invocation.args[0]).ends_with("first.moth"));
     assert!(cli_invocation.current_directory.ends_with("first_case"));
     assert!(
         cli_invocation
@@ -588,7 +588,7 @@ fn nested_start_directory_resolves_all_invocations_from_repository_root() {
             .current_directory
             .starts_with(&canonical_root)
     );
-    assert!(cli_invocation.args[0].ends_with("fixture.moth"));
+    assert!(Path::new(&cli_invocation.args[0]).ends_with("fixture.moth"));
     assert_eq!(
         frontend_invocation.entry,
         canonical_root.join("fixture.moth")

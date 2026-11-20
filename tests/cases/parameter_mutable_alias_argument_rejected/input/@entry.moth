@@ -1,0 +1,16 @@
+-- Reject the mutable alias at its declaration. A later mutable argument cannot
+-- make an immutable source eligible for exclusive access.
+
+set_two |value ~I32|:
+    ~value = 2
+;
+
+call_then_fact |divisor I32| -> I32:
+    $infallible
+    n ~I32 = divisor
+    set_two(~n)
+    return 10 // n
+;
+
+out = call_then_fact(4)
+io.line([: out=[out]])

@@ -1,0 +1,22 @@
+-- A typed value `if` transports the derivation ledger through its join. Reading the joined value
+-- while the exclusive alias it was derived from stays live is not a foreign access.
+
+identity |value {I32}| -> {I32}:
+    return value
+;
+
+show |items {I32}| -> I32:
+    return items.length()
+;
+
+probe |flag Bool| -> I32:
+    slot ~= {1}
+    writer ~= slot
+    value = if flag then identity(writer) else writer
+    first = show(value)
+    ~writer.push(2)
+    return first
+;
+
+result = probe(flag = true)
+io.line([:typed_if_derived=[result]])

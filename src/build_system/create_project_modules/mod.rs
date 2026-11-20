@@ -80,8 +80,6 @@ pub(super) use module_inventory::{
 };
 
 pub(crate) use source_loading::extract_source_code;
-#[cfg(test)]
-pub(crate) use source_tree_index::path_has_hidden_component_below;
 
 #[cfg(test)]
 pub(crate) use crate::projects::settings;

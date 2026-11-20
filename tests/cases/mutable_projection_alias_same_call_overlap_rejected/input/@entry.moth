@@ -1,0 +1,19 @@
+-- A fresh value written through an alias is owned by the referent storage. A projected mutable
+-- argument and a shared argument for the same projection therefore overlap in one call.
+
+Pair = | first I32, second I32 |
+
+mutate_and_read |target ~I32, observed I32| -> I32:
+    ~target = 9
+    return observed
+;
+
+probe || -> I32:
+    pair ~= Pair(1, 2)
+    writer ~= pair
+    ~writer = Pair(3, 4)
+    return mutate_and_read(~writer.first, writer.first)
+;
+
+result = probe()
+io.line([: mutable_projection_alias_same_call_overlap result=[result]])

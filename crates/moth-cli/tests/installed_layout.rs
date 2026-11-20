@@ -228,8 +228,8 @@ fn symlinked_installed_package_set_reports_its_own_normal_only_package_as_damage
 
     let root = tempdir().expect("temporary directory should be created");
     let executable = install_executable(root.path());
-    // The installed set is addressed through a symlink. Package discovery canonicalizes each
-    // registered root, so the damaged-set comparison must use the same physical spelling.
+    // The installed set is addressed through a symlink. The shipped registration must
+    // retain its damaged-installation diagnostic after package discovery resolves the link.
     let packages = root.path().join("shipped-packages");
     fs::create_dir_all(&packages).expect("shipped package directory should be created");
     copy_tree(Path::new(REPOSITORY_PACKAGES), &packages);

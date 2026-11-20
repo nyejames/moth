@@ -6,7 +6,7 @@
 use super::*;
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io::Write;
 
 /// Helper: write a gzip-compressed file with the given content.
@@ -93,7 +93,7 @@ fn build_samply_command_has_required_flags() {
         moth_path: PathBuf::from("/usr/bin/moth"),
         current_directory: PathBuf::from("/tmp/repository"),
         command: "check".to_string(),
-        args: vec!["test.moth".to_string()],
+        args: vec![OsString::from("test.moth")],
         output_path: PathBuf::from("/tmp/profile.json.gz"),
         samply_rate_hz: None,
         presymbolicate: false,
@@ -137,7 +137,7 @@ fn build_samply_command_with_rate() {
         moth_path: PathBuf::from("/usr/bin/moth"),
         current_directory: PathBuf::from("/tmp/repository"),
         command: "check".to_string(),
-        args: vec![],
+        args: Vec::new(),
         output_path: PathBuf::from("/tmp/profile.json.gz"),
         samply_rate_hz: Some(500.0),
         presymbolicate: false,
@@ -168,7 +168,7 @@ fn build_samply_command_with_presymbolicate() {
         moth_path: PathBuf::from("/usr/bin/moth"),
         current_directory: PathBuf::from("/tmp/repository"),
         command: "check".to_string(),
-        args: vec![],
+        args: Vec::new(),
         output_path: PathBuf::from("/tmp/profile.json.gz"),
         samply_rate_hz: None,
         presymbolicate: true,
@@ -188,7 +188,7 @@ fn build_samply_command_with_unstable_presymbolicate() {
         moth_path: PathBuf::from("/usr/bin/moth"),
         current_directory: PathBuf::from("/tmp/repository"),
         command: "check".to_string(),
-        args: vec![],
+        args: Vec::new(),
         output_path: PathBuf::from("/tmp/profile.json.gz"),
         samply_rate_hz: None,
         presymbolicate: true,
@@ -211,7 +211,7 @@ fn build_samply_command_with_rate_and_presymbolicate() {
         moth_path: PathBuf::from("/usr/bin/moth"),
         current_directory: PathBuf::from("/tmp/repository"),
         command: "build".to_string(),
-        args: vec!["foo.moth".to_string(), "bar.moth".to_string()],
+        args: vec![OsString::from("foo.moth"), OsString::from("bar.moth")],
         output_path: PathBuf::from("/tmp/out/profile.json.gz"),
         samply_rate_hz: Some(1000.0),
         presymbolicate: true,
@@ -243,7 +243,7 @@ fn build_samply_command_with_symbol_dirs() {
         moth_path: PathBuf::from("/usr/bin/moth"),
         current_directory: PathBuf::from("/tmp/repository"),
         command: "check".to_string(),
-        args: vec![],
+        args: Vec::new(),
         output_path: PathBuf::from("/tmp/profile.json.gz"),
         samply_rate_hz: None,
         presymbolicate: true,
@@ -287,7 +287,7 @@ fn build_samply_command_rate_appears_before_separator() {
         moth_path: PathBuf::from("/usr/bin/moth"),
         current_directory: PathBuf::from("/tmp/repository"),
         command: "check".to_string(),
-        args: vec![],
+        args: Vec::new(),
         output_path: PathBuf::from("/tmp/p.json.gz"),
         samply_rate_hz: Some(250.0),
         presymbolicate: true,
@@ -483,7 +483,7 @@ fn samply_run_input_struct_fields() {
         moth_path: PathBuf::from("/usr/bin/moth"),
         current_directory: PathBuf::from("/tmp/repository"),
         command: "check".to_string(),
-        args: vec!["foo.moth".to_string()],
+        args: vec![OsString::from("foo.moth")],
         output_path: PathBuf::from("/tmp/profile.json.gz"),
         samply_rate_hz: Some(500.0),
         presymbolicate: true,
@@ -493,7 +493,7 @@ fn samply_run_input_struct_fields() {
 
     assert_eq!(input.moth_path, PathBuf::from("/usr/bin/moth"));
     assert_eq!(input.command, "check");
-    assert_eq!(input.args, vec!["foo.moth"]);
+    assert_eq!(input.args, vec![OsString::from("foo.moth")]);
     assert_eq!(input.output_path, PathBuf::from("/tmp/profile.json.gz"));
     assert_eq!(input.samply_rate_hz, Some(500.0));
     assert!(input.presymbolicate);

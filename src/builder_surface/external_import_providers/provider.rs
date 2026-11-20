@@ -6,6 +6,7 @@
 //!      fit the same shape without leaking JS-specific concepts into the trait.
 
 use crate::builder_surface::external_import_providers::provider_sources::ProviderSourceRegistrar;
+use crate::builder_surface::package_metadata::PackageSetMembership;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
@@ -194,8 +195,17 @@ pub trait ExternalImportProvider: Send + Sync + std::fmt::Debug {
 pub struct RuntimeAssetIdentity {
     /// Stable provider-owned origin whose logical path is the declared output path.
     pub(crate) origin: StableResourceOriginId,
-    /// Canonical path to the asset source file. A byte-source fact, never identity.
+    /// Byte-source path to the asset file, never identity.
+    ///
+    /// Provider and Stage 0 paths are canonical. A compiler-shipped registration may instead name
+    /// an installed alias spelling; the build-owned registry resolves aliases to one canonical
+    /// read record at the first content read.
     pub canonical_source_path: PathBuf,
+    /// Registration provenance of the asset's package-set membership.
+    ///
+    /// Compiler-shipped runtime assets set this explicitly at registration. It is never inferred
+    /// from the canonical path, a package prefix or a builder identity.
+    pub(crate) package_set_membership: PackageSetMembership,
     /// General asset category used by backends to decide emission strategy.
     /// Examples: `"js"`, `"wit"`, `"rust"`.
     pub asset_kind: String,

@@ -1,0 +1,19 @@
+dead_arithmetic |value I32| -> I32:
+    return 4
+    unused I32 = value + 1
+    return unused
+;
+
+dead_range |value I32| -> I32:
+    return 5
+    loop 0 to value:
+        marker = 0
+    ;
+    return value
+;
+
+$export
+product || -> I32:
+    first I32 = dead_arithmetic(1)
+    return dead_range(first)
+;

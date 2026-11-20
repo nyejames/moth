@@ -5,7 +5,8 @@ use crate::bench_types::{BenchmarkCaseObservations, BenchmarkMetric, GitRevision
 use crate::profile::observations::ProfileObservation;
 use crate::profile::options::ProfileFilterMode;
 use crate::profile::parse::ProfileShapeDump;
-use std::path::Path;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 
 /// Build a test observation with sample data.
 fn test_observation() -> ProfileObservation {
@@ -13,7 +14,9 @@ fn test_observation() -> ProfileObservation {
         case_id: "test_case_bst".to_string(),
         group_name: "stress".to_string(),
         command: "check".to_string(),
-        command_args: vec!["test.moth".to_string()],
+        command_args: vec![OsString::from("test.moth")],
+        moth_path: PathBuf::from("/repo/target/profiling/moth"),
+        current_directory: PathBuf::from("/repo"),
         wall_ms: 1234.5,
         observations: BenchmarkCaseObservations {
             timing_schema_version: 2,
@@ -37,6 +40,11 @@ fn test_observation() -> ProfileObservation {
     }
 }
 
+/// The recorded replay line for the fixture observation.
+fn test_posix_shell_command_line() -> String {
+    test_observation().posix_shell_command_line()
+}
+
 /// Build a test case manifest entry with a fixed identity.
 fn test_case_manifest(case_id: &str, summary_path: Option<String>) -> ProfileCaseManifest {
     ProfileCaseManifest {
@@ -48,8 +56,7 @@ fn test_case_manifest(case_id: &str, summary_path: Option<String>) -> ProfileCas
             timing_schema_version: 2,
         },
         group_name: "core".to_string(),
-        command: "check".to_string(),
-        args: vec!["foo.moth".to_string()],
+        posix_shell_command_line: test_posix_shell_command_line(),
         observation_wall_ms: 1.0,
         profile_path: format!("cases/{case_id}/profile.json.gz"),
         stdout_path: format!("cases/{case_id}/stdout.log"),
@@ -147,7 +154,7 @@ fn run_manifest_file_with_empty_cases() {
     );
     let json = serde_json::to_string_pretty(&manifest).expect("manifest should serialize");
 
-    assert!(json.contains(r#""format_version": 4"#));
+    assert!(json.contains(r#""format_version": 5"#));
     assert!(json.contains(r#""run_id": "2026-06-18T10-30-abc1234""#));
     assert!(json.contains(r#""commit": "abc1234""#));
     assert!(json.contains(r#""filter": "normal""#));
@@ -168,7 +175,6 @@ fn run_manifest_file_with_null_revision_fields() {
 fn run_manifest_file_with_cases() {
     let mut case = test_case_manifest("check_foo_bst", None);
     case.observation_wall_ms = 500.0;
-    case.args = vec!["foo.moth".to_string()];
     let cases = vec![case];
 
     let git_revision = GitRevision {
@@ -233,7 +239,6 @@ fn raw_index_manifest_only_advertises_written_artifacts() {
     }
 
     let mut case = test_case_manifest("raw_index_case", None);
-    case.args = Vec::new();
     case.observation_wall_ms = 1.0;
     case.profile_path = "cases/raw_index_case/profile.json.gz".to_string();
     case.stdout_path = "cases/raw_index_case/stdout.log".to_string();
@@ -274,16 +279,16 @@ fn raw_index_manifest_only_advertises_written_artifacts() {
 #[test]
 fn detailed_observations_file_matches_plan_schema() {
     let observation = test_observation();
+    let command_line = observation.posix_shell_command_line();
     let json = serde_json::to_string_pretty(&DetailedObservationsFile::from(&observation))
         .expect("observations should serialize");
 
-    assert!(json.contains(r#""format_version": 2"#));
+    assert!(json.contains(r#""format_version": 3"#));
     assert!(json.contains(r#""case_id": "test_case_bst""#));
     assert!(!json.contains(r#""case_name""#));
     assert!(json.contains(r#""group": "stress""#));
     assert!(json.contains(r#""wall_ms": 1234.5"#));
-    assert!(json.contains(r#""check"#));
-    assert!(json.contains(r#""test.moth""#));
+    assert!(json.contains(&format!(r#""posix_shell_command_line": "{command_line}""#)));
     assert!(json.contains(r#""name": "frontend.ast.total""#));
     assert!(json.contains(r#""value": 812"#));
     assert!(json.contains(r#""name": "token_count""#));
@@ -296,6 +301,7 @@ fn format_index_md_lists_cases() {
     case.observation_wall_ms = 500.0;
     case.profile_path = "profile.json.gz".to_string();
     case.stdout_path = "stdout.log".to_string();
+    let command_line = case.posix_shell_command_line.clone();
     let cases = vec![case];
 
     let md = format_index_md("test-run", ProfileFilterMode::Terse, &cases);
@@ -304,6 +310,8 @@ fn format_index_md_lists_cases() {
     assert!(md.contains("Cases: 1"));
     assert!(md.contains("check_foo_bst"));
     assert!(md.contains("~500ms"));
+    assert!(md.contains("POSIX shell command:"));
+    assert!(md.contains(&format!("```\n{command_line}\n```")));
 }
 
 #[test]
@@ -406,7 +414,7 @@ fn write_observations_json_creates_valid_file() {
 
     let content =
         std::fs::read_to_string(&case_paths.observations_json).expect("read observations");
-    assert!(content.contains(r#""format_version": 2"#));
+    assert!(content.contains(r#""format_version": 3"#));
     assert!(content.contains(r#""case_id": "test_case_bst""#));
 }
 
@@ -470,7 +478,7 @@ fn write_run_manifest_creates_valid_file() {
     let content = std::fs::read_to_string(run_paths.manifest_path()).expect("read manifest");
     let _: serde_json::Value =
         serde_json::from_str(&content).expect("written manifest should be valid JSON");
-    assert!(content.contains(r#""format_version": 4"#));
+    assert!(content.contains(r#""format_version": 5"#));
     assert!(content.contains(r#""case_id": "test_case""#));
 }
 

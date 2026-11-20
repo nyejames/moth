@@ -1,0 +1,21 @@
+-- Projected-referent identity must survive a chain of projection-free aliases; the second alias
+-- still observes the storage replaced through `writer`.
+
+Pair = | first {I32}, second {I32} |
+
+same_pair |value Pair| -> Pair:
+    return value
+;
+
+probe || -> I32:
+    original ~= Pair({1}, {0})
+    holder ~= same_pair(original)
+    writer ~= holder.first
+    view = writer
+    view2 = view
+    ~writer = {2, 3}
+    return view2.length()
+;
+
+result = probe()
+io.line([: [result]])

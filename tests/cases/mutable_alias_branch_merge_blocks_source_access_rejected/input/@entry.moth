@@ -1,0 +1,24 @@
+-- A mutable alias created in one branch survives the merge, even though the value it observes
+-- came from a branch-local binding that is out of scope there. Reading the slot through a copy
+-- after the merge must stay rejected while the alias is still used.
+
+identity |value I32| -> I32:
+    return value
+;
+
+probe |flag Bool| -> Bool:
+    slot ~= 0
+    writer ~= 0
+    if flag:
+        seed ~= 5
+        ~slot = identity(seed)
+        ~writer = slot
+    else
+        return false
+    ;
+    snapshot = copy slot
+    return writer is snapshot
+;
+
+result = probe(flag = true)
+io.line([: mutable_alias_branch_merge result=[result]])

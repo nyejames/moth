@@ -28,7 +28,7 @@ Read the selected heading through the next heading of the same or higher level. 
 - **General Moth language understanding or source authoring:** read `docs/docs/cheatsheet/moth-language-cheatsheet.mtf` for a compact overview of the accepted end-state language surface. When source must work with the current Alpha compiler or current implementation or target support matters, also read `docs/docs/progress/@entry.moth`. The cheatsheet is an orientation and source-writing reference, not the authority for exact semantic edge cases.
 - **Exact language syntax or user-visible semantic work:** read `docs/developer-docs/language/overview.mtf` and every relevant canonical unsuffixed reference it selects. This route is required when a task changes or depends on the precise contract of a language feature. Also read routed memory material when behaviour touches access, copies, borrows, lifetimes, declared regions or ownership. Read paired `-basic.mtf` files and `@entry.moth` only for teaching, presentation or site structure.
 - **Tests:** read relevant sections of `docs/developer-docs/style-guide/testing.mtf` before choosing, adding, changing or reviewing coverage. Read it in full for test infrastructure, suite policy, broad fixture cleanup or audits.
-- **Structured codebase audits and accepted audit fixes:** read `docs/roadmap/audit-guide.md`, the selected guide under `docs/roadmap/audit-kinds/`, `docs/roadmap/audit-log.md`, `docs/roadmap/open-audit-findings.md` and the owning report under `docs/roadmap/audits/open_audits/` or `closed_audits/`. Consult `docs/roadmap/completed_audits_log.md` for earlier resolutions. This is the explicitly invoked audit framework, not the Slice review. Audit runs are read-only. Implement accepted findings in a separate task and preserve every invariant and change lane named by the report.
+- **Structured codebase audits and accepted audit fixes:** read `docs/roadmap/audit-guide.md`, the selected guide under `docs/roadmap/audit-kinds/` and `docs/roadmap/audit-log.md`. Correctness audits record bugs in `docs/bug-reports.md` and coverage in the audit log without a report. Other kinds use `docs/roadmap/open-audit-findings.md` and the owning report under `docs/roadmap/audits/open_audits/` or `closed_audits/`. Consult `docs/roadmap/completed_audits_log.md` for earlier formal resolutions. This is the explicitly invoked audit framework, not the Slice review. Audit runs do not change implementation. Implement accepted findings in a separate task and preserve the required invariants.
 - **Validation:** read `docs/developer-docs/style-guide/validation.mtf` before selecting or reporting checks. Choose by branch, checkpoint and affected behaviour rather than treating every slice as merge readiness.
 - **Architecture plans, cross-stage ownership changes, broad refactors and thorough reviews:** read every relevant authority in full, including adjacent handoff authorities, current status and active sequencing.
 
@@ -38,7 +38,7 @@ Use:
 - `docs/docs/progress/@entry.moth` for current implementation status and coverage
 - `docs/roadmap/roadmap.md` for sequencing, active plans, genuinely deferred design, and the rules for adding and maintaining plans
 - `docs/roadmap/audit-log.md` for what has been audited, when, and what has never been audited
-- `docs/bug-reports.md` for bugs found during other work that are outside the current task's scope
+- `docs/bug-reports.md` for incidental issues and bugs found by Correctness audits
 - `index.md` only as a file and module locator
 
 The public unsuffixed files under `docs/docs/design-scope/` own accepted deferred implementation, open questions and excluded language boundaries. The progress matrix tracks implementation of accepted design only.
@@ -115,9 +115,9 @@ Exceptions:
 - Update the progress matrix when implementation status, rejection behaviour, backend coverage or test coverage changes. Do not edit it for a pure refactor or prose-only correction.
 - Update `index.md` when modules, files or folders move, are renamed or fundamentally change behaviour.
 - Delete a plan under `docs/roadmap/plans/` in the same commit that completes it, and remove its roadmap entry. Do not mark it complete and commit that state. See `Adding and maintaining plans` in `docs/roadmap/roadmap.md`.
-- Structured audit tasks update their report, the open-findings index and the audit log as required by `docs/roadmap/audit-guide.md`.
+- Structured audit tasks record coverage in the audit log. Correctness audits use `docs/bug-reports.md` for findings, while other kinds maintain formal reports and indices as required by `docs/roadmap/audit-guide.md`.
 - Implementation and verification tasks mark an audit-log row stale when they materially change what it records. Only an audit run may record new coverage.
-- Log a bug found during unrelated or out-of-scope work in `docs/bug-reports.md` rather than fixing it in place or leaving it unrecorded. Remove its entry in the commit that resolves it.
+- Log a concrete incidental bug, documentation gap, test weakness, redundancy or efficiency concern in `docs/bug-reports.md` rather than fixing it outside the current task or leaving it unrecorded. Label unverified suspicions clearly and remove an entry in the commit that resolves it.
 
 Report documentation made inaccurate by implementation as a separate follow-up. Do not edit generated files under `docs/_release/**` directly. Rebuild them through the compiler.
 

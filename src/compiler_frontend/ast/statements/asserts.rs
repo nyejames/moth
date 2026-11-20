@@ -34,7 +34,7 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExpressionConstructionFailure, OwnedExpr,
 };
-use crate::compiler_frontend::ast::expressions::failure_classification::pending_expression_failure_facts;
+use crate::compiler_frontend::ast::expressions::failure_classification::pending_assertion_message_failure_facts;
 use crate::compiler_frontend::ast::generic_functions::GenericRequestRange;
 use crate::compiler_frontend::ast::numeric_construction::{
     BodyDraft, DeferredCallArgument, NumericContinuation,
@@ -175,7 +175,7 @@ pub(crate) fn finish_assert_statement(
     )? {
         return Err(diagnostic.into());
     }
-    let pending = pending_expression_failure_facts(
+    let pending = pending_assertion_message_failure_facts(
         expression_builder.view_owned(message)?,
         &context.template_ir_store.borrow(),
         &*expression_builder,

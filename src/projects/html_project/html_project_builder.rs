@@ -420,7 +420,7 @@ impl BackendBuilder for HtmlProjectBuilder {
         // explicit dependency clause to use it.
         builder_surface
             .source_packages
-            .register_filesystem_root(
+            .register_compiler_shipped_filesystem_root(
                 WEB_SITE_SOURCE_PACKAGE_PREFIX,
                 BuilderSurface::builtin_source_package_root(WEB_SITE_SOURCE_PACKAGE_PREFIX),
                 crate::builder_surface::PackageOrigin::Builder,

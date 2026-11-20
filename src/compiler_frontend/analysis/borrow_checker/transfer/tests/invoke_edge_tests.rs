@@ -14,6 +14,7 @@ fn invoke_edges_retire_both_previous_outcomes_before_selected_definitions() {
     let layout = FunctionLayout::new(FunctionLayoutInputs {
         local_ids: vec![LocalId(0), LocalId(1), LocalId(2)],
         local_mutable: vec![true; 3],
+        local_has_in_place_mutation_surface: vec![true; 3],
         local_first_write_order: vec![0; 3],
         local_last_use_order: vec![0; 3],
         statement_order_by_id: Default::default(),

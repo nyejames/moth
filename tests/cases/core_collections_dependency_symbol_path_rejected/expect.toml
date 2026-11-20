@@ -1,0 +1,12 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-IMPORT-0016"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-IMPORT-0016"
+reason = "invalid_import_path.implicit_package"
+path = "input/@entry.moth"
+line = 1

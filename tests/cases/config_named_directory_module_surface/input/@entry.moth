@@ -1,0 +1,17 @@
+@"@config.moth" answer
+@"@config.moth" as config_api
+@docs/"@config.moth" nested_answer as nested_direct
+@docs/"@config.moth" as nested_api
+
+direct = answer()
+namespaced = config_api.answer()
+nested = nested_direct()
+nested_namespaced = nested_api.nested_answer()
+qualified = @"@config.moth" answer()
+nested_qualified = @docs/"@config.moth" nested_answer()
+~[: [direct] ]
+~[: [namespaced] ]
+~[: [nested] ]
+~[: [nested_namespaced] ]
+~[: [qualified] ]
+~[: [nested_qualified] ]

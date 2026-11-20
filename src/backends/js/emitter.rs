@@ -14,7 +14,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerStage, compiler_errors::InfrastructureFailure,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{
@@ -61,7 +60,6 @@ pub(crate) struct JsEmitter<'hir> {
     pub(crate) type_environment: &'hir TypeEnvironment,
     pub(crate) out: String,
     pub(crate) indent: usize,
-    pub(crate) blocks_by_id: HashMap<BlockId, &'hir HirBlock>,
     pub(crate) function_name_by_id: HashMap<FunctionId, String>,
     pub(crate) local_name_by_id: HashMap<LocalId, String>,
     pub(crate) field_name_by_id: HashMap<FieldId, String>,
@@ -104,12 +102,6 @@ impl<'hir> JsEmitter<'hir> {
         config: JsLoweringConfig,
         type_environment: &'hir TypeEnvironment,
     ) -> Self {
-        let blocks_by_id = hir
-            .blocks
-            .iter()
-            .map(|block| (block.id, block))
-            .collect::<HashMap<_, _>>();
-
         Self {
             out: String::new(),
             hir,
@@ -119,7 +111,6 @@ impl<'hir> JsEmitter<'hir> {
             config,
             type_environment,
             indent: 0,
-            blocks_by_id,
             function_name_by_id: HashMap::new(),
             local_name_by_id: HashMap::new(),
             field_name_by_id: HashMap::new(),

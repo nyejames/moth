@@ -1,0 +1,8 @@
+always_false || -> Bool:
+    return false
+;
+$export
+probe |value I32| -> I32:
+    assert(always_false())
+    return value + 1
+;

@@ -14,7 +14,6 @@ use crate::compiler_frontend::compiler_messages::InvalidMutableAccessReason;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionReturnContract};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
-use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::utils::terminator_targets;
@@ -29,7 +28,7 @@ use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 
 struct CheckedSource {
-    hir: HirModule,
+    hir: crate::compiler_frontend::tests::hir_fixture_support::LoweredHirFixture,
     path_fork: PathInternerFork,
     string_table: StringTable,
     report: BorrowCheckReport,

@@ -14,12 +14,15 @@ use crate::compiler_frontend::ast::ast_nodes::{
 };
 use crate::compiler_frontend::ast::const_values::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
-use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchArm, MatchPattern, PatternValue,
 };
 use crate::compiler_frontend::ast::statements::never_call::{NeverCall, NeverCallTarget};
+use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -508,6 +511,53 @@ fn folded_false_loop_does_not_analyse_its_body() {
     assert_eq!(
         exits_of(&fx, &[loop_node]),
         ControlFlowExitSummary::FALLS_THROUGH
+    );
+}
+
+#[test]
+fn pre_fold_conditions_cover_value_block_bodies_and_skip_dynamic_conditions() {
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "probe |condition Bool| -> I32:\n    loop false:\n        marker I32 = 1\n    ;\n    value I32 = if condition:\n        loop false:\n            other I32 = 2\n        ;\n        then 1\n    else\n        then 2\n    ;\n    return value\n;\n",
+    );
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "probe");
+
+    let NodeKind::WhileLoop(top_condition, _) = &body[0].kind else {
+        panic!("expected the outer conditional loop");
+    };
+    assert_eq!(
+        ast.pre_fold_bool_conditions.get(top_condition),
+        Some(&false),
+        "a literal-false loop condition is decided before release folding"
+    );
+
+    let NodeKind::VariableDeclaration(declaration) = &body[1].kind else {
+        panic!("expected the value-if declaration");
+    };
+    let initializer = declaration
+        .value
+        .initializer()
+        .expect("value-if initializer");
+    let ExpressionOperationView::ValueBlock(ValueBlock::If(value_if)) = ast
+        .expressions
+        .view(initializer)
+        .expect("fixture view")
+        .operation()
+    else {
+        panic!("expected a value-producing if");
+    };
+    assert!(
+        !ast.pre_fold_bool_conditions
+            .contains_key(&value_if.condition),
+        "a parameter condition has no folded value"
+    );
+
+    let NodeKind::WhileLoop(nested_condition, _) = &value_if.then_body[0].kind else {
+        panic!("expected the loop inside the then branch");
+    };
+    assert_eq!(
+        ast.pre_fold_bool_conditions.get(nested_condition),
+        Some(&false),
+        "an expression-owned statement body keeps its pre-fold condition fact"
     );
 }
 

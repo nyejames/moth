@@ -1,0 +1,26 @@
+-- A join keeps every alternative a projected alias may observe. One path replaces the holder
+-- with a freshly built value, so the alias's write target keeps the holder cell that owns that
+-- allocation as well as the older provenance both paths share.
+
+Pair = | first {I32}, second {I32} |
+
+identity |value Pair| -> Pair:
+    return value
+;
+
+probe |flag Bool| -> I32:
+    original ~= Pair({4}, {0})
+    holder ~= identity(original)
+    snap ~= Pair({9}, {0})
+    if flag:
+        ~holder = Pair({1}, {0})
+        ~snap = identity(holder)
+    ;
+    writer ~= holder.first
+    view = snap.first
+    ~writer = {2, 3, 4}
+    return view.length()
+;
+
+result = probe(flag = true)
+io.line([: [result]])

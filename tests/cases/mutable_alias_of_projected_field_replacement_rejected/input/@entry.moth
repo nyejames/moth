@@ -1,0 +1,15 @@
+-- The direct projected alias also carries the holder write target through a projection-free
+-- alias, so the fresh replacement cannot ignore the live view.
+
+Pair = | first {I32}, second {I32} |
+
+probe || -> I32:
+    pair ~= Pair({1}, {0})
+    writer ~= pair.first
+    view = writer
+    ~writer = {2, 3}
+    return view.length()
+;
+
+result = probe()
+io.line([: [result]])

@@ -1,0 +1,23 @@
+-- The catch handler is statically pruned because the division cannot fail. Its fast range loop
+-- still selects the generated ordinal update: the folded loop condition lowers as a runtime
+-- check, so the body reaches the step block and `$safe_math` must reject the guard in both
+-- profiles.
+always_true || -> Bool:
+    return true
+;
+
+$safe_math
+skipped_loop_guard |limit I32| -> I32:
+    result I32 = 10 // 2 catch |error|:
+        $fast_math
+        loop 0 to limit |value, ordinal|:
+            loop always_true():
+                marker I32 = value
+            ;
+        ;
+        return 0
+    ;
+    return result
+;
+
+~[: [skipped_loop_guard(2)]]

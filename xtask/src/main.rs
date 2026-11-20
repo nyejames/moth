@@ -49,6 +49,7 @@ mod benchmark_status;
 mod benchmark_suite;
 mod benchmark_workspace;
 mod cache;
+mod command_line;
 mod compiler_binary;
 mod feature_matrix;
 mod first_party_deps;

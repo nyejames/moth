@@ -21,6 +21,7 @@ use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server::render_compilation_result_html,
     terse::format_terse_diagnostic_reports,
 };
+use crate::compiler_frontend::compiler_messages::{CompilerStage, PreparedFailure};
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceOutcome;
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
@@ -32,7 +33,7 @@ use crate::compiler_frontend::single_source_compilation::{
     MothTemplateCompilationRequest, compile_moth_template_source,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{ForcedExhaustionGuard, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::projects::html_project::moth_template::{
@@ -525,29 +526,83 @@ fn same_tree_in_two_checkouts_matches_origins_and_output_paths() {
 }
 
 #[test]
-fn mixed_relative_and_absolute_in_memory_paths_are_diagnosed() {
+fn mixed_relative_and_rooted_in_memory_paths_are_diagnosed() {
     let temp_dir = temp_project(&[]);
-    let mut string_table = StringTable::new();
+    let absolute_display_path =
+        PathBuf::from(portable_path_text(temp_dir.path().join("absolute.mtf")));
 
+    // Absolute and root-relative names share one rooted classification even where a host calls
+    // only one of them absolute.
+    for (second_path, second_name) in [
+        (absolute_display_path, "absolute.mtf"),
+        (PathBuf::from("/docs/rooted.mtf"), "rooted.mtf"),
+    ] {
+        let messages = expect_diagnosed(
+            compile_moth_template(
+                MothTemplateInput::Sources(vec![
+                    MothTemplateSource {
+                        display_path: PathBuf::from("memory/intro.mtf"),
+                        source_text: "first".to_owned(),
+                    },
+                    MothTemplateSource {
+                        // Rooted in-memory names follow the portable spelling contract too: only
+                        // the host prefix and root are native, the remainder uses `/`.
+                        display_path: second_path,
+                        source_text: "second".to_owned(),
+                    },
+                ]),
+                &mut StringTable::new(),
+            ),
+            "mixed relative and rooted display paths have one portable basis",
+        );
+
+        assert_eq!(messages.counts().errors, 1);
+        assert_eq!(
+            messages
+                .iter()
+                .map(|(_, view)| view.descriptor().code)
+                .collect::<Vec<_>>(),
+            ["MOTH-IMPORT-0029"],
+        );
+        let rendered = format_terse_diagnostic_reports(&messages).join("\n");
+        assert!(
+            rendered.contains("memory/intro.mtf"),
+            "the diagnostic should render its first actual input path: {rendered}",
+        );
+        assert!(
+            rendered.contains(second_name),
+            "the diagnostic should render its second actual input path: {rendered}",
+        );
+    }
+}
+
+// Unix absolute names always share the root directory, so only Windows path parsing can build a
+// three-input request whose leading components differ: a drive prefix and the root directory are
+// distinct first components.
+#[cfg(windows)]
+#[test]
+fn no_common_ancestor_diagnostic_names_the_conflicting_input() {
+    // The third input empties the shared directory prefix. The diagnostic must name the basis
+    // and the input that eliminated it, not an earlier pair that still shares a directory.
     let messages = expect_diagnosed(
         compile_moth_template(
             MothTemplateInput::Sources(vec![
                 MothTemplateSource {
-                    display_path: PathBuf::from("memory/intro.mtf"),
+                    display_path: PathBuf::from("/docs/a.mtf"),
                     source_text: "first".to_owned(),
                 },
                 MothTemplateSource {
-                    // Absolute in-memory names follow the portable spelling contract too: only
-                    // the host prefix and root are native, the remainder uses `/`.
-                    display_path: PathBuf::from(portable_path_text(
-                        temp_dir.path().join("absolute.mtf"),
-                    )),
+                    display_path: PathBuf::from("/docs/b.mtf"),
                     source_text: "second".to_owned(),
                 },
+                MothTemplateSource {
+                    display_path: PathBuf::from("C:/docs/c.mtf"),
+                    source_text: "third".to_owned(),
+                },
             ]),
-            &mut string_table,
+            &mut StringTable::new(),
         ),
-        "mixed relative and absolute display paths have one portable basis",
+        "a request whose third input eliminates the shared ancestor should be diagnosed",
     );
 
     assert_eq!(messages.counts().errors, 1);
@@ -560,12 +615,137 @@ fn mixed_relative_and_absolute_in_memory_paths_are_diagnosed() {
     );
     let rendered = format_terse_diagnostic_reports(&messages).join("\n");
     assert!(
-        rendered.contains("memory/intro.mtf"),
-        "the diagnostic should render its first actual input path: {rendered}",
+        rendered.contains("a.mtf"),
+        "the diagnostic should render the basis input: {rendered}",
     );
     assert!(
-        rendered.contains("absolute.mtf"),
-        "the diagnostic should render its second actual input path: {rendered}",
+        rendered.contains("c.mtf"),
+        "the diagnostic should render the conflicting input, not an earlier pair: {rendered}",
+    );
+    assert!(
+        !rendered.contains("b.mtf"),
+        "the diagnostic must not pair two inputs that still share a directory: {rendered}",
+    );
+}
+
+// Windows drive letters are case-insensitive host syntax: std parses the drive letter as
+// uppercase, so `Path` component equality treats `C:/` and `c:/` as one root. The shared ancestor
+// must still be found and each relative identity derived from it by ordinary `strip_prefix`.
+#[cfg(windows)]
+#[test]
+fn mixed_case_drive_letters_share_the_request_ancestor() {
+    let output = compile_ok(MothTemplateInput::Sources(vec![
+        MothTemplateSource {
+            display_path: PathBuf::from("C:/docs/a.mtf"),
+            source_text: "# A".to_owned(),
+        },
+        MothTemplateSource {
+            display_path: PathBuf::from("c:/docs/b.mtf"),
+            source_text: "# B".to_owned(),
+        },
+    ]));
+
+    assert_eq!(
+        output
+            .documents
+            .iter()
+            .map(|document| (
+                document.source_path.clone(),
+                document.relative_path.clone(),
+                document.content.as_str(),
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                PathBuf::from("C:/docs/a.mtf"),
+                Some(PathBuf::from("a.mtf")),
+                "<h1>A</h1>"
+            ),
+            (
+                PathBuf::from("c:/docs/b.mtf"),
+                Some(PathBuf::from("b.mtf")),
+                "<h1>B</h1>"
+            ),
+        ],
+        "the folded drive root should yield plain file identities with distinct filenames",
+    );
+}
+
+// Folding the drive letter must not fold ordinary directory names: authored spellings that
+// differ in case keep distinct relative identities and module origins.
+#[cfg(windows)]
+#[test]
+fn mixed_case_directory_names_keep_distinct_identities() {
+    let output = compile_ok(MothTemplateInput::Sources(vec![
+        MothTemplateSource {
+            display_path: PathBuf::from("C:/Docs/a.mtf"),
+            source_text: "# A".to_owned(),
+        },
+        MothTemplateSource {
+            display_path: PathBuf::from("c:/docs/b.mtf"),
+            source_text: "# B".to_owned(),
+        },
+    ]));
+
+    assert_eq!(
+        output
+            .documents
+            .iter()
+            .map(|document| document.relative_path.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            Some(PathBuf::from("Docs/a.mtf")),
+            Some(PathBuf::from("docs/b.mtf")),
+        ],
+        "only the drive prefix may fold case, so directory spellings stay distinct",
+    );
+}
+
+// Two display paths that differ only in drive-letter case reduce to one relative identity and
+// compare equal as canonical source paths, so the duplicate diagnostic reports the whole path.
+#[cfg(windows)]
+#[test]
+fn mixed_case_drive_duplicate_identities_are_diagnosed() {
+    let messages = expect_diagnosed(
+        compile_moth_template(
+            MothTemplateInput::Sources(vec![
+                MothTemplateSource {
+                    display_path: PathBuf::from("C:/docs/page.mtf"),
+                    source_text: "first".to_owned(),
+                },
+                MothTemplateSource {
+                    display_path: PathBuf::from("c:/docs/page.mtf"),
+                    source_text: "second".to_owned(),
+                },
+            ]),
+            &mut StringTable::new(),
+        ),
+        "two display paths that differ only in drive-letter case share one identity",
+    );
+
+    assert_eq!(messages.counts().errors, 1);
+    let (report, view) = messages
+        .iter()
+        .next()
+        .expect("duplicate diagnostic should be present");
+    assert_eq!(view.descriptor().code, "MOTH-IMPORT-0028");
+    let facts = view
+        .family_view::<DuplicateMothTemplateInputPathView>()
+        .expect("duplicate input diagnostic should retain its typed path fact");
+    let context = DiagnosticRenderContext::for_report(report);
+    let path_table = context
+        .path_table()
+        .expect("a retained report should own its path table");
+    let mut scratch = Vec::new();
+    assert_eq!(
+        path_table.render_native_frozen(facts.path, report.context().strings(), &mut scratch),
+        PathBuf::from("c:/docs/page.mtf"),
+        "the fact should name the repeated whole path, not the shortened identity",
+    );
+    let rendered = format_terse_diagnostic_reports(&messages).join("\n");
+    assert!(
+        rendered.contains("c:/docs/page.mtf"),
+        "the duplicate should render the repeated whole path: {rendered}",
     );
 }
 
@@ -1052,6 +1232,165 @@ fn files_input_rejects_distinct_non_utf8_names_without_collapsing_them() {
     );
 }
 
+// A selected source root can sit below a directory whose name is not UTF-8. That ancestor is a
+// host detail, not compiler identity: single-file, file-list, and directory requests identify
+// their sources below that root, so every lane accepts the tree.
+#[cfg(all(unix, not(target_vendor = "apple")))]
+#[test]
+fn non_utf8_ancestor_above_the_selected_source_root_is_accepted() {
+    let temp_dir = temp_project(&[]);
+    let source_root = temp_dir
+        .path()
+        .join(non_utf8_file_name(b"root\xFF"))
+        .join("docs");
+    fs::create_dir_all(&source_root).expect("non-UTF-8 ancestor directory should be created");
+    let source_path = source_root.join("page.mtf");
+    fs::write(&source_path, "# Page").expect("source should be written");
+    let second_source_path = source_root.join("second.mtf");
+    fs::write(&second_source_path, "# Second").expect("second source should be written");
+    let canonical_source_path = fs::canonicalize(&source_path).expect("source should canonicalize");
+
+    // A file-list request selects the same root through its files' common ancestor.
+    let files_output = compile_ok(MothTemplateInput::Files(vec![
+        source_path.clone(),
+        second_source_path,
+    ]));
+    assert_eq!(files_output.documents.len(), 2);
+    assert_eq!(
+        files_output
+            .documents
+            .iter()
+            .map(|document| document.relative_path.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some(Path::new("page.mtf")), Some(Path::new("second.mtf"))],
+        "the shared ancestor, not its non-UTF-8 parent, anchors both relative identities",
+    );
+
+    let file_output = compile_ok(MothTemplateInput::File(source_path));
+    assert_eq!(file_output.documents.len(), 1);
+    assert_eq!(file_output.documents[0].content, "<h1>Page</h1>");
+    assert_eq!(
+        file_output.documents[0].relative_path, None,
+        "a single-file request keeps the entry-root identity",
+    );
+    assert_eq!(
+        file_output.documents[0].source_path, canonical_source_path,
+        "the canonical native path should stay the document's host path",
+    );
+
+    let directory_output = compile_ok(MothTemplateInput::Directory {
+        path: source_root,
+        recursive: true,
+    });
+    assert_eq!(directory_output.documents.len(), 2);
+    let directory_document = |relative_path: &str| {
+        directory_output
+            .documents
+            .iter()
+            .find(|document| document.relative_path.as_deref() == Some(Path::new(relative_path)))
+            .unwrap_or_else(|| {
+                panic!("the selected root, not the non-UTF-8 ancestor, anchors '{relative_path}'")
+            })
+    };
+    let page = directory_document("page.mtf");
+    assert_eq!(page.content, "<h1>Page</h1>");
+    assert_eq!(
+        page.source_path, canonical_source_path,
+        "the canonical native path should stay the document's host path",
+    );
+    assert_eq!(directory_document("second.mtf").content, "<h1>Second</h1>");
+}
+
+// The duplicate fact is the request-relative identity, so a duplicate whose canonical ancestor
+// is not UTF-8 still reports MOTH-IMPORT-0028 instead of failing the identity gate.
+#[cfg(all(unix, not(target_vendor = "apple")))]
+#[test]
+fn duplicate_files_under_a_non_utf8_ancestor_stay_duplicate_diagnostics() {
+    let temp_dir = temp_project(&[]);
+    let docs = temp_dir
+        .path()
+        .join(non_utf8_file_name(b"root\xFF"))
+        .join("docs");
+    fs::create_dir_all(&docs).expect("non-UTF-8 ancestor directory should be created");
+    let source_path = docs.join("page.mtf");
+    fs::write(&source_path, "# Page").expect("source should be written");
+    let canonical_path = fs::canonicalize(&source_path).expect("source should canonicalize");
+    let alternate_spelling = docs.join(".").join("page.mtf");
+
+    let messages = expect_diagnosed(
+        compile_moth_template(
+            MothTemplateInput::Files(vec![canonical_path, alternate_spelling]),
+            &mut StringTable::new(),
+        ),
+        "a duplicate below a non-UTF-8 ancestor should remain a duplicate diagnostic",
+    );
+
+    assert_eq!(messages.counts().errors, 1);
+    let (report, view) = messages
+        .iter()
+        .next()
+        .expect("duplicate diagnostic should be present");
+    assert_eq!(view.descriptor().code, "MOTH-IMPORT-0028");
+    let facts = view
+        .family_view::<DuplicateMothTemplateInputPathView>()
+        .expect("duplicate input diagnostic should retain its typed path fact");
+    let context = DiagnosticRenderContext::for_report(report);
+    let path_table = context
+        .path_table()
+        .expect("a retained report should own its path table");
+    let mut scratch = Vec::new();
+    assert_eq!(
+        path_table.render_native_frozen(facts.path, report.context().strings(), &mut scratch),
+        PathBuf::from("page.mtf"),
+        "the fact should be the UTF-8 identity below the non-UTF-8 ancestor",
+    );
+    let rendered = format_terse_diagnostic_reports(&messages).join("\n");
+    assert!(
+        rendered.contains("page.mtf") && !rendered.contains("non-UTF-8"),
+        "the duplicate should render its request-relative identity, not an identity failure: \
+         {rendered}",
+    );
+}
+
+#[test]
+fn duplicate_files_reuse_the_relative_path_when_the_path_table_is_full() {
+    let temp_dir = temp_project(&[("page.mtf", "# Page")]);
+    let source_path = temp_dir.path().join("page.mtf");
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    path_fork
+        .try_intern_filesystem_path(Path::new("page.mtf"), &mut string_table)
+        .expect("the request-relative path should fit before exhaustion");
+
+    let input = MothTemplateInput::Files(vec![source_path.clone(), source_path]);
+    let failure = {
+        let _guard = ForcedExhaustionGuard::new();
+        input.collect_sources(&mut string_table, &mut path_fork)
+    };
+    let Err(PreparedFailure::Diagnosed(batch)) = failure else {
+        panic!("a duplicate should remain a diagnosed rejection");
+    };
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    let reports = accumulator
+        .finish(InstallMode::Unfrozen)
+        .expect("the duplicate diagnostic should freeze");
+    let (report, view) = reports.iter().next().expect("missing duplicate diagnostic");
+    assert_eq!(view.descriptor().code, "MOTH-IMPORT-0028");
+    let facts = view
+        .family_view::<DuplicateMothTemplateInputPathView>()
+        .expect("duplicate diagnostic should carry its path");
+    let context = DiagnosticRenderContext::for_report(report);
+    assert_eq!(
+        context.path_table().unwrap().render_native_frozen(
+            facts.path,
+            report.context().strings(),
+            &mut Vec::new(),
+        ),
+        PathBuf::from("page.mtf"),
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn literal_backslash_file_names_keep_distinct_identities_and_deterministic_order() {
@@ -1285,6 +1624,34 @@ fn in_memory_sources_reject_non_utf8_display_paths() {
     );
 }
 
+// The portable-name rule still applies beside a non-UTF-8 ancestor: the UTF-8 identity below a
+// rooted name must separate its components with `/`, never a literal backslash.
+#[cfg(unix)]
+#[test]
+fn rooted_in_memory_names_with_non_utf8_ancestors_still_reject_backslashes() {
+    let display_path = PathBuf::from(non_utf8_file_name(b"/\xFF/x\\y.mtf"));
+
+    let errors = expect_infrastructure_failure(
+        MothTemplateInput::Sources(vec![MothTemplateSource {
+            display_path: display_path.clone(),
+            source_text: "bad".to_owned(),
+        }]),
+        "a rooted in-memory name with a non-UTF-8 ancestor and a backslash",
+    );
+
+    assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(
+        errors.primary.host_path.as_deref(),
+        Some(display_path.as_path()),
+        "the in-memory logical name should be rejected exactly as supplied",
+    );
+    assert!(
+        errors.primary.message.contains("contains a backslash"),
+        "the rejection should name the portable separator rule: {}",
+        errors.primary.message,
+    );
+}
+
 // Windows parses `\` as a separator while Unix keeps it inside one filename component, so the
 // portable-name contract must reject that native spelling under either host parser.
 #[test]
@@ -1368,6 +1735,296 @@ fn absolute_in_memory_display_paths_keep_their_display_identity() {
         ],
         "the common display ancestor should yield request-relative names",
     );
+}
+
+#[test]
+fn prefixless_rooted_in_memory_display_paths_keep_their_display_identity() {
+    // A leading `/` without a drive prefix is rooted on every host, so Windows must derive the
+    // same request-relative names Unix already does instead of treating the name as relative.
+    let first = PathBuf::from("/docs/intro.mtf");
+    let second = PathBuf::from("/docs/guide.mtf");
+
+    let output = compile_ok(MothTemplateInput::Sources(vec![
+        MothTemplateSource {
+            display_path: first.clone(),
+            source_text: "# Intro".to_owned(),
+        },
+        MothTemplateSource {
+            display_path: second.clone(),
+            source_text: "# Guide".to_owned(),
+        },
+    ]));
+
+    assert_eq!(
+        output
+            .documents
+            .iter()
+            .map(|document| (
+                document.source_path.clone(),
+                document.relative_path.clone(),
+                document.content.as_str(),
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (first, Some(PathBuf::from("intro.mtf")), "<h1>Intro</h1>"),
+            (second, Some(PathBuf::from("guide.mtf")), "<h1>Guide</h1>"),
+        ],
+        "rooted display paths should keep their identity and use the common ancestor",
+    );
+}
+
+// A doubled separator inside a rooted display path must not survive into the request-relative
+// identity spelling. `Path` equality ignores the empty component, but later consumers read the
+// raw spelling, so the test compares the portable rendering.
+#[test]
+fn rooted_in_memory_display_paths_store_normalized_relative_spellings() {
+    let output = compile_ok(MothTemplateInput::Sources(vec![
+        MothTemplateSource {
+            display_path: PathBuf::from("/docs/nested//page.mtf"),
+            source_text: "# Page".to_owned(),
+        },
+        MothTemplateSource {
+            display_path: PathBuf::from("/docs/other.mtf"),
+            source_text: "Other".to_owned(),
+        },
+    ]));
+
+    let relative_path = output.documents[0]
+        .relative_path
+        .as_deref()
+        .expect("a rooted in-memory input should have a relative identity");
+    assert_eq!(
+        portable_path_text(relative_path),
+        "nested/page.mtf",
+        "the stored identity spelling must not keep the doubled separator",
+    );
+}
+
+// Resource URL validation reads that identity spelling, so the unnormalized form rejects a page
+// that references a sibling resource with an empty URL-context component.
+#[cfg(unix)]
+#[test]
+fn rooted_in_memory_document_with_sibling_resource_uses_normalized_url_context() {
+    let temp_dir = temp_project(&[("docs/nested/logo.svg", "<svg/>")]);
+    // Resource paths resolve against the display root, so it must be canonical: a symlinked
+    // temporary directory would make the sibling resource look like it escapes its module.
+    let canonical_root =
+        std::fs::canonicalize(temp_dir.path()).expect("fixture root should canonicalise");
+    let root = portable_path_text(&canonical_root);
+    let page_path = PathBuf::from(format!("{root}/docs/nested//page.mtf"));
+    let other_path = PathBuf::from(format!("{root}/docs/other.mtf"));
+
+    let output = compile_ok(MothTemplateInput::Sources(vec![
+        MothTemplateSource {
+            display_path: page_path,
+            source_text: "# Page\n\n[@logo.svg]".to_owned(),
+        },
+        MothTemplateSource {
+            display_path: other_path,
+            source_text: "Other".to_owned(),
+        },
+    ]));
+
+    assert_eq!(
+        portable_path_text(
+            output.documents[0]
+                .relative_path
+                .as_deref()
+                .expect("the page should have a relative identity")
+        ),
+        "nested/page.mtf",
+    );
+    assert!(
+        output.documents[0].content.contains("./logo.svg"),
+        "the sibling resource URL should resolve from the normalized document directory: {}",
+        output.documents[0].content,
+    );
+}
+
+#[test]
+fn in_memory_names_without_a_file_component_are_rejected_as_input() {
+    let display_path = PathBuf::from("/");
+
+    let errors = expect_infrastructure_failure(
+        MothTemplateInput::Sources(vec![MothTemplateSource {
+            display_path: display_path.clone(),
+            source_text: "# Root".to_owned(),
+        }]),
+        "a bare root in-memory display path",
+    );
+
+    assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(errors.primary.stage, CompilerStage::SourceLoading);
+    assert_eq!(
+        errors.primary.host_path.as_deref(),
+        Some(display_path.as_path()),
+        "the rejected input name should be reported exactly as supplied",
+    );
+    assert!(
+        errors.primary.message.contains("no source file component"),
+        "the rejection should explain the missing source identity: {}",
+        errors.primary.message,
+    );
+}
+
+#[test]
+fn in_memory_source_names_reject_dot_and_parent_components() {
+    for display_path in [
+        ".",
+        "..",
+        "/.",
+        "/..",
+        "./nested.mtf",
+        "../nested.mtf",
+        "a/./b.mtf",
+        "a/../b.mtf",
+        "a/.",
+        "a/..",
+    ] {
+        let display_path = PathBuf::from(display_path);
+        let errors = expect_infrastructure_failure(
+            MothTemplateInput::Sources(vec![MothTemplateSource {
+                display_path: display_path.clone(),
+                source_text: "# Source".to_owned(),
+            }]),
+            "a dot or parent component in an in-memory display path",
+        );
+
+        assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+        assert_eq!(errors.primary.stage, CompilerStage::SourceLoading);
+        assert_eq!(
+            errors.primary.host_path.as_deref(),
+            Some(display_path.as_path()),
+            "the rejected input name should be reported exactly as supplied",
+        );
+        assert!(
+            errors.primary.message.contains("path component"),
+            "the rejection should explain the component contract: {}",
+            errors.primary.message,
+        );
+    }
+}
+
+#[test]
+fn in_memory_source_names_reject_directory_like_spellings() {
+    for display_path in ["docs/", "/docs/", "C:/docs/", "docs//"] {
+        let display_path = PathBuf::from(display_path);
+        let errors = expect_infrastructure_failure(
+            MothTemplateInput::Sources(vec![MothTemplateSource {
+                display_path: display_path.clone(),
+                source_text: "# Source".to_owned(),
+            }]),
+            "a directory-like in-memory display path",
+        );
+
+        assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+        assert_eq!(errors.primary.stage, CompilerStage::SourceLoading);
+        assert_eq!(
+            errors.primary.host_path.as_deref(),
+            Some(display_path.as_path()),
+            "the rejected input name should be reported exactly as supplied",
+        );
+        assert!(
+            errors.primary.message.contains("directory separator"),
+            "the rejection should explain the directory-like spelling: {}",
+            errors.primary.message,
+        );
+    }
+}
+
+// Windows alone parses `C:docs/intro.mtf` as a drive prefix without a root. Such a name has no
+// portable identity, so it must be rejected as input instead of reaching the relative branch and
+// failing later as an internal logical-path error.
+#[cfg(windows)]
+#[test]
+fn drive_relative_in_memory_names_are_rejected_as_input() {
+    let display_path = PathBuf::from("C:docs/intro.mtf");
+
+    let errors = expect_infrastructure_failure(
+        MothTemplateInput::Sources(vec![MothTemplateSource {
+            display_path: display_path.clone(),
+            source_text: "# Intro".to_owned(),
+        }]),
+        "a drive-relative in-memory display path",
+    );
+
+    assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(errors.primary.stage, CompilerStage::SourceLoading);
+    assert_eq!(
+        errors.primary.host_path.as_deref(),
+        Some(display_path.as_path()),
+        "the rejected input name should be reported exactly as supplied",
+    );
+    assert!(
+        errors
+            .primary
+            .message
+            .contains("drive prefix without a root"),
+        "the rejection should explain the missing portable basis: {}",
+        errors.primary.message,
+    );
+}
+
+// Windows parses `\C:guide.mtf` as a root plus a normal component because a drive prefix is only
+// recognised at the start of the path. The common-ancestor rule then exposes `C:guide.mtf` as
+// the relative identity, which Windows parses as drive-relative.
+#[cfg(windows)]
+#[test]
+fn rooted_in_memory_names_whose_suffix_is_drive_relative_are_rejected_as_input() {
+    let display_path = PathBuf::from(r"\C:guide.mtf");
+
+    let errors = expect_infrastructure_failure(
+        MothTemplateInput::Sources(vec![MothTemplateSource {
+            display_path: display_path.clone(),
+            source_text: "# Guide".to_owned(),
+        }]),
+        "a rooted in-memory name whose relative suffix is drive-relative",
+    );
+
+    assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+    assert_eq!(errors.primary.stage, CompilerStage::SourceLoading);
+    assert_eq!(
+        errors.primary.host_path.as_deref(),
+        Some(display_path.as_path()),
+        "the rejection should name the original input, not the derived suffix",
+    );
+    assert!(
+        errors.primary.message.contains("drive prefix"),
+        "the rejection should explain the drive-relative suffix: {}",
+        errors.primary.message,
+    );
+}
+
+// Windows parses `//server/share` as a UNC prefix with an implicit root and no source file
+// component. Its implicit root occupies no bytes of the spelling, so offset arithmetic used to
+// panic while locating the portable suffix.
+#[cfg(windows)]
+#[test]
+fn bare_unc_in_memory_names_are_rejected_as_input() {
+    for display_path in ["//server/share", r"\\server\share"] {
+        let display_path = PathBuf::from(display_path);
+
+        let errors = expect_infrastructure_failure(
+            MothTemplateInput::Sources(vec![MothTemplateSource {
+                display_path: display_path.clone(),
+                source_text: "# Share".to_owned(),
+            }]),
+            "a bare UNC share in-memory display path",
+        );
+
+        assert_eq!(errors.primary.kind, InfrastructureFailureKind::Filesystem);
+        assert_eq!(errors.primary.stage, CompilerStage::SourceLoading);
+        assert_eq!(
+            errors.primary.host_path.as_deref(),
+            Some(display_path.as_path()),
+            "the rejected input name should be reported exactly as supplied",
+        );
+        assert!(
+            errors.primary.message.contains("no source file component"),
+            "the rejection should explain the missing source identity: {}",
+            errors.primary.message,
+        );
+    }
 }
 
 #[test]

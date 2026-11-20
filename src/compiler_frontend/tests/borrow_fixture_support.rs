@@ -12,18 +12,42 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::types_bo
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::FamilyView;
 use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidMutableAccessReason};
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::hir_fixture_support::LoweredHirFixture;
 
 pub(crate) fn run_borrow_checker(
-    module: &HirModule,
+    fixture: &LoweredHirFixture,
     external_package_registry: &ExternalPackageRegistry,
     path_fork: &PathInternerFork,
     string_table: &StringTable,
 ) -> Result<BorrowCheckReport, BorrowCheckError> {
-    check_borrows(module, external_package_registry, path_fork, string_table)
+    run_borrow_checker_with_types(
+        &fixture.hir_module,
+        &fixture.type_environment,
+        external_package_registry,
+        path_fork,
+        string_table,
+    )
+}
+
+pub(crate) fn run_borrow_checker_with_types(
+    module: &HirModule,
+    type_environment: &TypeEnvironment,
+    external_package_registry: &ExternalPackageRegistry,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> Result<BorrowCheckReport, BorrowCheckError> {
+    check_borrows(
+        module,
+        type_environment,
+        external_package_registry,
+        path_fork,
+        string_table,
+    )
 }
 
 pub(crate) fn assert_borrow_error_view<View: FamilyView>(error: BorrowCheckError) -> View {

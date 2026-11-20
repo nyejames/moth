@@ -15,6 +15,7 @@ use crate::builder_surface::external_import_providers::provider_sources::{
     ProviderSourceHandle, ProviderSourceRegistrar, ProviderSourceRegistrationError,
     ProviderSourceSpanError,
 };
+use crate::builder_surface::package_metadata::PackageSetMembership;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
@@ -248,6 +249,7 @@ impl ExternalImportProvider for JsExternalImportProvider {
             &request.logical_source_path,
             request.canonical_source_path,
             request.source_span,
+            PackageSetMembership::Ordinary,
         )
         .map_err(PreparedFailure::from)?;
 

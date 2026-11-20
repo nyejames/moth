@@ -1,0 +1,21 @@
+-- Replacing a projected field's value does not mutate the value it replaced. An immutable
+-- origin may be named by the old value's provenance; only the field's storage must be mutable.
+
+Pair = | first {I32}, second {I32} |
+
+identity |value {I32}| -> {I32}:
+    return value
+;
+
+probe || -> I32:
+    original = {1, 2}
+    slot ~= Pair(first = {0}, second = {0})
+    writer ~{I32} = {0}
+    ~writer = slot.first
+    ~writer = identity(original)
+    ~writer = {3}
+    return original.length()
+;
+
+result = probe()
+io.line([: projected_alias_fresh_write result=[result]])

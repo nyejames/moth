@@ -2,6 +2,7 @@
 
 use super::support::*;
 use crate::compiler_frontend::datatypes::CallableReturnShape;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionReturnContract};
@@ -814,3 +815,182 @@ fn computed_place_read_composes_with_bs_read() {
 }
 
 // ---------------------------------------------------------------------------
+// Projected place definition tests [computed] [alias]
+// ---------------------------------------------------------------------------
+
+/// One lowered definition of a local from a projected place.
+struct ProjectedDefinitionLowering {
+    source: String,
+    alias_name: String,
+    holder_name: String,
+    field_names: Vec<String>,
+}
+
+/// Lowers a definition whose value is a projected place over one holder.
+///
+/// WHAT: `projected_fields` names the field chain; `None` lowers an index projection instead.
+/// WHY: field, nested-field and index definitions share the module, symbol and field setup, and
+///      one rooting rule must cover every projection shape.
+fn lower_projected_definition(
+    destination_type: impl FnOnce(&TypeIds) -> TypeId,
+    projected_fields: Option<&[FieldId]>,
+) -> ProjectedDefinitionLowering {
+    let mut expressions = HirExpressionStore::default();
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, types) = build_type_environment();
+
+    let destination_type = destination_type(&types);
+    let mut place = HirPlace::local(LocalId(0));
+    match projected_fields {
+        Some(fields) => {
+            for field in fields {
+                place = place
+                    .with_field(*field, &mut expressions, None)
+                    .expect("test field projection should fit");
+            }
+        }
+        None => {
+            let index = i32_expression(0, types.i32, RegionId(0), &mut expressions);
+            place = place
+                .with_index(index, &mut expressions, None)
+                .expect("test index projection should fit");
+        }
+    }
+
+    let assignment = statement(
+        1,
+        HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(LocalId(1)),
+            value: expression(
+                HirExpressionKind::Load(place),
+                destination_type,
+                RegionId(0),
+                ValueKind::Place,
+                &mut expressions,
+            ),
+        },
+    );
+
+    let block = HirBlock {
+        id: BlockId(0),
+        region: RegionId(0),
+        locals: vec![
+            local(0, types.i32, RegionId(0)),
+            local(1, destination_type, RegionId(0)),
+        ],
+        statements: vec![assignment],
+        terminator: HirTerminator::Return(HirValueRange::empty()),
+    };
+
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![],
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
+    };
+
+    let mut module = build_module(
+        expressions,
+        &mut path_fork,
+        &mut string_table,
+        "main",
+        vec![block],
+        function,
+        &[(LocalId(0), "holder"), (LocalId(1), "alias")],
+    );
+
+    if let Some(fields) = projected_fields {
+        module.structs = vec![HirStruct {
+            id: StructId(0),
+            frontend_type_id: types.i32,
+            fields: fields
+                .iter()
+                .map(|field| HirField {
+                    id: *field,
+                    ty: destination_type,
+                })
+                .collect(),
+        }];
+    }
+
+    let mut field_names = Vec::new();
+    for (index, field) in projected_fields.unwrap_or(&[]).iter().enumerate() {
+        let leaf_name = format!("field{index}");
+        module.side_table.bind_field_name(
+            *field,
+            path_fork
+                .try_intern_portable_path(&leaf_name, &mut string_table)
+                .expect("test path fits"),
+        );
+        field_names.push(expected_dev_field_name(&leaf_name, field.0));
+    }
+
+    let output = lower_hir_to_js(
+        &module,
+        &NumericProofs::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("JS lowering should succeed");
+
+    ProjectedDefinitionLowering {
+        source: output.source,
+        alias_name: expected_dev_local_name("alias", 1),
+        holder_name: expected_dev_local_name("holder", 0),
+        field_names,
+    }
+}
+
+/// Verifies that a projected field definition keeps a rooted computed alias. [computed]
+#[test]
+fn projected_field_definition_keeps_rooted_computed_alias() {
+    let lowered = lower_projected_definition(|types| types.collection_i32, Some(&[FieldId(0)]));
+    let field_name = &lowered.field_names[0];
+
+    assert!(
+        lowered.source.contains(&format!(
+            "{} = __moth_alias_binding(__moth_field({}, \"{field_name}\"));",
+            lowered.alias_name, lowered.holder_name
+        )),
+        "a projected definition must alias the computed place that captured its base storage"
+    );
+}
+
+/// Verifies that a nested projection aliases the innermost captured field storage. [computed]
+#[test]
+fn nested_projected_definition_keeps_rooted_computed_alias() {
+    let lowered = lower_projected_definition(
+        |types| types.collection_i32,
+        Some(&[FieldId(0), FieldId(1)]),
+    );
+    let outer_field = &lowered.field_names[0];
+    let inner_field = &lowered.field_names[1];
+
+    assert!(
+        lowered.source.contains(&format!(
+            "{} = __moth_alias_binding(__moth_field(__moth_field({}, \"{outer_field}\"), \"{inner_field}\"));",
+            lowered.alias_name, lowered.holder_name
+        )),
+        "a nested projection must compose rooted field references to the innermost storage"
+    );
+}
+
+/// Verifies that an index-projected definition keeps a rooted computed alias. [computed]
+#[test]
+fn index_projected_definition_keeps_rooted_computed_alias() {
+    let lowered = lower_projected_definition(|types| types.collection_i32, None);
+
+    assert!(
+        lowered.source.contains(&format!(
+            "{} = __moth_alias_binding(__moth_index({}, 0));",
+            lowered.alias_name, lowered.holder_name
+        )),
+        "an index-projected definition must alias the computed element that captured its base"
+    );
+}

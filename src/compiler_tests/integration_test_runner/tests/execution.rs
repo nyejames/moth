@@ -911,24 +911,25 @@ fn synthetic_selected_entries_reject_importable_reserved_directory_claims() {
     fs::write(source_root.join("core/logo.png"), "not source").expect("should write core asset");
     fixture.build(&[]);
 
-    // A directory named for the reserved config source is inert at every depth. Its children
-    // must not become synthetic namespace claims or registered-prefix collisions.
+    // Only the file spelling stays inert. The same name used for a directory must not hide a
+    // reserved namespace claim.
     let mut fixture = EntryFixture::new("[:page]\n", false);
     fixture.select_ordinary_page_file();
-    let source_root = fixture.directory.path().join("src");
-    let inert_core_helper = source_root.join("core/@config.moth/helper.moth");
-    fs::create_dir_all(
-        inert_core_helper
-            .parent()
-            .expect("inert helper has a parent"),
-    )
-    .expect("should create config-named directory");
-    fs::write(&inert_core_helper, "value #= 1\n").expect("should write inert helper");
-    let inert_package_path = source_root.join("builder/@config.moth/web/site");
-    fs::create_dir_all(&inert_package_path).expect("should create config-named package path");
-    fs::write(inert_package_path.join("logo.png"), "not source")
-        .expect("should write inert package asset");
+    let core = fixture.directory.path().join("src/core");
+    let config_path = core.join("@config.moth");
+    fs::create_dir_all(&core).expect("should create core directory");
+    fs::write(&config_path, "not authored module source").expect("should write nested config");
     fixture.build(&[]);
+
+    fs::remove_file(&config_path).expect("should remove nested config file");
+    fs::create_dir(&config_path).expect("should create config-named directory");
+    fs::write(config_path.join("helper.moth"), "value #= 1\n").expect("should write helper");
+    assert_reserved_package_root_claim(
+        &fixture,
+        "core/@config.moth/helper.moth",
+        "core",
+        "ordinary page helper in a config-named directory",
+    );
 }
 
 #[test]

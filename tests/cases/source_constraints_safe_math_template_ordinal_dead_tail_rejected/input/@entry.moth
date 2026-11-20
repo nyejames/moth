@@ -1,0 +1,7 @@
+$fast_math $safe_math
+render_dead |limit I32| -> String:
+    assert(false)
+    return [: [loop 0 to limit |item, index|:<p>[index]</p>;] ]
+;
+
+~[render_dead(2)]

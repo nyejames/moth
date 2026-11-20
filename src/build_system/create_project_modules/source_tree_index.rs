@@ -15,12 +15,13 @@
 //! inventory/ownership owner and later consumers resolve source data through it rather than
 //! through duplicated per-module records.
 use super::module_identity::{ModuleId, ModuleIdentityRecord, ModuleIdentityTable};
+use super::source_loading::io_kind_indicates_damaged_install;
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::definition::damaged_package_set_report;
 use crate::builder_surface::external_import_providers::provider::ExternalFileExtension;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::package_metadata::{
-    is_reserved_package_namespace_root, reserved_package_namespace_claim_root,
+    PackageSetMembership, is_reserved_package_namespace_root, reserved_package_namespace_claim_root,
 };
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -31,12 +32,15 @@ use crate::compiler_frontend::compiler_messages::{
 };
 #[cfg(test)]
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
+use crate::compiler_frontend::paths::path_normalization::directory_name_is_hidden;
 use crate::compiler_frontend::project_globals::claims_project_globals_name;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootFiles, ModuleRootRole, StableModuleOriginIdentity, StableOwnedSourceIdentity,
     StablePackageIdentity, portable_relative_logical_path_from,
 };
-use crate::compiler_frontend::source::{SourceKind, SourceRegistrationIndex};
+use crate::compiler_frontend::source::{
+    SourceDatabase, SourceId, SourceKind, SourceRegistrationIndex,
+};
 use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_config_file, file_name_is_invalid_module_root_marker,
     file_name_is_module_root_file, module_root_role_for_file_name,
@@ -44,7 +48,7 @@ use crate::compiler_frontend::source_packages::root_file::{
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::counter_observation;
-use crate::projects::settings::Config;
+use crate::projects::settings::{CONFIG_FILE_NAME, Config};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
@@ -104,8 +108,9 @@ pub(crate) struct SourceTreeSkipPolicy {
 
 /// Validated project-level inputs shared by source-tree discovery and output-policy exclusion.
 pub(super) struct SourceTreeProjectContext<'a> {
-    pub(super) project_root: &'a Path,
     pub(super) validated_output_settings: Option<&'a ValidatedDirectoryOutputSettings>,
+    /// Bootstrap-registered config source, when present; discovery excludes its canonical target.
+    pub(super) config_source: Option<ProjectConfigSource<'a>>,
 }
 
 impl SourceTreeSkipPolicy {
@@ -195,31 +200,6 @@ impl SourceTreeSkipPolicy {
                 .iter()
                 .any(|output_root| directory == output_root || directory.starts_with(output_root))
     }
-}
-
-/// Whether a directory name is hidden from source discovery by the `_` prefix.
-///
-/// Only directory components are hidden. A file such as `_helper.moth` in a visible directory
-/// remains eligible source.
-fn directory_name_is_hidden(name: &str) -> bool {
-    name.starts_with('_')
-}
-
-/// Whether a canonical directory path contains a hidden component below the selected root.
-///
-/// The selected root itself is exempt: `moth check website/_prototype/` compiles that root, while
-/// any `_` descendant stays excluded. Canonical ancestry means a visible symlink alias cannot
-/// reveal a hidden physical subtree.
-pub(crate) fn path_has_hidden_component_below(path: &Path, selected_root: &Path) -> bool {
-    let Ok(relative) = path.strip_prefix(selected_root) else {
-        return false;
-    };
-    relative.components().any(|component| {
-        component
-            .as_os_str()
-            .to_str()
-            .is_some_and(directory_name_is_hidden)
-    })
 }
 
 /// One root file discovered inside a traversed directory, with its structural role.
@@ -472,6 +452,28 @@ struct SourceInventory {
     canonical_path_to_source_index: FxHashMap<PathBuf, SourceRecordIndex>,
 }
 
+/// The bootstrap-registered build-only config source, resolved through its owning database.
+///
+/// WHAT: pairs the config source identity with the database that owns its canonical path.
+/// WHY: bootstrap registers the physical config source before discovery. Carrying both facts
+///      together lets discovery exclude the canonical target while the database stays the sole
+///      path owner, so no second path copy enters build settings.
+#[derive(Clone, Copy)]
+pub(super) struct ProjectConfigSource<'a> {
+    pub(super) source_id: SourceId,
+    pub(super) source_files: &'a SourceDatabase,
+}
+
+impl<'a> ProjectConfigSource<'a> {
+    /// The canonical physical path of the registered config source.
+    fn canonical_path(&self) -> Option<&'a Path> {
+        self.source_files
+            .get(self.source_id)?
+            .canonical_os_path
+            .as_deref()
+    }
+}
+
 /// Canonical module identities and traversal evidence for one directory build.
 ///
 /// `module_identities` is the Stage 0 durable identity and topology table; the project module
@@ -487,6 +489,15 @@ struct SourceInventory {
 pub(crate) struct SourceTreeIndex {
     entry_root: PathBuf,
     package_identity: StablePackageIdentity,
+    /// Registration provenance of this boundary's package, or `Ordinary` for the project.
+    package_set_membership: PackageSetMembership,
+    /// Bootstrap-registered config source for a project boundary.
+    ///
+    /// WHAT: the one build-only config identity that must stay outside ordinary source and
+    ///       file-value admission even when its authored name is a symlink.
+    /// WHY: file-value resolution borrows its canonical path from the owning source database, so
+    ///      this ID is the single carried identity rather than another path copy.
+    config_source_id: Option<SourceId>,
     module_identities: ModuleIdentityTable,
     sources: Vec<SourceRecord>,
     owned_source_indices: Vec<Vec<SourceRecordIndex>>,
@@ -507,6 +518,15 @@ pub(crate) struct SourceTreeIndex {
 struct SourceTreeBoundary<'a> {
     entry_root: PathBuf,
     package_identity: StablePackageIdentity,
+    /// Registration provenance that decides this boundary's damaged-package-set lane.
+    package_set_membership: PackageSetMembership,
+    /// Bootstrap-registered config source identity for a project boundary.
+    ///
+    /// WHAT: the one build-only config identity that must stay outside ordinary source
+    ///       admission even when its authored name is a symlink to an ordinary-looking sibling.
+    /// WHY: bootstrap owns config identity before discovery runs, so carrying the existing source
+    ///      identity reuses it instead of re-resolving or inventing a second path mechanism.
+    config_source: Option<ProjectConfigSource<'a>>,
     skip_policy: SourceTreeSkipPolicy,
     kind: SourceTreeBoundaryKind<'a>,
 }
@@ -554,6 +574,10 @@ impl SourceTreeIndex {
     /// table. Recognized candidates with no enclosing
     /// module root remain explicit unrooted [`SourceRecord`]s rather than being silently
     /// discarded. Sorted rows are handed to the boundary's compiler-facing registration index.
+    ///
+    /// WHY the context carries a config source: bootstrap registers the physical config source
+    /// before discovery. Passing that source lets the traversal exclude its canonical target from
+    /// ordinary-source admission without copying the path into build settings.
     pub(super) fn discover(
         entry_root: PathBuf,
         project_context: SourceTreeProjectContext<'_>,
@@ -564,12 +588,14 @@ impl SourceTreeIndex {
         string_table: &mut StringTable,
     ) -> Result<Self, PreparedFailure> {
         let SourceTreeProjectContext {
-            project_root: _project_root,
             validated_output_settings,
+            config_source,
         } = project_context;
         let boundary = SourceTreeBoundary {
             entry_root: entry_root.clone(),
             package_identity: StablePackageIdentity::project_local(&config.project_name),
+            package_set_membership: PackageSetMembership::Ordinary,
+            config_source,
             skip_policy: SourceTreeSkipPolicy::from_validated_output_settings(
                 &entry_root,
                 validated_output_settings,
@@ -598,6 +624,7 @@ impl SourceTreeIndex {
         canonical_root: PathBuf,
         package_identity: StablePackageIdentity,
         package_prefix: &str,
+        package_set_membership: PackageSetMembership,
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
@@ -605,6 +632,8 @@ impl SourceTreeIndex {
         let boundary = SourceTreeBoundary {
             entry_root: canonical_root,
             package_identity,
+            package_set_membership,
+            config_source: None,
             skip_policy: SourceTreeSkipPolicy::default(),
             kind: SourceTreeBoundaryKind::Package { package_prefix },
         };
@@ -632,9 +661,14 @@ impl SourceTreeIndex {
         let SourceTreeBoundary {
             entry_root,
             package_identity: boundary_package,
+            package_set_membership,
+            config_source,
             skip_policy,
             kind,
         } = boundary;
+        let config_canonical_path = config_source.and_then(|source| source.canonical_path());
+        let config_source_id = config_source.map(|source| source.source_id);
+        let damaged_package = DamagedPackageBoundary::for_boundary(kind, package_set_membership);
         // One stable package identity shared by every structural module in this boundary:
         // normal roots, support roots and their role-neutral helper origin. It is derived from
         // the configured project name (project boundary) or the registry's `PackageOrigin` plus
@@ -651,8 +685,9 @@ impl SourceTreeIndex {
             // Symlink aliases are one physical subtree; canonicalize before indexing so aliases
             // cannot duplicate source identities, and do not traverse aliases outside this
             // boundary.
-            let directory = fs::canonicalize(&directory)
-                .map_err(|error| Self::directory_read_error(&directory, error))?;
+            let directory = fs::canonicalize(&directory).map_err(|error| {
+                Self::directory_read_error(&directory, error, damaged_package.as_ref())
+            })?;
             if !directory.starts_with(&entry_root)
                 || !visited_directories.insert(directory.clone())
                 || skip_policy.canonical_ancestor_is_skipped(&directory, &entry_root)
@@ -661,7 +696,7 @@ impl SourceTreeIndex {
             }
             stats.dirs_visited += 1;
 
-            let entries = Self::sorted_directory_entries(&directory)?;
+            let entries = Self::sorted_directory_entries(&directory, damaged_package.as_ref())?;
 
             let mut subdirectories = Vec::new();
             let mut source_files_by_stem: BTreeMap<String, String> = BTreeMap::new();
@@ -686,12 +721,6 @@ impl SourceTreeIndex {
                     // not a traversable module directory. An invalid marker name stays a closed
                     // vocabulary error even when it is not a regular file.
                     if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
-                        // The build-only config filename is reserved at every depth but is not a
-                        // root role. A nested directory sharing that name stays inert rather than
-                        // becoming an ordinary folder claim.
-                        if file_name_is_config_file(file_name) {
-                            continue;
-                        }
                         if file_name_is_invalid_module_root_marker(file_name) {
                             return Err(invalid_module_root_file_name_error(
                                 &directory,
@@ -700,11 +729,11 @@ impl SourceTreeIndex {
                             ));
                         }
                         if file_name_is_module_root_file(file_name) {
-                            let canonical_target = canonicalize_source_path(&path)?;
-                            return Err(module_root_not_regular_file_error(
+                            return Err(reject_non_regular_module_root(
+                                damaged_package.as_ref(),
+                                file_name,
                                 &directory,
                                 &path,
-                                &canonical_target,
                                 string_table,
                             ));
                         }
@@ -762,11 +791,11 @@ impl SourceTreeIndex {
                             ));
                         }
                         if file_name_is_module_root_file(file_name) {
-                            let canonical_target = canonicalize_source_path(&path)?;
-                            return Err(module_root_not_regular_file_error(
+                            return Err(reject_non_regular_module_root(
+                                damaged_package.as_ref(),
+                                file_name,
                                 &directory,
                                 &path,
-                                &canonical_target,
                                 string_table,
                             ));
                         }
@@ -790,11 +819,29 @@ impl SourceTreeIndex {
                     continue;
                 }
 
+                // A `@config.moth` symlink may resolve through another authored name such as
+                // `project.moth` or a `project.mtf` alias. That visible alias is skipped so the
+                // build-only config source keeps its identity instead of claiming the reserved
+                // `@project` namespace; a genuine project source still reaches the rejection.
+                let claims_project_globals =
+                    source_stem_from_file_name(file_name).is_some_and(claims_project_globals_name);
                 if let SourceTreeBoundaryKind::Project { .. } = kind
                     && directory == entry_root
-                    && source_stem_from_file_name(file_name)
-                        .is_some_and(claims_project_globals_name)
+                    && claims_project_globals
                 {
+                    // An ordinary entry compares its listed path; a symlink resolves once here.
+                    // Either the alias is the build-only config source and leaves admission, or
+                    // it is a genuine project claim and is rejected below.
+                    let config_target = config_canonical_path.is_some_and(|config_path| {
+                        config_path == path.as_path()
+                            || (listed_type.is_none()
+                                && canonicalize_source_path(&path)
+                                    .ok()
+                                    .is_some_and(|canonical| canonical == config_path))
+                    });
+                    if config_target {
+                        continue;
+                    }
                     let diagnostic = project_structure_diagnostic(
                         InvalidConfigReason::ProjectGlobalsNameReserved,
                     );
@@ -852,11 +899,18 @@ impl SourceTreeIndex {
                 // A file symlink can point outside the selected boundary or into an excluded
                 // subtree even when its visible spelling looks eligible. Directory ancestry
                 // decides exclusion; an underscore-prefixed file name remains valid source.
-                // Ordinary sources outside the boundary stay silently excluded. An authored root
-                // marker, however, must resolve to a source owned by its structural module, so a
-                // filtered root target is a structural failure rather than a missing root.
+                // Build-only config stays outside module ownership even through a file alias:
+                // either the target is named `@config.moth`, or it is the canonical target
+                // bootstrap already registered for a symlinked config source. An excluded root
+                // target is a structural failure rather than a missing root; other excluded
+                // targets stay silent.
                 let canonical_parent = canonical_path.parent();
                 if !canonical_path.starts_with(&entry_root)
+                    || canonical_path
+                        .file_name()
+                        .is_some_and(|name| name == CONFIG_FILE_NAME)
+                    || config_canonical_path
+                        .is_some_and(|config_path| config_path == canonical_path.as_path())
                     || canonical_parent.is_some_and(|parent| {
                         skip_policy.canonical_ancestor_is_skipped(parent, &entry_root)
                     })
@@ -1020,6 +1074,7 @@ impl SourceTreeIndex {
                         &directory,
                         &mut directory_roots,
                         package_prefix,
+                        damaged_package.as_ref(),
                         string_table,
                     )?
                 }
@@ -1090,6 +1145,8 @@ impl SourceTreeIndex {
         Ok(Self {
             entry_root,
             package_identity: boundary_package,
+            package_set_membership,
+            config_source_id,
             module_identities,
             sources,
             owned_source_indices,
@@ -1127,7 +1184,7 @@ impl SourceTreeIndex {
         // One classified pass supplies every fact: files own helper keys and claim spellings, while
         // directories own namespace keys, reserved-root claims and the roots registered-prefix
         // probing descends from.
-        for entry in Self::sorted_directory_entries(source_root)? {
+        for entry in Self::sorted_directory_entries(source_root, None)? {
             let Some(entry) = eligible_single_file_entry(&skip_policy, source_root, &entry)? else {
                 continue;
             };
@@ -1232,10 +1289,10 @@ impl SourceTreeIndex {
         })?;
 
         Self::discover(
-            canonical_root.clone(),
+            canonical_root,
             SourceTreeProjectContext {
-                project_root: &canonical_root,
                 validated_output_settings: None,
+                config_source: None,
             },
             config,
             source_packages,
@@ -1248,6 +1305,26 @@ impl SourceTreeIndex {
 
     pub(crate) fn entry_root(&self) -> &Path {
         &self.entry_root
+    }
+
+    /// Registration provenance that decides this boundary's damaged-package-set lane.
+    pub(crate) fn package_set_membership(&self) -> PackageSetMembership {
+        self.package_set_membership
+    }
+
+    /// The canonical physical path of this boundary's bootstrap config source.
+    ///
+    /// Consumers compare it with a resolved target so the build-only config keeps one physical
+    /// identity and never enters ordinary source admission. The index stores only the source ID,
+    /// so the boundary's `SourceDatabase` remains the path owner.
+    pub(crate) fn config_source_path<'a>(
+        &self,
+        source_files: &'a SourceDatabase,
+    ) -> Option<&'a Path> {
+        source_files
+            .get(self.config_source_id?)?
+            .canonical_os_path
+            .as_deref()
     }
 
     /// The stable package identity shared by every module in this boundary.
@@ -1353,27 +1430,36 @@ impl SourceTreeIndex {
 
     fn sorted_directory_entries(
         directory: &Path,
+        damaged_package: Option<&DamagedPackageBoundary<'_>>,
     ) -> Result<Vec<fs::DirEntry>, InfrastructureFailure> {
         let mut entries = fs::read_dir(directory)
-            .map_err(|error| Self::directory_read_error(directory, error))?
+            .map_err(|error| Self::directory_read_error(directory, error, damaged_package))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| {
-                InfrastructureFailure::filesystem(
+                let io_kind = error.kind();
+                let failure = InfrastructureFailure::filesystem(
                     CompilerStage::ProjectBuildAssembly,
                     directory,
                     format!("Failed to read directory entry while indexing source tree: {error}"),
-                )
+                );
+                explain_damaged_directory(failure, io_kind, damaged_package)
             })?;
         entries.sort_by_key(|entry| entry.path());
         Ok(entries)
     }
 
-    fn directory_read_error(directory: &Path, error: std::io::Error) -> InfrastructureFailure {
-        InfrastructureFailure::filesystem(
+    fn directory_read_error(
+        directory: &Path,
+        error: std::io::Error,
+        damaged_package: Option<&DamagedPackageBoundary<'_>>,
+    ) -> InfrastructureFailure {
+        let io_kind = error.kind();
+        let failure = InfrastructureFailure::filesystem(
             CompilerStage::ProjectBuildAssembly,
             directory,
             format!("Failed to read directory while indexing source tree: {error}"),
-        )
+        );
+        explain_damaged_directory(failure, io_kind, damaged_package)
     }
 }
 
@@ -1559,6 +1645,110 @@ fn module_root_outside_claim_error(
     ))
 }
 
+/// Package prefix and damaged-set report of one compiler-shipped package boundary.
+///
+/// WHAT: present only for a package boundary registered as part of the compiler-shipped set;
+///       project and ordinary package boundaries have none.
+/// WHY: registration provenance decides the lane, never the installation path, so a damaged
+///      shipped installation does not surface as an author error while a custom package under the
+///      installed `packages/` directory stays authored. One value per boundary serves every
+///      traversal failure site.
+struct DamagedPackageBoundary<'a> {
+    package_prefix: &'a str,
+    report: String,
+}
+
+impl<'a> DamagedPackageBoundary<'a> {
+    fn for_boundary(
+        kind: SourceTreeBoundaryKind<'a>,
+        package_set_membership: PackageSetMembership,
+    ) -> Option<Self> {
+        let SourceTreeBoundaryKind::Package { package_prefix } = kind else {
+            return None;
+        };
+        damaged_package_set_report(package_set_membership).map(|report| Self {
+            package_prefix,
+            report,
+        })
+    }
+}
+
+/// Explain one failed directory read inside a shipped package boundary as installation damage.
+///
+/// WHAT: a cause that contradicts the installed layout, such as a package directory replaced by
+///       a regular file, names the package and appends the damaged-set report while keeping the
+///       original OS cause. Transient I/O and every authored boundary keep the failure unchanged.
+fn explain_damaged_directory(
+    mut failure: InfrastructureFailure,
+    io_kind: std::io::ErrorKind,
+    damaged_package: Option<&DamagedPackageBoundary<'_>>,
+) -> InfrastructureFailure {
+    let Some(damaged_package) =
+        damaged_package.filter(|_| io_kind_indicates_damaged_install(io_kind))
+    else {
+        return failure;
+    };
+    failure.message = format!(
+        "Source package @{} cannot read its installed source directory: {}. {}",
+        damaged_package.package_prefix, failure.message, damaged_package.report
+    )
+    .into_boxed_str();
+    failure
+}
+
+/// Reject one reserved module-root name that is not a regular file in this boundary.
+///
+/// WHAT: resolves the visible marker first. A compiler-shipped package registration whose marker
+///       cannot resolve, or resolves to a non-file entry, reports the incomplete installed set
+///       with the original cause; every authored registration keeps its existing filesystem
+///       failure or structure diagnostic.
+/// WHY: a damaged shipped facade is not an author error. The original OS error stays visible.
+fn reject_non_regular_module_root(
+    damaged_package: Option<&DamagedPackageBoundary<'_>>,
+    file_name: &str,
+    directory: &Path,
+    visible_root_file: &Path,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    let canonical_target = match canonicalize_source_path(visible_root_file) {
+        Ok(canonical_target) => canonical_target,
+        Err(error) => {
+            // Resolution can fail before classification when a symlinked facade target becomes
+            // unsearchable, so the original OS error is retained in the shipped message.
+            let Some(damaged_package) = damaged_package else {
+                return error.into();
+            };
+            let mut error = error;
+            error.message = format!(
+                "Source package @{} cannot resolve its '{file_name}' module root \
+                 from the installed package set: {}. {}",
+                damaged_package.package_prefix, error.message, damaged_package.report
+            )
+            .into_boxed_str();
+            return error.into();
+        }
+    };
+
+    let Some(damaged_package) = damaged_package else {
+        return module_root_not_regular_file_error(
+            directory,
+            visible_root_file,
+            &canonical_target,
+            string_table,
+        );
+    };
+    InfrastructureFailure::filesystem(
+        CompilerStage::ProjectBuildAssembly,
+        visible_root_file,
+        format!(
+            "Source package @{} has a reserved module-root name that is not a \
+             regular file: '{file_name}'. {}",
+            damaged_package.package_prefix, damaged_package.report
+        ),
+    )
+    .into()
+}
+
 /// Reject a reserved root-marker name that resolves to a directory or other non-file entry.
 ///
 /// The authored marker stays visible while the canonical target explains where the malformed
@@ -1616,12 +1806,15 @@ fn aliased_root_files_error(
 /// Every registered Moth-source package publishes its external API through a directly contained
 /// `@package.moth`. A co-located `@mod.moth` keeps a distinct internal normal-position scope, while
 /// `@entry.moth` only contributes a dormant entry and never a package surface. Missing or aliased
-/// roots keep package-specific typed diagnostics, except in a compiler-shipped package, where a
-/// missing support facade means the installed package set is incomplete.
+/// roots keep package-specific typed diagnostics, except for a registration the compiler ships
+/// as part of its package set, where a missing support facade means that installed set is
+/// incomplete. Registration provenance decides the lane; a custom root under the installed
+/// `packages/` directory or reached through a symlink stays an authored structure diagnostic.
 fn classify_package_root_directory(
     directory: &Path,
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
     package_prefix: &str,
+    damaged_package: Option<&DamagedPackageBoundary<'_>>,
     string_table: &mut StringTable,
 ) -> Result<ClassifiedDirectoryRoots, PreparedFailure> {
     // The support facade is the only package-facing surface. A normal root alone is an internal
@@ -1630,11 +1823,14 @@ fn classify_package_root_directory(
         .iter()
         .any(|root| root.role == ModuleRootRole::Support);
     if !has_support_facade {
-        if let Some(report) = damaged_package_set_report(directory) {
+        if let Some(damaged_package) = damaged_package {
             return Err(InfrastructureFailure::filesystem(
                 CompilerStage::ProjectBuildAssembly,
                 directory,
-                format!("Source package @{package_prefix} has no '@package.moth' support facade root. {report}"),
+                format!(
+                    "Source package @{package_prefix} has no '@package.moth' support facade root. {}",
+                    damaged_package.report
+                ),
             )
             .into());
         }
@@ -2099,18 +2295,6 @@ fn eligible_single_file_entry(
     if !is_directory && !is_file {
         return Ok(None);
     }
-    // A directory sharing the reserved build-only config filename is inert at every depth,
-    // exactly as the directory traversal treats it. Descending would let its children become
-    // importable synthetic namespace claims or registered-prefix collisions that directory
-    // compilation never sees.
-    if is_directory
-        && path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(file_name_is_config_file)
-    {
-        return Ok(None);
-    }
     let directory_identity = if is_directory {
         match listed_type {
             Some(_) => {
@@ -2139,6 +2323,9 @@ fn eligible_single_file_entry(
                 return Ok(None);
             };
             if !canonical_file.starts_with(source_root)
+                || canonical_file
+                    .file_name()
+                    .is_some_and(|name| name == CONFIG_FILE_NAME)
                 || skip_policy.canonical_ancestor_is_skipped(canonical_parent, source_root)
             {
                 return Ok(None);
@@ -2170,7 +2357,7 @@ fn eligible_child_directories(
     skip_policy: &SourceTreeSkipPolicy,
 ) -> Result<Vec<EligibleDirectoryEntry>, PreparedFailure> {
     let mut directories = Vec::new();
-    for entry in SourceTreeIndex::sorted_directory_entries(directory)? {
+    for entry in SourceTreeIndex::sorted_directory_entries(directory, None)? {
         let Some(entry) = eligible_single_file_entry(skip_policy, source_root, &entry)? else {
             continue;
         };
@@ -2308,7 +2495,7 @@ fn reserved_root_directory_claim(
     let mut helper_source = None;
     let mut subdirectories = Vec::new();
 
-    for entry in SourceTreeIndex::sorted_directory_entries(directory)? {
+    for entry in SourceTreeIndex::sorted_directory_entries(directory, None)? {
         let Some(entry) = eligible_single_file_entry(skip_policy, source_root, &entry)? else {
             continue;
         };

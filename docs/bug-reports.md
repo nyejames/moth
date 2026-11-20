@@ -1,147 +1,56 @@
 # Bug reports
 
-A casual log of bugs and limitations found during other work and left for later investigation. Each entry names where the problem lives, what was observed and a starting point for the fix. Remove an entry in the commit that resolves it.
+A lightweight queue for unresolved bugs and issues discovered during other work or a Correctness audit. Any agent may record an unrelated, non-blocking concern here and return to its task without starting a formal audit. This includes concrete documentation, test, redundancy and efficiency leads found outside the current scope.
+
+Check for an existing entry before adding one. Name where the problem lives, what was observed or looks suspicious and a useful next investigation. Distinguish confirmed defects from unverified hypotheses. Keep the format flexible and the entry short when evidence is limited. Follow [the audit guide](./roadmap/audit-guide.md) for formal audit coverage and findings. Remove an entry in the commit that resolves it.
 
 ## Open
 
-### Unreachable generic call after return crashes summary convergence
+### `$infallible` release-only rejection from an erased fallback call
 
-- Found: Constraints branch implementation and independent merge review, 2026-11.
-- Where: `call_escapes_builtin_failure` / `retained_call_summary` in `src/compiler_frontend/module_compilation/generated/convergence.rs` (around line 1080).
-- Observed: a generic call after an unconditional return is unreachable, but summary convergence still looks for its exact callable summary and raises a compiler bug: `implicit builtin failure contributor has no exact call summary for ...`. The implementation agent reproduced the crash on original base `d80f56343` without any constraint directives, so it predates `$safe_math` and `$infallible`.
-- Investigate: preserve the unreachable-call repro as a compiler test, trace how its builtin failure contributor survives without an exact summary and either exclude dead contributors at their owner or ensure the mandatory summary is available before convergence. Keep selected-source fast-use accounting distinct from liveness-conditioned failure propagation. User-authored unreachable code must not trigger an infrastructure failure.
+- Found: release/debug divergence audit, 2026-11. Confirmed defect; pre-dates this branch, reproduced by probe on the current branch.
+- Where: release-erased call projection into `HirConstraintEvidence::live_erased_call_sites` in `src/compiler_frontend/hir/hir_builder/metadata.rs` from `Ast::release_erased_call_sites`, consumed by the `$infallible` escaping-failure analysis.
+- Observed: a probe defines `trap_if_zero |value I32| -> I32: return 1 // value` and a `$infallible` boundary containing `discarded I32 = value // 2 catch then trap_if_zero(1)`. Debug check accepts with no warnings. Release build rejects MOTH-RULE-0091 at the `$infallible` directive: "`$infallible` forbids escaping recoverable errors, but this boundary can return an `Error`". The divisor literal 2 cannot fail, so the fallback cannot run; release folding still erases the fallback call and HIR treats that erased row as live evidence.
+- Investigate: release-erased rows are inserted as live unconditionally. Keep a liveness link to the catch handler a folded call came from, or stop release speculation from folding fallback source that HIR cannot route. Add matching debug/release cases.
 
-### Mutable local passed by `~` gets an invalid parameter effect summary
+### `$infallible` accepts a handler trap erased by release folding
 
-- Found: Constraints branch implementation and independent merge review, 2026-11.
-- Where: `validate_parameter_summary` in `src/compiler_frontend/public_call_summary.rs` (around line 263), with the upstream mutation/transfer summary producer still to identify.
-- Observed: copy an immutable function parameter to a mutable local, then pass that local to another function through `~`. Compilation fails with `MOTH-INFRA-0001` and an `invalid effect combination` message instead of accepting the legal access or producing a source diagnostic. The implementation agent reproduced it on original base `d80f56343` and referenced a temporary probe at `tmp/probes-t3/p90`, which is not a durable test fixture.
-- Investigate: first commit a minimal repro under `tests/cases/`, then follow the parameter's declared access, mutation effect and transfer effect to find the first inconsistent producer. Preserve the `Shared` versus `Mutable` summary invariants and fix the producer rather than weakening the validator to accept invalid combinations.
-
-### Spanless release-folded calls may lose debug/release constraint parity
-
-- Found: Constraints follow-up `abc903852` source review, 2026-11. This is a potential limitation, not a reproduced source-level defect.
-- Where: `project_selected_hir_evidence` in `src/compiler_frontend/hir/hir_builder/metadata.rs`, specifically the `None => true` liveness fallback for `ast.release_erased_call_sites`, and the release-fold ledger in `ast/const_values/const_execution/rewrite.rs`.
-- Observed: a folded call with no source span cannot be matched against skipped statement spans, so the release path assumes it was live. If such a call originates in a skipped handler or after a terminator and its callee may trap or fail, release could reject `$infallible` where debug accepts. No test reached this case. The numeric backend contract calls for identical debug and release verdicts.
-- Investigate: determine whether any legal source or materialised callable can produce a spanless erased call in skipped code. Add a focused debug/release parity test if reachable. If impossible, document and enforce that invariant at the producer, then remove the fallback ambiguity. Otherwise carry explicit liveness or enclosing statement identity into the ledger rather than guessing from absent span data.
-
-### `ReservedConfigFile` path reason is unreachable for file values
-
-- Found: Core/Builder package namespace and config filename work, 2026-11.
-- Where: `src/build_system/create_project_modules/file_reference_resolution.rs` (directory resolver around line 115, single-file resolver around line 922) and `InvalidCompileTimePathReason::ReservedConfigFile`.
-- Observed: a file value such as `@"@config.moth"` is rejected by the AST first with `MOTH-SYNTAX-0023` (`invalid_expression.moth_file_has_no_value`). The resolver check that would report `invalid_compile_time_path.reserved_config_file` never runs for it, although both resolver comments say the reserved filename is reported instead of the no-value reason. The case `file_value_reserved_config_reference_rejected` pins the AST diagnostic.
-- Investigate: either let the reserved filename win before the AST no-value check or delete the reason, its code, key and renderer branch along with the misleading comments.
-
-### Damaged package set classification is path-only
-
-- Found: Core/Builder package namespace and config filename work, 2026-11.
-- Where: `damaged_package_set_report` in `src/builder_surface/definition.rs`, used by Stage 0 package discovery, source tree indexing, resource inputs and package reserved-root validation.
-- Observed: the infrastructure lane is chosen by whether a path sits below the canonical `BUILTIN_PACKAGES_ROOT`. A ProjectLocal or Dependency package registered inside the compiler's `packages/` directory gets a damaged-installation failure instead of an authored diagnostic. An official package root that is a symlink to a directory outside `packages/` gets the authored diagnostic instead. Both need a modified installation.
-- Investigate: whether lane selection should also require Core or compiler-shipped Builder registration identity, kept in one owner for all callers.
+- Found: release/debug divergence audit, 2026-11. Confirmed defect; pre-dates this branch, reproduced by probe on the current branch.
+- Where: HIR catch lowering in `src/compiler_frontend/hir/hir_expression.rs` and the skipped-handler walk in `src/compiler_frontend/hir/hir_expression/constraint_evidence.rs`. The contract is stated in `docs/docs/directives/constraints.mtf`: "Semantic reachability is checked after static selection, but before optional optimisation erases evidence."
+- Observed: a probe defines `divisor || -> I32: return 2` and a `$infallible` boundary containing `discarded I32 = value // divisor() catch:` with `assert(false)` in the handler. Debug check rejects MOTH-RULE-0091 at the `$infallible` directive: "`$infallible` forbids reachable traps, but this boundary's assertion may fail." Release build accepts and emits the project. Release folding replaces `divisor()` with 2, so the lowered protected division no longer routes an error edge to the handler and its assertion never reaches trap analysis; the skipped-handler evidence walk records only calls and fast uses.
+- Investigate: preserve trap and assertion evidence for a handler pruned after folding, as the pre-fold failure contributors and pre-fold `Bool` conditions already are. Add matching debug/release cases.
 
 ### Repeated work in single-file namespace validation
 
 - Found: Core/Builder package namespace and config filename final review, 2026-11.
 - Where: `ModuleNamespaceSet::for_single_file` in `src/build_system/create_project_modules/module_namespace.rs` and `single_file_namespace_inventory` / `eligible_child_directories` in `src/build_system/create_project_modules/source_tree_index.rs`.
-- Observed: a selected `@entry.moth` or `@mod.moth` builds a `ProjectModuleGraph` and project namespaces only to validate reserved-root claims, then discards them. The registered-prefix collision probe for an ordinary selected file can list the same parent directories again for each registered source package prefix. Both are bounded and small today.
-- Investigate: reuse the namespaces later stages build for bounded selections, and group prefixes by shared parent components in the probe. Measure before changing.
+- Observed: a selected `@entry.moth` or `@mod.moth` builds a `ProjectModuleGraph` and project namespaces only to validate reserved-root claims, then discards them. The registered-prefix collision probe for an ordinary selected file can list the same parent directories again for each registered source package prefix. No user-visible cost has been measured.
+- Investigate only if measurements show a material cost. Bounded single-file mode uses the graph and namespaces to validate reserved-root claims, then discards them. Later synthetic traversal resolves dependencies from inventory keys and filesystem facts, so there are no later project namespaces to reuse. For ordinary files, the prefix probe already shares the root listing. Measure repeated listings below that root before grouping prefixes by shared parents.
 
-### User-facing package backing docs omit `HostBinding`
+### Deferred catch eligibility skipped in inactive static-`if` branches
 
-- Found: Core/Builder package namespace and config filename work, 2026-11.
-- Where: `docs/docs/packages/package-origins-and-backing.mtf` (backing list and example table).
-- Observed: code has three backings (`MothSource`, `ExternalBinding`, `HostBinding`) and `docs/build-system-design.md` now lists all three. The user-facing package reference still lists only `MothSource` and `ExternalBinding`, so builder SDK host packages have no documented backing.
-- Investigate: add `HostBinding` with a builder SDK host package example, matching `Package classification` in `docs/build-system-design.md`.
+- Found: failure-fact retention review follow-up, 2026-11. Confirmed defect; pre-dates this branch.
+- Where: `StaticIfCandidate::publish` in `src/compiler_frontend/ast/module_ast/finalization/static_if_specialization.rs` rewrites the AST before `AstBuiltinFailureSummaries::compute` in `src/compiler_frontend/ast/module_ast/finalization/finalizer.rs`, so a discarded branch never reaches failure classification.
+- Observed: a catch whose eligibility needs the deferred private-call check is rejected when live but accepted in an inactive static-`if` branch. Example: `flaky(1, 2) catch then 0` where an infallible generic `flaky` returns its divisor, placed inside `if false:`. Debug and release both accept it. Syntax, type and immediate catch-eligibility checks still run while parsing, so only the deferred private-call check is lost. The same ordering exists on `main` (read from code, not re-executed there), so this is not a `bug-fixes` regression.
+- Investigate: `docs/docs/branching/statement-if.mtf` requires both bodies to be frontend-validated before a known `Bool` selects one, and `tests/cases/catch_and_inactive_branch_source_validation_rejected` already pins syntax and type validation in discarded branches. Preserve the discarded branch's deferred catch checks as validation-only facts, or compute failure summaries before static selection. Add matching debug/release rejection cases.
 
-### Scaffold `cd` instruction is not shell-quoted
+### JS projected call arguments still retarget when a later argument rebinds the base
 
-- Found: portable path display hardening inventory, 2026-11.
-- Where: `render_summary` in `crates/moth-cli/src/scaffold/mod.rs` (`format!("  cd {}", report.project_path.display())`) and `crates/moth-cli/src/scaffold/tests/summary_tests.rs`.
-- Observed: the printed next-step command interpolates the native display spelling with no quoting. Spaces, quotes and shell metacharacters break or alter the pasted command. Control characters pass through to the terminal and a non-UTF-8 directory prints a lossy path that cannot address the directory.
-- Investigate: a CLI-owned shell quoting operation with a stated POSIX and Windows contract, control-character handling and no runnable command for an unrepresentable path. Portable path display is the wrong operation here.
+- Found: projected-alias backend audit, 2026-11. Confirmed by Node probe on the current branch; pre-dates it.
+- Where: `src/compiler_frontend/hir/hir_expression/calls.rs` keeps an earlier projected argument as an unevaluated place load while a later argument's nested call is flushed into the prelude before the enclosing call. The JS computed-place helpers now capture their base storage when constructed (`src/backends/js/runtime/places.rs`), so the retarget comes from that construction happening after the hoisted later argument ran.
+- Observed: `read_count(holder.items, replace(~holder))` returns the replacement's length: the `replace(~holder)` call is lowered into a prelude temp before `__moth_field(holder, "items")` is constructed, so the earlier argument observes the rebound holder. Mutable projected alias declarations and collection-loop iterable temporaries are fixed by base capture; only hoisted call arguments still read the post-mutation base.
+- Investigate: keep projected argument construction at its source evaluation position, or capture the projected storage before emitting prelude statements for later arguments. Add a Node-executed case.
 
-### Benchmark invocations pass display text as child arguments
+### Rooted in-memory template sources may not reach disk resources on Windows
 
-- Found: portable path display hardening inventory, 2026-11.
-- Where: `xtask/src/benchmark_workspace.rs` (`absolute_entry.display().to_string()`, `workload.entry.display().to_string()`) feeding `CliBenchmarkInvocation.args: Vec<String>` and `process_runner.rs`. Related display-only quoting in `xtask/src/profile/runner.rs` (`format_command_line`, `shell_display_arg`).
-- Observed: a non-UTF-8 repository or entry path becomes U+FFFD text, so the compiler is launched against a different path. The recorded profile command quotes only empty or whitespace-bearing arguments.
-- Investigate: keep the entry argument as `PathBuf`/`OsString` through `Command::arg`. Quote recorded command lines completely or label them as non-runnable.
+- Found: template path simplification review, 2026-11. Unverified hypothesis from code reading; no Windows host was available.
+- Where: `src/projects/html_project/moth_template/input.rs` resource containment for in-memory `Sources` with rooted display paths.
+- Suspected: `portable_path_text` strips the `\\?\` verbatim prefix while `fs::canonicalize` returns it, so the containment check may reject a sibling resource such as `[@logo.svg]` that the same request accepts on Unix. `rooted_in_memory_document_with_sibling_resource_uses_normalized_url_context` is Unix-only for this reason.
+- Investigate: run that case on Windows. If it fails, compare both sides of the containment check in one canonical spelling.
 
-### Import case check skips non-UTF-8 canonical components
+### Projected alias write targets keep the holder cell as a conservative identity
 
-- Found: portable path display hardening inventory, 2026-11.
-- Where: `src/compiler_frontend/paths/dependency_resolution.rs` (canonical component collection with `segment.to_str()` and `first_case_mismatch`).
-- Observed: a non-UTF-8 canonical component is dropped from the compared list, the lengths differ and `first_case_mismatch` returns `None`, so `InvalidImportPathReason::CaseMismatch` is skipped. Containment still applies and later source loading may reject the file.
-- Investigate: treat a non-UTF-8 canonical component as a typed rejection or a mismatch instead of omitting it. Confirm which lane rejects the file today.
-
-### Boracle projected field source tests fail on `main`
-
-- Found: portable path display hardening validation, 2026-11.
-- Where: `src/projects/tests/boracle_tests.rs` (`run_source_dump` and `successful_value`), run by `just boracle`.
-- Observed: `boracle_source_base_alias_protects_fresh_projected_storage`, `boracle_source_distinct_projected_fields_remain_disjoint`, `boracle_source_projected_rebind_separates_old_projection_origin` and `boracle_source_projected_write_is_not_a_binding_definition` fail with a user diagnostic (`DiagnosticCode(3044)`) on the projected field write. The same failure reproduces at base `7b50e17e9`.
-- Investigate: whether the frontend now rejects these projected writes by design, in which case the fixtures need updating, or whether the Boracle source path lost a supported form.
-
-### HTML `origin` has no URL encoding contract
-
-- Found: portable path display hardening dev-server URL review, 2026-11.
-- Where: `validate_origin`, `prefix_origin`, `strip_origin_prefix` and `origin_root_url` in `src/projects/routing.rs`. The dev server strips the origin from the raw request path in `src/projects/dev_server/http.rs` before percent-decoding the site-local path.
-- Observed: validation accepts spaces, Unicode and `%` in the `origin` setting. Emitted URLs use the authored spelling verbatim, so a browser requests `/caf%C3%A9/...` for origin `/café` and the dev server's literal prefix match returns 404. It is undefined whether an authored `%20` is already encoded text or a literal percent.
-- Investigate: choose one rule, either restrict origin segments to URL-safe characters or treat the authored origin as decoded text and encode it on emission. Apply the same rule to the dev server prefix match and add loopback coverage.
-
-### Absolute `PathId` facts render with a doubled root separator
-
-- Found: portable path display hardening MTF input review, 2026-11.
-- Where: `DiagnosticPathContext::render` in `src/compiler_frontend/compiler_messages/render/context.rs` and `render_portable_with` in `src/compiler_frontend/symbols/path_interner/fork.rs`.
-- Observed: both join resolved components with `/`. An absolute native path interned with its root component `/` renders as `//project/src/page.mtf`. A Windows prefix and root component would render with mixed separators. Logical relative paths are unaffected.
-- Investigate: whether absolute `PathId` facts should reach diagnostics at all. If they should, render root and prefix components without an extra separator and add exact Unix and Windows assertions.
-
-### Windows root-relative in-memory template names fail as internal errors
-
-- Found: portable path display hardening MTF input review, 2026-11.
-- Where: `validate_in_memory_source_name` and in-memory `Sources` handling in `src/projects/html_project/moth_template/input.rs`.
-- Observed: on Windows `Path::is_relative` reports `/docs/x.mtf` as relative, so the name passes input validation and later fails as an internal logical-path failure instead of a typed input failure.
-- Investigate: classify a leading `/` without a drive prefix explicitly and reject or accept it with the typed input lane on every host.
-
-### Direct Moth template sources reject a non-UTF-8 ancestor above the source root
-
-- Found: portable path display hardening final integration review, 2026-11.
-- Where: `validate_source_path_identities` and `intern_filesystem_path_identity` in `src/projects/html_project/moth_template/input.rs`.
-- Observed: the direct filesystem lane interns each whole native source path, so a non-UTF-8 directory above the selected source root fails the MTF-owned UTF-8 identity check even when every module-relative name is UTF-8. The lane has no production caller outside its tests, and no test covers the case.
-- Investigate: whether identity should be checked only for the root-relative portion. Add a Unix test with a non-UTF-8 ancestor either way.
-
-### Windows protected output roots are only checked on `C:`
-
-- Found: portable path display hardening final review, 2026-11.
-- Where: `DANGEROUS_WINDOWS_ROOTS` in `is_dangerous_system_path` (`src/build_system/output/manifest.rs`).
-- Observed: named Windows protected directories are compared only against their `C:` spelling, so a Windows installation on another drive leaves `D:\Windows`, `D:\Program Files` and `D:\Users` unprotected. Drive and share roots are still rejected by the structural rule.
-- Investigate: derive the protected roots from `SystemDrive` or `SystemRoot` rather than hard-coding `C:`, and keep the component comparison. This limitation predates the native-component safety work.
-
-### Wasm rejects a runtime fragment that renders an open const loop template
-
-- Found: `$supplied` directive work, 2026-11. Reproduced without `$supplied` on base `1c79842cf`.
-- Where: `wasm_numeric_rejection` in `src/backends/backend_feature_validation.rs` rejects the range loop's numeric operation because it is delivered by `Invoke`. The upstream lowering that turns an open const loop template into runtime loop code still needs identifying.
-- Observed: in this entry, `html` builds and `html_wasm` fails with `MOTH-RULE-0064` (`Backend 'Wasm' does not support recoverable numeric failure yet`) at the fragment. Applying the template as `[looped:[$in x:"*"]]` fails the same way. A loop body without `$slot` builds on both backends.
-
-  ```moth
-  looped #= [:<ul>[loop 0 to 2 |i|:[$slot x]]</ul>]
-  name = "Priya"
-  ~[:[name]|[looped]]
-  ```
-
-- Workaround: `template_supplied_nested_composition` renders its loop checks in a separate fragment, `~[:[loops]]`, whose const content folds before lowering.
-- Investigate: whether a const range loop with constant bounds should fold or lower without checked `Invoke` delivery. Otherwise, implement recoverable numeric failure on Wasm. Pin the entry above as an `html_wasm` success case once fixed.
-
-### Whitespace around a consumed `$in` helper is kept on both sides
-
-- Found: `$supplied` directive work, 2026-11. Reproduced without `$supplied` on base `1c79842cf`. Possibly intended, since authored body whitespace is otherwise preserved.
-- Where: loose-content grouping in `route_tir_fill_nodes_against_schema` (`src/compiler_frontend/ast/templates/tir/slot_composition/contributions.rs`). Its contract says body formatting whitespace around explicit inserts is not routed.
-- Observed: given `plain #= [$html:<button>[$slot][$slot note]</button>]`, the following fills render as shown.
-
-  | Fill | Output |
-  |---|---|
-  | `[plain: Go]` | `<button> Go</button>` |
-  | `[plain:[$in note:] Go]` | `<button> Go</button>` |
-  | `[plain: [$in note:] Go]` | `<button>  Go</button>` |
-
-  The space before the helper and the space after it both reach the default slot, so a common idiom yields a double space.
-- Investigate: decide whether inline spaces next to an `$in` helper count as formatting whitespace. If they do, drop them at routing. If not, document that the helper does not absorb adjacent spaces.
+- Found: borrow-checker projected-alias corrections, 2026-11. Two parts with different origins: the fresh-holder rejection (`holder ~= Pair(...)`) predates this branch, while the value-backed rejection (`holder ~= same_pair(original)`) is a precision regression this branch accepts in exchange for soundness. The baseline accepted it only because its shared-access scan ignored projected write targets, the same gap that made scalar write-through unsound.
+- Where: `mutable_alias_write_targets_from_expression` in `src/compiler_frontend/analysis/borrow_checker/transfer/access.rs`. A projected mutable alias targets the union of the holder's designated cells (the pre-correction identity) and the containing allocation roots observed at binding time. A freshly built allocation has no older root: its identity is encoded as the holder cell or as empty provenance, and that identity cannot be transported precisely through joins, whole-binding alias chains, calls or scope exits.
+- Observed: `holder ~= Pair({1}, {0}); writer ~= holder.first; ~holder = Pair({2}, {3}); read = holder.first.length(); return read + writer.length()` is rejected with MOTH-BORROW-0003 even though `writer` observes the old allocation and the read observes the replacement. The value-backed form `holder ~= same_pair(original)` is rejected the same way when the rebound holder is read before the final writer read (`mutable_projected_alias_rebound_holder_while_writer_live_rejected`). Allocation-root-only targets accepted unsafe programs wherever the fresh alternative was lost: a join (`mutable_projected_alias_join_fresh_alternative_rejected`), a whole-binding alias transport (`mutable_projected_alias_join_alias_chain_rejected`), a loop back edge (`mutable_projected_alias_loop_back_edge_rejected`) and a scope exit (`mutable_projected_alias_scope_exit_conflict_rejected`). Those rejection cases are now pinned in debug and release. A projection that is only read after the rebind, with no live mutable alias, still passes (`projected_alias_survives_source_rebinding_accepted`).
+- Investigate: represent a freshly built allocation as an explicit transported root, for example a generation carried with the projected referent, so targets can stay allocation-rooted through joins, alias chains, calls and scope exits. Then drop the holder-cell union and restore the accepted F1 shape.

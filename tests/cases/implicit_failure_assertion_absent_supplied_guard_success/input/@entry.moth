@@ -1,0 +1,6 @@
+check |value I32| -> String:
+    assert(false, [:<p>[$supplied note:[loop 0 to value by 1 |i|:[i]]][value]</p>])
+    return "unreachable"
+;
+
+~[:[check(7)]]

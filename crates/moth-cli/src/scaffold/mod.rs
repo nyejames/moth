@@ -62,14 +62,18 @@ pub fn render_summary(report: &CreateProjectReport, current_dir: Option<&Path>) 
     let mut lines = Vec::new();
 
     lines.push(String::from("Created Moth HTML project:"));
-    lines.push(format!("  Project path: {}", report.project_path.display()));
-    lines.push(format!("  Project name: {}", report.project_name));
+    push_summary_line(
+        &mut lines,
+        "  Project path: ",
+        &report.project_path.to_string_lossy(),
+    );
+    push_summary_line(&mut lines, "  Project name: ", &report.project_name);
 
     if !report.created.is_empty() {
         lines.push(String::new());
         lines.push(String::from("Created:"));
         for path in &report.created {
-            lines.push(format!("  {}", path.display()));
+            push_summary_line(&mut lines, "  ", &path.to_string_lossy());
         }
     }
 
@@ -77,7 +81,7 @@ pub fn render_summary(report: &CreateProjectReport, current_dir: Option<&Path>) 
         lines.push(String::new());
         lines.push(String::from("Updated:"));
         for path in &report.updated {
-            lines.push(format!("  {}", path.display()));
+            push_summary_line(&mut lines, "  ", &path.to_string_lossy());
         }
     }
 
@@ -85,7 +89,7 @@ pub fn render_summary(report: &CreateProjectReport, current_dir: Option<&Path>) 
         lines.push(String::new());
         lines.push(String::from("Replaced:"));
         for path in &report.replaced {
-            lines.push(format!("  {}", path.display()));
+            push_summary_line(&mut lines, "  ", &path.to_string_lossy());
         }
     }
 
@@ -93,7 +97,7 @@ pub fn render_summary(report: &CreateProjectReport, current_dir: Option<&Path>) 
         lines.push(String::new());
         lines.push(String::from("Skipped:"));
         for path in &report.skipped {
-            lines.push(format!("  {}", path.display()));
+            push_summary_line(&mut lines, "  ", &path.to_string_lossy());
         }
     }
 
@@ -112,12 +116,91 @@ pub fn render_summary(report: &CreateProjectReport, current_dir: Option<&Path>) 
     };
 
     if !is_current_dir {
-        lines.push(format!("  cd {}", report.project_path.display()));
+        if let Some(command) = change_directory_command(&report.project_path) {
+            lines.push(command);
+        } else {
+            lines.push(String::from(
+                "  Open the project directory in your terminal before running these commands:",
+            ));
+        }
     }
     lines.push(String::from("  moth check ."));
     lines.push(String::from("  moth dev ."));
 
     lines.join("\n")
+}
+
+fn push_summary_line(lines: &mut Vec<String>, prefix: &str, text: &str) {
+    let mut line = String::with_capacity(prefix.len() + text.len());
+    line.push_str(prefix);
+    for character in text.chars() {
+        if is_unsafe_terminal_character(character) {
+            line.extend(character.escape_default());
+        } else {
+            line.push(character);
+        }
+    }
+    lines.push(line);
+}
+
+fn is_unsafe_terminal_character(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+        )
+}
+
+/// Emit a literal POSIX shell or PowerShell command, not a display spelling.
+fn change_directory_command(path: &Path) -> Option<String> {
+    #[cfg(windows)]
+    let absolute;
+    #[cfg(windows)]
+    let path = if path.is_absolute() {
+        path
+    } else {
+        // Resolve drive-relative targets with the same process context used to create them.
+        absolute = std::path::absolute(path).ok()?;
+        &absolute
+    };
+    let path = path.to_str()?;
+    if path.chars().any(is_unsafe_terminal_character) {
+        return None;
+    }
+
+    #[cfg(windows)]
+    {
+        // Qualify UNC paths even when the caller has a non-filesystem provider selected.
+        let prefix = "  Set-Location -LiteralPath 'FileSystem::";
+        let mut command = String::with_capacity(prefix.len() + path.len() + 1);
+        command.push_str(prefix);
+        for character in path.chars() {
+            // PowerShell recognises these smart quotes as single-quote delimiters too.
+            if matches!(
+                character,
+                '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}'
+            ) {
+                command.push(character);
+            }
+            command.push(character);
+        }
+        command.push('\'');
+        Some(command)
+    }
+    #[cfg(not(windows))]
+    {
+        let mut command = String::with_capacity("  cd ''".len() + path.len());
+        command.push_str("  cd '");
+        for character in path.chars() {
+            if character == '\'' {
+                command.push_str("'\\''");
+            } else {
+                command.push(character);
+            }
+        }
+        command.push('\'');
+        Some(command)
+    }
 }
 
 #[cfg(test)]

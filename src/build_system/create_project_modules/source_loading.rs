@@ -4,6 +4,8 @@
 //! supplies the logical path that a path-named diagnostic needs.
 
 use super::source_discovery_error::SourceDiscoveryError;
+use crate::builder_surface::definition::damaged_package_set_report;
+use crate::builder_surface::package_metadata::PackageSetMembership;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{
     InfrastructureDetail, InfrastructureFailure,
@@ -161,22 +163,66 @@ pub(crate) fn read_registered_source(
 /// beside the discovery pass lets that pass prepare a selected source before the final
 /// `SourceDatabaseBuilder` can retain the text. Entries are drained into the builder after
 /// selection; unselected slots remain pending and never allocate a snapshot.
+///
+/// A map that belongs to a compiler-shipped package boundary retains that boundary's
+/// damaged-installation report. A selected read failure is then known to be a registered source
+/// in that shipped set, so only this owner appends the installation explanation; project and
+/// ordinary package reads keep their operational error unchanged.
 #[derive(Debug, Default)]
 pub(crate) struct SelectedSourceTextMap {
     entries: BTreeMap<PathBuf, Result<String, SourceReadError>>,
+    damaged_source_set: Option<DamagedSourceSet>,
+}
+
+#[derive(Debug)]
+struct DamagedSourceSet {
+    package_prefix: String,
+    report: String,
 }
 
 impl SelectedSourceTextMap {
+    /// Build the selected-read cache for one source-package boundary.
+    ///
+    /// WHAT: keeps the damaged-installation report only when this boundary was registered as part
+    ///       of the compiler-shipped package set.
+    /// WHY: the read site, not a later failure wrapper, knows that every selected path belongs to
+    ///      this registered package boundary.
+    pub(crate) fn for_package_boundary(
+        membership: PackageSetMembership,
+        package_prefix: &str,
+    ) -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            damaged_source_set: damaged_package_set_report(membership).map(|report| {
+                DamagedSourceSet {
+                    package_prefix: package_prefix.to_owned(),
+                    report,
+                }
+            }),
+        }
+    }
+
     /// Read one selected source at most once and return its cached text.
     ///
     /// A failed read is cached as well, so a repeated selection reports the same classified
     /// failure without issuing another filesystem read. Invalid UTF-8 is a terminal `NonUtf8`
     /// outcome; the caller builds the path-named diagnostic from the registered slot.
     pub(crate) fn load(&mut self, canonical_path: &Path) -> Result<&str, SourceReadError> {
-        let entry = self
-            .entries
+        let Self {
+            entries,
+            damaged_source_set,
+        } = self;
+        let entry = entries
             .entry(canonical_path.to_path_buf())
-            .or_insert_with(|| extract_source_code(canonical_path));
+            .or_insert_with(|| {
+                read_source_code(canonical_path).map_err(|error| {
+                    classify_selected_source_read(
+                        canonical_path,
+                        error,
+                        damaged_source_set.as_ref(),
+                    )
+                })
+            });
         match entry {
             Ok(source) => Ok(source.as_str()),
             Err(error) => Err(error.clone()),
@@ -280,6 +326,52 @@ impl SelectedSourceTextMap {
     }
 }
 
+/// Classify one selected-source read, explaining a shipped package's damaged installation.
+///
+/// WHAT: reads the operating-system cause before classification consumes it. A cause that means
+///       a registered installed asset is missing, unreadable or undecodable rewrites the failure
+///       to name the package and append its damaged-set report; transient I/O such as descriptor
+///       exhaustion passes through unchanged, and every ordinary boundary keeps invalid UTF-8 as
+///       its authored `NonUtf8` outcome.
+/// WHY: `SelectedSourceTextMap::load` is the exact registered-source read site, so its known I/O
+///      cause can prove an incomplete shipped installation. Shipped sources are UTF-8 by
+///      construction, so invalid bytes there are installation damage, not something the author
+///      can edit. Unrelated discovery, provider and file-value failures never pass through here.
+fn classify_selected_source_read(
+    file_path: &Path,
+    error: std::io::Error,
+    damaged_source_set: Option<&DamagedSourceSet>,
+) -> SourceReadError {
+    let Some(damaged_source_set) =
+        damaged_source_set.filter(|_| io_kind_indicates_damaged_install(error.kind()))
+    else {
+        return classify_source_read_error(file_path, error);
+    };
+    let mut failure = source_read_error(file_path, error);
+    failure.message = format!(
+        "Source package @{} could not be read from its installed source set: {}. {}",
+        damaged_source_set.package_prefix, failure.message, damaged_source_set.report
+    )
+    .into_boxed_str();
+    SourceReadError::Infrastructure(failure)
+}
+
+/// Whether one read cause means a registered installed asset is missing, unreadable or corrupt.
+///
+/// Transient conditions such as descriptor exhaustion stay ordinary operational errors; only a
+/// cause that contradicts the installed package layout explains the shipped set as incomplete.
+/// `InvalidData` is how `read_to_string` reports bytes that are not UTF-8.
+pub(crate) fn io_kind_indicates_damaged_install(io_kind: std::io::ErrorKind) -> bool {
+    matches!(
+        io_kind,
+        std::io::ErrorKind::NotFound
+            | std::io::ErrorKind::PermissionDenied
+            | std::io::ErrorKind::IsADirectory
+            | std::io::ErrorKind::NotADirectory
+            | std::io::ErrorKind::InvalidData
+    )
+}
+
 /// Converts raw source-read failures into typed filesystem infrastructure facts.
 pub(crate) fn source_read_error(file_path: &Path, error: std::io::Error) -> InfrastructureFailure {
     let suggestion: &'static str = if error.kind() == std::io::ErrorKind::NotFound {
@@ -354,6 +446,72 @@ mod tests {
     }
 
     #[test]
+    fn damaged_set_explanation_rewrites_only_registered_filesystem_reads() {
+        let damaged = DamagedSourceSet {
+            package_prefix: String::from("core/html"),
+            report: String::from("The compiler-shipped package set is incomplete."),
+        };
+        let classified = |io_kind: std::io::ErrorKind,
+                          damaged_source_set: Option<&DamagedSourceSet>| {
+            classify_selected_source_read(
+                Path::new("/missing-source"),
+                std::io::Error::new(io_kind, "read failed"),
+                damaged_source_set,
+            )
+        };
+
+        let SourceReadError::Infrastructure(failure) =
+            classified(std::io::ErrorKind::PermissionDenied, Some(&damaged))
+        else {
+            panic!("a filesystem read failure must stay an infrastructure failure");
+        };
+        assert!(
+            failure.message.contains("@core/html")
+                && failure.message.contains("incomplete")
+                && failure.message.contains("read failed"),
+            "the shipped read failure keeps its OS cause and names the damaged set: {}",
+            failure.message
+        );
+
+        let SourceReadError::Infrastructure(failure) =
+            classified(std::io::ErrorKind::Other, Some(&damaged))
+        else {
+            panic!("a transient read failure must stay an infrastructure failure");
+        };
+        assert!(
+            !failure.message.contains("@core/html"),
+            "descriptor exhaustion and other transient I/O stay ordinary: {}",
+            failure.message
+        );
+
+        let SourceReadError::Infrastructure(failure) =
+            classified(std::io::ErrorKind::PermissionDenied, None)
+        else {
+            panic!("a filesystem read failure must stay an infrastructure failure");
+        };
+        assert!(
+            !failure.message.contains("@core/html"),
+            "ordinary boundaries keep their operational error unchanged: {}",
+            failure.message
+        );
+
+        let SourceReadError::Infrastructure(failure) =
+            classified(std::io::ErrorKind::InvalidData, Some(&damaged))
+        else {
+            panic!("undecodable shipped source text is installation damage");
+        };
+        assert!(
+            failure.message.contains("@core/html") && failure.message.contains("incomplete"),
+            "invalid UTF-8 in a shipped source names the damaged set: {}",
+            failure.message
+        );
+        assert!(matches!(
+            classified(std::io::ErrorKind::InvalidData, None),
+            SourceReadError::NonUtf8
+        ));
+    }
+
+    #[test]
     fn selected_source_text_map_caches_invalid_utf8_as_a_terminal_non_utf8_outcome() {
         let _test_guard = crate::timing::lock_instrumentation_tests();
         let temp_root = tempfile::tempdir().expect("source-loading test root should exist");
@@ -382,5 +540,20 @@ mod tests {
             1
         );
         assert!(!selected.contains_successful(&invalid_path));
+
+        // The same bytes in a compiler-shipped boundary are installation damage, not an
+        // authored decoding diagnostic.
+        let mut shipped = SelectedSourceTextMap::for_package_boundary(
+            PackageSetMembership::CompilerShipped,
+            "core/html",
+        );
+        let Err(SourceReadError::Infrastructure(failure)) = shipped.load(&invalid_path) else {
+            panic!("invalid UTF-8 in a shipped source must be an infrastructure failure");
+        };
+        assert!(
+            failure.message.contains("@core/html") && failure.message.contains("incomplete"),
+            "the shipped decoding failure names the damaged set: {}",
+            failure.message
+        );
     }
 }
