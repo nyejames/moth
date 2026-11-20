@@ -1,0 +1,10 @@
+$export @forms
+button #|label String| -> String:
+    return label
+;
+$export @forms/validation
+safe_form #|value String| -> String:
+    return value
+;
+$export
+root_item #= "root"

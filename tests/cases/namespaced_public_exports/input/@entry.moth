@@ -1,0 +1,17 @@
+@child/forms button as primary_button
+@child/forms/validation safe_form as validate_form
+@child root_item as root_value
+@shared/validation field as shared_field
+@reexport/mirror widget as mirror_widget
+@child/forms as route_ns
+@child
+
+primary = primary_button("go")
+safe = validate_form("ok")
+mirror = mirror_widget("re")
+shared = shared_field
+root = root_value
+bare = route_ns.button("bare")
+parent = child.root_item
+expression = @child/forms button("expr")
+io.line([:primary=[primary] safe=[safe] mirror=[mirror] shared=[shared] root=[root] bare=[bare] parent=[parent] expression=[expression]])

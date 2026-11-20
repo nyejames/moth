@@ -1,0 +1,6 @@
+$export @forms
+button #|label String| -> String:
+    return label
+;
+$export
+root_item #= "root"

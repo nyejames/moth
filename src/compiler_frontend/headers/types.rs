@@ -1896,6 +1896,37 @@ impl From<InfrastructureFailure> for FileFrontendPrepareFailure {
     }
 }
 
+#[cfg(test)]
+impl FileFrontendPrepareOutput {
+    /// Build the smallest retained output for owner-local caches whose contract is identity and
+    /// take-once ordering rather than syntax payload.
+    ///
+    /// WHY: cache unit tests must not tokenize a source or fake a whole prepared interface just to
+    ///      prove that one facade preparation is handed to one walk, so this test-only row keeps
+    ///      the payload empty and every invariant observable through the fields that are set.
+    pub(crate) fn empty_for_test() -> Self {
+        Self {
+            source_file: PathId::ROOT,
+            file_id: SourceId::from_index(0),
+            path_syntax: PreparedFilePathSyntax::empty(),
+            token_count: 0,
+            token_stats: Default::default(),
+            file_role: FileRole::Normal,
+            file_dependency_clauses: Vec::new(),
+            structural_file_references: Default::default(),
+            qualified_references: Vec::new(),
+            dependency_selections: Vec::new(),
+            headers: Vec::new(),
+            top_level_const_fragments: Vec::new(),
+            source_token_stream: None,
+            const_template_count: 0,
+            runtime_fragment_count: 0,
+            start_body_binding_spans: Default::default(),
+            warnings: DiagnosticBag::new(),
+        }
+    }
+}
+
 impl FileFrontendPrepareOutput {
     /// Remap every interned string owned by this per-file output into the merged global string table.
     ///

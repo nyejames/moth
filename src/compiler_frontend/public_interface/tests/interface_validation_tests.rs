@@ -370,6 +370,7 @@ fn rejects_binding_target_with_wrong_symbol_category_on_consumer_admission() {
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
             shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
         },
         interface: &interface,
     }])
@@ -798,6 +799,7 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
             shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
         },
         interface: &provider,
     }])

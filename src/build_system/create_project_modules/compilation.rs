@@ -62,6 +62,7 @@ use super::compiled_boundary::{
     ProjectDiagnosticBudget, ProjectFrontendCompilation, TransientPreparedBatch,
 };
 use super::config_boundary;
+use super::facade_route_prepass;
 use super::generated_store::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
 use super::module_identity::ModuleId;
@@ -562,6 +563,37 @@ fn finalize_schedule_source_spans(
         source_files.finish_source(source_id)?;
     }
     Ok(())
+}
+
+/// Finish the project source owner beside a facade-prepublish or namespace-building failure.
+///
+/// WHAT: retains the selected source snapshots the prepass loaded, adopts the span builders those
+///       sources produced, finalizes every retained source and returns the failure in the project
+///       premerge lane.
+/// WHY: route prepublication runs after project source registration but before module discovery,
+///       so its failures must leave the source owner in the same finished state as a failed
+///       discovery. Reusing this shape keeps the boundary's one terminal freeze contract intact.
+fn finalize_project_setup_failure(
+    project_sources: &mut SourceDatabaseBuilder,
+    selected_source_texts: &mut SelectedSourceTextMap,
+    string_table: &mut StringTable,
+    failure: PreparedFailure,
+) -> BoundaryPremergeFailure {
+    let selected_source_ids = selected_source_texts.selected_source_ids(project_sources.sources());
+    let mut retain_path_fork = project_sources.sources().fork_path_interner();
+    let retain_result =
+        selected_source_texts.retain_into(project_sources.sources_mut(), &mut retain_path_fork);
+    project_sources.adopt_pending_span_builders();
+    let failure = match retain_result {
+        Ok(()) => failure,
+        Err(error) => error.admit_into_owner(Some(failure), string_table, &retain_path_fork),
+    };
+    let failure = match finalize_schedule_source_spans(project_sources, None, &selected_source_ids)
+    {
+        Ok(()) => failure,
+        Err(error) => failure.with_infrastructure_cause(error),
+    };
+    BoundaryPremergeFailure::project(vec![failure])
 }
 
 fn finalize_remaining_source_package_inventories(
@@ -1101,6 +1133,11 @@ pub(super) fn discover_source_package_inventories(
             crate::timing::TimingMetric::BoundaryInventory,
             Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
         );
+        // Registered source-package route prepublication is Phase 3; until then the package walk
+        // runs without a facade cache and builds its own origin table. The per-boundary cache and
+        // optional origin slot already exist here so that phase can fill them without changing
+        // the inventory shape.
+        let mut package_prepared_facades = facade_route_prepass::FacadePreparationCache::default();
         let package_waves_result =
             module_inventory::discover_all_modules_in_package_with_check_only(
                 config,
@@ -1112,6 +1149,8 @@ pub(super) fn discover_source_package_inventories(
                 external_imports,
                 package_resolution,
                 resource_inputs,
+                &mut package_prepared_facades,
+                None,
                 mode.includes_check_only(),
                 &mut package_selected_source_texts,
                 string_table,
@@ -1665,7 +1704,6 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
         &builder_surface.source_packages,
         &builder_surface.source_file_kinds,
         &builder_surface.external_import_providers,
-        &builder_surface.binding_packages,
         string_table,
     ) {
         Ok(resolver) => resolver,
@@ -1700,9 +1738,27 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
         let mut selected_source_texts = SelectedSourceTextMap::default();
         let config_globals = builder_surface.config_globals().clone();
 
-        // 2. Build every source-package inventory and the project inventory before semantic
-        // compilation. Provider-backed discovery may extend the binding registry, so all boundaries
-        // finish that serial mutation phase before the registry becomes the immutable frontend view.
+        // 1. Build package namespaces and every source-package inventory first. Provider-backed
+        // discovery may extend the binding registry, so every boundary must finish that serial
+        // mutation phase before the registry becomes the immutable frontend view. Keeping package
+        // inventories before any project facade preparation also preserves the established
+        // package-before-project failure ordering.
+        let mut module_namespace_set = match ModuleNamespaceSet::for_source_packages(
+            project_setup.source_package_boundary_indexes,
+            &builder_surface.binding_packages,
+            string_table,
+        ) {
+            Ok(namespace_set) => namespace_set,
+            Err(failure) => {
+                return Err(finalize_project_setup_failure(
+                    &mut project_sources,
+                    &mut selected_source_texts,
+                    string_table,
+                    failure,
+                ));
+            }
+        };
+
         let mut external_imports = source_discovery::ExternalImportDiscoveryState {
             external_packages: &mut builder_surface.binding_packages,
             providers: &builder_surface.external_import_providers,
@@ -1713,7 +1769,7 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
 
         let mut source_package_inventories = discover_source_package_inventories(
             config,
-            &project_setup.module_namespace_set,
+            &module_namespace_set,
             &project_path_resolver,
             style_directives,
             &mut external_imports,
@@ -1722,15 +1778,71 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
             mode,
         )?;
 
-        // Register the main-project boundary before its inventory so its accumulated total is
-        // attributed separately from every source package.
+        // Register the main-project boundary before facade preparation so facade read/tokenize
+        // time is attributed to `frontend.prepare` and its module, not lost outside the boundary.
         #[cfg(feature = "timers")]
         let project_timing_boundary = crate::timing::register_timing_boundary(
             crate::timing::TimingBoundaryKind::MainProject,
             || config.project_name.clone(),
         );
+        // 2. Prepare every project facade root once and publish its declared public routes before
+        // project consumer namespaces exist. Project namespace attachment, including reserved-root
+        // validation, therefore runs after package inventories and after this prepass; the project
+        // inventory is discovered afterwards. The preparation is provider-independent, and its
+        // cache is adopted by the module walk below so the facade is never tokenized or parsed a
+        // second time.
+        let mut facade_route_prepass = match facade_route_prepass::prepublish_facade_routes(
+            &project_setup.source_tree_index,
+            &project_setup.project_module_graph,
+            project_source_files,
+            style_directives,
+            config.frontend_options().max_errors_per_module,
+            &mut project_source_spans,
+            &mut selected_source_texts,
+            string_table,
+            &project_path_interner,
+            #[cfg(feature = "timers")]
+            project_timing_boundary,
+        ) {
+            Ok(prepass) => prepass,
+            Err(failure) => {
+                let failure = finalize_project_setup_failure(
+                    &mut project_sources,
+                    &mut selected_source_texts,
+                    string_table,
+                    failure,
+                );
+                return Err(finalize_remaining_source_package_inventories(
+                    failure,
+                    source_package_inventories,
+                ));
+            }
+        };
+        // Consumer namespaces now combine the structural index with those published routes.
+        // Descendant package paths stay private and a route never falls through to a physical
+        // folder.
+        if let Err(failure) = module_namespace_set.attach_project_namespaces(
+            &project_setup.source_tree_index,
+            &project_setup.project_module_graph,
+            &facade_route_prepass.routes,
+            string_table,
+        ) {
+            let failure = finalize_project_setup_failure(
+                &mut project_sources,
+                &mut selected_source_texts,
+                string_table,
+                failure,
+            );
+            return Err(finalize_remaining_source_package_inventories(
+                failure,
+                source_package_inventories,
+            ));
+        }
+
+        // The project boundary was registered before facade preparation; its accumulated total
+        // remains separate from every source package.
         let directory_dependency_resolution = DirectoryDependencyResolution::project(
-            &project_setup.module_namespace_set,
+            &module_namespace_set,
             &project_setup.source_tree_index,
             &project_path_fork,
         );
@@ -1752,6 +1864,8 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
                 &mut external_imports,
                 directory_dependency_resolution,
                 &mut resource_inputs,
+                &mut facade_route_prepass.cache,
+                Some(Arc::clone(&facade_route_prepass.source_module_origins)),
                 mode.includes_check_only(),
                 &mut selected_source_texts,
                 string_table,
@@ -1818,7 +1932,7 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
         if mode.includes_check_only()
             && let Err(failure) = prepare_source_package_check_only_jobs(
                 &mut source_package_inventories,
-                &project_setup.module_namespace_set,
+                &module_namespace_set,
                 style_directives,
                 &mut external_imports,
                 string_table,

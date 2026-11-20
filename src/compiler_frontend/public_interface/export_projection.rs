@@ -300,7 +300,7 @@ fn collect_binding_exports<'a>(
                 source_name: selected_name,
                 ..
             } => {
-                let provider_id = source_provider_dependencies
+                let resolved_clause = source_provider_dependencies
                     .resolve_reexport(dependency_selection.shell)
                     .ok_or_else(|| {
                         InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
@@ -309,9 +309,9 @@ fn collect_binding_exports<'a>(
                         ))
                     })?;
                 let selected_name_text = string_table.resolve(*selected_name);
-                let view = source_provider_dependencies.binding_view(provider_id)?;
-                let Some(binding) =
-                    view.binding_export(&PublicExportRoute::ROOT, selected_name_text)
+                let view = source_provider_dependencies.binding_view(resolved_clause.provider)?;
+                let Some(binding) = view
+                    .binding_export(&resolved_clause.route, selected_name_text)
                 else {
                     // Source-backed provider exports are projected by the ordinary re-export
                     // path below; this collector owns only binding-backed public exports.
@@ -967,7 +967,7 @@ fn collect_one_reexport_binding<'a>(
     // Cross-module re-exports resolve through the immutable provider interface selected by
     // Stage 0. The origin remains provider-owned while this module owns the public alias.
     if let Some((dependency_selection, selected_name)) = provider_selection {
-        let provider_id = context
+        let resolved_clause = context
             .source_provider_dependencies
             .resolve_reexport(dependency_selection.shell)
             .ok_or_else(|| {
@@ -978,19 +978,19 @@ fn collect_one_reexport_binding<'a>(
             })?;
         let provider_interface = context
             .source_provider_dependencies
-            .interface(provider_id)?;
+            .interface(resolved_clause.provider)?;
         let selected_name_text = context.string_table.resolve(*selected_name);
         let view = context
             .source_provider_dependencies
-            .binding_view(provider_id)?;
-        // The provider-side route of a selected binding is still the provider's root surface in
-        // this slice; the authored route only selects where this re-exporter publishes.
+            .binding_view(resolved_clause.provider)?;
+        // The provider-side route is the authored clause's route beneath the provider facade;
+        // the re-exporter's own `$export` route only decides where this binding publishes.
         let Some(provider_origin) = view
-            .exported_origin(&PublicExportRoute::ROOT, selected_name_text)
+            .exported_origin(&resolved_clause.route, selected_name_text)
             .cloned()
         else {
             if view
-                .binding_export(&PublicExportRoute::ROOT, selected_name_text)
+                .binding_export(&resolved_clause.route, selected_name_text)
                 .is_some()
             {
                 return Ok(());
@@ -1014,7 +1014,7 @@ fn collect_one_reexport_binding<'a>(
                 provider_origin,
             ),
             provenance: view
-                .export_diagnostic_provenance(&PublicExportRoute::ROOT, selected_name_text),
+                .export_diagnostic_provenance(&resolved_clause.route, selected_name_text),
         });
         return Ok(());
     }

@@ -10,6 +10,8 @@
 //!   root discovery and collision checks
 //! - `source_package_discovery` — source-package registration, boundary indexes and prefix checks
 //! - `module_identity`          — Stage 0 durable module identity and structural topology
+//! - `facade_route_prepass`     — once-only project facade preparation and owned public-route
+//!   summaries published before consumer namespace construction
 //! - `module_namespace`         — boundary-aware indexed module namespaces for dependency resolution
 //! - `project_module_graph`     — canonical structural project module graph and compile order
 //! - `module_inventory`         — project-level module assembly
@@ -50,6 +52,7 @@
 mod compilation;
 pub(crate) mod compiled_boundary;
 mod config_boundary;
+pub(crate) mod facade_route_prepass;
 pub(crate) mod file_reference_resolution;
 pub(crate) mod generated_store;
 pub(crate) mod module_artifact_store;

@@ -42,12 +42,15 @@ use crate::compiler_frontend::headers::binding_environment::{
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleRootBoundary, ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
+use crate::compiler_frontend::headers::public_export_route_conflicts::{
+    CaseFoldedRouteIndex, CaseRouteClaim, RouteClaimOrder, fold_route_spelling,
+};
 use crate::compiler_frontend::headers::types::{DependencySelection, Header, HeaderParseFailure};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::project_globals::is_project_globals_dependency;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
-use crate::compiler_frontend::semantic_identity::{ModuleRootRole, PublicExportRoute};
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::{SourceDatabase, SourceSpan};
 use crate::compiler_frontend::style_directives::PublicExportRouteOperand;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternError, PathInternerFork};
@@ -304,12 +307,8 @@ fn build_source_package_public_dependencies(
             .get(prefix)
             .cloned()
             .unwrap_or_default();
-        let mut collector = PublicExportCollector::from_existing(
-            current_exports,
-            export_locations.remove(prefix),
-            string_table,
-            path_fork,
-        );
+        let mut collector =
+            PublicExportCollector::from_existing(current_exports, export_locations.remove(prefix));
 
         if let Some(dependencies) = module_symbols
             .file_dependency_clauses_by_source
@@ -514,8 +513,6 @@ fn build_module_root_public_dependencies(
         let mut collector = PublicExportCollector::from_existing(
             current_exports,
             export_locations.remove(&root_source),
-            string_table,
-            path_fork,
         );
 
         for dependency in dependencies {
@@ -589,6 +586,7 @@ fn resolve_public_export_dependency_or_provider(
         source_provider_dependencies.resolve_clause(dependency.dependency.dependency_shell_id)
     {
         let provider_id = resolved_clause.provider;
+        let provider_route = resolved_clause.route;
         let provider_name = string_table.resolve(selection.source_name);
         let provider_view = source_provider_dependencies.binding_view(provider_id)?;
         let diagnostic_path = path_fork
@@ -601,10 +599,10 @@ fn resolve_public_export_dependency_or_provider(
             })?;
 
         if provider_view
-            .exported_origin(&PublicExportRoute::ROOT, provider_name)
+            .exported_origin(&provider_route, provider_name)
             .is_none()
             && provider_view
-                .binding_export(&PublicExportRoute::ROOT, provider_name)
+                .binding_export(&provider_route, provider_name)
                 .is_none()
         {
             let interface = source_provider_dependencies.interface(provider_id)?;
@@ -948,14 +946,20 @@ struct PublicExportKey {
 
 /// Authored diagnostic sites retained alongside one facade's public export entries.
 ///
-/// WHAT: the first export-site span for each `(route, leaf)` plus each distinct route's operand
-///       site.
+/// WHAT: the first export-site span for each `(route, leaf)`, each distinct route's operand site
+///       and the validated folded route index the second pass reuses.
 /// WHY: the second collection pass consumes this state by value; duplicate diagnostics need the
 ///      first export site, and case-only route conflicts need both route operand sites.
 #[derive(Default)]
 struct PublicExportLocations {
     exports: FxHashMap<PublicExportKey, SourceSpan>,
     routes: FxHashMap<PathId, PublicExportRouteSite>,
+    /// Folded route keys already validated by the first pass.
+    ///
+    /// WHY: the second pass must keep the same conflict rule without re-rendering every authored
+    ///      route; moving the validated index forward also makes a repeated claim an ordinary
+    ///      conflict rather than an invariant panic.
+    route_folds: CaseFoldedRouteIndex<PathId>,
 }
 
 /// One route operand's authored site, retained to order and label case-only route conflicts.
@@ -968,12 +972,6 @@ struct PublicExportRouteSite {
     path_syntax: PathSyntaxId,
 }
 
-/// One route's path identity plus the authored operand site that claimed it.
-struct RouteClaim {
-    path: PathId,
-    site: PublicExportRouteSite,
-}
-
 /// Accumulates public export entries for one root file and detects duplicate `(route, leaf)`
 /// names and case-only route conflicts.
 #[derive(Default)]
@@ -981,23 +979,22 @@ struct PublicExportCollector {
     exports: FxHashSet<PublicExportEntry>,
     seen_exports: FxHashMap<PublicExportKey, SourceSpan>,
     route_spans: FxHashMap<PathId, PublicExportRouteSite>,
-    /// ASCII-folded canonical route spelling to the route's authored path identity.
+    /// ASCII-folded route spellings and their authored claims.
     ///
     /// WHY: one fold per distinct route makes case-conflict detection a map lookup rather than a
-    ///      pairwise component comparison that re-allocates for every existing route.
-    route_keys: FxHashMap<String, PathId>,
+    ///      pairwise component comparison that re-allocates for every existing route. The shared
+    ///      index keeps ordering identical to the eager facade prepass.
+    route_folds: CaseFoldedRouteIndex<PathId>,
 }
 
 impl PublicExportCollector {
-    /// Continue collecting into the first pass's entries and authored sites.
+    /// Continue collecting into the first pass's entries, authored sites and folded route index.
     ///
     /// The set and locations are consumed rather than copied: the second pass owns the first
     /// pass's state until it hands its own back through [`Self::into_parts`].
     fn from_existing(
         exports: FxHashSet<PublicExportEntry>,
         existing_locations: Option<PublicExportLocations>,
-        string_table: &StringTable,
-        path_fork: &PathInternerFork,
     ) -> Self {
         let mut collector = Self {
             exports,
@@ -1005,11 +1002,8 @@ impl PublicExportCollector {
         };
         if let Some(locations) = existing_locations {
             collector.seen_exports = locations.exports;
-            for (path, site) in locations.routes {
-                let key = route_conflict_key(path, path_fork, string_table);
-                collector.route_spans.insert(path, site);
-                collector.route_keys.insert(key, path);
-            }
+            collector.route_spans = locations.routes;
+            collector.route_folds = locations.route_folds;
         }
         collector
     }
@@ -1021,6 +1015,7 @@ impl PublicExportCollector {
             PublicExportLocations {
                 exports: self.seen_exports,
                 routes: self.route_spans,
+                route_folds: self.route_folds,
             },
         )
     }
@@ -1099,36 +1094,23 @@ impl PublicExportCollector {
         }
 
         let route_key = route_conflict_key(route.path, path_fork, string_table);
-        if let Some(existing_route) = self.route_keys.get(&route_key).copied() {
-            // `route_keys` and `route_spans` are written together, so a folded key always has
-            // its authored site.
-            let existing_site = self
-                .route_spans
-                .get(&existing_route)
-                .copied()
-                .expect("a recorded folded route key keeps its authored site");
-            let (earlier, later) = order_route_claims(
-                RouteClaim {
-                    path: existing_route,
-                    site: existing_site,
-                },
-                RouteClaim {
-                    path: route.path,
-                    site,
-                },
-            );
+        let claim = CaseRouteClaim::new(
+            route.path,
+            site.span,
+            RouteClaimOrder::new(site.span.source(), site.path_syntax),
+        );
+        if let Err((earlier, later)) = self.route_folds.insert(route_key, claim) {
             return Err(HeaderParseFailure::Diagnostic(
                 generics_traits_api::case_conflicting_public_export_route(
-                    later.path,
-                    earlier.path,
-                    Some(earlier.site.span),
-                    Some(later.site.span),
+                    later.id,
+                    earlier.id,
+                    Some(earlier.span),
+                    Some(later.span),
                 ),
             ));
         }
 
         self.route_spans.insert(route.path, site);
-        self.route_keys.insert(route_key, route.path);
         Ok(())
     }
 }
@@ -1143,25 +1125,8 @@ fn route_conflict_key(
     string_table: &StringTable,
 ) -> String {
     let mut scratch = Vec::new();
-    let mut folded = path_fork.render_portable(path, string_table, &mut scratch);
-    folded.make_ascii_lowercase();
-    folded
-}
-
-/// Order two route claims by authored position within one source.
-///
-/// WHAT: returns the earlier claim first and the later claim second.
-/// WHY: the two claims can arrive from different collection passes, so insertion order is not
-///      authored order. `PathSyntaxId` rows are source-local and monotonic in authored order;
-///      claims from different sources keep arrival order because their rows are not comparable.
-fn order_route_claims(first: RouteClaim, second: RouteClaim) -> (RouteClaim, RouteClaim) {
-    if first.site.span.source() == second.site.span.source()
-        && first.site.path_syntax > second.site.path_syntax
-    {
-        (second, first)
-    } else {
-        (first, second)
-    }
+    let rendered = path_fork.render_portable(path, string_table, &mut scratch);
+    fold_route_spelling(&rendered)
 }
 
 // --------------------------

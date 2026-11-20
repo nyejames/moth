@@ -25,7 +25,7 @@ use crate::compiler_frontend::headers::parse_file_headers::FileRole;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{
-    ModuleRootFiles, ModuleRootRole, StableModuleOriginIdentity,
+    ModuleRootFiles, ModuleRootRole, PublicExportRoute, StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::{
     SourceDatabase, SourceId as CompilerSourceId, SourceSpanBuilders,
@@ -45,6 +45,7 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::facade_route_prepass::FacadePreparationCache;
 use super::file_reference_resolution::FileReferenceResolver;
 use super::module_identity::ModuleId;
 use super::module_namespace::{DirectoryDependencyResolution, ResolvedDependency};
@@ -165,6 +166,8 @@ pub(crate) struct CheckOnlyProviderBinding {
     pub(crate) dependency_shell_id: DependencyShellId,
     pub(crate) provider_module_id: ModuleId,
     pub(crate) provider_surface: ModuleRootRole,
+    /// Exact public route beneath the provider facade, absent for its root surface.
+    pub(crate) route: Option<PublicExportRoute>,
 }
 pub(crate) struct CheckOnlySourcePackageDependency {
     pub(crate) dependency_shell_id: DependencyShellId,
@@ -219,6 +222,8 @@ enum ResolvedDirectoryDependencyEffect {
         provider_module_id: ModuleId,
         provider_surface: ModuleRootRole,
         dependency_shell_id: DependencyShellId,
+        /// Exact public route beneath the provider facade, absent for its root surface.
+        route: Option<PublicExportRoute>,
     },
     SourcePackage {
         dependency_prefix: String,
@@ -373,6 +378,7 @@ fn apply_resolved_directory_dependency(
             provider_module_id,
             provider_surface,
             consumer_module_id,
+            route,
             ..
         } => {
             add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
@@ -406,6 +412,7 @@ fn apply_resolved_directory_dependency(
                     provider_module_id: *provider_module_id,
                     provider_surface: *provider_surface,
                     dependency_shell_id: provider.dependency_shell_id,
+                    route: route.clone(),
                 });
         }
         ResolvedDependency::SourcePackageSurface {
@@ -623,6 +630,8 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
+    prepared_facades: &mut FacadePreparationCache,
+    source_module_origins: Option<Arc<SourceModuleOriginTable>>,
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
@@ -639,6 +648,8 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
         external_imports,
         directory_dependency_resolution,
         resource_inputs,
+        prepared_facades,
+        source_module_origins,
         include_check_only,
         selected_source_texts,
         string_table,
@@ -664,6 +675,8 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
+    prepared_facades: &mut FacadePreparationCache,
+    source_module_origins: Option<Arc<SourceModuleOriginTable>>,
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
@@ -680,6 +693,8 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
         external_imports,
         directory_dependency_resolution,
         resource_inputs,
+        prepared_facades,
+        source_module_origins,
         include_check_only,
         selected_source_texts,
         string_table,
@@ -703,6 +718,8 @@ fn discover_all_modules_in_boundary(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
+    prepared_facades: &mut FacadePreparationCache,
+    source_module_origins: Option<Arc<SourceModuleOriginTable>>,
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
@@ -710,15 +727,25 @@ fn discover_all_modules_in_boundary(
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, PreparedFailure> {
     let seeds = module_seeds_in_module_id_order(project_module_graph);
-    let source_origin_lookup = project_module_graph
-        .build_source_origin_lookup(directory_dependency_resolution.source_tree_index())?;
-    // Construct one immutable source-origin table for this project or package boundary. Prepared
-    // module payloads retain only cloned `Arc` handles, never per-module origin rows.
-    let source_module_origins = Arc::new(SourceModuleOriginTable::from_graph_ownership(
-        source_files,
-        &source_origin_lookup,
-    ));
-    drop(source_origin_lookup);
+    // The project boundary's route prepass has already built this table for the facades it
+    // prepared, so the project walk reuses it. A package boundary without a prepass builds its own
+    // here, exactly as before.
+    let source_module_origins = match source_module_origins {
+        Some(origins) => origins,
+        None => {
+            let source_origin_lookup = project_module_graph
+                .build_source_origin_lookup(directory_dependency_resolution.source_tree_index())?;
+            // Construct one immutable source-origin table for this project or package boundary.
+            // Prepared module payloads retain only cloned `Arc` handles, never per-module origin
+            // rows.
+            let origins = Arc::new(SourceModuleOriginTable::from_graph_ownership(
+                source_files,
+                &source_origin_lookup,
+            ));
+            drop(source_origin_lookup);
+            origins
+        }
+    };
 
     let module_error_allowance = config.frontend_options().max_errors_per_module;
     let ModuleCompilationJobBatch {
@@ -740,6 +767,7 @@ fn discover_all_modules_in_boundary(
         },
         external_imports,
         resource_inputs,
+        prepared_facades,
         include_check_only,
         string_table,
         path_interner,
@@ -1099,10 +1127,12 @@ fn prepare_check_only_module(
                         provider_module_id,
                         provider_surface,
                         dependency_shell_id,
+                        route,
                     } => provider_bindings.push(CheckOnlyProviderBinding {
                         dependency_shell_id,
                         provider_module_id,
                         provider_surface,
+                        route,
                     }),
                     ResolvedDirectoryDependencyEffect::SourcePackage {
                         dependency_prefix,
@@ -1427,6 +1457,7 @@ fn discover_modules_serial_provider_capable(
     context: ModuleDiscoveryContext<'_, '_>,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     resource_inputs: &mut ResourceInputRegistry,
+    prepared_facades: &mut FacadePreparationCache,
     include_check_only: bool,
     string_table: &StringTable,
     path_interner: &PathInternerBuilder,
@@ -1551,33 +1582,55 @@ fn discover_modules_serial_provider_capable(
                 .source(source_index)
                 .canonical_path()
                 .to_path_buf();
-            let input_result = crate::timed_stage_attributed!(
-                crate::timing::TimingMetric::FrontendPrepare,
-                timing_context,
-                {
-                    let (syntax_string_table, selected_source_texts, syntax_path_fork) =
-                        syntax.source_preparation_inputs_and_path_fork_mut();
-                    prepare_owned_source_input(
-                        source_index,
-                        source_tree_index,
-                        source_files,
-                        source_spans,
-                        style_directives,
-                        syntax_string_table,
-                        syntax_path_fork,
-                        selected_source_texts,
-                    )
-                },
-            );
-            let input = match input_result {
-                Ok(input) => input,
-                Err(error) => {
-                    let path_table = Arc::new(syntax.path_fork_mut().shared_table());
-                    return Err(error.into_failure(syntax.string_table_mut(), path_table));
-                }
+            // A facade root prepared by the route prepass is adopted, never re-tokenized or
+            // re-parsed. The production cache is exhaustive for this boundary, so a present
+            // facade root missing from it is a compiler invariant failure rather than a reason
+            // to prepare the facade a second time. Package walks until Phase 3 pass a
+            // non-exhaustive cache and keep the ordinary preparation path.
+            let facade_role = seed
+                .root_files
+                .present()
+                .find(|(_, root_path)| *root_path == &source_path)
+                .map(|(role, _)| role)
+                .filter(|role| matches!(role, ModuleRootRole::Normal | ModuleRootRole::Support));
+            let cached_facade =
+                facade_role.and_then(|role| prepared_facades.take(seed.module_id, role));
+            let mut prepared_output = if let Some(prepared) = cached_facade {
+                syntax.adopt_facade_preparation(prepared)?
+            } else if let Some(role) = facade_role.filter(|_| prepared_facades.is_exhaustive()) {
+                return Err(graph_inventory_mismatch_error(format!(
+                    "ModuleId {} {role:?} facade was present but absent from the exhaustive facade preparation cache",
+                    seed.module_id.index(),
+                )));
+            } else {
+                let input_result = crate::timed_stage_attributed!(
+                    crate::timing::TimingMetric::FrontendPrepare,
+                    timing_context,
+                    {
+                        let (syntax_string_table, selected_source_texts, syntax_path_fork) =
+                            syntax.source_preparation_inputs_and_path_fork_mut();
+                        prepare_owned_source_input(
+                            source_index,
+                            source_tree_index,
+                            source_files,
+                            source_spans,
+                            style_directives,
+                            syntax_string_table,
+                            syntax_path_fork,
+                            selected_source_texts,
+                        )
+                    },
+                );
+                let input = match input_result {
+                    Ok(input) => input,
+                    Err(error) => {
+                        let path_table = Arc::new(syntax.path_fork_mut().shared_table());
+                        return Err(error.into_failure(syntax.string_table_mut(), path_table));
+                    }
+                };
+                // Already in the premerge lane; propagate without an intermediate vessel.
+                syntax.prepare_source(input, source_spans)?
             };
-            // Already in the premerge lane; propagate without an intermediate vessel.
-            let mut prepared_output = syntax.prepare_source(input, source_spans)?;
             let consumer_role = source_tree_index
                 .source(source_index)
                 .logical_identity()
@@ -1619,11 +1672,13 @@ fn discover_modules_serial_provider_capable(
                             provider_module_id,
                             provider_surface,
                             dependency_shell_id,
+                            route,
                         } => resolved_edges.push(ResolvedDependencyEdge {
                             provider_module_id,
                             provider_surface,
                             consumer_module_id: seed.module_id,
                             dependency_shell_id,
+                            route,
                         }),
                         ResolvedDirectoryDependencyEffect::SourcePackage {
                             dependency_prefix,

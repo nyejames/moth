@@ -7,8 +7,10 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::IdentifierNamingConventionView;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
@@ -3877,5 +3879,91 @@ fn paired_root_private_declarations_keep_their_surface_origins() {
         private_roles,
         [ModuleRootRole::Normal, ModuleRootRole::Support],
         "same-named root-private functions must retain distinct surface identities"
+    );
+}
+
+#[test]
+fn paired_root_facade_warning_remaps_through_cached_adoption() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let project_root = temporary_directory.path().to_path_buf();
+    let source_root = project_root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(
+        project_root.join("@config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(source_root.join("@entry.moth"), "[:entry]\n").expect("should write entry");
+    // The normal facade interns `normal_only` before the support facade's `mixedCase` warning is
+    // adopted. Without the warning remap, the support warning's StringId resolves to the normal
+    // facade's identifier text.
+    fs::write(source_root.join("@mod.moth"), "normal_only #= 1\n")
+        .expect("should write normal facade");
+    fs::write(
+        source_root.join("@package.moth"),
+        "mixedCase #= 2\nSupport_type :: bad_variant;\n",
+    )
+    .expect("should write support facade");
+
+    let mut config = Config::new(project_root.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    let result = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+    );
+    let mut frontend = match result.expect("paired facade warning should compile") {
+        CompilationOutcome::Success {
+            value,
+            warnings: None,
+        } => value,
+        CompilationOutcome::Success {
+            warnings: Some(warnings),
+            ..
+        } => panic!("inner frontend should not freeze warnings: {warnings:?}"),
+        CompilationOutcome::Diagnosed(reports) => {
+            panic!("warning-only paired facade should compile: {reports:?}")
+        }
+    };
+    let project_source_database = frontend.project_source_database.take();
+    drop(frontend);
+    let warning_outcome = crate::build_system::build::finish_successful_project_warnings(
+        &mut warning_owner,
+        project_source_database,
+        (),
+    )
+    .expect("successful paired facade warnings should freeze");
+    let warning_names = match &warning_outcome {
+        CompilationOutcome::Success {
+            warnings: Some(warnings),
+            ..
+        } => warnings
+            .iter_severity(DiagnosticSeverity::Warning)
+            .filter_map(|(report, view)| {
+                let facts = view.family_view::<IdentifierNamingConventionView>()?;
+                Some(report.context().strings().resolve(facts.name).to_owned())
+            })
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    assert!(
+        warning_names.iter().any(|name| name == "mixedCase"),
+        "the adopted warning should resolve the support facade identifier: {warning_names:?}"
+    );
+    assert!(
+        !warning_names.iter().any(|name| name == "normal_only"),
+        "the adopted warning must not resolve through the normal facade string delta: {warning_names:?}"
+    );
+    let rendered_result: crate::projects::CompilationResult<()> = Ok(warning_outcome);
+    let rendered = render_compilation_result_html(&rendered_result, &project_root);
+    assert!(
+        rendered.contains("&#39;mixedCase&#39;"),
+        "the rendered adopted warning should show the remapped identifier: {rendered}"
     );
 }

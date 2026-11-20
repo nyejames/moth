@@ -1,0 +1,6 @@
+@paired/validation validation_label
+
+$export
+result || -> String:
+    return validation_label
+;

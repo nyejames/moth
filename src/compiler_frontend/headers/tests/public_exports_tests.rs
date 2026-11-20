@@ -109,13 +109,10 @@ fn duplicate_public_export_retains_first_owner_span_across_passes() {
             first_span,
         )]),
         routes: FxHashMap::default(),
+        route_folds: CaseFoldedRouteIndex::default(),
     };
-    let mut second_pass = PublicExportCollector::from_existing(
-        first_pass.exports,
-        Some(existing_locations),
-        &string_table,
-        &path_fork,
-    );
+    let mut second_pass =
+        PublicExportCollector::from_existing(first_pass.exports, Some(existing_locations));
     let HeaderParseFailure::Diagnostic(diagnostic) = second_pass
         .insert(
             None,
@@ -464,8 +461,7 @@ fn cross_pass_route_conflict_labels_the_earlier_authored_operand() {
     let (exports, locations) = first_pass.into_parts();
 
     // Pass 2 records the earlier authored re-export clause route.
-    let mut second_pass =
-        PublicExportCollector::from_existing(exports, Some(locations), &string_table, &path_fork);
+    let mut second_pass = PublicExportCollector::from_existing(exports, Some(locations));
     let HeaderParseFailure::Diagnostic(diagnostic) = insert_export(
         &mut second_pass,
         Some(route_operand_at(reexport_route, reexport_route_span, 0)),

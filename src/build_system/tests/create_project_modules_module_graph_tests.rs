@@ -678,12 +678,14 @@ fn provider_binding_index_rejects_duplicate_shell_edges() {
             provider_surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
             consumer_module_id: ModuleId::from_index(0),
             dependency_shell_id: shell,
+            route: None,
         },
         ResolvedDependencyEdge {
             provider_module_id: ModuleId::from_index(2),
             provider_surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
             consumer_module_id: ModuleId::from_index(0),
             dependency_shell_id: shell,
+            route: None,
         },
     ];
 
@@ -705,6 +707,7 @@ fn source_package_dependency_index_rejects_cross_category_or_duplicate_shells() 
         provider_surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         consumer_module_id: ModuleId::from_index(0),
         dependency_shell_id: shell,
+        route: None,
     };
     let provider_binding_index = super::compilation::build_provider_binding_index(&[provider_edge]);
 

@@ -690,6 +690,7 @@ fn provider_declaration_selection_rejects_keyword_shadow_names_before_provider_r
             SourceProviderDependencySet::new(vec![SourceProviderDependency {
                 kind: ProviderDependencyKind::Authored {
                     shell: dependency.dependency.dependency_shell_id,
+                    route: PublicExportRoute::ROOT,
                 },
                 interface: &provider,
             }])
@@ -1851,6 +1852,7 @@ fn provider_semantics_bind_once_across_many_shells() {
             .map(|(index, _)| SourceProviderDependency {
                 kind: ProviderDependencyKind::Authored {
                     shell: DependencyShellId::new(SourceId::from_index(0), index as u32),
+                    route: PublicExportRoute::ROOT,
                 },
                 interface: &provider,
             })
@@ -1949,12 +1951,14 @@ fn reversed_selection_order_keeps_one_provider_surface_identity() {
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 0),
+                route: PublicExportRoute::ROOT,
             },
             interface: &provider,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 1),
+                route: PublicExportRoute::ROOT,
             },
             interface: &provider,
         },
@@ -2112,12 +2116,14 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 0),
+                route: PublicExportRoute::ROOT,
             },
             interface: &first_provider,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 1),
+                route: PublicExportRoute::ROOT,
             },
             interface: &second_provider,
         },
@@ -2445,7 +2451,10 @@ fn provider_selection_public_namespace_member_joins_declaration_surface() {
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let provider = constant_provider("provider", &["CONST_0"]);
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-        kind: ProviderDependencyKind::Authored { shell },
+        kind: ProviderDependencyKind::Authored {
+            shell,
+            route: PublicExportRoute::ROOT,
+        },
         interface: &provider,
     }])
     .expect("provider shell should resolve");
@@ -2518,7 +2527,10 @@ fn provider_selection_namespace_prefers_source_name_over_facade_alias() {
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let provider = constant_provider("provider", &["SOURCE", "ALIAS"]);
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-        kind: ProviderDependencyKind::Authored { shell },
+        kind: ProviderDependencyKind::Authored {
+            shell,
+            route: PublicExportRoute::ROOT,
+        },
         interface: &provider,
     }])
     .expect("provider shell should resolve");
@@ -2584,7 +2596,10 @@ fn provider_selection_public_namespace_member_joins_binding_surface() {
     let mut registry = ExternalPackageRegistry::new();
     let provider = binding_provider(&mut registry);
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-        kind: ProviderDependencyKind::Authored { shell },
+        kind: ProviderDependencyKind::Authored {
+            shell,
+            route: PublicExportRoute::ROOT,
+        },
         interface: &provider,
     }])
     .expect("provider shell should resolve");
@@ -2646,7 +2661,10 @@ fn provider_selection_namespace_binding_prefers_source_name_over_facade_alias() 
     let provider =
         binding_provider_with_members(&mut registry, &[("SOURCE", 5_101), ("ALIAS", 5_102)]);
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-        kind: ProviderDependencyKind::Authored { shell },
+        kind: ProviderDependencyKind::Authored {
+            shell,
+            route: PublicExportRoute::ROOT,
+        },
         interface: &provider,
     }])
     .expect("provider shell should resolve");
@@ -2763,7 +2781,10 @@ fn provider_selection_public_namespace_member_rejects_missing_member() {
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let provider = constant_provider("provider", &["CONST_0"]);
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-        kind: ProviderDependencyKind::Authored { shell },
+        kind: ProviderDependencyKind::Authored {
+            shell,
+            route: PublicExportRoute::ROOT,
+        },
         interface: &provider,
     }])
     .expect("provider shell should resolve");
@@ -2847,12 +2868,14 @@ fn namespace_and_direct_selection_share_provider_semantics() {
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 0),
+                route: PublicExportRoute::ROOT,
             },
             interface: &provider,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 1),
+                route: PublicExportRoute::ROOT,
             },
             interface: &provider,
         },
@@ -2920,12 +2943,14 @@ fn two_aliases_of_one_declaration_retain_one_record() {
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 0),
+                route: PublicExportRoute::ROOT,
             },
             interface: &provider,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 1),
+                route: PublicExportRoute::ROOT,
             },
             interface: &provider,
         },
@@ -2992,6 +3017,7 @@ fn missing_provider_record_fails_deterministically() {
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: ProviderDependencyKind::Authored {
             shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: PublicExportRoute::ROOT,
         },
         interface: &provider,
     }])
@@ -3064,6 +3090,7 @@ fn qualified_occurrence_binds_provider_target_without_publishing_a_name() {
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: ProviderDependencyKind::Authored {
             shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: PublicExportRoute::ROOT,
         },
         interface: &provider,
     }])
@@ -3126,6 +3153,7 @@ fn missing_qualified_provider_member_reports_the_clause_diagnostic() {
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: ProviderDependencyKind::Authored {
             shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: PublicExportRoute::ROOT,
         },
         interface: &provider,
     }])
@@ -3330,6 +3358,7 @@ fn bind_provider_occurrence(
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: ProviderDependencyKind::Authored {
             shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: PublicExportRoute::ROOT,
         },
         interface: provider,
     }])
@@ -3419,6 +3448,7 @@ fn receiver_methods_reuse_summary_by_origin_storage() {
             .map(|index| SourceProviderDependency {
                 kind: ProviderDependencyKind::Authored {
                     shell: DependencyShellId::new(SourceId::from_index(0), index),
+                    route: PublicExportRoute::ROOT,
                 },
                 interface: &provider,
             })

@@ -208,6 +208,7 @@ fn close(
                 kind:
                     crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
                         shell: DependencyShellId::new(SourceId::from_index(0), index as u32),
+                        route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
                     },
                 interface,
             })
@@ -679,12 +680,14 @@ fn disagreeing_provider_declarations_fail_deterministically() {
         SourceProviderDependency {
             kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 0),
+                route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
             },
             interface: &first,
         },
         SourceProviderDependency {
             kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 1),
+                route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
             },
             interface: &second,
         },
@@ -730,12 +733,14 @@ fn disagreeing_provider_summaries_fail_deterministically() {
         SourceProviderDependency {
             kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 0),
+                route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
             },
             interface: &first,
         },
         SourceProviderDependency {
             kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 1),
+                route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
             },
             interface: &second,
         },
@@ -767,6 +772,7 @@ fn duplicate_keys_in_one_interface_fail_at_view_construction() {
     let error = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
             shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
         },
         interface: &duplicate,
     }])
@@ -933,12 +939,14 @@ fn disagreeing_provider_summary_constraint_bits_fail_deterministically() {
             SourceProviderDependency {
                 kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
                     shell: DependencyShellId::new(SourceId::from_index(0), 0),
+                    route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
                 },
                 interface: &current,
             },
             SourceProviderDependency {
                 kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
                     shell: DependencyShellId::new(SourceId::from_index(0), 1),
+                    route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
                 },
                 interface: &refreshed,
             },

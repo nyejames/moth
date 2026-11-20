@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "primary=button:go:private safe=safe:ok mirror=widget:re shared=field root=root bare=button:bare:private parent=root expression=button:expr:private"

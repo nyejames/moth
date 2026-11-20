@@ -17,6 +17,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMod
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{DiagnosticSeverity, PreparedFailure};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::semantic_identity::{ModuleRootRole, PublicExportRoute};
 
 fn prepared_failure_reports(
     failure: PreparedFailure,
@@ -1084,6 +1085,27 @@ fn build_namespace_set_for_test(
     resolver: &ProjectPathResolver,
     source_packages: &crate::builder_surface::SourcePackageRegistry,
 ) -> Result<ModuleNamespaceSet, PreparedFailure> {
+    build_namespace_set_with_routes_for_test(
+        config,
+        resolver,
+        source_packages,
+        &ExternalPackageRegistry::new(),
+        &[],
+    )
+}
+
+/// Build one Stage 0 namespace set from authored route claims.
+///
+/// Claims name a project-relative facade directory, the surface declaring the route and its
+/// canonical spelling. The helper resolves each directory to its boundary-local `ModuleId` from
+/// the same index production consumes, so the test never invents an identity.
+fn build_namespace_set_with_routes_for_test(
+    config: &Config,
+    resolver: &ProjectPathResolver,
+    source_packages: &crate::builder_surface::SourcePackageRegistry,
+    external_packages: &ExternalPackageRegistry,
+    claims: &[(&str, ModuleRootRole, &str)],
+) -> Result<ModuleNamespaceSet, PreparedFailure> {
     let mut string_table = StringTable::new();
     let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let external_import_providers = ExternalImportProviderRegistry::default();
@@ -1110,11 +1132,32 @@ fn build_namespace_set_for_test(
             &mut string_table,
         )
         .expect("source-package boundary indexes should build");
+    let route_claims = claims.iter().map(|(directory, surface, route)| {
+        let directory = std::path::Path::new(directory);
+        let module_id = source_tree_index
+            .module_identities()
+            .module_ids()
+            .find(|module_id| {
+                source_tree_index
+                    .module_identities()
+                    .record(*module_id)
+                    .root_directory()
+                    .ends_with(directory)
+            })
+            .expect("claim facade directory should carry a structural module");
+        (
+            module_id,
+            *surface,
+            PublicExportRoute::from_canonical_spelling((*route).to_owned()),
+        )
+    });
+    let facade_routes = super::facade_route_prepass::FacadeRouteIndex::from_claims(route_claims);
     ModuleNamespaceSet::build(
         &source_tree_index,
         &project_module_graph,
         package_boundary_indexes,
-        &ExternalPackageRegistry::new(),
+        external_packages,
+        &facade_routes,
         &mut string_table,
     )
 }
@@ -1378,4 +1421,170 @@ fn invalid_root_file_name_fact_renders_the_authored_directory_portably() {
         "invalid_config.invalid_module_root_file_name",
         &["@page.moth", "src/docs"],
     );
+}
+
+struct RouteNamespaceFixture {
+    _temporary_directory: tempfile::TempDir,
+    root: PathBuf,
+    config: Config,
+    resolver: ProjectPathResolver,
+}
+
+/// Write one project tree and parse its config for route-namespace tests.
+fn route_namespace_fixture(files: &[(&str, &str)]) -> RouteNamespaceFixture {
+    let temporary_directory = tempfile::tempdir().expect("should create temp dir");
+    let root = temporary_directory.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src dir");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    for (relative_path, contents) in files {
+        let path = src.join(relative_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("should create fixture parent");
+        }
+        fs::write(path, contents).expect("should write fixture source");
+    }
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    RouteNamespaceFixture {
+        _temporary_directory: temporary_directory,
+        root,
+        config,
+        resolver,
+    }
+}
+
+fn assert_route_collision_failure(failure: PreparedFailure) {
+    let reports = prepared_failure_reports(failure);
+    assert!(
+        reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, diagnostic)| diagnostic.descriptor().code == "MOTH-IMPORT-0006"),
+        "expected the eager route collision diagnostic"
+    );
+}
+
+#[test]
+fn unreferenced_facade_route_colliding_with_a_same_module_source_is_rejected() {
+    // The support facade at `vendor/forms` is visible as `forms`; its route `x` publishes
+    // `forms/x`, which is already a root-owned source key. No file references either, so the
+    // rejection must be eager.
+    let fixture = route_namespace_fixture(&[
+        ("@mod.moth", ""),
+        ("forms/x.moth", "value #= 1\n"),
+        ("vendor/forms/@package.moth", "$export\nvalue #= 1\n"),
+    ]);
+    let result = build_namespace_set_with_routes_for_test(
+        &fixture.config,
+        &fixture.resolver,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &ExternalPackageRegistry::new(),
+        &[("vendor/forms", ModuleRootRole::Support, "x")],
+    );
+    let Err(failure) = result else {
+        panic!("an unreferenced route/source collision must fail namespace construction");
+    };
+    assert_route_collision_failure(failure);
+}
+
+#[test]
+fn facade_route_colliding_case_only_with_a_same_module_source_is_rejected() {
+    let fixture = route_namespace_fixture(&[
+        ("@mod.moth", ""),
+        ("forms/x.moth", "value #= 1\n"),
+        ("vendor/forms/@package.moth", "$export\nvalue #= 1\n"),
+    ]);
+    let result = build_namespace_set_with_routes_for_test(
+        &fixture.config,
+        &fixture.resolver,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &ExternalPackageRegistry::new(),
+        &[("vendor/forms", ModuleRootRole::Support, "X")],
+    );
+    let Err(failure) = result else {
+        panic!("a case-only route/source collision is ambiguous");
+    };
+    assert_route_collision_failure(failure);
+}
+
+#[test]
+fn ambiguous_support_basenames_do_not_publish_route_entries() {
+    // Two support facades sharing one case-folded basename already make the base key ambiguous.
+    // Neither facade may publish `x` beneath that base; resolution rejects both the base and any
+    // attempted route under it (covered by the focused namespace-resolution test).
+    let fixture = route_namespace_fixture(&[
+        ("@mod.moth", ""),
+        ("a/Ford/@package.moth", "$export\nvalue #= 1\n"),
+        ("b/ford/@package.moth", "$export\nvalue #= 2\n"),
+    ]);
+    build_namespace_set_with_routes_for_test(
+        &fixture.config,
+        &fixture.resolver,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &ExternalPackageRegistry::new(),
+        &[
+            ("a/Ford", ModuleRootRole::Support, "x"),
+            ("b/ford", ModuleRootRole::Support, "x"),
+        ],
+    )
+    .expect("an ambiguous support base keeps its existing ambiguity and publishes no routes");
+}
+
+#[test]
+fn facade_route_overlapping_a_source_package_prefix_is_rejected() {
+    let fixture = route_namespace_fixture(&[
+        ("@mod.moth", ""),
+        ("a/@mod.moth", ""),
+        ("a/@package.moth", "$export\nvalue #= 1\n"),
+    ]);
+    let package_root = fixture.root.join("packages/local/shared");
+    fs::create_dir_all(&package_root).expect("should create source package root");
+    fs::write(package_root.join("@package.moth"), "$export\nvalue #= 1\n")
+        .expect("should write source package facade");
+    let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
+    source_packages
+        .register_filesystem_root("a/shared", package_root, PackageOrigin::ProjectLocal)
+        .expect("source package should register");
+    let result = build_namespace_set_with_routes_for_test(
+        &fixture.config,
+        &fixture.resolver,
+        &source_packages,
+        &ExternalPackageRegistry::new(),
+        &[("a", ModuleRootRole::Normal, "shared")],
+    );
+    let Err(failure) = result else {
+        panic!("a route cannot shadow a registered source-package prefix");
+    };
+    assert_route_collision_failure(failure);
+}
+
+#[test]
+fn facade_route_sharing_a_private_folder_spelling_stays_legal() {
+    // The private folder has no importable namespace entry in any consumer, so it cannot
+    // collide with the route spelling.
+    let fixture = route_namespace_fixture(&[
+        ("@mod.moth", ""),
+        ("child/@mod.moth", ""),
+        ("child/forms/@entry.moth", ""),
+    ]);
+    build_namespace_set_with_routes_for_test(
+        &fixture.config,
+        &fixture.resolver,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &ExternalPackageRegistry::new(),
+        &[("child", ModuleRootRole::Normal, "forms")],
+    )
+    .expect("a private physical folder with no namespace identity must stay legal");
 }

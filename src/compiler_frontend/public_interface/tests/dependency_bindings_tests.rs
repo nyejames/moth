@@ -57,7 +57,10 @@ fn authored(
     interface: &PublicSemanticInterface,
 ) -> SourceProviderDependency<'_> {
     SourceProviderDependency {
-        kind: ProviderDependencyKind::Authored { shell: shell_id },
+        kind: ProviderDependencyKind::Authored {
+            shell: shell_id,
+            route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
+        },
         interface,
     }
 }
@@ -120,12 +123,14 @@ fn duplicate_shell_fails_instead_of_overwriting() {
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(3), 0),
+                route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
             },
             interface: &provider,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(3), 0),
+                route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
             },
             interface: &nested,
         },
@@ -291,11 +296,12 @@ fn grouped_reexport_lookup_uses_the_same_shell_identity() {
     )])
     .expect("one authored provider should register");
 
-    let provider_id = set
+    let resolved = set
         .resolve_reexport(DependencyShellId::new(SourceId::from_index(6), 0))
         .expect("the direct-selection re-export shell must resolve");
+    assert!(resolved.route.is_root());
     assert!(std::ptr::eq(
-        set.interface(provider_id).expect("provider resolves"),
+        set.interface(resolved.provider).expect("provider resolves"),
         &provider,
     ));
     assert!(

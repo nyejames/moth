@@ -595,6 +595,7 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
             shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
         },
         interface: &provider_interface,
     }])

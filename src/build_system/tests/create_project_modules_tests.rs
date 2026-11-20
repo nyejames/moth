@@ -1,6 +1,7 @@
 use super::compiled_boundary::{
     CompiledGraphBoundary, CompiledSourcePackage, CompletedSourcePackageRegistry, DiagnosedModule,
 };
+use super::facade_route_prepass::{FacadePreparationCache, FacadeRouteIndex};
 use super::file_reference_resolution::SingleFileReferenceOutcome;
 use super::generated_store::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::ModuleArtifactStore;
@@ -66,7 +67,7 @@ use crate::compiler_frontend::paths::resource_identity::{
 };
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
-    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+    ModuleRootRole, PublicExportRoute, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{
     LocalSpan, SourceCapacityError, SourceDatabase, SourceDatabaseBuilder, SourceDatabaseError,
@@ -704,6 +705,7 @@ fn discover_modules_for_test_with_resource_inputs(
         &project_module_graph,
         source_package_boundary_indexes,
         &external_packages,
+        &FacadeRouteIndex::default(),
         &mut string_table,
     ) {
         Ok(namespace_set) => namespace_set,
@@ -734,6 +736,8 @@ fn discover_modules_for_test_with_resource_inputs(
                 &path_fork,
             ),
             &mut resource_inputs,
+            &mut FacadePreparationCache::default(),
+            None,
             false,
             &mut selected_source_texts,
             &mut string_table,
@@ -836,6 +840,7 @@ fn discover_modules_for_test_with_providers(
         &project_module_graph,
         source_package_boundary_indexes,
         &external_packages,
+        &FacadeRouteIndex::default(),
         &mut string_table,
     ) {
         Ok(namespace_set) => namespace_set,
@@ -866,6 +871,8 @@ fn discover_modules_for_test_with_providers(
                 &path_fork,
             ),
             &mut resource_inputs,
+            &mut FacadePreparationCache::default(),
+            None,
             false,
             &mut selected_source_texts,
             &mut string_table,
@@ -921,6 +928,34 @@ fn with_namespace_resolution(
         &mut PathInternerFork,
     ),
 ) {
+    with_namespace_resolution_and_routes(
+        config,
+        resolver,
+        source_packages,
+        package_prefix,
+        &ExternalPackageRegistry::new(),
+        &[],
+        body,
+    );
+}
+
+/// Resolve dependencies against a namespace set that carries authored facade routes.
+fn with_namespace_resolution_and_routes(
+    config: &Config,
+    resolver: &ProjectPathResolver,
+    source_packages: &crate::builder_surface::SourcePackageRegistry,
+    package_prefix: Option<&str>,
+    external_packages: &ExternalPackageRegistry,
+    route_claims: &[(&str, ModuleRootRole, &str)],
+    body: impl FnOnce(
+        &ModuleNamespaceSet,
+        &SourceTreeIndex,
+        Option<&str>,
+        &mut StringTable,
+        &[(String, PathId)],
+        &mut PathInternerFork,
+    ),
+) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
@@ -941,7 +976,6 @@ fn with_namespace_resolution(
     .expect("source tree index should build");
     let project_module_graph =
         super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&source_tree_index);
-    let external_packages = ExternalPackageRegistry::new();
     let source_package_boundary_indexes = build_source_package_boundary_indexes(
         source_packages,
         resolver.source_file_kinds(),
@@ -949,11 +983,32 @@ fn with_namespace_resolution(
         &mut string_table,
     )
     .expect("source package boundary indexes should build");
+    let facade_routes =
+        FacadeRouteIndex::from_claims(route_claims.iter().map(|(directory, surface, route)| {
+            let directory = std::path::Path::new(directory);
+            let module_id = source_tree_index
+                .module_identities()
+                .module_ids()
+                .find(|module_id| {
+                    source_tree_index
+                        .module_identities()
+                        .record(*module_id)
+                        .root_directory()
+                        .ends_with(directory)
+                })
+                .expect("route facade directory should carry a structural module");
+            (
+                module_id,
+                *surface,
+                PublicExportRoute::from_canonical_spelling((*route).to_owned()),
+            )
+        }));
     let module_namespace_set = ModuleNamespaceSet::build(
         &source_tree_index,
         &project_module_graph,
         source_package_boundary_indexes,
-        &external_packages,
+        external_packages,
+        &facade_routes,
         &mut string_table,
     )
     .expect("namespace reserved-root claims should validate");
@@ -999,6 +1054,21 @@ fn retained_provider_path(path: PathId) -> RetainedDependencyPath {
             0,
         ),
     }
+}
+
+/// Intern one multi-component provider path into a retained dependency shell.
+fn intern_provider_path(
+    segments: &[&str],
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+) -> RetainedDependencyPath {
+    let mut path = PathId::ROOT;
+    for segment in segments {
+        path = path_fork
+            .try_intern_child(path, string_table.intern(segment))
+            .expect("test path fits");
+    }
+    retained_provider_path(path)
 }
 
 /// Build a retained provider-root dependency for one pre-interned single-component shell.
@@ -1323,6 +1393,7 @@ pub(super) fn discover_modules_and_graph_for_test_with_check_only(
         &project_module_graph,
         source_package_boundary_indexes,
         &external_packages,
+        &FacadeRouteIndex::default(),
         &mut string_table,
     )
     .expect("namespace reserved-root claims should validate");
@@ -1352,6 +1423,8 @@ pub(super) fn discover_modules_and_graph_for_test_with_check_only(
                 &path_fork,
             ),
             &mut resource_inputs,
+            &mut FacadePreparationCache::default(),
+            None,
             include_check_only,
             &mut selected_source_texts,
             &mut string_table,
@@ -1907,6 +1980,204 @@ fn direct_selection_resolves_cross_module_child_facade() {
                 }
                 other => panic!("expected CrossModule, got {:?}", other),
             }
+        },
+    );
+}
+
+#[test]
+fn namespace_route_entries_resolve_exactly_and_never_bypass_private_paths() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(src.join("child/private")).expect("should create private child directory");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@mod.moth"), "").expect("should write parent root");
+    fs::write(src.join("child/@mod.moth"), "$export @forms\nButton #= 1\n")
+        .expect("should write routed child root");
+    fs::write(src.join("child/private/@entry.moth"), "").expect("should write private entry");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    let declaring_source =
+        fs::canonicalize(src.join("@mod.moth")).expect("declaring source should canonicalize");
+
+    with_namespace_resolution_and_routes(
+        &config,
+        &resolver,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        None,
+        &ExternalPackageRegistry::new(),
+        &[
+            ("child", ModuleRootRole::Normal, "forms"),
+            ("child", ModuleRootRole::Normal, "_forms/validation"),
+        ],
+        |namespace_set,
+         source_tree_index,
+         _package_prefix,
+         string_table,
+         _provider_paths,
+         path_fork| {
+            let route_dependency =
+                intern_provider_path(&["child", "forms"], path_fork, string_table);
+            let underscore_route_dependency =
+                intern_provider_path(&["child", "_forms", "validation"], path_fork, string_table);
+            let bare_dependency = intern_provider_path(&["child"], path_fork, string_table);
+            let bypass_dependencies = [
+                vec!["child", "private"],
+                vec!["child", "forms", "extra"],
+                vec!["missing", "forms"],
+            ]
+            .iter()
+            .map(|bypass| intern_provider_path(bypass, path_fork, string_table))
+            .collect::<Vec<_>>();
+
+            let resolution =
+                DirectoryDependencyResolution::project(namespace_set, source_tree_index, path_fork);
+
+            let route = resolution
+                .resolve_dependency(&route_dependency, &declaring_source, string_table)
+                .expect("the declared route should resolve exactly");
+            match route {
+                ResolvedDependency::CrossModule {
+                    provider_surface,
+                    route,
+                    ..
+                } => {
+                    assert_eq!(provider_surface, ModuleRootRole::Normal);
+                    assert_eq!(
+                        route.as_ref().map(|route| route.as_str()),
+                        Some("forms"),
+                        "the provider edge must carry the declared route"
+                    );
+                }
+                other => panic!("expected CrossModule, got {other:?}"),
+            }
+
+            let underscore_route = resolution
+                .resolve_dependency(
+                    &underscore_route_dependency,
+                    &declaring_source,
+                    string_table,
+                )
+                .expect("an exact published route precedes the hidden-directory guard");
+            match underscore_route {
+                ResolvedDependency::CrossModule { route, .. } => assert_eq!(
+                    route.as_ref().map(|route| route.as_str()),
+                    Some("_forms/validation"),
+                ),
+                other => panic!("expected CrossModule, got {other:?}"),
+            }
+
+            let bare = resolution
+                .resolve_dependency(&bare_dependency, &declaring_source, string_table)
+                .expect("a bare parent dependency should keep resolving to the root surface");
+            match bare {
+                ResolvedDependency::CrossModule { route, .. } => assert!(
+                    route.is_none(),
+                    "a bare parent dependency must stay root-only, got {route:?}"
+                ),
+                other => panic!("expected CrossModule, got {other:?}"),
+            }
+
+            for (dependency, expected_code) in bypass_dependencies.iter().zip([
+                "MOTH-IMPORT-0015",
+                "MOTH-IMPORT-0015",
+                "MOTH-IMPORT-0005",
+            ]) {
+                let error = resolution
+                    .resolve_dependency(dependency, &declaring_source, string_table)
+                    .expect_err("route entries must not act as prefix fallbacks");
+                assert_eq!(
+                    error.code(),
+                    expected_code,
+                    "unexpected bypass diagnostic for {dependency:?}"
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn namespace_does_not_publish_routes_under_an_ambiguous_facade_base() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(src.join("a/forms")).expect("should create support facade dir");
+    fs::create_dir_all(src.join("b/forms")).expect("should create support facade dir");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@mod.moth"), "").expect("should write parent root");
+    fs::write(
+        src.join("a/forms/@package.moth"),
+        "$export @x\nvalue #= 1\n",
+    )
+    .expect("should write first support facade");
+    fs::write(
+        src.join("b/forms/@package.moth"),
+        "$export @x\nvalue #= 2\n",
+    )
+    .expect("should write second support facade");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    let declaring_source =
+        fs::canonicalize(src.join("@mod.moth")).expect("declaring source should canonicalize");
+
+    with_namespace_resolution_and_routes(
+        &config,
+        &resolver,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        None,
+        &ExternalPackageRegistry::new(),
+        &[
+            ("a/forms", ModuleRootRole::Support, "x"),
+            ("b/forms", ModuleRootRole::Support, "x"),
+        ],
+        |namespace_set,
+         source_tree_index,
+         _package_prefix,
+         string_table,
+         _provider_paths,
+         path_fork| {
+            let base_dependency = intern_provider_path(&["forms"], path_fork, string_table);
+            let route_dependency = intern_provider_path(&["forms", "x"], path_fork, string_table);
+            let resolution =
+                DirectoryDependencyResolution::project(namespace_set, source_tree_index, path_fork);
+
+            let base_error = resolution
+                .resolve_dependency(&base_dependency, &declaring_source, string_table)
+                .expect_err("the competing support basenames must stay ambiguous");
+            assert_eq!(base_error.code(), "MOTH-IMPORT-0006");
+
+            let route_error = resolution
+                .resolve_dependency(&route_dependency, &declaring_source, string_table)
+                .expect_err("no route may be published under an ambiguous facade base");
+            assert_eq!(
+                route_error.code(),
+                "MOTH-IMPORT-0006",
+                "an ambiguous base route must report the base ambiguity, not a missing export"
+            );
         },
     );
 }

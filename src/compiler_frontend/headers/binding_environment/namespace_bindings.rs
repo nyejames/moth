@@ -27,7 +27,6 @@ use crate::compiler_frontend::headers::module_symbols::{
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
 use crate::compiler_frontend::headers::types::DependencyBindingSyntax;
 use crate::compiler_frontend::public_interface::PublicDeclarationSemantics;
-use crate::compiler_frontend::semantic_identity::PublicExportRoute;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::source_packages::match_package_prefix;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
@@ -797,7 +796,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             type_members,
             span,
         } = input;
-        let provider_id = self
+        let resolved_clause = self
             .source_provider_dependencies
             .resolve_reexport(selection.shell)
             .ok_or_else(|| {
@@ -808,6 +807,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     ),
                 )
             })?;
+        let provider_id = resolved_clause.provider;
+        let provider_route = resolved_clause.route;
         self.register_provider_semantics_once(provider_id)?;
         let view = self
             .source_provider_dependencies
@@ -817,10 +818,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         // provider interface; otherwise an alias can silently bind an unrelated member.
         let provider_name = self.string_table.resolve(source_name);
         if view
-            .exported_origin(&PublicExportRoute::ROOT, provider_name)
+            .exported_origin(&provider_route, provider_name)
             .is_none()
             && view
-                .binding_export(&PublicExportRoute::ROOT, provider_name)
+                .binding_export(&provider_route, provider_name)
                 .is_none()
         {
             return Err(
@@ -835,7 +836,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         if let Some(origin) = view
-            .exported_origin(&PublicExportRoute::ROOT, provider_name)
+            .exported_origin(&provider_route, provider_name)
             .cloned()
         {
             let declaration = view.declaration(&origin).ok_or_else(|| {
@@ -912,7 +913,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             return Ok(());
         }
 
-        if let Some(binding) = view.binding_export(&PublicExportRoute::ROOT, provider_name) {
+        if let Some(binding) = view.binding_export(&provider_route, provider_name) {
             let symbol_id = self
                 .external_package_registry
                 .resolve_canonical_symbol(&binding.target)

@@ -804,6 +804,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             "resolved provider clause must retain its authored shell identity"
         );
         let provider_id = resolved_clause.provider;
+        let requested_route = resolved_clause.route;
         self.register_provider_semantics_once(provider_id)?;
         let view = self
             .source_provider_dependencies
@@ -825,9 +826,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             dependency.dependency.path,
         ));
         for binding in &interface.export_bindings {
-            // A bare namespace import names the provider's root surface; nested routes are
-            // separate shallow providers resolved by their own requested route.
-            if !binding.route().is_root() {
+            // A bare namespace import names exactly the requested route's direct members. A root
+            // request keeps the facade's root surface, and a nested request never exposes root,
+            // deeper or sibling route members through the same shallow record.
+            if binding.route() != &requested_route {
                 continue;
             }
             let declaration = view.declaration(binding.origin()).ok_or_else(|| {
@@ -912,7 +914,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         for binding in &interface.binding_exports {
-            if !binding.route.is_root() {
+            if binding.route != requested_route {
                 continue;
             }
             let Some(symbol_id) = self
@@ -1514,6 +1516,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 selection.source_name,
                 &selected_path,
                 selection,
+                &resolved_clause.route,
             );
         }
 
@@ -1547,6 +1550,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         provider_name: StringId,
         local_path: &PathId,
         selection: &DependencySelection,
+        route: &PublicExportRoute,
     ) -> BuilderResult<ResolvedSelectedTarget> {
         self.register_provider_semantics_once(provider_id)?;
         let view = self
@@ -1555,10 +1559,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let interface = self.source_provider_dependencies.interface(provider_id)?;
         let provider_name_text = self.string_table.resolve(provider_name);
 
-        if let Some(origin) = view
-            .exported_origin(&PublicExportRoute::ROOT, provider_name_text)
-            .cloned()
-        {
+        if let Some(origin) = view.exported_origin(route, provider_name_text).cloned() {
             // Preserve the successful-interface invariant: an exported origin must carry its
             // declaration record before either a clause or an occurrence may bind it.
             if view.declaration(&origin).is_none() {
@@ -1580,7 +1581,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             });
         }
 
-        if let Some(binding) = view.binding_export(&PublicExportRoute::ROOT, provider_name_text) {
+        if let Some(binding) = view.binding_export(route, provider_name_text) {
             let Some(symbol_id) = self
                 .external_package_registry
                 .resolve_canonical_symbol(&binding.target)
@@ -1784,7 +1785,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     diagnostic_path,
                     ..
                 } => {
-                    let provider_id = self
+                    let resolved_clause = self
                         .source_provider_dependencies
                         .resolve_reexport(provider_selection.shell)
                         .ok_or_else(|| {
@@ -1794,10 +1795,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                             ))
                         })?;
                     return self.resolve_provider_selected_target(
-                        provider_id,
+                        resolved_clause.provider,
                         provider_source_name,
                         selected_path,
                         selection,
+                        &resolved_clause.route,
                     );
                 }
                 PublicExportLookupResult::ExportedExternal { symbol_id } => {

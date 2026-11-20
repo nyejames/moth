@@ -424,11 +424,39 @@ diagnostic_family! {
         severity: DiagnosticSeverity::Error,
         title: "Ambiguous dependency target",
         facts: [path: PathFact],
-        labels: [],
+        labels: [LabelMessageCode::PREVIOUS_DECLARATION],
         extra: None,
-        ctor: generated ambiguous_import_target,
+        ctor: manual,
         view: AmbiguousImportTargetView,
         render: render_ambiguous_import_target,
+    }
+}
+
+/// Report one ambiguous dependency target with only its own path site.
+pub(crate) fn ambiguous_import_target(path: PathId, span: Option<SourceSpan>) -> DiagnosticDraft {
+    ambiguous_import_target_with_previous(path, span, None)
+}
+
+/// Report one ambiguous dependency target and label the competing authored claim.
+///
+/// WHY: eager route collisions have both authored operands even when no consumer references
+///      either, so one label must point at the other route's operand rather than repeating the
+///      primary path text only.
+pub(crate) fn ambiguous_import_target_with_previous(
+    path: PathId,
+    span: Option<SourceSpan>,
+    previous_span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    let draft = DiagnosticDraft::with_facts(&AMBIGUOUS_IMPORT_TARGET, span, |cursor| {
+        cursor.push::<PathFact>(&path)?;
+        Ok(())
+    });
+    match previous_span {
+        Some(previous_span) => draft.with_label(
+            Some(previous_span),
+            Some(LabelDraftMessage::PreviousDeclaration),
+        ),
+        None => draft,
     }
 }
 

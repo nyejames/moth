@@ -1,0 +1,4 @@
+$export @forms
+button #|label String| -> String:
+    return [:button:[label]]
+;

@@ -1,0 +1,5 @@
+@child/forms as f
+
+nested_value = f.safe_form
+
+[:entry]

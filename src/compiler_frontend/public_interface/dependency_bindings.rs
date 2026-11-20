@@ -16,7 +16,7 @@ use super::model::PublicSemanticInterface;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
+use crate::compiler_frontend::semantic_identity::{PublicExportRoute, StableModuleOriginIdentity};
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 
 use rustc_hash::FxHashMap;
@@ -41,10 +41,13 @@ impl ProviderInterfaceId {
 ///       that shell. Direct selections and namespace dependencies both consume this resolved phase.
 /// WHY: a provider interface is not the dependency clause itself; keeping both identities in one
 ///      value prevents later binding code from treating a provider row as a selected-name identity.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ResolvedDependencyClause {
     pub(crate) shell: DependencyShellId,
     pub(crate) provider: ProviderInterfaceId,
+    /// Exact public route beneath the provider facade, [`PublicExportRoute::ROOT`] when the
+    /// clause named none.
+    pub(crate) route: PublicExportRoute,
 }
 
 /// Explicit provider-dependency state for one binding.
@@ -56,8 +59,14 @@ pub(crate) struct ResolvedDependencyClause {
 ///      prelude package set is fixed by compiler policy, not selected by the active builder.
 #[derive(Debug)]
 pub(crate) enum ProviderDependencyKind {
-    Authored { shell: DependencyShellId },
-    TemplatePrelude { package_prefix: &'static str },
+    Authored {
+        shell: DependencyShellId,
+        /// Exact public route beneath the provider facade, root when the clause named none.
+        route: PublicExportRoute,
+    },
+    TemplatePrelude {
+        package_prefix: &'static str,
+    },
 }
 
 /// One official Core source package supplying the fixed `.mtf` constant prelude.
@@ -89,7 +98,7 @@ pub(crate) struct SourceProviderDependency<'a> {
 pub(crate) struct SourceProviderDependencySet<'a> {
     interfaces: Vec<&'a PublicSemanticInterface>,
     binding_views: Vec<ProviderBindingView<'a>>,
-    by_shell: FxHashMap<DependencyShellId, ProviderInterfaceId>,
+    by_shell: FxHashMap<DependencyShellId, (ProviderInterfaceId, PublicExportRoute)>,
     template_prelude: Vec<TemplatePreludeProvider>,
     by_origin: FxHashMap<StableModuleOriginIdentity, ProviderInterfaceId>,
 }
@@ -107,9 +116,9 @@ impl<'a> SourceProviderDependencySet<'a> {
         };
 
         for dependency in &dependencies {
-            match dependency.kind {
-                ProviderDependencyKind::Authored { shell } => {
-                    if set.by_shell.contains_key(&shell) {
+            match &dependency.kind {
+                ProviderDependencyKind::Authored { shell, route } => {
+                    if set.by_shell.contains_key(shell) {
                         return Err(InfrastructureFailure::internal(
                             CompilerStage::AstConstruction,
                             format!(
@@ -119,7 +128,7 @@ impl<'a> SourceProviderDependencySet<'a> {
                         ));
                     }
                     let provider_id = set.register(dependency.interface)?;
-                    set.by_shell.insert(shell, provider_id);
+                    set.by_shell.insert(*shell, (provider_id, route.clone()));
                 }
                 ProviderDependencyKind::TemplatePrelude { package_prefix } => {
                     set.register_template_prelude(package_prefix, dependency.interface)?;
@@ -253,13 +262,19 @@ impl<'a> SourceProviderDependencySet<'a> {
     ) -> Option<ResolvedDependencyClause> {
         self.by_shell
             .get(&shell)
-            .copied()
-            .map(|provider| ResolvedDependencyClause { shell, provider })
+            .map(|(provider, route)| ResolvedDependencyClause {
+                shell,
+                provider: *provider,
+                route: route.clone(),
+            })
     }
 
-    /// The provider ID selected for one public re-export dependency shell.
-    pub(crate) fn resolve_reexport(&self, shell: DependencyShellId) -> Option<ProviderInterfaceId> {
-        self.resolve_clause(shell).map(|resolved| resolved.provider)
+    /// The provider and public route selected for one public re-export dependency shell.
+    pub(crate) fn resolve_reexport(
+        &self,
+        shell: DependencyShellId,
+    ) -> Option<ResolvedDependencyClause> {
+        self.resolve_clause(shell)
     }
 
     /// Resolve one dense provider identity to its borrowed completed interface.

@@ -22522,3 +22522,94 @@ path = "config_named_template_source_reserved_rejected"
 tags = ["integration", "paths", "dependencies", "modules", "diagnostics"]
 contract = "language.dependencies.config_named_template_key_is_reserved"
 role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports"
+path = "namespaced_public_exports"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports"]
+contract = "language.dependencies.namespaced_public_exports_execute"
+role = "primary"
+
+[[case]]
+id = "namespaced_public_exports_unexported_leaf_rejected"
+path = "namespaced_public_exports_unexported_leaf_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_unexported_leaf_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_private_path_bypass_rejected"
+path = "namespaced_public_exports_private_path_bypass_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_private_path_bypass_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_deeper_route_rejected"
+path = "namespaced_public_exports_deeper_route_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_deeper_route_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_bare_parent_member_rejected"
+path = "namespaced_public_exports_bare_parent_member_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_bare_parent_member_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_route_collision_rejected"
+path = "namespaced_public_exports_route_collision_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_route_collision_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_ambiguous_base_route_rejected"
+path = "namespaced_public_exports_ambiguous_base_route_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_ambiguous_base_route_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_route_case_order_rejected"
+path = "namespaced_public_exports_route_case_order_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_route_case_order_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_same_facade_route_case_conflict_rejected"
+path = "namespaced_public_exports_same_facade_route_case_conflict_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_same_facade_route_case_conflict_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_bare_route_member_rejected"
+path = "namespaced_public_exports_bare_route_member_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_bare_route_member_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_paired_support_success"
+path = "namespaced_public_exports_paired_support_success"
+tags = ["integration", "dependencies", "packages", "facade", "namespace-bindings", "exports"]
+contract = "language.dependencies.namespaced_public_exports_paired_support_feature"
+role = "primary"
+
+[[case]]
+id = "namespaced_public_exports_mtf_head_success"
+path = "namespaced_public_exports_mtf_head_success"
+tags = ["integration", "dependencies", "templates", "facade", "namespace-bindings", "exports"]
+contract = "language.dependencies.namespaced_public_exports_mtf_head_feature"
+role = "primary"
+
+[[case]]
+id = "namespaced_public_exports_bare_route_root_member_rejected"
+path = "namespaced_public_exports_bare_route_root_member_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_bare_route_root_member_rejected"
+role = "boundary"
