@@ -1,5 +1,14 @@
 External binding packages expose typed functions, constants and opaque types implemented outside Moth. The HTML builder currently supports annotated project-local JavaScript files; WIT component imports are deferred.
 
+The intended foreign implementation families are native Rust host bindings
+through Lappet, browser-only JavaScript bindings and Wasm bindings. User-owned
+foreign implementations are untrusted for `$safe_math` and `$infallible`
+proofs. Compiler-maintained packages or approved vendored Rust libraries can have
+compiler-authorised, per-callable constraint evidence. A trusted package does
+not make each of its functions infallible or free of fast numeric behaviour.
+See @./package-origins-and-backing (Package origins and backing) and
+@../directives/constraints (Constraints).
+
 ### Annotated JavaScript dependencies
 
 The HTML builder supports annotated single-file `.js` dependency clauses through `@moth.opaque`, `@moth.sig` and `@moth.const`. `@moth.sig` declares each exposed function and `@moth.const` declares each literal-backed constant. `@moth.opaque` is required only when signatures use foreign opaque handle types. A function-only module may use `@moth.sig` without `@moth.opaque` and a constant-only module may use `@moth.const` on its own. JavaScript export names are runtime implementation details. Moth names come from annotations.
@@ -206,9 +215,23 @@ violations of a declared value contract.
 
 ### Deferred WIT component support
 
-WIT is the standard foreign Wasm/component boundary. It does not encode Moth module or package semantic interfaces. `MothSource` packages keep their Moth interfaces even when their physical output is Wasm.
+WIT is the required foreign interface for precompiled, general-purpose Wasm
+components. It does not encode Moth module or package semantic interfaces.
+`MothSource` packages keep their Moth interfaces even when their physical
+output is Wasm. Arbitrary compiled Wasm has no direct untyped import path.
 
 The HTML builder does not currently load WIT component imports. Component discovery and projection into binding-backed package metadata are deferred; no WIT component loader contract is delivered here.
+
+### Future constrained WAT bindings
+
+A separate future direct-WAT facility may let a project author small,
+specialised Wasm routines under a Moth-defined binding contract without WIT.
+It will be deliberately narrower than general component imports, with the
+compiler owning its interface, permitted operations and validated adapters.
+It is similar in purpose to inline assembly, but its source form, ABI and
+exact limits are not yet accepted. The planned annotated file-backed scalar
+WAT provider remains a bounded provider mechanism, not unrestricted Wasm
+interop. More expressive precompiled Wasm uses WIT.
 
 ### Deferred WIT surfaces
 

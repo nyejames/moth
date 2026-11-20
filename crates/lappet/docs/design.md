@@ -205,6 +205,14 @@ prevent native memory corruption. The embedding author chooses which libraries
 to expose. The Moth package manager does not fetch, compile or dynamically load
 native host extensions as a consequence of adding a Moth dependency.
 
+Runtime privilege is distinct from Moth's constraint evidence. Arbitrary Rust
+bindings registered by an embedder remain untrusted for `$safe_math` and
+`$infallible`, even though they execute with native host privileges. Only
+officially approved vendored Rust implementations can carry compiler-authorised
+per-callable evidence, and that evidence may declare fast semantics, traps or
+recoverable failure. Neither Lappet usage nor a user-declared Rust adapter
+grants constraint trust. This does not change managed package eligibility.
+
 Lappet provides reusable native Core implementations. Canonical Core signatures,
 access/effect facts and semantics remain compiler-owned. Reuse direct Wasm
 lowering or compiler runtime helpers where they already implement an operation.
@@ -316,6 +324,10 @@ V1 executes Moth core Wasm and registered Rust host imports. It does not load WI
 components, generate Canonical ABI adapters or execute C libraries compiled to
 foreign Wasm. The earlier value-only WIT profile remains a possible first future
 component contract, not a permanent ban on richer interoperability.
+
+Native Wasm and the browser JavaScript/Wasm family are Moth's official execution
+targets. A future full-stack builder composes them rather than adding another
+language backend. Other native-code targets are outside the supported roadmap.
 
 JS and WAT file-backed bindings require an explicit builder and target provider.
 Lappet has no JavaScript execution. The scalar WAT provider work does not imply

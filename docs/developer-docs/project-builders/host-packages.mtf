@@ -154,6 +154,13 @@ macro examines syntax rather than resolving arbitrary Rust names or analysing
 function bodies. It doesn't infer purity, absence of panics or application
 permissions from a function signature.
 
+Host packages registered through this public SDK remain untrusted for Moth
+constraint proofs. A descriptor cannot claim `$safe_math` or `$infallible`
+evidence. The compiler grants per-callable evidence only through its private
+official-provider path for maintained or explicitly approved vendored Rust
+implementations. Runtime Rust trust and managed package certification do not
+grant that authority.
+
 ### Values cross through an adapter
 
 The runtime adapter validates scalar encodings, numeric ranges, finite floats,
