@@ -164,10 +164,11 @@ explicit compiler or workspace selectors when library coverage is required.
 Install the executable from source with
 `cargo install --path crates/moth-cli --locked`.
 
-`just clippy` runs `cargo clippy -p moth -p moth-cli -p moth-lexical -p moth-mon`.
-`just fmt` and `just fmt-check` select the same four packages with `cargo fmt`,
-adding `--check` for the latter. Routine recipes keep code moved into the two
-standalone libraries covered without enabling extra features or targets.
+`just clippy` runs `cargo clippy` for `moth`, `moth-builder-fixture`,
+`moth-cli`, `moth-host`, `moth-lexical` and `moth-mon`. `just fmt` and
+`just fmt-check` select the same six packages with `cargo fmt`, adding
+`--check` for the latter. Routine recipes cover these libraries and the
+external-builder fixture without enabling extra features or targets.
 Broader coverage remains explicit: `just clippy-features` checks the workspace
 and all targets under the standard feature set, and `just fmt-workspace-check`
 runs `cargo fmt --all --check`. A bare Cargo command uses Cargo's defaults and
@@ -195,8 +196,14 @@ A commit or slice on a feature branch is not automatically a merge checkpoint.
     ]
 
     [td:
-        [: Completed plan or feature in final preparation for merge into main, or release readiness]
+        [: Completed plan or feature in final preparation for merge into main]
         [: `just validate-full` on the final integrated tree]
+    ]
+
+    [td:
+        [: Tagged release]
+        [: `just validate-full` and the full executing feature matrix as separate blocking
+        release jobs before package builds, with Windows remaining non-blocking]
     ]
 
     [td:
@@ -236,8 +243,9 @@ repository run. Report the selected commands and what they covered. A targeted
 or routine pass does not claim that unrun families passed.
 
 The `justfile` owns command contents. `ship`, `release` and release CI use
-`validate-full`. This policy changes when to run those commands, not their
-coverage or failure contracts.
+`validate-full`. The tagged-release workflow separately executes the feature
+matrix before building or publishing packages. This policy changes when to
+run those commands, not their failure contracts.
 
 ### Code-bearing final gate
 
@@ -292,13 +300,14 @@ require that full run.
     [td:
         [: Formatting check]
         [: `just fmt-check`]
-        [: Formatting for `moth`, `moth-cli`, `moth-lexical` and `moth-mon`, without writing source]
+        [: Formatting for `moth`, `moth-builder-fixture`, `moth-cli`, `moth-host`,
+        `moth-lexical` and `moth-mon`, without writing source]
     ]
 
     [td:
         [: Clippy]
         [: `just clippy`]
-        [: Default features and targets for `moth`, `moth-cli`, `moth-lexical` and `moth-mon`]
+        [: Default features and targets for the same six packages]
     ]
 
     [td:
@@ -355,12 +364,13 @@ require that full run.
     ]
 ]
 
-The workspace test command includes the compiler, CLI, both standalone libraries
-and `xtask`. It is not the compiler's default configuration.
+The workspace test command includes the compiler, CLI, standalone libraries,
+builder fixture, Lappet and `xtask`. It is not the compiler's default configuration.
 `xtask` depends on `moth` with
 `features = ["timers"]`, and Cargo unifies features across one resolve graph.
 The default configuration and each standard feature configuration are covered
-by `just test-feature-matrix`, not by `just validate`.
+by the explicit `just test-feature-matrix` command and tagged-release CI,
+not by `just validate` or `just validate-full`.
 
 The integration command loads the complete canonical suite and applies the shared hard-policy
 evaluator before selection or compilation. This makes missing ownership, duplicate primaries and
@@ -374,10 +384,14 @@ CLI and frontend subsets with three iterations. Scaling fits the declared metric
 against input size and fails on a budget violation or unmeasurable series. Both
 commands are non-recording. They retain their existing workloads and budgets.
 
-`just validate-full` runs the routine gate, workspace formatting, standard-feature
-Clippy, the executing feature matrix, the test honesty audit, performance checks
-and the exact no-timer release-artifact check. It finishes with cache maintenance.
-Boracle, its campaign, stress and recording benchmarks remain explicit opt-in work.
+`just validate-full` runs workspace formatting, default and standard-feature
+Clippy, routine source and feature-coverage audits, first-party dependency
+checks, workspace unit tests, integration tests, documentation checks, the
+test honesty audit, performance checks and the exact no-timer release-artifact
+check. It runs cache maintenance once. It shares the routine check recipes
+without repeating narrower formatting checks or intermediate maintenance.
+The executing feature matrix, Boracle, its campaign, stress and recording
+benchmarks remain separate explicit work.
 
 Standard-feature Clippy checks every workspace target and deliberately excludes
 Boracle. Linux, macOS and Windows CI use the same feature selection. The timer
@@ -385,10 +399,10 @@ erasure gate builds the no-timer release binary and rejects every timer-only
 marker and every name from the schema-owned metric inventory in its bytes.
 Routine source audit retains the complementary timer-source rules.
 
-The full gate deliberately covers more than the previous local recipe because
-it also executes the feature matrix and honesty audit. Compare identical scopes
-when measuring build improvements. Moving release builds out of routine
-validation is a scheduling change, not evidence that release compilation got faster.
+The full gate deliberately covers the honesty and release-artifact checks beyond
+routine validation. The feature matrix remains available through
+`just test-feature-matrix` and runs on tagged releases. This changes validation
+scheduling, not the coverage or compilation cost of the feature lanes.
 
 ### Cache maintenance
 
@@ -420,9 +434,10 @@ preview the selected files and then apply package-scoped Cargo cleaning:
     just cache-evict
 ]
 
-This evicts current dev/test artifacts for `moth`, `moth-cli`, `moth-lexical`, `moth-mon`
-and `xtask`, so the next run pays a rebuild. It preserves unrelated dependencies
-and release builds. It is never automatically triggered by the size warning
+This evicts current dev/test artifacts for `moth`, `moth-builder-fixture`,
+`moth-cli`, `moth-host`, `moth-lexical`, `moth-mon` and `xtask`, so the next run
+pays a rebuild. It preserves unrelated dependencies and release builds.
+It is never automatically triggered by the size warning
 and may not bring all target usage under budget. Use a one-time clean for a
 profile migration, not after each run.
 
@@ -459,7 +474,7 @@ the single owner of what that file says. The inventory has four parts:
   present so a missing report can never be read as a clean one.
 
 The source scan walks `src`, `crates/moth-cli/src`, `crates/moth-cli/tests`,
-`crates/moth-lexical/src`, `crates/moth-mon/src`,
+`crates/moth-host/src`, `crates/moth-lexical/src`, `crates/moth-mon/src`,
 `crates/moth-mon/tests` and `xtask/src`. Nested subsystem test directories are
 included recursively. Missing configured roots fail the audit. The console and
 inventory name the roots scanned by the run.
@@ -507,7 +522,7 @@ have one owner:
 ]
 
 It walks `src`, `crates/moth-cli/src`, `crates/moth-cli/tests`,
-`crates/moth-lexical/src`, `crates/moth-mon/src`,
+`crates/moth-host/src`, `crates/moth-lexical/src`, `crates/moth-mon/src`,
 `crates/moth-mon/tests` and `xtask/src` once, including nested subsystem tests,
 and reports typed findings with the file each was found in. The console and
 JSON report list those roots. Missing configured roots fail the audit. Only the
@@ -572,8 +587,8 @@ The same dependency-kind and canonical-name checks keep `moth` independent of
 
 ### Feature lanes
 
-`just validate` runs one standard feature configuration. The standard lanes run all standard
-configurations:
+`just validate` runs the workspace-unified feature configuration. The
+package-scoped feature matrix executes all standard configurations:
 
 [codeblock, $code "bash":
     just test-feature-matrix
@@ -582,8 +597,9 @@ configurations:
 Package-scoped standard lanes cover the compiler's default configuration,
 `timers`, `detailed_timers`, `benchmark_counters`, `timers` with
 `benchmark_counters` (including the retained-layout memory probe), the scoped-block
-feature lane, every `show_*` feature, `xtask` and feature-free runs of
-`moth-lexical` and `moth-mon`. Matching CLI lanes execute the forwarded
+feature lane, every `show_*` feature, `xtask` and standalone runs of
+`moth-lexical`, `moth-mon`, `moth-host`, `moth-builder-fixture` and Lappet
+with and without its runtime feature. Matching CLI lanes execute the forwarded
 configurations independently, retaining the compiler's own unit-test lanes.
 `testing.mtf > Feature and platform lanes` owns the lane table and each lane's coverage.
 
@@ -591,9 +607,10 @@ The `boracle` feature is an opt-in developer lane. `just boracle` owns its forma
 feature-enabled Clippy and smoke test. The `boracle-campaign` lane, using `boracle_campaign`, is a
 separate opt-in developer lane owned by `just boracle-campaign`. It was measured at roughly 61
 seconds against roughly 8 seconds for the default lane, so it cannot belong in the default lane.
-Matching CLI opt-in lanes run through those same recipes. These lanes are
-intentionally excluded from `just validate`, `just validate-full`,
-`just test-feature-matrix` and ordinary CI gates.
+Matching CLI opt-in lanes run through those same recipes. The structured
+compiler-bug subprocess tests use their separate `just compiler-bug-test`
+lane. These opt-in lanes are intentionally excluded from `just validate`,
+`just validate-full`, `just test-feature-matrix` and ordinary CI gates.
 
 Lanes use `cargo test -p <package>` rather than `--workspace` because Cargo unifies features across
 one resolve graph. `xtask` requires `moth` with `timers`, so no workspace-wide command can run the
@@ -602,15 +619,19 @@ default configuration.
 `just feature-lane-check` proves the mapping without running a lane, and is part of `just validate`.
 The report distinguishes standard and opt-in lane owners. Adding a Cargo feature means adding it
 to a standard or opt-in lane in the same change. The check fails otherwise.
-Run affected executing lanes for feature-gated work even when the routine gate passes.
-Use the relevant package, feature set and test filter during a branch slice.
-Run the complete standard matrix at full-validation checkpoints rather than
-for every intermediate feature-branch commit.
+Run affected executing lanes for feature-gated work even when the routine gate
+passes. Use the relevant package, feature set and test filter during a branch slice.
+The complete standard matrix runs for tagged releases, and developers can
+invoke it explicitly when the change warrants it. It is not a merge-readiness
+prerequisite for ordinary branches or main commits. A main commit can therefore
+pass routine CI while an isolated feature lane fails. The release matrix blocks
+publication of that revision, while targeted lane tests provide earlier
+protection during feature development.
 
 ### CI gates
 
 `just validate` is the routine local gate and is deliberately fail-fast: the first failure stops
-the run. `just validate-full` provides all standard families as one fail-fast command.
+the run. `just validate-full` provides all merge-readiness families as one fail-fast command.
 The per-main-commit requirement is independent of how frequently CI is triggered.
 A push containing several main commits does not establish full evidence for each
 one merely because CI tested its final revision.
@@ -637,11 +658,6 @@ another from reporting:
     [td:
         [: `unit-tests`]
         [: `just ci-gate-unit-tests`]
-    ]
-
-    [td:
-        [: `feature-matrix`]
-        [: `just ci-gate-feature-matrix`]
     ]
 
     [td:
@@ -686,18 +702,26 @@ another from reporting:
 ]
 
 Each gate runs on Linux, macOS and Windows. Every gate consumes the Rust release pinned by
-`rust-toolchain.toml`. The `unit-tests`, `feature-matrix` and `integration` gates execute rendered
-JavaScript and also install the Node release pinned by `.node-version`. The workflow result is still
-failed when any blocking gate fails. The `integration`, `feature-matrix`, `first-party-deps` and
-`honesty-audit` gates
+`rust-toolchain.toml`. The `unit-tests` and `integration` gates execute rendered
+JavaScript and also install the Node release pinned by `.node-version`. Every gate job
+installs the same pinned `just` release binary rather than compiling the runner
+and its dependencies through Cargo. Superseded gate jobs for the same branch,
+OS and gate are cancelled while Pages deployment retains its own non-cancelling
+concurrency policy. The workflow result is still failed when any blocking gate
+fails. The `integration`, `first-party-deps` and `honesty-audit` gates
 upload `target/test-reports/` whether they passed or failed, because a failed run's report is the
 evidence a reviewer needs most.
 
-`unit-tests` and `feature-matrix` overlap on purpose. `unit-tests` runs the workspace-unified
-command a developer runs locally. `feature-matrix` runs the configurations that command cannot
-reach.
+`unit-tests` runs the workspace-unified command a developer runs locally.
+It cannot execute default and isolated feature configurations because Cargo
+unifies features across the workspace. The tagged-release workflow therefore
+runs `just test-feature-matrix` separately on Linux, macOS and Windows. Linux
+and macOS matrix failures block release builds and publication. Windows remains
+non-blocking under the same platform policy as regular CI. Failed matrix
+runs upload their lane outcomes for review. Both the full gate and feature
+matrix must finish successfully on their blocking platforms before builds start.
 
-The release workflow uses `just validate-full`. The split gates report on pushes
+The release workflow uses `just validate-full` alongside this matrix. The split gates report on pushes
 to main and manual workflow dispatch. Creating a PR does not itself trigger this
 workflow, and no CI result may be claimed without an actual completed run.
 
@@ -708,12 +732,14 @@ but does not fail the workflow or hold back deployment.
 
 Windows becomes blocking when both hold:
 
-- every gate has passed on `windows-latest` in one run of the default branch
+- every routine gate has passed on `windows-latest` in one run of the default branch,
+  and the feature matrix has passed on Windows in a tagged-release run
 - no Windows-only failure is open in the exposed-failure ledger
 
-The change is then removing `continue-on-error` from the gate job. Until that happens, a Windows
-result is evidence to act on, not a gate that can be ignored: a Windows-only failure belongs in the
-ledger like any other.
+The change is then removing `continue-on-error` from both the routine gate
+job and the tagged-release feature-matrix job. Until that happens, a Windows
+result is evidence to act on, not a gate that can be ignored. A Windows-only
+failure belongs in the ledger like any other.
 
 A platform-specific test may be absent only when the underlying API does not exist on that
 platform. An equivalent portable policy test should still run everywhere. `testing.mtf > Feature
@@ -943,7 +969,8 @@ checks can close a branch slice without implying full merge readiness.
 ### Formatting
 
 - Run `cargo fmt` when Rust files changed, or `cargo fmt --all` for workspace changes.
-- `just validate` checks routine formatting for the compiler, CLI and both extracted libraries.
+- `just validate` checks routine formatting for the compiler, CLI, builder fixture,
+  host and both extracted libraries.
 - `just validate-full` also checks formatting throughout the workspace.
 - Do not solve formatting failures through lint suppression.
 - Documentation-only changes do not require Rust formatting.

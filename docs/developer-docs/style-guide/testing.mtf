@@ -627,8 +627,9 @@ contract, not source-level aggregate layout, allocation or field/index support.
 ### Feature and platform lanes
 
 A feature-gated test that no command runs is not a test. Every declared Cargo feature belongs to a
-lane. Standard lanes run in the feature matrix. Deliberately expensive developer systems may use an
-opt-in lane with its own named command:
+lane. Standard lanes run in the feature matrix on tagged releases, or when a developer explicitly
+invokes it. Deliberately expensive developer systems may use an opt-in lane with its own named
+command:
 
 [codeblock, $code "bash":
     just test-feature-matrix
@@ -701,6 +702,30 @@ opt-in lane with its own named command:
     ]
 
     [td:
+        [: `moth-host`]
+        [: none]
+        [: standalone descriptor vocabulary unit tests]
+    ]
+
+    [td:
+        [: `moth-builder-fixture`]
+        [: none]
+        [: external-crate acceptance of the public builder SDK]
+    ]
+
+    [td:
+        [: `lappet`]
+        [: none]
+        [: dependency-free Lappet build without Wasmtime]
+    ]
+
+    [td:
+        [: `lappet-runtime`]
+        [: `runtime`]
+        [: native Wasm execution mechanics over core Wasm fixtures]
+    ]
+
+    [td:
         [: `boracle`]
         [: `boracle`]
         [: the reference-solver developer gate, owned by `just boracle` and excluded from the
@@ -712,6 +737,13 @@ opt-in lane with its own named command:
         [: the measured generated differential campaign, owned by `just boracle-campaign`: 2048
         deterministic generated shapes per cyclic mode, 4096 problems and 8192 comparisons,
         classified through the same differential comparison the `boracle` lane uses]
+    ]
+
+    [td:
+        [: `compiler-bug-test`]
+        [: `test_compiler_bug`]
+        [: the structured compiler-bug trigger and CLI exit contract, owned by
+        `just compiler-bug-test` and excluded from the standard matrix]
     ]
 ]
 
@@ -735,13 +767,14 @@ Feature coverage is checked mechanically, without running a lane:
     just feature-lane-check
 ]
 
-`just feature-lane-check` checks the compiler, CLI, lexical, MON and `xtask`
-manifests against `cfg` references in their source and test directories. It
-fails on uncovered or unknown features and missing roots. Its report at
+`just feature-lane-check` checks the compiler, CLI, lexical, MON, host,
+builder-fixture, Lappet and `xtask` manifests against `cfg` references in
+their source and test directories. It fails on uncovered or unknown features
+and missing roots. Its report at
 `target/test-reports/feature_lane_coverage.json` maps features to lanes and
 files, not outcomes. `just test-feature-matrix` records executed standard
-lanes in `target/test-reports/feature_matrix_results.json`; `boracle` and
-`boracle-campaign` run only through their named opt-in commands.
+lanes in `target/test-reports/feature_matrix_results.json`. The Boracle,
+campaign and compiler-bug lanes run only through their named opt-in commands.
 
 Adding a Cargo feature means adding it to a standard or opt-in lane in the same change. The gate
 fails otherwise.
@@ -780,8 +813,11 @@ Platform-gated tests are owned by the platform that has the API:
     ]
 ]
 
-CI runs every gate on Linux, macOS and Windows, so a platform-gated owner executes wherever its API
-exists. A platform-specific test may be absent only when the underlying API does not exist there;
+Routine CI runs its gates on Linux, macOS and Windows. The complete feature
+matrix runs on those same platforms for tagged releases, with Windows still
+non-blocking. A platform-gated owner therefore executes wherever its API
+exists at the applicable validation checkpoint. A platform-specific test may
+be absent only when the underlying API does not exist there;
 an equivalent portable policy test should still run everywhere. Windows results are currently
 non-blocking - `validation.mtf` owns that status and the conditions that end it.
 

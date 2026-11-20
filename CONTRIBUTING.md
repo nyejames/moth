@@ -71,7 +71,10 @@ Intermediate branch commits use the smallest checks that cover their changes.
 Run `just validate` at important boundaries. Reserve `just validate-full` for
 final plan or feature merge preparation and release readiness. Every commit
 landing on `main`, including documentation-only commits, needs full validation
-of its resulting tree. The validation guide owns the exact evidence rules.
+of its resulting tree. The expensive package-scoped feature matrix runs on
+tagged releases, or explicitly with `just test-feature-matrix` when a feature
+change needs isolated-configuration coverage. The validation guide owns the
+exact evidence rules.
 
 ## Command guide
 
@@ -84,12 +87,13 @@ of its resulting tree. The validation guide owns the exact evidence rules.
 - `cargo run --quiet -- tests --list [filters]` - list selected suite metadata without compiling
 - `cargo run --quiet -- tests --audit` - validate and write the complete suite inventory
 - `cargo clippy` - lint the default CLI package and its dependencies
-- `just clippy` - lint `moth`, `moth-cli`, `moth-lexical` and `moth-mon` with default features and targets
+- `just clippy` - lint `moth`, `moth-builder-fixture`, `moth-cli`, `moth-host`, `moth-lexical` and `moth-mon` with default features and targets
 - `cargo fmt` - format with Cargo's default package selection
-- `just fmt` / `just fmt-check` - format or check the compiler, CLI and both extracted libraries
+- `just fmt` / `just fmt-check` - format or check the same six packages
 - `just validate` - routine correctness at important feature-branch boundaries
 - `just validate-perf` - non-recording benchmark and scaling evidence when the change needs it
-- `just validate-full` - final merge preparation, every main commit and release readiness
+- `just validate-full` - full merge-readiness validation with performance and timer-erasure checks, without the executing feature matrix
+- `just test-feature-matrix` - complete package-scoped feature matrix, blocking on tagged releases or available explicitly
 - `just cache-maintain` - conservative timing-report retention and a soft target size warning
 - `just cache-evict-preview` - preview explicit workspace dev/test eviction before `just cache-evict`
 - `just bench-check` - non-recording performance evidence
@@ -97,9 +101,11 @@ of its resulting tree. The validation guide owns the exact evidence rules.
 - `just bench-report` - inspect local benchmark history
 - `just profile-case <case> [filter]` - profile a selected benchmark case
 
-Source audit, feature-lane coverage and the honesty audit include `src`,
-`crates/moth-lexical/src`, `crates/moth-mon/src`, `crates/moth-mon/tests` and
-`xtask/src`. Routine formatting and Clippy cover both extracted packages.
+Source audit and honesty audit include `src`, `crates/moth-cli/src`,
+`crates/moth-cli/tests`, `crates/moth-host/src`, `crates/moth-lexical/src`,
+`crates/moth-mon/src`, `crates/moth-mon/tests` and `xtask/src`.
+Feature-lane coverage also inspects the builder fixture and Lappet sources.
+Routine formatting and Clippy cover the six packages listed above.
 The first-party dependency gate checks Cargo metadata, including development
 and build edges: `moth-lexical` depends on no workspace package and `moth-mon`
 may depend only on `moth-lexical`, never `moth` or `xtask`.

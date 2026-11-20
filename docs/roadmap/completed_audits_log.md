@@ -8,6 +8,7 @@ Historical formal audit resolutions and the index of reports with no outstanding
 
 ## Closed reports
 
+- [AUD-0026: HTML runtime-glue assembly redundancy](./audits/closed_audits/AUD-0026-runtime-glue-redundancy.md)
 - [AUD-0001: Redundancy across integration and unit test support](./audits/closed_audits/AUD-0001-test-support-redundancy.md)
 - [AUD-0002: Stage 0 source discovery and preparation performance](./audits/closed_audits/AUD-0002-stage0-discovery-preparation-performance.md)
 - [AUD-0003: Runtime assertion messages and call-argument consolidation](./audits/closed_audits/AUD-0003-runtime-assertion-messages-call-arguments.md)
@@ -32,6 +33,14 @@ Historical formal audit resolutions and the index of reports with no outstanding
 - [AUD-0023: Numeric proof side-table performance](./audits/closed_audits/AUD-0023-numeric-proofs-performance.md)
 
 ## Resolution records
+
+- AUD-0026 completed without Redundancy findings at `72330758a`. Reviewed all six HTML external-JS
+  runtime-glue modules, their selected-export and wrapper paths, URL and import-map assembly,
+  runtime-module emission and the adjacent builder/registry handoffs. Per-entry demand and
+  build-wide emission remain distinct, and structural resource URLs have different input and
+  ownership contracts from JS module import URLs. Coverage is complete for the defined area.
+  The Rust toolchain was unavailable, so no tests or documentation build ran. See
+  [AUD-0026](./audits/closed_audits/AUD-0026-runtime-glue-redundancy.md).
 
 - AUD-0023 completed without findings at `e49a166e8`. Sampled `moth check` and HTML-JS
   `moth build` on generated `narrow-chains` workloads of up to 4,096 operations per chain. The
