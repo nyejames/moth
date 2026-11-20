@@ -1,5 +1,6 @@
 use super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
 use super::*;
+use crate::build_system::create_project_modules::ProjectFrontendCompilation;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::ValueReceiverContext;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
@@ -10,6 +11,12 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use std::num::NonZeroU32;
+
+/// Minimal directory-project config used by the in-root config-symlink tests.
+///
+/// The project name proves the selected config was loaded rather than defaulted from the
+/// containing directory name.
+const LINKED_CONFIG_SOURCE: &str = "project #= (\n    name = \"linked\",\n)\nhtml #= ()\n";
 
 fn assert_project_config_identity(
     result: CompilationResult<()>,
@@ -1574,6 +1581,48 @@ fn assert_config_path_infrastructure_error(
     );
 }
 
+/// Load one directory project's bootstrap config and compile its frontend in one step.
+///
+/// WHY: the bootstrap source builder must stay alive across config loading and Stage 0
+/// discovery, so tests that only inspect the final outcome should not repeat the owner setup.
+fn compile_directory_project_with_loaded_config(
+    root: PathBuf,
+) -> CompilationResult<ProjectFrontendCompilation> {
+    let mut config = Config::new(root);
+    let style_directives = test_style_directives();
+    let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let services = ProjectConfigParseServices {
+        style_directives: &style_directives,
+        frontend_surface: &frontend_surface,
+        build_config_inputs: &build_config_inputs,
+    };
+    let mut string_table = StringTable::new();
+    let mut source_builder = Some(SourceDatabaseBuilder::new(SourceDatabase::empty()));
+    let validated_output_settings = load_project_config(
+        &mut config,
+        &services,
+        &mut source_builder,
+        &mut string_table,
+    )
+    .unwrap_or_else(|_| panic!("config should load"));
+    let mut project_source_files = None;
+    let mut warning_owner =
+        crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator::with_root_string_table(string_table);
+    compile_project_frontend_with_inputs(
+        &mut config,
+        crate::build_system::BuildProfile::Dev,
+        validated_output_settings.as_ref(),
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+        &mut project_source_files,
+        &mut source_builder,
+        &build_config_inputs,
+        FrontendCompilationMode::Canonical,
+    )
+}
+
 #[cfg(unix)]
 #[test]
 fn dangling_config_symlink_diagnoses_instead_of_defaulting() {
@@ -1674,6 +1723,223 @@ fn in_root_config_symlink_to_differently_named_source_loads() {
         "an in-root config symlink must configure this project"
     );
     assert_eq!(config.project_name, "linked");
+}
+
+#[cfg(unix)]
+#[test]
+fn in_root_config_symlink_completes_directory_build() {
+    use std::os::unix::fs::symlink;
+
+    // The timing collector is process-global, so an unguarded compile can inherit an active
+    // session's boundary/module IDs. Hold the shared instrumentation lock to keep this compile out
+    // of exact-snapshot timing tests.
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().join("docs");
+    fs::create_dir_all(&root).expect("should create directory project root");
+    let target = root.join("actual_config.moth");
+    fs::write(&target, LINKED_CONFIG_SOURCE).expect("should write in-root config target");
+    symlink("actual_config.moth", root.join(settings::CONFIG_FILE_NAME))
+        .expect("should create in-root config symlink");
+    fs::write(root.join("@entry.moth"), "value = 1\n").expect("should write the entry root");
+
+    let mut config = Config::new(root);
+    let style_directives = test_style_directives();
+    let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let services = ProjectConfigParseServices {
+        style_directives: &style_directives,
+        frontend_surface: &frontend_surface,
+        build_config_inputs: &build_config_inputs,
+    };
+    let mut string_table = StringTable::new();
+    let mut source_builder = Some(SourceDatabaseBuilder::new(SourceDatabase::empty()));
+    let validated_output_settings = load_project_config(
+        &mut config,
+        &services,
+        &mut source_builder,
+        &mut string_table,
+    )
+    .unwrap_or_else(|_| panic!("in-root config symlink should load"));
+    let canonical_target =
+        fs::canonicalize(&target).expect("in-root config target should canonicalize");
+    let bootstrap_sources = source_builder
+        .as_ref()
+        .expect("bootstrap source builder should be retained");
+    let config_source_id = bootstrap_sources
+        .config_source_id()
+        .expect("bootstrap must carry the config source identity into discovery");
+    let registered_config_id = bootstrap_sources
+        .sources()
+        .get_by_canonical_path(&canonical_target)
+        .map(|slot| slot.id);
+    assert_eq!(
+        registered_config_id,
+        Some(config_source_id),
+        "bootstrap must keep the canonical config identity in its owning source database"
+    );
+
+    let mut project_source_files = None;
+    let mut warning_owner =
+        crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator::with_root_string_table(string_table);
+    let frontend = successful_compilation_value(compile_project_frontend_with_inputs(
+        &mut config,
+        crate::build_system::BuildProfile::Dev,
+        validated_output_settings.as_ref(),
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+        &mut project_source_files,
+        &mut source_builder,
+        &build_config_inputs,
+        FrontendCompilationMode::Canonical,
+    ));
+
+    assert_eq!(
+        frontend
+            .project
+            .successful_artefacts_in_module_id_order()
+            .count(),
+        1,
+        "the config target must not become a second project module"
+    );
+    let source_files = frontend
+        .project_source_database
+        .as_ref()
+        .expect("directory compilation retains the project source database");
+    let config_sources = source_files
+        .iter()
+        .filter(|slot| slot.canonical_os_path.as_deref() == Some(canonical_target.as_path()))
+        .count();
+    assert_eq!(
+        config_sources, 1,
+        "the config target must keep exactly its bootstrap source identity, not a second \
+         ordinary-source slot"
+    );
+    assert!(
+        source_files
+            .get_by_canonical_path(&canonical_target)
+            .is_some(),
+        "the config target keeps exactly its bootstrap source identity"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn in_root_config_symlink_target_named_project_is_not_a_project_global() {
+    use std::os::unix::fs::symlink;
+
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().join("docs");
+    fs::create_dir_all(&root).expect("should create directory project root");
+    let target = root.join("project.moth");
+    fs::write(&target, LINKED_CONFIG_SOURCE).expect("should write in-root config target");
+    symlink("project.moth", root.join(settings::CONFIG_FILE_NAME))
+        .expect("should create in-root config symlink");
+    fs::write(root.join("@entry.moth"), "value = 1\n").expect("should write the entry root");
+
+    successful_compilation_value(compile_directory_project_with_loaded_config(root));
+}
+
+#[test]
+fn genuine_project_source_file_at_entry_root_still_rejected() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().join("docs");
+    fs::create_dir_all(&root).expect("should create directory project root");
+    fs::write(root.join(settings::CONFIG_FILE_NAME), LINKED_CONFIG_SOURCE)
+        .expect("should write config");
+    fs::write(root.join("@entry.moth"), "value = 1\n").expect("should write the entry root");
+    fs::write(root.join("project.moth"), "projected = 1\n")
+        .expect("should write the reserved project source");
+
+    let result = compile_directory_project_with_loaded_config(root);
+
+    let reports = diagnosed_reports(&result);
+    assert!(
+        reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, diagnostic)| {
+                diagnostic.descriptor().code == "MOTH-CONFIG-0001"
+                    && diagnostic
+                        .family_view::<InvalidConfigView>()
+                        .is_some_and(|facts| {
+                            facts.reason == InvalidConfigCode::ProjectGlobalsNameReserved
+                        })
+            }),
+        "a genuine project-named source must still claim the reserved @project namespace"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn chained_config_symlink_through_project_name_builds() {
+    use std::os::unix::fs::symlink;
+
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().join("docs");
+    fs::create_dir_all(&root).expect("should create directory project root");
+    let target = root.join("actual_config.moth");
+    fs::write(&target, LINKED_CONFIG_SOURCE).expect("should write in-root config target");
+    symlink("actual_config.moth", root.join("project.moth"))
+        .expect("should create the intermediate config symlink");
+    symlink("project.moth", root.join(settings::CONFIG_FILE_NAME))
+        .expect("should create the selected config symlink");
+    fs::write(root.join("@entry.moth"), "value = 1\n").expect("should write the entry root");
+
+    successful_compilation_value(compile_directory_project_with_loaded_config(root));
+}
+
+#[cfg(unix)]
+#[test]
+fn config_symlink_target_svg_and_mtf_aliases_stay_reserved() {
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+        InvalidCompileTimePathCode, InvalidCompileTimePathView,
+    };
+    use std::os::unix::fs::symlink;
+
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    // Resource and content aliases both reach physical resolution. The `.mtf` case previously
+    // reported an internal missing-index failure instead of the authored reservation diagnostic.
+    for (index, (alias, entry_source)) in [
+        ("alias.svg", "icon #= @alias.svg\n"),
+        ("alias.mtf", "note #= @alias.mtf\n"),
+        ("project.mtf", "note #= @project.mtf\n"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let root = _temp.path().join(format!("docs_{index}"));
+        fs::create_dir_all(&root).expect("should create directory project root");
+        let target = root.join("actual_config.moth");
+        fs::write(&target, LINKED_CONFIG_SOURCE).expect("should write in-root config target");
+        symlink("actual_config.moth", root.join(settings::CONFIG_FILE_NAME))
+            .expect("should create in-root config symlink");
+        symlink(settings::CONFIG_FILE_NAME, root.join(alias))
+            .expect("should create a config-target alias");
+        fs::write(root.join("@entry.moth"), entry_source).expect("should write the entry root");
+
+        let result = compile_directory_project_with_loaded_config(root);
+
+        let reports = diagnosed_reports(&result);
+        let matched = reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, diagnostic)| {
+                diagnostic.descriptor().code == "MOTH-RULE-0063"
+                    && diagnostic
+                        .family_view::<InvalidCompileTimePathView>()
+                        .is_some_and(|facts| {
+                            facts.reason == InvalidCompileTimePathCode::ReservedConfigFile
+                        })
+            });
+        assert!(
+            matched,
+            "{alias} must stay reserved as a file value rather than become ordinary source"
+        );
+    }
 }
 
 #[cfg(unix)]

@@ -242,6 +242,21 @@ impl<'a> FileReferenceResolver<'a> {
             }
         };
 
+        // The bootstrap config source is build-only even when an authored alias resolves to its
+        // canonical path under an ordinary-looking sibling name. Exclude that one source identity
+        // before source admission; the SourceTreeIndex never contains it as an ordinary row.
+        if self.source_tree_index.config_source_path(source_files) == Some(canonical.as_path()) {
+            return Ok(self.diagnostic_outcome(
+                source_file,
+                reference,
+                authored_path,
+                invalid_reason(
+                    PhysicalInvalidReason::ReservedConfigFile,
+                    &mut DiagnosticStringBuilder::new(string_table),
+                ),
+            ));
+        }
+
         // Canonical directory ancestry catches a visible symlink alias whose physical target lies
         // inside an excluded `_` subtree. The terminal file name is not a directory component.
         if canonical.parent().is_some_and(|parent| {

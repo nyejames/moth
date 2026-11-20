@@ -263,8 +263,8 @@ fn directory_resolution_accepts_targets_inside_a_config_named_directory() {
     let index = SourceTreeIndex::discover(
         canonical_src.clone(),
         SourceTreeProjectContext {
-            project_root: &canonical_root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &source_packages,
@@ -370,8 +370,8 @@ fn directory_physical_aliases_to_config_file_are_rejected_before_dispatch() {
     let index = SourceTreeIndex::discover(
         canonical_src.clone(),
         SourceTreeProjectContext {
-            project_root: &canonical_root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &source_packages,

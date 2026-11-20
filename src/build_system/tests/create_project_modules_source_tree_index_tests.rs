@@ -140,7 +140,6 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     config.project_name = String::from("docs");
     config.output_roots.dev_output = Some(String::from("scratch"));
     config.output_roots.release_output = Some(String::from("generated"));
-    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
     let canonical_entry_root =
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");
     let mut string_table = StringTable::new();
@@ -156,8 +155,8 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     let index = super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root.clone(),
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &canonical_root,
             validated_output_settings: Some(&validated_output_settings),
+            config_source: None,
         },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -240,7 +239,6 @@ fn source_tree_index_ignores_collision_in_fixed_skipped_directory() {
         .expect("should write nested reserved config");
 
     let config = Config::new(root.clone());
-    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
     let canonical_entry_root =
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");
     let mut string_table = StringTable::new();
@@ -248,8 +246,8 @@ fn source_tree_index_ignores_collision_in_fixed_skipped_directory() {
     let index = super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &canonical_root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -277,7 +275,6 @@ fn source_tree_index_ignores_package_prefix_collision_in_skipped_directory() {
     fs::write(entry_root.join("@entry.moth"), "").expect("should write entry root");
 
     let config = Config::new(root.clone());
-    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
     let canonical_entry_root =
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");
 
@@ -294,8 +291,8 @@ fn source_tree_index_ignores_package_prefix_collision_in_skipped_directory() {
     super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &canonical_root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &source_packages,
@@ -326,8 +323,8 @@ fn source_tree_index_rejects_exact_nested_package_path_but_allows_ancestor() {
         super::source_tree_index::SourceTreeIndex::discover(
             entry.clone(),
             super::source_tree_index::SourceTreeProjectContext {
-                project_root: &root,
                 validated_output_settings: None,
+                config_source: None,
             },
             &config,
             &packages,
@@ -410,8 +407,8 @@ fn source_tree_index_rejects_project_folders_that_claim_official_core_package_pr
         super::source_tree_index::SourceTreeIndex::discover(
             entry.clone(),
             super::source_tree_index::SourceTreeProjectContext {
-                project_root: &root,
                 validated_output_settings: None,
+                config_source: None,
             },
             &config,
             &packages,
@@ -520,8 +517,8 @@ fn discover_project_with(files: &[(&str, &str)]) -> Result<(), PreparedFailure> 
     super::source_tree_index::SourceTreeIndex::discover(
         entry,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &packages,
@@ -602,7 +599,6 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
     fs::write(entry_root.join("@entry.moth"), "").expect("should write entry root");
 
     let config = Config::new(root.clone());
-    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
     let canonical_entry_root =
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");
     let mut string_table = StringTable::new();
@@ -610,8 +606,8 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
     let failure = super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &canonical_root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -780,15 +776,14 @@ fn invalid_root_beside_canonical_facade_is_rejected() {
     fs::write(entry_root.join("@page.moth"), "").expect("should write invalid root filename");
 
     let config = Config::new(root.clone());
-    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
     let canonical_entry_root =
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");
     let mut string_table = StringTable::new();
     let failure = super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &canonical_root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -815,15 +810,14 @@ fn marked_project_root_follows_the_invalid_root_lane() {
         fs::write(entry_root.join(invalid_root), "").expect("should write invalid root marker");
 
         let config = Config::new(root.clone());
-        let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
         let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
-                project_root: &canonical_root,
                 validated_output_settings: None,
+                config_source: None,
             },
             &config,
             &crate::builder_surface::SourcePackageRegistry::default(),
@@ -858,16 +852,14 @@ fn explicitly_selected_hidden_root_compiles_but_nested_hidden_descendants_do_not
     fs::write(selected.join("visible/@entry.moth"), "").expect("should write visible descendant");
 
     let config = Config::new(selected.clone());
-    let canonical_project_root =
-        fs::canonicalize(&project_root).expect("project root should canonicalize");
     let canonical_selected =
         fs::canonicalize(&selected).expect("selected root should canonicalize");
     let mut string_table = StringTable::new();
     let index = super::source_tree_index::SourceTreeIndex::discover(
         canonical_selected,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &canonical_project_root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -925,8 +917,8 @@ fn directory_alias_into_hidden_tree_creates_no_namespace_or_collision() {
     let index = super::source_tree_index::SourceTreeIndex::discover(
         canonical_root.clone(),
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &canonical_root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -979,8 +971,8 @@ fn directory_alias_into_fixed_skipped_descendant_is_excluded() {
     let index = super::source_tree_index::SourceTreeIndex::discover(
         canonical_root.clone(),
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &canonical_root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -1018,16 +1010,14 @@ fn directory_alias_outside_entry_root_does_not_create_a_folder_claim() {
     symlink(&outside, entry_root.join("helper")).expect("should create external directory alias");
 
     let config = Config::new(project_root.clone());
-    let canonical_project_root =
-        fs::canonicalize(&project_root).expect("project root should canonicalize");
     let canonical_entry_root =
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");
     let mut string_table = StringTable::new();
     let index = super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &canonical_project_root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -1475,8 +1465,8 @@ fn source_tree_index_excludes_file_symlinks_into_hidden_directories() {
     let index = super::source_tree_index::SourceTreeIndex::discover(
         canonical_root.clone(),
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &canonical_root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),

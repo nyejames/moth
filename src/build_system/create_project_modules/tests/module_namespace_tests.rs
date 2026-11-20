@@ -132,8 +132,8 @@ fn entry_root_file_is_not_a_same_module_namespace_entry() {
     let index = SourceTreeIndex::discover(
         root.clone(),
         SourceTreeProjectContext {
-            project_root: &root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &SourcePackageRegistry::default(),
@@ -189,8 +189,8 @@ fn config_named_template_publishes_reserved_key_as_same_module_source() {
     let index = SourceTreeIndex::discover(
         root.clone(),
         SourceTreeProjectContext {
-            project_root: &root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &SourcePackageRegistry::default(),

@@ -124,6 +124,9 @@ pub fn load_project_config(
     project_source_builder: &mut Option<SourceDatabaseBuilder>,
     string_table: &mut StringTable,
 ) -> Result<Option<ValidatedDirectoryOutputSettings>, ProjectConfigFailure> {
+    if let Some(source_builder) = project_source_builder.as_mut() {
+        source_builder.clear_config_source_id();
+    }
     let config_path = config.config_file_path();
 
     // Single-file compilation uses its separate synthetic path and must not probe a
@@ -332,6 +335,7 @@ pub(crate) fn compile_project_config_file(
             "project config source database is absent",
         ))
     })?;
+    source_builder.clear_config_source_id();
     let canonical_config_path = std::fs::canonicalize(config_path).map_err(|error| {
         PreparedFailure::from(InfrastructureFailure::filesystem(
             CompilerStage::ProjectBuildAssembly,
@@ -379,6 +383,9 @@ pub(crate) fn compile_project_config_file(
             ),
             SourceDatabaseError::Infrastructure(error) => PreparedFailure::from(error),
         })?;
+    // Carry the bootstrap-registered config identity through Stage 0 construction. The canonical
+    // path stays owned by this source slot; consumers borrow it through this ID.
+    source_builder.set_config_source_id(config_file_id);
 
     let mut path_fork = PathInternerFork::empty();
     let source_code = match extract_source_code(&canonical_config_path) {

@@ -551,8 +551,8 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &project_root,
             validated_output_settings: None,
+            config_source: None,
         },
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -1085,14 +1085,13 @@ fn build_namespace_set_for_test(
     source_packages: &crate::builder_surface::SourcePackageRegistry,
 ) -> Result<ModuleNamespaceSet, PreparedFailure> {
     let mut string_table = StringTable::new();
-    let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let external_import_providers = ExternalImportProviderRegistry::default();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
-            project_root: &project_root,
             validated_output_settings: None,
+            config_source: None,
         },
         config,
         source_packages,
