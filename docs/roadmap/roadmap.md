@@ -29,7 +29,9 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Sequenced work
 
-- [Core Math fast counterparts](./plans/core-math-fast-counterparts-plan.md) - Queued next: Evaluate and implement a small, benchmark-justified set of explicit `fast_*` Core Math helpers, including the distinct `fast_hypot` algorithm. Reuse trusted package contracts and existing lowering machinery without changing ordinary Math.
+- [Namespaced public export paths](./plans/namespaced-public-export-paths-plan.md) - Queued next: Extend `$export` with explicit relative public namespace paths for declarations and direct-selection reexports across existing facades. Preserve private implementation paths, package identity and current package APIs. Complete before Core Math fast counterparts.
+
+- [Core Math fast counterparts](./plans/core-math-fast-counterparts-plan.md) - Queued after namespaced public export paths: Evaluate and implement a small, benchmark-justified set of explicit `fast_*` Core Math helpers, including the distinct `fast_hypot` algorithm. Reuse trusted package contracts and existing lowering machinery without changing ordinary Math.
 
 - [Const-function evaluation foundation and semantics](./plans/const-functions-evaluation-foundation-and-semantics-plan.md) - Queued after Core Math fast counterparts: Reuse direct typed-expression value evaluation, reduce redundant interpreter rewriting, then add match, multi-return/multi-bind and immutable const receiver methods. Investigate stepped collection loops conditionally and benchmark package-style helpers. Work may pause at each completed phase.
 
