@@ -6,6 +6,20 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 ## Open
 
+### Dev server snapshot can expose files outside its output root through symlinks
+
+- Found: Static-file Correctness audit, 2026-11. Confirmed by code trace at `72330758a`. Runtime reproduction was unavailable because Cargo is not installed.
+- Where: `capture_served_artifacts` in `src/projects/dev_server/build_loop.rs`, consumed by `resolve_request_with_file_exists` in `src/projects/dev_server/static_files.rs` and `prepare_static_response` in `src/projects/dev_server/http.rs`.
+- Observed: An existing unowned `_dev/external` symlink to a readable directory outside `_dev` does not invalidate an otherwise successful output write when it is not a planned destination. Snapshot capture follows it and stores the external files under output-relative keys. `GET /external/secret.txt` then serves those bytes. Individual output destinations are canonically checked, and HTML entry validation rejects external symlinks, but snapshot capture has no matching containment check. Exposure is more serious when the dev server binds to a non-loopback interface.
+- Investigate: Constrain snapshot capture to canonical targets inside the output root, including file and directory symlinks. Preserve legitimate contained symlinks and the immutable-generation contract. Add an HTTP regression with an unrelated external symlink present before a successful build.
+
+### Authored HTML marker can suppress dev-client injection
+
+- Found: Static-file Correctness audit, 2026-11. Confirmed by code trace at `72330758a`. Runtime reproduction was unavailable because Cargo is not installed.
+- Where: `inject_dev_client` in `src/projects/dev_server/static_files.rs`, called by `prepare_static_response` in `src/projects/dev_server/http.rs`.
+- Observed: A supported Moth root contribution `[$in head:<!-- moth-dev-client -->]` renders the exact `DEV_CLIENT_MARKER` into generated HTML. `inject_dev_client` treats that authored comment as proof that injection already happened and returns the page unchanged. The response therefore lacks the EventSource subscription and startup-error hooks required for development reporting. Production HTTP injects independently into pristine snapshot bytes for each GET, so the idempotence shortcut does not protect a necessary production state.
+- Investigate: Ensure the normal HTTP path installs the client on each pristine generated HTML response regardless of authored marker text, before bootstrap scripts. Add a generated-HTML/HTTP regression and retain an idempotence check only if another production caller needs it.
+
 ### `$infallible` release-only rejection from an erased fallback call
 
 - Found: release/debug divergence audit, 2026-11. Confirmed defect; pre-dates this branch, reproduced by probe on the current branch.
