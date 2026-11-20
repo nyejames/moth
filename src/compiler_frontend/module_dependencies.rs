@@ -439,7 +439,11 @@ impl<'a> DependencyGraph<'a> {
 
         self.source_package_public_exports
             .get(package_prefix)
-            .is_some_and(|entries| entries.iter().any(|entry| entry.export_name == export_name))
+            .is_some_and(|entries| {
+                entries
+                    .iter()
+                    .any(|entry| entry.route.is_none() && entry.export_name == export_name)
+            })
     }
 
     fn is_same_file_symbol_hint(

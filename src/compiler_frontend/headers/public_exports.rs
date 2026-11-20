@@ -44,10 +44,12 @@ use crate::compiler_frontend::headers::module_symbols::{
 };
 use crate::compiler_frontend::headers::types::{DependencySelection, Header, HeaderParseFailure};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::project_globals::is_project_globals_dependency;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::semantic_identity::{ModuleRootRole, PublicExportRoute};
 use crate::compiler_frontend::source::{SourceDatabase, SourceSpan};
+use crate::compiler_frontend::style_directives::PublicExportRouteOperand;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternError, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
@@ -182,7 +184,7 @@ pub(super) fn build_public_exports(
     // Pass 2: resolve `$export`-marked dependencies against the completed authored export maps.
     build_source_package_public_dependencies(
         module_symbols,
-        &source_package_locations,
+        source_package_locations,
         resolver,
         external_package_registry,
         source_provider_dependencies,
@@ -192,7 +194,7 @@ pub(super) fn build_public_exports(
     )?;
     build_module_root_public_dependencies(
         module_symbols,
-        &module_root_locations,
+        module_root_locations,
         resolver,
         source_files,
         external_package_registry,
@@ -211,7 +213,7 @@ fn build_source_package_public_exports(
     resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> PublicExportDataResult<FxHashMap<String, FxHashMap<StringId, SourceSpan>>> {
+) -> PublicExportDataResult<FxHashMap<String, PublicExportLocations>> {
     let mut export_locations = FxHashMap::default();
     for (prefix, root_file) in resolver.source_package_public_surface_files() {
         let root_file_logical = resolver.logical_path_for_canonical_file(root_file)?;
@@ -223,7 +225,6 @@ fn build_source_package_public_exports(
         )?;
 
         let mut collector = PublicExportCollector::default();
-        let mut root_locations = FxHashMap::default();
 
         module_symbols
             .file_package_membership
@@ -253,21 +254,23 @@ fn build_source_package_public_exports(
                     Some(name_span),
                 )?;
                 collector.insert(
+                    header.export_mode.route(),
                     export_name,
                     PublicExportTarget::SourceDeclaration {
                         path: header.declaration_path,
                     },
                     Some(name_span),
                     string_table,
+                    path_fork,
                 )?;
-                root_locations.insert(export_name, name_span);
             }
         }
 
-        export_locations.insert(prefix.clone(), root_locations);
+        let (exports, locations) = collector.into_parts();
+        export_locations.insert(prefix.clone(), locations);
         module_symbols
             .source_package_public_exports
-            .insert(prefix.clone(), collector.exports);
+            .insert(prefix.clone(), exports);
     }
 
     Ok(export_locations)
@@ -279,7 +282,7 @@ fn build_source_package_public_exports(
 )]
 fn build_source_package_public_dependencies(
     module_symbols: &mut ModuleSymbols,
-    export_locations: &FxHashMap<String, FxHashMap<StringId, SourceSpan>>,
+    mut export_locations: FxHashMap<String, PublicExportLocations>,
     resolver: &ProjectPathResolver,
     external_package_registry: &ExternalPackageRegistry,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
@@ -301,8 +304,12 @@ fn build_source_package_public_dependencies(
             .get(prefix)
             .cloned()
             .unwrap_or_default();
-        let mut collector =
-            PublicExportCollector::from_existing(&current_exports, export_locations.get(prefix));
+        let mut collector = PublicExportCollector::from_existing(
+            current_exports,
+            export_locations.remove(prefix),
+            string_table,
+            path_fork,
+        );
 
         if let Some(dependencies) = module_symbols
             .file_dependency_clauses_by_source
@@ -338,6 +345,7 @@ fn build_source_package_public_dependencies(
                         Some(selection.source_span),
                     )?;
                     collector.insert(
+                        dependency.export_mode.route(),
                         export_name,
                         target,
                         Some(
@@ -346,6 +354,7 @@ fn build_source_package_public_dependencies(
                                 .map_or(selection.source_span, |alias| alias.span),
                         ),
                         string_table,
+                        path_fork,
                     )?;
                 }
             }
@@ -368,8 +377,9 @@ fn build_module_root_public_exports_pass1(
     source_files: &SourceDatabase,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> PublicExportDataResult<FxHashMap<PathId, FxHashMap<StringId, SourceSpan>>> {
+) -> PublicExportDataResult<FxHashMap<PathId, PublicExportLocations>> {
     let mut export_locations = FxHashMap::default();
+    let mut collectors: FxHashMap<PathId, PublicExportCollector> = FxHashMap::default();
     let mut module_root_boundaries =
         build_module_root_boundaries(resolver, string_table, path_fork)?;
     module_root_boundaries
@@ -420,21 +430,25 @@ fn build_module_root_public_exports_pass1(
                 &header.declaration_path,
                 Some(name_span),
             )?;
-            let exports = module_symbols
-                .module_root_public_exports
-                .entry(logical)
-                .or_default();
-            exports.insert(PublicExportEntry {
+            collectors.entry(logical).or_default().insert(
+                header.export_mode.route(),
                 export_name,
-                target: PublicExportTarget::SourceDeclaration {
+                PublicExportTarget::SourceDeclaration {
                     path: header.declaration_path,
                 },
-            });
-            export_locations
-                .entry(logical)
-                .or_insert_with(FxHashMap::default)
-                .insert(export_name, name_span);
+                Some(name_span),
+                string_table,
+                path_fork,
+            )?;
         }
+    }
+
+    for (logical, collector) in collectors {
+        let (exports, locations) = collector.into_parts();
+        module_symbols
+            .module_root_public_exports
+            .insert(logical, exports);
+        export_locations.insert(logical, locations);
     }
 
     Ok(export_locations)
@@ -445,7 +459,7 @@ fn build_module_root_public_exports_pass1(
 )]
 fn build_module_root_public_dependencies(
     module_symbols: &mut ModuleSymbols,
-    export_locations: &FxHashMap<PathId, FxHashMap<StringId, SourceSpan>>,
+    mut export_locations: FxHashMap<PathId, PublicExportLocations>,
     _resolver: &ProjectPathResolver,
     _source_files: &SourceDatabase,
     external_package_registry: &ExternalPackageRegistry,
@@ -498,8 +512,10 @@ fn build_module_root_public_dependencies(
             .cloned()
             .unwrap_or_default();
         let mut collector = PublicExportCollector::from_existing(
-            &current_exports,
-            export_locations.get(&root_source),
+            current_exports,
+            export_locations.remove(&root_source),
+            string_table,
+            path_fork,
         );
 
         for dependency in dependencies {
@@ -531,6 +547,7 @@ fn build_module_root_public_dependencies(
                     Some(selection.source_span),
                 )?;
                 collector.insert(
+                    dependency.export_mode.route(),
                     export_name,
                     target,
                     Some(
@@ -539,6 +556,7 @@ fn build_module_root_public_dependencies(
                             .map_or(selection.source_span, |alias| alias.span),
                     ),
                     string_table,
+                    path_fork,
                 )?;
             }
         }
@@ -582,8 +600,12 @@ fn resolve_public_export_dependency_or_provider(
                 ))
             })?;
 
-        if provider_view.exported_origin(provider_name).is_none()
-            && provider_view.binding_export(provider_name).is_none()
+        if provider_view
+            .exported_origin(&PublicExportRoute::ROOT, provider_name)
+            .is_none()
+            && provider_view
+                .binding_export(&PublicExportRoute::ROOT, provider_name)
+                .is_none()
         {
             let interface = source_provider_dependencies.interface(provider_id)?;
             return Err(HeaderParseFailure::Diagnostic(
@@ -913,38 +935,104 @@ fn resolve_public_export_dependency(
 //  Public export collection helper
 // --------------------------
 
-/// Accumulates public export entries for one root file and detects duplicate public names.
+/// One `(route, exported leaf)` identity inside a single facade's public surface.
+///
+/// WHAT: the authored route identity (absent for the facade root) plus the exported leaf name.
+/// WHY: a public name is unique within its route, not across the whole facade. Distinct routes
+///      may publish the same leaf independently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct PublicExportKey {
+    route: Option<PathId>,
+    export_name: StringId,
+}
+
+/// Authored diagnostic sites retained alongside one facade's public export entries.
+///
+/// WHAT: the first export-site span for each `(route, leaf)` plus each distinct route's operand
+///       site.
+/// WHY: the second collection pass consumes this state by value; duplicate diagnostics need the
+///      first export site, and case-only route conflicts need both route operand sites.
+#[derive(Default)]
+struct PublicExportLocations {
+    exports: FxHashMap<PublicExportKey, SourceSpan>,
+    routes: FxHashMap<PathId, PublicExportRouteSite>,
+}
+
+/// One route operand's authored site, retained to order and label case-only route conflicts.
+///
+/// WHY: `PathSyntaxId` rows follow authored order within one source, so they order route claims
+///      even when a span cannot be resolved inline or lies far into the file.
+#[derive(Clone, Copy, Debug)]
+struct PublicExportRouteSite {
+    span: SourceSpan,
+    path_syntax: PathSyntaxId,
+}
+
+/// One route's path identity plus the authored operand site that claimed it.
+struct RouteClaim {
+    path: PathId,
+    site: PublicExportRouteSite,
+}
+
+/// Accumulates public export entries for one root file and detects duplicate `(route, leaf)`
+/// names and case-only route conflicts.
 #[derive(Default)]
 struct PublicExportCollector {
     exports: FxHashSet<PublicExportEntry>,
-    seen_names: FxHashMap<StringId, SourceSpan>,
+    seen_exports: FxHashMap<PublicExportKey, SourceSpan>,
+    route_spans: FxHashMap<PathId, PublicExportRouteSite>,
+    /// ASCII-folded canonical route spelling to the route's authored path identity.
+    ///
+    /// WHY: one fold per distinct route makes case-conflict detection a map lookup rather than a
+    ///      pairwise component comparison that re-allocates for every existing route.
+    route_keys: FxHashMap<String, PathId>,
 }
 
 impl PublicExportCollector {
+    /// Continue collecting into the first pass's entries and authored sites.
+    ///
+    /// The set and locations are consumed rather than copied: the second pass owns the first
+    /// pass's state until it hands its own back through [`Self::into_parts`].
     fn from_existing(
-        exports: &FxHashSet<PublicExportEntry>,
-        existing_locations: Option<&FxHashMap<StringId, SourceSpan>>,
+        exports: FxHashSet<PublicExportEntry>,
+        existing_locations: Option<PublicExportLocations>,
+        string_table: &StringTable,
+        path_fork: &PathInternerFork,
     ) -> Self {
-        let mut seen_names = FxHashMap::default();
-        for entry in exports {
-            if let Some(span) =
-                existing_locations.and_then(|locations| locations.get(&entry.export_name))
-            {
-                seen_names.insert(entry.export_name, *span);
+        let mut collector = Self {
+            exports,
+            ..Self::default()
+        };
+        if let Some(locations) = existing_locations {
+            collector.seen_exports = locations.exports;
+            for (path, site) in locations.routes {
+                let key = route_conflict_key(path, path_fork, string_table);
+                collector.route_spans.insert(path, site);
+                collector.route_keys.insert(key, path);
             }
         }
-        Self {
-            exports: exports.clone(),
-            seen_names,
-        }
+        collector
+    }
+
+    /// Split the collected entries from their authored diagnostic sites without copying either.
+    fn into_parts(self) -> (FxHashSet<PublicExportEntry>, PublicExportLocations) {
+        (
+            self.exports,
+            PublicExportLocations {
+                exports: self.seen_exports,
+                routes: self.route_spans,
+            },
+        )
     }
 
     fn insert(
         &mut self,
+        route: Option<PublicExportRouteOperand>,
         export_name: StringId,
         target: PublicExportTarget,
         span: Option<SourceSpan>,
         string_table: &StringTable,
+        path_fork: &PathInternerFork,
     ) -> PublicExportDataResult<()> {
         let export_name_text = string_table.resolve(export_name);
         if is_core_cast_trait_name(export_name_text) {
@@ -957,19 +1045,122 @@ impl PublicExportCollector {
             ));
         }
 
-        if let Some(first_span) = self.seen_names.get(&export_name) {
+        if let Some(route) = route {
+            self.record_route(route, string_table, path_fork)?;
+        }
+
+        let key = PublicExportKey {
+            route: route.map(|route| route.path),
+            export_name,
+        };
+        if let Some(first_span) = self.seen_exports.get(&key) {
             return Err(HeaderParseFailure::Diagnostic(
                 generics_traits_api::duplicate_public_export(export_name, Some(*first_span), span),
             ));
         }
         if let Some(span) = span {
-            self.seen_names.insert(export_name, span);
+            self.seen_exports.insert(key, span);
         }
         self.exports.insert(PublicExportEntry {
+            route: key.route,
             export_name,
             target,
         });
         Ok(())
+    }
+
+    /// Record one authored route operand and reject a distinct spelling that differs only by case.
+    ///
+    /// WHAT: folds the new route's canonical spelling once and looks it up in the facade's route
+    ///       index, ignoring ASCII case.
+    /// WHY: the collector sees every route of one facade across both collection passes, so the
+    ///      conflict is published eagerly even when no consumer references either route. Parent
+    ///      and child routes remain legal because their folded spellings differ.
+    fn record_route(
+        &mut self,
+        route: PublicExportRouteOperand,
+        string_table: &StringTable,
+        path_fork: &PathInternerFork,
+    ) -> PublicExportDataResult<()> {
+        let site = PublicExportRouteSite {
+            span: route.span,
+            path_syntax: route.path_syntax,
+        };
+        if let Some(existing_site) = self.route_spans.get_mut(&route.path) {
+            // The same route spelling can arrive from both collection passes. Keep the earliest
+            // authored claim so a later case-conflicting clause is compared against the first
+            // authored operand, not a declaration collected earlier by pass 1.
+            if site.span.source() == existing_site.span.source()
+                && site.path_syntax < existing_site.path_syntax
+            {
+                *existing_site = site;
+            }
+            return Ok(());
+        }
+
+        let route_key = route_conflict_key(route.path, path_fork, string_table);
+        if let Some(existing_route) = self.route_keys.get(&route_key).copied() {
+            // `route_keys` and `route_spans` are written together, so a folded key always has
+            // its authored site.
+            let existing_site = self
+                .route_spans
+                .get(&existing_route)
+                .copied()
+                .expect("a recorded folded route key keeps its authored site");
+            let (earlier, later) = order_route_claims(
+                RouteClaim {
+                    path: existing_route,
+                    site: existing_site,
+                },
+                RouteClaim {
+                    path: route.path,
+                    site,
+                },
+            );
+            return Err(HeaderParseFailure::Diagnostic(
+                generics_traits_api::case_conflicting_public_export_route(
+                    later.path,
+                    earlier.path,
+                    Some(earlier.site.span),
+                    Some(later.site.span),
+                ),
+            ));
+        }
+
+        self.route_spans.insert(route.path, site);
+        self.route_keys.insert(route_key, route.path);
+        Ok(())
+    }
+}
+
+/// One route's canonical spelling folded for case-insensitive conflict lookup.
+///
+/// WHY: folding the rendered path once per distinct route keeps every new route at one allocation
+///      and one map probe, instead of re-resolving and allocating every earlier component list.
+fn route_conflict_key(
+    path: PathId,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> String {
+    let mut scratch = Vec::new();
+    let mut folded = path_fork.render_portable(path, string_table, &mut scratch);
+    folded.make_ascii_lowercase();
+    folded
+}
+
+/// Order two route claims by authored position within one source.
+///
+/// WHAT: returns the earlier claim first and the later claim second.
+/// WHY: the two claims can arrive from different collection passes, so insertion order is not
+///      authored order. `PathSyntaxId` rows are source-local and monotonic in authored order;
+///      claims from different sources keep arrival order because their rows are not comparable.
+fn order_route_claims(first: RouteClaim, second: RouteClaim) -> (RouteClaim, RouteClaim) {
+    if first.site.span.source() == second.site.span.source()
+        && first.site.path_syntax > second.site.path_syntax
+    {
+        (second, first)
+    } else {
+        (first, second)
     }
 }
 

@@ -1,6 +1,8 @@
 use super::*;
 use crate::build_system::create_project_modules::compiled_boundary::ProjectFrontendCompilation;
 use crate::compiler_frontend::ast::generic_functions::reuse_probe;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::hir::reachability::collect_reachability_from_function_link_facts;
@@ -58,6 +60,242 @@ fn normal_interface_for<'a>(
                 .ends_with(suffix)
         })
         .unwrap_or_else(|| panic!("expected a normal facade ending with {suffix:?}"))
+}
+
+/// Returns the normal interface that publishes the leaf `name` under `route`.
+fn normal_interface_with_route<'a>(
+    frontend: &'a ProjectFrontendCompilation,
+    route: &str,
+    name: &str,
+) -> &'a PublicSemanticInterface {
+    frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .filter_map(|artifact| artifact.normal_interface.as_ref())
+        .find(|interface| {
+            interface
+                .export_bindings
+                .iter()
+                .any(|binding| binding.route().as_str() == route && binding.public_name() == name)
+        })
+        .unwrap_or_else(|| panic!("expected a facade publishing {name:?} under route {route:?}"))
+}
+
+/// Exact authored facts for one diagnostic site: start line/column (both zero-based) and excerpt.
+type SiteFacts = ((u32, u32), String);
+
+/// Return the primary and related authored sites for the first diagnostic with `code`.
+fn diagnostic_site_facts<T>(result: &CompilationResult<T>, code: &str) -> (SiteFacts, SiteFacts) {
+    let reports = super::super::create_project_modules_tests::diagnosed_reports(result);
+    let (report, diagnostic) = reports
+        .iter()
+        .find(|(_, diagnostic)| diagnostic.descriptor().code == code)
+        .unwrap_or_else(|| panic!("expected diagnostic {code}"));
+    let context = DiagnosticRenderContext::for_report(report);
+    let facts = |site: SiteRef<'_>| {
+        let position = context
+            .site_position(site)
+            .unwrap_or_else(|| panic!("{code} site must resolve to authored source"));
+        let excerpt = position
+            .line
+            .chars()
+            .skip(position.start.column as usize)
+            .take((position.end.column - position.start.column) as usize)
+            .collect::<String>();
+        ((position.start.line, position.start.column), excerpt)
+    };
+    let primary = facts(diagnostic.primary_site());
+    let related_site = diagnostic
+        .durable_labels()
+        .find_map(|label| (!matches!(label.site, SiteRef::Absent)).then_some(label.site))
+        .unwrap_or_else(|| panic!("{code} must retain a related authored site"));
+    (primary, facts(related_site))
+}
+
+/// Assert one diagnostic by exact code retains a primary site and one related site.
+fn assert_two_site_diagnostic<T>(result: &CompilationResult<T>, code: &str) {
+    let reports = super::super::create_project_modules_tests::diagnosed_reports(result);
+    let diagnostic = reports
+        .iter()
+        .find_map(|(_, diagnostic)| (diagnostic.descriptor().code == code).then_some(diagnostic))
+        .unwrap_or_else(|| panic!("expected diagnostic {code}"));
+    let has_site = |site: SiteRef<'_>| !matches!(site, SiteRef::Absent);
+    assert!(
+        has_site(diagnostic.primary_site()),
+        "{code} must retain its primary authored site"
+    );
+    assert!(
+        diagnostic
+            .durable_labels()
+            .any(|label| has_site(label.site)),
+        "{code} must retain a related authored site"
+    );
+}
+
+#[test]
+fn reexport_clause_before_declaration_reports_the_earlier_authored_route_site() {
+    const FACADE: &str = "$export @Forms\n@child label\n$export @forms\nfirst #= 1\n";
+    let result = compile_fixture_result(
+        &[
+            ("src/child/@mod.moth", "$export\nlabel #= \"child\"\n"),
+            ("src/@mod.moth", FACADE),
+        ],
+        false,
+        BuildProfile::Dev,
+    );
+    let (primary, related) = diagnostic_site_facts(&result, "MOTH-RULE-0092");
+    // Pass 1 records the later declaration first; the diagnostic must still point at the later
+    // declaration as primary and the earlier re-export operand as related.
+    assert_eq!(primary, ((2, 8), "@forms".to_owned()));
+    assert_eq!(related, ((0, 8), "@Forms".to_owned()));
+}
+
+#[test]
+fn repeated_route_claims_keep_the_earliest_authored_operand() {
+    const FACADE: &str = concat!(
+        "$export @Forms\n",
+        "@child one\n",
+        "$export @forms\n",
+        "@child two\n",
+        "$export @Forms\n",
+        "render #= 1\n",
+    );
+    let result = compile_fixture_result(
+        &[
+            (
+                "src/child/@mod.moth",
+                "$export\none #= 1\n$export\ntwo #= 2\n",
+            ),
+            ("src/@mod.moth", FACADE),
+        ],
+        false,
+        BuildProfile::Dev,
+    );
+    let (primary, related) = diagnostic_site_facts(&result, "MOTH-RULE-0092");
+    // The final `@Forms` declaration is pass-1's first claim, but the earlier authored `@Forms`
+    // clause replaces it. The middle `@forms` clause therefore conflicts with the first clause.
+    assert_eq!(primary, ((2, 8), "@forms".to_owned()));
+    assert_eq!(related, ((0, 8), "@Forms".to_owned()));
+}
+
+#[test]
+fn duplicate_leaf_in_one_route_across_declaration_and_reexport_reports_both_sites() {
+    let result = compile_fixture_result(
+        &[
+            ("src/child/@mod.moth", "$export\nrender #= \"child\"\n"),
+            (
+                "src/@mod.moth",
+                "$export @forms\nrender #= \"direct\"\n$export @forms\n@child render\n",
+            ),
+        ],
+        false,
+        BuildProfile::Dev,
+    );
+    assert_two_site_diagnostic(&result, "MOTH-RULE-0081");
+}
+
+#[test]
+fn same_leaf_from_different_targets_across_routes_keeps_local_name_collision() {
+    let result = compile_fixture_result(
+        &[
+            ("src/left/@mod.moth", "$export\nrender #= \"left\"\n"),
+            ("src/right/@mod.moth", "$export\nrender #= \"right\"\n"),
+            (
+                "src/@mod.moth",
+                "$export @forms\n@left render\n$export @tables\n@right render\n",
+            ),
+        ],
+        false,
+        BuildProfile::Dev,
+    );
+    assert_has_diagnostic_code(&result, "MOTH-IMPORT-0009");
+}
+
+#[test]
+fn same_target_reexported_under_two_routes_keeps_both_bindings_and_one_origin() {
+    let frontend = compile_fixture(&[
+        ("src/left/@mod.moth", "$export\nrender #= \"left\"\n"),
+        (
+            "src/@mod.moth",
+            "$export @forms\n@left render\n$export @tables\n@left render\n",
+        ),
+    ]);
+    let interface = normal_interface_with_route(&frontend, "forms", "render");
+    let bindings: Vec<_> = interface
+        .export_bindings
+        .iter()
+        .filter(|binding| binding.public_name() == "render")
+        .collect();
+    assert_eq!(bindings.len(), 2, "both routes must publish a binding");
+    let routes: Vec<_> = bindings
+        .iter()
+        .map(|binding| binding.route().as_str())
+        .collect();
+    assert_eq!(routes, vec!["forms", "tables"]);
+    let origin = bindings[0].origin();
+    assert!(
+        bindings.iter().all(|binding| binding.origin() == origin),
+        "publishing one target under two routes must keep one declaration origin"
+    );
+    assert_eq!(
+        interface
+            .declarations
+            .iter()
+            .filter(|declaration| &declaration.origin == origin)
+            .count(),
+        1,
+        "the two route bindings must join one declaration record"
+    );
+}
+
+#[test]
+fn changing_only_one_reexport_route_changes_the_fingerprint_not_origins() {
+    let compile_with_second_route = |second_route: &str| {
+        let facade =
+            format!("$export @forms\n@left render\n$export @{second_route}\n@left render\n");
+        compile_fixture(&[
+            ("src/left/@mod.moth", "$export\nrender #= \"left\"\n"),
+            ("src/@mod.moth", facade.as_str()),
+        ])
+    };
+    let before = compile_with_second_route("tables");
+    let after = compile_with_second_route("cards");
+    let before_interface =
+        interface_fingerprint_content(normal_interface_with_route(&before, "forms", "render"));
+    let after_interface =
+        interface_fingerprint_content(normal_interface_with_route(&after, "forms", "render"));
+    assert_eq!(
+        before_interface
+            .export_bindings
+            .iter()
+            .map(|binding| binding.origin())
+            .collect::<Vec<_>>(),
+        after_interface
+            .export_bindings
+            .iter()
+            .map(|binding| binding.origin())
+            .collect::<Vec<_>>(),
+        "changing a second route must not change declaration origins"
+    );
+    assert_ne!(
+        before_interface, after_interface,
+        "the route is part of the public-interface fingerprint"
+    );
+}
+
+#[test]
+fn case_only_route_spellings_remain_legal_across_separate_facades() {
+    let frontend = compile_fixture(&[
+        ("src/@mod.moth", "$export\nunrelated #= 1\n"),
+        ("src/one/@mod.moth", "$export @forms\nvalue #= 1\n"),
+        ("src/two/@mod.moth", "$export @Forms\nvalue #= 2\n"),
+    ]);
+    let forms = normal_interface_with_route(&frontend, "forms", "value");
+    let forms_upper = normal_interface_with_route(&frontend, "Forms", "value");
+    assert_ne!(
+        forms.module_origin, forms_upper.module_origin,
+        "the fixtures must exercise two separate facades"
+    );
 }
 
 /// Returns the fully folded text of an exported string constant in a normal interface.

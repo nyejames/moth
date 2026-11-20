@@ -12,7 +12,9 @@ use super::model::{PublicBindingExport, PublicDeclarationRecord, PublicSemanticI
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
-use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginFunctionId};
+use crate::compiler_frontend::semantic_identity::{
+    OriginDeclarationId, OriginFunctionId, PublicExportRoute,
+};
 use crate::compiler_frontend::source::SourceSpan;
 
 use rustc_hash::FxHashMap;
@@ -28,17 +30,19 @@ fn view_error(detail: impl Into<String>) -> InfrastructureFailure {
 ///
 /// WHAT: indexes only the facts header binding needs: public export names, binding-export
 ///       names, declaration origins, concrete summary origins and export diagnostic provenance.
-///       Keys borrow the interface's own stable strings instead of allocating owned copies.
+///       Public name indexes are keyed by `(route, leaf)`, because one leaf may appear under
+///       several routes. Keys borrow the interface's own stable strings instead of allocating
+///       owned copies.
 /// WHY: header binding resolves many shells against one provider; a narrow borrowed view keeps
 ///      those lookups direct without duplicating the broader closure view or owned string keys.
 #[derive(Debug)]
 pub(crate) struct ProviderBindingView<'a> {
     interface: &'a PublicSemanticInterface,
-    export_by_name: FxHashMap<&'a str, usize>,
-    binding_export_by_name: FxHashMap<&'a str, usize>,
+    export_by_route_and_name: FxHashMap<(&'a str, &'a str), usize>,
+    binding_export_by_route_and_name: FxHashMap<(&'a str, &'a str), usize>,
     declaration_by_origin: FxHashMap<OriginDeclarationId, usize>,
     summary_by_origin: FxHashMap<OriginFunctionId, usize>,
-    provenance_by_name: FxHashMap<&'a str, usize>,
+    provenance_by_route_and_name: FxHashMap<(&'a str, &'a str), usize>,
 }
 
 impl<'a> ProviderBindingView<'a> {
@@ -47,25 +51,25 @@ impl<'a> ProviderBindingView<'a> {
     ) -> Result<Self, InfrastructureFailure> {
         let mut view = Self {
             interface,
-            export_by_name: FxHashMap::default(),
-            binding_export_by_name: FxHashMap::default(),
+            export_by_route_and_name: FxHashMap::default(),
+            binding_export_by_route_and_name: FxHashMap::default(),
             declaration_by_origin: FxHashMap::default(),
             summary_by_origin: FxHashMap::default(),
-            provenance_by_name: FxHashMap::default(),
+            provenance_by_route_and_name: FxHashMap::default(),
         };
 
         for (index, binding) in interface.export_bindings.iter().enumerate() {
             Self::insert_unique(
-                &mut view.export_by_name,
-                binding.public_name(),
+                &mut view.export_by_route_and_name,
+                (binding.route().as_str(), binding.public_name()),
                 index,
                 "export name",
             )?;
         }
         for (index, binding) in interface.binding_exports.iter().enumerate() {
             Self::insert_unique(
-                &mut view.binding_export_by_name,
-                binding.public_name.as_str(),
+                &mut view.binding_export_by_route_and_name,
+                (binding.route.as_str(), binding.public_name.as_str()),
                 index,
                 "binding export name",
             )?;
@@ -88,8 +92,8 @@ impl<'a> ProviderBindingView<'a> {
         }
         for (index, entry) in interface.export_diagnostic_provenance.iter().enumerate() {
             Self::insert_unique(
-                &mut view.provenance_by_name,
-                entry.public_name.as_str(),
+                &mut view.provenance_by_route_and_name,
+                (entry.route.as_str(), entry.public_name.as_str()),
                 index,
                 "export diagnostic provenance",
             )?;
@@ -113,15 +117,25 @@ impl<'a> ProviderBindingView<'a> {
         Ok(())
     }
 
-    pub(crate) fn exported_origin(&self, public_name: &str) -> Option<&OriginDeclarationId> {
-        self.export_by_name
-            .get(public_name)
+    /// The declaration origin published at `(route, public_name)`, if any.
+    pub(crate) fn exported_origin(
+        &self,
+        route: &PublicExportRoute,
+        public_name: &str,
+    ) -> Option<&OriginDeclarationId> {
+        self.export_by_route_and_name
+            .get(&(route.as_str(), public_name))
             .map(|index| self.interface.export_bindings[*index].origin())
     }
 
-    pub(crate) fn binding_export(&self, public_name: &str) -> Option<&PublicBindingExport> {
-        self.binding_export_by_name
-            .get(public_name)
+    /// The binding-backed export published at `(route, public_name)`, if any.
+    pub(crate) fn binding_export(
+        &self,
+        route: &PublicExportRoute,
+        public_name: &str,
+    ) -> Option<&PublicBindingExport> {
+        self.binding_export_by_route_and_name
+            .get(&(route.as_str(), public_name))
             .map(|index| &self.interface.binding_exports[*index])
     }
 
@@ -143,9 +157,13 @@ impl<'a> ProviderBindingView<'a> {
             .map(|index| &self.interface.concrete_call_summaries[*index].summary)
     }
 
-    pub(crate) fn export_diagnostic_provenance(&self, public_name: &str) -> Option<SourceSpan> {
-        self.provenance_by_name
-            .get(public_name)
+    pub(crate) fn export_diagnostic_provenance(
+        &self,
+        route: &PublicExportRoute,
+        public_name: &str,
+    ) -> Option<SourceSpan> {
+        self.provenance_by_route_and_name
+            .get(&(route.as_str(), public_name))
             .and_then(|index| self.interface.export_diagnostic_provenance[*index].span)
     }
 }

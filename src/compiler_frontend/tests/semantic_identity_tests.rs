@@ -10,8 +10,8 @@
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, FunctionOriginKind, ModuleRootRole, OriginConstantId, OriginDeclarationId,
-    OriginFunctionId, OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
-    StableOwnedSourceIdentity, StablePackageIdentity,
+    OriginFunctionId, OriginTraitId, OriginTypeCategory, OriginTypeId, PublicExportRoute,
+    StableModuleOriginIdentity, StableOwnedSourceIdentity, StablePackageIdentity,
 };
 
 use std::collections::HashSet;
@@ -392,11 +392,13 @@ fn helper_reexported_through_both_facades_keeps_one_defining_origin_and_two_expo
     ));
     let normal_binding = ExportBinding::new(
         normal_facade.clone(),
+        PublicExportRoute::ROOT,
         "render".to_owned(),
         defining_origin.clone(),
     );
     let support_binding = ExportBinding::new(
         support_facade.clone(),
+        PublicExportRoute::ROOT,
         "render".to_owned(),
         defining_origin.clone(),
     );

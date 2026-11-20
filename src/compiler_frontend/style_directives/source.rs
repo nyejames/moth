@@ -53,9 +53,11 @@ use std::sync::Arc;
 ///       row that produced it.
 /// WHY: a route names a public namespace under the declaring facade, never a dependency or
 ///      source-file path. Retaining the path row lets preparation exclude the operand from
-///      structural file references without rescanning the file's path table by span.
+///      structural file references without rescanning the file's path table by span. This is the
+///      authored boundary-local operand; the stable cross-module route value is
+///      [`PublicExportRoute`](crate::compiler_frontend::semantic_identity::PublicExportRoute).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PublicExportRoute {
+pub(crate) struct PublicExportRouteOperand {
     pub(crate) path: PathId,
     pub(crate) span: SourceSpan,
     pub(crate) path_syntax: PathSyntaxId,
@@ -71,7 +73,7 @@ pub(crate) struct PublicExportRoute {
 pub(crate) enum SourceDirectiveOperand {
     None,
     Expression(TokenRange),
-    PublicRoute(PublicExportRoute),
+    PublicRoute(PublicExportRouteOperand),
 }
 
 impl SourceDirectiveOperand {
@@ -256,7 +258,7 @@ pub(crate) fn capture_source_directive_operand(
                 );
             };
             let path_row = path_syntax.try_path_for_token(path_syntax_id, first.source_span())?;
-            let route = PublicExportRoute {
+            let route = PublicExportRouteOperand {
                 path: path_row.root,
                 span: first.source_span(),
                 path_syntax: path_syntax_id,

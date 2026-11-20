@@ -27,6 +27,7 @@ use crate::compiler_frontend::headers::module_symbols::{
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
 use crate::compiler_frontend::headers::types::DependencyBindingSyntax;
 use crate::compiler_frontend::public_interface::PublicDeclarationSemantics;
+use crate::compiler_frontend::semantic_identity::PublicExportRoute;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::source_packages::match_package_prefix;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
@@ -286,6 +287,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         match access {
             SourceDependencyAccess::PublicExport { exported_entries } => {
                 for entry in exported_entries {
+                    // A bare namespace exposes only root-route members; nested routes are
+                    // separate shallow providers.
+                    if entry.route.is_some() {
+                        continue;
+                    }
                     let Some(type_path) = entry.target.source_path() else {
                         continue;
                     };
@@ -686,6 +692,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let mut type_members = FxHashMap::default();
 
         for entry in exported_entries {
+            // A bare root namespace exposes only root-route members; nested routes are separate
+            // shallow providers.
+            if entry.route.is_some() {
+                continue;
+            }
             match &entry.target {
                 PublicExportTarget::SourceDeclaration { path: symbol_path } => {
                     if self
@@ -805,8 +816,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         // consumer-facing map key and must never take precedence when both names exist on the
         // provider interface; otherwise an alias can silently bind an unrelated member.
         let provider_name = self.string_table.resolve(source_name);
-        if view.exported_origin(provider_name).is_none()
-            && view.binding_export(provider_name).is_none()
+        if view
+            .exported_origin(&PublicExportRoute::ROOT, provider_name)
+            .is_none()
+            && view
+                .binding_export(&PublicExportRoute::ROOT, provider_name)
+                .is_none()
         {
             return Err(
                 crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(CompilerStage::HeaderParsing,
@@ -819,7 +834,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             );
         }
 
-        if let Some(origin) = view.exported_origin(provider_name).cloned() {
+        if let Some(origin) = view
+            .exported_origin(&PublicExportRoute::ROOT, provider_name)
+            .cloned()
+        {
             let declaration = view.declaration(&origin).ok_or_else(|| {
                 crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                     "provider interface {:?} has no declaration record for exported origin {:?}",
@@ -894,7 +912,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             return Ok(());
         }
 
-        if let Some(binding) = view.binding_export(provider_name) {
+        if let Some(binding) = view.binding_export(&PublicExportRoute::ROOT, provider_name) {
             let symbol_id = self
                 .external_package_registry
                 .resolve_canonical_symbol(&binding.target)

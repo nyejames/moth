@@ -37,7 +37,7 @@ use crate::compiler_frontend::public_interface::{
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, FunctionOriginKind, ModuleRootRole, OriginConstantId, OriginDeclarationId,
-    OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+    OriginTraitId, OriginTypeCategory, OriginTypeId, PublicExportRoute, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpan};
@@ -440,6 +440,7 @@ fn same_module_reexport_preserves_alias_origin_and_authored_provenance() {
             .get(&fixture.active_root_file_id)
             .expect("active root source path should be prepared"),
         [PublicExportEntry {
+            route: None,
             export_name: fixture.string_table.intern("PublicValue"),
             target: PublicExportTarget::SourceDeclaration { path: target_path },
         }]
@@ -511,6 +512,7 @@ fn helper_reexport_preserves_role_neutral_defining_origin() {
             .get(&fixture.active_root_file_id)
             .expect("active root source path should be prepared"),
         [PublicExportEntry {
+            route: None,
             export_name: fixture.string_table.intern("PublicValue"),
             target: PublicExportTarget::SourceDeclaration { path: target_path },
         }]
@@ -559,6 +561,10 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
         .path_fork
         .try_intern_portable_path("provider/Imported", &mut fixture.string_table)
         .expect("test path fits");
+    let reexport_route = fixture
+        .path_fork
+        .try_intern_portable_path("forms", &mut fixture.string_table)
+        .expect("test route path fits");
     let provider_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("provider"),
         "provider/@mod.moth".to_owned(),
@@ -572,10 +578,12 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
         module_origin: provider_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             provider_origin,
+            PublicExportRoute::ROOT,
             "Imported".to_owned(),
             provider_constant_origin.clone(),
         )],
         export_diagnostic_provenance: vec![PublicExportDiagnosticProvenance {
+            route: PublicExportRoute::ROOT,
             public_name: "Imported".to_owned(),
             span: None,
         }],
@@ -598,6 +606,7 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
             .get(&fixture.active_root_file_id)
             .expect("active root source path should be prepared"),
         [PublicExportEntry {
+            route: Some(reexport_route),
             export_name: fixture.string_table.intern("PublicImported"),
             target: PublicExportTarget::ProviderSelection {
                 diagnostic_path: target_path,
@@ -625,12 +634,18 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
     .expect("provider re-export projection should succeed");
 
     let binding = binding_for(&seed, "PublicImported");
-    assert_eq!(binding.origin(), &provider_constant_origin);
+    assert_eq!(
+        binding.origin(),
+        &provider_constant_origin,
+        "the re-export publishes under a route without changing the provider origin",
+    );
+    assert_eq!(binding.route().as_str(), "forms");
     let provenance = seed
         .export_diagnostic_provenance()
         .iter()
         .find(|entry| entry.public_name == "PublicImported")
         .expect("provider re-export should retain provider provenance under the alias");
+    assert_eq!(provenance.route.as_str(), "forms");
     assert_eq!(
         provenance.span, None,
         "synthetic provider fixtures carry no authored source span",
@@ -684,6 +699,7 @@ fn external_binding_export_identity_resolves_in_independent_registry() {
             .get(&fixture.active_root_file_id)
             .expect("active root source path should be prepared"),
         [PublicExportEntry {
+            route: None,
             export_name,
             target: PublicExportTarget::External(ExternalSymbolId::Function(donor_length)),
         }]
@@ -1034,6 +1050,7 @@ fn module_symbols_with_module_root_export_targets(
         .iter()
         .filter_map(|target| {
             Some(PublicExportEntry {
+                route: None,
                 export_name: path_fork.try_component(*target)?,
                 target: PublicExportTarget::SourceDeclaration { path: *target },
             })
@@ -1054,6 +1071,7 @@ fn add_source_package_export_target(
     export_name: crate::compiler_frontend::symbols::string_interning::StringId,
 ) {
     let entry = PublicExportEntry {
+        route: None,
         export_name,
         target: PublicExportTarget::SourceDeclaration { path: *target },
     };

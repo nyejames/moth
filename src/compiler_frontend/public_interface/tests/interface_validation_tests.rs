@@ -37,7 +37,8 @@ use crate::compiler_frontend::public_call_summary::{
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId,
-    OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
+    OriginTypeCategory, OriginTypeId, PublicExportRoute, StableModuleOriginIdentity,
+    StablePackageIdentity,
 };
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
@@ -217,6 +218,7 @@ fn binding_interface(target: CanonicalBindingSymbolIdentity) -> PublicSemanticIn
         export_diagnostic_provenance: Vec::new(),
         binding_exports: vec![PublicBindingExport {
             exporting_module: module_origin(),
+            route: PublicExportRoute::ROOT,
             public_name: "binding".to_owned(),
             target,
         }],
@@ -227,10 +229,65 @@ fn binding_interface(target: CanonicalBindingSymbolIdentity) -> PublicSemanticIn
 }
 
 #[test]
+fn binding_export_duplicates_are_scoped_to_the_route() {
+    let target = CanonicalBindingSymbolIdentity {
+        package: StablePackageIdentity::binding(
+            crate::builder_surface::PackageOrigin::Core,
+            "@core/math",
+        ),
+        symbol_path: ExternalSymbolPath::from_single("sin"),
+        category: ExternalSymbolCategory::Function,
+    };
+    let mut interface = binding_interface(target);
+    let forms = PublicExportRoute::from_canonical_spelling("forms".to_owned());
+    interface.binding_exports.push(PublicBindingExport {
+        exporting_module: module_origin(),
+        route: forms.clone(),
+        public_name: "binding".to_owned(),
+        target: CanonicalBindingSymbolIdentity {
+            package: StablePackageIdentity::binding(
+                crate::builder_surface::PackageOrigin::Core,
+                "@core/math",
+            ),
+            symbol_path: ExternalSymbolPath::from_single("cos"),
+            category: ExternalSymbolCategory::Function,
+        },
+    });
+    interface
+        .validate_for_publication()
+        .expect("the same leaf in different routes is not a duplicate");
+
+    interface.binding_exports.push(PublicBindingExport {
+        exporting_module: module_origin(),
+        route: forms,
+        public_name: "binding".to_owned(),
+        target: CanonicalBindingSymbolIdentity {
+            package: StablePackageIdentity::binding(
+                crate::builder_surface::PackageOrigin::Core,
+                "@core/math",
+            ),
+            symbol_path: ExternalSymbolPath::from_single("tan"),
+            category: ExternalSymbolCategory::Function,
+        },
+    });
+    let error = interface
+        .validate_for_publication()
+        .expect_err("one leaf cannot be published twice in the same route");
+    assert!(
+        error
+            .message
+            .contains("duplicate public export 'binding' in route 'forms'"),
+        "unexpected publication error: {:?}",
+        error
+    );
+}
+
+#[test]
 fn rejects_export_binding_without_declaration() {
     let origin = OriginFunctionId::new_free(module_origin(), "render".to_owned());
     let binding = ExportBinding::new(
         module_origin(),
+        PublicExportRoute::ROOT,
         "render".to_owned(),
         OriginDeclarationId::Function(origin),
     );
@@ -253,6 +310,7 @@ fn rejects_binding_export_owned_by_another_module() {
         export_diagnostic_provenance: Vec::new(),
         binding_exports: vec![PublicBindingExport {
             exporting_module: provider_module_origin(),
+            route: PublicExportRoute::ROOT,
             public_name: "sine".to_owned(),
             target: CanonicalBindingSymbolIdentity {
                 package: StablePackageIdentity::binding(
@@ -696,16 +754,19 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
         export_bindings: vec![
             ExportBinding::new(
                 provider_module.clone(),
+                PublicExportRoute::ROOT,
                 "HiddenLabel".to_owned(),
                 OriginDeclarationId::Type(hidden_origin.clone()),
             ),
             ExportBinding::new(
                 provider_module.clone(),
+                PublicExportRoute::ROOT,
                 "PublicCard".to_owned(),
                 OriginDeclarationId::Type(card_origin.clone()),
             ),
             ExportBinding::new(
                 provider_module,
+                PublicExportRoute::ROOT,
                 "make_card".to_owned(),
                 OriginDeclarationId::Function(make_origin.clone()),
             ),
@@ -723,11 +784,13 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
     let facade_bindings = vec![
         ExportBinding::new(
             module_origin(),
+            PublicExportRoute::ROOT,
             "Card".to_owned(),
             OriginDeclarationId::Type(card_origin.clone()),
         ),
         ExportBinding::new(
             module_origin(),
+            PublicExportRoute::ROOT,
             "make_card".to_owned(),
             OriginDeclarationId::Function(make_origin.clone()),
         ),

@@ -186,6 +186,7 @@ fn equal_origins_with_differing_interfaces_fail_in_either_input_order() {
     second.export_bindings.push(
         crate::compiler_frontend::semantic_identity::ExportBinding::new(
             second.module_origin.clone(),
+            crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
             "extra".to_owned(),
             crate::compiler_frontend::semantic_identity::OriginDeclarationId::Constant(
                 crate::compiler_frontend::semantic_identity::OriginConstantId::new(

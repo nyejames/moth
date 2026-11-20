@@ -5,10 +5,10 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 #[test]
 fn export_routes_survive_non_identity_path_remapping_and_source_rebinding() {
     use crate::compiler_frontend::style_directives::{
-        PublicExportRoute, SourceDirectiveKind, SourceDirectiveOperand,
+        PublicExportRouteOperand, SourceDirectiveKind, SourceDirectiveOperand,
     };
 
-    fn export_annotation_route(header: &Header) -> &PublicExportRoute {
+    fn export_annotation_route(header: &Header) -> &PublicExportRouteOperand {
         header
             .source_directives
             .iter()

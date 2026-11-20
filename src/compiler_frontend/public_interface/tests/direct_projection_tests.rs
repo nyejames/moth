@@ -63,6 +63,7 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginFunctionId, OriginTypeCategory, OriginTypeId,
+    PublicExportRoute,
 };
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::{ConstraintDirectiveSpans, SourceConstraintSet};
@@ -337,26 +338,31 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
     let bindings = vec![
         ExportBinding::new(
             module_origin(),
+            PublicExportRoute::ROOT,
             "Counter".to_owned(),
             OriginDeclarationId::Type(struct_origin("Counter")),
         ),
         ExportBinding::new(
             module_origin(),
+            PublicExportRoute::ROOT,
             "I32Alias".to_owned(),
             OriginDeclarationId::Type(alias_origin("I32Alias")),
         ),
         ExportBinding::new(
             module_origin(),
+            PublicExportRoute::ROOT,
             "MaxSize".to_owned(),
             OriginDeclarationId::Constant(constant_origin("MaxSize")),
         ),
         ExportBinding::new(
             module_origin(),
+            PublicExportRoute::ROOT,
             "Status".to_owned(),
             OriginDeclarationId::Type(choice_origin("Status")),
         ),
         ExportBinding::new(
             module_origin(),
+            PublicExportRoute::ROOT,
             "render".to_owned(),
             OriginDeclarationId::Function(free_function_origin("render")),
         ),
@@ -538,6 +544,7 @@ fn builder_attaches_receiver_methods_to_struct_record() {
 
     let binding = ExportBinding::new(
         module_origin(),
+        PublicExportRoute::ROOT,
         "Counter".to_owned(),
         OriginDeclarationId::Type(struct_origin("Counter")),
     );
@@ -642,11 +649,13 @@ fn projects_never_function_and_receiver_method_contracts() {
     let bindings = vec![
         ExportBinding::new(
             module_origin(),
+            PublicExportRoute::ROOT,
             "Counter".to_owned(),
             OriginDeclarationId::Type(struct_origin("Counter")),
         ),
         ExportBinding::new(
             module_origin(),
+            PublicExportRoute::ROOT,
             "stop".to_owned(),
             OriginDeclarationId::Function(free_function_origin("stop")),
         ),
@@ -821,6 +830,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
 
     let binding = ExportBinding::new(
         module_origin(),
+        PublicExportRoute::ROOT,
         "Box".to_owned(),
         OriginDeclarationId::Type(struct_origin("Box")),
     );
@@ -1128,6 +1138,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
 
     let binding = ExportBinding::new(
         module_origin(),
+        PublicExportRoute::ROOT,
         "render".to_owned(),
         OriginDeclarationId::Function(free_function_origin("render")),
     );
@@ -1265,6 +1276,7 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
 
     let binding = ExportBinding::new(
         module_origin(),
+        PublicExportRoute::ROOT,
         "Point".to_owned(),
         OriginDeclarationId::Type(struct_origin("Point")),
     );
@@ -1368,6 +1380,7 @@ fn choice_payload_fields_remain_default_free() {
 
     let binding = ExportBinding::new(
         module_origin(),
+        PublicExportRoute::ROOT,
         "Option".to_owned(),
         OriginDeclarationId::Type(choice_origin("Option")),
     );
@@ -1499,6 +1512,7 @@ fn receiver_method_retains_folded_parameter_defaults() {
 
     let binding = ExportBinding::new(
         module_origin(),
+        PublicExportRoute::ROOT,
         "Counter".to_owned(),
         OriginDeclarationId::Type(struct_origin("Counter")),
     );

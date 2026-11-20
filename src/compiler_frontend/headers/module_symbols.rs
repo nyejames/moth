@@ -100,10 +100,15 @@ impl PublicExportTarget {
 
 /// One exported symbol in a module-root public surface.
 ///
-/// WHAT: records the name that external consumers use and the resolved target.
-/// WHY: the public API name can differ from the canonical declaration path.
+/// WHAT: records the facade-relative public route, the name that external consumers use and the
+/// resolved target. `route` is `None` for the facade root and `Some` for a nested `$export`
+/// suffix; the path identity is interned inside the preparing module's path table.
+/// WHY: the public API name can differ from the canonical declaration path, and the same name may
+/// be published independently under several routes. The route therefore participates in the
+/// entry key while the declaration target and its authored span stay route-independent.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PublicExportEntry {
+    pub route: Option<PathId>,
     pub export_name: StringId,
     pub target: PublicExportTarget,
 }

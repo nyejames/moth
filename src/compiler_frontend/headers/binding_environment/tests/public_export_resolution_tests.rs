@@ -87,6 +87,68 @@ fn nested_module_root_same_module_dependency_bypasses_public_surface() {
     );
 }
 
+/// A nested-route export must not answer a root-level public name lookup.
+#[test]
+fn nested_route_entry_is_not_a_root_public_name() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+
+    let entry_root = intern_path(&["entry-root"], &mut string_table, &mut path_fork);
+    let child_root = intern_path(&["child-root"], &mut string_table, &mut path_fork);
+    let child_mod_file = intern_path(&["child", "@mod.moth"], &mut string_table, &mut path_fork);
+    let page_file = intern_path(&["page.moth"], &mut string_table, &mut path_fork);
+    let hidden_source = intern_path(&["hidden"], &mut string_table, &mut path_fork);
+    let forms_route = intern_path(&["forms"], &mut string_table, &mut path_fork);
+
+    let mut file_module_membership = FxHashMap::default();
+    file_module_membership.insert(page_file, entry_root);
+    file_module_membership.insert(child_mod_file, child_root);
+
+    let boundaries = vec![ModuleRootBoundary {
+        dependency_prefix: intern_path(&["child"], &mut string_table, &mut path_fork),
+        module_root: child_root,
+        root_file: child_mod_file,
+        surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
+    }];
+    let hidden_name = string_table.intern("hidden");
+    let mut module_root_public_exports = empty_exports_for_roots(&[child_mod_file]);
+    module_root_public_exports
+        .get_mut(&child_mod_file)
+        .expect("the child root export map should exist")
+        .insert(PublicExportEntry {
+            route: Some(forms_route),
+            export_name: hidden_name,
+            target: PublicExportTarget::SourceDeclaration {
+                path: hidden_source,
+            },
+        });
+
+    let mut input = PublicExportResolutionInput {
+        consumer_file: &page_file,
+        header_path: &intern_path(&["child", "hidden"], &mut string_table, &mut path_fork),
+        source_package_public_exports: &FxHashMap::default(),
+        file_package_membership: &FxHashMap::default(),
+        module_root_public_exports: &module_root_public_exports,
+        file_module_membership: &file_module_membership,
+        module_root_boundaries: &boundaries,
+        string_table: &string_table,
+        path_fork: &mut path_fork,
+    };
+
+    let result = resolve_public_export_boundary(&mut input)
+        .expect("test boundary path interns within the test path table");
+    assert!(
+        matches!(
+            result,
+            Some(PublicExportLookupResult::NotExported {
+                public_surface_type: PublicExportSurfaceType::ModuleRoot,
+                ..
+            })
+        ),
+        "a nested-route entry must not resolve as a root public name"
+    );
+}
+
 /// An entry-root consumer targeting a child module must resolve through that child's
 /// public surface, not bypass it.
 #[test]
@@ -114,6 +176,7 @@ fn cross_module_child_dependency_resolves_through_public_surface() {
     let greet_source = intern_path(&["child", "greet.moth"], &mut string_table, &mut path_fork);
     let mut child_exports = FxHashSet::default();
     child_exports.insert(PublicExportEntry {
+        route: None,
         export_name: greet_name,
         target: PublicExportTarget::SourceDeclaration { path: greet_source },
     });
@@ -218,6 +281,7 @@ fn cross_module_provider_selection_preserves_shell_name_and_diagnostic_path() {
 
     let mut child_exports = FxHashSet::default();
     child_exports.insert(PublicExportEntry {
+        route: None,
         export_name,
         target: PublicExportTarget::ProviderSelection {
             selection,
@@ -368,6 +432,7 @@ fn nested_source_package_prefix_resolves_only_direct_public_symbols() {
     package_exports.insert(
         "builder/web/site".to_owned(),
         FxHashSet::from_iter([PublicExportEntry {
+            route: None,
             export_name: root_name,
             target: PublicExportTarget::SourceDeclaration { path: root_source },
         }]),

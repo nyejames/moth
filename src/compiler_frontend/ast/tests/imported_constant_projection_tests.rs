@@ -41,7 +41,7 @@ use crate::compiler_frontend::public_interface::{
     PublicInterfaceDraftBuilderInput,
 };
 use crate::compiler_frontend::semantic_identity::{
-    ExportBinding, ModuleRootRole, OriginConstantId, StableModuleOriginIdentity,
+    ExportBinding, ModuleRootRole, OriginConstantId, PublicExportRoute, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
 use crate::compiler_frontend::source::SourceSpan;
@@ -251,6 +251,7 @@ fn structural_string_round_trips_through_public_projection_and_import_materialis
         producer_module_origin.clone(),
         vec![ExportBinding::new(
             producer_module_origin.clone(),
+            PublicExportRoute::ROOT,
             "logo".to_owned(),
             OriginDeclarationId::Constant(OriginConstantId::new(
                 producer_module_origin.clone(),
@@ -454,6 +455,7 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
         producer_module_origin.clone(),
         vec![ExportBinding::new(
             producer_module_origin.clone(),
+            PublicExportRoute::ROOT,
             "meta".to_owned(),
             OriginDeclarationId::Constant(OriginConstantId::new(
                 producer_module_origin.clone(),

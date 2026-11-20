@@ -46,6 +46,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginFunctionId, OriginTraitId, OriginTypeId,
+    PublicExportRoute,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -334,6 +335,7 @@ fn aliased_trait_binding_joins_the_defining_trait_root() {
     let origin = trait_origin("Shape");
     let binding = ExportBinding::new(
         module_origin(),
+        PublicExportRoute::ROOT,
         "PublicShape".to_owned(),
         OriginDeclarationId::Trait(origin.clone()),
     );
@@ -660,6 +662,7 @@ fn ignores_non_trait_export_bindings() {
     // A free-function binding must not produce a trait surface and must not block the trait.
     let function_binding = ExportBinding::new(
         module_origin(),
+        PublicExportRoute::ROOT,
         "helper".to_owned(),
         OriginDeclarationId::Function(OriginFunctionId::new_free(
             module_origin(),
@@ -786,6 +789,7 @@ fn rejects_trait_binding_origin_mismatching_root_resolved_origin() {
     // The binding names a different trait origin than the root resolves to.
     let wrong_binding = ExportBinding::new(
         module_origin(),
+        PublicExportRoute::ROOT,
         "Shape".to_owned(),
         OriginDeclarationId::Trait(OriginTraitId::new(module_origin(), "OtherShape".to_owned())),
     );

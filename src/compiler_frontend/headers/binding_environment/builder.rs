@@ -32,7 +32,9 @@ use crate::compiler_frontend::public_interface::{
     ProviderInterfaceId, PublicDeclarationSemantics, ResolvedDependencyClause,
     SourceProviderDependencySet,
 };
-use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginDeclarationId};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, OriginDeclarationId, PublicExportRoute,
+};
 use crate::compiler_frontend::source::{SourceDatabase, SourceKind, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
@@ -823,6 +825,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             dependency.dependency.path,
         ));
         for binding in &interface.export_bindings {
+            // A bare namespace import names the provider's root surface; nested routes are
+            // separate shallow providers resolved by their own requested route.
+            if !binding.route().is_root() {
+                continue;
+            }
             let declaration = view.declaration(binding.origin()).ok_or_else(|| {
                 super::diagnostics::missing_dependency_target(
                     &dependency.dependency.path,
@@ -905,6 +912,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         for binding in &interface.binding_exports {
+            if !binding.route.is_root() {
+                continue;
+            }
             let Some(symbol_id) = self
                 .external_package_registry
                 .resolve_canonical_symbol(&binding.target)
@@ -1143,7 +1153,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .map_err(|_| token_lexical::logical_path_capacity())?;
 
         for binding in &interface.export_bindings {
-            let Some(origin) = view.exported_origin(binding.public_name()).cloned() else {
+            // The fixed prelude deliberately selects only root-level provider constants.
+            if !binding.route().is_root() {
+                continue;
+            }
+            let Some(origin) = view
+                .exported_origin(&PublicExportRoute::ROOT, binding.public_name())
+                .cloned()
+            else {
                 continue;
             };
             let Some(declaration) = self
@@ -1196,6 +1213,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         prelude_constants: &mut Vec<TemplatePreludeConstant>,
     ) {
         for entry in entries {
+            // Nested routes are never flattened into the fixed `.mtf` constant prelude.
+            if entry.route.is_some() {
+                continue;
+            }
             let Some(path) = entry.target.source_path() else {
                 continue;
             };
@@ -1534,7 +1555,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let interface = self.source_provider_dependencies.interface(provider_id)?;
         let provider_name_text = self.string_table.resolve(provider_name);
 
-        if let Some(origin) = view.exported_origin(provider_name_text).cloned() {
+        if let Some(origin) = view
+            .exported_origin(&PublicExportRoute::ROOT, provider_name_text)
+            .cloned()
+        {
             // Preserve the successful-interface invariant: an exported origin must carry its
             // declaration record before either a clause or an occurrence may bind it.
             if view.declaration(&origin).is_none() {
@@ -1556,7 +1580,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             });
         }
 
-        if let Some(binding) = view.binding_export(provider_name_text) {
+        if let Some(binding) = view.binding_export(&PublicExportRoute::ROOT, provider_name_text) {
             let Some(symbol_id) = self
                 .external_package_registry
                 .resolve_canonical_symbol(&binding.target)

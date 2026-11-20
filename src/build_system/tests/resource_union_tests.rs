@@ -32,7 +32,7 @@ use crate::compiler_frontend::public_interface::{
     PublicSemanticInterface,
 };
 use crate::compiler_frontend::semantic_identity::{
-    ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId,
+    ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, PublicExportRoute,
     StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -208,6 +208,7 @@ fn package_exported_folded_resource_is_selected_but_private_unused_origin_is_not
         module_origin: module_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             module_origin.clone(),
+            PublicExportRoute::ROOT,
             "exported".to_owned(),
             OriginDeclarationId::Constant(exported_constant.clone()),
         )],
@@ -263,6 +264,7 @@ fn package_export_join_rejects_export_without_public_declaration() {
         module_origin: module_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             module_origin,
+            PublicExportRoute::ROOT,
             "missing".to_owned(),
             OriginDeclarationId::Constant(missing_constant),
         )],

@@ -21,7 +21,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, NominalTypeId, TypeId};
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
-    OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+    OriginTraitId, OriginTypeCategory, OriginTypeId, PublicExportRoute, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -48,6 +48,7 @@ pub(crate) fn struct_origin(name: &str) -> OriginTypeId {
 pub(crate) fn trait_binding(name: &str) -> ExportBinding {
     ExportBinding::new(
         module_origin(),
+        PublicExportRoute::ROOT,
         name.to_owned(),
         OriginDeclarationId::Trait(trait_origin(name)),
     )

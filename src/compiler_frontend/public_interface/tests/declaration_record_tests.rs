@@ -57,7 +57,7 @@ use crate::compiler_frontend::public_interface::{
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
-    OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+    OriginTraitId, OriginTypeCategory, OriginTypeId, PublicExportRoute, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -252,7 +252,12 @@ fn constant_root(
 }
 
 fn export_binding(name: &str, origin: OriginDeclarationId) -> ExportBinding {
-    ExportBinding::new(origin.module_origin().clone(), name.to_owned(), origin)
+    ExportBinding::new(
+        origin.module_origin().clone(),
+        PublicExportRoute::ROOT,
+        name.to_owned(),
+        origin,
+    )
 }
 
 fn nominal_origins_map(

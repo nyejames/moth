@@ -31,7 +31,7 @@ use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable
 use crate::compiler_frontend::semantic_identity::{ModuleRootFiles, ModuleRootRole};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::{
-    PublicExportRoute, SourceDirectiveAnnotation, StyleDirectiveRegistry,
+    PublicExportRouteOperand, SourceDirectiveAnnotation, StyleDirectiveRegistry,
 };
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
@@ -350,7 +350,9 @@ pub enum HeaderExportMode {
     ///
     /// The route is a namespace suffix under the declaring facade and is never a dependency or
     /// source-file path.
-    Public { route: Option<PublicExportRoute> },
+    Public {
+        route: Option<PublicExportRouteOperand>,
+    },
 }
 
 impl HeaderExportMode {
@@ -359,7 +361,7 @@ impl HeaderExportMode {
     }
 
     /// The authored public route, or `None` for a private item or a root-level public export.
-    pub fn route(&self) -> Option<PublicExportRoute> {
+    pub fn route(&self) -> Option<PublicExportRouteOperand> {
         match self {
             HeaderExportMode::Private => None,
             HeaderExportMode::Public { route } => *route,

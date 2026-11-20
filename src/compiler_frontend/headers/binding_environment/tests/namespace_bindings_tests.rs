@@ -66,7 +66,7 @@ use crate::compiler_frontend::public_interface::{
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
-    OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+    OriginTraitId, OriginTypeCategory, OriginTypeId, PublicExportRoute, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{
@@ -2002,6 +2002,7 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
         module_origin: alpha_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             alpha_origin.clone(),
+            PublicExportRoute::ROOT,
             "VALUE".to_owned(),
             alpha_value.clone(),
         )],
@@ -2037,6 +2038,7 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
         module_origin: beta_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             beta_origin.clone(),
+            PublicExportRoute::ROOT,
             "VALUE".to_owned(),
             beta_value.clone(),
         )],
@@ -2157,6 +2159,7 @@ fn constant_provider(prefix: &str, names: &[&str]) -> PublicSemanticInterface {
         ));
         export_bindings.push(ExportBinding::new(
             module_origin.clone(),
+            PublicExportRoute::ROOT,
             (*name).to_owned(),
             origin.clone(),
         ));
@@ -2204,6 +2207,7 @@ fn alias_provider(prefix: &str, name: &str) -> PublicSemanticInterface {
         module_origin: module_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             module_origin,
+            PublicExportRoute::ROOT,
             name.to_owned(),
             origin.clone(),
         )],
@@ -2233,6 +2237,7 @@ fn trait_provider(prefix: &str, name: &str) -> PublicSemanticInterface {
         module_origin: module_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             module_origin,
+            PublicExportRoute::ROOT,
             name.to_owned(),
             origin.clone(),
         )],
@@ -2271,6 +2276,7 @@ fn struct_provider_with_receiver_method() -> PublicSemanticInterface {
         module_origin: module_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             module_origin.clone(),
+            PublicExportRoute::ROOT,
             "Box".to_owned(),
             OriginDeclarationId::Type(box_origin.clone()),
         )],
@@ -2315,6 +2321,7 @@ fn provider_selection_entry(
     diagnostic_path: PathId,
 ) -> PublicExportEntry {
     PublicExportEntry {
+        route: None,
         export_name,
         target: PublicExportTarget::ProviderSelection {
             selection: DependencySelectionId::new(shell, 0),
@@ -2371,6 +2378,7 @@ fn binding_provider_with_members(
             .into_iter()
             .map(|(name, symbol_id)| PublicBindingExport {
                 exporting_module: module_origin.clone(),
+                route: PublicExportRoute::ROOT,
                 public_name: name.to_owned(),
                 target: registry
                     .canonical_symbol_identity(ExternalSymbolId::Constant(symbol_id))

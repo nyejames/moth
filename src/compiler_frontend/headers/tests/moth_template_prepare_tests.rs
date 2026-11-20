@@ -59,8 +59,8 @@ use crate::compiler_frontend::public_interface::{
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::semantic_identity::{
-    ExportBinding, OriginConstantId, OriginDeclarationId, StableModuleOriginIdentity,
-    StablePackageIdentity,
+    ExportBinding, OriginConstantId, OriginDeclarationId, PublicExportRoute,
+    StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceId, SourceKind,
@@ -316,7 +316,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
+        &SourceProviderDependencySet::default(),
         Some(&project_path_resolver),
         &source_files,
         &mut string_table,
@@ -397,6 +397,7 @@ fn constant_core_prelude_interface(
     package_prefix: &str,
     constant_name: &str,
     folded_text: &str,
+    route: PublicExportRoute,
 ) -> PublicSemanticInterface {
     let module_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::source_package(PackageOrigin::Core, package_prefix),
@@ -411,6 +412,7 @@ fn constant_core_prelude_interface(
         module_origin: module_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             module_origin,
+            route,
             constant_name.to_owned(),
             constant_origin.clone(),
         )],
@@ -507,6 +509,8 @@ $export
 collision #= "html"
 $export
 html_defaults #= HtmlDefaults(color = "green")
+$export @forms
+nested_html #= "nested"
 $export
 HtmlDefaults = | color String |
 $export
@@ -627,7 +631,7 @@ css_private #= "private"
         &self,
         moth_template_relative_path: &str,
         prepared_relative_paths: &[&str],
-        source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
+        source_provider_dependencies: &SourceProviderDependencySet<'_>,
     ) -> Result<(Ast, StringTable, PathInternerFork), PreparedFailure> {
         let (ast, string_table, path_fork) = self.compile_module_ast_with_providers(
             prepared_relative_paths,
@@ -656,7 +660,7 @@ css_private #= "private"
     fn compile_module_ast_with_providers(
         &self,
         prepared_relative_paths: &[&str],
-        source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
+        source_provider_dependencies: &SourceProviderDependencySet<'_>,
     ) -> Result<(Ast, StringTable, PathInternerFork), PreparedFailure> {
         let mut path_fork = self.source_files.fork_path_interner();
         let (headers, mut string_table) = self
@@ -811,7 +815,7 @@ css_private #= "private"
     fn prepare_and_bind_headers_with_providers(
         &self,
         prepared_relative_paths: &[&str],
-        source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
+        source_provider_dependencies: &SourceProviderDependencySet<'_>,
         path_fork: &mut PathInternerFork,
     ) -> Result<
         (
@@ -830,7 +834,7 @@ css_private #= "private"
     fn prepare_and_bind_headers_with_providers_with_table(
         &self,
         prepared_relative_paths: &[&str],
-        source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
+        source_provider_dependencies: &SourceProviderDependencySet<'_>,
         path_fork: &mut PathInternerFork,
     ) -> Result<
         (
@@ -1003,6 +1007,24 @@ css_private #= "private"
     ) -> CompilationResult<()> {
         let result =
             self.compile_moth_template_ast(moth_template_relative_path, prepared_relative_paths);
+        let source_files = self.source_files;
+        match result {
+            Ok(_) => panic!("Moth template fixture should fail"),
+            Err(failure) => Self::freeze_ast_failure(failure, source_files),
+        }
+    }
+
+    fn compile_moth_template_diagnostic_with_providers(
+        self,
+        moth_template_relative_path: &str,
+        prepared_relative_paths: &[&str],
+        source_provider_dependencies: &SourceProviderDependencySet<'_>,
+    ) -> CompilationResult<()> {
+        let result = self.compile_moth_template_ast_with_providers(
+            moth_template_relative_path,
+            prepared_relative_paths,
+            source_provider_dependencies,
+        );
         let source_files = self.source_files;
         match result {
             Ok(_) => panic!("Moth template fixture should fail"),
@@ -1637,6 +1659,7 @@ fn moth_template_prelude_excludes_private_runtime_and_type_exports() {
         "CssToken",
         "HtmlDefaults",
         "render_html",
+        "nested_html",
     ] {
         assert!(
             !names.contains(excluded),
@@ -1781,8 +1804,18 @@ fn moth_template_sees_standard_prelude_constants_without_provider_headers() {
     let fixture =
         MothTemplateScopeFixture::new(&[("src/intro.mtf", "[test_constant][css_constant]")]);
 
-    let html_interface = constant_core_prelude_interface("core/html", "test_constant", "from html");
-    let css_interface = constant_core_prelude_interface("core/css", "css_constant", "from css");
+    let html_interface = constant_core_prelude_interface(
+        "core/html",
+        "test_constant",
+        "from html",
+        PublicExportRoute::ROOT,
+    );
+    let css_interface = constant_core_prelude_interface(
+        "core/css",
+        "css_constant",
+        "from css",
+        PublicExportRoute::ROOT,
+    );
     let provider_dependencies = SourceProviderDependencySet::new(vec![
         SourceProviderDependency {
             kind: ProviderDependencyKind::TemplatePrelude {
@@ -1812,13 +1845,41 @@ fn moth_template_sees_standard_prelude_constants_without_provider_headers() {
 }
 
 #[test]
+fn nested_route_provider_constant_stays_out_of_the_flat_prelude() {
+    // The completed-interface prelude lane must apply the same root filter as the header lane:
+    // a constant published under `@core/html/forms` is a separate route, not a flat name.
+    let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[nested_constant]")]);
+    let html_interface = constant_core_prelude_interface(
+        "core/html",
+        "nested_constant",
+        "from nested route",
+        PublicExportRoute::from_canonical_spelling("forms".to_owned()),
+    );
+    let css_interface = empty_core_prelude_interface("core/css");
+    let provider_dependencies =
+        standard_template_prelude_dependencies(&html_interface, &css_interface);
+
+    let diagnostic = fixture.compile_moth_template_diagnostic_with_providers(
+        "src/intro.mtf",
+        &["src/intro.mtf"],
+        &provider_dependencies,
+    );
+    assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
+}
+
+#[test]
 fn cross_package_constant_reexport_does_not_enter_the_flat_prelude() {
     // A provider that re-exports another package's constant through its completed interface is
     // an imported alias, not a constant it declares. The alias must not enter the flat prelude,
     // and its spelling must not collide with the declaring package's real export.
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[test_constant]")]);
 
-    let html_interface = constant_core_prelude_interface("core/html", "test_constant", "from html");
+    let html_interface = constant_core_prelude_interface(
+        "core/html",
+        "test_constant",
+        "from html",
+        PublicExportRoute::ROOT,
+    );
     let reexported_declaration = html_interface.declarations[0].clone();
     let reexported_origin = reexported_declaration.origin.clone();
     let css_origin = StableModuleOriginIdentity::from_portable_path(
@@ -1830,6 +1891,7 @@ fn cross_package_constant_reexport_does_not_enter_the_flat_prelude() {
         module_origin: css_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             css_origin,
+            PublicExportRoute::ROOT,
             "test_constant".to_owned(),
             reexported_origin,
         )],
@@ -1895,6 +1957,7 @@ fn same_package_constant_reexport_enters_the_flat_prelude() {
         module_origin: css_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             css_origin,
+            PublicExportRoute::ROOT,
             "stacked_constant".to_owned(),
             constant_origin.clone(),
         )],
@@ -1941,9 +2004,18 @@ fn duplicate_prelude_constants_across_official_packages_fail_before_body_evaluat
     let mut messages = Vec::new();
 
     for (first, second) in [("core/html", "core/css"), ("core/css", "core/html")] {
-        let first_interface = constant_core_prelude_interface(first, "shared_name", "from first");
-        let second_interface =
-            constant_core_prelude_interface(second, "shared_name", "from second");
+        let first_interface = constant_core_prelude_interface(
+            first,
+            "shared_name",
+            "from first",
+            PublicExportRoute::ROOT,
+        );
+        let second_interface = constant_core_prelude_interface(
+            second,
+            "shared_name",
+            "from second",
+            PublicExportRoute::ROOT,
+        );
         let provider_dependencies = SourceProviderDependencySet::new(vec![
             SourceProviderDependency {
                 kind: ProviderDependencyKind::TemplatePrelude {
@@ -2293,7 +2365,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
+        &SourceProviderDependencySet::default(),
         Some(&project_path_resolver),
         &crate::compiler_frontend::source::SourceDatabase::empty(),
         &mut string_table,

@@ -202,10 +202,11 @@ impl PublicSemanticInterface {
                     self.module_origin
                 )));
             }
-            if !public_names.insert(binding.public_name()) {
+            if !public_names.insert((binding.route(), binding.public_name())) {
                 return Err(publication_error(format!(
-                    "duplicate public export name '{}'",
-                    binding.public_name()
+                    "duplicate public export '{}' in route '{}'",
+                    binding.public_name(),
+                    binding.route().as_str()
                 )));
             }
             if !declarations_by_origin.contains_key(binding.origin()) {
@@ -224,10 +225,11 @@ impl PublicSemanticInterface {
                     binding.public_name, binding.exporting_module, self.module_origin
                 )));
             }
-            if !public_names.insert(binding.public_name.as_str()) {
+            if !public_names.insert((&binding.route, binding.public_name.as_str())) {
                 return Err(publication_error(format!(
-                    "duplicate public export name '{}'",
-                    binding.public_name
+                    "duplicate public export '{}' in route '{}'",
+                    binding.public_name,
+                    binding.route.as_str()
                 )));
             }
             if binding.target.package.name().is_empty()

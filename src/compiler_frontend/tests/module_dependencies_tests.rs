@@ -1280,8 +1280,10 @@ fn trait_incompatibility_references_do_not_create_dependency_sort_edges() {
     );
 }
 
-#[test]
-fn source_package_public_export_dependency_edges_do_not_require_concrete_header_paths() {
+/// Build the `helper/Widget` ordering fixture with the export entry at `route`.
+fn source_package_public_export_ordering_fixture(
+    route: Option<&str>,
+) -> (BoundModuleHeaders, StringTable, PathInternerFork) {
     let (mut headers, mut string_table, mut path_fork) = parse_module_headers(
         &[("src/page.moth", "NeedsWidget #String = \"ok\"\n")],
         "src/page.moth",
@@ -1298,6 +1300,11 @@ fn source_package_public_export_dependency_edges_do_not_require_concrete_header_
             &mut string_table,
         )
         .expect("test path should be UTF-8");
+    let route = route.map(|route| {
+        path_fork
+            .try_intern_portable_path(route, &mut string_table)
+            .expect("test route path fits")
+    });
 
     let dependent_header = headers
         .headers
@@ -1316,11 +1323,20 @@ fn source_package_public_export_dependency_edges_do_not_require_concrete_header_
         .entry("helper".to_owned())
         .or_default()
         .insert(PublicExportEntry {
+            route,
             export_name: widget_name,
             target: PublicExportTarget::SourceDeclaration {
                 path: concrete_target,
             },
         });
+
+    (headers, string_table, path_fork)
+}
+
+#[test]
+fn source_package_public_export_dependency_edges_do_not_require_concrete_header_paths() {
+    let (headers, mut string_table, mut path_fork) =
+        source_package_public_export_ordering_fixture(None);
 
     let sorted = resolve_module_dependencies(
         headers,
@@ -1341,6 +1357,29 @@ fn source_package_public_export_dependency_edges_do_not_require_concrete_header_
         non_start_names,
         vec!["NeedsWidget"],
         "source-backed package public export paths may differ from concrete source headers"
+    );
+}
+
+#[test]
+fn source_package_nested_route_export_is_not_a_root_ordering_dependency() {
+    let (headers, mut string_table, mut path_fork) =
+        source_package_public_export_ordering_fixture(Some("forms"));
+
+    let failure = resolve_module_dependencies(
+        headers,
+        &ContentSourceTargets::empty(),
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("a nested-route export must not satisfy a root-level ordering hint");
+
+    let boundary = diagnosed_result(failure);
+    let reports = diagnosed_reports(&boundary);
+    assert!(
+        reports
+            .iter()
+            .any(|(_, diagnostic)| diagnostic.descriptor().code == "MOTH-IMPORT-0005"),
+        "the root-level hint should remain a missing import target, got: {reports:?}"
     );
 }
 

@@ -128,7 +128,9 @@ fn try_resolve_package_public_export(
     let symbol_name = components[prefix_len];
     let exports = input.source_package_public_exports.get(package_prefix)?;
     for entry in exports {
-        if entry.export_name == symbol_name {
+        // This lane answers root-level public lookup; nested-route members are published by
+        // their own route and must not acquire a flat package name.
+        if entry.route.is_none() && entry.export_name == symbol_name {
             match &entry.target {
                 PublicExportTarget::SourceDeclaration { path } => {
                     return Some(PublicExportLookupResult::ExportedSource {
@@ -256,7 +258,7 @@ fn lookup_module_root_public_export(
                 if effective_components.len() == 1 {
                     let public_name = effective_components[0];
                     for entry in exports {
-                        if entry.export_name != public_name {
+                        if entry.route.is_some() || entry.export_name != public_name {
                             continue;
                         }
 
@@ -283,6 +285,9 @@ fn lookup_module_root_public_export(
                 }
 
                 for entry in exports {
+                    if entry.route.is_some() {
+                        continue;
+                    }
                     if let Some(path) = entry.target.source_path()
                         && suffix_matches_with_optional_source_extension(
                             path,
@@ -325,7 +330,7 @@ fn lookup_module_root_public_export(
             };
 
             for entry in exports {
-                if entry.export_name == symbol_name {
+                if entry.route.is_none() && entry.export_name == symbol_name {
                     match &entry.target {
                         PublicExportTarget::SourceDeclaration { path } => {
                             return Some(PublicExportLookupResult::ExportedSource {

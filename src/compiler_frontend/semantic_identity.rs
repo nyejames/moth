@@ -830,13 +830,48 @@ impl OriginDeclarationId {
     }
 }
 
+/// Owned canonical public export route below one facade.
+///
+/// WHAT: the `/`-joined facade-relative route components. [`Self::ROOT`] is the empty spelling and
+///       denotes the facade's own root surface; a nested route is a non-empty canonical spelling
+///       such as `forms/validation`.
+/// WHY: export bindings cross module and build boundaries, so the route must be owned stable text
+///      rather than a `PathId` owned by the preparing module's path table. The route is part of
+///      the public binding and therefore participates in interface equality, but it never
+///      participates in a declaration's [`OriginDeclarationId`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct PublicExportRoute(String);
+
+impl PublicExportRoute {
+    /// The facade root route, where an operand-free `$export` publishes.
+    pub(crate) const ROOT: Self = Self(String::new());
+
+    /// Construct a route from the canonical spelling produced by the header path owner.
+    ///
+    /// Compiler-internal: header preparation has already rejected empty, parent and
+    /// extension-bearing spellings, so this stores the validated components unchanged.
+    pub(crate) fn from_canonical_spelling(spelling: String) -> Self {
+        Self(spelling)
+    }
+
+    /// Whether this route names the facade's own root surface.
+    pub(crate) fn is_root(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The canonical `/`-joined spelling used as an owned lookup key.
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// One stable export binding for a public declaration defined directly in the active module root.
 ///
-/// WHAT: maps the exporting module's public API name to the stable origin declaration identity
-///       for a declaration authored directly in the active module root's public surface. The
-///       exporting module is the stable [`StableModuleOriginIdentity`], never a build-local dense
-///       `ModuleId`. The public name and the origin's defining name are self-contained owned
-///       strings, never `StringId` or `PathId` values that would not survive the graph
+/// WHAT: maps the exporting module's public route and API name to the stable origin declaration
+///       identity for a declaration authored directly in the active module root's public surface.
+///       The exporting module is the stable [`StableModuleOriginIdentity`], never a build-local
+///       dense `ModuleId`. The route, public name and origin's defining name are self-contained
+///       owned strings, never `StringId` or `PathId` values that would not survive the graph
 ///       table. Direct exports use the defining name; re-exports retain the public alias
 ///       alongside the original declaration identity.
 /// WHY: the compiler design overview's `ExportBinding` contract requires public-interface binding
@@ -846,6 +881,7 @@ impl OriginDeclarationId {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ExportBinding {
     exporting_module: StableModuleOriginIdentity,
+    route: PublicExportRoute,
     public_name: String,
     origin: OriginDeclarationId,
 }
@@ -855,14 +891,17 @@ impl ExportBinding {
     ///
     /// Compiler-internal: the construction owner in `public_interface::export_projection`
     /// builds these only for declarations admitted to the active module root's public surface,
-    /// so the exporting module, public name and origin identity are already known to be consistent.
+    /// so the exporting module, route, public name and origin identity are already known to be
+    /// consistent.
     pub(crate) fn new(
         exporting_module: StableModuleOriginIdentity,
+        route: PublicExportRoute,
         public_name: String,
         origin: OriginDeclarationId,
     ) -> Self {
         Self {
             exporting_module,
+            route,
             public_name,
             origin,
         }
@@ -871,6 +910,11 @@ impl ExportBinding {
     /// The stable identity of the module exporting the declaration.
     pub(crate) fn exporting_module(&self) -> &StableModuleOriginIdentity {
         &self.exporting_module
+    }
+
+    /// The public route under which the exporting module exposes the declaration.
+    pub(crate) fn route(&self) -> &PublicExportRoute {
+        &self.route
     }
 
     /// The public API name the exporting module exposes the declaration under.
