@@ -40,3 +40,10 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Where: `src/backends/js/runtime/places.rs` computed `__moth_field`/`__moth_index` records, reached from the range/collection loop iterable temporary in `src/compiler_frontend/hir/hir_statement/loop_lowering.rs` (~1596), mutable assignments and mutable alias declarations, and call arguments evaluated before a later argument rebinds the base.
 - Observed: with `s ~= Pair({{1}, {2, 3}})`, `loop s.items |item, idx|:` whose body rebinds `s` to `Pair({{7, 8, 9}, {10, 11, 12}})` prints item lengths `1, 3` instead of `1, 2`: the generated iterable temporary follows the rebound field. `pack(s.items, replace(~s))` also reads the projection after `replace` rebinds `s`. Immutable projected alias definitions already snapshot their storage.
 - Investigate: capture the iterable value once at loop entry without losing its borrow provenance, and materialise projected call arguments at evaluation time. Add Node-executed cases.
+
+### Rooted in-memory template sources may not reach disk resources on Windows
+
+- Found: template path simplification review, 2026-11. Unverified hypothesis from code reading; no Windows host was available.
+- Where: `src/projects/html_project/moth_template/input.rs` resource containment for in-memory `Sources` with rooted display paths.
+- Suspected: `portable_path_text` strips the `\\?\` verbatim prefix while `fs::canonicalize` returns it, so the containment check may reject a sibling resource such as `[@logo.svg]` that the same request accepts on Unix. `rooted_in_memory_document_with_sibling_resource_uses_normalized_url_context` is Unix-only for this reason.
+- Investigate: run that case on Windows. If it fails, compare both sides of the containment check in one canonical spelling.

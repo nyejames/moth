@@ -1565,6 +1565,7 @@ fn load_config_for_path_test(
     (config, result)
 }
 
+#[cfg(unix)]
 fn assert_config_path_infrastructure_error(
     failure: crate::build_system::project_config::ProjectConfigFailure,
     expected_message: &str,

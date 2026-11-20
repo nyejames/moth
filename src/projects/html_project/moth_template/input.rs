@@ -17,7 +17,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::collections::HashSet;
 use std::fs;
-use std::path::{Component, Path, PathBuf, Prefix};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -108,13 +108,16 @@ fn collect_directory_units(
     let mut paths = Vec::new();
     collect_moth_template_paths_in_directory(&root, recursive, &mut paths)?;
 
-    paths.sort_by(|left, right| {
-        relative_path_under(&root, left).cmp(relative_path_under(&root, right))
-    });
+    // Derive each normalized relative path once; sorting these pairs avoids recomputing it in the
+    // comparator.
+    let mut sorted_paths: Vec<(PathBuf, PathBuf)> = paths
+        .into_iter()
+        .map(|path| (relative_path_under(&root, &path), path))
+        .collect();
+    sorted_paths.sort_by(|(left, _), (right, _)| left.cmp(right));
 
-    let mut units = Vec::with_capacity(paths.len());
-    for path in paths {
-        let relative_path = relative_path_under(&root, &path).to_path_buf();
+    let mut units = Vec::with_capacity(sorted_paths.len());
+    for (relative_path, path) in sorted_paths {
         units.push(read_file_unit(path, Some(relative_path))?);
     }
 
@@ -152,7 +155,7 @@ fn assign_common_ancestor_relative_paths(
         };
 
     for unit in units.iter_mut() {
-        unit.relative_path = Some(relative_path_below_ancestor(&ancestor, &unit.source_path));
+        unit.relative_path = Some(relative_path_under(&ancestor, &unit.source_path));
     }
 
     Ok(())
@@ -245,11 +248,11 @@ fn reject_derived_drive_relative_paths(
 /// request diagnostic must name the input that eliminated the shared basis. An empty input set
 /// yields the empty path.
 ///
-/// Ordinary Windows drive letters compare ASCII-case-insensitively because a drive letter is
-/// case-insensitive host syntax, so `C:/` and `c:/` still share one root. Every other component
-/// compares exactly, so authored directory spellings retain distinct module identities. Relative
-/// paths must be derived from the resulting shared component count rather than a textual prefix
-/// strip, because the ancestor is spelled with the first input's drive case.
+/// Components compare with `Path` component equality. On Windows that equality folds a drive
+/// prefix's ASCII case because std parses the drive letter as uppercase and compares that parsed
+/// prefix, so `C:/` and `c:/` share one root. Ordinary name components compare exactly, so
+/// authored directory spellings retain distinct module identities. The selected ancestor is
+/// component-equal to every input, so `strip_prefix` yields each relative path.
 fn common_ancestor_directory<'a>(
     mut paths: impl Iterator<Item = &'a Path>,
 ) -> Result<PathBuf, &'a Path> {
@@ -263,7 +266,7 @@ fn common_ancestor_directory<'a>(
         let shared_length = shared
             .iter()
             .zip(components.iter())
-            .take_while(|(left, right)| directory_components_match(**left, **right))
+            .take_while(|(left, right)| left == right)
             .count();
         shared.truncate(shared_length);
 
@@ -283,23 +286,6 @@ fn directory_components(path: &Path) -> Vec<Component<'_>> {
     let mut components: Vec<Component<'_>> = path.components().collect();
     components.pop();
     components
-}
-
-/// Whether two directory components name the same location for ancestor selection.
-///
-/// Only ordinary disk prefixes fold ASCII case. Other prefix kinds and ordinary name components
-/// compare exactly, so two authored directory spellings that differ in case keep distinct
-/// relative identities and module origins.
-fn directory_components_match(left: Component<'_>, right: Component<'_>) -> bool {
-    match (left, right) {
-        (Component::Prefix(left), Component::Prefix(right)) => match (left.kind(), right.kind()) {
-            (Prefix::Disk(left_drive), Prefix::Disk(right_drive)) => {
-                left_drive.eq_ignore_ascii_case(&right_drive)
-            }
-            (left_prefix, right_prefix) => left_prefix == right_prefix,
-        },
-        (left, right) => left == right,
-    }
 }
 
 /// Reject a request whose inputs cannot derive portable module identities.
@@ -728,26 +714,19 @@ fn reject_duplicate_source_paths(
     }
 }
 
-/// The path's native spelling relative to `root` when it is under that root.
+/// The path's component-normalized spelling below `root` when it is under that root.
 ///
-/// The canonical native components are retained so a literal backslash on Unix stays inside one
-/// component. Logical consumers convert these components to a portable `/` spelling at their own
-/// identity boundary.
-fn relative_path_under<'a>(root: &Path, path: &'a Path) -> &'a Path {
-    path.strip_prefix(root).unwrap_or(path)
-}
+/// `strip_prefix` is the prefix authority: it compares components with the same equality used to
+/// select a shared ancestor, so a mixed-case Windows drive prefix still matches. The suffix is
+/// rebuilt from components rather than returned as a slice, because a slice keeps an unnormalized
+/// interior spelling such as `nested//page.mtf`, which portable URL and logical-path validation
+/// rejects. Component collection also retains a literal backslash on Unix inside one component.
+fn relative_path_under(root: &Path, path: &Path) -> PathBuf {
+    let Ok(suffix) = path.strip_prefix(root) else {
+        return path.to_path_buf();
+    };
 
-/// The path's spelling below the selected common ancestor, preserving component boundaries.
-///
-/// `common_ancestor_directory` may accept a path whose drive letter is spelled with the other
-/// ASCII case, so the ancestor is not necessarily a textual prefix of the path. Skipping the
-/// shared component count applies exactly the prefix relationship the ancestor was selected with;
-/// `relative_path_under` would instead fall back to the whole rooted path and mint a module
-/// identity that downstream derivation rejects. Components are retained rather than reparsed as
-/// text, so a literal backslash on Unix stays inside one component.
-fn relative_path_below_ancestor(ancestor: &Path, path: &Path) -> PathBuf {
-    let ancestor_component_count = ancestor.components().count();
-    path.components().skip(ancestor_component_count).collect()
+    suffix.components().collect()
 }
 
 fn has_moth_template_extension(path: &Path) -> bool {

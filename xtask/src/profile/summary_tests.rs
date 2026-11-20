@@ -435,6 +435,7 @@ fn agent_summary_contains_case_id() {
         profile_relative_path: "cases/check_benchmarks_test_bst/profile.json.gz".to_string(),
         filter: ProfileFilterMode::Terse,
     };
+    let command_line = obs.posix_shell_command_line();
 
     let md = format_agent_summary_md(&[data], "test-run-id", ProfileFilterMode::Terse);
     assert!(md.contains("check_benchmarks_test_bst"));
@@ -444,7 +445,7 @@ fn agent_summary_contains_case_id() {
     assert!(md.contains("~500ms"));
     assert!(md.contains("Top stage: AST ~300ms"));
     assert!(md.contains("POSIX shell command:"));
-    assert!(md.contains("```\ncd /repo && /repo/target/profiling/moth check test.moth\n```"));
+    assert!(md.contains(&format!("```\n{command_line}\n```")));
     assert!(!md.contains("frontend.ast.total"));
 }
 
@@ -540,12 +541,13 @@ fn enriched_case_summary_includes_hotspots_and_samply_command() {
     };
     let case_paths = run_paths.case_paths("test_case");
     case_paths.create_dir().expect("create case dir");
+    let command_line = obs.posix_shell_command_line();
 
     let md = format_enriched_case_summary(&data, &run_paths);
     assert!(md.contains("test_case"));
     assert!(md.contains("Timing schema: 2"));
     assert!(md.contains("POSIX shell command:"));
-    assert!(md.contains("```\ncd /repo && /repo/target/profiling/moth check test.moth\n```"));
+    assert!(md.contains(&format!("```\n{command_line}\n```")));
     assert!(md.contains("Sample count: 1000"));
     assert!(md.contains("- AST: ~800ms"));
     assert!(!md.contains("frontend.ast.total"));

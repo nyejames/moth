@@ -207,7 +207,7 @@ The recognised setting names and defaults are:
     ]
 ]
 
-`origin` takes decoded path text such as `"/café docs"`. Moth encodes it as `/caf%C3%A9%20docs` in generated URLs and dev-server redirects. A literal `%20` in the setting becomes `%2520` in a URL. Use `/` for the site root. Other prefixes must start with `/` and cannot contain empty or dot segments, a query, a fragment, a backslash or control characters.
+`origin` takes decoded path text such as `"/café docs"`. Moth encodes it as `/caf%C3%A9%20docs` in generated URLs and dev-server redirects. A literal `%20` in the setting becomes `%2520` in a URL. The dev server redirects a request for the bare prefix to its trailing-slash root and keeps the query, so relative links resolve inside the origin. Use `/` for the site root. Other prefixes must start with `/` and cannot contain empty or dot segments, a query, a fragment, a backslash or control characters.
 
 `page_url_style` accepts `trailing_slash`, `no_trailing_slash` or `ignore`. `html_favicon` accepts a compile-time String containing an untracked URL, not necessarily a string literal. Tracked file resources belong in a direct root builder slot because `@config.moth` rejects authored file-value paths.
 

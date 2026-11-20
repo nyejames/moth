@@ -628,9 +628,9 @@ fn no_common_ancestor_diagnostic_names_the_conflicting_input() {
     );
 }
 
-// Windows drive letters are case-insensitive host syntax, so one request may spell the same
-// drive differently. The shared ancestor must still be found and each relative identity derived
-// from it, rather than a textual prefix strip that would keep the rooted spelling.
+// Windows drive letters are case-insensitive host syntax: std parses the drive letter as
+// uppercase, so `Path` component equality treats `C:/` and `c:/` as one root. The shared ancestor
+// must still be found and each relative identity derived from it by ordinary `strip_prefix`.
 #[cfg(windows)]
 #[test]
 fn mixed_case_drive_letters_share_the_request_ancestor() {
@@ -667,7 +667,7 @@ fn mixed_case_drive_letters_share_the_request_ancestor() {
                 "<h1>B</h1>"
             ),
         ],
-        "the shared drive root should yield plain file identities with distinct filenames",
+        "the folded drive root should yield plain file identities with distinct filenames",
     );
 }
 
@@ -701,8 +701,8 @@ fn mixed_case_directory_names_keep_distinct_identities() {
     );
 }
 
-// A duplicate identity can be spelled with different drive-letter case even though the supplied
-// display paths differ. The duplicate diagnostic owns that identity collision.
+// Two display paths that differ only in drive-letter case reduce to one relative identity and
+// compare equal as canonical source paths, so the duplicate diagnostic reports the whole path.
 #[cfg(windows)]
 #[test]
 fn mixed_case_drive_duplicate_identities_are_diagnosed() {
@@ -739,13 +739,13 @@ fn mixed_case_drive_duplicate_identities_are_diagnosed() {
     let mut scratch = Vec::new();
     assert_eq!(
         path_table.render_native_frozen(facts.path, report.context().strings(), &mut scratch),
-        PathBuf::from("page.mtf"),
-        "the fact should name the shared request-relative identity",
+        PathBuf::from("c:/docs/page.mtf"),
+        "the fact should name the repeated whole path, not the shortened identity",
     );
     let rendered = format_terse_diagnostic_reports(&messages).join("\n");
     assert!(
-        rendered.contains("page.mtf"),
-        "the duplicate should render the shared identity: {rendered}",
+        rendered.contains("c:/docs/page.mtf"),
+        "the duplicate should render the repeated whole path: {rendered}",
     );
 }
 
@@ -1764,6 +1764,74 @@ fn prefixless_rooted_in_memory_display_paths_keep_their_display_identity() {
             (second, Some(PathBuf::from("guide.mtf")), "<h1>Guide</h1>"),
         ],
         "rooted display paths should keep their identity and use the common ancestor",
+    );
+}
+
+// A doubled separator inside a rooted display path must not survive into the request-relative
+// identity spelling. `Path` equality ignores the empty component, but later consumers read the
+// raw spelling, so the test compares the portable rendering.
+#[test]
+fn rooted_in_memory_display_paths_store_normalized_relative_spellings() {
+    let output = compile_ok(MothTemplateInput::Sources(vec![
+        MothTemplateSource {
+            display_path: PathBuf::from("/docs/nested//page.mtf"),
+            source_text: "# Page".to_owned(),
+        },
+        MothTemplateSource {
+            display_path: PathBuf::from("/docs/other.mtf"),
+            source_text: "Other".to_owned(),
+        },
+    ]));
+
+    let relative_path = output.documents[0]
+        .relative_path
+        .as_deref()
+        .expect("a rooted in-memory input should have a relative identity");
+    assert_eq!(
+        portable_path_text(relative_path),
+        "nested/page.mtf",
+        "the stored identity spelling must not keep the doubled separator",
+    );
+}
+
+// Resource URL validation reads that identity spelling, so the unnormalized form rejects a page
+// that references a sibling resource with an empty URL-context component.
+#[cfg(unix)]
+#[test]
+fn rooted_in_memory_document_with_sibling_resource_uses_normalized_url_context() {
+    let temp_dir = temp_project(&[("docs/nested/logo.svg", "<svg/>")]);
+    // Resource paths resolve against the display root, so it must be canonical: a symlinked
+    // temporary directory would make the sibling resource look like it escapes its module.
+    let canonical_root =
+        std::fs::canonicalize(temp_dir.path()).expect("fixture root should canonicalise");
+    let root = portable_path_text(&canonical_root);
+    let page_path = PathBuf::from(format!("{root}/docs/nested//page.mtf"));
+    let other_path = PathBuf::from(format!("{root}/docs/other.mtf"));
+
+    let output = compile_ok(MothTemplateInput::Sources(vec![
+        MothTemplateSource {
+            display_path: page_path,
+            source_text: "# Page\n\n[@logo.svg]".to_owned(),
+        },
+        MothTemplateSource {
+            display_path: other_path,
+            source_text: "Other".to_owned(),
+        },
+    ]));
+
+    assert_eq!(
+        portable_path_text(
+            output.documents[0]
+                .relative_path
+                .as_deref()
+                .expect("the page should have a relative identity")
+        ),
+        "nested/page.mtf",
+    );
+    assert!(
+        output.documents[0].content.contains("./logo.svg"),
+        "the sibling resource URL should resolve from the normalized document directory: {}",
+        output.documents[0].content,
     );
 }
 

@@ -21,9 +21,10 @@
 //! - Agent summaries and enriched per-case summaries (see `summary.rs`)
 
 use crate::bench_types::BenchmarkCaseObservations;
-use crate::command_line::posix_shell_command_line;
+use crate::command_line::{RecordedWorkingDirectory, posix_shell_command_line};
+use crate::process_runner::BENCHMARK_ENVIRONMENT;
 use std::ffi::{OsStr, OsString};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Reject non-finite profile-owned numeric data before serialization.
 ///
@@ -72,19 +73,18 @@ impl ProfileObservation {
     /// Render the executed command as a POSIX shell command for reports and
     /// artifact records.
     ///
-    /// The line names the profiling binary. The first argument is always the
-    /// resolved entry; a relative entry is only resolvable from the recorded
-    /// working directory, so the line then starts with a `cd` into it. An
-    /// absolute entry needs no directory.
+    /// File-entry cases run from a generated case directory that is also the CLI output root and
+    /// is removed when the run finishes. The recorded line therefore recreates that directory
+    /// before entering it, even when the entry argument is absolute. The benchmark environment is
+    /// recorded from the same definition the executor applies, so replaying the line uses the
+    /// configuration the run actually had. `mkdir -p` is idempotent, so directory-entry cases
+    /// whose working directory is the repository root still replay successfully.
     pub(crate) fn posix_shell_command_line(&self) -> String {
-        let working_directory = self
-            .command_args
-            .first()
-            .filter(|entry| Path::new(entry).is_relative())
-            .map(|_| self.current_directory.as_os_str());
-
         posix_shell_command_line(
-            working_directory,
+            Some(RecordedWorkingDirectory::Ephemeral(
+                self.current_directory.as_os_str(),
+            )),
+            BENCHMARK_ENVIRONMENT,
             self.moth_path.as_os_str(),
             std::iter::once(OsStr::new(&self.command))
                 .chain(self.command_args.iter().map(OsString::as_os_str)),

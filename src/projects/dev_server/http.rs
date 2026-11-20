@@ -10,7 +10,7 @@ use crate::projects::dev_server::state::{
     BuildState, DevServerState, RuntimeReportCategory, RuntimeReportKey,
 };
 use crate::projects::dev_server::static_files::{self, ResolvedRequest, ResolvedRequestKind};
-use crate::projects::routing::{origin_root_url, strip_origin_prefix};
+use crate::projects::routing::{is_bare_origin_request, origin_root_url, strip_origin_prefix};
 use saying::say;
 use serde::de::{MapAccess, Visitor, value::MapAccessDeserializer};
 use serde::{Deserialize, Deserializer};
@@ -89,10 +89,15 @@ fn handle_connection_with_timeouts(
         let origin = &build_state.html_site_config.origin;
 
         if request_path == "/" && origin != "/" {
-            GetResponse::Static(PreparedResponse::Redirect {
-                status_line: "302 FOUND",
-                location: origin_root_url(origin),
-            })
+            GetResponse::Static(PreparedResponse::redirect(origin_root_url(origin)))
+        } else if is_bare_origin_request(request_path, origin) {
+            // Serving the index from a slashless origin makes relative links resolve above it.
+            let mut location = origin_root_url(origin);
+            if let Some(query) = request_query {
+                location.push('?');
+                location.push_str(query);
+            }
+            GetResponse::Static(PreparedResponse::redirect(location))
         } else if let Some(site_local_path) = strip_origin_prefix(request_path, origin) {
             match site_local_path.as_str() {
                 "/__moth/events" => GetResponse::Events,
@@ -176,6 +181,14 @@ impl PreparedResponse {
             status_line,
             content_type,
             body: body.into(),
+        }
+    }
+
+    /// A redirect to a canonical location; every dev-server redirect uses the same status.
+    fn redirect(location: String) -> Self {
+        Self::Redirect {
+            status_line: "302 FOUND",
+            location,
         }
     }
 }
@@ -575,10 +588,7 @@ fn prepare_static_response(
         },
     );
     if let ResolvedRequest::Redirect { location } = resolved_request {
-        return PreparedResponse::Redirect {
-            status_line: "302 FOUND",
-            location,
-        };
+        return PreparedResponse::redirect(location);
     }
 
     if matches!(resolved_request, ResolvedRequest::MissingEntryPage) && !build_state.last_build_ok {

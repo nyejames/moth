@@ -23,7 +23,8 @@
 //! - Artifact directory layout (see `artifacts.rs`)
 //! - Profile JSON parsing or hotspot extraction (see `parse.rs` and `hotspots.rs`)
 
-use crate::command_line::posix_shell_command_line;
+use crate::command_line::{RecordedWorkingDirectory, posix_shell_command_line};
+use crate::process_runner::{BENCHMARK_ENVIRONMENT, apply_benchmark_environment};
 use flate2::read::GzDecoder;
 use std::ffi::OsString;
 use std::fs::File;
@@ -186,13 +187,11 @@ pub(crate) fn check_samply_available() -> Result<SamplyRecordCapabilities, Strin
 pub(crate) fn build_samply_command(input: &SamplyRunInput) -> Command {
     let mut cmd = Command::new("samply");
     cmd.current_dir(&input.current_directory)
-        .env("MOTH_TIMERS", "bench")
-        .env("MOTH_COUNTERS", "off")
-        .env("MOTH_BENCH_STATUS", "1")
         .arg("record")
         .arg("--save-only")
         .arg("-o")
         .arg(&input.output_path);
+    apply_benchmark_environment(&mut cmd);
 
     if let Some(rate) = input.samply_rate_hz {
         cmd.arg("--rate").arg(rate.to_string());
@@ -231,7 +230,10 @@ pub(crate) fn run_samply(input: &SamplyRunInput) -> Result<ProfileProcessRun, St
     let start = Instant::now();
     let mut command = build_samply_command(input);
     let command_line = posix_shell_command_line(
-        command.get_current_dir().map(Path::as_os_str),
+        command
+            .get_current_dir()
+            .map(|directory| RecordedWorkingDirectory::Existing(directory.as_os_str())),
+        BENCHMARK_ENVIRONMENT,
         command.get_program(),
         command.get_args(),
     );

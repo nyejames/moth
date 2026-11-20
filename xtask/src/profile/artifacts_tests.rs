@@ -40,6 +40,11 @@ fn test_observation() -> ProfileObservation {
     }
 }
 
+/// The recorded replay line for the fixture observation.
+fn test_posix_shell_command_line() -> String {
+    test_observation().posix_shell_command_line()
+}
+
 /// Build a test case manifest entry with a fixed identity.
 fn test_case_manifest(case_id: &str, summary_path: Option<String>) -> ProfileCaseManifest {
     ProfileCaseManifest {
@@ -51,8 +56,7 @@ fn test_case_manifest(case_id: &str, summary_path: Option<String>) -> ProfileCas
             timing_schema_version: 2,
         },
         group_name: "core".to_string(),
-        posix_shell_command_line: "cd /repo && /repo/target/profiling/moth check foo.moth"
-            .to_string(),
+        posix_shell_command_line: test_posix_shell_command_line(),
         observation_wall_ms: 1.0,
         profile_path: format!("cases/{case_id}/profile.json.gz"),
         stdout_path: format!("cases/{case_id}/stdout.log"),
@@ -235,7 +239,6 @@ fn raw_index_manifest_only_advertises_written_artifacts() {
     }
 
     let mut case = test_case_manifest("raw_index_case", None);
-    case.posix_shell_command_line = "cd /repo && /repo/target/profiling/moth check".to_string();
     case.observation_wall_ms = 1.0;
     case.profile_path = "cases/raw_index_case/profile.json.gz".to_string();
     case.stdout_path = "cases/raw_index_case/stdout.log".to_string();
@@ -276,6 +279,7 @@ fn raw_index_manifest_only_advertises_written_artifacts() {
 #[test]
 fn detailed_observations_file_matches_plan_schema() {
     let observation = test_observation();
+    let command_line = observation.posix_shell_command_line();
     let json = serde_json::to_string_pretty(&DetailedObservationsFile::from(&observation))
         .expect("observations should serialize");
 
@@ -284,9 +288,7 @@ fn detailed_observations_file_matches_plan_schema() {
     assert!(!json.contains(r#""case_name""#));
     assert!(json.contains(r#""group": "stress""#));
     assert!(json.contains(r#""wall_ms": 1234.5"#));
-    assert!(json.contains(
-        r#""posix_shell_command_line": "cd /repo && /repo/target/profiling/moth check test.moth""#
-    ));
+    assert!(json.contains(&format!(r#""posix_shell_command_line": "{command_line}""#)));
     assert!(json.contains(r#""name": "frontend.ast.total""#));
     assert!(json.contains(r#""value": 812"#));
     assert!(json.contains(r#""name": "token_count""#));
@@ -299,6 +301,7 @@ fn format_index_md_lists_cases() {
     case.observation_wall_ms = 500.0;
     case.profile_path = "profile.json.gz".to_string();
     case.stdout_path = "stdout.log".to_string();
+    let command_line = case.posix_shell_command_line.clone();
     let cases = vec![case];
 
     let md = format_index_md("test-run", ProfileFilterMode::Terse, &cases);
@@ -308,7 +311,7 @@ fn format_index_md_lists_cases() {
     assert!(md.contains("check_foo_bst"));
     assert!(md.contains("~500ms"));
     assert!(md.contains("POSIX shell command:"));
-    assert!(md.contains("```\ncd /repo && /repo/target/profiling/moth check foo.moth\n```"));
+    assert!(md.contains(&format!("```\n{command_line}\n```")));
 }
 
 #[test]

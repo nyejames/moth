@@ -240,6 +240,18 @@ pub fn strip_origin_prefix(public_path: &str, origin: &str) -> Option<String> {
     }
 }
 
+/// Returns whether the request addresses the origin root without its trailing slash.
+///
+/// The dev server redirects this form so relative links resolve under the origin instead of
+/// above it. An origin of `/` is already the canonical root, so it never matches and cannot
+/// redirect to itself. Origin matching keeps the same percent-escape spelling rules as
+/// `strip_origin_prefix`.
+pub fn is_bare_origin_request(request_path: &str, origin: &str) -> bool {
+    origin != "/"
+        && request_path.len() == origin.len()
+        && matches_origin_escape_spelling(request_path, origin)
+}
+
 /// Percent escapes may use lowercase hex, but literal path bytes are case-sensitive.
 /// Never decode here: an escaped slash must not become a prefix separator.
 fn matches_origin_escape_spelling(request: &str, origin: &str) -> bool {

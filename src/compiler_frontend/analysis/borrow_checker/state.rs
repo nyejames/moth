@@ -486,7 +486,7 @@ pub(super) struct LocalState {
     // value analysis follow these roots.
     pub value_roots: RootSet,
     // Binding-cell overlap: the definite slots this binding aliases as a whole binding. These
-    // cells decide whole-binding exclusivity and are not contained in `value_roots`.
+    // cells decide whole-binding exclusivity and need not be contained in `value_roots`.
     pub direct_alias_roots: RootSet,
     // Cells a write through this binding targets, plus projected referent cells an immutable
     // alias inherits from a projection-free alias chain as overlap identity. An alias of a

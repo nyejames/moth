@@ -49,6 +49,7 @@ fn has_invalid_path_reason(
     }
 }
 
+#[cfg(unix)]
 fn has_resolved_outcome_reason(
     outcome: ResolvedFileReferenceOutcome,
     expected: InvalidCompileTimePathCode,

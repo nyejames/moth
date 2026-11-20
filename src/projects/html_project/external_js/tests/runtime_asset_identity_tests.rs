@@ -11,9 +11,10 @@ use super::{js_runtime_asset_identity, register_js_runtime_asset_sources};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache;
+#[cfg(unix)]
+use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::builder_surface::external_import_providers::provider::{
     ExternalImportProvider, ExternalImportProviderContext, ExternalImportRequest,
-    RuntimeAssetIdentity,
 };
 use crate::builder_surface::package_metadata::PackageSetMembership;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
@@ -534,6 +535,7 @@ fn shipped_symlink_fixture() -> ShippedSymlinkFixture {
     }
 }
 
+#[cfg(unix)]
 fn runtime_plan(
     assets: impl IntoIterator<Item = RuntimeAssetIdentity>,
 ) -> HtmlExternalRuntimeEmissionPlan {

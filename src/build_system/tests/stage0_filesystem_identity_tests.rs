@@ -9,8 +9,11 @@
 //!      without duplicating them in the larger orchestration suites.
 
 use super::*;
+#[cfg(unix)]
 use crate::build_system::create_project_modules::ProjectFrontendCompilation;
-use crate::compiler_frontend::compiler_errors::{InfrastructureFailure, InfrastructureFailureKind};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+#[cfg(unix)]
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::{DiagnosticSeverity, PreparedFailure};

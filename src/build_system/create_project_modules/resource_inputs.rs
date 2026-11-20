@@ -81,6 +81,7 @@ impl ResourceInputRecord {
         self.content
     }
 
+    #[cfg(unix)]
     pub(crate) fn canonical_source_path(&self) -> &Path {
         &self.canonical_source_path
     }
