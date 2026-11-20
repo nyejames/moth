@@ -12,11 +12,9 @@ on:
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+# Validation only needs repository read access. Deployment grants are scoped to its job.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 jobs:
   gate:
@@ -26,6 +24,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     continue-on-error: ${{ matrix.os == 'windows-latest' }}
+
+    # Superseded pushes can drop stale gates without interrupting Pages deployment.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.gate }}-${{ matrix.os }}
+      cancel-in-progress: true
 
     strategy:
       fail-fast: false
@@ -38,7 +41,6 @@ jobs:
           - format
           - clippy
           - unit-tests
-          - feature-matrix
           - integration
           - docs
           - benchmarks
@@ -67,13 +69,13 @@ jobs:
       # Only these gates execute rendered JavaScript through Node. .node-version owns the exact
       # validation release; the compiler's own host requirement stays native Math.f16round.
       - name: Install repository Node runtime
-        if: matrix.gate == 'unit-tests' || matrix.gate == 'feature-matrix' || matrix.gate == 'integration'
+        if: matrix.gate == 'unit-tests' || matrix.gate == 'integration'
         uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
 
       - name: Report Node runtime
-        if: matrix.gate == 'unit-tests' || matrix.gate == 'feature-matrix' || matrix.gate == 'integration'
+        if: matrix.gate == 'unit-tests' || matrix.gate == 'integration'
         shell: bash
         run: node -p 'process.execPath + " " + process.version + " " + typeof Math.f16round'
 
@@ -85,9 +87,11 @@ jobs:
             ~/.cargo/git
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      # A pinned release binary avoids compiling just and its dependencies in every gate job.
       - name: Install just
-        timeout-minutes: 10
-        run: cargo install just --locked
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        with:
+          just-version: '1.56.0'
 
       - name: Run gate
         timeout-minutes: 45
@@ -95,7 +99,7 @@ jobs:
 
       # Reports are review evidence, so they are uploaded whether the gate passed or failed.
       - name: Upload machine-readable reports
-        if: always() && (matrix.gate == 'honesty-audit' || matrix.gate == 'integration' || matrix.gate == 'feature-matrix' || matrix.gate == 'first-party-deps')
+        if: always() && (matrix.gate == 'honesty-audit' || matrix.gate == 'integration' || matrix.gate == 'first-party-deps')
         uses: actions/upload-artifact@v7
         with:
           name: test-reports-${{ matrix.gate }}-${{ matrix.os }}
@@ -107,6 +111,11 @@ jobs:
     # Manual dispatches from feature branches are validation-only; only `main` publishes Pages.
     if: github.ref == 'refs/heads/main'
     needs: gate
+
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
 
     concurrency:
       group: pages

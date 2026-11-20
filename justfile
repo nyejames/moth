@@ -28,15 +28,16 @@ validate-perf:
     just bench-scaling
     just cache-maintain
 
-# All standard validation families, including configurations absent from workspace tests.
+# Full merge-readiness checks. Separate feature configurations run explicitly or on release tags.
 # Opt-in Boracle, stress and recording benchmarks remain separate.
 validate-full:
-    just validate
     just fmt-workspace-check
+    just clippy
+    just validate-common
     just clippy-features
-    just test-feature-matrix
     just test-honesty-audit
-    just validate-perf
+    just bench-ci
+    just bench-scaling
     just timers-erasure-check
     just cache-maintain
 
@@ -78,9 +79,27 @@ ship:
     just bench
 
 release version:
+    just release-clean-check
+    just release-verified "{{version}}" "$(git rev-parse --verify HEAD)"
+
+# Capture the validated revision before running checks so a concurrent checkout cannot retarget a tag.
+[private]
+release-verified version revision:
     just validate-full
-    git tag -a v{{version}} -m "Moth v{{version}}"
-    git push origin v{{version}}
+    just release-clean-check {{revision}}
+    git tag -a "v{{version}}" -m "Moth v{{version}}" "{{revision}}"
+    git push origin "v{{version}}"
+
+# The tag must describe exactly the committed tree that passed validation.
+[unix]
+release-clean-check revision="":
+    @changes="$(git status --porcelain=v1 --untracked-files=all)" || exit 1; test -z "$changes" || { echo "Release requires a clean worktree" >&2; exit 1; }
+    @test -z "{{revision}}" || { current="$(git rev-parse --verify HEAD)" && test "$current" = "{{revision}}"; } || { echo "Release HEAD changed during validation" >&2; exit 1; }
+
+[windows]
+release-clean-check revision="":
+    $changes = @(git status --porcelain=v1 --untracked-files=all); if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; if ($changes.Count -gt 0) { throw "Release requires a clean worktree" }
+    if ("{{revision}}" -ne "") { $current = git rev-parse --verify HEAD; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; if ($current -ne "{{revision}}") { throw "Release HEAD changed during validation" } }
 
 bench:
     cargo run --package xtask --bin xtask -- bench
@@ -178,9 +197,6 @@ ci-gate-clippy:
 
 ci-gate-unit-tests:
     just validate-unit-tests
-
-ci-gate-feature-matrix:
-    just test-feature-matrix
 
 ci-gate-integration:
     cargo run --quiet -p moth-cli --bin moth -- tests --terse

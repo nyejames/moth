@@ -14,7 +14,7 @@ env:
 
 jobs:
   validate:
-    # Release keeps every standard gate, including the expensive release-artifact checks.
+    # Merge-readiness checks run alongside the package-scoped release feature matrix.
     name: Validate before release
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -53,16 +53,76 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install just
-        timeout-minutes: 10
-        run: cargo install just --locked
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        with:
+          just-version: '1.56.0'
 
       - name: Run validation
         timeout-minutes: 30
         run: just validate-full
 
+  feature-matrix:
+    # Workspace tests unify Cargo features; these package-scoped lanes are release blockers.
+    name: Validate release features (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 70
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install repository Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install --no-self-update
+          rustc -vV
+
+      - name: Install repository Node runtime
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+
+      - name: Report Node runtime
+        shell: bash
+        run: node -p 'process.execPath + " " + process.version + " " + typeof Math.f16round'
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        with:
+          just-version: '1.56.0'
+
+      - name: Run feature matrix
+        timeout-minutes: 60
+        run: just test-feature-matrix
+
+      - name: Upload feature matrix results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-feature-matrix-${{ matrix.os }}
+          path: |
+            target/test-reports/feature_lane_coverage.json
+            target/test-reports/feature_matrix_results.json
+          if-no-files-found: warn
+
   build:
     name: Build ${{ matrix.target }}
-    needs: validate
+    needs: [validate, feature-matrix]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
 
@@ -244,6 +304,8 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           path: dist
+          # Exclude validation reports from the public release payload.
+          pattern: ${{ env.BIN_NAME }}-${{ github.ref_name }}-*
           merge-multiple: true
 
       - name: Generate checksums
