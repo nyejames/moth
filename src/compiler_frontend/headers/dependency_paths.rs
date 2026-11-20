@@ -6,9 +6,11 @@
 //! normalisation transform exists, the retained path is the validated authored path.
 
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::compiler_messages::InvalidExportRouteReason;
 use crate::compiler_frontend::compiler_messages::InvalidImportPathReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
+use crate::compiler_frontend::paths::file_references::explicit_extension;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -66,6 +68,48 @@ pub(super) fn validate_dependency_path(
             InvalidImportPathReason::CurrentDirectorySegment,
             Some(*path_span),
         ));
+    }
+
+    Ok(())
+}
+
+/// Validate one authored `$export` public route suffix.
+///
+/// WHAT: classifies the route's components once and rejects the site root, a leading `.`, any
+///       `..` and any extension-bearing component.
+/// WHY: a route names namespace segments under the declaring facade, never a dependency or file
+///      path. Keeping the checks here leaves the import family for provider resolution and lets
+///      the directive owner report one route-specific diagnostic.
+pub(super) fn validate_export_route(
+    route_path: PathId,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> Result<(), InvalidExportRouteReason> {
+    if route_path == PathId::ROOT {
+        return Err(InvalidExportRouteReason::PublicRoot);
+    }
+
+    let mut components = Vec::new();
+    let components = path_fork.resolve_components(route_path, &mut components);
+    // Lexing keeps leading `.` and `..` as relative markers, but a route is always a suffix
+    // under its facade. Reject the leading `.` spelling and every surviving `..` step.
+    if let Some(first) = components.first()
+        && string_table.resolve(*first) == "."
+    {
+        return Err(InvalidExportRouteReason::CurrentDirectorySegment);
+    }
+    if components
+        .iter()
+        .any(|component| string_table.resolve(*component) == "..")
+    {
+        return Err(InvalidExportRouteReason::ParentDirectorySegment);
+    }
+    // Any remaining extension spelling is a file, not a namespace segment.
+    if components
+        .iter()
+        .any(|component| explicit_extension(string_table.resolve(*component)).is_some())
+    {
+        return Err(InvalidExportRouteReason::ExtensionSegment);
     }
 
     Ok(())

@@ -6,6 +6,10 @@
 //!       authored spans and the recorded attachment fact on one focused owner.
 
 use super::*;
+use crate::compiler_frontend::compiler_messages::PathKind;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    InvalidReceiverDeclarationCode, InvalidReceiverDeclarationView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView,
 };
@@ -341,9 +345,13 @@ fn export_modifier_marks_only_its_next_declaration_public() {
     let public_headers: Vec<_> = headers
         .headers
         .iter()
-        .filter(|header| header.export_mode == HeaderExportMode::Public)
+        .filter(|header| header.export_mode.is_public())
         .collect();
     assert_eq!(public_headers.len(), 1, "only the marked struct is public");
+    assert!(
+        public_headers[0].export_mode.route().is_none(),
+        "an operand-free `$export` keeps the root destination"
+    );
     assert!(matches!(public_headers[0].kind, HeaderKind::Struct { .. }));
 
     let private_helper = headers
@@ -372,7 +380,7 @@ fn export_modifier_marks_a_direct_selection_dependency_public() {
     assert_eq!(output.file_dependency_clauses.len(), 1);
     assert_eq!(
         output.file_dependency_clauses[0].export_mode,
-        HeaderExportMode::Public
+        HeaderExportMode::Public { route: None }
     );
     let selections = output.file_dependency_clauses[0]
         .selections(&output.dependency_selections)
@@ -536,8 +544,7 @@ fn export_modifier_attaches_across_comments_and_crlf() {
         "comment-only lines must not break `$export` attachment",
     );
     assert!(headers.headers.iter().any(|header| {
-        matches!(header.kind, HeaderKind::Constant { .. })
-            && header.export_mode == HeaderExportMode::Public
+        matches!(header.kind, HeaderKind::Constant { .. }) && header.export_mode.is_public()
     }));
 
     let crlf = "$export\r\nlabel #= \"x\"\r\n";
@@ -546,8 +553,7 @@ fn export_modifier_attaches_across_comments_and_crlf() {
         "CRLF after `$export` should attach like LF",
     );
     assert!(headers.headers.iter().any(|header| {
-        matches!(header.kind, HeaderKind::Constant { .. })
-            && header.export_mode == HeaderExportMode::Public
+        matches!(header.kind, HeaderKind::Constant { .. }) && header.export_mode.is_public()
     }));
 }
 
@@ -573,10 +579,12 @@ fn export_modifier_rejects_operands() {
     for (source, needle, occurrence) in cases {
         let errors = expect_header_error(
             parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
-            "`$export` accepts no same-line operand",
+            "`$export` accepts at most one bare route operand",
         );
-        let diagnostic =
-            assert_directive_reason(&errors, InvalidTemplateDirectiveCode::UnexpectedArguments);
+        let diagnostic = assert_directive_reason(
+            &errors,
+            InvalidTemplateDirectiveCode::InvalidExportRouteOperand,
+        );
         assert_eq!(
             diagnostic_primary_span(diagnostic),
             Some(source_span_for(source, needle, occurrence)),
@@ -659,7 +667,7 @@ $export\ntyped #I32 = 2\n";
     let public_headers: Vec<_> = headers
         .headers
         .iter()
-        .filter(|header| header.export_mode == HeaderExportMode::Public)
+        .filter(|header| header.export_mode.is_public())
         .collect();
     assert_eq!(
         public_headers.len(),
@@ -777,8 +785,7 @@ fn export_modifier_is_allowed_in_a_reached_facade() {
     );
 
     assert!(headers.headers.iter().any(|header| {
-        matches!(header.kind, HeaderKind::Constant { .. })
-            && header.export_mode == HeaderExportMode::Public
+        matches!(header.kind, HeaderKind::Constant { .. }) && header.export_mode.is_public()
     }));
 }
 
@@ -878,6 +885,454 @@ fn exported_namespace_dependencies_report_public_target_before_provider_binding(
     }
 }
 
+fn export_route_diagnostics(source: &str) -> HeaderTestDiagnostics {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    match prepare_active_root_with_role(
+        source,
+        &PathBuf::from("src/@mod.moth"),
+        ModuleRootRole::Normal,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    ) {
+        Ok(_) => panic!("the export route should be rejected"),
+        Err(FileFrontendPrepareFailure::Diagnosed(error)) => HeaderTestDiagnostics {
+            diagnostics: diagnostic_view_for_test(error.diagnostic),
+        },
+        Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
+            panic!("the export route fixture should diagnose source, not infrastructure: {error:?}")
+        }
+    }
+}
+
+fn rendered_public_route(
+    output: &FileFrontendPrepareOutput,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> String {
+    let route = output
+        .headers
+        .iter()
+        .find_map(|header| header.export_mode.route())
+        .expect("the exported declaration should retain a public route");
+    path_fork.render_portable(route.path, string_table, &mut Vec::new())
+}
+
+#[test]
+fn export_route_is_retained_on_a_declaration() {
+    let source = "$export @tables\nButton = | label String |\n";
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (output, _span_builder) = prepare_api_root_with_fork(
+        source,
+        std::path::Path::new("src/@mod.moth"),
+        &mut string_table,
+        &mut path_fork,
+    );
+
+    let header = output
+        .headers
+        .iter()
+        .find(|header| matches!(header.kind, HeaderKind::Struct { .. }))
+        .expect("the exported struct should parse");
+    let route = header
+        .export_mode
+        .route()
+        .expect("`$export @tables` should retain its route");
+    assert_eq!(route.span, source_span_for(source, "@tables", 0));
+    assert_eq!(
+        path_fork.render_portable(route.path, &string_table, &mut Vec::new()),
+        "tables"
+    );
+    assert!(
+        output.structural_file_references.references().is_empty(),
+        "a route path row must not become a structural file reference"
+    );
+    assert!(
+        output.qualified_references.is_empty(),
+        "a route path row must not become a qualified provider reference"
+    );
+    assert!(
+        output.file_dependency_clauses.is_empty(),
+        "a declaration route must not create a dependency clause"
+    );
+}
+
+#[test]
+fn export_route_retains_a_multi_component_suffix() {
+    let source = "$export @tables/layout\nTableLayout = | columns I32 |\n";
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (output, _span_builder) = prepare_api_root_with_fork(
+        source,
+        std::path::Path::new("src/@mod.moth"),
+        &mut string_table,
+        &mut path_fork,
+    );
+
+    assert_eq!(
+        rendered_public_route(&output, &path_fork, &string_table),
+        "tables/layout"
+    );
+    assert!(output.structural_file_references.references().is_empty());
+}
+
+#[test]
+fn export_route_is_retained_on_a_support_package_facade() {
+    let source = "$export @forms\nButton = | label String |\n";
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let output = prepare_active_root_with_role(
+        source,
+        &PathBuf::from("src/@package.moth"),
+        ModuleRootRole::Support,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    )
+    .expect("a support facade should accept a routed export");
+
+    assert_eq!(
+        rendered_public_route(&output, &path_fork, &string_table),
+        "forms"
+    );
+}
+
+#[test]
+fn export_route_survives_crlf_and_a_comment_only_line() {
+    let source = "$export @forms\r\n-- public form\r\nButton = | label String |\r\n";
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let output = prepare_active_root_with_role(
+        source,
+        &PathBuf::from("src/@mod.moth"),
+        ModuleRootRole::Normal,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    )
+    .expect("CRLF and a comment-only line must not break route attachment");
+
+    assert_eq!(
+        rendered_public_route(&output, &path_fork, &string_table),
+        "forms"
+    );
+}
+
+#[test]
+fn doc_and_route_stack_on_one_target() {
+    let source = "$doc [: Public docs.] $export @forms\nButton = | label String |\n";
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (output, _span_builder) = prepare_api_root_with_fork(
+        source,
+        std::path::Path::new("src/@mod.moth"),
+        &mut string_table,
+        &mut path_fork,
+    );
+
+    let header = output
+        .headers
+        .iter()
+        .find(|header| matches!(header.kind, HeaderKind::Struct { .. }))
+        .expect("the documented exported struct should parse");
+    assert_eq!(
+        header
+            .source_directives
+            .iter()
+            .map(|directive| directive.kind)
+            .collect::<Vec<_>>(),
+        [SourceDirectiveKind::Doc, SourceDirectiveKind::Export]
+    );
+    assert_eq!(
+        rendered_public_route(&output, &path_fork, &string_table),
+        "forms"
+    );
+}
+
+#[test]
+fn export_route_is_retained_on_a_multi_selection_clause() {
+    let source = "$export @forms\n@button Button, render as render_button\n";
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let output = prepare_active_root_with_role(
+        source,
+        &PathBuf::from("src/@mod.moth"),
+        ModuleRootRole::Normal,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    )
+    .expect("a facade should accept a routed multi-selection export");
+
+    assert_eq!(output.file_dependency_clauses.len(), 1);
+    let clause = &output.file_dependency_clauses[0];
+    let route = clause
+        .export_mode
+        .route()
+        .expect("the clause should retain its route");
+    assert_eq!(route.span, source_span_for(source, "@forms", 0));
+    assert_eq!(
+        path_fork.render_portable(route.path, &string_table, &mut Vec::new()),
+        "forms"
+    );
+    let selections = clause
+        .selections(&output.dependency_selections)
+        .expect("the exported clause retains its selections");
+    assert_eq!(selections.len(), 2);
+    assert_eq!(string_table.resolve(selections[0].source_name), "Button");
+    assert!(selections[0].local_alias.is_none());
+    assert_eq!(string_table.resolve(selections[1].source_name), "render");
+    let alias = selections[1]
+        .local_alias
+        .as_ref()
+        .expect("the second selection carries its authored alias");
+    assert_eq!(string_table.resolve(alias.name), "render_button");
+    assert_eq!(alias.span, source_span_for(source, "render_button", 0));
+    assert!(
+        output.structural_file_references.references().is_empty(),
+        "neither the provider path nor the route path is a structural file value"
+    );
+    assert!(output.qualified_references.is_empty());
+}
+
+#[test]
+fn duplicate_export_routes_cite_both_authored_spans() {
+    for source in [
+        "$export @a\n$export @b\nButton = | label String |\n",
+        "$export @a $export @b\nButton = | label String |\n",
+    ] {
+        let diagnostics = export_route_diagnostics(source);
+        let diagnostic = assert_directive_reason(
+            &diagnostics,
+            InvalidTemplateDirectiveCode::DuplicateModifier,
+        );
+        assert_eq!(
+            diagnostic_primary_span(diagnostic),
+            Some(source_span_for(source, "$export", 1))
+        );
+        assert_eq!(
+            earlier_directive_span(diagnostic),
+            Some(source_span_for(source, "$export", 0)),
+            "the diagnostic labels the first authored modifier"
+        );
+    }
+}
+
+#[test]
+fn export_route_rejects_trailing_tokens_and_second_operands() {
+    for (source, needle) in [
+        (
+            "$export @tables forms\nButton = | label String |\n",
+            "forms",
+        ),
+        ("$export @a @b\nButton = | label String |\n", "@b"),
+        ("$export @tables(\"x\")\nButton = | label String |\n", "("),
+    ] {
+        let diagnostics = export_route_diagnostics(source);
+        let diagnostic = assert_directive_reason(
+            &diagnostics,
+            InvalidTemplateDirectiveCode::InvalidExportRouteOperand,
+        );
+        assert_eq!(
+            diagnostic_primary_span(diagnostic),
+            Some(source_span_for(source, needle, 0)),
+            "the offending token owns the operand diagnostic for `{source}`"
+        );
+    }
+}
+
+#[test]
+fn export_route_rejects_invalid_path_spellings() {
+    for (source, needle, expected) in [
+        (
+            "$export @/\nButton = | label String |\n",
+            "@/",
+            InvalidTemplateDirectiveCode::InvalidExportRoutePublicRoot,
+        ),
+        (
+            "$export @./forms\nButton = | label String |\n",
+            "@./forms",
+            InvalidTemplateDirectiveCode::InvalidExportRouteCurrentDirectorySegment,
+        ),
+        (
+            "$export @tables.js\nButton = | label String |\n",
+            "@tables.js",
+            InvalidTemplateDirectiveCode::InvalidExportRouteExtensionSegment,
+        ),
+        (
+            "$export @..\nButton = | label String |\n",
+            "@..",
+            InvalidTemplateDirectiveCode::InvalidExportRouteParentDirectorySegment,
+        ),
+        (
+            "$export @../forms\nButton = | label String |\n",
+            "@../forms",
+            InvalidTemplateDirectiveCode::InvalidExportRouteParentDirectorySegment,
+        ),
+        (
+            "$export @tables.moth\nButton = | label String |\n",
+            "@tables.moth",
+            InvalidTemplateDirectiveCode::InvalidExportRouteExtensionSegment,
+        ),
+        (
+            "$export @tables.moth/layout\nButton = | label String |\n",
+            "@tables.moth/layout",
+            InvalidTemplateDirectiveCode::InvalidExportRouteExtensionSegment,
+        ),
+    ] {
+        let diagnostics = export_route_diagnostics(source);
+        let diagnostic = assert_directive_reason(&diagnostics, expected);
+        assert_eq!(
+            diagnostic_primary_span(diagnostic),
+            Some(source_span_for(source, needle, 0)),
+            "the route operand owns the spelling diagnostic for `{source}`"
+        );
+    }
+}
+
+#[test]
+fn export_route_rejects_lexically_invalid_path_components() {
+    for (source, expected_prefix, expected_kind) in [
+        (
+            "$export @forms/../x\nButton = | label String |\n",
+            "@forms/..",
+            PathKind::InvalidComponent,
+        ),
+        (
+            "$export @forms/./x\nButton = | label String |\n",
+            "@forms/.",
+            PathKind::InvalidComponent,
+        ),
+        (
+            "$export @forms/\nButton = | label String |\n",
+            "@forms/",
+            PathKind::TrailingSeparator,
+        ),
+    ] {
+        let diagnostics = export_route_diagnostics(source);
+        let diagnostic = diagnostics
+            .diagnostics
+            .first()
+            .expect("the invalid component should compact to one record");
+        assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0018");
+        let facts = diagnostic
+            .family_view::<token_lexical::InvalidPathView>()
+            .expect("the invalid component keeps its typed invalid-path facts");
+        assert_eq!(facts.path_kind, expected_kind);
+        assert_eq!(
+            diagnostic_primary_span(diagnostic),
+            Some(source_span_for(source, expected_prefix, 0)),
+            "the path prefix through the offending component owns its lexical diagnostic"
+        );
+    }
+}
+
+#[test]
+fn blank_line_dangles_a_routed_export() {
+    let source = "$export @x\n\nButton = | label String |\n";
+    let diagnostics = export_route_diagnostics(source);
+    let diagnostic =
+        assert_directive_reason(&diagnostics, InvalidTemplateDirectiveCode::DanglingModifier);
+    assert_eq!(
+        diagnostic_primary_span(diagnostic),
+        Some(source_span_for(source, "$export", 0))
+    );
+}
+
+#[test]
+fn routed_export_keeps_existing_target_eligibility() {
+    let runtime_statement = "$export @forms\nvalue = 1\n";
+    let diagnostics = export_route_diagnostics(runtime_statement);
+    let diagnostic =
+        assert_directive_reason(&diagnostics, InvalidTemplateDirectiveCode::WrongTarget);
+    assert_eq!(
+        diagnostic_primary_span(diagnostic),
+        Some(source_span_for(runtime_statement, "$export", 0))
+    );
+
+    let receiver_method =
+        "Box = | x I32 |\n\n$export @forms\nvalue |this Box| -> I32:\n    return this.x\n;\n";
+    let diagnostics = export_route_diagnostics(receiver_method);
+    let diagnostic = diagnostics
+        .diagnostics
+        .views()
+        .find(|diagnostic| diagnostic_has_family::<InvalidReceiverDeclarationView>(diagnostic))
+        .expect("the routed receiver method should keep its receiver diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidReceiverDeclarationView>()
+        .expect("the receiver diagnostic retains its typed facts");
+    assert_eq!(
+        facts.code,
+        InvalidReceiverDeclarationCode::ReceiverMethodImportOrExportNotAllowed,
+        "a routed export still cannot publish a receiver method"
+    );
+    assert_eq!(
+        diagnostic_primary_span(diagnostic),
+        Some(source_span_for(receiver_method, "value", 0)),
+        "the receiver declaration owns the rejection span"
+    );
+
+    let conformance = "DISPLAY must:\n    show |This| -> String\n;\n\nBox = | x I32 |\n\n$export @forms\nBox must DISPLAY\n";
+    let diagnostics = export_route_diagnostics(conformance);
+    let diagnostic =
+        assert_directive_reason(&diagnostics, InvalidTemplateDirectiveCode::WrongTarget);
+    assert_eq!(
+        diagnostic_primary_span(diagnostic),
+        Some(source_span_for(conformance, "$export", 0))
+    );
+}
+
+#[test]
+fn routed_export_rejects_namespace_clauses() {
+    for source in [
+        "$export @forms\n@impl\n",
+        "$export @forms\n@impl as impl_ns\n",
+    ] {
+        let diagnostics = export_route_diagnostics(source);
+        let diagnostic = diagnostics
+            .diagnostics
+            .first()
+            .expect("the invalid export target should compact to one record");
+        assert!(
+            diagnostic_has_family::<generics_traits_api::InvalidExportTargetView>(&diagnostic),
+            "`{source}` must keep the invalid public export target diagnostic"
+        );
+        assert_eq!(
+            diagnostic_primary_span(diagnostic),
+            Some(source_span_for(source, "@impl", 0))
+        );
+    }
+}
+
+#[test]
+fn routed_export_keeps_placement_rejections() {
+    for (file_path, entry_path) in [
+        ("src/@entry.moth", "src/@entry.moth"),
+        ("src/impl.moth", "src/@entry.moth"),
+        ("src/@config.moth", "src/@entry.moth"),
+    ] {
+        let source = "$export @forms\nvalue #= 1\n";
+        let errors = expect_header_error(
+            parse_single_file_headers_with_entry(source, file_path, entry_path),
+            "only an API facade root may author a routed `$export`",
+        );
+        let diagnostic = assert_directive_reason(
+            &errors,
+            InvalidTemplateDirectiveCode::DirectiveNotAllowedHere,
+        );
+        assert_eq!(
+            diagnostic_primary_span(diagnostic),
+            Some(source_span_for(source, "$export", 0))
+        );
+    }
+}
+
 enum InvalidDependencyCode {
     InvalidExportTarget,
     MissingSelectionAfterComma,
@@ -885,16 +1340,18 @@ enum InvalidDependencyCode {
 
 #[test]
 fn template_head_rejects_export_source_modifier() {
-    let failure = parse_single_file_ast_diagnostic("[: [$export: body] ]");
-    let diagnostic = assert_ast_diagnostic(
-        &failure,
-        "MOTH-SYNTAX-0021",
-        Some("invalid_template_directive.wrong_context"),
-    );
-    let facts = diagnostic
-        .family_view::<InvalidTemplateDirectiveView>()
-        .expect("the template-head directive keeps its typed facts");
-    assert_eq!(facts.reason, InvalidTemplateDirectiveCode::WrongContext);
+    for source in ["[: [$export: body] ]", "[: [$export @forms: body] ]"] {
+        let failure = parse_single_file_ast_diagnostic(source);
+        let diagnostic = assert_ast_diagnostic(
+            &failure,
+            "MOTH-SYNTAX-0021",
+            Some("invalid_template_directive.wrong_context"),
+        );
+        let facts = diagnostic
+            .family_view::<InvalidTemplateDirectiveView>()
+            .expect("the template-head directive keeps its typed facts");
+        assert_eq!(facts.reason, InvalidTemplateDirectiveCode::WrongContext);
+    }
 }
 
 #[test]

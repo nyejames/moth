@@ -122,7 +122,8 @@ fn classify_authored_path(
     }
 }
 
-fn explicit_extension(name: &str) -> Option<&str> {
+/// Return a name's explicit extension, treating a leading or trailing dot as no extension.
+pub(crate) fn explicit_extension(name: &str) -> Option<&str> {
     match name.rfind('.') {
         Some(0) | None => None,
         Some(dot) if dot + 1 < name.len() => Some(&name[dot + 1..]),

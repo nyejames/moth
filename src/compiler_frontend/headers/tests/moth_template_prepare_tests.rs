@@ -1525,7 +1525,7 @@ fn module_root_export_syntax_can_target_moth_template_content() {
     assert_eq!(root_output.file_dependency_clauses.len(), 1);
     assert_eq!(
         root_output.file_dependency_clauses[0].export_mode,
-        HeaderExportMode::Public
+        HeaderExportMode::Public { route: None }
     );
     assert_ne!(
         root_output.file_dependency_clauses[0].dependency.path,

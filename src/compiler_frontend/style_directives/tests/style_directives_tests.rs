@@ -47,7 +47,7 @@ fn export_and_config_are_source_modifiers() {
         export.kind,
         StyleDirectiveKind::SourceModifier {
             target: SourceModifierTarget::ExportablePublicApiItem,
-            operand: SourceModifierOperand::None,
+            operand: SourceModifierOperand::OptionalPublicRoute,
         }
     ));
 

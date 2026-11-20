@@ -309,13 +309,16 @@ impl ConstraintDirectiveSpans {
 /// Operand shape a source directive requires after its name.
 ///
 /// WHAT: `None` accepts no operand; `RequiredSingleString` requires exactly one compile-time
-///       String expression whose tokens the AST owner parses and folds.
+///       String expression whose tokens the AST owner parses and folds; `OptionalPublicRoute`
+///       accepts at most one authored path spelling the facade-relative public suffix.
 /// WHY: the header and statement attachment owners read one contract per directive instead of
-///      hard-coding operand acceptance by directive name.
+///      hard-coding operand acceptance by directive name, and `$export` keeps its optional
+///      operand distinct from the expression operands `$doc` and `$todo` fold.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceModifierOperand {
     None,
     RequiredSingleString,
+    OptionalPublicRoute,
 }
 
 /// Core language directive behavior handled directly by compiler-owned template parsing.

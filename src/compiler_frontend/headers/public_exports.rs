@@ -42,9 +42,7 @@ use crate::compiler_frontend::headers::binding_environment::{
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleRootBoundary, ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
-use crate::compiler_frontend::headers::types::{
-    DependencySelection, Header, HeaderExportMode, HeaderParseFailure,
-};
+use crate::compiler_frontend::headers::types::{DependencySelection, Header, HeaderParseFailure};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::project_globals::is_project_globals_dependency;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
@@ -127,7 +125,7 @@ fn intern_public_surface_path(
 ///       contract-shell eligibility stay centralized on `HeaderKind`.
 fn is_authored_public_export(header: &Header) -> bool {
     header.file_role.is_export_capable()
-        && header.export_mode == HeaderExportMode::Public
+        && header.export_mode.is_public()
         && header.kind.is_authored_public_export_declaration()
 }
 
@@ -311,7 +309,7 @@ fn build_source_package_public_dependencies(
             .get(&root_file_interned)
         {
             for dependency in dependencies {
-                if dependency.export_mode != HeaderExportMode::Public {
+                if !dependency.export_mode.is_public() {
                     continue;
                 }
 
@@ -475,7 +473,7 @@ fn build_module_root_public_dependencies(
             .map(Vec::as_slice)
             .unwrap_or(&[]);
         for dependency in dependencies {
-            if dependency.export_mode != HeaderExportMode::Public
+            if !dependency.export_mode.is_public()
                 || !is_project_globals_dependency(
                     dependency.dependency.path,
                     &*path_fork,
@@ -505,7 +503,7 @@ fn build_module_root_public_dependencies(
         );
 
         for dependency in dependencies {
-            if dependency.export_mode != HeaderExportMode::Public {
+            if !dependency.export_mode.is_public() {
                 continue;
             }
 

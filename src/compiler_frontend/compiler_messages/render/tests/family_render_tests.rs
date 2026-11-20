@@ -44,14 +44,14 @@ use crate::compiler_frontend::compiler_messages::{
     ExternalJsAnnotationDirective, ExternalJsDeclarationKind, GenericApplicationErrorReason,
     InvalidAssignmentTargetReason, InvalidBuiltinCallReason, InvalidCallShapeReason,
     InvalidCastReason, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
-    InvalidConfigReason, InvalidDependencyClauseReason, InvalidExpressionReason,
-    InvalidExternalModuleReason, InvalidFallibleHandlingReason, InvalidFunctionSignatureReason,
-    InvalidGenericParameterReason, InvalidImportPathReason, InvalidReceiverCallReason,
-    InvalidSignatureMemberReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
-    InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
-    InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, NameNamespace,
-    NamespaceMemberRole, NamespaceRecordKind, NamespaceTypeValueMisuseKind, PathKind,
-    ReceiverCallKind, TypeAnnotationContext, TypeMismatchContext, UnknownTypeNameSite,
+    InvalidConfigReason, InvalidDependencyClauseReason, InvalidExportRouteReason,
+    InvalidExpressionReason, InvalidExternalModuleReason, InvalidFallibleHandlingReason,
+    InvalidFunctionSignatureReason, InvalidGenericParameterReason, InvalidImportPathReason,
+    InvalidReceiverCallReason, InvalidSignatureMemberReason, InvalidStandaloneStatementReason,
+    InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidTemplateDirectiveReason,
+    InvalidTemplateStructureReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
+    NameNamespace, NamespaceMemberRole, NamespaceRecordKind, NamespaceTypeValueMisuseKind,
+    PathKind, ReceiverCallKind, TypeAnnotationContext, TypeMismatchContext, UnknownTypeNameSite,
     ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
@@ -813,11 +813,55 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         (
             templates::invalid_template_directive(
                 Some(export_directive),
-                InvalidTemplateDirectiveReason::UnexpectedArguments,
+                InvalidTemplateDirectiveReason::InvalidExportRouteOperand,
                 None,
             ),
-            "`$export` takes no operand and must occupy its own line. Remove the operand, colon, or parentheses after it.",
-            "UnexpectedArguments",
+            "`$export` takes at most one bare `@route` path. Remove the extra token or parentheses after it.",
+            "InvalidExportRouteOperand",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(export_directive),
+                InvalidTemplateDirectiveReason::InvalidExportRoute {
+                    reason: InvalidExportRouteReason::PublicRoot,
+                },
+                None,
+            ),
+            "`$export` routes name a suffix under the facade. Replace `@/` with a named suffix such as `@tables`, or omit the operand for a root export.",
+            "PublicRoot",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(export_directive),
+                InvalidTemplateDirectiveReason::InvalidExportRoute {
+                    reason: InvalidExportRouteReason::CurrentDirectorySegment,
+                },
+                None,
+            ),
+            "`$export` route components cannot start with `.`. Remove `./`; write `$export @forms` instead of `$export @./forms`.",
+            "CurrentDirectorySegment",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(export_directive),
+                InvalidTemplateDirectiveReason::InvalidExportRoute {
+                    reason: InvalidExportRouteReason::ParentDirectorySegment,
+                },
+                None,
+            ),
+            "`$export` routes cannot step up with `..`. Write a suffix under this facade, for example `$export @tables`.",
+            "ParentDirectorySegment",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(export_directive),
+                InvalidTemplateDirectiveReason::InvalidExportRoute {
+                    reason: InvalidExportRouteReason::ExtensionSegment,
+                },
+                None,
+            ),
+            "`$export` route components cannot carry a file extension. A route names public namespace segments, for example `$export @tables/layout`.",
+            "ExtensionSegment",
         ),
         (
             templates::invalid_template_directive(

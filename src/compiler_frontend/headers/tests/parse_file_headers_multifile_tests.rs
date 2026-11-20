@@ -451,7 +451,7 @@ fn retained_dependency_shells_get_deterministic_ordinals_per_authored_clause() {
     assert_eq!(public_selections.len(), 1);
     assert_eq!(
         public.export_mode,
-        HeaderExportMode::Public,
+        HeaderExportMode::Public { route: None },
         "the repeated public re-export keeps its own retained shell and visibility"
     );
 }
@@ -554,8 +554,7 @@ fn api_only_support_root_exports_declarations_without_synthesizing_start() {
         FileRole::ActiveApiOnlyModuleRoot(root_role)
     );
     assert!(output.headers.iter().any(|header| {
-        matches!(header.kind, HeaderKind::Constant { .. })
-            && header.export_mode == HeaderExportMode::Public
+        matches!(header.kind, HeaderKind::Constant { .. }) && header.export_mode.is_public()
     }));
     assert!(
         output
@@ -684,7 +683,6 @@ fn support_package_root_file_accepts_export_directives() {
     );
 
     assert!(headers.headers.iter().any(|header| {
-        matches!(header.kind, HeaderKind::Struct { .. })
-            && header.export_mode == HeaderExportMode::Public
+        matches!(header.kind, HeaderKind::Struct { .. }) && header.export_mode.is_public()
     }));
 }

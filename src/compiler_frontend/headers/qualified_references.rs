@@ -491,9 +491,10 @@ pub(crate) fn push_const_required_expression_ranges(
 
     // Source-directive operands fold before their target is emitted, exactly like a const
     // initializer, so their qualified references must create the same ordering edge and content
-    // dependency. They are const-required regardless of the target header kind.
+    // dependency. A public export route is a namespace identity rather than an expression, so
+    // only typed expression operands contribute a range.
     for directive in &header.source_directives {
-        if let Some(operand) = directive.operand {
+        if let Some(operand) = directive.operand.expression_range() {
             push(operand);
         }
     }

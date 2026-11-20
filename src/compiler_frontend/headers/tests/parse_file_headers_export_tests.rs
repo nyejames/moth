@@ -84,7 +84,7 @@ fn public_dependency_and_private_dependency_keep_distinct_retained_shells() {
     );
     assert_eq!(
         output.file_dependency_clauses[1].export_mode,
-        HeaderExportMode::Public
+        HeaderExportMode::Public { route: None }
     );
     assert_eq!(
         output.file_dependency_clauses[1]

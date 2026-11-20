@@ -31,7 +31,7 @@ use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable
 use crate::compiler_frontend::semantic_identity::{ModuleRootFiles, ModuleRootRole};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::{
-    SourceDirectiveAnnotation, StyleDirectiveRegistry,
+    PublicExportRoute, SourceDirectiveAnnotation, StyleDirectiveRegistry,
 };
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
@@ -337,20 +337,47 @@ pub enum HeaderKind {
 
 /// Explicit export mode for a parsed header or file dependency.
 ///
-/// WHAT: distinguishes private source-file items from public module-root API surface.
+/// WHAT: distinguishes private source-file items from public module-root API surface and retains
+///       the optional facade-relative public route the author supplied.
 /// WHY: module-root files use `$export` to mark public declarations and direct-selection
-/// re-exports. All other files keep every declaration as `Private`.
+///      re-exports. All other files keep every declaration as `Private`. Combining the route with
+///      the public state removes the impossible "private with a route" representation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeaderExportMode {
     /// Private to the source file or depending file.
     Private,
     /// Public module API entry exposed through a module-root file.
-    Public,
+    ///
+    /// The route is a namespace suffix under the declaring facade and is never a dependency or
+    /// source-file path.
+    Public { route: Option<PublicExportRoute> },
 }
 
 impl HeaderExportMode {
     pub fn is_public(&self) -> bool {
-        matches!(self, HeaderExportMode::Public)
+        matches!(self, HeaderExportMode::Public { .. })
+    }
+
+    /// The authored public route, or `None` for a private item or a root-level public export.
+    pub fn route(&self) -> Option<PublicExportRoute> {
+        match self {
+            HeaderExportMode::Private => None,
+            HeaderExportMode::Public { route } => *route,
+        }
+    }
+
+    /// Remap the route's facade-relative path identity after a path-fork merge.
+    pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        if let HeaderExportMode::Public { route: Some(route) } = self {
+            route.path = remap.get(route.path);
+        }
+    }
+
+    /// Rebind the route's authored span into the finalised source identity.
+    pub fn rebind_source_identity(&mut self, file_id: SourceId) {
+        if let HeaderExportMode::Public { route: Some(route) } = self {
+            route.span = SourceSpan::new(file_id, route.span.local());
+        }
     }
 }
 
@@ -600,7 +627,7 @@ pub struct Header {
     /// Whether this header is part of the module public surface.
     ///
     /// WHAT: `Public` only for `$export`-marked items in a module root; `Private` everywhere
-    /// else.
+    /// else. A public item retains its optional facade-relative export route.
     /// WHY: dependency preparation builds module APIs from explicit public-surface metadata, not from
     /// file role alone.
     pub export_mode: HeaderExportMode,
@@ -702,9 +729,11 @@ impl RetainedDependencyClause {
         self.binding.remap_string_ids(remap);
     }
 
-    /// Remap the retained dependency complete-path identity after its path fork merges.
+    /// Remap the dependency's complete path and any retained public export route after their
+    /// path forks merge.
     pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.dependency.remap_path_ids(remap);
+        self.export_mode.remap_path_ids(remap);
     }
 
     /// Commit the source identity after `FileFrontendPrepareOutput` has preflighted every
@@ -712,6 +741,7 @@ impl RetainedDependencyClause {
     pub fn commit_source_rebinding(&mut self, file_id: SourceId) {
         self.dependency.commit_source_rebinding(file_id);
         self.binding.rebind_source_identity(file_id);
+        self.export_mode.rebind_source_identity(file_id);
     }
 }
 
@@ -1171,6 +1201,10 @@ impl Header {
 
     pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.kind.remap_path_ids(remap);
+        self.export_mode.remap_path_ids(remap);
+        for annotation in &mut self.source_directives {
+            annotation.operand.remap_path_ids(remap);
+        }
         let hints = std::mem::take(&mut self.local_ordering_hints);
         self.local_ordering_hints = hints
             .into_iter()
@@ -1187,6 +1221,8 @@ impl Header {
         provisional_source_file: PathId,
         path_fork: &PathInternerFork,
     ) -> Result<(), InfrastructureFailure> {
+        // `export_mode` routes are facade-relative namespace suffixes rather than source-owned
+        // paths, so they are deliberately exempt from this provisional-prefix check.
         if !path_fork.starts_with(self.declaration_path, provisional_source_file) {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::HeaderParsing,
@@ -1234,10 +1270,9 @@ impl Header {
         }
         for annotation in &mut self.source_directives {
             annotation.span = SourceSpan::new(file_id, annotation.span.local());
-            if let Some(operand) = &mut annotation.operand {
-                *operand = operand.rebind_source(file_id);
-            }
+            annotation.operand.rebind_source_identity(file_id);
         }
+        self.export_mode.rebind_source_identity(file_id);
         self.declaration_path = rebind_required_path(
             self.declaration_path,
             provisional_source_file,
@@ -1391,8 +1426,9 @@ pub struct RetainedDependencyClause {
     pub binding: DependencyBindingSyntax,
     /// Whether this dependency clause is part of the module public surface.
     ///
-    /// WHAT: `Public` for direct selections marked with `$export`;
-    /// `Private` for ordinary dependency clauses.
+    /// WHAT: `Public` for direct selections marked with `$export`, retaining the optional
+    ///       facade-relative route that applies to every selected name; `Private` for ordinary
+    ///       dependency clauses.
     pub export_mode: HeaderExportMode,
 }
 

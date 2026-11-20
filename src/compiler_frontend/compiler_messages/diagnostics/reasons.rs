@@ -899,6 +899,23 @@ pub enum InvalidGenericParameterReason {
     DuplicateTraitBound,
 }
 
+/// Why an authored `$export` public route cannot name a namespace suffix.
+///
+/// WHAT: the route spelling failures that remain after tokenization.
+/// WHY: a route is a directive operand, not a dependency or file path, so its diagnostics keep
+///      directive wording and must not imply provider resolution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum InvalidExportRouteReason {
+    /// The route spelled the site root (`@/`) instead of a suffix under the facade.
+    PublicRoot,
+    /// The first route component was `.` rather than a public namespace segment.
+    CurrentDirectorySegment,
+    /// A route component stepped up with `..`.
+    ParentDirectorySegment,
+    /// A route component carried a file extension rather than naming a namespace segment.
+    ExtensionSegment,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidTemplateDirectiveReason {
     UnknownDirective,
@@ -911,6 +928,12 @@ pub enum InvalidTemplateDirectiveReason {
     DirectiveNotAllowedHere,
     /// Directive received parenthesized arguments it does not accept.
     UnexpectedArguments,
+    /// `$export` received an operand that is not one bare `@route` path.
+    InvalidExportRouteOperand,
+    /// `$export` received a route spelling its public namespace contract rejects.
+    InvalidExportRoute {
+        reason: InvalidExportRouteReason,
+    },
     /// `$slot` received an invalid target declaration.
     InvalidSlotTarget,
     /// `$slot ... = ...` received a default that is not a compile-time `String`.

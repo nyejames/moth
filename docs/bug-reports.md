@@ -34,6 +34,13 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: a probe defines `divisor || -> I32: return 2` and a `$infallible` boundary containing `discarded I32 = value // divisor() catch:` with `assert(false)` in the handler. Debug check rejects MOTH-RULE-0091 at the `$infallible` directive: "`$infallible` forbids reachable traps, but this boundary's assertion may fail." Release build accepts and emits the project. Release folding replaces `divisor()` with 2, so the lowered protected division no longer routes an error edge to the handler and its assertion never reaches trap analysis; the skipped-handler evidence walk records only calls and fast uses.
 - Investigate: preserve trap and assertion evidence for a handler pruned after folding, as the pre-fold failure contributors and pre-fold `Bool` conditions already are. Add matching debug/release cases.
 
+### Executable-body `$export` operand paths reach structural discovery
+
+- Found: namespaced public export paths Phase 1 audit, 2026-11. Confirmed by code trace; pre-dates the route operand.
+- Where: `attach_structural_file_facts` in `src/compiler_frontend/headers/file_parser.rs` excludes route path rows only for `$export` runs attached to top-level declarations and dependency clauses. Statement-level runs are captured later by `parse_statement_source_directive_run` in `src/compiler_frontend/style_directives/source.rs`.
+- Observed: inside a function body or nested entry block, `$export @docs.mtf` or `$export @missing name` leaves the `PATH` token in the file-reference and qualified-reference scans. Stage 0 can queue the content file or add a provider edge before the AST rejects the directive as `WrongTarget`, so a missing provider may be reported instead of the placement error. Extensionless routes create no physical reference.
+- Investigate: identify directive-owned path rows before structural classification, keyed by `PathSyntaxId`, or reject `$export` runs at statement positions during header preparation. Add a body-placement case whose operand resembles a provider reference.
+
 ### Repeated work in single-file namespace validation
 
 - Found: Core/Builder package namespace and config filename final review, 2026-11.
