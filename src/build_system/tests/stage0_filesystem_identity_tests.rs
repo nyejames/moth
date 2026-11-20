@@ -367,7 +367,6 @@ mod non_utf8_filesystem_identity {
         fs::write(&bad_file, "x ~= 1\n").expect("should write non-UTF-8 named file");
 
         let config = Config::new(root.clone());
-        let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
@@ -401,7 +400,6 @@ mod non_utf8_filesystem_identity {
         fs::create_dir_all(&bad_folder).expect("should create non-UTF-8 named folder");
 
         let config = Config::new(root.clone());
-        let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
@@ -437,7 +435,6 @@ mod non_utf8_filesystem_identity {
         fs::write(&bad_file, "x ~= 1\n").expect("should write non-UTF-8 named file");
 
         let config = Config::new(root.clone());
-        let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
