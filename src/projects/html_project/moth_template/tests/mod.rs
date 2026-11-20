@@ -1282,17 +1282,23 @@ fn non_utf8_ancestor_above_the_selected_source_root_is_accepted() {
         path: source_root,
         recursive: true,
     });
-    assert_eq!(directory_output.documents.len(), 1);
-    assert_eq!(directory_output.documents[0].content, "<h1>Page</h1>");
+    assert_eq!(directory_output.documents.len(), 2);
+    let directory_document = |relative_path: &str| {
+        directory_output
+            .documents
+            .iter()
+            .find(|document| document.relative_path.as_deref() == Some(Path::new(relative_path)))
+            .unwrap_or_else(|| {
+                panic!("the selected root, not the non-UTF-8 ancestor, anchors '{relative_path}'")
+            })
+    };
+    let page = directory_document("page.mtf");
+    assert_eq!(page.content, "<h1>Page</h1>");
     assert_eq!(
-        directory_output.documents[0].relative_path,
-        Some(PathBuf::from("page.mtf")),
-        "the selected root, not the non-UTF-8 ancestor, anchors the relative identity",
-    );
-    assert_eq!(
-        directory_output.documents[0].source_path, canonical_source_path,
+        page.source_path, canonical_source_path,
         "the canonical native path should stay the document's host path",
     );
+    assert_eq!(directory_document("second.mtf").content, "<h1>Second</h1>");
 }
 
 // The duplicate fact is the request-relative identity, so a duplicate whose canonical ancestor
