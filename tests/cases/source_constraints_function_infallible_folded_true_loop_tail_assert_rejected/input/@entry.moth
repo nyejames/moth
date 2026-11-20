@@ -1,0 +1,14 @@
+always_true || -> Bool:
+    return true
+;
+
+$infallible
+probe |limit I32| -> I32:
+    loop always_true():
+        marker I32 = limit
+    ;
+    assert(limit > 0)
+    return limit
+;
+
+~[: [probe(2)]]

@@ -31,7 +31,7 @@ use crate::compiler_frontend::ast::expressions::failure_facts::{
     retain_bounded_witness_hops,
 };
 use crate::compiler_frontend::ast::statements::control_flow_exits::{
-    ControlFlowExitScratch, ControlFlowExitSummary, folded_bool_condition,
+    ConditionLookup, ControlFlowExitScratch, ControlFlowExitSummary, folded_bool_condition,
     range_ordinal_update_is_emitted, statement_exits,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
@@ -734,7 +734,7 @@ impl<'a> TraversalState<'a> {
         Some(statement_exits(
             statement,
             self.expression_builder.store(),
-            constants,
+            ConditionLookup::Constants(Some(constants)),
             &mut self.exit_scratch,
         ))
     }
@@ -1990,7 +1990,7 @@ fn classify_nodes(
                         bindings,
                         body,
                         state.expression_builder.store(),
-                        state.constants,
+                        ConditionLookup::Constants(state.constants),
                     );
                     effect = classify_range_failure(
                         range.domain,

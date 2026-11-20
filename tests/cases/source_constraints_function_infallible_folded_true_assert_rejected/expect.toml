@@ -1,0 +1,20 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0091"]
+message_contains = ["`$infallible` forbids reachable traps, but this boundary's assertion may fail."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0091"
+occurrence = 1
+reason = "invalid_source_constraint.trap_assertion"
+path = "input/@entry.moth"
+line = 5
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@entry.moth"
+line = 7
+column = 5

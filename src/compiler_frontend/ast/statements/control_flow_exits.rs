@@ -28,7 +28,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandli
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Independent facts about every reachable exit from a statement sequence.
 ///
@@ -280,6 +280,32 @@ impl ControlFlowExitScratch {
     }
 }
 
+/// Where control-condition folding reads its decision.
+///
+/// WHAT: the constant store for an AST-stage walk, or the pre-fold selection table when the walk
+///       sees the release-rewritten AST.
+/// WHY: release speculation can replace an authored call with a constant before HIR. Only a
+///      condition the pre-fold table recorded was decided by static selection; a condition with
+///      no row must stay runtime even though the rewritten store now holds a constant for it.
+#[derive(Clone, Copy)]
+pub(crate) enum ConditionLookup<'a> {
+    /// AST-stage analysis before release rewriting: the constant store decides. `None` means a
+    /// provisional projection has no store yet, so every condition stays dynamic.
+    Constants(Option<&'a ConstValueStore>),
+    /// Post-rewrite analysis: only recorded pre-fold decisions decide a condition.
+    PreFold(&'a FxHashMap<ExprId, bool>),
+}
+
+impl ConditionLookup<'_> {
+    /// Reads one condition's folded `Bool` value from this source.
+    fn folded_bool(self, condition: ExprId, expressions: &ExpressionStore) -> Option<bool> {
+        match self {
+            Self::Constants(constants) => folded_bool_condition(condition, expressions, constants?),
+            Self::PreFold(conditions) => conditions.get(&condition).copied(),
+        }
+    }
+}
+
 /// Analyses a statement sequence into independent exit facts.
 ///
 /// WHAT: walks statements in order and applies each next statement only to paths that still
@@ -294,7 +320,7 @@ pub(crate) fn analyze_control_flow_exits(
     analyze_control_flow_exits_in_scratch(
         body,
         expressions,
-        constants,
+        ConditionLookup::Constants(Some(constants)),
         &mut ControlFlowExitScratch::default(),
     )
 }
@@ -305,31 +331,21 @@ pub(crate) fn analyze_control_flow_exits(
 ///       block by falling through or executing `continue`; statically infallible catch handlers
 ///       contribute nothing because lowering emits them as skipped evidence, not as CFG.
 /// WHY: the ordinal update lives in the step block, which lowering discards when the body cannot
-///       reach it. Failure classification, skipped-source constraint evidence and the pre-fold
-///       fast-operation ledger must project the same emitted work, so all call this one owner
-///       instead of re-deriving reachability.
+///       reach it. Failure classification, skipped-source constraint evidence and live lowering
+///       must project the same emitted work, so all call this one owner instead of re-deriving
+///       reachability. `conditions` decides whether the walk sees the pre-fold AST or the
+///       release-rewritten one.
 pub(crate) fn range_ordinal_update_is_emitted(
     bindings: &LoopBindings,
     body: &[AstNode],
     expressions: &ExpressionStore,
-    constants: Option<&ConstValueStore>,
+    conditions: ConditionLookup<'_>,
 ) -> bool {
     if bindings.index.is_none() {
         return false;
     }
-    // Provisional parse-time projections can run before their owner has a constant store. An
-    // empty store votes no folded conditions, so every dynamic branch stays possible and the
-    // approximation can only keep the update, never drop a trap the live program would emit.
-    let empty_constants;
-    let constants = match constants {
-        Some(constants) => constants,
-        None => {
-            empty_constants = ConstValueStore::default();
-            &empty_constants
-        }
-    };
     let mut scratch = ControlFlowExitScratch::for_emitted_work();
-    let exits = analyze_control_flow_exits_in_scratch(body, expressions, constants, &mut scratch);
+    let exits = analyze_control_flow_exits_in_scratch(body, expressions, conditions, &mut scratch);
     exits.can_fall_through || exits.continues_current_loop
 }
 
@@ -352,7 +368,12 @@ pub(crate) fn analyze_control_flow_exits_with_never_targets(
         never_call_targets: Some(Vec::new()),
         ..ControlFlowExitScratch::default()
     };
-    let summary = analyze_control_flow_exits_in_scratch(body, expressions, constants, &mut scratch);
+    let summary = analyze_control_flow_exits_in_scratch(
+        body,
+        expressions,
+        ConditionLookup::Constants(Some(constants)),
+        &mut scratch,
+    );
     (summary, scratch.take_never_call_targets())
 }
 
@@ -363,14 +384,14 @@ pub(crate) fn analyze_control_flow_exits_with_never_targets(
 pub(crate) fn analyze_control_flow_exits_in_scratch(
     body: &[AstNode],
     expressions: &ExpressionStore,
-    constants: &ConstValueStore,
+    conditions: ConditionLookup<'_>,
     scratch: &mut ControlFlowExitScratch,
 ) -> ControlFlowExitSummary {
     let mut summary = ControlFlowExitSummary::FALLS_THROUGH;
 
     for statement in body {
         summary =
-            summary.then_sequence(statement_exits(statement, expressions, constants, scratch));
+            summary.then_sequence(statement_exits(statement, expressions, conditions, scratch));
         if !summary.can_fall_through {
             break;
         }
@@ -387,7 +408,7 @@ pub(crate) fn analyze_control_flow_exits_in_scratch(
 pub(crate) fn statement_exits(
     statement: &AstNode,
     expressions: &ExpressionStore,
-    constants: &ConstValueStore,
+    conditions: ConditionLookup<'_>,
     scratch: &mut ControlFlowExitScratch,
 ) -> ControlFlowExitSummary {
     let summary = match &statement.kind {
@@ -396,13 +417,17 @@ pub(crate) fn statement_exits(
         NodeKind::Return(_) | NodeKind::ReturnError(_) => ControlFlowExitSummary::RETURNS_TO_CALLER,
 
         NodeKind::If(_, then_body, Some(else_body), _) => {
-            analyze_control_flow_exits_in_scratch(then_body, expressions, constants, scratch).union(
-                analyze_control_flow_exits_in_scratch(else_body, expressions, constants, scratch),
-            )
+            analyze_control_flow_exits_in_scratch(then_body, expressions, conditions, scratch)
+                .union(analyze_control_flow_exits_in_scratch(
+                    else_body,
+                    expressions,
+                    conditions,
+                    scratch,
+                ))
         }
 
         NodeKind::If(_, then_body, None, _) => {
-            analyze_control_flow_exits_in_scratch(then_body, expressions, constants, scratch)
+            analyze_control_flow_exits_in_scratch(then_body, expressions, conditions, scratch)
                 .union(ControlFlowExitSummary::FALLS_THROUGH)
         }
 
@@ -416,20 +441,20 @@ pub(crate) fn statement_exits(
             default.as_deref(),
             *exhaustiveness,
             expressions,
-            constants,
+            conditions,
             scratch,
         ),
 
         NodeKind::LexicalScope { body } => {
-            analyze_control_flow_exits_in_scratch(body, expressions, constants, scratch)
+            analyze_control_flow_exits_in_scratch(body, expressions, conditions, scratch)
         }
 
         NodeKind::WhileLoop(condition, body) => {
-            while_loop_exits(*condition, body, expressions, constants, scratch)
+            while_loop_exits(*condition, body, expressions, conditions, scratch)
         }
 
         NodeKind::RangeLoop { body, .. } | NodeKind::CollectionLoop { body, .. } => {
-            finite_loop_exits(body, expressions, constants, scratch)
+            finite_loop_exits(body, expressions, conditions, scratch)
         }
 
         NodeKind::Break => ControlFlowExitSummary::BREAKS_CURRENT_LOOP,
@@ -450,7 +475,7 @@ pub(crate) fn statement_exits(
         }
 
         NodeKind::Assert { condition, .. } => {
-            if folded_bool_condition(*condition, expressions, constants) == Some(false) {
+            if conditions.folded_bool(*condition, expressions) == Some(false) {
                 ControlFlowExitSummary::DIVERGES
             } else {
                 ControlFlowExitSummary::FALLS_THROUGH
@@ -465,7 +490,7 @@ pub(crate) fn statement_exits(
     summary.with_nested_expression_exits(nested_expression_exits(
         statement,
         expressions,
-        constants,
+        conditions,
         scratch,
     ))
 }
@@ -481,7 +506,7 @@ pub(crate) fn statement_exits(
 fn nested_expression_exits(
     statement: &AstNode,
     expressions: &ExpressionStore,
-    constants: &ConstValueStore,
+    conditions: ConditionLookup<'_>,
     scratch: &mut ControlFlowExitScratch,
 ) -> ControlFlowExitSummary {
     // A statement whose expressions own statement bodies always keeps its own fallthrough fact,
@@ -506,7 +531,7 @@ fn nested_expression_exits(
             nested = nested.union(value_block_owned_exits(
                 block,
                 expressions,
-                constants,
+                conditions,
                 scratch,
             ));
         } else {
@@ -523,7 +548,7 @@ fn nested_expression_exits(
 fn value_block_owned_exits(
     block: &ValueBlock,
     expressions: &ExpressionStore,
-    constants: &ConstValueStore,
+    conditions: ConditionLookup<'_>,
     scratch: &mut ControlFlowExitScratch,
 ) -> ControlFlowExitSummary {
     let mut exits = ControlFlowExitSummary::FALLS_THROUGH;
@@ -534,13 +559,13 @@ fn value_block_owned_exits(
                 .union(analyze_control_flow_exits_in_scratch(
                     &value_if.then_body,
                     expressions,
-                    constants,
+                    conditions,
                     scratch,
                 ))
                 .union(analyze_control_flow_exits_in_scratch(
                     &value_if.else_body,
                     expressions,
-                    constants,
+                    conditions,
                     scratch,
                 ));
         }
@@ -549,7 +574,7 @@ fn value_block_owned_exits(
             exits = exits.union(analyze_control_flow_exits_in_scratch(
                 &scope.body,
                 expressions,
-                constants,
+                conditions,
                 scratch,
             ));
         }
@@ -559,7 +584,7 @@ fn value_block_owned_exits(
                 exits = exits.union(analyze_control_flow_exits_in_scratch(
                     &arm.body,
                     expressions,
-                    constants,
+                    conditions,
                     scratch,
                 ));
             }
@@ -567,7 +592,7 @@ fn value_block_owned_exits(
                 exits = exits.union(analyze_control_flow_exits_in_scratch(
                     default,
                     expressions,
-                    constants,
+                    conditions,
                     scratch,
                 ));
             }
@@ -587,7 +612,7 @@ fn value_block_owned_exits(
                     exits = exits.union(analyze_control_flow_exits_in_scratch(
                         body,
                         expressions,
-                        constants,
+                        conditions,
                         scratch,
                     ));
                 }
@@ -603,14 +628,14 @@ fn match_exits(
     default_body: Option<&[AstNode]>,
     exhaustiveness: MatchExhaustiveness,
     expressions: &ExpressionStore,
-    constants: &ConstValueStore,
+    conditions: ConditionLookup<'_>,
     scratch: &mut ControlFlowExitScratch,
 ) -> ControlFlowExitSummary {
     let mut combined: Option<ControlFlowExitSummary> = None;
 
     for arm in arms {
         let arm_exits =
-            analyze_control_flow_exits_in_scratch(&arm.body, expressions, constants, scratch);
+            analyze_control_flow_exits_in_scratch(&arm.body, expressions, conditions, scratch);
         combined = Some(match combined {
             Some(existing) => existing.union(arm_exits),
             None => arm_exits,
@@ -628,7 +653,7 @@ fn match_exits(
             let default_exits = analyze_control_flow_exits_in_scratch(
                 default_body,
                 expressions,
-                constants,
+                conditions,
                 scratch,
             );
             combined.unwrap_or(default_exits).union(default_exits)
@@ -648,10 +673,10 @@ fn while_loop_exits(
     condition: ExprId,
     body: &[AstNode],
     expressions: &ExpressionStore,
-    constants: &ConstValueStore,
+    conditions: ConditionLookup<'_>,
     scratch: &mut ControlFlowExitScratch,
 ) -> ControlFlowExitSummary {
-    match folded_bool_condition(condition, expressions, constants) {
+    match conditions.folded_bool(condition, expressions) {
         // A folded-false loop never runs its body, so body exits are unreachable.
         Some(false) => ControlFlowExitSummary::FALLS_THROUGH,
 
@@ -660,7 +685,7 @@ fn while_loop_exits(
             // its body does, so a Never call inside the body is not part of the enclosing body's
             // divergence proof.
             let body_exits = scratch.without_never_call_targets(|scratch| {
-                analyze_control_flow_exits_in_scratch(body, expressions, constants, scratch)
+                analyze_control_flow_exits_in_scratch(body, expressions, conditions, scratch)
             });
             let mut summary = body_exits.with_loop_control_consumed();
 
@@ -681,7 +706,7 @@ fn while_loop_exits(
             // exits are possible but cannot prove all-path non-fallthrough. A Never call in the
             // body is likewise not needed for the enclosing body's divergence proof.
             let body_exits = scratch.without_never_call_targets(|scratch| {
-                analyze_control_flow_exits_in_scratch(body, expressions, constants, scratch)
+                analyze_control_flow_exits_in_scratch(body, expressions, conditions, scratch)
             });
             let mut summary = body_exits.with_loop_control_consumed();
             summary.can_fall_through = true;
@@ -696,13 +721,13 @@ fn while_loop_exits(
 fn finite_loop_exits(
     body: &[AstNode],
     expressions: &ExpressionStore,
-    constants: &ConstValueStore,
+    conditions: ConditionLookup<'_>,
     scratch: &mut ControlFlowExitScratch,
 ) -> ControlFlowExitSummary {
     // A finite loop can run zero times, so its body never decides whether the enclosing function
     // diverges; a Never call inside it is not part of that proof.
     let body_exits = scratch.without_never_call_targets(|scratch| {
-        analyze_control_flow_exits_in_scratch(body, expressions, constants, scratch)
+        analyze_control_flow_exits_in_scratch(body, expressions, conditions, scratch)
     });
     let mut summary = body_exits.with_loop_control_consumed();
     summary.can_fall_through = true;
@@ -710,22 +735,25 @@ fn finite_loop_exits(
     summary
 }
 
-/// Collects the expression roots of statements that authored control flow cannot reach.
+/// Collects the expression roots of statements that no profile can execute.
 ///
 /// WHAT: walks every statement sequence in `nodes` in authored order through the same exit
 ///       summary that owns terminality, and records each expression root directly owned by a
 ///       statement in an unreachable tail, including every statement of a folded-false `while`
-///       body and the dead inner tails of reachable value blocks.
-/// WHY: release speculation must fold only authored-live calls, and HIR lowering already omits
-///      the same dead statements while preserving their selected evidence. Deciding the skip per
-///      statement occurrence keeps a const template's shared definition spans from making a live
-///      use look dead, which a module-wide span set cannot do.
+///       body, the dead inner tails of reachable value blocks, and every statement of a catch
+///       handler whose protected value is statically infallible.
+/// WHY: release speculation must fold only calls that can execute, and HIR lowering already omits
+///      the same statements while preserving their selected evidence. A statically pruned catch
+///      handler is omitted for the same reason: its protected value cannot fail, so no profile
+///      runs the handler. Deciding the skip per statement occurrence keeps a const template's
+///      shared definition spans from making a live use look dead, which a module-wide span set
+///      cannot do.
 ///
 /// A dead statement's folder entry skips its whole expression graph at that root, so only the
 /// statement's directly owned roots are needed. One scratch owns the exit analysis and a
 /// depth-indexed pool of expression walks; the pool keeps allocations across statements and lets
 /// a nested sequence or value block run while its ancestor's walk still owns its stack.
-pub(crate) fn collect_authored_dead_expression_roots(
+pub(crate) fn collect_unexecuted_expression_roots(
     nodes: &[AstNode],
     expressions: &ExpressionStore,
     constants: &ConstValueStore,
@@ -790,7 +818,7 @@ fn collect_sequence_dead_roots(
         summary = summary.then_sequence(statement_exits(
             node,
             expressions,
-            constants,
+            ConditionLookup::Constants(Some(constants)),
             &mut scratch.exit,
         ));
     }
@@ -947,7 +975,7 @@ fn collect_live_expression_dead_tails(
 ///
 /// WHY: expression graphs flatten a value block's statement bodies into its child ids, so a
 ///      consumer that also walks those bodies structurally must not descend through them here.
-///      Both the dead-root walk and the pre-fold fast-operation walk share this rule.
+///      Both the dead-root walk and the pre-fold condition collector share this rule.
 pub(crate) fn push_value_block_headers(block: &ValueBlock, pending: &mut Vec<ExprId>) {
     match block {
         ValueBlock::If(value_if) => pending.push(value_if.condition),
@@ -1027,20 +1055,36 @@ fn collect_value_block_dead_roots(
         }
         ValueBlock::Catch(value_catch) => {
             if let FallibleHandling::Handler { body, .. } = &value_catch.handler {
-                collect_sequence_dead_roots(
-                    body,
-                    expressions,
-                    constants,
-                    dead_roots,
-                    scratch,
-                    depth,
-                );
+                // A statically infallible protected value prunes this handler before HIR, so no
+                // profile runs its body. Keep the body byte-for-byte like any authored-dead
+                // statement: release folding must not replace calls or fast operations that the
+                // skipped-source walk reports for constraint evidence. The protected value still
+                // folds normally; only the handler's statements are dead.
+                let handler_is_pruned = expressions
+                    .view(value_catch.handled_value)
+                    .ok()
+                    .and_then(|view| view.failure_facts())
+                    .is_some_and(|facts| facts.is_statically_infallible_catch());
+                if handler_is_pruned {
+                    for dead_node in body {
+                        record_dead_node_roots(dead_node, dead_roots);
+                    }
+                } else {
+                    collect_sequence_dead_roots(
+                        body,
+                        expressions,
+                        constants,
+                        dead_roots,
+                        scratch,
+                        depth,
+                    );
+                }
             }
         }
     }
 }
 
-/// Records the directly owned expression roots of a statement the sequence cannot reach.
+/// Records the directly owned expression roots of a statement that no profile executes.
 fn record_dead_node_roots(node: &AstNode, dead_roots: &mut FxHashSet<ExprId>) {
     // A nested declaration is compiled as its own callable; the enclosing dead tail does not
     // make its body unreachable.
@@ -1098,6 +1142,146 @@ pub(crate) fn folded_bool_condition(
 ) -> Option<bool> {
     let view = expressions.view(condition).ok()?;
     constants.folded_bool_value(view)
+}
+
+/// Records the folded `Bool` value of every control condition HIR classifies.
+///
+/// WHAT: one row per `assert`, `if`, conditional-loop and value-`if` condition that the shared
+///       folded-Bool authority decided before release folding, keyed by the condition's
+///       expression root.
+/// WHY: HIR lowering and constraint verification classify these conditions by the pre-optimisation
+///      selection fact. Release speculation can replace an ordinary call with its constant result,
+///      and a post-fold read would then skip a body or a trap that a debug build keeps. One walk
+///      per callable covers expression-owned statement bodies with a single visited set, because
+///      the completed-expression edge convention also flattens those bodies into expression ids.
+pub(crate) fn collect_pre_fold_bool_conditions(
+    nodes: &[AstNode],
+    expressions: &ExpressionStore,
+    constants: &ConstValueStore,
+    conditions: &mut FxHashMap<ExprId, bool>,
+) {
+    for node in nodes {
+        let body = match &node.kind {
+            NodeKind::Function(_, _, body) | NodeKind::EntryStart(_, body) => body,
+            _ => continue,
+        };
+        PreFoldConditionWalk {
+            expressions,
+            constants,
+            conditions,
+            visited: FxHashSet::default(),
+        }
+        .collect_body(body);
+    }
+}
+
+/// One callable's pre-fold condition walk.
+struct PreFoldConditionWalk<'a> {
+    expressions: &'a ExpressionStore,
+    constants: &'a ConstValueStore,
+    conditions: &'a mut FxHashMap<ExprId, bool>,
+    visited: FxHashSet<ExprId>,
+}
+
+impl PreFoldConditionWalk<'_> {
+    fn collect_body(&mut self, nodes: &[AstNode]) {
+        let mut expression_roots = Vec::new();
+        for node in nodes {
+            match &node.kind {
+                NodeKind::If(condition, then_body, else_body, _) => {
+                    self.record_condition(*condition);
+                    self.collect_body(then_body);
+                    if let Some(else_body) = else_body {
+                        self.collect_body(else_body);
+                    }
+                }
+
+                NodeKind::Match { arms, default, .. } => {
+                    for arm in arms {
+                        self.collect_body(&arm.body);
+                    }
+                    if let Some(default) = default {
+                        self.collect_body(default);
+                    }
+                }
+
+                NodeKind::WhileLoop(condition, body) => {
+                    self.record_condition(*condition);
+                    self.collect_body(body);
+                }
+
+                NodeKind::RangeLoop { body, .. } | NodeKind::CollectionLoop { body, .. } => {
+                    self.collect_body(body);
+                }
+
+                NodeKind::LexicalScope { body } => self.collect_body(body),
+
+                NodeKind::Assert { condition, .. } => self.record_condition(*condition),
+
+                // A nested declaration is its own callable and starts its own walk.
+                NodeKind::Function(_, _, _) | NodeKind::EntryStart(_, _) => {}
+
+                _ => {}
+            }
+            node.visit_immediate_expression_ids(&mut |expression| {
+                expression_roots.push(expression);
+            });
+        }
+        self.collect_expression_roots(expression_roots);
+    }
+
+    /// Follows reachable expressions to the statement bodies their value blocks own.
+    ///
+    /// WHY: a value block's body is reachable from both its block expression and a flattened
+    ///      expression edge. One visited set per callable keeps the traversal linear in the
+    ///      expression graph, matching the other completed-expression walkers.
+    fn collect_expression_roots(&mut self, roots: Vec<ExprId>) {
+        let mut pending = roots;
+        while let Some(expression) = pending.pop() {
+            if !self.visited.insert(expression) {
+                continue;
+            }
+            let Ok(view) = self.expressions.view(expression) else {
+                continue;
+            };
+            if let ExpressionOperationView::ValueBlock(block) = view.operation() {
+                push_value_block_headers(block, &mut pending);
+                self.collect_value_block(block);
+            } else {
+                let _ = view.visit_child_ids(&mut |child| pending.push(child));
+            }
+        }
+    }
+
+    fn collect_value_block(&mut self, block: &ValueBlock) {
+        match block {
+            ValueBlock::If(value_if) => {
+                self.record_condition(value_if.condition);
+                self.collect_body(&value_if.then_body);
+                self.collect_body(&value_if.else_body);
+            }
+            ValueBlock::LexicalScope(scope) => self.collect_body(&scope.body),
+            ValueBlock::Match(value_match) => {
+                for arm in &value_match.arms {
+                    self.collect_body(&arm.body);
+                }
+                if let Some(default) = &value_match.default {
+                    self.collect_body(default);
+                }
+            }
+            ValueBlock::Catch(value_catch) => {
+                if let FallibleHandling::Handler { body, .. } = &value_catch.handler {
+                    self.collect_body(body);
+                }
+            }
+        }
+    }
+
+    fn record_condition(&mut self, condition: ExprId) {
+        if let Some(value) = folded_bool_condition(condition, self.expressions, self.constants) {
+            self.conditions.insert(condition, value);
+        }
+    }
 }
 
 #[cfg(test)]

@@ -7,11 +7,11 @@ diagnostic_codes = ["MOTH-RULE-0091"]
 code = "MOTH-RULE-0091"
 reason = "invalid_source_constraint.fast_range_guard"
 path = "input/@entry.moth"
-line = 8
+line = 7
 column = 12
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
 path = "input/@entry.moth"
-line = 11
+line = 10
 column = 16

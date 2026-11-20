@@ -1,0 +1,13 @@
+always_false || -> Bool:
+    return false
+;
+
+$infallible
+probe |flag Bool| -> I32:
+    loop always_false():
+        assert(flag)
+    ;
+    return 0
+;
+
+~[: [probe(false)]]

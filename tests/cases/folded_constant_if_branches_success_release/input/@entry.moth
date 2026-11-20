@@ -1,0 +1,19 @@
+always_true || -> Bool:
+    return true
+;
+
+probe |value I32| -> I32:
+    if always_true():
+        marker I32 = value + 1
+    else
+        marker I32 = value - 1
+    ;
+    chosen = if always_true():
+        then value + 2
+    else
+        then value - 2
+    ;
+    return chosen
+;
+
+~[: [probe(2)]]

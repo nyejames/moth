@@ -764,7 +764,7 @@ Ordinary statement and value-producing `if` use the normal folded Bool authority
 
 A known `true` selects the `then` branch. A known `false` selects the `else` branch or an empty scoped result when absent. Preserve the selected lexical scope. Runtime or unknown conditions remain ordinary `if`.
 
-Terminality, declared Never validation and durable executable summaries use the active specialised AST. Inactive code publishes no generated request, HIR, effect, project-context, link or target fact. Every `if` remaining in HIR has a runtime condition. This rule adds no match folding, loop unrolling or general control-flow partial evaluator.
+Terminality, declared Never validation and durable executable summaries use the active specialised AST. Inactive code publishes no generated request, HIR, effect, project-context, link or target fact. Every `if` remaining in HIR lowers a two-way runtime branch. A condition that only release folding makes constant reaches HIR as a constant, so both branches and their evidence survive. This rule adds no match folding, loop unrolling or general control-flow partial evaluator.
 
 Structural references were already graph-active before selection. Frontend errors in inactive ordinary branches remain errors. Structural `$feature` exclusion is a different earlier contract.
 
@@ -948,8 +948,11 @@ before expression freezing and HIR lowering. Stage 4 emission prepares eligible 
 while their canonical scope facts are live. One whole-body classifier decides declaration
 eligibility and speculative candidacy with different refusal policy. A successful candidate replaces
 the call expression transactionally; a refused, failing or budget-limited candidate leaves the
-authored call and every runtime check intact. Debug does not run speculation. HIR receives only the
-final folded AST and never adapts itself back into typed expressions.
+authored call and every runtime check intact. Speculation leaves authored-dead statements and
+statically pruned catch handlers unfolded, so they keep their calls and fast operations. Debug does
+not run speculation. HIR receives the final folded AST together with the
+pre-fold conditions static selection decided, the pre-fold semantic failure contributors and the
+erased-call ledger. It never adapts itself back into typed expressions.
 
 ### Stage 5: HIR and validation
 

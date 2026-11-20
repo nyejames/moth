@@ -1,6 +1,5 @@
--- Release folding proves the assertion false and discards the tail that lowers the template
--- loop. The generated ordinal update is still selected source, so both profiles must reject the
--- fast guard; the pre-fold ledger keeps the row from the runtime template handoff.
+-- The folded assertion lowers as a runtime check, so the template loop stays live and its
+-- generated ordinal update is selected source. Both profiles must reject the fast guard.
 always_false || -> Bool:
     return false
 ;

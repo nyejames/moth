@@ -6,6 +6,20 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 ## Open
 
+### `$infallible` release-only rejection from an erased fallback call
+
+- Found: release/debug divergence audit, 2026-11. Confirmed defect; pre-dates this branch, reproduced by probe on the current branch.
+- Where: release-erased call projection into `HirConstraintEvidence::live_erased_call_sites` in `src/compiler_frontend/hir/hir_builder/metadata.rs` from `Ast::release_erased_call_sites`, consumed by the `$infallible` escaping-failure analysis.
+- Observed: a probe defines `trap_if_zero |value I32| -> I32: return 1 // value` and a `$infallible` boundary containing `discarded I32 = value // 2 catch then trap_if_zero(1)`. Debug check accepts with no warnings. Release build rejects MOTH-RULE-0091 at the `$infallible` directive: "`$infallible` forbids escaping recoverable errors, but this boundary can return an `Error`". The divisor literal 2 cannot fail, so the fallback cannot run; release folding still erases the fallback call and HIR treats that erased row as live evidence.
+- Investigate: release-erased rows are inserted as live unconditionally. Keep a liveness link to the catch handler a folded call came from, or stop release speculation from folding fallback source that HIR cannot route. Add matching debug/release cases.
+
+### `$infallible` accepts a handler trap erased by release folding
+
+- Found: release/debug divergence audit, 2026-11. Confirmed defect; pre-dates this branch, reproduced by probe on the current branch.
+- Where: HIR catch lowering in `src/compiler_frontend/hir/hir_expression.rs` and the skipped-handler walk in `src/compiler_frontend/hir/hir_expression/constraint_evidence.rs`. The contract is stated in `docs/docs/directives/constraints.mtf`: "Semantic reachability is checked after static selection, but before optional optimisation erases evidence."
+- Observed: a probe defines `divisor || -> I32: return 2` and a `$infallible` boundary containing `discarded I32 = value // divisor() catch:` with `assert(false)` in the handler. Debug check rejects MOTH-RULE-0091 at the `$infallible` directive: "`$infallible` forbids reachable traps, but this boundary's assertion may fail." Release build accepts and emits the project. Release folding replaces `divisor()` with 2, so the lowered protected division no longer routes an error edge to the handler and its assertion never reaches trap analysis; the skipped-handler evidence walk records only calls and fast uses.
+- Investigate: preserve trap and assertion evidence for a handler pruned after folding, as the pre-fold failure contributors and pre-fold `Bool` conditions already are. Add matching debug/release cases.
+
 ### Repeated work in single-file namespace validation
 
 - Found: Core/Builder package namespace and config filename final review, 2026-11.

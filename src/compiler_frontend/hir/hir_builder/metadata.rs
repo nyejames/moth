@@ -7,7 +7,6 @@
 //! metadata result boundary, not stored on `HirModule`.
 
 use crate::compiler_frontend::ast::Ast;
-use crate::compiler_frontend::ast::AstFastOperationSource;
 use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, NodeKind};
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
 use crate::compiler_frontend::ast::expressions::failure_facts::{
@@ -344,18 +343,12 @@ impl<'a> HirBuilder<'a> {
             if is_pruned(witness.function, witness.scope, witness.span) {
                 continue;
             }
-            let provenance = match witness.source {
-                AstFastOperationSource::AuthoredArithmetic => {
-                    HirFastUseProvenance::AuthoredArithmetic
-                }
-                AstFastOperationSource::RangeOrdinal => HirFastUseProvenance::RangeGuard,
-            };
             evidence
                 .entry(function_id)
                 .or_default()
                 .fast_use
                 .push(HirFastUseWitness {
-                    provenance,
+                    provenance: HirFastUseProvenance::AuthoredArithmetic,
                     span: witness.span,
                 });
         }
@@ -431,39 +424,24 @@ impl<'a> HirBuilder<'a> {
             // Release folding erased these calls before HIR existed, but they were selected source.
             // Adding the row here makes callee summary bits and witness hops identical to a debug
             // build that keeps the runtime call. Resolution uses the ordinary call-target mapping
-            // rather than a second AST-path translation. The live subset also feeds
-            // liveness-conditioned trap and escaping-failure analysis.
+            // rather than a second AST-path translation. The rows also feed liveness-conditioned
+            // trap and escaping-failure analysis.
             for site in &ast.release_erased_call_sites {
                 if identity != Some(site.function) || is_pruned(Some(site.span)) {
                     continue;
                 }
                 let target = self.resolve_call_target_or_error(&site.target)?;
-                // The release producer already skipped every authored-dead statement root, so a
-                // recorded row was reachable when it was folded. Only a statically pruned catch
-                // handler can still make an erased row unreachable, and that skip is authored too.
-                let live = skipped_source.is_none_or(|skipped| {
-                    !skipped.contains_pruned_handler_span(site.span, span_sources)
-                });
-                if live {
-                    insert_live_erased_site_in_source_order(
-                        &mut live_erased_call_sites,
-                        HirLiveErasedCallSite {
-                            target,
-                            span: site.span,
-                            failure_caught: site.failure_caught,
-                        },
-                        span_sources,
-                    );
-                } else {
-                    insert_selected_site_in_source_order(
-                        &mut skipped_call_sites,
-                        HirSelectedCallSite {
-                            target,
-                            span: Some(site.span),
-                        },
-                        span_sources,
-                    );
-                }
+                // Release speculation skips authored-dead statements and statically pruned catch
+                // handlers, so every row it records belongs to source HIR lowered.
+                insert_live_erased_site_in_source_order(
+                    &mut live_erased_call_sites,
+                    HirLiveErasedCallSite {
+                        target,
+                        span: site.span,
+                        failure_caught: site.failure_caught,
+                    },
+                    span_sources,
+                );
             }
             let mut live_sites = live_selected_call_sites.into_sites();
             for site in &live_erased_call_sites {

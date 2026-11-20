@@ -91,7 +91,10 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        if self.expression_constant_bool(condition).is_some() {
+        // A condition the folded-Bool authority decided before release folding means AST static
+        // selection failed its own contract. A condition that only release folding made constant
+        // is absent from the pre-fold fact and lowers as the runtime branch a debug build keeps.
+        if self.pre_fold_bool_condition(condition.id()).is_some() {
             increment_frontend_counter(FrontendCounter::HirStaticBoolIfNodes);
             return Err(InfrastructureFailure::hir_transformation(
                 "Stage 4 passed a statically decided Bool `if` to HIR",

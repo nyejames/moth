@@ -28,7 +28,8 @@ use crate::compiler_frontend::ast::statements::branching::{
     DeferredMatchBodyReceiver, resume_deferred_match,
 };
 use crate::compiler_frontend::ast::statements::control_flow_exits::{
-    ControlFlowExitScratch, ControlFlowExitSummary, analyze_control_flow_exits_in_scratch,
+    ConditionLookup, ControlFlowExitScratch, ControlFlowExitSummary,
+    analyze_control_flow_exits_in_scratch,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::{
     ensure_pattern_compatible_with_subject, finish_pending_choice_pattern,
@@ -266,7 +267,7 @@ fn collect_deferred_body_producers(
                 analyze_control_flow_exits_in_scratch(
                     std::slice::from_ref(node),
                     expressions.store(),
-                    constants,
+                    ConditionLookup::Constants(Some(constants)),
                     &mut scratch,
                 )
             }

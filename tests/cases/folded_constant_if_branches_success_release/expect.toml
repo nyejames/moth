@@ -1,0 +1,7 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = " 4"

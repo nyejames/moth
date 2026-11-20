@@ -1,0 +1,16 @@
+-- The catch handler is statically pruned because the division cannot fail. Its fast range loop
+-- body ends in an authored-false assertion, so the generated ordinal update never runs and
+-- `$safe_math` must accept the guard in both profiles.
+$safe_math
+skipped_literal_guard |limit I32| -> I32:
+    result I32 = 10 // 2 catch |error|:
+        $fast_math
+        loop 0 to limit |value, ordinal|:
+            assert(false)
+        ;
+        return 0
+    ;
+    return result
+;
+
+~[: [skipped_literal_guard(2)]]

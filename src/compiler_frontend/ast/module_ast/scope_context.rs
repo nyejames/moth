@@ -32,7 +32,6 @@
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::AstConstraintBoundary;
 use crate::compiler_frontend::ast::AstDocFragment;
-use crate::compiler_frontend::ast::AstFastOperationSource;
 use crate::compiler_frontend::ast::AstFastOperationWitness;
 use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, Declaration};
 use crate::compiler_frontend::ast::const_values::const_execution::ConstFunctionExecutable;
@@ -1439,7 +1438,6 @@ impl ScopeContext {
             function,
             scope: self.scope,
             span,
-            source: AstFastOperationSource::AuthoredArithmetic,
         };
         self.fast_operation_witnesses.borrow_mut().push(witness);
     }

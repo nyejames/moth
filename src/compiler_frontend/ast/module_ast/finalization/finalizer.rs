@@ -14,14 +14,12 @@ use super::super::scope_context::{ContextKind, ScopeContext};
 use super::normalize_ast::{TemplateNormalizationError, discard_inactive_assertion_messages};
 use super::static_if_specialization::{StaticIfCandidate, StaticIfSpecialization};
 use crate::compiler_frontend::FrontendBuildProfile;
-use crate::compiler_frontend::ast::ConstValueStore;
 use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::const_execution::rewrite_release_calls;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStoreError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    ExprId, ExpressionFreezeRoots, ExpressionOperationView, ExpressionStore, PlaceId,
+    ExprId, ExpressionFreezeRoots, PlaceId,
 };
-use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
 use crate::compiler_frontend::ast::expressions::failure_classification::AstBuiltinFailureSummaries;
 use crate::compiler_frontend::ast::expressions::failure_facts::ImplicitFailureSource;
 use crate::compiler_frontend::ast::generic_functions::{
@@ -30,23 +28,16 @@ use crate::compiler_frontend::ast::generic_functions::{
 };
 use crate::compiler_frontend::ast::statements::control_flow_exits::{
     ControlFlowExitSummary, analyze_control_flow_exits_with_never_targets,
-    push_value_block_headers, range_ordinal_update_is_emitted,
+    collect_pre_fold_bool_conditions,
 };
 use crate::compiler_frontend::ast::statements::terminality::{
     NeverProofNode, never_proof_cycle, terminality_policy_for_signature,
     validate_function_body_terminality, validate_function_body_terminality_with_exits,
 };
-use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
-use crate::compiler_frontend::ast::templates::runtime_handoff::{
-    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
-    visit_node_expression_ids, walk_owned_runtime_slot_application_handoff,
-    walk_owned_runtime_template_handoff,
-};
-use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopHeader;
 use crate::compiler_frontend::ast::templates::top_level_templates::collect_const_top_level_fragments;
 use crate::compiler_frontend::ast::{
-    Ast, AstBuildResult, AstChoiceDefinition, AstFastOperationSource, AstFastOperationWitness,
-    AstPublicInterfaceProjectionInput, normalize_fast_operation_witnesses,
+    Ast, AstBuildResult, AstChoiceDefinition, AstPublicInterfaceProjectionInput,
+    normalize_fast_operation_witnesses,
 };
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
 use crate::compiler_frontend::canonical_type_identity::{
@@ -63,7 +54,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidFallibleHandlingReason, InvalidTraitConformanceReason, PreparedFailure,
 };
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
-use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
+use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::CoreTraitKind;
@@ -138,6 +129,48 @@ impl ExpressionFreezeRoots for Vec<AstNode> {
         for node in self {
             node.visit_place_ids_mut(visitor);
         }
+    }
+}
+
+/// Freeze roots that keep the pre-fold condition table's expression ids remapped with the AST.
+///
+/// WHAT: forwards the AST's root visits and rewrites every table key when its condition root is
+///       remapped.
+/// WHY: freezing compacts the expression store and remaps every durable expression id outside it.
+///      The pre-fold condition table is another owner of condition roots, and a pre-freeze id or a
+///      span match would disagree with the ids HIR later queries.
+struct PreFoldConditionRoots<'a> {
+    nodes: &'a mut Vec<AstNode>,
+    conditions: &'a mut FxHashMap<ExprId, bool>,
+}
+
+impl ExpressionFreezeRoots for PreFoldConditionRoots<'_> {
+    fn visit_expression_ids(&self, visitor: &mut dyn FnMut(ExprId)) {
+        self.nodes.visit_expression_ids(visitor);
+    }
+
+    fn visit_expression_ids_mut(&mut self, visitor: &mut dyn FnMut(&mut ExprId)) {
+        self.nodes.visit_expression_ids_mut(visitor);
+        // The condition table is the other durable owner of these roots. Freezing assigns every
+        // selected dense index before this visit, including value-block bodies, so the same
+        // remapping visitor rewrites these keys too. Keys cannot be mutated in place, so the
+        // table takes its known size in one allocation.
+        let previous = std::mem::take(self.conditions);
+        let mut remapped = FxHashMap::default();
+        remapped.reserve(previous.len());
+        for (mut id, value) in previous {
+            visitor(&mut id);
+            remapped.insert(id, value);
+        }
+        *self.conditions = remapped;
+    }
+
+    fn visit_place_ids(&self, visitor: &mut dyn FnMut(PlaceId)) {
+        self.nodes.visit_place_ids(visitor);
+    }
+
+    fn visit_place_ids_mut(&mut self, visitor: &mut dyn FnMut(&mut PlaceId)) {
+        self.nodes.visit_place_ids_mut(visitor);
     }
 }
 
@@ -389,24 +422,20 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             .deferred_generic_requests
             .iter()
             .any(|slot| matches!(slot, GenericRequestSlot::AssertionValidation(_)));
-        // Constraint evidence is selected before release folding. A fitted assertion inside a loop
-        // body can make the step block unreachable only after folding; the authored body still
-        // reaches it, and both build profiles must reject the same fast ordinal. Record the
-        // ordinal row on the existing pre-fold fast-operation ledger; retained HIR adds the same
-        // `(provenance, span)` row in debug builds and dedup collapses it.
-        //
-        // This is the ledger's single normalization point: recording stays one push per selected
-        // operation and duplicates or unordered rows are resolved once, after every emitter and
-        // this pre-fold walk have contributed.
-        {
-            record_pre_fold_range_ordinal_witnesses(
-                &emitted.ast,
-                self.context.expression_builder.store(),
-                &self.context.const_values,
-                &mut fast_operation_witnesses,
-            );
-            normalize_fast_operation_witnesses(&mut fast_operation_witnesses);
-        }
+        // HIR classifies `assert`, `if`, conditional-loop and value-`if` conditions by this
+        // pre-fold view. Release folding can replace an ordinary call with its constant result
+        // before HIR, and omission must follow the selection fact both build profiles share.
+        let mut pre_fold_bool_conditions = FxHashMap::default();
+        collect_pre_fold_bool_conditions(
+            &emitted.ast,
+            self.context.expression_builder.store(),
+            &self.context.const_values,
+            &mut pre_fold_bool_conditions,
+        );
+        // This is the ledger's single normalization point: resolution records one push per
+        // selected operation, and duplicates or unordered rows are resolved once after every
+        // emitter has contributed.
+        normalize_fast_operation_witnesses(&mut fast_operation_witnesses);
         // Semantic failure facts are fixed before release folding, which can erase a call or a
         // whole tail. The classifier decides authored reachability per statement occurrence, so
         // HIR projects the same contributors in both build profiles.
@@ -646,9 +675,15 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             )
         })?;
         drop(template_ir_store);
-        let expressions = expression_builder
-            .freeze(&mut emitted.ast)
-            .map_err(|error| PreparedFailure::Infrastructure(error.into()))?;
+        let expressions = {
+            let mut roots = PreFoldConditionRoots {
+                nodes: &mut emitted.ast,
+                conditions: &mut pre_fold_bool_conditions,
+            };
+            expression_builder
+                .freeze(&mut roots)
+                .map_err(|error| PreparedFailure::Infrastructure(error.into()))?
+        };
 
         let support_trait_environment = support_public_type_roots
             .as_ref()
@@ -685,6 +720,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 fast_operation_witnesses,
                 release_erased_call_sites,
                 pre_fold_failure_facts,
+                pre_fold_bool_conditions,
                 constraint_pruned_regions,
                 synthesizes_entry_start,
                 const_top_level_fragments,
@@ -1230,237 +1266,4 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
 
         choice_definitions
     }
-}
-
-/// Records range-guard rows on the pre-fold fast-operation ledger.
-///
-/// WHAT: walks each callable body's statement tree and owned runtime template handoffs,
-///       recording generated `$fast_math` range guards that HIR would lower. A template body
-///       cannot break or return, so a bound ordinal always reaches its checked update; an
-///       authored template step always owns its zero-step guard.
-/// WHY: release folding can prove an authored assertion false and discard the step block or the
-///      template-lowering tail before HIR. Those guards are still selected source, so the pre-fold
-///      ledger keeps the same row in debug and release; retained HIR adds a duplicate row in debug
-///      that dedup removes.
-fn record_pre_fold_range_ordinal_witnesses(
-    nodes: &[AstNode],
-    expressions: &ExpressionStore,
-    constants: &ConstValueStore,
-    witnesses: &mut Vec<AstFastOperationWitness>,
-) {
-    for node in nodes {
-        let body = match &node.kind {
-            NodeKind::Function(_, _, body) | NodeKind::EntryStart(_, body) => body,
-            _ => continue,
-        };
-        let Some(function) = node.function_identity() else {
-            continue;
-        };
-        RangeOrdinalWalk {
-            function,
-            expressions,
-            constants,
-            witnesses: &mut *witnesses,
-            visited: FxHashSet::default(),
-        }
-        .record_body(body);
-    }
-}
-
-/// One callable's pre-fold ordinal walk.
-///
-/// WHAT: owns the single expression-visited set for one callable and the statement/expression
-///       traversal state.
-/// WHY: a value-producing block owns statement bodies and the completed-expression edge
-///      convention also flattens those bodies into its expression ids. Walking a body structurally
-///      and enumerating the same value block's flattened expression ids would re-walk each nested
-///      subtree once per level. One visited set per callable, structural descent into owned
-///      bodies, and only the block's dispatch roots keeps the traversal linear.
-struct RangeOrdinalWalk<'a> {
-    function: AstFunctionIdentity,
-    expressions: &'a ExpressionStore,
-    constants: &'a ConstValueStore,
-    witnesses: &'a mut Vec<AstFastOperationWitness>,
-    visited: FxHashSet<ExprId>,
-}
-
-impl<'a> RangeOrdinalWalk<'a> {
-    /// Recurses through one callable body and its expression-owned statement bodies.
-    fn record_body(&mut self, body: &[AstNode]) {
-        let mut expression_roots = Vec::new();
-        for node in body {
-            match &node.kind {
-                NodeKind::RangeLoop {
-                    bindings,
-                    range,
-                    body: loop_body,
-                } => {
-                    if range.fast_math
-                        && range_ordinal_update_is_emitted(
-                            bindings,
-                            loop_body,
-                            self.expressions,
-                            Some(self.constants),
-                        )
-                        && let Some(span) = node.span
-                    {
-                        self.witnesses.push(AstFastOperationWitness {
-                            function: self.function,
-                            scope: PathId::ROOT,
-                            span: Some(span),
-                            source: AstFastOperationSource::RangeOrdinal,
-                        });
-                    }
-                    self.record_body(loop_body);
-                }
-                NodeKind::If(_, then_body, else_body, _) => {
-                    self.record_body(then_body);
-                    if let Some(else_body) = else_body {
-                        self.record_body(else_body);
-                    }
-                }
-                NodeKind::Match { arms, default, .. } => {
-                    for arm in arms {
-                        self.record_body(&arm.body);
-                    }
-                    if let Some(default) = default {
-                        self.record_body(default);
-                    }
-                }
-                NodeKind::LexicalScope { body }
-                | NodeKind::Function(_, _, body)
-                | NodeKind::EntryStart(_, body) => {
-                    self.record_body(body);
-                }
-                NodeKind::CollectionLoop { body, .. } | NodeKind::WhileLoop(_, body) => {
-                    self.record_body(body);
-                }
-                _ => {}
-            }
-            node.visit_immediate_expression_ids(&mut |id| expression_roots.push(id));
-        }
-        self.record_expression_roots(expression_roots);
-    }
-
-    /// Visits one callable's expression graph through its single shared `visited` set.
-    fn record_expression_roots(&mut self, roots: Vec<ExprId>) {
-        let expressions = self.expressions;
-        let mut pending = roots;
-        while let Some(id) = pending.pop() {
-            if !self.visited.insert(id) {
-                continue;
-            }
-            let Ok(view) = expressions.view(id) else {
-                continue;
-            };
-            match view.operation() {
-                ExpressionOperationView::ValueBlock(block) => {
-                    push_value_block_headers(block, &mut pending);
-                    self.record_value_block(block);
-                }
-                ExpressionOperationView::RuntimeTemplate(handoff) => {
-                    self.record_runtime_template_handoff(handoff, &mut pending);
-                }
-                ExpressionOperationView::RuntimeSlotApplication(handoff) => {
-                    self.record_runtime_slot_application_handoff(handoff, &mut pending);
-                }
-                _ => {
-                    // A view that cannot enumerate its children contributes no further work; the
-                    // sibling expression walkers treat the same store error as a dead end.
-                    let _ = view.visit_child_ids(&mut |child| pending.push(child));
-                }
-            }
-        }
-    }
-
-    /// Records range guards and expression roots in one owned-handoff walk.
-    fn record_runtime_template_handoff(
-        &mut self,
-        handoff: &OwnedRuntimeTemplateHandoff,
-        pending: &mut Vec<ExprId>,
-    ) {
-        let _ = walk_owned_runtime_template_handoff(handoff, &mut |node| {
-            visit_node_expression_ids(node, &mut |id| pending.push(id));
-            self.record_owned_template_loop_evidence(node);
-            Ok::<(), std::convert::Infallible>(())
-        });
-    }
-
-    /// Records range guards and expression roots in one slot-application walk.
-    fn record_runtime_slot_application_handoff(
-        &mut self,
-        handoff: &OwnedRuntimeSlotApplicationHandoff,
-        pending: &mut Vec<ExprId>,
-    ) {
-        let _ = walk_owned_runtime_slot_application_handoff(handoff, &mut |node| {
-            visit_node_expression_ids(node, &mut |id| pending.push(id));
-            self.record_owned_template_loop_evidence(node);
-            Ok::<(), std::convert::Infallible>(())
-        });
-    }
-
-    /// Records one owned runtime loop's fast range-guard rows.
-    fn record_owned_template_loop_evidence(&mut self, node: &OwnedRuntimeTemplateNode) {
-        let OwnedRuntimeTemplateNode::Loop { header, span, .. } = node else {
-            return;
-        };
-        let TemplateLoopHeader::Range { bindings, range } = header else {
-            return;
-        };
-        if !range.fast_math {
-            return;
-        }
-        if bindings.index.is_some() {
-            push_range_guard_witness(self.witnesses, self.function, *span);
-        }
-        if let Some(step) = range.step {
-            // HIR labels the generated zero-step guard with the authored step's own span.
-            let step_span = self
-                .expressions
-                .view(step)
-                .ok()
-                .and_then(|expression| expression.span());
-            push_range_guard_witness(self.witnesses, self.function, step_span);
-        }
-    }
-
-    /// Recurses into the statement bodies one value block owns.
-    fn record_value_block(&mut self, block: &ValueBlock) {
-        match block {
-            ValueBlock::If(value_if) => {
-                self.record_body(&value_if.then_body);
-                self.record_body(&value_if.else_body);
-            }
-            ValueBlock::LexicalScope(scope) => {
-                self.record_body(&scope.body);
-            }
-            ValueBlock::Match(value_match) => {
-                for arm in &value_match.arms {
-                    self.record_body(&arm.body);
-                }
-                if let Some(default) = &value_match.default {
-                    self.record_body(default);
-                }
-            }
-            ValueBlock::Catch(value_catch) => {
-                if let FallibleHandling::Handler { body, .. } = &value_catch.handler {
-                    self.record_body(body);
-                }
-            }
-        }
-    }
-}
-
-/// Pushes one selected `$fast_math` range guard row onto the pre-fold ledger.
-fn push_range_guard_witness(
-    witnesses: &mut Vec<AstFastOperationWitness>,
-    function: AstFunctionIdentity,
-    span: Option<SourceSpan>,
-) {
-    witnesses.push(AstFastOperationWitness {
-        function,
-        scope: PathId::ROOT,
-        span,
-        source: AstFastOperationSource::RangeOrdinal,
-    });
 }

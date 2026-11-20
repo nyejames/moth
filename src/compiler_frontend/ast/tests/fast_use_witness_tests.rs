@@ -14,8 +14,8 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView,
 };
 use crate::compiler_frontend::ast::{
-    AstFastOperationSource, AstFastOperationWitness, ContextKind, ScopeContext,
-    TopLevelDeclarationTable, normalize_fast_operation_witnesses,
+    AstFastOperationWitness, ContextKind, ScopeContext, TopLevelDeclarationTable,
+    normalize_fast_operation_witnesses,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -212,7 +212,6 @@ fn recompleting_a_resolved_operation_records_one_witness() {
             function,
             scope,
             span: Some(operator_span),
-            source: AstFastOperationSource::AuthoredArithmetic,
         }
     );
 }
@@ -263,31 +262,26 @@ fn the_witness_ledger_normalises_when_it_is_drained() {
             AstFastOperationWitness {
                 function: AstFunctionIdentity::Entry,
                 scope: entry_scope_path,
-                source: AstFastOperationSource::AuthoredArithmetic,
                 span: None
             },
             AstFastOperationWitness {
                 function: AstFunctionIdentity::Entry,
                 scope: entry_scope_path,
-                source: AstFastOperationSource::AuthoredArithmetic,
                 span: Some(marked_span(20))
             },
             AstFastOperationWitness {
                 function,
                 scope,
-                source: AstFastOperationSource::AuthoredArithmetic,
                 span: None
             },
             AstFastOperationWitness {
                 function,
                 scope,
-                source: AstFastOperationSource::AuthoredArithmetic,
                 span: Some(marked_span(10))
             },
             AstFastOperationWitness {
                 function,
                 scope,
-                source: AstFastOperationSource::AuthoredArithmetic,
                 span: Some(marked_span(300))
             },
         ],

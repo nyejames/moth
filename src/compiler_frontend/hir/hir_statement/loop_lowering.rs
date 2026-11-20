@@ -236,11 +236,15 @@ impl<'a> HirBuilder<'a> {
         span_ref: &Option<SourceSpan>,
         span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        // A folded-false statement loop never enters its body in any profile. Skipping the body
-        // here mirrors the pre-fold classifier and release speculation, so a failing call in the
-        // body neither demands a private failure lane nor reaches the CFG. Its selected call and
-        // fast-use evidence still needs recording, exactly like a skipped catch handler.
-        if self.expression_constant_bool(condition) == Some(false) {
+        // A statement loop the folded-Bool authority decided false before release folding never
+        // enters its body in any profile. Skipping the body here matches the pre-fold exit
+        // analysis and release speculation, so a failing call in the body neither demands a
+        // private failure lane nor reaches the CFG. Its selected call and fast-use evidence still
+        // needs recording, exactly like a skipped catch handler.
+        //
+        // The pre-fold fact matters: a loop whose condition only release folding made false must
+        // lower normally so its live branches keep the trap evidence a debug build sees.
+        if self.pre_fold_bool_condition(condition.id()) == Some(false) {
             self.record_skipped_statement_evidence(expressions, body)?;
             return Ok(());
         }
@@ -278,11 +282,13 @@ impl<'a> HirBuilder<'a> {
 
         self.set_current_block(header_block)?;
 
-        // Read the same AST constant-store fact the exit analysis used, before lowering the
-        // condition. Recognising only HIR's lowered literal would disagree with a named or
-        // body-local folded Bool and leave an accepted non-exiting body unterminated.
+        // Read the same pre-fold Bool fact the exit analysis used, before lowering the condition.
+        // Recognising only HIR's lowered literal would disagree with a named or body-local folded
+        // Bool and leave an accepted non-exiting body unterminated. A condition that only release
+        // folding made true stays an ordinary two-way header so the post-loop statements a debug
+        // build lowers keep their evidence.
         let condition_is_folded_true = exit_policy == LoopExitPolicy::Statement
-            && self.expression_constant_bool(condition) == Some(true);
+            && self.pre_fold_bool_condition(condition.id()) == Some(true);
 
         let condition_value = self.lower_expression_value_to_current_block(condition)?;
         let condition_block = self.current_block_id_or_error()?;

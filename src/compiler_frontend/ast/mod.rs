@@ -156,7 +156,7 @@ use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, AstNode};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    AstExpressionBuilder, ExpressionStore,
+    AstExpressionBuilder, ExprId, ExpressionStore,
 };
 use crate::compiler_frontend::ast::expressions::failure_classification::PendingFunctionFailureFacts;
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
@@ -304,23 +304,9 @@ pub(crate) struct AstConstraintPrunedRegion {
     pub(crate) end: SourceSpan,
 }
 
-/// What selected one fast numeric operation recorded in the pre-fold ledger.
-///
-/// WHAT: distinguishes authored arithmetic from a range loop's generated ordinal update.
-/// WHY: both are fast numeric work that `$safe_math` must see, but they project to different
-///      `HirFastUseProvenance` values. Keeping the source on the existing ledger row lets the
-///      pre-fold evidence channel carry both without inventing a second ledger.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum AstFastOperationSource {
-    /// An authored expression resolved with fast semantics.
-    AuthoredArithmetic,
-    /// A range loop's checked ordinal update, selected from authored body reachability.
-    RangeOrdinal,
-}
-
 /// One selected fast numeric operation recorded while resolving an authored expression.
 ///
-/// WHAT: the callable that owns the operation, the authored operator span, and what selected it.
+/// WHAT: the callable that owns the operation, its lexical scope and the authored operator span.
 /// WHY: `$safe_math` must still see a fast use after constant folding or dead-result elimination
 ///      removes the executable operation. Resolution records the selection before either
 ///      optimisation runs, so this sparse evidence outlives the node it describes. One record per
@@ -328,9 +314,8 @@ pub(crate) enum AstFastOperationSource {
 ///      to the expression graph, and the owning callable lets a later verifier attribute the use
 ///      without re-reading directives or lexical scopes.
 ///
-/// The derived order is the ledger's canonical order: owning callable, lexical scope, operator
-/// span, then what selected the operation, with the entry body first and an absent span before
-/// any real one.
+/// The derived order is the ledger's canonical order: owning callable, lexical scope, then
+/// operator span, with the entry body first and an absent span before any real one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct AstFastOperationWitness {
     /// The callable body whose authored expression selected fast arithmetic.
@@ -342,8 +327,6 @@ pub(crate) struct AstFastOperationWitness {
     pub(crate) scope: PathId,
     /// The authored operator span; `None` for a synthetic operation without source text.
     pub(crate) span: Option<SourceSpan>,
-    /// What selected the fast operation.
-    pub(crate) source: AstFastOperationSource,
 }
 
 /// Canonicalises a fast-operation witness ledger.
@@ -367,9 +350,9 @@ pub(crate) fn normalize_fast_operation_witnesses(witnesses: &mut Vec<AstFastOper
 ///      summary bits and fast-use witness must reach the caller exactly as they do in a debug build
 ///      that keeps the call. HIR projects each row through the same call-target mapping and
 ///      inactive-static-branch filter as authored and skipped call evidence. The span is mandatory
-///      because every projected row carries its authored call site, and the pruned-handler
-///      liveness split matches that span; the release producer declines to erase a spanless call
-///      instead. Authored-dead statements are never folded, so every recorded row is authored-live.
+///      because every projected row carries its authored call site; the release producer declines
+///      to erase a spanless call instead. Authored-dead statements and statically pruned catch
+///      handlers are never folded, so every recorded row belongs to source HIR lowered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct AstReleaseErasedCallSite {
     /// The callable body whose expression release speculation folded.
@@ -415,9 +398,8 @@ pub struct Ast {
     /// WHY: `$safe_math` and `$infallible` verification run after optimisation, so evidence of a
     ///      selected fast operation cannot live on the (possibly folded) expression node. The
     ///      ledger is recorded beside the executable AST and ordered and deduplicated once in
-    ///      finalization after every producer, including the pre-fold range-ordinal walk, has
-    ///      contributed. HIR then projects it per function into constraint evidence before the AST
-    ///      is dropped.
+    ///      finalization after every producer has contributed. HIR then projects it per function
+    ///      into constraint evidence before the AST is dropped.
     pub(crate) fast_operation_witnesses: Vec<AstFastOperationWitness>,
 
     /// Selected ordinary calls erased by release constant folding, in recording order.
@@ -443,6 +425,16 @@ pub struct Ast {
     ///      projects them instead of reclassifying the post-fold AST, so debug and release publish
     ///      the same contributors and the same witness order.
     pub(crate) pre_fold_failure_facts: HashMap<AstFunctionIdentity, PendingFunctionFailureFacts>,
+
+    /// Statement-owned `Bool` conditions the folded-Bool authority decided before release folding.
+    ///
+    /// WHAT: one row per `assert`, `if`, value-`if` and conditional-loop condition, keyed by its
+    ///       expression root.
+    /// WHY: HIR lowering classifies these conditions by the pre-optimisation selection fact. A
+    ///      release fold can replace an ordinary call with its constant result, and reading the
+    ///      post-fold store would then omit a loop body or a trap that a debug build keeps. A
+    ///      condition no profile folded has no row.
+    pub(crate) pre_fold_bool_conditions: FxHashMap<ExprId, bool>,
 
     /// Inactive static-`if` branches, retained so HIR projection can drop their evidence rows.
     ///

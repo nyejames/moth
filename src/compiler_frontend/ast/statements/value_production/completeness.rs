@@ -18,7 +18,8 @@ use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::statements::control_flow_exits::{
-    ControlFlowExitScratch, ControlFlowExitSummary, analyze_control_flow_exits_in_scratch,
+    ConditionLookup, ControlFlowExitScratch, ControlFlowExitSummary,
+    analyze_control_flow_exits_in_scratch,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::ast::statements::value_production::types::ProducedValues;
@@ -41,7 +42,7 @@ pub fn validate_value_match_completeness(
         let arm_exits = analyze_control_flow_exits_in_scratch(
             &arm.body,
             expressions.store(),
-            constants,
+            ConditionLookup::Constants(Some(constants)),
             &mut scratch,
         );
         reject_fallthrough(arm_exits, span)?;
@@ -55,7 +56,7 @@ pub fn validate_value_match_completeness(
         let default_exits = analyze_control_flow_exits_in_scratch(
             default_body,
             expressions.store(),
-            constants,
+            ConditionLookup::Constants(Some(constants)),
             &mut scratch,
         );
         reject_fallthrough(default_exits, span)?;
@@ -110,7 +111,7 @@ fn visit_reachable_then_values_in_scratch<E>(
         reachable = analyze_control_flow_exits_in_scratch(
             std::slice::from_ref(statement),
             expressions.store(),
-            constants,
+            ConditionLookup::Constants(Some(constants)),
             scratch,
         )
         .can_fall_through;

@@ -1,7 +1,7 @@
 -- The generated ordinal update lives in the range step block. When the body can neither fall
 -- through nor `continue`, lowering discards that block, so no ordinal update runs. `$safe_math`
--- must accept the fast loop in every skip shape: live, after a terminator, and after release
--- folding turns an assertion into a terminator before the loop.
+-- must accept the fast loop in every skip shape: live, after a terminator, and after a folded
+-- assertion that lowers as a runtime check before the loop.
 $fast_math $safe_math
 live_break |limit I32| -> I32:
     loop 0 to limit |value, ordinal|:
