@@ -6,6 +6,12 @@ compiler roadmap. Refresh the current compiler contracts before each
 integration slice. This roadmap never resumes a paused compiler plan or treats
 planned backend support as available.
 
+**Sequencing gate:** Further Lappet resume work remains paused until the
+compiler delivers exact ObVer package build declarations, project-local package
+libraries and deterministic resolved package graphs. The compiler roadmap owns
+that foundation. This gate applies before native readiness work and milestones
+6 through 10, in addition to each milestone's existing prerequisites.
+
 ## Current state
 
 - Status: CLI separation, the public `moth::builder` SDK, the shared host
