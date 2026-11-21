@@ -189,6 +189,14 @@ host-callable artefact must have no implicit Wasm start function. Lappet checks
 that requirement during manifest validation, before instantiation. The builder
 owns when each selected function runs.
 
+Reject invalid or oversized Rust-supplied export arguments before guest entry.
+These are caller-facing `ExportArgument` errors and do not quarantine an
+otherwise usable instance. Once guest execution begins, invalid guest output,
+malformed ABI values and broken resource/staging invariants take the defined
+boundary/host fault lane and quarantine the instance. A previously quarantined
+instance rejects all attempted guest calls before token preflight, context
+installation or epoch-deadline changes.
+
 Returned Moth strings are copied into independently owned Rust storage before
 scope close. Apply an explicit per-result byte bound before allocating the copy,
 in addition to checking the ABI's `i32::MAX` length ceiling, span validity and
