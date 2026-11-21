@@ -1,8 +1,8 @@
 # Lappet roadmap
 
-Lappet owns its runtime, embedding and package-manager work here. Develop it on
-the `lappet-work` branch in an isolated worktree, separately from Moth's serial
-compiler roadmap. Refresh the current compiler contracts before each
+Lappet owns its runtime, embedding and package-manager work here. Develop it
+on a dedicated Lappet branch in an isolated worktree, separately from Moth's
+serial compiler roadmap. Refresh the current compiler contracts before each
 integration slice. This roadmap never resumes a paused compiler plan or treats
 planned backend support as available.
 
@@ -86,7 +86,7 @@ V1 const functions landed on `main` and this branch merged them on 13 November
 After each sync, rerun the focused Lappet tests and the dependency boundary
 check, then re-read any authority the merge changed.
 
-## Open decisions
+## Accepted decisions and remaining checkpoints
 
 **Accepted for native readiness:** retain the restricted V1 host ABI and route
 Core operations through compiler-owned direct, helper or native providers.
@@ -191,7 +191,7 @@ the main roadmap's rules for adding and maintaining plans. Only this roadmap
 links them. A plan names the capabilities it needs and never cites another
 plan. Delete a plan in the commit that completes it and update this roadmap in
 the same commit. Commits are authored by Nye only, with no attribution lines.
-Push to `lappet-work` and don't open a pull request unless asked.
+Push to the designated Lappet branch and don't open a pull request unless asked.
 
 ## 1. Separate the CLI from the compiler library
 
