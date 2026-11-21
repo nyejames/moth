@@ -1,0 +1,95 @@
+# Obvious Versioning (ObVer)
+
+Obvious Versioning (ObVer) is a calendar-based versioning standard with explicit compatibility rules and exact build labels. 
+Its numeric version shows when a compatibility generation began. Its optional label identifies a specific build of that version.
+
+ObVer is design to be:
+- Easy to see WHEN the last major version was released
+- Whether it is a specific build or pre-release version
+- Compact and easy to read in most cases
+- Consistent, with one set of rules and no alternative interpretations 
+
+ObVer combines ideas from @https://calver.org (CalVer) and @https://semver.org (SemVer). 
+Unlike SemVer, its major identifier includes a calendar date. 
+Unlike CalVer's family of possible formats, ObVer defines one grammar with optional month and day precision. 
+Unlike @https://antfu.me/posts/epoch-semver (Epoch SemVer), its major identifier records a date rather than a numeric epoch. 
+SemVer also offers build metadata, but ObVer explicitly defines how labels select builds.
+
+## Format
+
+[codeblock, $code "text":
+    YYYY[-MM[-DD]].MINOR[.MICRO][-LABEL]
+]
+
+- `YYYY` is the four-digit UTC year in which a major compatibility generation begins.
+- `MM` is the optional two-digit month (`01` to `12`).
+- `DD` is the optional two-digit day, which requires `MM` and must form a valid Gregorian date.
+- `MINOR` counts backward-compatible feature releases within the major generation, starting at `0`.
+- `MICRO` counts backward-compatible patch releases within a minor release, starting at `0`.
+- `LABEL` optionally identifies one build or distribution variant of the numeric release.
+
+Dates use the Gregorian calendar and UTC. Numeric counters use decimal digits without leading zeroes, except `0`. Normally the major identifier needs only `YYYY`. Add the current UTC month or day when a further breaking release requires a distinct major identifier in the same year.
+
+## Release rules
+
+- A backward-incompatible change to the public contract requires a new date-based major identifier. Reset `MINOR` and `MICRO` to `0`.
+- A backward-compatible feature release increments `MINOR` by one and resets `MICRO` to `0`.
+- A release containing only backward-compatible fixes increments `MICRO` by one.
+- Omit `MICRO` whenever it is `0`, including after either reset. Include it from `1` onward.
+- A changed source revision requires a new numeric version. A different build configuration of the same source release may instead use a different label.
+
+The calendar does not force a breaking change each year. Releases in later years can retain an older major identifier.
+
+## Ordering and canonical form
+
+Compare numeric versions in this order: year, month, day, `MINOR` and `MICRO`. Missing month, day and `MICRO` components compare as `0`. Labels never affect precedence. Compare parsed numbers, not strings.
+
+A new major identifier must be strictly greater than the preceding one. Its specified year, month and day must match the UTC date on which that major generation is introduced. After a month-qualified major, a later major in the same year cannot return to the year-only form. Once a major identifier includes the current UTC day, another distinct major cannot be introduced on that day.
+
+The canonical spelling omits `MICRO` when it is `0`. For example, `2026.32` and `2026.32.0` compare equally, but only `2026.32` is canonical. Tools may accept the explicit `.0` on input but must emit the canonical spelling.
+
+These numeric versions are in ascending order:
+
+[codeblock, $code "text":
+    2026.0
+    2026.32
+    2026.32.1
+    2026-11.0
+    2026-11-20.0
+    2026-11-20.2.1
+    2027.0
+]
+
+## Build labels
+
+A label is a lowercase ASCII `snake_case` identifier. It starts with a letter, then uses lowercase letters, digits and single underscores separating nonempty parts. Append it after one hyphen. Labels have no numeric counter or predefined vocabulary.
+
+[codeblock, $code "text":
+    2027.2
+    2027.2-alpha
+    2027.2-beta
+    2027.2-debug
+    2027.2-preview
+    2027.2-wasm
+    2027.2.1-re_release
+]
+
+A label distinguishes builds of the same numeric release, such as builds with different compile-time flags, experimental features, optimisation settings or release channels. Words such as `alpha`, `beta`, `rc` and `pre_release` are allowed, but ObVer does not assign them prerelease ordering or automatic compatibility semantics.
+
+The complete canonical identifier, including an optional label, identifies a published build. Thus `2027.2-debug` and `2027.2` have equal numeric precedence but different build identities. Neither takes precedence over the other. Published identifiers must remain immutable, and a label must not be reused for different contents under the same numeric version.
+
+## Selecting builds
+
+An exact request for a labelled identifier selects only that label. An exact request without a label selects only the unlabelled build. There is no fallback in either direction, even when another build of the same numeric version is available. If the requested build is absent, resolution fails.
+
+The unlabelled build represents the normal full release. Publishers should use the unlabelled identifier for default stable releases and use labels for other variants. A numeric version may exist only in labelled builds, with no unlabelled (full release) build published.
+
+A label does not guarantee compatibility between build variants. Consumers must still satisfy the requirements of the selected build, including any platform, feature or ABI constraints. Version-range and compatibility-resolution policies are separate from exact build selection.
+
+## Tooling
+
+ObVer needs its own parser, comparator and build selector. Some numeric forms also satisfy SemVer syntax, but SemVer gives hyphen suffixes prerelease precedence, unlike ObVer. Tools must not apply SemVer prerelease rules to ObVer labels.
+
+The format uses characters suitable for ordinary directory names, filenames and Git tags without rewriting separators. 
+
+Editions and support policies remain separate contracts. But ObVer usually replaces the need for explicit software "editions".
