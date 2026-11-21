@@ -31,8 +31,41 @@ Source directives attach to one following construct:
 ]
 
 `$export` publishes a declaration or strict direct-selection dependency clause
-in `@mod.moth` or `@package.moth`. It cannot export an entry, ordinary runtime
-statement, whole namespace or `$config` input. See
+in `@mod.moth` or `@package.moth`. Without an operand, it publishes at the
+facade root. One bare `@route` operand publishes under that public route
+instead:
+
+[codeblock, $code "moth":
+    -- child/@mod.moth
+    $export
+    root_value #= "root"
+
+    $export @forms
+    button #|label String| -> String:
+        return label
+    ;
+
+    $export @forms/validation
+    validate |value String| -> String:
+        return value
+    ;
+]
+
+Consumers reach those names as `@child root_value`, `@child/forms button` and
+`@child/forms/validation validate`. Distinct targets may share a route, which
+groups their public names. A route never renames the leaf. Select an alias when
+the public name must differ.
+
+A route uses dependency-path spelling and is a suffix below this facade. A bare
+`@`, a `.` or `..` segment and a file extension are invalid route spellings, as
+are a malformed or extra operand. The operand stays on the `$export` line and
+does not change the directive's attachment to the next eligible declaration or
+strict direct-selection clause.
+
+`$export` cannot export an entry, ordinary runtime statement, whole namespace,
+wildcard selection or `$config` input. One target has one public destination,
+so two `$export` directives on the same target fail as a duplicate
+(`MOTH-SYNTAX-0021`) even when their routes differ. See
 @../project-structure/#public-api (Public API) and
 @../packages/#public-reexports (Public re-exports).
 
@@ -99,11 +132,13 @@ No source directive can be the operand of another.
 
 **Each directive name may occur at most once in one attachment run.** Every
 duplicate is an error, even if the operands match or repetition would otherwise
-be harmless. Diagnostics identify both authored occurrences. The same directive
-may annotate a different following construct. There is no blanket pairwise
-compatibility hierarchy: each distinct directive validates its own eligible
-target and semantic requirements. Constraint directives therefore evaluate
-the resulting program semantics independently of source order.
+be harmless. Diagnostics identify both authored occurrences. Two `$export`
+directives on one target are a duplicate even when their route operands name
+different routes, because one target has one public destination. The same
+directive may annotate a different following construct. There is no blanket
+pairwise compatibility hierarchy: each distinct directive validates its own
+eligible target and semantic requirements. Constraint directives therefore
+evaluate the resulting program semantics independently of source order.
 
 ### Operands and diagnostics
 
@@ -118,8 +153,18 @@ The general directive surface is:
 The directive contract selects which of these forms is legal. A named operand
 has exactly one key and value, without a type annotation. Operands use the
 ordinary compile-time expression rules and may contain balanced nested
-templates. `$export` and `$config` accept no operand. Parenthesized calls
-such as `$name(...)` are not directive syntax.
+templates. `$config` accepts no operand. `$export` accepts no operand or one
+bare `@route` path after its name. The target construct still starts on a later
+line. Parenthesized calls such as `$name(...)` are not directive syntax.
+
+A route operand names a public suffix under the declaring facade. It uses
+slash-separated path components, not a file path. A bare `@` is an empty path
+and fails lexically with `MOTH-SYNTAX-0018`. An `@/` operand reaches route
+validation and is rejected as a public root (`MOTH-SYNTAX-0021`,
+`invalid_template_directive.export_route_public_root`). The compiler also
+rejects a `.` or `..` component, an extension-bearing component and any second
+or malformed operand. Omit the operand for a root export. Write
+`$export @tables/layout`, not `$export @tables/layout.moth`.
 
 The compiler diagnoses unknown names, wrong locations, invalid operands,
 nonconstant required values, duplicate names, missing targets and unsuitable

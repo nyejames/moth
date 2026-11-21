@@ -468,6 +468,8 @@ impl ModuleNamespaceSet {
         &mut self,
         package_prefix: &str,
         routes: &FacadeRouteIndex,
+        source_files: &SourceDatabase,
+        selected_source_texts: &mut SelectedSourceTextMap,
     ) -> Result<(), PreparedFailure> {
         let Self {
             package_namespaces,
@@ -504,6 +506,11 @@ impl ModuleNamespaceSet {
             routes,
             package_boundary_indexes,
             binding_package_paths,
+            Some(RouteCollisionSite {
+                source_tree_index: package_index,
+                source_files,
+            }),
+            Some(&mut *selected_source_texts),
         )?;
 
         let Some(root_module_id) = package_index
@@ -522,14 +529,19 @@ impl ModuleNamespaceSet {
         // Only this boundary's newly published claims need the internal eager check. Claims from
         // earlier packages have already passed this scan, and the project pass validates every
         // package against project-local identities once project namespaces exist.
+        // Only this package's own namespaces share the source database that resolves a matching
+        // local provider. Another package's boundary-local ModuleIds and SourceIds are foreign.
         validate_package_route_claims(
-            package_namespaces.values().flatten(),
+            namespaces.iter(),
             package_prefix,
             root_claims
                 .iter()
                 .map(|claim| (claim.route.as_str(), claim.span)),
-            ProjectRouteClaimSite::PackageOperand,
-            None,
+            ProjectRouteClaimSite::PackageLocal {
+                source_tree_index: package_index,
+                source_files,
+            },
+            Some(selected_source_texts),
         )?;
         package_public_routes.insert(
             package_prefix.to_owned(),
@@ -629,7 +641,7 @@ impl ModuleNamespaceSet {
         &mut self,
         source_tree_index: &SourceTreeIndex,
         source_files: Option<&SourceDatabase>,
-        selected_source_texts: Option<&mut SelectedSourceTextMap>,
+        mut selected_source_texts: Option<&mut SelectedSourceTextMap>,
         project_module_graph: &ProjectModuleGraph,
         facade_routes: &FacadeRouteIndex,
         string_table: &mut StringTable,
@@ -649,12 +661,18 @@ impl ModuleNamespaceSet {
             package_public_routes,
             ..
         } = self;
+        let route_collision_site = source_files.map(|source_files| RouteCollisionSite {
+            source_tree_index,
+            source_files,
+        });
         insert_facade_route_entries(
             project_namespaces,
             source_tree_index.module_identities(),
             facade_routes,
             package_boundary_indexes,
             binding_package_paths,
+            route_collision_site,
+            selected_source_texts.as_deref_mut(),
         )?;
         let consumers = project_namespaces.iter().collect::<Vec<_>>();
         validate_published_package_routes_against_consumers(
@@ -1392,10 +1410,26 @@ fn build_package_namespaces(
 /// One planned public-route namespace entry for a consumer module.
 struct PlannedRouteEntry {
     key: String,
+    /// The facade base key every route under this claim is scoped to, folded for comparison.
+    ///
+    /// WHY: two routes with one folded key are latent only when they sit behind the same
+    ///      ambiguous base. Distinct bases own independent visibility and must collide eagerly.
+    base_key: String,
     facade_module_id: ModuleId,
     surface: ModuleRootRole,
     route: PublicExportRoute,
     span: SourceSpan,
+}
+
+/// Route claims that fold to one consumer-visible key, split by publication status.
+///
+/// WHY: selectable and ambiguous-base claims obey different collision rules. Two selectable
+///      facades conflict with each other, a selectable claim conflicts with any ambiguous claim,
+///      and ambiguous claims conflict with one another only when their folded base keys differ.
+#[derive(Default)]
+struct RouteClaimGroup<'plan> {
+    planned: Vec<&'plan PlannedRouteEntry>,
+    ambiguous: Vec<&'plan PlannedRouteEntry>,
 }
 
 #[derive(Clone, Debug)]
@@ -1410,17 +1444,19 @@ struct RouteCollision {
 ///
 /// WHAT: for each consumer namespace, plans `<facade-key>/<route>` entries only for facades whose
 ///       own `CrossModule` entry is present, rejects a collision involving any route even when no
-///       consumer references it, then inserts the surviving entries through `ModuleNamespace::insert`.
-/// WHY: public routes are content-derived facts published by the prepass. Inserting them through
-///      the existing no-precedence table keeps exact and case-only collision policy identical to
-///      every other visible identity, while planning first lets eager validation stay one
-///      deterministic pass over the authored route claims.
+///       consumer references it, then inserts the surviving planned entries directly.
+/// WHY: public routes are content-derived facts published by the prepass. Validating every claim
+///      before insertion keeps exact and case-only collision policy identical to every other
+///      visible identity, while one deterministic pass over the authored route claims avoids a
+///      second per-route scan of the namespace table.
 fn insert_facade_route_entries(
     namespaces: &mut [ModuleNamespace],
     identities: &ModuleIdentityTable,
     routes: &FacadeRouteIndex,
     package_boundary_indexes: &SourcePackageBoundaryIndexes,
     binding_package_paths: &BTreeSet<String>,
+    route_collision_site: Option<RouteCollisionSite<'_>>,
+    mut selected_source_texts: Option<&mut SelectedSourceTextMap>,
 ) -> Result<(), PreparedFailure> {
     let mut registered_package_paths = package_boundary_indexes
         .iter()
@@ -1431,22 +1467,26 @@ fn insert_facade_route_entries(
     for module_id in identities.module_ids() {
         let namespace = &mut namespaces[module_id.index()];
         let (planned, ambiguous_plans) = planned_route_entries(namespace, routes);
-        if let Some(collision) =
-            first_ambiguous_route_local_collision(ambiguous_plans.values(), &namespace.entries)
-        {
+        // Validation covers ambiguous-base claims too: a route that a healthy child facade or a
+        // registered package already owns cannot stay latent behind the base ambiguity.
+        if let Some(collision) = first_route_collision(
+            &planned,
+            &ambiguous_plans,
+            &namespace.entries,
+            &registered_package_paths,
+            route_collision_site,
+            selected_source_texts.as_deref_mut(),
+        ) {
             return Err(route_collision_failure(collision));
         }
         namespace.ambiguous_keys.extend(ambiguous_plans.into_keys());
-        if planned.is_empty() {
-            continue;
-        }
-        if let Some(collision) =
-            first_route_collision(&planned, &namespace.entries, &registered_package_paths)
-        {
-            return Err(route_collision_failure(collision));
-        }
+        // The validation pass above checked every surviving planned key against existing entries
+        // and against its sibling routes, so a second `insert` scan cannot discover a collision.
+        // Same-facade case-only route conflicts are header diagnostics emitted by the prepass, so
+        // no reachable entry relies on `insert`'s ambiguity tracking here. Insert directly to keep
+        // route publication linear in the number of published routes.
         for entry in planned {
-            namespace.insert(
+            namespace.entries.insert(
                 entry.key,
                 NamespaceEntry::PublicRoute {
                     target_module_id: entry.facade_module_id,
@@ -1466,14 +1506,20 @@ fn insert_facade_route_entries(
 ///      preserves child/support selection, paired-surface suppression, root-local isolation and
 ///      entry-only exclusion without re-deriving any of them from topology.
 ///
-/// Returns the publication plans and the plans whose base facade key is ambiguous, keyed by the
-/// route key. The caller owns resolving an ambiguous plan to the base conflict.
+/// Returns the publication plans and every claim whose base facade key is ambiguous, grouped by
+/// raw route key. One key may hold claims behind distinct folded bases, so the caller owns both
+/// resolving the base conflict and rejecting a collision between independent bases.
 fn planned_route_entries(
     namespace: &ModuleNamespace,
     routes: &FacadeRouteIndex,
-) -> (Vec<PlannedRouteEntry>, BTreeMap<String, PlannedRouteEntry>) {
+) -> (
+    Vec<PlannedRouteEntry>,
+    BTreeMap<String, Vec<PlannedRouteEntry>>,
+) {
     let mut planned = BTreeMap::new();
-    let mut ambiguous_plans = BTreeMap::new();
+    // One raw route key can be reached from distinct ambiguous bases. Keep every claim so the
+    // caller can compare folded bases instead of letting map insertion discard one base.
+    let mut ambiguous_plans: BTreeMap<String, Vec<PlannedRouteEntry>> = BTreeMap::new();
     for (facade_key, claimants) in &namespace.facade_claimants {
         if facade_key.is_empty() {
             continue;
@@ -1481,8 +1527,11 @@ fn planned_route_entries(
         // Every claimant behind an ambiguous base still contributes route identities. Publishing
         // any one of them would select a facade by insertion order, so record each route spelling
         // as ambiguous; retaining the claims here is what makes a later `@base/<other-route>`
-        // resolve to the base conflict instead of a route miss.
+        // resolve to the base conflict instead of a route miss. Identical route claims behind one
+        // folded base stay latent until selected; claims behind distinct bases are retained
+        // separately so their collision is not hidden by raw-key deduplication.
         let base_is_ambiguous = namespace.is_ambiguous(facade_key);
+        let folded_base = fold_route_spelling(facade_key);
         for (target_module_id, surface) in claimants {
             for claim in routes.routes(*target_module_id, *surface) {
                 if claim.route.is_root() {
@@ -1492,8 +1541,10 @@ fn planned_route_entries(
                 if base_is_ambiguous {
                     ambiguous_plans
                         .entry(key.clone())
-                        .or_insert(PlannedRouteEntry {
+                        .or_default()
+                        .push(PlannedRouteEntry {
                             key,
+                            base_key: folded_base.clone(),
                             facade_module_id: *target_module_id,
                             surface: *surface,
                             route: claim.route.clone(),
@@ -1507,6 +1558,7 @@ fn planned_route_entries(
                     .entry((key.clone(), *target_module_id, *surface))
                     .or_insert_with(|| PlannedRouteEntry {
                         key,
+                        base_key: folded_base.clone(),
                         facade_module_id: *target_module_id,
                         surface: *surface,
                         route: claim.route.clone(),
@@ -1518,39 +1570,27 @@ fn planned_route_entries(
     (planned.into_values().collect(), ambiguous_plans)
 }
 
-/// Reject an ambiguous-base route that also names a visible non-facade local identity.
+/// The boundary's source facts for resolving a competing namespace entry's authored location.
 ///
-/// WHY: a facade key collision already makes route selection ambiguous, but it cannot hide a
-///      route whose spelling is also a real local source. That is a distinct eager collision and
-///      must not wait for an authored dependency clause to expose it.
-fn first_ambiguous_route_local_collision<'plan>(
-    ambiguous_plans: impl Iterator<Item = &'plan PlannedRouteEntry>,
-    entries: &BTreeMap<String, NamespaceEntry>,
-) -> Option<RouteCollision> {
-    for plan in ambiguous_plans {
-        // Local dependency lookup and ordinary facade-route collision checks compare exact
-        // case-insensitive keys. Ancestor overlap would reject a distinct local provider such as
-        // `forms/x` merely because an ambiguous facade publishes the deeper route `forms/x/y`.
-        let collides = entries.iter().any(|(key, entry)| {
-            !matches!(entry, NamespaceEntry::CrossModule { .. })
-                && key.eq_ignore_ascii_case(&plan.key)
-        });
-        if collides {
-            return Some(RouteCollision {
-                route_key: plan.key.clone(),
-                span: plan.span,
-                related_span: None,
-            });
-        }
-    }
-    None
+/// WHY: a route that collides with a visible child facade or owned source has two authored sites.
+///      The route operand already supplies the primary span; this site resolves the entry that
+///      owns the other claim so both can be reported without a second source scan.
+#[derive(Clone, Copy)]
+struct RouteCollisionSite<'a> {
+    source_tree_index: &'a SourceTreeIndex,
+    source_files: &'a SourceDatabase,
 }
 
 /// Where a published package route's collision site can be rendered.
 #[derive(Clone, Copy)]
 enum ProjectRouteClaimSite<'a> {
-    /// The consumer is the package boundary that owns the authored route operand.
+    /// The route operand has no usable consumer source database in this report context.
     PackageOperand,
+    /// The consumer is the same package boundary, so its local entry resolves in that database.
+    PackageLocal {
+        source_tree_index: &'a SourceTreeIndex,
+        source_files: &'a SourceDatabase,
+    },
     /// The consumer is the project boundary; its matching entry supplies the responsible site.
     ProjectLocal {
         source_tree_index: &'a SourceTreeIndex,
@@ -1579,10 +1619,15 @@ impl<'a> ProjectRouteClaimSite<'a> {
 ///       shared overlap predicate, with every visible entry of every consumer. Ambiguous keys are
 ///       covered by their retained base entry, which the same ancestor-aware rule matches.
 /// WHY: external package selection must not silently outrank a local provider. Validation is
-///      eager so an unreferenced collision still reports. A package-boundary consumer names the
-///      authored route operand; a project consumer names the matching local entry's file instead,
-///      because the package-owned `SourceId` cannot render in the project diagnostic context. The
-///      diagnostic path remains the route key, so the package spelling stays visible.
+///      eager so an unreferenced collision still reports. Inside the same package boundary, the
+///      authored route operand is primary and the local provider is its related site; both
+///      resolve in that boundary's source database. A project consumer names the matching local
+///      entry's file instead. Its competing package operand is known, but a package-owned
+///      `SourceId` is a foreign identity: rendering it beside a project span needs a frozen label
+///      handle plus the package source database retained as a report domain. Premerge project
+///      failures are unfrozen and carry one source owner, so attaching that span now would
+///      reinterpret a foreign `SourceId` in the project database. The diagnostic path therefore
+///      keeps the package route spelling.
 fn validate_published_package_routes_against_consumers(
     namespaces: &[&ModuleNamespace],
     package_public_routes: &BTreeMap<String, BTreeMap<String, SourceSpan>>,
@@ -1621,13 +1666,13 @@ fn validate_package_route_claims<'namespace, 'route>(
         }) else {
             continue;
         };
-        let span = match claim_site {
-            ProjectRouteClaimSite::PackageOperand => published_span,
-            ProjectRouteClaimSite::ProjectLocal {
+        let (span, related_span) = match claim_site {
+            ProjectRouteClaimSite::PackageOperand => (published_span, None),
+            ProjectRouteClaimSite::PackageLocal {
                 source_tree_index,
                 source_files,
             } => {
-                let Some(span) = project_local_claim_span(
+                let Some(local_span) = project_local_claim_span(
                     matched_local.1,
                     source_tree_index,
                     source_files,
@@ -1635,13 +1680,30 @@ fn validate_package_route_claims<'namespace, 'route>(
                 ) else {
                     continue;
                 };
-                span
+                (published_span, Some(local_span))
+            }
+            ProjectRouteClaimSite::ProjectLocal {
+                source_tree_index,
+                source_files,
+            } => {
+                let Some(local_span) = project_local_claim_span(
+                    matched_local.1,
+                    source_tree_index,
+                    source_files,
+                    selected_source_texts.as_deref_mut(),
+                ) else {
+                    continue;
+                };
+                // The competing package operand's SourceId belongs to another boundary's
+                // database. This unfrozen premerge failure retains one source owner, so the route
+                // key names it instead of misinterpreting a foreign span.
+                (local_span, None)
             }
         };
         return Err(route_collision_failure(RouteCollision {
             route_key,
             span,
-            related_span: None,
+            related_span,
         }));
     }
     Ok(())
@@ -1721,70 +1783,124 @@ fn source_span_for_path(
     Some(SourceSpan::new(slot.id, LocalSpan::source_start()))
 }
 
-/// Return the first deterministic collision involving a planned route entry.
+/// Return the first deterministic collision involving a planned or ambiguous-base route entry.
 ///
-/// WHAT: rejects a route that folds onto any existing non-route entry, two routes from distinct
-///       facades that fold together, and a route that overlaps a registered source-package
-///       prefix.
+/// WHAT: rejects a route that folds onto any existing non-route entry, two selectable routes from
+///       distinct facades that fold together, a selectable route colliding with an ambiguous-base
+///       route, and a route that overlaps a registered source or binding package prefix.
 /// WHY: these are the identities consumers can actually collide with under the current topology.
 ///      A route matching a private physical folder inside the exporting module has no namespace
 ///      entry in any consumer and therefore stays legal. Case-only conflicts between the same
 ///      facade's routes are authored-header diagnostics, not namespace collisions, so they stay
-///      reserved for the facade's own preparation.
+///      reserved for the facade's own preparation. Identical route claims behind the same folded
+///      ambiguous base stay latent until a consumer selects them; claims behind distinct
+///      ambiguous bases own independent route identities and collide eagerly.
 fn first_route_collision(
     planned: &[PlannedRouteEntry],
+    ambiguous_plans: &BTreeMap<String, Vec<PlannedRouteEntry>>,
     entries: &BTreeMap<String, NamespaceEntry>,
     registered_package_paths: &[&str],
+    collision_site: Option<RouteCollisionSite<'_>>,
+    mut selected_source_texts: Option<&mut SelectedSourceTextMap>,
 ) -> Option<RouteCollision> {
-    for plan in planned {
-        if entries
-            .keys()
-            .any(|existing| existing.eq_ignore_ascii_case(&plan.key))
-        {
+    if planned.is_empty() && ambiguous_plans.is_empty() {
+        return None;
+    }
+    // One folded index replaces a per-claim scan of every existing key. Entries may retain
+    // case-only claimants as ambiguity, so the first sorted spelling is the deterministic site.
+    let folded_entries = entries
+        .iter()
+        .map(|(key, entry)| (fold_route_spelling(key), entry))
+        .collect::<BTreeMap<_, _>>();
+    for plan in planned.iter().chain(ambiguous_plans.values().flatten()) {
+        if let Some(entry) = folded_entries.get(&fold_route_spelling(&plan.key)) {
+            let related_span = collision_site.and_then(|site| {
+                project_local_claim_span(
+                    entry,
+                    site.source_tree_index,
+                    site.source_files,
+                    selected_source_texts.as_deref_mut(),
+                )
+            });
             return Some(RouteCollision {
                 route_key: plan.key.clone(),
                 span: plan.span,
-                related_span: None,
+                related_span,
             });
         }
     }
 
-    let mut folded_route_groups: BTreeMap<String, Vec<&PlannedRouteEntry>> = BTreeMap::new();
+    let mut folded_route_groups: BTreeMap<String, RouteClaimGroup<'_>> = BTreeMap::new();
     for plan in planned {
         folded_route_groups
             .entry(fold_route_spelling(&plan.key))
             .or_default()
+            .planned
+            .push(plan);
+    }
+    for plan in ambiguous_plans.values().flatten() {
+        folded_route_groups
+            .entry(fold_route_spelling(&plan.key))
+            .or_default()
+            .ambiguous
             .push(plan);
     }
     for group in folded_route_groups.values() {
-        if group.len() < 2 {
-            continue;
+        if group.planned.len() >= 2 {
+            let first_facade = (group.planned[0].facade_module_id, group.planned[0].surface);
+            if group
+                .planned
+                .iter()
+                .any(|plan| (plan.facade_module_id, plan.surface) != first_facade)
+            {
+                // The later planned claim owns the diagnostic site, keeping the result
+                // independent of map iteration or authored-file discovery order.
+                let collision = group
+                    .planned
+                    .last()
+                    .expect("a folded route group repeats its first key");
+                return Some(RouteCollision {
+                    route_key: collision.key.clone(),
+                    span: collision.span,
+                    related_span: group
+                        .planned
+                        .iter()
+                        .find(|candidate| {
+                            (candidate.facade_module_id, candidate.surface)
+                                != (collision.facade_module_id, collision.surface)
+                        })
+                        .map(|candidate| candidate.span),
+                });
+            }
         }
-        let first_facade = (group[0].facade_module_id, group[0].surface);
-        if group
-            .iter()
-            .any(|plan| (plan.facade_module_id, plan.surface) != first_facade)
+        // A selectable route and an ambiguous-base route with the same folded key cannot both
+        // survive publication: selecting the key would reject the healthy claim because of the
+        // unrelated base ambiguity. Ambiguous claims under one folded base stay latent; distinct
+        // bases are compared below.
+        if let (Some(selectable), Some(ambiguous)) =
+            (group.planned.first(), group.ambiguous.first())
         {
-            // The later planned claim owns the diagnostic site, keeping the result independent
-            // of map iteration or authored-file discovery order.
-            let collision = group
-                .last()
-                .expect("a folded route group repeats its first key");
+            return Some(RouteCollision {
+                route_key: ambiguous.key.clone(),
+                span: ambiguous.span,
+                related_span: Some(selectable.span),
+            });
+        }
+        if let Some(collision) = group.ambiguous.last()
+            && let Some(related) = group
+                .ambiguous
+                .iter()
+                .find(|candidate| candidate.base_key != collision.base_key)
+        {
             return Some(RouteCollision {
                 route_key: collision.key.clone(),
                 span: collision.span,
-                related_span: group
-                    .iter()
-                    .find(|candidate| {
-                        (candidate.facade_module_id, candidate.surface)
-                            != (collision.facade_module_id, collision.surface)
-                    })
-                    .map(|candidate| candidate.span),
+                related_span: Some(related.span),
             });
         }
     }
 
-    for plan in planned {
+    for plan in planned.iter().chain(ambiguous_plans.values().flatten()) {
         if registered_package_paths
             .iter()
             .any(|package_prefix| package_paths_overlap(package_prefix, &plan.key))
@@ -1802,12 +1918,14 @@ fn first_route_collision(
 
 /// Build the typed import diagnostic for one eagerly rejected route collision.
 ///
-/// WHAT: interns the colliding consumer-relative route key into a diagnostic-only path table and
-///       reports it through the ambiguous-import family at the authored route operand span.
-/// WHY: the route key is the importable spelling the author would write, and the operand span is
-///      the only authored site that exists before any consumer references it. The affected facade
-///      root or same-module source carries no source span of its own in Stage 0, so the diagnostic
-///      names the route and leaves the other claimant as the key's visible identity.
+/// WHAT: interns the colliding consumer-relative route key into a diagnostic-only path table,
+///       reports the route operand as the primary site, and adds a previous-claim label when
+///       `related_span` names the competing authored operand.
+/// WHY: the route key is the importable spelling the author would write. Two route operands or a
+///      route operand and a visible local provider both resolve in the boundary's source context,
+///      so both spans are retained. A registered package prefix has no authored content site, and
+///      a package-owned span cannot cross the unfrozen premerge diagnostic source owner; those
+///      collisions carry only the route operand and name the competing identity through the key.
 fn route_collision_failure(collision: RouteCollision) -> PreparedFailure {
     // A publication failure can be retained past its boundary's preparation, so it must not
     // consume the live boundary string table. The diagnostic's path rows pair with this fresh

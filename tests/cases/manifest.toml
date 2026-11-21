@@ -22697,3 +22697,17 @@ path = "namespaced_public_exports_invalid_operand_rejected"
 tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
 contract = "language.dependencies.namespaced_public_exports_invalid_operand_rejected"
 role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_ambiguous_base_route_child_facade_rejected"
+path = "namespaced_public_exports_ambiguous_base_route_child_facade_rejected"
+tags = ["integration", "packages", "facade", "dependencies", "namespace-bindings", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_ambiguous_base_route_child_facade_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_ambiguous_base_route_mixed_child_rejected"
+path = "namespaced_public_exports_ambiguous_base_route_mixed_child_rejected"
+tags = ["integration", "packages", "facade", "dependencies", "namespace-bindings", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_ambiguous_base_route_mixed_child_rejected"
+role = "boundary"

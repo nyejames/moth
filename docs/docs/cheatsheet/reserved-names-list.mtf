@@ -57,9 +57,10 @@ The `@core` and `@builder` package namespace roots are reserved. Package imports
 - `$doc` - attach one compile-time String as documentation to a following declaration.
 - `$todo` - annotate a following declaration or executable statement with one compile-time String, with no runtime effect.
 
-`$export` and `$config` take no operand. Source directives may share a line
-or occupy consecutive lines without commas. All apply to the same following-line
-target regardless of order; duplicate directive names are always invalid.
+`$config` takes no operand. `$export` takes no operand or one bare `@route`
+path. Source directives may share a line or occupy consecutive lines without
+commas. All apply to the same following-line target regardless of order.
+Duplicate directive names are always invalid.
 Comment-only lines may intervene, but a blank physical line breaks attachment.
 Template heads continue to require commas between directives and expressions.
 All directives are compiler-owned and available under every builder where valid.

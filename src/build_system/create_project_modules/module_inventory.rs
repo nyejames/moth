@@ -722,6 +722,13 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
 fn discover_all_modules_in_boundary(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
+    #[cfg_attr(
+        not(test),
+        allow(
+            unused_variables,
+            reason = "only the focused-test origin fallback reads the source database"
+        )
+    )]
     source_files: &SourceDatabase,
     source_spans: &mut SourceSpanBuilders<'_>,
     project_module_graph: &mut ProjectModuleGraph,
@@ -739,10 +746,11 @@ fn discover_all_modules_in_boundary(
 ) -> Result<ModuleCompilationSchedule, PreparedFailure> {
     let seeds = module_seeds_in_module_id_order(project_module_graph);
     // The boundary's route prepass has already built this table for the facades it prepared, so
-    // the project and package walks reuse it. A walk without a prepass (focused tests) builds its
-    // own here.
+    // the project and package walks reuse it. Only focused tests walk without a prepass; keep
+    // their fallback out of production, where a missing table would mean a skipped boundary.
     let source_module_origins = match source_module_origins {
         Some(origins) => origins,
+        #[cfg(test)]
         None => {
             let source_origin_lookup = project_module_graph
                 .build_source_origin_lookup(directory_dependency_resolution.source_tree_index())?;
@@ -756,6 +764,11 @@ fn discover_all_modules_in_boundary(
             drop(source_origin_lookup);
             origins
         }
+        #[cfg(not(test))]
+        None => crate::compiler_bug!(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            "a production boundary walk must receive the origin table built by its facade prepass"
+        ),
     };
 
     let module_error_allowance = config.frontend_options().max_errors_per_module;

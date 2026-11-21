@@ -591,6 +591,26 @@ fn directory_frontend_registers_package_and_project_boundaries() {
         project_boundary,
         crate::timing::TimingMetric::BoundaryCompile
     ));
+    let package_inventory_samples = boundary_timing_samples(
+        &snapshot,
+        package_boundary,
+        crate::timing::TimingMetric::BoundaryInventory,
+    );
+    assert!(
+        package_inventory_samples >= 2,
+        "the package boundary inventory total must include its facade prepass and route \
+         attachment as well as the later module walk: {package_inventory_samples} samples"
+    );
+    let project_inventory_samples = boundary_timing_samples(
+        &snapshot,
+        project_boundary,
+        crate::timing::TimingMetric::BoundaryInventory,
+    );
+    assert!(
+        project_inventory_samples >= 2,
+        "the project boundary inventory total must include its facade prepass and route \
+         attachment as well as the later module walk: {project_inventory_samples} samples"
+    );
 
     let own_modules = snapshot
         .modules

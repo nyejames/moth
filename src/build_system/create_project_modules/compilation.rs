@@ -1152,6 +1152,11 @@ fn prepare_source_package_boundaries(
             &dependency_prefix,
         );
         let path_interner = package_sources.sources_mut().fork_path_builder();
+        timing_scope_attributed!(
+            timing_guard_package_route_inventory,
+            crate::timing::TimingMetric::BoundaryInventory,
+            Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
+        );
         let prepass_result = {
             let (package_source_files, mut package_source_spans) = package_sources.split();
             facade_route_prepass::prepublish_facade_routes(
@@ -1172,6 +1177,8 @@ fn prepare_source_package_boundaries(
         let prepass = match prepass_result {
             Ok(prepass) => prepass,
             Err(failure) => {
+                #[cfg(feature = "timers")]
+                timing_guard_package_route_inventory.finish();
                 return Err(finalize_failed_package_preparation(
                     failure,
                     package_sources,
@@ -1199,11 +1206,17 @@ fn prepare_source_package_boundaries(
                 )
             });
         if prepass_failure.is_none()
-            && let Err(failure) =
-                namespace_set.attach_package_facade_routes(&dependency_prefix, &routes)
+            && let Err(failure) = namespace_set.attach_package_facade_routes(
+                &dependency_prefix,
+                &routes,
+                package_sources.sources(),
+                &mut package_selected_source_texts,
+            )
         {
             prepass_failure = Some(failure);
         }
+        #[cfg(feature = "timers")]
+        timing_guard_package_route_inventory.finish();
         // The external registered prefix is unavailable only when boundary-wide publication
         // failed or its root support facade failed. A child facade's diagnostic stays scoped to
         // that internal facade key, so an external consumer of an unrelated undeclared path still
@@ -1978,10 +1991,18 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
         );
         // 2. Prepare every project facade root once and publish its declared public routes before
         // project consumer namespaces exist. Project namespace attachment, including reserved-root
-        // validation, therefore runs after package inventories and after this prepass; the project
+        // validation, therefore runs after package inventories and after this prepass; project
         // inventory is discovered afterwards. The preparation is provider-independent, and its
         // cache is adopted by the module walk below so the facade is never tokenized or parsed a
-        // second time.
+        // second time. The prepass and namespace attachment are inventory work for this boundary,
+        // not an untimed preamble.
+        timing_scope_attributed!(
+            timing_guard_project_route_inventory,
+            crate::timing::TimingMetric::BoundaryInventory,
+            Some(crate::timing::TimingContext::for_boundary(
+                project_timing_boundary
+            )),
+        );
         let mut facade_route_prepass = match facade_route_prepass::prepublish_facade_routes(
             &project_setup.source_tree_index,
             &project_setup.project_module_graph,
@@ -1998,6 +2019,8 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
         ) {
             Ok(prepass) => prepass,
             Err(failure) => {
+                #[cfg(feature = "timers")]
+                timing_guard_project_route_inventory.finish();
                 let failure = finalize_project_setup_failure(
                     &mut project_sources,
                     &mut selected_source_texts,
@@ -2021,6 +2044,8 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
             &facade_route_prepass.routes,
             string_table,
         ) {
+            #[cfg(feature = "timers")]
+            timing_guard_project_route_inventory.finish();
             let failure = finalize_project_setup_failure(
                 &mut project_sources,
                 &mut selected_source_texts,
@@ -2032,6 +2057,8 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
                 source_package_inventories,
             ));
         }
+        #[cfg(feature = "timers")]
+        timing_guard_project_route_inventory.finish();
 
         // The project boundary was registered before facade preparation; its accumulated total
         // remains separate from every source package.

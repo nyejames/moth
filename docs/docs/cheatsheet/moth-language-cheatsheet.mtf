@@ -924,7 +924,7 @@ Constant loops have a configurable iteration limit.
 
 `$md` supports headings, paragraphs, lists, emphasis, links and same-line paired backtick code, while escaping raw HTML.
 Use `$code` for code blocks and `@core/html` helpers for tables. In `.moth` files, import `@core/html table, th, td`.
-The `@core/html` and `@core/css` constants are available automatically in `.mtf` files:
+The facade-root `@core/html` and `@core/css` constants are available automatically in `.mtf` files. Public routes stay out of the prelude:
 
 [codeblock, $code "moth":
     [table, [th: [: Name] [: Score]]:
@@ -1022,6 +1022,7 @@ Moth has no `import` keyword. Use a top-level `@path` to bind names or namespace
 
 `as` after one selection renames that binding. After the path it binds a namespace without selections.
 Bare `@core/math` binds `math`, used as `math.sin(1.0)`. Namespaces are not first-class values. Selections are flat names, not path components.
+A facade may publish names under public routes. Name the route under the facade, such as `@child/forms Button`. A bare `@child/forms` binds a shallow namespace of that route's direct members only, not root members or deeper routes. `@core/html as html` doesn't enable `html.tables.cells`.
 
 Paths resolve relative to the **module root**, not the importing file. Omit `.moth`, `.mtf` and `.md` extensions for source dependencies,
 but retain extensions for providers such as `.js`. A path may bind an owned helper, visible child module or support package.
@@ -1029,7 +1030,7 @@ Module boundaries expose only exports. `@./`, `@/` and `../` are invalid depende
 Root filenames (`@mod.moth`, `@package.moth`, `@entry.moth`) can't be imported directly. Depend on the module directory. The build-only `@config.moth` is not importable either. `@core` and `@builder` are reserved package namespace roots, so Core imports start below `@core/` and Builder imports below `@builder/`. Neither root alone names an importable package.
 
 An expression reads one provider symbol as `@settings site_name`. Keep the path and symbol on the same physical line. The read creates no local
-binding, so it can't shadow a local name. At the start of a statement, `@settings site_name, other` is a dependency clause instead. `@file.ext` is a
+binding, so it can't shadow a local name. A route-qualified read such as `@child/forms button("go")` also binds no name. At the start of a statement, `@settings site_name, other` is a dependency clause instead. `@file.ext` is a
 file value, not a dependency.
 
 Selections are file-local and can't shadow existing names. Commas permit multiline selection lists, with the path and first selection on the same
@@ -1078,9 +1079,13 @@ Helpers in ordinary `.moth` files are shared by every root, while each root keep
 
     $export
     @core/math PI
+
+    $export @forms
+    form_label #= "Form"
 ]
 
 A facade uses `$export` before each public declaration or direct-selection re-export. Unmarked items stay private.
+Add one `@route` operand to publish under a public route, or omit it for the facade root. One target has one public destination, so repeating `$export` on it is a duplicate even when the routes differ.
 Runtime statements, fragments and whole namespaces aren't exports. Public signatures can't expose private types or required private trait evidence.
 Methods are visible wherever their receiver type is visible. They can't be imported or exported separately.
 
@@ -1145,7 +1150,7 @@ See @../project-structure (Project structure) and @../packages (Package visibili
 Template-head items, including directives and expressions, always use commas. Source directives may share one line or occupy consecutive lines
 without commas. They all attach independently to the same following-line construct, regardless of directive order. Repeating a directive name
 on one target is invalid. Comments may intervene, but a blank line breaks attachment and no directive skips an unsuitable target.
-`$export` publishes eligible declarations or direct-selection re-exports in facades. `$config` marks a typed build input. Both take no operand.
+`$export` publishes eligible declarations or direct-selection re-exports in facades, at the facade root or under one `@route` operand. `$config` marks a typed build input and takes no operand.
 `$doc` documents a declaration and `$todo` annotates a declaration or executable statement. Both require one compile-time String operand,
 usually a template; `$doc` applies no implicit Markdown formatting. Source directives stop at the next outer source directive token, not at
 nested template-head directives. No directive uses a function-style argument list.

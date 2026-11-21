@@ -282,8 +282,19 @@ fn same_stem_moth_and_mtf_sources_remain_ambiguous() {
 }
 
 fn planned_route(key: &str, facade: usize, surface: ModuleRootRole) -> PlannedRouteEntry {
+    let base_key = key.rsplit_once('/').map_or("", |(base, _)| base);
+    planned_route_with_base(key, base_key, facade, surface)
+}
+
+fn planned_route_with_base(
+    key: &str,
+    base_key: &str,
+    facade: usize,
+    surface: ModuleRootRole,
+) -> PlannedRouteEntry {
     PlannedRouteEntry {
         key: key.to_owned(),
+        base_key: base_key.to_owned(),
         facade_module_id: ModuleId::from_index(facade),
         surface,
         route: PublicExportRoute::from_canonical_spelling(
@@ -304,8 +315,11 @@ fn route_planning_rejects_exact_and_case_only_entry_collisions() {
     for route_key in ["child/forms", "child/Forms"] {
         let collision = first_route_collision(
             &[planned_route(route_key, 0, ModuleRootRole::Normal)],
+            &BTreeMap::new(),
             &entries,
             &[],
+            None,
+            None,
         )
         .expect("a route folding onto a namespace entry must collide");
         assert_eq!(collision.route_key, route_key);
@@ -322,7 +336,10 @@ fn route_planning_rejects_distinct_facade_collisions() {
             planned_route("a/b/c", 1, ModuleRootRole::Support),
         ],
         &BTreeMap::new(),
+        &BTreeMap::new(),
         &[],
+        None,
+        None,
     )
     .expect("two facades publishing one folded route must collide");
     assert_eq!(collision.route_key, "a/b/c");
@@ -341,12 +358,124 @@ fn route_planning_rejects_source_package_prefix_collisions() {
     let collision = first_route_collision(
         &[planned_route("a/b", 0, ModuleRootRole::Support)],
         &BTreeMap::new(),
+        &BTreeMap::new(),
         &["a/b"],
+        None,
+        None,
     )
     .expect("a route overlapping a source-package prefix must collide");
     assert_eq!(collision.route_key, "a/b");
     assert_eq!(collision.span.source(), SourceId::from_index(1));
     assert!(collision.related_span.is_none());
+}
+
+#[test]
+fn route_planning_validates_ambiguous_claims_against_visible_providers() {
+    let ambiguous = BTreeMap::from([(
+        "forms/cards".to_owned(),
+        vec![planned_route("forms/cards", 2, ModuleRootRole::Support)],
+    )]);
+    let mut entries = BTreeMap::new();
+    entries.insert("forms/cards".to_owned(), cross_module_entry(1));
+
+    let collision = first_route_collision(&[], &ambiguous, &entries, &[], None, None)
+        .expect("a visible child facade must reject an ambiguous-base route eagerly");
+    assert_eq!(collision.route_key, "forms/cards");
+    assert_eq!(collision.span.source(), SourceId::from_index(3));
+
+    let prefix_collision =
+        first_route_collision(&[], &ambiguous, &BTreeMap::new(), &["forms"], None, None)
+            .expect("a registered package prefix must reject an ambiguous-base route eagerly");
+    assert_eq!(prefix_collision.route_key, "forms/cards");
+
+    assert!(
+        first_route_collision(&[], &ambiguous, &BTreeMap::new(), &[], None, None).is_none(),
+        "duplicate identical claims behind one ambiguous base must stay latent until selected"
+    );
+}
+
+#[test]
+fn route_planning_rejects_mixed_ambiguous_and_selectable_claims() {
+    let selectable = planned_route("forms/cards/detail", 1, ModuleRootRole::Normal);
+    let ambiguous = BTreeMap::from([(
+        "forms/cards/detail".to_owned(),
+        vec![planned_route(
+            "forms/cards/detail",
+            3,
+            ModuleRootRole::Support,
+        )],
+    )]);
+
+    let collision =
+        first_route_collision(&[selectable], &ambiguous, &BTreeMap::new(), &[], None, None)
+            .expect("a healthy child route must not be shadowed by an unrelated ambiguous base");
+    assert_eq!(collision.route_key, "forms/cards/detail");
+    assert_eq!(
+        collision.span.source(),
+        SourceId::from_index(4),
+        "the ambiguous-base route operand is the primary site"
+    );
+    assert_eq!(
+        collision
+            .related_span
+            .expect("the selectable child route keeps its authored site")
+            .source(),
+        SourceId::from_index(2)
+    );
+}
+
+#[test]
+fn route_planning_rejects_colliding_claims_behind_distinct_ambiguous_bases() {
+    // `forms` and `forms/cards` are independently ambiguous bases. Their routes produce one
+    // consumer key, but neither base owns the other, so the duplicate must not stay latent.
+    let ambiguous = BTreeMap::from([(
+        "forms/cards/detail".to_owned(),
+        vec![
+            planned_route_with_base(
+                "forms/cards/detail",
+                "forms/cards",
+                1,
+                ModuleRootRole::Normal,
+            ),
+            planned_route_with_base("forms/cards/detail", "forms", 2, ModuleRootRole::Support),
+        ],
+    )]);
+
+    let collision = first_route_collision(&[], &ambiguous, &BTreeMap::new(), &[], None, None)
+        .expect("routes behind distinct ambiguous bases must collide eagerly");
+    assert_eq!(collision.route_key, "forms/cards/detail");
+    let mut sources = [
+        collision.span.source().index(),
+        collision
+            .related_span
+            .expect("the competing ambiguous base keeps its authored site")
+            .source()
+            .index(),
+    ];
+    sources.sort_unstable();
+    assert_eq!(sources, [2, 3], "both route operands must be named");
+
+    let same_base = BTreeMap::from([(
+        "forms/cards/detail".to_owned(),
+        vec![
+            planned_route_with_base(
+                "forms/cards/detail",
+                "forms/cards",
+                1,
+                ModuleRootRole::Normal,
+            ),
+            planned_route_with_base(
+                "forms/Cards/detail",
+                "forms/cards",
+                2,
+                ModuleRootRole::Support,
+            ),
+        ],
+    )]);
+    assert!(
+        first_route_collision(&[], &same_base, &BTreeMap::new(), &[], None, None).is_none(),
+        "case variants of one folded ambiguous base keep identical route claims latent"
+    );
 }
 
 #[test]

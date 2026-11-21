@@ -61,7 +61,7 @@ The fragments carry no runtime behaviour and need no runtime assets. Only compil
 
 ### Prelude contribution
 
-`@core/css` contributes all six constants to the fixed `.mtf` prelude. A public constant declared by the package enters that prelude even when another file in the package exports it. A re-export of another package's declaration does not. See @../html/#html-helpers (HTML helpers) and @../../../moth-templates/#template-scope (Template scope).
+`@core/css` contributes all six constants to the fixed `.mtf` prelude. A public constant exported at the package facade root enters that prelude even when another file in the package exports it. A routed export and a re-export of another package's declaration do not. See @../html/#html-helpers (HTML helpers) and @../../../moth-templates/#template-scope (Template scope).
 
 ### Related concepts
 

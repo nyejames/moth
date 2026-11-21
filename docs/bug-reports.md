@@ -96,3 +96,10 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Where: provider-body publication for registered source packages, surfaced during project entry AST construction. The `compile_registered_package_project` helper in `src/build_system/tests/compile_project_frontend_tests/package_materialisation_tests.rs` reproduces it.
 - Observed: a registered package `builder/test/rootpkg` whose `@package.moth` exports `decorate #|label String| -> String` and an entry calling it via `@builder/test/rootpkg decorate as f` fails with `Internal AstConstruction: Imported const function OriginFunctionId { ... package: Builder("builder/test/rootpkg") ... defining_name: "decorate" ... } has no published provider body`. The same function in a project-local `helper/@package.moth` builds, and no-argument package functions work.
 - Investigate: compare how project-local support facades and registered package facades publish const-function bodies to the consumer's provider-body registry; an internal error is reachable from valid source, so fix the publication lane and add a registered-package case calling a parameterised const function.
+
+### Package-route collisions omit the package-side authored site
+
+- Found: namespaced public export paths final review, 2026-11. Confirmed limitation by code trace.
+- Where: route collision reporting in `src/build_system/create_project_modules/module_namespace.rs` when a registered package's `$export @route` collides with a project-local provider (or the reverse for a package consumer).
+- Observed: MOTH-IMPORT-0006 reports only the site owned by the reporting boundary. Project route failures become an unfrozen premerge report with one source owner, so the package `$export` operand's `SourceId` cannot be attached without reinterpreting it in the project source database. The route spelling is kept in the diagnostic path fact.
+- Investigate: carry a frozen label handle for the foreign site and retain the package `SourceDatabase` as a report domain, then add the package operand as a related label and assert both sites.

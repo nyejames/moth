@@ -266,6 +266,23 @@ A qualified expression occurrence (`@provider symbol` in an expression) contribu
 
 Preparation happens once for a source in a preparation lane, then all consumers in that lane reuse it. A separate canonical/check-only analysis may use another lane without creating another physical source identity. Such work appends spans through the same live source-local owner. This is distinct from repeatedly parsing the same source to reconstruct graph or semantic facts.
 
+### Facade public-route prepublication
+
+Stage 0 publishes declared public export routes before it builds consumer namespaces. A `@mod.moth` or `@package.moth` facade is prepared exactly once in its boundary, and the cache hands the same success or typed failure to that facade's later module walk. A diagnosed facade stays a cached failure, so an unavailable facade reports its own diagnostic instead of a not-exported route miss. Boundary reporting keeps package and project order.
+
+The prepass follows this order:
+
+1. Registered package namespaces.
+2. Every registered package boundary's facade prepass.
+3. Package inventories.
+4. The project facade prepass.
+5. Project namespace attachment, with reserved-root claims before route entries.
+6. Project discovery.
+
+A package boundary publishes its own facade routes into its module namespaces and retains its root support facade routes for external consumers, so route resolution does not depend on registration or discovery order. The project boundary attaches its route entries after package inventories, which preserves package-before-project failure ordering. A consumer discovered before its exporter still sees the declared route.
+
+A route summary carries only the owned canonical `(facade, route)` claim and its authored `$export` operand span. It never copies a prepared interface, resolves a provider or publishes a semantic fact. Namespace construction uses the summary for exact edge selection, and the completed compiler interface validates members. Single-file compilation publishes no facade routes and remains route-less.
+
 Source IDs and span-table freeze have separate barriers. Workers return live span owners on success and failure, including discarded speculative preparations, before fallible aggregation. The boundary keeps each owner until its last canonical/check-only producer ends. AST lookup borrows end before exclusive table installation and terminal immutable publication. A package interface may publish before its source lookup context freezes if check-only producers still remain.
 
 These source ownership rules come from the data-layout authority. Direct-template bundles transfer their snapshots/live owners to the compiler service on success. Failed discovery finalises known sources at its terminal boundary. Retained earlier warnings keep the correct document context when a later document fails. Private discovery normalises provisional source identities once before publishing either outcome.
@@ -309,7 +326,7 @@ Any other authored `.moth` filename whose stem starts with `@`, `+` or `#`, incl
 
 Each root file is a root-local declaration and visibility scope. Its top-level declarations are visible only in that file. Ordinary helper `.moth` files are shared, prepared once and cannot see any root-local declaration. A root binds helper declarations through ordinary dependency clauses and cannot import another root by a direct special-file path. Same-spelling declarations in disjoint roots remain independent. Every root claim must resolve to a distinct physical file owned by its structural module. Aliases to one canonical file, including across directories, are rejected before module identity or semantics.
 
-The two facade roles carry declarations and function bodies but reject top-level runtime statements, direct fragments and builder-slot contributions. They publish individual declarations and strict direct-selection re-exports through `$export`, with unmarked items private. Other eligible source annotations, including declaration `$doc` and `$todo`, attach independently without changing `$export` visibility or granting entry output. `@entry` permits private declarations, top-level runtime, fragments and registered direct builder slots, but publishes no interface. Only `@mod` and `@package` are public facades.
+The two facade roles carry declarations and function bodies but reject top-level runtime statements, direct fragments and builder-slot contributions. They publish individual declarations and strict direct-selection re-exports through `$export`, optionally under one facade-relative public route, with unmarked items private. The route changes the published path, not the declaration's origin or selected leaf. Other eligible source annotations, including declaration `$doc` and `$todo`, attach independently without changing `$export` visibility or granting entry output. `@entry` permits private declarations, top-level runtime, fragments and registered direct builder slots, but publishes no interface. Only `@mod` and `@package` are public facades.
 
 The normal and support facades have separate role-qualified semantic origins and public interfaces. A successful artefact publishes exactly the interfaces its present `@mod` and `@package` roots declare in one atomic outcome. An absent facade publishes no placeholder interface. An `@entry` root publishes no importable API and is the only root with an implicit `start`, dormant runtime work, fragments and entry metadata. A dependency exposes declarations without activating any entry. Any diagnostic invalidates the whole module transaction, including every present interface.
 
@@ -360,7 +377,7 @@ For support package `S` whose nearest ancestor normal-position module is `P`, `S
 
 The support facade may depend on owned files, any descendant module in its private subtree, strictly outer-scope support packages and registered packages. It cannot depend on its parent, normal sibling consumers or same-scope support siblings.
 
-For a paired directory, a normal-position parent imports the normal surface when one exists, while a normal sibling branch and its eligible descendants import the support surface. The support facade cannot use its co-located normal-position root's privileges. Selection happens when Stage 0 builds the namespace entry and carries an explicit surface on the dependency edge. Resolution never falls back from one surface to the other.
+For a paired directory, a normal-position parent imports the normal surface when one exists, while a normal sibling branch and its eligible descendants import the support surface. The support facade cannot use its co-located normal-position root's privileges. Selection happens when Stage 0 builds the namespace entry and carries an explicit surface and any exact public route on the dependency edge. Resolution never falls back from one surface to the other.
 
 The same name may occur in disjoint scopes. Overlapping visible scopes are rejected with both locations. Direct normal-sibling dependencies remain outside the accepted topology rather than becoming an implicit fallback.
 
@@ -368,7 +385,7 @@ The same name may occur in disjoint scopes. Overlapping visible scopes are rejec
 
 A `@package.moth` at the selected build root is an ordinary support surface over that structural module. Package assembly may select it as the external project package surface, whether or not the same directory also has `@mod.moth`, `@entry.moth` or `@config.moth`. It is not a separate graph node or root-file kind. Only an external project package requires this project-root facade. Without it, the project has no external Moth package surface even when it has `@mod.moth`.
 
-The project package surface never bypasses public boundaries, is invisible to internal modules, cannot import `@project` and cannot expose prohibited project-dependent facts. Provider edges ensure its dependencies compile first. It has no root runtime activation or route.
+The project package surface never bypasses public boundaries, is invisible to internal modules, cannot import `@project` and cannot expose prohibited project-dependent facts. Provider edges ensure its dependencies compile first. It has no root runtime activation and no output route of its own.
 
 `ProjectPackageAssembly` is a separate link plan over the selected project package surface, selected descendant interfaces, reachable generated functions and permitted runtime requirements. It never recompiles or mutates the facade. A project may be both application and package. Without this facade it has no external Moth package surface. A selected project package surface does not create or require an executable entry. Its package identity uses the `project` config record's `name`.
 
@@ -376,11 +393,19 @@ The project package surface never bypasses public boundaries, is invisible to in
 
 Dependency resolution has no precedence, nearest-match shadowing or ordered fallback. Reject overlapping visible identities among project globals, support packages, child modules, extensionless files, internal directory segments, external project package name, Core/Builder roots and dependency aliases, including case-only variants.
 
+Stage 0 registers each declared public export route as a namespace identity beneath its publishing facade. A route entry carries the owned exact spelling and the facade surface it names. Distinct names merge into one route, and a route keeps exactly the visibility of its facade. It creates no module, package, registration, graph node or artefact and never renames a leaf. A bare route dependency binds a shallow record of that route's direct members. A parent facade keeps exposing only root members, so it never gains a routed member or a recursive path such as `html.tables.cells`.
+
 `core/` and `builder/` are reserved package namespace roots with one owning origin each. Core owns every registered path below `core/`, Builder owns every registered path below `builder/`. Builder registrations use an explicit path below the root, such as `@builder/web/site` or `@builder/game`. Neither exact root is importable, and ProjectLocal or Dependency packages cannot claim either root, including case-only variants. Registration rejects empty components, exact reserved-root registrations, case-insensitive equal overlaps, ancestor or descendant overlaps and cross-origin claims. The rule covers source-backed and binding-backed registrations alike, so the backing never changes namespace ownership.
 
 Project-local structural claims reserve only importable names. A local normal or support facade, importable helper or alias that claims `core` or `builder` under case folding is rejected. Entry-only modules, their private helpers, directories containing only entry modules and plain asset directories stay legal because they publish no importable package identity. A directory name alone never triggers that rejection. An import whose first component is either root resolves only to a registered package, never to a local source, so a private helper below a local `core/` directory stays unreachable through `@core`.
 
 A separate exact-path rule protects registered source package identities. A project folder whose full path matches a registered source package path, such as `core/html/` or `builder/web/site/`, collides whichever module owns it, even when the folder holds no importable surface. Comparison ignores ASCII case. A binding-backed package has no source module, so an asset folder at `builder/web/canvas/` or `core/io/` stays legal. An ancestor folder such as `core/` alone, or an unrelated asset directory, stays legal. Unrelated local `html/`, `css/`, `styles/` and `web/` folders also stay legal. Copying a source package folder to a non-colliding local path grants ordinary support-facade visibility rather than Core or Builder identity, while copying a binding asset folder creates no package.
+
+Route publication rejects concrete overlaps eagerly, even when no consumer names the route. Reject a route that overlaps a different visible provider, such as a selectable child facade or one of its routes, a local source or child-module key or a registered package prefix, including case-only variants, with both authored route sites where they exist. A same-facade case-only conflict reports both `$export` operand sites. A private folder inside the exporter may share a route spelling because it stays private.
+
+Two facades that share one visible key create an ambiguous base. Stage 0 marks the base and every route beneath it ambiguous instead of selecting a claimant by insertion order. Identical route claims from different facades behind that base stay latent, and the base and each such route report `MOTH-IMPORT-0006` when a consumer names them. A route behind an ambiguous base that overlaps a different visible provider, such as a selectable child facade or one of its routes, a local source or a registered package prefix, remains an eager concrete collision even when unused.
+
+An exact declared route resolves before the hidden-directory guard and only to its facade surface. A route entry never acts as a bypass prefix: a deeper undeclared suffix, a route miss or a private path below the facade never falls through to physical source lookup. Under a registered prefix, an external consumer selects only `@<exact prefix>/<declared root support-facade route>`. Package-internal child-facade routes stay inside that boundary and never become external registrations.
 
 Recognised extensionless source kinds share a namespace. `docs.moth`, `docs.mtf`, `docs.md` and `docs/` cannot coexist where each means `@docs`. An explicit-extension provider file may share a stem with a directory only when syntax stays unambiguous. Diagnostics identify every conflicting declaration and the overlapping scope.
 
@@ -835,7 +860,7 @@ All output paths/conflicts validate before content hashing, emission-time metada
 
 ### Invalidation
 
-Stable-origin changes follow semantic fingerprint rules. Byte-only changes invalidate content/output and affected provider transforms without recompiling semantic consumers. Route, output-root, origin-policy and URL-context changes replan affected physical/output facts without reopening source legality.
+Stable-origin changes follow semantic fingerprint rules. Byte-only changes invalidate content/output and affected provider transforms without recompiling semantic consumers. Output-route, output-root, origin-policy and URL-context changes replan affected physical/output facts without reopening source legality.
 
 ## Output ownership
 

@@ -29,9 +29,7 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Sequenced work
 
-- [Namespaced public export paths](./plans/namespaced-public-export-paths-plan.md) - Queued next: Extend `$export` with explicit relative public namespace paths for declarations and direct-selection reexports across existing facades. Preserve private implementation paths, package identity and current package APIs. Complete before Core Math fast counterparts.
-
-- [Core Math fast counterparts](./plans/core-math-fast-counterparts-plan.md) - Queued after namespaced public export paths: Evaluate and implement a small, benchmark-justified set of explicit `fast_*` Core Math helpers, including the distinct `fast_hypot` algorithm. Reuse trusted package contracts and existing lowering machinery without changing ordinary Math.
+- [Core Math fast counterparts](./plans/core-math-fast-counterparts-plan.md) - Queued next: Evaluate and implement a small, benchmark-justified set of explicit `fast_*` Core Math helpers, including the distinct `fast_hypot` algorithm. Reuse trusted package contracts and existing lowering machinery without changing ordinary Math.
 
 - [Const-function evaluation foundation and semantics](./plans/const-functions-evaluation-foundation-and-semantics-plan.md) - Queued after Core Math fast counterparts: Reuse direct typed-expression value evaluation, reduce redundant interpreter rewriting, then add match, multi-return/multi-bind and immutable const receiver methods. Investigate stepped collection loops conditionally and benchmark package-style helpers. Work may pause at each completed phase.
 
@@ -256,6 +254,16 @@ After the canvas reachability refactor:
 - JS-backed external package APIs
 - Wasm implementations for JS-backed packages such as `@builder/web/canvas`
 - current reachability is artefact-planning correctness, not general JS tree shaking or minification
+
+Public export routing delivered one optional facade-relative destination per `$export` target. These related designs stay deferred and unauthorised by that feature:
+
+- a broader `$export` facade-boilerplate redesign
+- multiple public destinations or alias lists on one target
+- distinct targets sharing one public leaf across routes in one facade, which local-name rules block today
+- whole-namespace forwarding
+- recursive source namespace or member access such as `html.tables.cells`
+
+Revisit these only with real use cases and a separately accepted design.
 
 ## Source-package JavaScript provider identity
 

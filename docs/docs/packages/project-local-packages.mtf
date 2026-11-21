@@ -34,7 +34,12 @@ A module with `@mod.moth` or `@entry.moth` occupies the normal-position owner ro
 
 ### Public surface
 
-Consumers see only declarations and direct-selection re-exports marked with `$export` in the support facade. Internal implementation files remain private unless the facade re-exports selected declarations.
+Consumers see only declarations and direct-selection re-exports marked with
+`$export` in the support facade. A facade may publish some names at its root
+and others under a public route. A route appears under the package path, for
+example `@markdown/forms`, and is visible exactly where the support package is
+visible. Internal implementation files remain private unless the facade
+re-exports selected declarations.
 
 Shared helpers in a paired directory must obey the intersection of imports legal to every root that can consume them.
 
@@ -42,11 +47,11 @@ Shared helpers in a paired directory must obey the intersection of imports legal
 
 The support facade may depend on ordinary files it owns, any descendant module in its private subtree, support packages from a strictly outer scope and registered packages. It may not depend on its parent, normal sibling consumers or same-scope support siblings.
 
-Consumers see only the support facade's `$export` surface. They cannot address `@markdown/parser` or another implementation path.
+Consumers see only the support facade's `$export` surface. They cannot address `@markdown/parser` or another implementation path. A public route such as `@markdown/forms` is not a filesystem path, so it exposes only names the facade published there.
 
-### Depended-on package roots do not produce routes
+### Depended-on package roots do not produce pages
 
-Support roots are API-only. They reject top-level runtime work, direct fragments and builder-slot contributions, export declarations instead and produce no HTML artefact. Only `@entry.moth` creates a page. Importing a support package never activates an entry in its directory. See @../project-structure/#html-routing-and-artifacts (HTML routing and artefacts).
+Support roots are API-only. They reject top-level runtime work, direct fragments and builder-slot contributions, export declarations instead and produce no HTML artefact. Public export routes are not page routes. Only `@entry.moth` creates a page. Importing a support package never activates an entry in its directory. See @../project-structure/#html-routing-and-artifacts (HTML routing and artefacts).
 
 Support packages may hold reusable ordinary `#` constants and expose them through their public surface. They do not need custom project metadata. Project metadata remains the separate `@config.moth` contract.
 

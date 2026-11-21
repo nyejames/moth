@@ -140,7 +140,8 @@ pub(crate) struct FacadePreparationCache {
     ///
     /// WHY: a project or package walk must adopt or report, never re-prepare, a root the prepass
     ///      already handled. Only focused tests construct a cache without a prepass and keep the
-    ///      ordinary preparation path.
+    ///      ordinary preparation path; production has no non-exhaustive producer.
+    #[cfg(test)]
     exhaustive: bool,
 }
 
@@ -149,6 +150,7 @@ impl FacadePreparationCache {
     fn exhaustive() -> Self {
         Self {
             by_facade: BTreeMap::new(),
+            #[cfg(test)]
             exhaustive: true,
         }
     }
@@ -164,7 +166,14 @@ impl FacadePreparationCache {
 
     /// Whether a present facade root missing from this cache is a compiler invariant failure.
     pub(super) fn is_exhaustive(&self) -> bool {
-        self.exhaustive
+        #[cfg(test)]
+        {
+            self.exhaustive
+        }
+        #[cfg(not(test))]
+        {
+            true
+        }
     }
 
     /// Move one facade's preparation or original diagnostic into its discovery walk.

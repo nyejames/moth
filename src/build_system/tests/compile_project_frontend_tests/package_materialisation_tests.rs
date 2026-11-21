@@ -738,7 +738,7 @@ fn unreferenced_descendant_local_provider_collides_with_package_route() {
     assert_eq!((primary.1, primary.2), (0, 0));
     assert!(
         related.is_none(),
-        "the package route spelling remains in the diagnostic path, not a foreign span"
+        "a package-owned span is a foreign identity; unfrozen premerge failures retain one source owner, so the route spelling stays in the diagnostic path"
     );
     let rendered = render_compilation_result_html(&result, &project_root);
     assert!(
@@ -860,7 +860,7 @@ fn ambiguous_base_route_overlapping_a_local_source_is_rejected_eagerly() {
     // overlap even though no dependency names `@forms/cards`.
     let result = compile_fixture_result(
         &[
-            ("src/@entry.moth", "@forms/cards value\n\n~[:[value]]\n"),
+            ("src/@entry.moth", "[:entry]\n"),
             ("src/@mod.moth", ""),
             ("src/forms/cards.moth", "value #= 1\n"),
             ("src/a/forms/@package.moth", "$export @x\nvalue #= 2\n"),
@@ -875,9 +875,131 @@ fn ambiguous_base_route_overlapping_a_local_source_is_rejected_eagerly() {
         "the discarded claimant's route operand owns the eager collision: {primary:?}"
     );
     assert_eq!((primary.1, primary.2), (0, 8));
+    let related = related.expect("the competing local source keeps its authored site");
+    assert!(
+        related.0.ends_with("forms/cards.moth"),
+        "the local source is the second authored site: {related:?}"
+    );
+    assert_eq!((related.1, related.2), (0, 0));
+}
+
+#[test]
+fn unreferenced_route_colliding_with_child_facade_reports_both_sites() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // The support facade publishes `@forms`, which folds onto the normal child facade
+    // `vendor/forms`. No consumer names the route, so only eager publication can report it.
+    let result = compile_fixture_result(
+        &[
+            ("src/@entry.moth", "[:entry]\n"),
+            ("src/@mod.moth", ""),
+            (
+                "src/elsewhere/vendor/@package.moth",
+                "$export @forms\nvalue #= 1\n",
+            ),
+            ("src/vendor/forms/@mod.moth", "$export\nvalue #= 2\n"),
+        ],
+        false,
+        BuildProfile::Dev,
+    );
+    let (primary, related) = diagnostic_sites(&result, "MOTH-IMPORT-0006");
+    assert!(
+        primary.0.ends_with("elsewhere/vendor/@package.moth"),
+        "the route operand owns the collision: {primary:?}"
+    );
+    assert_eq!((primary.1, primary.2), (0, 8));
+    let related = related.expect("the child facade keeps its authored root site");
+    assert!(
+        related.0.ends_with("vendor/forms/@mod.moth"),
+        "the child facade root is the second authored site: {related:?}"
+    );
+    assert_eq!((related.1, related.2), (0, 0));
+}
+
+#[test]
+fn ambiguous_base_route_colliding_with_child_facade_reports_both_sites() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // The ambiguous `forms` base cannot hide a route that a visible child facade already owns.
+    // Eager validation must report the discarded claimant's route and the child root.
+    let result = compile_fixture_result(
+        &[
+            ("src/@entry.moth", "[:entry]\n"),
+            ("src/@mod.moth", ""),
+            ("src/a/forms/@package.moth", "$export\nvalue #= 1\n"),
+            ("src/b/forms/@package.moth", "$export @cards\nvalue #= 2\n"),
+            ("src/forms/cards/@mod.moth", "$export\nvalue #= 3\n"),
+        ],
+        false,
+        BuildProfile::Dev,
+    );
+    let (primary, related) = diagnostic_sites(&result, "MOTH-IMPORT-0006");
+    assert!(
+        primary.0.ends_with("b/forms/@package.moth"),
+        "the discarded claimant's route operand owns the collision: {primary:?}"
+    );
+    assert_eq!((primary.1, primary.2), (0, 8));
+    let related = related.expect("the visible child facade keeps its authored root site");
+    assert!(
+        related.0.ends_with("forms/cards/@mod.moth"),
+        "the child facade root is the second authored site: {related:?}"
+    );
+    assert_eq!((related.1, related.2), (0, 0));
+}
+
+#[test]
+fn ambiguous_base_route_colliding_with_registered_binding_prefix_is_rejected() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temporary = tempfile::tempdir().expect("should create temporary project");
+    let project_root = temporary.path().to_path_buf();
+    fs::create_dir_all(project_root.join("src/a/forms"))
+        .expect("should create first support facade folder");
+    fs::create_dir_all(project_root.join("src/b/forms"))
+        .expect("should create second support facade folder");
+    fs::write(
+        project_root.join("@config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write project config");
+    fs::write(project_root.join("src/@entry.moth"), "[:entry]\n")
+        .expect("should write project entry");
+    fs::write(project_root.join("src/@mod.moth"), "").expect("should write project module root");
+    fs::write(
+        project_root.join("src/a/forms/@package.moth"),
+        "$export\nvalue #= 1\n",
+    )
+    .expect("should write steady support facade");
+    fs::write(
+        project_root.join("src/b/forms/@package.moth"),
+        "$export @cards\nvalue #= 2\n",
+    )
+    .expect("should write routed support facade");
+
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface
+        .binding_packages
+        .register_package("@forms/cards", PackageOrigin::ProjectLocal)
+        .expect("the binding package should register");
+
+    let mut config = Config::new(project_root.join("src"));
+    config.project_name = "docs".to_owned();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let result = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+    );
+    let (primary, related) = diagnostic_sites(&result, "MOTH-IMPORT-0006");
+    assert!(
+        primary.0.ends_with("b/forms/@package.moth"),
+        "the discarded claimant's route operand owns the prefix collision: {primary:?}"
+    );
+    assert_eq!((primary.1, primary.2), (0, 8));
     assert!(
         related.is_none(),
-        "the local source is named through the diagnostic path, not a related package site"
+        "a registered binding package is not an authored content site"
     );
 }
 
@@ -1129,6 +1251,36 @@ fn earlier_package_discovery_error_precedes_later_route_prepass_failure() {
         primary.0.ends_with("@package.moth"),
         "the earlier boundary's walk error must own the diagnostic: {primary:?}"
     );
+}
+
+#[test]
+fn registered_source_package_route_collision_with_same_package_provider_reports_both_sites() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // The @tools route `@forms` folds onto the package-local source at `tools/forms.moth`.
+    // Both spans live in the package source database, so the diagnostic retains both sites.
+    let result = compile_registered_packages_project(
+        &[(
+            "tools",
+            PackageOrigin::ProjectLocal,
+            &[
+                ("@package.moth", "$export @forms\nvalue #= 1\n"),
+                ("tools/forms.moth", "local_value #= 2\n"),
+            ],
+        )],
+        "[:entry]\n",
+    );
+    let (primary, related) = diagnostic_sites(&result, "MOTH-IMPORT-0006");
+    assert!(
+        primary.0.ends_with("@package.moth"),
+        "the published route operand owns the primary site: {primary:?}"
+    );
+    assert_eq!((primary.1, primary.2), (0, 8));
+    let related = related.expect("the package-local provider keeps its authored site");
+    assert!(
+        related.0.ends_with("tools/forms.moth"),
+        "the same-package provider is the related site: {related:?}"
+    );
+    assert_eq!((related.1, related.2), (0, 0));
 }
 
 #[test]

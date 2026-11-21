@@ -12,7 +12,7 @@ A `.mtf` file sees the fixed `@core/html` and `@core/css` helpers and values fro
     # Welcome to [@settings site_name]
 ]
 
-The path names the helper file and the symbol names one compile-time value. Keep them on one line. No `@mod.moth` file is needed.
+The path names the helper file and the symbol names one compile-time value, or a const function call that folds. Keep them on one line. No `@mod.moth` file is needed.
 
 The selected name does not become a local name. It cannot clash with a prelude helper.
 

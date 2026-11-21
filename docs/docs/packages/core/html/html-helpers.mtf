@@ -4,7 +4,7 @@
 
 ### The fixed template prelude
 
-Compile-time constants from `@core/html` and `@core/css` are visible flat inside `.mtf` files without an explicit dependency clause. This is the fixed template prelude.
+Facade-root exported compile-time constants from `@core/html` and `@core/css` are visible flat inside `.mtf` files without an explicit dependency clause. This is the fixed template prelude.
 
 [codeblock, $code "moth":
     -- docs/intro.mtf

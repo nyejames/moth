@@ -16,7 +16,7 @@ Declarations are private by default. In `@mod.moth` and `@package.moth`, place `
     ;
 ]
 
-`$export` applies only to the next eligible item. It occupies its own line and a blank line breaks attachment. A `#` binding is compile-time, not automatically public.
+`$export` applies only to the next eligible item. It may share a line with other source directives, and the target begins on a later line. A blank line breaks attachment. A `#` binding is compile-time, not automatically public.
 
 ### Re-exporting helpers
 
