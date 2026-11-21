@@ -8,7 +8,7 @@
 
 **Architecture:** The config compiler retains package declarations without binding or evaluating their targets. Bootstrap applies fixed project settings to determine library roots. The build system resolves exact package build identities from those roots before Stage 0 constructs dependency graphs. The frontend owns path/qualifier syntax and canonical semantic identities. File-local source clauses only bind already selected packages.
 
-**Specification:** The current compiler and build-system design authorities, `docs/docs/packages/dependency-paths.mtf`, `docs/docs/project-structure/project-config.mtf` and the provided Obvious Versioning (ObVer) specification. The accepted V1 rules below explicitly supersede current prohibitions on config dependency declarations and `package_folders` and must be transferred into the permanent authorities before the plan is retired.
+**Specification:** The current compiler and build-system design authorities, `docs/docs/packages/dependency-paths.mtf`, `docs/docs/project-structure/project-config.mtf` and the retained ObVer reference at `docs/docs/packages/obver.mtf`. The accepted V1 rules below explicitly supersede current prohibitions on config dependency declarations and `package_folders` and must be transferred into the permanent authorities before the plan is retired.
 
 ## Status and prerequisites
 
@@ -69,7 +69,7 @@ game/
 
 - `<project root>/packages` is the sole default library. The CLI neither creates nor consults a global directory. An absent default folder is allowed when no selected package requires it.
 - A fixed-only project setting may replace the default library list with an explicit list of project-root-relative directories. Initial proposed field: `project.package_libraries`, containing an ordinary folded collection of Strings. Omission gives one `packages` entry. An explicitly supplied list replaces rather than appends to the default. The field is build-control metadata, not a published `@project` value or a dynamic `$config` input. Confirm the final field spelling and exact value restrictions during the Phase 0 design checkpoint.
-- V1 library paths must remain within the selected project root after lexical and canonical containment checks. Reject `..`, absolute paths, symlink escapes, source/output overlap and duplicate canonical library roots with typed diagnostics. A future managed global library can be an explicitly configured source only after its separate trust, ownership and installation policy is approved.
+- V1 library paths must remain within the selected project root after lexical and canonical containment checks. Reject `..`, absolute paths, symlink escapes, overlapping library roots and overlap with owned output locations using typed diagnostics. A valid library remains a subdirectory of the project but is excluded from its ordinary source index. A future managed global library can be an explicitly configured source only after its separate trust, ownership and installation policy is approved.
 - Every validated library subtree is excluded from the consuming project's ordinary source index regardless of its name, including check-only units, helper/import lookup and watcher membership. Retain the existing independent underscore-prefixed exclusion rule. A package is indexed only when its version directory is selected as the root of a separate package compilation.
 - The selected build requires `@package.moth` at its root and matching `project.name` and canonical `project.version` from its own `@config.moth`. Project applications may remain unversioned, but a selected external package may not. Do not treat the folder name alone as authority for package identity.
 - `@core/*`, `@builder/*` and the synthetic `@project` root retain their reserved provenance. An authored package cannot claim those roots.
@@ -108,7 +108,7 @@ No global library creation, out-of-project library roots, arbitrary absolute or 
 - [ ] Inspect the config compilation service, source dependency clause/parser, path tokenizer, Stage 0 index, registered source packages, builder SDK and present module collision/diagnostic owners. Map current producers and consumers and remove proposed duplicate owners.
 - [ ] Confirm the config field name and exact fixed-only path-list syntax. Record whether an explicitly empty list disables package libraries and how that is diagnosed when dependencies exist.
 - [ ] Ratify the build qualifier spelling `@name::ObVer`, V1 one-component external names and the deferral of source-level and local-module selectors.
-- [ ] Choose the canonical ObVer reference location and preserve the supplied versioning specification there before any parser work. Retain the exact-build-label and canonical `.0` rules.
+- [ ] Validate the retained `docs/docs/packages/obver.mtf` against the supplied specification before parser work. Preserve exact-build labels and the canonical `.0` rules.
 - [ ] Establish baseline focused tests and record actual command evidence. Do not treat hand-authored fixtures as proof of full downstream native package support.
 
 ### Phase 1: One config syntax and typed ObVer parser
