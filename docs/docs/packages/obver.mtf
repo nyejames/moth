@@ -1,18 +1,18 @@
 # Obvious Versioning (ObVer)
 
-Obvious Versioning (ObVer) is a calendar-based versioning standard with explicit compatibility rules and exact build labels. 
+Obvious Versioning (ObVer) is a calendar-based versioning standard with explicit compatibility rules and exact build labels.
 Its numeric version shows when a compatibility generation began. Its optional label identifies a specific build of that version.
 
 ObVer is design to be:
 - Easy to see WHEN the last major version was released
 - Whether it is a specific build or pre-release version
 - Compact and easy to read in most cases
-- Consistent, with one set of rules and no alternative interpretations 
+- Consistent, with one set of rules and no alternative interpretations
 
-ObVer combines ideas from @https://calver.org (CalVer) and @https://semver.org (SemVer). 
-Unlike SemVer, its major identifier includes a calendar date. 
-Unlike CalVer's family of possible formats, ObVer defines one grammar with optional month and day precision. 
-Unlike @https://antfu.me/posts/epoch-semver (Epoch SemVer), its major identifier records a date rather than a numeric epoch. 
+ObVer combines ideas from @https://calver.org (CalVer) and @https://semver.org (SemVer).
+Unlike SemVer, its major identifier includes a calendar date.
+Unlike CalVer's family of possible formats, ObVer defines one grammar with optional month and day precision.
+Unlike @https://antfu.me/posts/epoch-semver (Epoch SemVer), its major identifier records a date rather than a numeric epoch.
 SemVer also offers build metadata, but ObVer explicitly defines how labels select builds.
 
 ## Format
@@ -90,6 +90,6 @@ A label does not guarantee compatibility between build variants. Consumers must 
 
 ObVer needs its own parser, comparator and build selector. Some numeric forms also satisfy SemVer syntax, but SemVer gives hyphen suffixes prerelease precedence, unlike ObVer. Tools must not apply SemVer prerelease rules to ObVer labels.
 
-The format uses characters suitable for ordinary directory names, filenames and Git tags without rewriting separators. 
+The format uses characters suitable for ordinary directory names, filenames and Git tags without rewriting separators.
 
 Editions and support policies remain separate contracts. But ObVer usually replaces the need for explicit software "editions".
