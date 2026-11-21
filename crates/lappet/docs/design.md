@@ -157,6 +157,20 @@ entry. Rust invokes only explicitly selected Moth callable exports through
 checked wrappers. A public Moth package declaration is not automatically a host
 export, network endpoint or a revived `moth_start` convention.
 
+The Rust caller receives a manifest-validated handle for each selected export,
+with typed arguments and results. Several ordered success slots may use a Rust
+tuple at this API boundary without introducing a Moth tuple or another signature
+model. A builtin Moth `Error!` is a distinct declared-error result, while guest
+traps, boundary faults and host failures remain runtime failures. Callers do not
+select arbitrary Wasm functions, pass raw Wasm carriers or reconstruct types from
+their physical signatures. The adapter consumes the compiler's host manifest.
+
+A compiled artefact intended for host-selected calls has no implicit Wasm start
+entry. Its selected functions run only when the builder calls them. The compiler
+must emit no Wasm start section for that artefact and Lappet must reject one
+before instantiation. Generic core Wasm fixtures may still exercise Wasm start
+semantics independently of this compiler-produced artefact contract.
+
 The V1 profile contains exact scalars except `F16`, strings, one optional layer,
 the builtin `Error!` channel, explicit host context and opaque Rust-owned
 resource parameters. Exports may also return ordered multiple results. The
@@ -219,6 +233,20 @@ lowering or compiler runtime helpers where they already implement an operation.
 A scalar helper should not acquire a Rust host transition merely because this
 crate exists. Compiler memory helpers are not ordinary foreign host bindings.
 
+The compiler chooses the implementation route for each reachable Core operation:
+direct lowering, a compiler runtime helper or an explicitly provided native Core
+implementation. This selection uses canonical Core identities and validated
+target capabilities. It must not infer native imports from source spelling or
+silently recategorise a Core binding as a builder-authored host package.
+
+The Core catalogue exposes a real V1 boundary mismatch. `@core/time` returns
+opaque `Duration`, `TimeMark` and `Timestamp` values, and `@core/io` returns
+opaque `Input` from `input.new()`. The general native host-binding profile permits
+opaque resource parameters but not results. A compiler-owned Core provider and
+representation decision must cover those functions before claiming native Core
+conformance. This does not grant resource results to arbitrary Rust host bindings
+or permit a second Lappet-side type registry.
+
 Trusted scalar-parametric Core registrations and file-backed JS/WAT authoring
 remain under their Moth owners. Concrete types are resolved before target and
 adapter selection. The generics work creates neither a generic foreign
@@ -232,6 +260,11 @@ Official executable builders provide the complete documented Core catalogue
 through official native or browser implementations. Host-dependent operations
 retain their canonical capability gates or declared unsupported outcomes.
 An unavailable window title cannot become a successful silent no-op.
+
+The first conformance checkpoint records each Core operation's semantic owner,
+implementation route, target capability requirement and executable test case.
+Cover both directly lowered and native-backed operations. A registered name or
+an available Rust function does not establish that its semantics are supported.
 
 Documented approximation, nondeterminism and host differences belong in the
 individual Core contracts and conformance tests. Builders cannot privately
@@ -249,6 +282,12 @@ builders can acquire only no-core managed packages, even if they use Lappet and
 implement every Core API. Official Core eligibility comes from Moth-maintained
 builder certification, never a self-declared flag or matching signatures. The
 package-manager design owns this policy and its future trust checkpoint.
+Certification is a trusted choice made by the official build/CLI distribution
+from its maintained first-party builder catalogue. It is separate from the
+builder's public identity, package declarations and output-manifest owner. A
+custom builder cannot promote itself by choosing a reserved name or installing
+Lappet. Each certified environment must have conformance evidence and a declared
+capability/support matrix before it is eligible for managed Core dependencies.
 
 The HTML builder remains the initial browser implementation owner. Keep Core
 semantics outside it and separate reusable browser implementations from HTML
