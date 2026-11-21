@@ -268,26 +268,66 @@ listing does not exempt the selected closure from inspection when a user adds
 it. Dependency tiers can be public metadata. Lead packages remain eligible for
 review rather than facing an automatic depth-only ban.
 
-## Foundations retained from the retired plan
+## Compiler-owned package foundations
 
-Permanent declaration, namespace and resolver invariants now live in
-[Project and package topology](../../../docs/build-system-design.md#project-and-package-topology).
-In particular, declarations stay separate from file-local clauses, aliases never
-change canonical identity and each source dependency owns an isolated immutable
-compilation boundary. Acquisition never moves into source binding.
+The compiler/build system owns package declarations, source indexing, package
+libraries, exact build selection and graph resolution. Lappet's future manager
+consumes the completed immutable catalog and compiler-produced compatibility
+facts. It never parses config imports, infers source topology or acquires
+packages during source binding.
 
-The first foundations work is a local or programmatic resolved catalog, not a
-remote installer. Before implementing it, review the declaration carrier,
-canonical name grammar, alias replacement rules, allowed local source and exact
-catalog handoff. Preserve the rejection of config import preambles, implicit
-`/lib` or `package_folders` discovery and fallback namespace probing.
+The accepted local V1 foundation uses the project's `@config.moth`:
 
-The roadmap retains the old plan's producer/consumer sequence and acceptance
-obligations. They include duplicate rejection before resolution, direct-only
-visibility, private project globals, exact numeric/ABI compatibility, immutable
-publication and resource identity independent of aliases. The new work must
-consume current delivered compiler contracts rather than restoring historical
-numeric profiles or old source grammar.
+```moth
+@cool_package::2026.32.5
+@renderer::2027.2-debug as graphics
+```
+
+These declarations name exact ObVer builds. The optional `as` replaces the
+source-visible package root, not its canonical identity. Ordinary project
+sources import the selected root or its explicit public export routes without
+a build qualifier. The `::` build qualifier is initially supported only on
+external dependency declarations in config; selecting variants of ordinary
+project modules is deferred.
+
+The compiler's sole default package library is `<project root>/packages/`,
+where each package uses `<library>/<package name>/<canonical ObVer>/`.
+The package directory and version metadata must match the declared name and
+exact build, and each installed build publishes its facade through
+`@package.moth`. Fixed project settings may replace the default with an
+explicit set of other project-local libraries. There is no implicit global
+packages directory, no automatic global-directory creation and no fallback to
+other filesystem locations. The build system consults only explicitly declared
+packages and diagnoses duplicate exact-build matches across libraries rather
+than prioritising a local copy.
+
+Registered libraries are excluded from the consuming project's normal source
+index. An installed package compiles in its own graph and config boundary.
+Its own exact dependencies use the same invoking project's fixed library
+search roots, but transitive packages never become direct imports of the
+consumer. A package config cannot change the resolver's search roots.
+Canonical package identity includes the complete ObVer build, including its
+label, and neither aliases nor physical paths change that identity.
+
+This source-library foundation works without Lappet, Wasmtime or manager
+admission. Local manually supplied packages are still subject to ordinary
+compiler legality, namespace, capability and target checks. The separate
+managed workflow applies its no-core/Core-dependent admission policy when
+the manager actually adds or authorises packages.
+
+ObVer is defined in the [canonical specification](../../../docs/docs/packages/obver.mtf).
+Its optional label distinguishes exact build identity without introducing
+SemVer prerelease precedence. V1 selects exact identifiers only; there is no
+implicit latest-version selection, version range, lockfile, remote download
+or package solver.
+
+The legacy package-manager foundations plan remains retired. Its lasting
+compiler obligations are now owned by the build-system and language
+authorities: duplicate/collision rejection, canonical immutable interfaces,
+private project globals, exact numeric/ABI compatibility, deterministic
+graphs and resource identity independent of aliases. The Lappet roadmap
+retains only package-catalog consumption, Core eligibility, admission and
+future acquisition work.
 
 ## Later design
 
