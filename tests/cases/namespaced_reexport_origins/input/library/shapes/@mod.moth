@@ -1,0 +1,17 @@
+$export
+wrap_message #|label String| -> String:
+    return [:shape:[label]]
+;
+
+$export
+Shape = |
+    width I32,
+    height I32,
+|
+
+area |this Shape| -> I32:
+    return this.width * this.height catch then 0
+;
+
+$export
+UNIT #= 7

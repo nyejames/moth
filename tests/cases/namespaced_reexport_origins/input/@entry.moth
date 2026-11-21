@@ -1,0 +1,12 @@
+@library/forms shape_label, Form, FORM_UNIT
+@library/ext external_text
+@chain/mirror/deep twice, Counter as NestedCounter, FALLBACK_BASE
+
+form Form = Form(2, 3)
+counter NestedCounter = NestedCounter(41)
+text = external_text("done") catch:
+    then "failed"
+;
+label = shape_label("ok")
+nested = twice("tw")
+~[:label=[label] area=[form.area()] unit=[FORM_UNIT] mirror=[nested] bump=[counter.bump()] base=[FALLBACK_BASE] ext=[text]]

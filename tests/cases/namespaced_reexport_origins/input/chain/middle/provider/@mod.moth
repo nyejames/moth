@@ -1,0 +1,16 @@
+$export @nested/inner
+twice type T |value T| -> T:
+    return value
+;
+
+$export @nested/inner
+Counter = |
+    count I32,
+|
+
+bump |this Counter| -> I32:
+    return this.count + 1 catch then 0
+;
+
+$export @nested/inner
+BASE #= 5

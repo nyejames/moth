@@ -11,9 +11,9 @@
 //!
 //! The summary is deliberately tiny: one owned route spelling and its authored operand span per
 //! declared route. It never carries a prepared interface, a whole `Header` or a donor `PathId`
-//! across a boundary. Registered source-package boundaries can call the same per-boundary helper
-//! when their route prepublication phase lands; this module has no project-index assumption other
-//! than the identities it is handed.
+//! across a boundary. Registered source-package boundaries run the same per-boundary helper into
+//! their own namespace sets; this module has no project-index assumption other than the identities
+//! it is handed.
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
@@ -136,10 +136,17 @@ impl FacadeRouteIndex {
 #[derive(Default)]
 pub(crate) struct FacadePreparationCache {
     by_facade: BTreeMap<(ModuleId, ModuleRootRole), FacadePreparedSource>,
-    /// Whether the producing pass prepared every present facade root in this boundary.
+    /// Source diagnostics produced by the one preparation attempt for a facade.
     ///
-    /// WHY: a project BFS must adopt, never re-prepare, a root the prepass already handled. Package
-    ///      boundaries until Phase 3 pass an ordinary default cache and keep their existing path.
+    /// WHY: a diagnosed facade cannot be handed to the walk as a preparation, but the walk still
+    ///      owns the boundary-ordered report. Retaining the failure lets the walk return the
+    ///      original diagnostic without tokenizing or parsing the facade again.
+    failures: BTreeMap<(ModuleId, ModuleRootRole), PreparedFailure>,
+    /// Whether the producing pass handled every present facade root in this boundary.
+    ///
+    /// WHY: a project or package walk must adopt or report, never re-prepare, a root the prepass
+    ///      already handled. Callers that construct a cache without a prepass (focused tests)
+    ///      keep the ordinary preparation path.
     exhaustive: bool,
 }
 
@@ -148,6 +155,7 @@ impl FacadePreparationCache {
     fn exhaustive() -> Self {
         Self {
             by_facade: BTreeMap::new(),
+            failures: BTreeMap::new(),
             exhaustive: true,
         }
     }
@@ -166,26 +174,53 @@ impl FacadePreparationCache {
         self.by_facade.remove(&(module_id, surface))
     }
 
+    /// Move one facade's original source diagnostic into its module's discovery walk.
+    pub(super) fn take_failure(
+        &mut self,
+        module_id: ModuleId,
+        surface: ModuleRootRole,
+    ) -> Option<PreparedFailure> {
+        self.failures.remove(&(module_id, surface))
+    }
+
     fn insert(
         &mut self,
         module_id: ModuleId,
         surface: ModuleRootRole,
         prepared: FacadePreparedSource,
     ) -> Result<(), InfrastructureFailure> {
-        if self
-            .by_facade
-            .insert((module_id, surface), prepared)
-            .is_some()
-        {
-            return Err(InfrastructureFailure::internal(
-                CompilerStage::ProjectBuildAssembly,
-                format!(
-                    "facade route prepass prepared ModuleId {} {surface:?} facade more than once",
-                    module_id.index()
-                ),
-            ));
+        let key = (module_id, surface);
+        if self.failures.contains_key(&key) || self.by_facade.insert(key, prepared).is_some() {
+            return Err(self.multiple_preparation_error(module_id, surface));
         }
         Ok(())
+    }
+
+    fn insert_failure(
+        &mut self,
+        module_id: ModuleId,
+        surface: ModuleRootRole,
+        failure: PreparedFailure,
+    ) -> Result<(), InfrastructureFailure> {
+        let key = (module_id, surface);
+        if self.by_facade.contains_key(&key) || self.failures.insert(key, failure).is_some() {
+            return Err(self.multiple_preparation_error(module_id, surface));
+        }
+        Ok(())
+    }
+
+    fn multiple_preparation_error(
+        &self,
+        module_id: ModuleId,
+        surface: ModuleRootRole,
+    ) -> InfrastructureFailure {
+        InfrastructureFailure::internal(
+            CompilerStage::ProjectBuildAssembly,
+            format!(
+                "facade route prepass prepared ModuleId {} {surface:?} facade more than once",
+                module_id.index()
+            ),
+        )
     }
 
     #[cfg(test)]
@@ -194,17 +229,34 @@ impl FacadePreparationCache {
     }
 }
 
+/// Which owner reports a facade source-preparation diagnostic.
+///
+/// WHAT: the project boundary validates its config before this pass, so its prepass fails fast;
+///       a package boundary defers source diagnostics to its ordinary walk so config-first and
+///       package-order diagnostics remain intact.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FacadeDiagnosticOwner {
+    Prepass,
+    BoundaryWalk,
+}
+
 /// One boundary's completed facade route prepublication.
 ///
-/// WHAT: the owned route summaries, the facade preparations awaiting their walks, and the shared
-///       source-origin table those walks reuse instead of rebuilding it.
-/// WHY: all three are produced by the same per-boundary traversal and consumed by the same
+/// WHAT: the owned route summaries, the facade preparations awaiting their walks, the shared
+///       source-origin table those walks reuse instead of rebuilding it, the facades whose own
+///       preparation raised a source diagnostic, and any non-source prepass failure retained for
+///       boundary-ordered reporting.
+/// WHY: all facts are produced by the same per-boundary traversal and consumed by the same
 ///      namespace build and module inventory. Keeping them together avoids a second origin table
 ///      or a parallel facade scan.
 pub(super) struct FacadeRoutePrepass {
     pub(super) routes: FacadeRouteIndex,
     pub(super) cache: FacadePreparationCache,
     pub(super) source_module_origins: Arc<SourceModuleOriginTable>,
+    /// Facades whose source preparation produced a diagnostic the boundary walk must own.
+    pub(super) unavailable_facades: Vec<(ModuleId, ModuleRootRole)>,
+    /// A route-publication or infrastructure failure retained for this boundary's walk turn.
+    pub(super) failure: Option<PreparedFailure>,
 }
 
 /// Prepare every facade root in one boundary and derive its public route summary.
@@ -224,6 +276,7 @@ pub(super) fn prepublish_facade_routes(
     source_files: &SourceDatabase,
     style_directives: &StyleDirectiveRegistry,
     module_error_allowance: Option<NonZeroU32>,
+    diagnostic_owner: FacadeDiagnosticOwner,
     source_spans: &mut SourceSpanBuilders<'_>,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
@@ -249,10 +302,12 @@ pub(super) fn prepublish_facade_routes(
 
     let mut routes = FacadeRouteIndex::default();
     let mut cache = FacadePreparationCache::exhaustive();
+    let mut unavailable_facades = Vec::new();
+    let mut boundary_failure = None;
 
     // `nodes()` is already the canonical `ModuleId` order the module walk seeds from, so neither
     // the preparation nor its diagnostics depend on filesystem traversal.
-    for node in project_module_graph.nodes() {
+    'boundary: for node in project_module_graph.nodes() {
         let module_id = node.module_id();
         #[cfg(feature = "timers")]
         let timing_module_key = crate::timing::register_timing_module_for_preparation(
@@ -262,7 +317,7 @@ pub(super) fn prepublish_facade_routes(
         );
         #[cfg(feature = "timers")]
         let timing_context = Some(crate::timing::TimingContext::for_module(timing_module_key));
-        for (surface, root_path) in node.root_files().present() {
+        'facades: for (surface, root_path) in node.root_files().present() {
             if !matches!(surface, ModuleRootRole::Normal | ModuleRootRole::Support) {
                 continue;
             }
@@ -318,21 +373,75 @@ pub(super) fn prepublish_facade_routes(
                     )
                 },
             );
-            let input = input_result.map_err(|error| {
-                let path_table = Arc::new(syntax.path_fork_mut().shared_table());
-                error.into_failure(syntax.string_table_mut(), path_table)
-            })?;
-            let output = syntax.prepare_source(input, source_spans)?;
+            let input = match input_result {
+                Ok(input) => input,
+                Err(error) => {
+                    let path_table = Arc::new(syntax.path_fork_mut().shared_table());
+                    let failure = error.into_failure(syntax.string_table_mut(), path_table);
+                    match diagnostic_owner {
+                        FacadeDiagnosticOwner::BoundaryWalk
+                            if matches!(failure, PreparedFailure::Diagnosed(_)) =>
+                        {
+                            // Cache the facade's one original diagnostic for its boundary walk.
+                            if let Err(error) = cache.insert_failure(module_id, surface, failure) {
+                                boundary_failure = Some(error.into());
+                                break 'boundary;
+                            }
+                            unavailable_facades.push((module_id, surface));
+                            continue 'facades;
+                        }
+                        FacadeDiagnosticOwner::BoundaryWalk => {
+                            boundary_failure = Some(failure);
+                            break 'boundary;
+                        }
+                        FacadeDiagnosticOwner::Prepass => return Err(failure),
+                    }
+                }
+            };
+            let output = match syntax.prepare_source(input, source_spans) {
+                Ok(output) => output,
+                Err(failure) => match diagnostic_owner {
+                    FacadeDiagnosticOwner::BoundaryWalk
+                        if matches!(failure, PreparedFailure::Diagnosed(_)) =>
+                    {
+                        if let Err(error) = cache.insert_failure(module_id, surface, failure) {
+                            boundary_failure = Some(error.into());
+                            break 'boundary;
+                        }
+                        unavailable_facades.push((module_id, surface));
+                        continue 'facades;
+                    }
+                    FacadeDiagnosticOwner::BoundaryWalk => {
+                        boundary_failure = Some(failure);
+                        break 'boundary;
+                    }
+                    FacadeDiagnosticOwner::Prepass => return Err(failure),
+                },
+            };
 
             let claims = collect_route_claims(&output, &syntax);
-            validate_facade_route_case_conflicts(&claims, string_table)?;
+            if let Err(failure) = validate_facade_route_case_conflicts(&claims) {
+                match diagnostic_owner {
+                    FacadeDiagnosticOwner::BoundaryWalk => {
+                        boundary_failure = Some(failure);
+                        break 'boundary;
+                    }
+                    FacadeDiagnosticOwner::Prepass => return Err(failure),
+                }
+            }
             for claim in claims {
                 routes.insert_claim(module_id, surface, claim);
             }
             let prepared = syntax.into_facade_prepared_source(output, string_base_len);
-            cache
-                .insert(module_id, surface, prepared)
-                .map_err(PreparedFailure::from)?;
+            if let Err(error) = cache.insert(module_id, surface, prepared) {
+                match diagnostic_owner {
+                    FacadeDiagnosticOwner::BoundaryWalk => {
+                        boundary_failure = Some(PreparedFailure::from(error));
+                        break 'boundary;
+                    }
+                    FacadeDiagnosticOwner::Prepass => return Err(PreparedFailure::from(error)),
+                }
+            }
         }
     }
 
@@ -340,6 +449,8 @@ pub(super) fn prepublish_facade_routes(
         routes,
         cache,
         source_module_origins,
+        unavailable_facades,
+        failure: boundary_failure,
     })
 }
 
@@ -413,7 +524,6 @@ fn collect_route_claims(
 ///      This uses the same shared folding/ordering rule as the header collector.
 fn validate_facade_route_case_conflicts(
     claims: &[FacadeRouteClaim],
-    string_table: &mut StringTable,
 ) -> Result<(), PreparedFailure> {
     let mut folded = CaseFoldedRouteIndex::<usize>::default();
     for (index, claim) in claims.iter().enumerate() {
@@ -429,7 +539,6 @@ fn validate_facade_route_case_conflicts(
             return Err(case_conflicting_route_failure(
                 &claims[earlier.id],
                 &claims[later.id],
-                string_table,
             ));
         }
     }
@@ -440,24 +549,33 @@ fn validate_facade_route_case_conflicts(
 fn case_conflicting_route_failure(
     earlier: &FacadeRouteClaim,
     later: &FacadeRouteClaim,
-    string_table: &mut StringTable,
 ) -> PreparedFailure {
+    // A retained prepass failure must not consume the boundary's live string table: later
+    // boundaries and the walk still intern through it. The diagnostic path rows pair with this
+    // fresh local table, keeping the batch self-contained.
+    let mut diagnostic_strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let earlier_path =
-        try_intern_route_spelling(earlier.route.as_str(), &mut path_fork, string_table)
-            .expect("an authored route re-interns within a fresh path domain");
-    let later_path = try_intern_route_spelling(later.route.as_str(), &mut path_fork, string_table)
-        .expect("an authored route re-interns within a fresh path domain");
+    let earlier_path = try_intern_route_spelling(
+        earlier.route.as_str(),
+        &mut path_fork,
+        &mut diagnostic_strings,
+    )
+    .expect("an authored route re-interns within a fresh path domain");
+    let later_path = try_intern_route_spelling(
+        later.route.as_str(),
+        &mut path_fork,
+        &mut diagnostic_strings,
+    )
+    .expect("an authored route re-interns within a fresh path domain");
     let diagnostic = generics_traits_api::case_conflicting_public_export_route(
         later_path,
         earlier_path,
         Some(earlier.span),
         Some(later.span),
     );
-    let table = string_table.take_for_handoff();
     PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
         DiagnosticBag::from(diagnostic),
-        table,
+        diagnostic_strings,
         None,
         Some(Arc::new(path_fork.shared_table())),
     ))
@@ -499,10 +617,10 @@ mod tests {
             "a missing facade preparation must be observable as a cache miss"
         );
 
-        let package_cache = FacadePreparationCache::default();
+        let ordinary_cache = FacadePreparationCache::default();
         assert!(
-            !package_cache.is_exhaustive(),
-            "package walks keep the ordinary preparation path until their prepass lands"
+            !ordinary_cache.is_exhaustive(),
+            "a cache constructed without a prepass keeps the ordinary preparation path"
         );
     }
 

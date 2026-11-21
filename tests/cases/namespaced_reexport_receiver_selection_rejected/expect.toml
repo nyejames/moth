@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-IMPORT-0011"]
+message_contains = ["not exported by the module's public surface"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-IMPORT-0011"
+path = "input/library/@mod.moth"
+line = 4
+column = 27

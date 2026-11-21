@@ -1,0 +1,4 @@
+$export @nested
+widget #|label String| -> String:
+    return [:widget:[label]]
+;

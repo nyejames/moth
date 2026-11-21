@@ -205,6 +205,12 @@ pub(crate) struct ResolvedSourcePackageDependency {
     pub(super) consumer_module_id: ModuleId,
     pub(super) dependency_prefix: String,
     pub(super) dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId,
+    /// The exact public route on the package root facade; `ROOT` selects the package's own surface.
+    ///
+    /// WHY: the package interface exposes route bindings beside root bindings. Binding must look up
+    ///      the selected leaf under the route the consumer named, and the route is a Stage 0
+    ///      resolution fact that would otherwise be lost before interface binding.
+    pub(super) route: PublicExportRoute,
 }
 
 /// Mutable traversal outputs shared by the source-dependency queue helpers.

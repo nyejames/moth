@@ -1,0 +1,7 @@
+$export @nested
+@b/mirror beta
+
+$export @nested
+call_beta |x I32| -> I32:
+    return beta(x)
+;

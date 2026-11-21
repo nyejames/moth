@@ -1,0 +1,8 @@
+@helper/forms decorate as decorate_button
+@helper/forms as route_ns
+@helper root_label
+
+primary = decorate_button
+bare = route_ns.decorate
+
+~[:package primary=[primary] bare=[bare] root=[root_label]]

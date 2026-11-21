@@ -399,7 +399,7 @@ fn compile_single_file_frontend_with_target(
         &builder_surface.source_file_kinds,
         module_roots,
     );
-    let namespace_set = ModuleNamespaceSet::for_single_file(
+    let mut namespace_set = ModuleNamespaceSet::for_single_file(
         source_package_indexes,
         &builder_surface.binding_packages,
         &project_path_resolver,
@@ -483,7 +483,7 @@ fn compile_single_file_frontend_with_target(
                 };
                 let mut inventories = discover_source_package_inventories(
                     config,
-                    &namespace_set,
+                    &mut namespace_set,
                     &project_path_resolver,
                     style_directives,
                     &mut external_imports,

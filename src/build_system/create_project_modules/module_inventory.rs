@@ -172,6 +172,8 @@ pub(crate) struct CheckOnlyProviderBinding {
 pub(crate) struct CheckOnlySourcePackageDependency {
     pub(crate) dependency_shell_id: DependencyShellId,
     pub(crate) dependency_prefix: String,
+    /// Exact public route on the package root facade; `ROOT` selects its own surface.
+    pub(crate) route: PublicExportRoute,
 }
 /// The check-only jobs stay in a separate lane so no caller can accidentally publish their
 /// interfaces, generated functions, resource associations, graph edges or backend roots.
@@ -228,6 +230,8 @@ enum ResolvedDirectoryDependencyEffect {
     SourcePackage {
         dependency_prefix: String,
         dependency_shell_id: DependencyShellId,
+        /// Exact public route on the package root facade; `ROOT` selects its own surface.
+        route: PublicExportRoute,
     },
 }
 
@@ -418,6 +422,7 @@ fn apply_resolved_directory_dependency(
         ResolvedDependency::SourcePackageSurface {
             consumer_module_id,
             dependency_prefix,
+            route,
             ..
         } => {
             add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
@@ -430,7 +435,13 @@ fn apply_resolved_directory_dependency(
                 .push(ResolvedDirectoryDependencyEffect::SourcePackage {
                     dependency_prefix: dependency_prefix.clone(),
                     dependency_shell_id: provider.dependency_shell_id,
+                    route: route.clone(),
                 });
+        }
+        ResolvedDependency::UnavailableSourcePackage => {
+            // The package boundary owns its source diagnostic and reports it at its own walk
+            // turn. Resolving the clause here keeps this walk from misreporting a route miss.
+            add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
         }
         ResolvedDependency::BindingPackage => {
             add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
@@ -727,9 +738,9 @@ fn discover_all_modules_in_boundary(
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, PreparedFailure> {
     let seeds = module_seeds_in_module_id_order(project_module_graph);
-    // The project boundary's route prepass has already built this table for the facades it
-    // prepared, so the project walk reuses it. A package boundary without a prepass builds its own
-    // here, exactly as before.
+    // The boundary's route prepass has already built this table for the facades it prepared, so
+    // the project and package walks reuse it. A walk without a prepass (focused tests) builds its
+    // own here.
     let source_module_origins = match source_module_origins {
         Some(origins) => origins,
         None => {
@@ -1137,9 +1148,11 @@ fn prepare_check_only_module(
                     ResolvedDirectoryDependencyEffect::SourcePackage {
                         dependency_prefix,
                         dependency_shell_id,
+                        route,
                     } => source_package_dependencies.push(CheckOnlySourcePackageDependency {
                         dependency_shell_id,
                         dependency_prefix,
+                        route,
                     }),
                 }
             }
@@ -1582,17 +1595,22 @@ fn discover_modules_serial_provider_capable(
                 .source(source_index)
                 .canonical_path()
                 .to_path_buf();
-            // A facade root prepared by the route prepass is adopted, never re-tokenized or
-            // re-parsed. The production cache is exhaustive for this boundary, so a present
-            // facade root missing from it is a compiler invariant failure rather than a reason
-            // to prepare the facade a second time. Package walks until Phase 3 pass a
-            // non-exhaustive cache and keep the ordinary preparation path.
+            // A facade root handled by the route prepass is adopted or diagnosed, never
+            // re-tokenized or re-parsed. An exhaustive cache covers every present facade with
+            // either one prepared source or one retained source failure, so a missing entry is a
+            // compiler invariant failure. A cache constructed without a prepass stays
+            // non-exhaustive and keeps the ordinary preparation path.
             let facade_role = seed
                 .root_files
                 .present()
                 .find(|(_, root_path)| *root_path == &source_path)
                 .map(|(role, _)| role)
                 .filter(|role| matches!(role, ModuleRootRole::Normal | ModuleRootRole::Support));
+            if let Some(failure) =
+                facade_role.and_then(|role| prepared_facades.take_failure(seed.module_id, role))
+            {
+                return Err(failure);
+            }
             let cached_facade =
                 facade_role.and_then(|role| prepared_facades.take(seed.module_id, role));
             let mut prepared_output = if let Some(prepared) = cached_facade {
@@ -1683,10 +1701,12 @@ fn discover_modules_serial_provider_capable(
                         ResolvedDirectoryDependencyEffect::SourcePackage {
                             dependency_prefix,
                             dependency_shell_id,
+                            route,
                         } => source_package_dependencies.push(ResolvedSourcePackageDependency {
                             consumer_module_id: seed.module_id,
                             dependency_prefix,
                             dependency_shell_id,
+                            route,
                         }),
                     }
                 }

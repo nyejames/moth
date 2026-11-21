@@ -1,0 +1,4 @@
+$export @nested
+broken #|label String| -> String:
+    return missing_value
+;

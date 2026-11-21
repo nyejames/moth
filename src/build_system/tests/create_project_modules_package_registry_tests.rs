@@ -256,6 +256,7 @@ fn module_package_dependency_index_walks_only_direct_dependencies() {
         consumer_module_id,
         dependency_prefix: "b".to_owned(),
         dependency_shell_id: shell,
+        route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
     }];
 
     let index =

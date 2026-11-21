@@ -1,0 +1,4 @@
+$export
+button #|value String| -> String:
+    return [:provider:[value]]
+;

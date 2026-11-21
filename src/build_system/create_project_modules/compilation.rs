@@ -37,7 +37,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{
-    StableModuleOriginIdentity, StablePackageIdentity,
+    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{
     SourceDatabase, SourceDatabaseBuilder, SourceDatabaseError, SourceId, SourceKind,
@@ -1071,28 +1071,51 @@ fn package_on_dependency_cycle(indegree: &[usize], consumer_lists: &[Vec<usize>]
     current
 }
 
-/// Discover each registered source-backed package within its own indexed boundary.
+/// One registered package boundary whose facades are prepared and routes published.
 ///
-/// WHAT: builds the package-local graph, source owner and canonical/check-only schedule using the
-///       already completed namespace index and shared provider-discovery state.
-/// WHY: directory and synthetic consumers must use the same Stage 0 package boundary path; only
-///      the consumer's source discovery differs.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "package discovery keeps immutable boundary inputs and independently borrowed import/resource/string services explicit"
-)]
-pub(super) fn discover_source_package_inventories(
+/// WHAT: owns the package-local source owner, graph, path/string domains, prepared facade cache
+///       and shared origin table between route prepublication and the module walk.
+/// WHY: all package boundaries must publish their root facade routes before any package or
+///      project consumer resolves a nested route. Splitting preparation from discovery keeps that
+///      ordering to one pass over the registered prefixes and lets each walk adopt the exact
+///      facade preparation instead of parsing it again.
+struct SourcePackageBoundaryPreparation {
+    dependency_prefix: String,
+    package_identity: StablePackageIdentity,
+    root_module_id: ModuleId,
+    path_resolver: ProjectPathResolver,
+    source_files: SourceDatabaseBuilder,
+    path_interner: PathInternerBuilder,
+    graph: ProjectModuleGraph,
+    prepared_facades: facade_route_prepass::FacadePreparationCache,
+    source_module_origins:
+        Arc<crate::compiler_frontend::source_module_origin::SourceModuleOriginTable>,
+    selected_source_texts: SelectedSourceTextMap,
+    /// A prepass or route-publication failure reported when this boundary's walk turn arrives.
+    prepass_failure: Option<PreparedFailure>,
+    #[cfg(feature = "timers")]
+    timing_boundary: crate::timing::TimingBoundaryId,
+}
+
+/// Prepare every registered package facade and publish its declared routes.
+///
+/// WHAT: builds each boundary's Stage 0 source owner and graph, runs the same facade route prepass
+///       the project boundary uses, then inserts the boundary's route namespace entries and
+///       retains its root support facade routes for external selection.
+/// WHY: package-internal consumers resolve routes through their own namespaces, and external
+///      consumers select the exact published root surface. Preparing all boundaries before any
+///      package walk also makes a cross-package route reference independent of registration order.
+fn prepare_source_package_boundaries(
     config: &Config,
-    namespace_set: &ModuleNamespaceSet,
+    namespace_set: &mut ModuleNamespaceSet,
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
-    external_imports: &mut ExternalImportDiscoveryState<'_>,
-    resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
-    mode: FrontendCompilationMode,
-) -> Result<Vec<SourcePackageModuleInventory>, BoundaryPremergeFailure> {
-    let mut inventories = Vec::new();
-    for (dependency_prefix, package_index) in namespace_set.source_package_boundaries() {
+) -> Result<Vec<SourcePackageBoundaryPreparation>, BoundaryPremergeFailure> {
+    let package_prefixes = namespace_set.source_package_prefixes();
+    let mut preparations = Vec::with_capacity(package_prefixes.len());
+
+    for dependency_prefix in package_prefixes {
         // Register the package boundary before its inventory so inventory and compile
         // observations share one dense id for the human boundary total.
         #[cfg(feature = "timers")]
@@ -1100,7 +1123,10 @@ pub(super) fn discover_source_package_inventories(
             crate::timing::TimingBoundaryKind::SourcePackage,
             || format!("@{dependency_prefix}"),
         );
-        let mut package_graph = ProjectModuleGraph::from_source_tree_index(package_index);
+        let package_index = namespace_set
+            .source_package_boundary(&dependency_prefix)
+            .expect("a prefix snapshot names one registered package boundary");
+        let package_graph = ProjectModuleGraph::from_source_tree_index(package_index);
         let package_path_resolver = project_path_resolver.for_source_package_boundary(
             package_index.entry_root().to_path_buf(),
             package_index
@@ -1117,14 +1143,187 @@ pub(super) fn discover_source_package_inventories(
         let mut package_sources = SourceDatabaseBuilder::new(package_source_files);
         let mut package_selected_source_texts = SelectedSourceTextMap::for_package_boundary(
             package_index.package_set_membership(),
-            dependency_prefix,
+            &dependency_prefix,
         );
         let path_interner = package_sources.sources_mut().fork_path_builder();
+        let prepass_result = {
+            let (package_source_files, mut package_source_spans) = package_sources.split();
+            facade_route_prepass::prepublish_facade_routes(
+                package_index,
+                &package_graph,
+                package_source_files,
+                style_directives,
+                config.frontend_options().max_errors_per_module,
+                facade_route_prepass::FacadeDiagnosticOwner::BoundaryWalk,
+                &mut package_source_spans,
+                &mut package_selected_source_texts,
+                string_table,
+                &path_interner,
+                #[cfg(feature = "timers")]
+                timing_boundary,
+            )
+        };
+        let prepass = match prepass_result {
+            Ok(prepass) => prepass,
+            Err(failure) => {
+                return Err(finalize_failed_package_preparation(
+                    failure,
+                    package_sources,
+                    &mut package_selected_source_texts,
+                    string_table,
+                ));
+            }
+        };
+        let facade_route_prepass::FacadeRoutePrepass {
+            routes,
+            cache,
+            source_module_origins,
+            unavailable_facades,
+            failure: mut prepass_failure,
+        } = prepass;
+        // Derive every stable boundary handle before the mutable route publication borrow.
+        let package_identity = package_index.stable_package_identity().clone();
+        let root_module_id = package_index
+            .module_identities()
+            .module_id_for_directory(package_index.entry_root())
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
+                    "Source package has no module rooted at its indexed entry root"
+                )
+            });
+        if prepass_failure.is_none()
+            && let Err(failure) =
+                namespace_set.attach_package_facade_routes(&dependency_prefix, &routes)
+        {
+            prepass_failure = Some(failure);
+        }
+        // The external registered prefix is unavailable only when boundary-wide publication
+        // failed or its root support facade failed. A child facade's diagnostic stays scoped to
+        // that internal facade key, so an external consumer of an unrelated undeclared path still
+        // receives the route-miss diagnostic instead of being masked by the child's failure.
+        let root_support_unavailable = unavailable_facades.iter().any(|(module_id, surface)| {
+            *module_id == root_module_id && *surface == ModuleRootRole::Support
+        });
+        if prepass_failure.is_some() || root_support_unavailable {
+            namespace_set.mark_source_package_unavailable(&dependency_prefix);
+        }
+        if !unavailable_facades.is_empty() {
+            namespace_set
+                .mark_package_facades_unavailable(&dependency_prefix, &unavailable_facades);
+        }
+        preparations.push(SourcePackageBoundaryPreparation {
+            dependency_prefix,
+            package_identity,
+            root_module_id,
+            path_resolver: package_path_resolver,
+            source_files: package_sources,
+            path_interner,
+            graph: package_graph,
+            prepared_facades: cache,
+            source_module_origins,
+            selected_source_texts: package_selected_source_texts,
+            prepass_failure,
+            #[cfg(feature = "timers")]
+            timing_boundary,
+        });
+    }
+
+    Ok(preparations)
+}
+
+/// Finish one package source owner beside a facade-prepass or route-publication failure.
+///
+/// WHY: both failures happen after sources were registered but before the walk's normal failure
+///      tail. Retaining the selected snapshots and finalizing loaded spans keeps the package
+///      diagnostic source owner in the same state a failed discovery would leave it.
+fn finalize_failed_package_preparation(
+    failure: PreparedFailure,
+    mut package_sources: SourceDatabaseBuilder,
+    package_selected_source_texts: &mut SelectedSourceTextMap,
+    string_table: &mut StringTable,
+) -> BoundaryPremergeFailure {
+    let selected_source_ids =
+        package_selected_source_texts.selected_source_ids(package_sources.sources());
+    let mut retain_path_fork = package_sources.sources().fork_path_interner();
+    let retain_result = package_selected_source_texts
+        .retain_into(package_sources.sources_mut(), &mut retain_path_fork);
+    package_sources.adopt_pending_span_builders();
+    let failure = match retain_result {
+        Ok(()) => failure,
+        Err(error) => error.admit_into_owner(Some(failure), string_table, &retain_path_fork),
+    };
+    let failure =
+        match finalize_schedule_source_spans(&mut package_sources, None, &selected_source_ids) {
+            Ok(()) => failure,
+            Err(finish_error) => failure.with_infrastructure_cause(finish_error),
+        };
+    finalize_package_failure(failure, package_sources)
+}
+
+/// Discover each registered source-backed package within its own indexed boundary.
+///
+/// WHAT: walks each prepared package boundary's modules and assigns the canonical/check-only
+///       schedule using the already completed namespace index and shared provider-discovery state.
+/// WHY: directory and synthetic consumers must use the same Stage 0 package boundary path; only
+///      the consumer's source discovery differs.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "package discovery keeps immutable boundary inputs and independently borrowed import/resource/string services explicit"
+)]
+pub(super) fn discover_source_package_inventories(
+    config: &Config,
+    namespace_set: &mut ModuleNamespaceSet,
+    project_path_resolver: &ProjectPathResolver,
+    style_directives: &StyleDirectiveRegistry,
+    external_imports: &mut ExternalImportDiscoveryState<'_>,
+    resource_inputs: &mut ResourceInputRegistry,
+    string_table: &mut StringTable,
+    mode: FrontendCompilationMode,
+) -> Result<Vec<SourcePackageModuleInventory>, BoundaryPremergeFailure> {
+    let preparations = prepare_source_package_boundaries(
+        config,
+        namespace_set,
+        project_path_resolver,
+        style_directives,
+        string_table,
+    )?;
+    let mut inventories = Vec::with_capacity(preparations.len());
+    for preparation in preparations {
+        let SourcePackageBoundaryPreparation {
+            dependency_prefix,
+            package_identity,
+            root_module_id,
+            path_resolver: package_path_resolver,
+            source_files: mut package_sources,
+            path_interner,
+            graph: mut package_graph,
+            mut prepared_facades,
+            source_module_origins,
+            selected_source_texts: mut package_selected_source_texts,
+            prepass_failure,
+            #[cfg(feature = "timers")]
+            timing_boundary,
+        } = preparation;
+        // A boundary's prepass failure is reported here, at the turn its ordinary walk would
+        // take. Earlier boundaries have already walked and can fail first with their own
+        // discovery diagnostics, preserving package-prefix order across the preparation barrier.
+        if let Some(failure) = prepass_failure {
+            return Err(finalize_failed_package_preparation(
+                failure,
+                package_sources,
+                &mut package_selected_source_texts,
+                string_table,
+            ));
+        }
+        let package_index = namespace_set
+            .source_package_boundary(&dependency_prefix)
+            .expect("a prepared package boundary remains registered");
         let (package_source_files, mut package_source_spans) = package_sources.split();
         let package_path_fork = path_interner.fork_source().fork_for_module();
         let package_resolution = DirectoryDependencyResolution::package(
             namespace_set,
-            dependency_prefix,
+            &dependency_prefix,
             package_index,
             &package_path_fork,
         );
@@ -1133,11 +1332,6 @@ pub(super) fn discover_source_package_inventories(
             crate::timing::TimingMetric::BoundaryInventory,
             Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
         );
-        // Registered source-package route prepublication is Phase 3; until then the package walk
-        // runs without a facade cache and builds its own origin table. The per-boundary cache and
-        // optional origin slot already exist here so that phase can fill them without changing
-        // the inventory shape.
-        let mut package_prepared_facades = facade_route_prepass::FacadePreparationCache::default();
         let package_waves_result =
             module_inventory::discover_all_modules_in_package_with_check_only(
                 config,
@@ -1149,8 +1343,8 @@ pub(super) fn discover_source_package_inventories(
                 external_imports,
                 package_resolution,
                 resource_inputs,
-                &mut package_prepared_facades,
-                None,
+                &mut prepared_facades,
+                Some(source_module_origins),
                 mode.includes_check_only(),
                 &mut package_selected_source_texts,
                 string_table,
@@ -1201,18 +1395,9 @@ pub(super) fn discover_source_package_inventories(
             package_waves.waves(),
             string_table,
         );
-        let Some(root_module_id) = package_index
-            .module_identities()
-            .module_id_for_directory(package_index.entry_root())
-        else {
-            crate::compiler_bug!(
-                CompilerStage::ProjectBuildAssembly,
-                "Source package @{dependency_prefix} has no module rooted at its indexed entry root"
-            );
-        };
         inventories.push(SourcePackageModuleInventory {
-            dependency_prefix: dependency_prefix.to_owned(),
-            package_identity: package_index.stable_package_identity().clone(),
+            dependency_prefix,
+            package_identity,
             root_module_id,
             path_resolver: package_path_resolver,
             source_files: package_sources,
@@ -1769,7 +1954,7 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
 
         let mut source_package_inventories = discover_source_package_inventories(
             config,
-            &module_namespace_set,
+            &mut module_namespace_set,
             &project_path_resolver,
             style_directives,
             &mut external_imports,
@@ -1797,6 +1982,7 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
             project_source_files,
             style_directives,
             config.frontend_options().max_errors_per_module,
+            facade_route_prepass::FacadeDiagnosticOwner::Prepass,
             &mut project_source_spans,
             &mut selected_source_texts,
             string_table,
@@ -1823,6 +2009,8 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
         // folder.
         if let Err(failure) = module_namespace_set.attach_project_namespaces(
             &project_setup.source_tree_index,
+            Some(project_source_files),
+            Some(&mut selected_source_texts),
             &project_setup.project_module_graph,
             &facade_route_prepass.routes,
             string_table,

@@ -326,7 +326,8 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             DependencyShellId,
             (ModuleId, ModuleRootRole, PublicExportRoute),
         > = FxHashMap::default();
-        let mut transient_package_index: FxHashMap<DependencyShellId, &str> = FxHashMap::default();
+        let mut transient_package_index: FxHashMap<DependencyShellId, (&str, PublicExportRoute)> =
+            FxHashMap::default();
 
         if let Some(bindings) = check_only_provider_bindings {
             for binding in bindings {
@@ -358,7 +359,10 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                     || transient_package_index
                         .insert(
                             dependency.dependency_shell_id,
-                            dependency.dependency_prefix.as_str(),
+                            (
+                                dependency.dependency_prefix.as_str(),
+                                dependency.route.clone(),
+                            ),
                         )
                         .is_some()
                 {
@@ -430,7 +434,9 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                     continue;
                 }
 
-                if let Some(dependency_prefix) = transient_package_index.get(&shell_id).copied() {
+                if let Some((dependency_prefix, route)) =
+                    transient_package_index.get(&shell_id).cloned()
+                {
                     let package_id = self
                             .boundary
                             .completed_packages
@@ -446,7 +452,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                     dependencies.push(SourceProviderDependency {
                         kind: ProviderDependencyKind::Authored {
                             shell: shell_id,
-                            route: PublicExportRoute::ROOT,
+                            route,
                         },
                         interface: completed_package.root_interface()?,
                     });
@@ -511,7 +517,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             dependencies.push(SourceProviderDependency {
                 kind: ProviderDependencyKind::Authored {
                     shell: shell_id,
-                    route: PublicExportRoute::ROOT,
+                    route: package_dependency.route.clone(),
                 },
                 interface: completed_package.root_interface()?,
             });

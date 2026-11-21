@@ -27,7 +27,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 use crate::compiler_frontend::paths::path_normalization::{
     is_relative_dependency_path, join_and_normalize_path,
 };
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::semantic_identity::{ModuleRootRole, PublicExportRoute};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
 use crate::compiler_frontend::symbols::path_interner::{
@@ -579,6 +579,7 @@ enum SyntheticDependencyResolution {
     PackageSurface {
         consumer_module_id: ModuleId,
         dependency_prefix: String,
+        route: PublicExportRoute,
     },
     HandledPackage,
 }
@@ -649,10 +650,12 @@ fn process_reachable_authored_dependency(
                     ResolvedDependency::SourcePackageSurface {
                         consumer_module_id,
                         dependency_prefix,
+                        route,
                         ..
                     } => SyntheticDependencyResolution::PackageSurface {
                         consumer_module_id,
                         dependency_prefix,
+                        route,
                     },
                     _ => SyntheticDependencyResolution::HandledPackage,
                 }
@@ -700,11 +703,13 @@ fn process_reachable_authored_dependency(
         SyntheticDependencyResolution::PackageSurface {
             consumer_module_id,
             dependency_prefix,
+            route,
         } => {
             source_package_dependencies.push(ResolvedSourcePackageDependency {
                 consumer_module_id,
                 dependency_prefix,
                 dependency_shell_id: provider.dependency_shell_id,
+                route,
             });
             add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
         }

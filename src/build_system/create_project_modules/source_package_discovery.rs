@@ -55,6 +55,19 @@ impl SourcePackageBoundaryIndexes {
             .map(|entry| (entry.package_prefix.as_str(), &entry.index))
     }
 
+    /// Look up one registered package boundary by its exact `@`-stripped prefix.
+    ///
+    /// WHY: route prepublication addresses a boundary by its registered prefix and the vector is
+    ///      already sorted, so binary search keeps that lookup logarithmic. External dependency
+    ///      routing deliberately walks every boundary instead: it must test route suffixes and
+    ///      private-path rejection against the full registration set, not one known prefix.
+    pub(crate) fn get(&self, package_prefix: &str) -> Option<&SourceTreeIndex> {
+        self.indexes
+            .binary_search_by(|entry| entry.package_prefix.as_str().cmp(package_prefix))
+            .ok()
+            .map(|index| &self.indexes[index].index)
+    }
+
     /// Derive the resolver's narrow package-root view from indexed facts.
     ///
     /// WHAT: projects each boundary index to its canonical root directory and selected

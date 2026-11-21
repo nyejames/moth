@@ -715,6 +715,7 @@ fn source_package_dependency_index_rejects_cross_category_or_duplicate_shells() 
         consumer_module_id: ModuleId::from_index(0),
         dependency_prefix: "markdown".to_owned(),
         dependency_shell_id: shell,
+        route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
     };
 
     let expected_message = format!(

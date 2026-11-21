@@ -82,3 +82,17 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Where: the nested-content loop in `discover_modules_serial_provider_capable` in `src/build_system/create_project_modules/module_inventory.rs` (after `syntax.prepare_source`, around the `structural_file_references` walk).
 - Observed: the loop resolves file references for nested content sources but does not visit authored provider occurrences, so `moth check` may never create the transient check-only provider binding that a provider-qualified `.mtf` template head needs. Build mode binds the same head through canonical provider edges.
 - Investigate: add a check-only case whose nested `.mtf` file uses a provider-qualified template head from another module, compare with build mode, and if it fails, walk authored provider occurrences in the same loop.
+
+### One nominal type imported under two local aliases reports duplicate receiver methods
+
+- Found: namespaced public export paths Phase 3, 2026-11. Confirmed by reproduction; pre-dates routed exports.
+- Where: provider binding deduplication by local path in `src/compiler_frontend/headers/binding_environment/builder.rs` (around line 988) and the defensive receiver guard in `src/compiler_frontend/ast/module_ast/environment/function_signatures.rs` (around line 539), which compares local-path targets instead of method origins.
+- Observed: a support package exports `Button` with receiver methods; two child facades each re-export it; an entry importing both aliases fails with MOTH-RULE-0041 (`invalid_receiver_declaration.duplicate_visible_method`). Also reproduced when one facade publishes the same struct under `$export @one` and `$export @two` and a consumer selects both. Each import alone compiles.
+- Investigate: deduplicate visible receiver methods by origin declaration identity rather than local path, then add a case importing one type through two aliases.
+
+### Registered Builder package const functions have no published provider body
+
+- Found: namespaced public export paths Phase 3, 2026-11. Confirmed by reproduction at baseline `b0465cd9d` and on the branch; independent of public export routes.
+- Where: provider-body publication for registered source packages, surfaced during project entry AST construction. The `compile_registered_package_project` helper in `src/build_system/tests/compile_project_frontend_tests/package_materialisation_tests.rs` reproduces it.
+- Observed: a registered package `builder/test/rootpkg` whose `@package.moth` exports `decorate #|label String| -> String` and an entry calling it via `@builder/test/rootpkg decorate as f` fails with `Internal AstConstruction: Imported const function OriginFunctionId { ... package: Builder("builder/test/rootpkg") ... defining_name: "decorate" ... } has no published provider body`. The same function in a project-local `helper/@package.moth` builds, and no-argument package functions work.
+- Investigate: compare how project-local support facades and registered package facades publish const-function bodies to the consumer's provider-body registry; an internal error is reachable from valid source, so fix the publication lane and add a registered-package case calling a parameterised const function.
