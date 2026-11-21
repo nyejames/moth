@@ -41,7 +41,7 @@ project #= (
 - Ordinary project source imports `@cool_package` or `@cool_package/forms` without an ObVer qualifier. For the alias above, source imports `@graphics`. No `::` qualifier is accepted in ordinary source dependency clauses, qualified expressions or file values in V1.
 - Canonical package/build identity includes the exact ObVer build, including its optional label. File-local aliases and physical paths remain provenance, not semantic identity. Distinct build identities may coexist privately across separately compiled dependency graphs when their owners select them.
 
-The existing `Choice::Variant` expression grammar stays unchanged. Header preparation recognises the version-qualified config-dependency form in its own syntactic position. The path tokenizer currently terminates at `:`; change that one owned path/header grammar deliberately and retain a typed build qualifier rather than reparsing a string later. Do not introduce a generic selector registry, a new token language for arbitrary settings or speculative source-module variants.
+The existing `Choice::Variant` expression grammar stays unchanged. Header preparation recognises the version-qualified config-dependency form in its own syntactic position. The path tokenizer currently terminates at `:`. Change that one owned path/header grammar deliberately and retain a typed build qualifier rather than reparsing a string later. Do not introduce a generic selector registry, a new token language for arbitrary settings or speculative source-module variants.
 
 A future extension may permit a module with an explicitly defined variant set to be selected by `@module::selector`. It requires an independent contract for producing variants, build/config inputs, interface identity, graph and cache compatibility and consumer visibility. This plan neither implements such a producer nor allows imports to recompile existing modules.
 
@@ -79,7 +79,7 @@ game/
 Use the supplied ObVer specification, not SemVer precedence or an ad hoc split on dots.
 
 - Format: `YYYY[-MM[-DD]].MINOR[.MICRO][-LABEL]`. Validate Gregorian dates, zero-free integer spelling except `0`, lower-case ASCII snake_case labels and valid component ranges.
-- `MICRO=0` is omitted canonically. `2026.32.0` may be accepted in a request and normalised to `2026.32` for lookup; installed directory names and package metadata use canonical spelling.
+- `MICRO=0` is omitted canonically. `2026.32.0` may be accepted in a request and normalised to `2026.32` for lookup. Installed directory names and package metadata use canonical spelling.
 - The full canonical identifier, including any label, is the exact build identity. `2027.2` does not select `2027.2-debug` or vice versa. Labels have no ordering relative to the unlabelled build or to each other.
 - Numeric precedence compares parsed year, month, day, minor and micro, with absent numeric components treated as zero. The V1 resolver uses exact identity, not precedence, ranges, latest-version selection or compatibility guessing.
 - Preserve ObVer's release and immutability rules in its independent canonical reference. Version solving, automatic updates, lockfiles and managed integrity checks are later work. Do not infer build compatibility from matching numeric precedence.
