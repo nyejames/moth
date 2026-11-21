@@ -18,13 +18,15 @@ that foundation. This gate applies before native readiness work and milestones
   contract crate and the native binding handoff are delivered. The `lappet`
   crate has a Wasmtime runtime and host boundary tables. It has no host adapter
   yet.
-- Current milestone: none is startable. Milestone 6 needs its checkpoint
-  approved and milestone 7 waits for the compiler work listed under
-  [Waiting on main](#waiting-on-main).
-- Blockers: Nye approves the milestone 6 checkpoint or the milestone 8
-  checkpoint, or the native host ABI lowering lands on `main`. The branch was
-  synced with `main` on 14 November 2026.
-- Next action: prepare the milestone 6 checkpoint inventory for approval.
+- Current milestone: the native readiness and hardening prerequisite is queued
+  behind the compiler's exact ObVer package-resolution foundation. No further
+  Lappet roadmap milestone is currently startable.
+- Blockers: compiler-owned package libraries and dependency graphs must land
+  first. Selected Rust export adapters also require the compiler's native
+  host ABI capabilities listed under [Waiting on main](#waiting-on-main).
+- Next action: after the compiler prerequisite lands, sync and verify the
+  earlier runtime findings, apply focused corrections and complete the Core
+  implementation/conformance inventory for approval.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
 and [Wasm optimisation](../../docs/developer-docs/wasm-optimisation/overview.mtf)
@@ -46,14 +48,17 @@ compiler crate.
 | 3 | Build host boundary tables and fault mechanics | Delivered | Delivered | None |
 | 4 | Extract the shared host contract crate | Delivered | Delivered | None |
 | 5 | Finish the native binding and artefact handoff | Delivered | Delivered | None |
-| 6 | Establish official Core conformance | Lappet, Core references | Milestones 3 and 5 and its own checkpoint | Write when the checkpoint is approved |
-| 7 | Connect real Moth applications | Lappet, public compiler services | The compiler's native host ABI prerequisites | Write when the gate opens |
-| 8 | Package declaration and local catalog foundations | Build system, Stage 0, Lappet | Its checkpoint and the package prerequisites | Write when the checkpoint is approved |
+| Prerequisite | Native readiness and hardening | Lappet runtime, Core and host contracts | After the compiler package-resolution foundation is delivered | [Phased plan](../../docs/roadmap/plans/lappet-native-readiness-and-hardening-plan.md) |
+| 6 | Establish official Core conformance | Lappet, Core references | Prerequisite, milestones 3 and 5 and its own checkpoint | Write when the checkpoint is approved |
+| 7 | Connect real Moth applications | Lappet, public compiler services | Prerequisite and the compiler's native host ABI prerequisites | Write when the gate opens |
+| 8 | Consume compiler-resolved package catalog | Lappet package infrastructure | Prerequisite and delivered compiler package-resolution foundation | Write when the consumer checkpoint is approved |
 | 9 | Package eligibility and dependency evidence | Lappet, compiler facts | Milestone 8 | Write when the checkpoint is approved |
 | 10 | Remote admission | Lappet | Milestone 9 and its checkpoint | Write when the checkpoint is approved |
 
 The package lane, milestones 8 to 10, is independent of Wasmtime and may move
-ahead of milestones 6 and 7 once its prerequisites and checkpoint are met.
+ahead of milestones 6 and 7 after the compiler package foundation and common
+readiness prerequisite are delivered. Its own consumer and admission checkpoints
+still apply. Milestone 8 must not repeat compiler dependency syntax or resolution.
 
 ## Waiting on main
 
@@ -67,7 +72,8 @@ the current tree instead of trusting this table.
 | Host-import lowering to `moth-host-v1` names, fallible-call lowering through `out_frame` and `status` and builtin `Error` value lowering | Milestone 7 and the compiler-level adapter tests | Lappet adapters convert only what compiled Moth really emits |
 | `i64` resource-token carriage, the `staged_text_take` import and the call-scope helper exports | Milestone 7 | Milestone 3 exercised these protocols with fixtures only |
 | Builder-selected export wrappers, the host manifest and `host.assertion_failed` moved into `moth-abi-v1` | Milestone 7 and manifest-driven preflight | Lappet matches implementations against the manifest, never against guessed names |
-| Dependency clauses, canonical project and package graphs, configuration and input isolation, immutable public interfaces and stable capability and ABI fingerprints | Milestone 8 | The manager consumes compiler-owned compatibility facts |
+| Exact ObVer-qualified config declarations, project-local package libraries, immutable resolved package catalog and separate package graphs | Readiness prerequisite and milestone 8 | This compiler foundation is a hard gate before Lappet resumes; Lappet consumes it without another resolver |
+| Canonical public interfaces, stable dependency capabilities, ABI fingerprints and configuration/input isolation | Milestones 8 and 9 | The manager consumes compiler-owned compatibility and closure facts |
 
 The [native host ABI](../../docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf)
 owns the full compiler prerequisite list. The first registry prerequisite, the
@@ -82,10 +88,47 @@ check, then re-read any authority the merge changed.
 
 ## Open decisions
 
-None are open. Nye confirmed the runtime policy defaults and the host boundary
-limits on 14 November 2026, with the values unchanged. They now live in
-[the runtime design](docs/design.md) and
-[the host ABI adapter responsibilities](docs/host-abi.md).
+**Accepted for native readiness:** retain the restricted V1 host ABI and route
+Core operations through compiler-owned direct, helper or native providers.
+Official Core eligibility uses a trusted first-party builder catalogue, not
+custom builder self-identification. The Rust adapter uses manifest-validated
+selected exports, canonical resource/context descriptors and no implicit start
+for host-callable artefacts. The exact operational bound for copied export
+strings remains a prerequisite checkpoint, not a chosen number. These decisions
+live in [the runtime design](docs/design.md),
+[the host ABI adapter responsibilities](docs/host-abi.md) and
+[the package-manager design](docs/package-manager.md).
+
+**Accepted compiler dependency foundation:** `@config.moth` declares an exact
+external ObVer build through `@package::2026.32.5`; `as` replaces the visible
+root without changing canonical identity. A fixed project-local `packages/`
+library is the default. Explicit fixed-only configuration can replace it with
+other project-local libraries. No global directory is created or searched.
+The compiler inspects only declared exact builds under
+`library/package_name/version/`; duplicate matches are errors, not precedence.
+Each package version must have a matching name/version and `@package.moth`.
+Registered library subtrees are outside the consumer's source index, and each
+package gets its own config, graph and private globals. Direct-only dependency
+visibility applies across the entire closure. The package's compiler-produced
+catalogue is the sole source of graph and compatibility facts. `::` is a
+provider-build qualifier conceptually, but only exact external ObVer selection
+in config is supported in V1. Ordinary imports never select builds or override
+module compilation settings.
+
+The precise fixed-only package-library field spelling and empty-list handling
+remain a compiler implementation checkpoint. Those questions do not reopen
+Lappet's declaration syntax, version policy or catalogue ownership.
+
+**Remaining Lappet checkpoints:** (1) the complete Core provider and host
+capability/conformance matrix, including opaque Core result representation,
+(2) the internal trusted first-party environment certification handoff and
+(3) the operational byte bound and configuration surface for copying exported
+Moth strings into Rust. These are required implementation choices, not an
+invitation to broaden the general V1 host ABI. Native export adapters also
+wait for the compiler's selected-export manifest and concrete ABI lowerings.
+
+**Previously decided:** Nye confirmed the runtime policy defaults and host
+boundary limits on 14 November 2026, with the values unchanged.
 
 **Facade-only projects: decided.** A project with a valid package facade and no
 executable entry is a valid build target for a package-capable builder. The
@@ -102,6 +145,28 @@ diagnostic itself against the source root the frontend compiled. One ordering
 change follows: an HTML project with no entry and a source error now reports
 the source error first, because compilation runs before the builder's check.
 The `just validate` run recorded under milestone 2 covered this tree.
+
+## Native readiness findings
+
+The pre-roadmap plan owns verification, implementation and tests. An earlier
+inspection identified four concrete correctness/diagnostic leads. Reconfirm
+them against the current Lappet baseline before changing code:
+
+- `instance.rs` can validate a token before reporting a quarantined instance,
+  and a rejected call can still install an epoch deadline.
+- `staging.rs` checks configurable byte limits without independently enforcing
+  the native ABI's `i32::MAX` text-length ceiling.
+- The scope driver reports oversized Rust caller input as an internal host
+  fault. It should reject the input before guest entry without quarantine.
+- The single-string fixture driver reports declared errors without decoding
+  their record and uses the noncanonical-status fault for malformed result
+  spans and UTF-8. The manifest adapter must replace this path in milestone 7.
+
+Core conformance also has a documented integration blocker: `@core/time` and
+`@core/io` return opaque Core types, while general V1 host imports disallow
+resource results. The compiler's existing host requirement collection does
+not include Core-backed external bindings. The prerequisite inventory must
+assign explicit Core provider routes before native implementation starts.
 
 ## Working rules
 
@@ -689,6 +754,13 @@ unsupported results for browser, game and headless server hosts. Define the
 trusted official-environment identity used by package admission. A builder's
 self-declaration or use of Lappet cannot grant certification.
 
+**Accepted direction.** The compiler selects direct lowering, a compiler
+helper or a native Core provider by canonical identity and target capability.
+The prerequisite inventory must resolve opaque return values from `@core/time`
+and `@core/io` without widening general host bindings. Official certification
+comes from the trusted first-party catalogue and complete applicable Core
+conformance, not a builder name or the presence of native implementations.
+
 **Delivery.** Provide reusable native Core implementations through the existing
 canonical binding contracts. Retain efficient compiler/Wasm implementations
 where already suitable. Custom builders may select implementations for local
@@ -713,11 +785,18 @@ also needs the host context and opaque resource descriptor work listed under
 [milestone 5](#5-finish-the-native-binding-and-artefact-handoff), which V1
 requires.
 
+The pre-roadmap readiness gate must also be completed. Its selected-export
+contract requires the compiler manifest, no implicit Wasm start function and
+an approved bounded-copy policy before a public Rust call adapter ships.
+
 **Delivery.** Compile through public Moth services, install matching Rust host
-implementations and invoke explicitly selected exports. Extend the `moth-host`
+implementations and invoke explicitly selected exports through checked,
+manifest-validated typed handles. Preserve multiple ordered success slots,
+builtin declared errors and distinct runtime faults. Extend the `moth-host`
 descriptors, the compiler's conversion table and `preflight` to host context
-and opaque resources. Prove one embedded game lifecycle and one server
-lifecycle without adding a scheduler or web framework.
+and opaque resource parameters. Replace the fixture-only export driver rather
+than maintaining a second semantic signature or call path. Prove one embedded
+game lifecycle and one server lifecycle without adding a scheduler or web framework.
 Keep rendering/output/resource planning with the builder and build system.
 
 **Evidence.** Run actual Moth programs, not hand-authored ABI substitutes.
@@ -735,45 +814,49 @@ Never mutate published compiler results to make runtime binding succeed.
 when the compiler and runtime handoffs support it. Keep the example checked
 against the public embedding API rather than documenting hypothetical calls.
 
-## 8. Deliver package declaration and local catalog foundations
+## 8. Consume compiler-resolved package catalog
 
-This lane is independent of Wasmtime. It replaces the retired main-roadmap
-package-manager foundations plan without claiming that its implementation is
-complete.
+This lane is independent of Wasmtime. The compiler now owns the package
+declaration, local library selection and canonical catalogue foundations as a
+separately sequenced implementation item. Lappet must not reimplement them.
 
-**Prerequisites.** Consume delivered dependency clauses, canonical project and
-package graphs, configuration/input isolation, exact numeric identities,
-immutable public interfaces and stable capability/ABI fingerprints. Require
-backend capabilities only where the chosen artefact actually needs them.
+**Prerequisites.** The compiler delivers exact ObVer-qualified declarations
+in `@config.moth`, project-local library selection, source exclusion and a
+deterministic immutable resolved package graph. It also supplies canonical
+public interfaces, separate dependency config/input scopes and stable package,
+capability and ABI fingerprints. The common native readiness gate must be
+complete before this milestone begins.
 
-**Checkpoint.** Decide canonical package-name grammar, the project declaration
-carrier, alias replacement rules and the exact resolved-catalog input. Choose
-programmatic packages or one explicit local development source for the first
-implementation. Preserve the separation from config evaluation and file-local
-symbol binding. Version solving, remote fetching and lockfile implementation
-are not prerequisites for this local slice.
+**Checkpoint.** Identify the first real Lappet package consumer of that
+catalogue and the minimal existing compiler/builder API it needs. Confirm how
+the future manager receives the selected package/build identities and
+compatibility facts without a new resolver, path scanner or parallel graph.
+The package manager does not create a global directory, download anything or
+implicitly add packages to a project in this milestone. If the compiler
+catalogue is already sufficient, delete the redundant proposed adapter rather
+than create a future-only wrapper.
 
-**Delivery sequence.** Extract declarations in authored order, reject duplicate
-canonical names and colliding roots, resolve each declared dependency once,
-compile separate dependency graphs in deterministic order and publish direct
-roots through the normal registration path. Acquisition remains outside Stage
-0. Source and compatible precompiled forms share the catalog contract, without
-adding a persistence framework merely to support its vocabulary.
+**Delivery.** Connect the needed manager-facing package records through the
+approved compiler API when a real consumer is present. Preserve the compiler
+catalogue's exact ObVer build identities, aliases, direct dependency edges,
+source/compatible-precompiled metadata and immutable public-interface facts.
+Keep any future managed package installation separate from local manual package
+resolution. Do not parse `@config.moth`, reconstruct package identity,
+search `packages/` again or introduce version ranges, lockfiles or
+source-specific fallback paths.
 
-**Evidence retained from the former plan.** Test undeclared source dependencies,
-duplicate canonical names, alias collisions, invalid roots and missing catalog
-entries. Test direct-only visibility, transitive privacy, independent config and
-private project globals, generated-instance ownership and failed publication.
-Reverse declaration order to verify deterministic graph outcomes while keeping
-authored diagnostic order. Verify exact numeric/ABI compatibility and that
-aliases never change artefact or resource-output identities. Missing names must
-not trigger filesystem probing, a config import preamble or legacy folder
-fallback. Incompatible artefacts are rejected or rebuilt through the existing
-policy, never repaired with guessed layouts or numeric conversions.
+**Evidence.** Tests cover exact build identity and labels, public namespace
+routes, aliases, declared direct-only visibility, independent package configs,
+private project globals, diamond graphs, deterministic graph order, source
+boundary isolation, incompatible cached artefacts and output resource
+identity. Demonstrate that a manager consumer cannot access an undeclared
+transitive dependency or alter a compiler-selected package by spelling its
+path differently. Do not repeat compiler tests solely to add a second owner.
 
 ## 9. Derive package eligibility and dependency evidence
 
-**Checkpoint.** Specify how compiler/provider facts establish public Core use,
+**Checkpoint.** Consume the compiler's exact ObVer package/build identity and
+immutable resolved dependency closure. Specify how compiler/provider facts establish public Core use,
 no-core closure and excluded Builder/foreign dependencies. Distinguish public
 Core dependencies from implicit namespace reservation and compiler runtime
 helpers. Define trusted official/custom classification, exact version-instance
@@ -795,7 +878,8 @@ cost without counting shared packages repeatedly.
 
 ## 10. Design remote admission before enabling managed addition
 
-**Checkpoint.** Approve version/lockfile/override policy, metadata provenance,
+**Checkpoint.** Approve version ranges (if supported), lockfile/override policy,
+metadata provenance,
 source staging and archive limits, source integrity, isolated analysis and the
 required checker set. Specify unknown/failure handling, dependency thresholds,
 reports, exact-content approval and atomic project updates. Include concurrent
