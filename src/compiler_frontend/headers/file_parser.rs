@@ -31,6 +31,9 @@ use crate::compiler_frontend::headers::header_dispatch::{
     HeaderDeclarationMetadata, create_header,
 };
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
+use crate::compiler_frontend::headers::public_export_route_conflicts::{
+    PublicExportRouteClaim, case_conflicting_public_export_route_diagnostic,
+};
 use crate::compiler_frontend::headers::qualified_references::{
     collect_qualified_references, push_header_expression_ranges,
 };
@@ -827,7 +830,7 @@ fn handle_symbol_item(
         name_id,
         current_span,
         current_index,
-        source_directives,
+        mut source_directives,
     } = symbol;
     // `$export` is the only authored public-surface form. An unmarked declaration stays private.
     let export_mode = export_mode_for(&source_directives, context)?;
@@ -931,6 +934,10 @@ fn handle_symbol_item(
             directive,
         )));
     }
+    // `$export` has already contributed its one route fact to `export_mode` and passed target
+    // validation. Keeping the annotation would retain a second copy of the route through every
+    // path remap and source rebind without any production reader.
+    source_directives.retain(|directive| directive.kind != SourceDirectiveKind::Export);
     header.source_directives = source_directives;
 
     // Structural directive targets are already settled by the pending-run preflight and
@@ -1220,6 +1227,37 @@ pub(super) fn finish_file_output(
         return Err(FileFrontendPrepareFailure::Diagnosed(
             state.into_error(diagnostic),
         ));
+    }
+
+    if context.file_role.is_export_capable() {
+        // Every route of one facade is authored in its single facade root file, so declaration
+        // and clause claims are merged here while their original PathIds and authored order are
+        // still available. Stage 0 and header binding consume this validation instead of
+        // rebuilding folded-route indexes from cross-boundary summaries.
+        let claims = state
+            .headers
+            .iter()
+            .filter_map(|header| header.export_mode.route())
+            .chain(
+                state
+                    .file_dependency_clauses
+                    .iter()
+                    .filter_map(|clause| clause.export_mode.route()),
+            )
+            .map(|route| PublicExportRouteClaim {
+                route: route.path,
+                span: route.span,
+                path_syntax: route.path_syntax,
+            });
+        if let Some(diagnostic) = case_conflicting_public_export_route_diagnostic(
+            claims,
+            &*context.path_fork,
+            context.string_table,
+        ) {
+            return Err(FileFrontendPrepareFailure::Diagnosed(
+                state.into_error(diagnostic),
+            ));
+        }
     }
 
     if matches!(

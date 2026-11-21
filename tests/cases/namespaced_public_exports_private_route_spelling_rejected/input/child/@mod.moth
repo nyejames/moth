@@ -1,4 +1,6 @@
 $export @forms
 button #|label String| -> String:
-    return [:button:[label]]
+    return label
 ;
+$export
+root_item #= "root"

@@ -109,6 +109,14 @@ struct ModuleNamespace {
     /// Entries remain present so private-boundary prefix checks still work, but resolution
     /// rejects an ambiguous key before selecting any target.
     ambiguous_keys: BTreeSet<String>,
+    /// Every facade identity inserted behind each consumer-relative key.
+    ///
+    /// WHAT: retains all `CrossModule` claimants even when the entry table keeps only the first
+    ///       spelling. A key with one retained entry can still hide several facades from a
+    ///       case-folded or support-basename collision.
+    /// WHY: route planning and eager collision validation must inspect every visible facade, not
+    ///      merely the structurally retained row that resolution uses as context.
+    facade_claimants: BTreeMap<String, Vec<(ModuleId, ModuleRootRole)>>,
     /// Visible facade keys whose own preparation raised a source diagnostic.
     ///
     /// WHAT: consumer-relative keys such as `widgets` whose facade could not prepare.
@@ -122,6 +130,7 @@ impl ModuleNamespace {
         Self {
             entries: BTreeMap::new(),
             ambiguous_keys: BTreeSet::new(),
+            facade_claimants: BTreeMap::new(),
             unavailable_facades: BTreeSet::new(),
         }
     }
@@ -142,6 +151,18 @@ impl ModuleNamespace {
     /// entry stays only as structural context for private-boundary detection; it can never win
     /// resolution while its key remains ambiguous.
     fn insert(&mut self, key: String, entry: NamespaceEntry) {
+        if let NamespaceEntry::CrossModule {
+            target_module_id,
+            surface,
+        } = &entry
+        {
+            let claimants = self.facade_claimants.entry(key.clone()).or_default();
+            let claimant = (*target_module_id, *surface);
+            if !claimants.contains(&claimant) {
+                claimants.push(claimant);
+            }
+        }
+
         let case_collisions = self
             .entries
             .keys()
@@ -175,16 +196,13 @@ fn is_same_or_nested_path(key: &str, prefix: &str) -> bool {
             .is_some_and(|remainder| remainder.starts_with('/'))
 }
 
-/// One resolved registered package surface and its root facade file.
+/// One resolved registered package surface and the public route the consumer named.
 ///
-/// WHY: the exact prefix and the root support facade are separate ownership facts from the public
-///      route the consumer named, so resolution returns them together without reconstructing the
-///      prefix from the authored key or searching the package boundary again.
+/// WHY: the exact prefix and the public route are separate ownership facts, so resolution returns
+///      them together without reconstructing the prefix from the authored key or searching the
+///      package boundary again.
 struct RegisteredPackageSurface<'a> {
     dependency_prefix: &'a str,
-    /// Retained for focused resolution tests; production uses the completed package interface.
-    #[cfg_attr(not(test), allow(dead_code))]
-    root_file: &'a Path,
     route: PublicExportRoute,
 }
 
@@ -498,22 +516,29 @@ impl ModuleNamespaceSet {
             );
         };
         let root_claims = routes.routes(root_module_id, ModuleRootRole::Support);
-        if !root_claims.is_empty() {
-            package_public_routes.insert(
-                package_prefix.to_owned(),
-                root_claims
-                    .iter()
-                    .map(|claim| (claim.route.as_str().to_owned(), claim.span))
-                    .collect(),
-            );
+        if root_claims.is_empty() {
+            return Ok(());
         }
-        let consumers = package_namespaces.values().flatten().collect::<Vec<_>>();
-        validate_published_package_routes_against_consumers(
-            &consumers,
-            package_public_routes,
+        // Only this boundary's newly published claims need the internal eager check. Claims from
+        // earlier packages have already passed this scan, and the project pass validates every
+        // package against project-local identities once project namespaces exist.
+        validate_package_route_claims(
+            package_namespaces.values().flatten(),
+            package_prefix,
+            root_claims
+                .iter()
+                .map(|claim| (claim.route.as_str(), claim.span)),
             ProjectRouteClaimSite::PackageOperand,
             None,
-        )
+        )?;
+        package_public_routes.insert(
+            package_prefix.to_owned(),
+            root_claims
+                .iter()
+                .map(|claim| (claim.route.as_str().to_owned(), claim.span))
+                .collect(),
+        );
+        Ok(())
     }
 
     /// Mark every facade of one package boundary as unavailable to its internal consumers.
@@ -1101,12 +1126,20 @@ impl ModuleNamespaceSet {
                 ));
             }
 
+            #[cfg(test)]
+            let root_file = self
+                .package_boundary_indexes
+                .get(surface.dependency_prefix)
+                .and_then(SourceTreeIndex::package_public_root_file)
+                .expect("a resolved package surface must name a registered support facade")
+                .to_path_buf();
+
             return Ok(Some(ResolvedDependency::SourcePackageSurface {
                 consumer_module_id,
                 dependency_prefix: surface.dependency_prefix.to_owned(),
                 route: surface.route,
                 #[cfg(test)]
-                root_file: surface.root_file.to_path_buf(),
+                root_file,
             }));
         }
 
@@ -1158,12 +1191,11 @@ impl ModuleNamespaceSet {
     ) -> Option<RegisteredPackageSurface<'_>> {
         for (dependency_prefix, package_index) in self.package_boundary_indexes.iter() {
             if dependency_prefix == provider_path {
-                return package_index.package_public_root_file().map(|root_file| {
-                    RegisteredPackageSurface {
-                        dependency_prefix,
-                        root_file,
-                        route: PublicExportRoute::ROOT,
-                    }
+                // A boundary without a published support facade exposes no external surface.
+                package_index.package_public_root_file()?;
+                return Some(RegisteredPackageSurface {
+                    dependency_prefix,
+                    route: PublicExportRoute::ROOT,
                 });
             }
             let Some(route_spelling) = provider_path
@@ -1176,15 +1208,11 @@ impl ModuleNamespaceSet {
                 .package_public_routes
                 .get(dependency_prefix)
                 .is_some_and(|routes| routes.contains_key(route_spelling));
-            if !route_is_published {
+            if !route_is_published || package_index.package_public_root_file().is_none() {
                 continue;
             }
-            let Some(root_file) = package_index.package_public_root_file() else {
-                continue;
-            };
             return Some(RegisteredPackageSurface {
                 dependency_prefix,
-                root_file,
                 route: PublicExportRoute::from_canonical_spelling(route_spelling.to_owned()),
             });
         }
@@ -1370,25 +1398,8 @@ struct PlannedRouteEntry {
     span: SourceSpan,
 }
 
-/// Which visible identity a declared public route collides with.
-///
-/// WHAT: separates the collision causes while one typed import diagnostic reports every kind to
-///       the author.
-/// WHY: the eager publication rule must name the collision kind without inventing a second
-///      diagnostic family; focused tests assert the kind directly.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RouteCollisionKind {
-    ExistingNamespaceEntry,
-    FacadeRoute,
-    SourcePackage,
-}
-
 #[derive(Clone, Debug)]
 struct RouteCollision {
-    /// Retained for focused collision-cause tests; production reports the one typed import
-    /// diagnostic for every kind.
-    #[cfg_attr(not(test), allow(dead_code))]
-    kind: RouteCollisionKind,
     route_key: String,
     span: SourceSpan,
     /// The competing facade's authored route operand when the collision has two content sites.
@@ -1419,10 +1430,13 @@ fn insert_facade_route_entries(
 
     for module_id in identities.module_ids() {
         let namespace = &mut namespaces[module_id.index()];
-        let (planned, ambiguous_route_keys) = planned_route_entries(namespace, routes);
-        for key in ambiguous_route_keys {
-            namespace.ambiguous_keys.insert(key);
+        let (planned, ambiguous_plans) = planned_route_entries(namespace, routes);
+        if let Some(collision) =
+            first_ambiguous_route_local_collision(ambiguous_plans.values(), &namespace.entries)
+        {
+            return Err(route_collision_failure(collision));
         }
+        namespace.ambiguous_keys.extend(ambiguous_plans.into_keys());
         if planned.is_empty() {
             continue;
         }
@@ -1448,63 +1462,88 @@ fn insert_facade_route_entries(
 
 /// Plan the route entries one consumer namespace may insert from its already-built facade entries.
 ///
-/// WHY: route visibility is exactly facade-entry visibility. Reusing the `CrossModule` entries
+/// WHY: route visibility is exactly facade-entry visibility. Reusing the `CrossModule` claimants
 ///      preserves child/support selection, paired-surface suppression, root-local isolation and
 ///      entry-only exclusion without re-deriving any of them from topology.
+///
+/// Returns the publication plans and the plans whose base facade key is ambiguous, keyed by the
+/// route key. The caller owns resolving an ambiguous plan to the base conflict.
 fn planned_route_entries(
     namespace: &ModuleNamespace,
     routes: &FacadeRouteIndex,
-) -> (Vec<PlannedRouteEntry>, Vec<String>) {
+) -> (Vec<PlannedRouteEntry>, BTreeMap<String, PlannedRouteEntry>) {
     let mut planned = BTreeMap::new();
-    let mut ambiguous_route_keys = BTreeSet::new();
-    for (facade_key, entry) in &namespace.entries {
-        let NamespaceEntry::CrossModule {
-            target_module_id,
-            surface,
-        } = entry
-        else {
-            continue;
-        };
+    let mut ambiguous_plans = BTreeMap::new();
+    for (facade_key, claimants) in &namespace.facade_claimants {
         if facade_key.is_empty() {
             continue;
         }
-        // An ambiguous base key keeps the first retained row only as structural context. Its
-        // route keys must stay unresolvable too: publishing them would select one of the
-        // competing facades by insertion order. Record those keys as ambiguous so resolution
-        // reports the base conflict rather than falling through to the bypass lane.
-        if namespace.is_ambiguous(facade_key) {
+        // Every claimant behind an ambiguous base still contributes route identities. Publishing
+        // any one of them would select a facade by insertion order, so record each route spelling
+        // as ambiguous; retaining the claims here is what makes a later `@base/<other-route>`
+        // resolve to the base conflict instead of a route miss.
+        let base_is_ambiguous = namespace.is_ambiguous(facade_key);
+        for (target_module_id, surface) in claimants {
             for claim in routes.routes(*target_module_id, *surface) {
-                if !claim.route.is_root() {
-                    ambiguous_route_keys.insert(format!("{facade_key}/{}", claim.route.as_str()));
+                if claim.route.is_root() {
+                    continue;
                 }
+                let key = format!("{facade_key}/{}", claim.route.as_str());
+                if base_is_ambiguous {
+                    ambiguous_plans
+                        .entry(key.clone())
+                        .or_insert(PlannedRouteEntry {
+                            key,
+                            facade_module_id: *target_module_id,
+                            surface: *surface,
+                            route: claim.route.clone(),
+                            span: claim.span,
+                        });
+                    continue;
+                }
+                // The formatted key already fixes the facade and spelling, so the plan identity
+                // needs no second route copy.
+                planned
+                    .entry((key.clone(), *target_module_id, *surface))
+                    .or_insert_with(|| PlannedRouteEntry {
+                        key,
+                        facade_module_id: *target_module_id,
+                        surface: *surface,
+                        route: claim.route.clone(),
+                        span: claim.span,
+                    });
             }
-            continue;
-        }
-        for claim in routes.routes(*target_module_id, *surface) {
-            if claim.route.is_root() {
-                continue;
-            }
-            let key = format!("{facade_key}/{}", claim.route.as_str());
-            planned
-                .entry((
-                    key.clone(),
-                    *target_module_id,
-                    *surface,
-                    claim.route.clone(),
-                ))
-                .or_insert(PlannedRouteEntry {
-                    key,
-                    facade_module_id: *target_module_id,
-                    surface: *surface,
-                    route: claim.route.clone(),
-                    span: claim.span,
-                });
         }
     }
-    (
-        planned.into_values().collect(),
-        ambiguous_route_keys.into_iter().collect(),
-    )
+    (planned.into_values().collect(), ambiguous_plans)
+}
+
+/// Reject an ambiguous-base route that also names a visible non-facade local identity.
+///
+/// WHY: a facade key collision already makes route selection ambiguous, but it cannot hide a
+///      route whose spelling is also a real local source. That is a distinct eager collision and
+///      must not wait for an authored dependency clause to expose it.
+fn first_ambiguous_route_local_collision<'plan>(
+    ambiguous_plans: impl Iterator<Item = &'plan PlannedRouteEntry>,
+    entries: &BTreeMap<String, NamespaceEntry>,
+) -> Option<RouteCollision> {
+    for plan in ambiguous_plans {
+        // Local dependency lookup and ordinary facade-route collision checks compare exact
+        // case-insensitive keys. Ancestor overlap would reject a distinct local provider such as
+        // `forms/x` merely because an ambiguous facade publishes the deeper route `forms/x/y`.
+        let collides = entries.iter().any(|(key, entry)| {
+            !matches!(entry, NamespaceEntry::CrossModule { .. })
+                && key.eq_ignore_ascii_case(&plan.key)
+        });
+        if collides {
+            return Some(RouteCollision {
+                route_key: plan.key.clone(),
+                span: plan.span,
+                related_span: None,
+            });
+        }
+    }
+    None
 }
 
 /// Where a published package route's collision site can be rendered.
@@ -1551,40 +1590,59 @@ fn validate_published_package_routes_against_consumers(
     mut selected_source_texts: Option<&mut SelectedSourceTextMap>,
 ) -> Result<(), PreparedFailure> {
     for (package_prefix, routes) in package_public_routes {
-        for (route_spelling, published_span) in routes {
-            let route_key = format!("{package_prefix}/{route_spelling}");
-            let Some(matched_local) = namespaces.iter().find_map(|namespace| {
-                namespace
-                    .entries
-                    .iter()
-                    .find(|(key, _)| package_paths_overlap(key, &route_key))
-            }) else {
-                continue;
-            };
-            let span = match claim_site {
-                ProjectRouteClaimSite::PackageOperand => *published_span,
-                ProjectRouteClaimSite::ProjectLocal {
+        validate_package_route_claims(
+            namespaces.iter().copied(),
+            package_prefix,
+            routes
+                .iter()
+                .map(|(spelling, span)| (spelling.as_str(), *span)),
+            claim_site,
+            selected_source_texts.as_deref_mut(),
+        )?;
+    }
+    Ok(())
+}
+
+/// Check one package boundary's published root claims against the consumers that can see them.
+fn validate_package_route_claims<'namespace, 'route>(
+    namespaces: impl Iterator<Item = &'namespace ModuleNamespace> + Clone,
+    package_prefix: &str,
+    published_routes: impl Iterator<Item = (&'route str, SourceSpan)>,
+    claim_site: ProjectRouteClaimSite<'_>,
+    mut selected_source_texts: Option<&mut SelectedSourceTextMap>,
+) -> Result<(), PreparedFailure> {
+    for (route_spelling, published_span) in published_routes {
+        let route_key = format!("{package_prefix}/{route_spelling}");
+        let Some(matched_local) = namespaces.clone().find_map(|namespace| {
+            namespace
+                .entries
+                .iter()
+                .find(|(key, _)| package_paths_overlap(key, &route_key))
+        }) else {
+            continue;
+        };
+        let span = match claim_site {
+            ProjectRouteClaimSite::PackageOperand => published_span,
+            ProjectRouteClaimSite::ProjectLocal {
+                source_tree_index,
+                source_files,
+            } => {
+                let Some(span) = project_local_claim_span(
+                    matched_local.1,
                     source_tree_index,
                     source_files,
-                } => {
-                    let Some(span) = project_local_claim_span(
-                        matched_local.1,
-                        source_tree_index,
-                        source_files,
-                        selected_source_texts.as_deref_mut(),
-                    ) else {
-                        continue;
-                    };
-                    span
-                }
-            };
-            return Err(route_collision_failure(RouteCollision {
-                kind: RouteCollisionKind::ExistingNamespaceEntry,
-                route_key,
-                span,
-                related_span: None,
-            }));
-        }
+                    selected_source_texts.as_deref_mut(),
+                ) else {
+                    continue;
+                };
+                span
+            }
+        };
+        return Err(route_collision_failure(RouteCollision {
+            route_key,
+            span,
+            related_span: None,
+        }));
     }
     Ok(())
 }
@@ -1605,12 +1663,16 @@ fn project_local_claim_span(
             selected_source_texts,
         ),
         NamespaceEntry::CrossModule {
-            target_module_id, ..
+            target_module_id,
+            surface,
         }
         | NamespaceEntry::PublicRoute {
-            target_module_id, ..
+            target_module_id,
+            surface,
+            ..
         } => module_root_span(
             *target_module_id,
+            *surface,
             source_tree_index,
             source_files,
             selected_source_texts,
@@ -1620,22 +1682,16 @@ fn project_local_claim_span(
 
 fn module_root_span(
     module_id: ModuleId,
+    surface: ModuleRootRole,
     source_tree_index: &SourceTreeIndex,
     source_files: &SourceDatabase,
-    mut selected_source_texts: Option<&mut SelectedSourceTextMap>,
+    selected_source_texts: Option<&mut SelectedSourceTextMap>,
 ) -> Option<SourceSpan> {
-    source_tree_index
+    let root_file = source_tree_index
         .module_identities()
         .record(module_id)
-        .root_files()
-        .present()
-        .into_iter()
-        .find_map(|(role, path)| match role {
-            ModuleRootRole::Normal | ModuleRootRole::Support => {
-                source_span_for_path(path, source_files, selected_source_texts.as_deref_mut())
-            }
-            _ => None,
-        })
+        .root_file(surface)?;
+    source_span_for_path(root_file, source_files, selected_source_texts)
 }
 
 fn source_span_for_record(
@@ -1686,7 +1742,6 @@ fn first_route_collision(
             .any(|existing| existing.eq_ignore_ascii_case(&plan.key))
         {
             return Some(RouteCollision {
-                kind: RouteCollisionKind::ExistingNamespaceEntry,
                 route_key: plan.key.clone(),
                 span: plan.span,
                 related_span: None,
@@ -1716,7 +1771,6 @@ fn first_route_collision(
                 .last()
                 .expect("a folded route group repeats its first key");
             return Some(RouteCollision {
-                kind: RouteCollisionKind::FacadeRoute,
                 route_key: collision.key.clone(),
                 span: collision.span,
                 related_span: group
@@ -1736,7 +1790,6 @@ fn first_route_collision(
             .any(|package_prefix| package_paths_overlap(package_prefix, &plan.key))
         {
             return Some(RouteCollision {
-                kind: RouteCollisionKind::SourcePackage,
                 route_key: plan.key.clone(),
                 span: plan.span,
                 related_span: None,

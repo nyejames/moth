@@ -798,7 +798,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         } = input;
         let resolved_clause = self
             .source_provider_dependencies
-            .resolve_reexport(selection.shell)
+            .resolve_clause(selection.shell)
             .ok_or_else(|| {
                 crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(CompilerStage::HeaderParsing,
                     format!(
@@ -818,11 +818,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         // provider interface; otherwise an alias can silently bind an unrelated member.
         let provider_name = self.string_table.resolve(source_name);
         if view
-            .exported_origin(&provider_route, provider_name)
+            .exported_origin(provider_route, provider_name)
             .is_none()
-            && view
-                .binding_export(&provider_route, provider_name)
-                .is_none()
+            && view.binding_export(provider_route, provider_name).is_none()
         {
             return Err(
                 crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(CompilerStage::HeaderParsing,
@@ -835,10 +833,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             );
         }
 
-        if let Some(origin) = view
-            .exported_origin(&provider_route, provider_name)
-            .cloned()
-        {
+        if let Some(origin) = view.exported_origin(provider_route, provider_name).cloned() {
             let declaration = view.declaration(&origin).ok_or_else(|| {
                 crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                     "provider interface {:?} has no declaration record for exported origin {:?}",
@@ -913,7 +908,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             return Ok(());
         }
 
-        if let Some(binding) = view.binding_export(&provider_route, provider_name) {
+        if let Some(binding) = view.binding_export(provider_route, provider_name) {
             let symbol_id = self
                 .external_package_registry
                 .resolve_canonical_symbol(&binding.target)

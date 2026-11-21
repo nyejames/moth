@@ -297,7 +297,7 @@ fn grouped_reexport_lookup_uses_the_same_shell_identity() {
     .expect("one authored provider should register");
 
     let resolved = set
-        .resolve_reexport(DependencyShellId::new(SourceId::from_index(6), 0))
+        .resolve_clause(DependencyShellId::new(SourceId::from_index(6), 0))
         .expect("the direct-selection re-export shell must resolve");
     assert!(resolved.route.is_root());
     assert!(std::ptr::eq(
@@ -305,7 +305,7 @@ fn grouped_reexport_lookup_uses_the_same_shell_identity() {
         &provider,
     ));
     assert!(
-        set.resolve_reexport(DependencyShellId::new(SourceId::from_index(6), 1))
+        set.resolve_clause(DependencyShellId::new(SourceId::from_index(6), 1))
             .is_none(),
         "a different shell ordinal must not borrow the re-export binding"
     );

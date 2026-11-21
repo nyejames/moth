@@ -41,13 +41,13 @@ impl ProviderInterfaceId {
 ///       that shell. Direct selections and namespace dependencies both consume this resolved phase.
 /// WHY: a provider interface is not the dependency clause itself; keeping both identities in one
 ///      value prevents later binding code from treating a provider row as a selected-name identity.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ResolvedDependencyClause {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ResolvedDependencyClause<'a> {
     pub(crate) shell: DependencyShellId,
     pub(crate) provider: ProviderInterfaceId,
     /// Exact public route beneath the provider facade, [`PublicExportRoute::ROOT`] when the
-    /// clause named none.
-    pub(crate) route: PublicExportRoute,
+    /// clause named none. Borrowed from the provider set so a routed lookup allocates nothing.
+    pub(crate) route: &'a PublicExportRoute,
 }
 
 /// Explicit provider-dependency state for one binding.
@@ -115,10 +115,10 @@ impl<'a> SourceProviderDependencySet<'a> {
             by_origin: FxHashMap::default(),
         };
 
-        for dependency in &dependencies {
-            match &dependency.kind {
+        for dependency in dependencies {
+            match dependency.kind {
                 ProviderDependencyKind::Authored { shell, route } => {
-                    if set.by_shell.contains_key(shell) {
+                    if set.by_shell.contains_key(&shell) {
                         return Err(InfrastructureFailure::internal(
                             CompilerStage::AstConstruction,
                             format!(
@@ -128,7 +128,7 @@ impl<'a> SourceProviderDependencySet<'a> {
                         ));
                     }
                     let provider_id = set.register(dependency.interface)?;
-                    set.by_shell.insert(*shell, (provider_id, route.clone()));
+                    set.by_shell.insert(shell, (provider_id, route));
                 }
                 ProviderDependencyKind::TemplatePrelude { package_prefix } => {
                     set.register_template_prelude(package_prefix, dependency.interface)?;
@@ -259,22 +259,14 @@ impl<'a> SourceProviderDependencySet<'a> {
     pub(crate) fn resolve_clause(
         &self,
         shell: DependencyShellId,
-    ) -> Option<ResolvedDependencyClause> {
+    ) -> Option<ResolvedDependencyClause<'_>> {
         self.by_shell
             .get(&shell)
             .map(|(provider, route)| ResolvedDependencyClause {
                 shell,
                 provider: *provider,
-                route: route.clone(),
+                route,
             })
-    }
-
-    /// The provider and public route selected for one public re-export dependency shell.
-    pub(crate) fn resolve_reexport(
-        &self,
-        shell: DependencyShellId,
-    ) -> Option<ResolvedDependencyClause> {
-        self.resolve_clause(shell)
     }
 
     /// Resolve one dense provider identity to its borrowed completed interface.

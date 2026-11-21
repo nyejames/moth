@@ -11,9 +11,11 @@ use crate::compiler_frontend::hir::utils::{collect_reachable_blocks, for_each_te
 use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_interface::{
-    PublicDeclarationSemantics, PublicSemanticInterface,
+    PublicDeclarationSemantics, PublicFunctionCategory, PublicSemanticInterface,
 };
-use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
+use crate::compiler_frontend::semantic_identity::{
+    ExportBinding, OriginDeclarationId, OriginTypeCategory,
+};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceClass;
 
 const BASE_HELPER: &str = "compute |value I32| -> I32:\n    return value\n;\n";
@@ -79,6 +81,49 @@ fn normal_interface_with_route<'a>(
                 .any(|binding| binding.route().as_str() == route && binding.public_name() == name)
         })
         .unwrap_or_else(|| panic!("expected a facade publishing {name:?} under route {route:?}"))
+}
+
+/// Returns the project module artefact whose support facade path ends with `suffix`.
+fn artifact_with_support_facade<'a>(
+    frontend: &'a ProjectFrontendCompilation,
+    suffix: &str,
+) -> &'a CompiledModuleArtifact {
+    frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .find(|artifact| {
+            artifact
+                .support_interface
+                .as_ref()
+                .is_some_and(|interface| {
+                    interface
+                        .module_origin
+                        .logical_module_path()
+                        .ends_with(suffix)
+                })
+        })
+        .unwrap_or_else(|| {
+            panic!("expected a module artefact whose support facade ends with {suffix:?}")
+        })
+}
+
+/// Returns the support interface that publishes the leaf `name` under `route`.
+fn support_interface_with_route<'a>(
+    frontend: &'a ProjectFrontendCompilation,
+    route: &str,
+    name: &str,
+) -> &'a PublicSemanticInterface {
+    frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .filter_map(|artifact| artifact.support_interface.as_ref())
+        .find(|interface| {
+            interface
+                .export_bindings
+                .iter()
+                .any(|binding| binding.route().as_str() == route && binding.public_name() == name)
+        })
+        .unwrap_or_else(|| panic!("expected a support facade publishing {name:?} under {route:?}"))
 }
 
 /// Exact authored facts for one diagnostic site: start line/column (both zero-based) and excerpt.
@@ -195,6 +240,55 @@ fn duplicate_leaf_in_one_route_across_declaration_and_reexport_reports_both_site
 }
 
 #[test]
+fn routed_facade_export_of_private_struct_field_type_is_rejected() {
+    let result = compile_fixture_result(
+        &[
+            (
+                "src/sub/@mod.moth",
+                "PrivateData = |\n    value String,\n|\n\n$export @forms\nPublicData = |\n    private_data PrivateData,\n|\n",
+            ),
+            (
+                "src/@entry.moth",
+                "@sub/forms PublicData\n\n~[:routed_private_field]",
+            ),
+        ],
+        false,
+        BuildProfile::Dev,
+    );
+    assert_has_diagnostic_code(&result, "MOTH-RULE-0082");
+}
+
+#[test]
+fn root_export_may_use_a_type_published_only_under_a_nested_route() {
+    let frontend = compile_fixture(&[
+        (
+            "src/sub/@mod.moth",
+            "$export @forms\nPublicData = |\n    value String,\n|\n\n$export\nRootData = |\n    public_data PublicData,\n|\n",
+        ),
+        (
+            "src/@entry.moth",
+            "@sub RootData\n\n~[:root_uses_nested_type]",
+        ),
+    ]);
+    let interface = normal_interface_for(&frontend, "sub");
+    assert!(
+        interface
+            .export_bindings
+            .iter()
+            .any(|binding| binding.route().is_root() && binding.public_name() == "RootData"),
+        "the root export whose signature uses a nested-route type must remain public"
+    );
+    assert!(
+        interface
+            .export_bindings
+            .iter()
+            .any(|binding| binding.route().as_str() == "forms"
+                && binding.public_name() == "PublicData"),
+        "the field type stays published under its own nested route"
+    );
+}
+
+#[test]
 fn same_leaf_from_different_targets_across_routes_keeps_local_name_collision() {
     let result = compile_fixture_result(
         &[
@@ -281,6 +375,354 @@ fn changing_only_one_reexport_route_changes_the_fingerprint_not_origins() {
         before_interface, after_interface,
         "the route is part of the public-interface fingerprint"
     );
+}
+
+/// Compiles one member of the repeated-build route family.
+///
+/// WHAT: the provider facade publishes its one const function under `provider_route`; the consumer
+///       facade selects it through `consumer_route`, folds it into its own constant and an
+///       unrelated facade publishes no dependency on either.
+/// WHY:  this project frontend has no cross-build artefact cache, so the reuse fact is the canonical
+///       public interface. A provider route change must alter the provider interface, and a consumer
+///       clause that still names the old route must be rejected rather than resolved against the
+///       new surface.
+fn compile_route_reuse_family(
+    provider_route: &str,
+    consumer_route: &str,
+) -> CompilationResult<ProjectFrontendCompilation> {
+    let provider = format!(
+        "$export @{provider_route}\nrender #|label String| -> String:\n    return label\n;\n"
+    );
+    let consumer =
+        format!("@shapes/{consumer_route} render\n\n$export\nrendered #= render(\"route\")\n");
+    compile_fixture_result(
+        &[
+            ("src/shapes/@package.moth", provider.as_str()),
+            ("src/affected/@mod.moth", consumer.as_str()),
+            ("src/bystander/@mod.moth", "$export\nunrelated #= 1\n"),
+            (
+                "src/@entry.moth",
+                "@affected rendered\n@bystander unrelated\n~[: [rendered] [unrelated] ]\n",
+            ),
+        ],
+        false,
+        BuildProfile::Dev,
+    )
+}
+
+/// WHAT: changing only a provider export route changes the provider public interface and rejects a
+///       consumer whose retained clause still names the old route; following the new route keeps
+///       the consumer's own canonical interface and an unrelated consumer's interface equal.
+/// WHY:  the accepted interface equality is the consumer invalidation key. With no cross-build
+///       cache, the observable contract is the route-keyed provider surface plus the stale clause's
+///       rejection. The unrelated facade proves the change does not widen every consumer.
+#[test]
+fn route_only_export_change_invalidates_the_provider_binding_and_rejects_the_stale_consumer() {
+    let before = successful_compilation_value(compile_route_reuse_family("forms", "forms"));
+
+    // The same authored project must reproduce the exact canonical interfaces consumers reuse.
+    let unchanged = successful_compilation_value(compile_route_reuse_family("forms", "forms"));
+    assert_eq!(
+        interface_fingerprint_content(support_interface_with_route(&unchanged, "forms", "render")),
+        interface_fingerprint_content(support_interface_with_route(&before, "forms", "render")),
+        "an unchanged routed provider must reproduce its reusable interface"
+    );
+    assert_eq!(
+        interface_fingerprint_content(normal_interface_for(&unchanged, "affected")),
+        interface_fingerprint_content(normal_interface_for(&before, "affected")),
+        "an unchanged routed consumer must reproduce its reusable interface"
+    );
+
+    // A real cache would reuse the consumer only against the matching provider interface. The same
+    // unchanged clause against a moved route must therefore fail to bind, not silently resolve.
+    let stale = compile_route_reuse_family("cards", "forms");
+    assert_has_diagnostic_code(&stale, "MOTH-IMPORT-0015");
+
+    let followed = successful_compilation_value(compile_route_reuse_family("cards", "cards"));
+
+    let before_provider = support_interface_with_route(&before, "forms", "render");
+    let after_provider = support_interface_with_route(&followed, "cards", "render");
+    assert!(
+        before_provider
+            .export_bindings
+            .iter()
+            .all(|binding| binding.route().as_str() != "cards"),
+        "the first build must publish only the forms route"
+    );
+    assert!(
+        after_provider
+            .export_bindings
+            .iter()
+            .all(|binding| binding.route().as_str() != "forms"),
+        "the moved route must no longer be a provider binding key"
+    );
+    assert_ne!(
+        interface_fingerprint_content(before_provider),
+        interface_fingerprint_content(after_provider),
+        "an exported route change must change the provider public interface"
+    );
+
+    // Only the binding route and its authored provenance may differ: the declaration origin and
+    // every declaration-owned semantic fact must survive the route change unchanged.
+    assert_eq!(before_provider.module_origin, after_provider.module_origin);
+    assert_eq!(before_provider.declarations, after_provider.declarations);
+    assert_eq!(
+        before_provider.binding_exports,
+        after_provider.binding_exports
+    );
+    assert_eq!(
+        before_provider.reusable_evidence,
+        after_provider.reusable_evidence
+    );
+    assert_eq!(
+        before_provider.concrete_call_summaries,
+        after_provider.concrete_call_summaries
+    );
+
+    let before_consumer = normal_interface_for(&before, "affected");
+    let after_consumer = normal_interface_for(&followed, "affected");
+    assert_eq!(
+        interface_fingerprint_content(before_consumer),
+        interface_fingerprint_content(after_consumer),
+        "a consumer that follows the same declaration through a renamed route keeps its own interface"
+    );
+    assert_eq!(
+        exported_constant_text(before_consumer, "rendered"),
+        "route",
+        "the consumer must fold the routed declaration value from the first build"
+    );
+    assert_eq!(
+        exported_constant_text(after_consumer, "rendered"),
+        "route",
+        "the consumer must fold the same routed declaration value after the route change"
+    );
+
+    assert_eq!(
+        interface_fingerprint_content(normal_interface_for(&before, "bystander")),
+        interface_fingerprint_content(normal_interface_for(&followed, "bystander")),
+        "a module outside the changed provider edge must keep an unchanged interface"
+    );
+}
+
+/// Compiles one member of the routed private-body family.
+fn compile_routed_private_body(body_line: &str) -> ProjectFrontendCompilation {
+    let provider = format!(
+        "$export @forms\nrender |label String| -> String:\n{body_line}    return label\n;\n"
+    );
+    compile_fixture(&[
+        ("src/shapes/@package.moth", provider.as_str()),
+        (
+            "src/consumer/@mod.moth",
+            "@shapes/forms render\n\n$export\nwrapped |label String| -> String:\n    return render(label)\n;\n",
+        ),
+        (
+            "src/@entry.moth",
+            "@consumer wrapped\n\n~[: [wrapped(\"ok\")] ]\n",
+        ),
+    ])
+}
+
+/// WHAT: editing only an exported function's private implementation body leaves the routed public
+///       interface and a consumer's canonical view equal, while the provider artefact really
+///       compiles different implementation work.
+/// WHY:  the provider public interface is the semantic consumer's reuse key. The added `io.line`
+///       demand proves the fixture changed the implementation rather than silently compiling the
+///       same body twice; it adds no call-summary trap, failure or fast-math bit.
+#[test]
+fn private_implementation_body_edit_preserves_the_routed_interface_and_consumer_view() {
+    let before = compile_routed_private_body("");
+    let after = compile_routed_private_body("    io.line(\"edited\")\n");
+
+    let before_provider = support_interface_with_route(&before, "forms", "render");
+    let after_provider = support_interface_with_route(&after, "forms", "render");
+    assert_eq!(
+        interface_fingerprint_content(before_provider),
+        interface_fingerprint_content(after_provider),
+        "a private implementation body must not change the routed provider interface"
+    );
+    assert_eq!(
+        interface_fingerprint_content(normal_interface_for(&before, "consumer")),
+        interface_fingerprint_content(normal_interface_for(&after, "consumer")),
+        "a semantic consumer of the unchanged provider interface must be reusable"
+    );
+
+    let before_provider_artifact = artifact_with_support_facade(&before, "shapes");
+    let after_provider_artifact = artifact_with_support_facade(&after, "shapes");
+    assert!(
+        !reachable_external_functions(before_provider_artifact)
+            .contains(&ExternalFunctionId::IoLine),
+        "the unchanged implementation must not demand io.line"
+    );
+    assert!(
+        reachable_external_functions(after_provider_artifact).contains(&ExternalFunctionId::IoLine),
+        "the edited implementation must publish its io.line demand"
+    );
+}
+
+/// One routed provider facade exporting every declaration category that must survive a route.
+const ROUTED_SHAPES_FACADE: &str = "$export @forms\nBox = |\n    value I32,\n|\n\npeek |this Box| -> I32:\n    return this.value + 1 catch then 0\n;\n\n$export @forms\ntwice type T |value T| -> T:\n    return value\n;\n\n$export @forms\nROUTE_LABEL #= \"route constant\"\n\n$export @forms\nwrap #|label String| -> String:\n    return label\n;\n\n$export @forms\nCrate as Box\n";
+
+/// One re-exporting facade that republishes the routed declarations under a second route and
+/// aliases their leaf names.
+const ROUTED_LIBRARY_FACADE: &str = "$export @mirror\n@shapes/forms Box as Crate, twice, ROUTE_LABEL, wrap as label, Crate as BoxAlias\n";
+
+/// Returns the export binding published at exactly `route` and `name`.
+fn route_binding<'a>(
+    interface: &'a PublicSemanticInterface,
+    route: &str,
+    name: &str,
+) -> &'a ExportBinding {
+    interface
+        .export_bindings
+        .iter()
+        .find(|binding| binding.route().as_str() == route && binding.public_name() == name)
+        .unwrap_or_else(|| panic!("expected {name:?} under route {route:?}"))
+}
+
+/// WHAT: a route is a published location, not part of the declaration. The provider and a
+///       re-exporting facade must publish one stable origin for each declaration, preserve nominal
+///       receiver surfaces, generic-template declarations, folded constants and leaf aliases.
+/// WHY:  consumer invalidation, generated instances and runtime linking key on these canonical
+///       facts. Runtime integration cases already execute the same categories; this asserts the
+///       canonical interface data that a cold execution case cannot observe.
+#[test]
+fn routed_declarations_publish_stable_origins_types_templates_receivers_constants_and_aliases() {
+    let frontend = compile_fixture(&[
+        ("src/shapes/@package.moth", ROUTED_SHAPES_FACADE),
+        ("src/library/@mod.moth", ROUTED_LIBRARY_FACADE),
+        (
+            "src/@entry.moth",
+            "@library/mirror Crate, twice, ROUTE_LABEL, label, BoxAlias\n\nitem Crate = Crate(2)\nmirrored = twice(\"twice\")\naliased BoxAlias = Crate(3)\ntext = label(\"ok\")\n\n~[: [mirrored] [ROUTE_LABEL] [text] [item.peek()] [aliased.value] ]\n",
+        ),
+    ]);
+
+    let provider = support_interface_with_route(&frontend, "forms", "Box");
+    assert!(
+        provider
+            .export_bindings
+            .iter()
+            .all(|binding| binding.route().as_str() == "forms"),
+        "every provider declaration is routed; no root binding may leak from the nested route"
+    );
+
+    let box_binding = route_binding(provider, "forms", "Box");
+    let OriginDeclarationId::Type(box_origin) = box_binding.origin() else {
+        panic!("Box must publish a type origin");
+    };
+    assert_eq!(box_origin.defining_name(), "Box");
+    assert_eq!(box_origin.category(), OriginTypeCategory::Struct);
+    let box_declaration = provider
+        .declaration(box_binding.origin())
+        .expect("the routed type binding must join its declaration record");
+    let PublicDeclarationSemantics::Struct(structure) = &box_declaration.semantics else {
+        panic!("Box must retain struct semantics under its route");
+    };
+    assert_eq!(structure.fields.len(), 1);
+    assert_eq!(
+        structure.receiver_methods.len(),
+        1,
+        "the receiver method must travel with its exported type"
+    );
+    let peek = &structure.receiver_methods[0];
+    assert_eq!(peek.method_origin.defining_name(), "peek");
+    assert!(
+        peek.method_origin.receiver().is_some(),
+        "the receiver surface must retain its receiver identity"
+    );
+
+    let twice_binding = route_binding(provider, "forms", "twice");
+    let twice_declaration = provider
+        .declaration(twice_binding.origin())
+        .expect("the routed generic declaration must publish a record");
+    let PublicDeclarationSemantics::Function(twice) = &twice_declaration.semantics else {
+        panic!("twice must retain function semantics under its route");
+    };
+    let PublicFunctionCategory::GenericTemplate(template) = &twice.category else {
+        panic!("twice must remain a generic template under its route");
+    };
+    assert_eq!(template.generic_parameters.len(), 1);
+
+    let label_binding = route_binding(provider, "forms", "ROUTE_LABEL");
+    assert_eq!(
+        exported_constant_text(provider, "ROUTE_LABEL"),
+        "route constant",
+        "a routed constant must publish its fully folded value"
+    );
+    let OriginDeclarationId::Constant(label_origin) = label_binding.origin() else {
+        panic!("ROUTE_LABEL must publish a constant origin");
+    };
+    assert_eq!(label_origin.defining_name(), "ROUTE_LABEL");
+
+    let wrap_binding = route_binding(provider, "forms", "wrap");
+    assert_eq!(wrap_binding.origin().defining_name(), "wrap");
+    let crate_alias_binding = route_binding(provider, "forms", "Crate");
+    let OriginDeclarationId::Type(crate_alias_origin) = crate_alias_binding.origin() else {
+        panic!("the transparent alias must publish a type origin");
+    };
+    assert_eq!(
+        crate_alias_origin.category(),
+        OriginTypeCategory::TransparentAlias
+    );
+
+    // The re-exporter publishes its own route and leaf aliases, but must not manufacture new
+    // declaration identities: every binding joins the provider-owned origin and semantics.
+    let library = normal_interface_with_route(&frontend, "mirror", "Crate");
+    assert_eq!(
+        box_binding.origin().module_origin(),
+        &provider.module_origin,
+        "the routed declaration origin must name the declaring provider module"
+    );
+    assert_ne!(
+        box_binding.origin().module_origin(),
+        &library.module_origin,
+        "the re-exporter must not rebase the origin onto its own module"
+    );
+    assert_eq!(
+        route_binding(library, "mirror", "Crate").origin(),
+        box_binding.origin(),
+        "a leaf alias must not change the routed type origin"
+    );
+    assert_eq!(
+        route_binding(library, "mirror", "label").origin(),
+        wrap_binding.origin(),
+        "a leaf alias must not change the routed function origin"
+    );
+    assert_eq!(
+        route_binding(library, "mirror", "ROUTE_LABEL").origin(),
+        label_binding.origin(),
+        "a re-export must not change the routed constant origin"
+    );
+    assert_eq!(
+        route_binding(library, "mirror", "twice").origin(),
+        twice_binding.origin()
+    );
+    assert_eq!(
+        route_binding(library, "mirror", "BoxAlias").origin(),
+        crate_alias_binding.origin(),
+        "a re-exported transparent alias keeps its authored origin"
+    );
+
+    let library_box = library
+        .declaration(box_binding.origin())
+        .expect("the re-exporter must join the provider's struct declaration");
+    let PublicDeclarationSemantics::Struct(library_structure) = &library_box.semantics else {
+        panic!("the re-exported type must retain struct semantics");
+    };
+    assert_eq!(
+        library_structure.receiver_methods.len(),
+        1,
+        "the re-exported type must retain its receiver surface"
+    );
+    let library_twice = library
+        .declaration(twice_binding.origin())
+        .expect("the re-exporter must join the provider's generic declaration");
+    let PublicDeclarationSemantics::Function(library_twice) = &library_twice.semantics else {
+        panic!("the re-exported generic must retain function semantics");
+    };
+    assert!(matches!(
+        library_twice.category,
+        PublicFunctionCategory::GenericTemplate(_)
+    ));
 }
 
 #[test]
@@ -1399,5 +1841,239 @@ fn public_receiver_method_constraint_bits_are_published() {
     assert!(
         !method_summary.may_trap && !method_summary.may_fail,
         "the ordinary method body must not publish trap or failure evidence"
+    );
+}
+
+/// Returns the published `(route, leaf)` bindings of one normal interface in publication order.
+///
+/// WHY: route bindings are ordered facts in the canonical public interface, so comparing the
+///      sequence catches provider-order drift that unordered set comparisons would hide.
+fn interface_route_bindings(interface: &PublicSemanticInterface) -> Vec<(String, String)> {
+    interface
+        .export_bindings
+        .iter()
+        .map(|binding| {
+            (
+                binding.route().as_str().to_owned(),
+                binding.public_name().to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// Returns every normal facade's route binding sequence in module identity order.
+fn published_route_bindings(frontend: &ProjectFrontendCompilation) -> Vec<Vec<(String, String)>> {
+    frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .filter_map(|artifact| artifact.normal_interface.as_ref())
+        .map(interface_route_bindings)
+        .collect()
+}
+
+/// WHAT: two builds of one routed project publish identical module identities, route binding
+///       sequences and facade interfaces, including when fixture files are created in reverse.
+/// WHY:  the Stage 0 facade route prepass and Stage 3 public-export publication must not depend on
+///       filesystem enumeration or source registration order. Reordered bindings would invalidate
+///       unrelated consumers and make route publication host-order dependent.
+#[test]
+fn namespaced_route_builds_are_deterministic_across_creation_order() {
+    let files = [
+        (
+            "src/@entry.moth",
+            "@alpha/forms left as alpha_left\n\
+             @zeta/mirror left as mirrored_left\n\
+             @alpha/forms as route_ns\n\n\
+             alpha = alpha_left(\"a\")\n\
+             mirrored = mirrored_left(\"m\")\n\
+             also = route_ns.also\n\
+             folded #I32 = 40 + 2\n\
+             [: folded=[folded] ]\n\
+             ~[: [alpha] [mirrored] [also] ]\n",
+        ),
+        (
+            "src/alpha/@mod.moth",
+            "$export @forms\n\
+             left #|value String| -> String:\n    return [:alpha:[value]]\n;\n\n\
+             $export @forms\n\
+             also #= \"also\"\n",
+        ),
+        ("src/zeta/@mod.moth", "$export @mirror\n@inner/forms left\n"),
+        (
+            "src/zeta/inner/@mod.moth",
+            "$export @forms\n\
+             left #|value String| -> String:\n    return [:inner:[value]]\n;\n",
+        ),
+        (
+            "src/omega/@mod.moth",
+            "$export @forms\n\
+             left #|value String| -> String:\n    return [:omega:[value]]\n;\n",
+        ),
+    ];
+    let mut reversed = files.to_vec();
+    reversed.reverse();
+
+    let first = compile_template_fixture(&files);
+    let second = compile_template_fixture(&reversed);
+    let repeat = compile_template_fixture(&files);
+
+    let stable_origins = |frontend: &ProjectFrontendCompilation| -> Vec<_> {
+        frontend
+            .project
+            .structure
+            .nodes()
+            .iter()
+            .map(|node| node.stable_origin().clone())
+            .collect()
+    };
+    assert_eq!(
+        stable_origins(&first),
+        stable_origins(&second),
+        "module graph identities must not depend on source creation order"
+    );
+    assert_eq!(
+        stable_origins(&first),
+        stable_origins(&repeat),
+        "a repeated build must reproduce module graph identities"
+    );
+
+    let interfaces = |frontend: &ProjectFrontendCompilation| -> Vec<_> {
+        frontend
+            .project
+            .successful_artefacts_in_module_id_order()
+            .map(|artifact| {
+                (
+                    artifact
+                        .normal_interface
+                        .as_ref()
+                        .map(interface_fingerprint_content),
+                    artifact
+                        .support_interface
+                        .as_ref()
+                        .map(interface_fingerprint_content),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(
+        interfaces(&first),
+        interfaces(&second),
+        "facade interfaces, including ordered route bindings, must repeat exactly"
+    );
+    assert_eq!(
+        interfaces(&first),
+        interfaces(&repeat),
+        "a repeated build must reproduce every facade interface"
+    );
+
+    let first_routes = published_route_bindings(&first);
+    assert!(
+        first_routes
+            .iter()
+            .flatten()
+            .any(|(route, leaf)| { route == "forms" && leaf == "left" })
+            && first_routes
+                .iter()
+                .flatten()
+                .any(|(route, leaf)| route == "mirror" && leaf == "left"),
+        "the fixture must publish the same leaf through two routes: {first_routes:?}"
+    );
+    let forms_left_facades = first_routes
+        .iter()
+        .filter(|bindings| {
+            bindings
+                .iter()
+                .any(|(route, leaf)| route == "forms" && leaf == "left")
+        })
+        .count();
+    assert_eq!(
+        forms_left_facades, 3,
+        "alpha, omega and zeta/inner must all publish `forms/left`: {first_routes:?}"
+    );
+
+    assert_eq!(
+        entry_folded_output(&first),
+        " folded=42 ",
+        "the fixture must publish a non-empty const-folded entry fragment"
+    );
+    assert_eq!(
+        entry_folded_output(&first),
+        entry_folded_output(&second),
+        "folded entry content must not depend on creation order"
+    );
+    assert_eq!(
+        entry_folded_output(&first),
+        entry_folded_output(&repeat),
+        "folded entry content must repeat across builds"
+    );
+}
+
+/// WHAT: independent case-conflicting public routes in two facades report the same typed
+///       diagnostic, sites and terse text on repeated compilations and when fixture files are
+///       created in reverse order.
+/// WHY:  route conflicts are discovered by the eager Stage 0 prepass, which must pick and label a
+///       conflict deterministically rather than follow filesystem discovery order.
+#[test]
+fn namespaced_route_diagnostics_are_deterministic_across_creation_order() {
+    let files = [
+        ("src/@entry.moth", "[:entry]\n"),
+        (
+            "src/alpha/@mod.moth",
+            "$export @forms\nvalue #= 1\n$export @Forms\nother #= 2\n",
+        ),
+        (
+            "src/zeta/@mod.moth",
+            "$export @cards\nvalue #= 1\n$export @Cards\nother #= 2\n",
+        ),
+    ];
+    let mut reversed = files.to_vec();
+    reversed.reverse();
+
+    let diagnosed_reports =
+        |files: &[(&str, &str)]| match compile_fixture_result(files, false, BuildProfile::Dev) {
+            Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+            Ok(CompilationOutcome::Success { .. }) => {
+                panic!("a case-conflicting public route must be rejected")
+            }
+            Err(errors) => {
+                panic!("source route conflicts must not reach infrastructure errors: {errors:?}")
+            }
+        };
+
+    let first = diagnosed_reports(&files);
+    let second = diagnosed_reports(&reversed);
+    let repeat = diagnosed_reports(&files);
+    assert!(
+        first
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| view.descriptor().code == "MOTH-RULE-0092"),
+        "the fixture must retain the typed case-conflict diagnostic"
+    );
+    assert_eq!(
+        first.counts(),
+        second.counts(),
+        "reversed creation order must retain identical diagnostic counts"
+    );
+    assert_eq!(
+        first.counts(),
+        repeat.counts(),
+        "a repeated compilation must retain identical diagnostic counts"
+    );
+    let first_rendered = terse::format_terse_diagnostic_reports(&first);
+    assert_eq!(
+        first_rendered,
+        terse::format_terse_diagnostic_reports(&second),
+        "canonical diagnostic text must not depend on source creation order"
+    );
+    assert_eq!(
+        first_rendered,
+        terse::format_terse_diagnostic_reports(&repeat),
+        "canonical diagnostic text must repeat across compilations"
+    );
+    assert!(
+        first
+            .iter_severity(DiagnosticSeverity::Error)
+            .all(|(_, view)| view.descriptor().code.starts_with("MOTH-")),
+        "every route-conflict failure must be a typed user diagnostic"
     );
 }

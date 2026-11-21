@@ -4,6 +4,10 @@ $export @forms
 button #|label String| -> String:
     return [:button:[label]:[suffix]]
 ;
+$export @forms
+badge #|label String| -> String:
+    return [:badge:[label]:[suffix]]
+;
 $export @forms/validation
 safe_form #|value String| -> String:
     return [:safe:[value]]

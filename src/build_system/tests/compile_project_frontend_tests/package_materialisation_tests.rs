@@ -326,27 +326,55 @@ fn compile_registered_packages_project(
 
 #[test]
 fn canonical_mode_compiles_facade_only_project_as_package_assembly() {
-    let frontend = compile_fixture(&[("@package.moth", "$export\nlabel #= \"facade\"\n")]);
+    let frontend = compile_fixture(&[(
+        "@package.moth",
+        "$export @forms\nlabel #= \"facade\"\n$export @forms/deep\nvalue #= 1\n$export\nroot_label #= \"root\"\n",
+    )]);
     assert!(
         frontend.project.structure.entry_modules().is_empty(),
         "a project with no @entry.moth must select no entries"
     );
+    let facade = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .next()
+        .expect("the project package facade must still compile");
     assert!(
-        frontend
-            .project
-            .successful_artefacts_in_module_id_order()
-            .next()
-            .is_some(),
-        "the project package facade must still compile"
+        facade.module.executable.hir.start_function.is_none(),
+        "an API-only facade with nested routes must own no executable entry"
+    );
+    assert!(
+        facade.module.metadata.entry.is_none(),
+        "an API-only facade with nested routes must not publish entry metadata"
     );
 
     let compilation = crate::build_system::build::ProjectCompilation::from_frontend(frontend)
         .expect("an entryless facade project should assemble without an entry");
 
     assert_eq!(compilation.entry_count(), 0);
-    assert!(
-        compilation.package_assembly().is_some(),
-        "the project package surface should be exposed as ProjectPackageAssembly"
+    let assembly = compilation
+        .package_assembly()
+        .expect("the project package surface should be exposed as ProjectPackageAssembly");
+    let mut exported_bindings = assembly
+        .facade_interface(&compilation)
+        .export_bindings
+        .iter()
+        .map(|binding| {
+            (
+                binding.route().as_str().to_owned(),
+                binding.public_name().to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    exported_bindings.sort();
+    assert_eq!(
+        exported_bindings,
+        [
+            (String::new(), "root_label".to_owned()),
+            ("forms".to_owned(), "label".to_owned()),
+            ("forms/deep".to_owned(), "value".to_owned()),
+        ],
+        "the package surface must publish the root and nested route bindings exactly"
     );
 }
 
@@ -403,10 +431,13 @@ fn registered_triple_root_package_keeps_its_entry_dormant() {
         "builder/test/triplepkg",
         &[
             ("@mod.moth", "$export\nnormal_label #= \"normal\"\n"),
-            ("@package.moth", "$export\nsupport_label #= \"support\"\n"),
+            (
+                "@package.moth",
+                "$export @widgets\nsupport_value #= \"support\"\n$export\nsupport_label #= \"support\"\n",
+            ),
             ("@entry.moth", "package_runtime ~= 1\n"),
         ],
-        "@builder/test/triplepkg support_label\n~[:[support_label]]\n",
+        "@builder/test/triplepkg support_label\n@builder/test/triplepkg/widgets support_value\n\n~[:[support_label] [support_value]]\n",
     ));
     assert_eq!(frontend.source_packages.len(), 3);
     let package = frontend
@@ -423,6 +454,15 @@ fn registered_triple_root_package_keeps_its_entry_dormant() {
     assert!(
         artifact.normal_interface.is_some(),
         "the triple-root package keeps its normal facade"
+    );
+    assert!(
+        artifact
+            .support_interface
+            .as_ref()
+            .is_some_and(|interface| interface.export_bindings.iter().any(|binding| {
+                binding.route().as_str() == "widgets" && binding.public_name() == "support_value"
+            })),
+        "the package support facade must publish its nested route beside the dormant entry"
     );
     assert!(
         artifact.support_interface.is_some(),
@@ -785,6 +825,157 @@ fn registered_source_package_route_selects_root_facade_and_internal_child_route(
 }
 
 #[test]
+fn route_under_an_ambiguous_base_reports_the_base_collision() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // Both support facades share the consumer-relative base `forms`. Only one `CrossModule` row
+    // can remain in the entry table, so the second facade's route must still participate in
+    // ambiguity: `@forms/y` names a real route on the discarded claimant, not an undeclared path.
+    let result = compile_fixture_result(
+        &[
+            ("src/@entry.moth", "@forms/y value\n\n~[:[value]]\n"),
+            ("src/@mod.moth", ""),
+            ("src/a/forms/@package.moth", "$export @x\nvalue #= 1\n"),
+            ("src/b/forms/@package.moth", "$export @y\nvalue #= 2\n"),
+        ],
+        false,
+        BuildProfile::Dev,
+    );
+    let (primary, related) = diagnostic_sites(&result, "MOTH-IMPORT-0006");
+    assert!(
+        primary.0.ends_with("@entry.moth"),
+        "the consumer clause owns the ambiguous-base diagnostic: {primary:?}"
+    );
+    assert_eq!((primary.1, primary.2), (0, 0));
+    assert!(
+        related.is_none(),
+        "an ambiguous facade base has no single authored competing site"
+    );
+}
+
+#[test]
+fn ambiguous_base_route_overlapping_a_local_source_is_rejected_eagerly() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // The retained `forms` facade publishes `x`; the discarded claimant publishes `cards`, which
+    // is also a real local source. Route planning must see both claimants and reject the local
+    // overlap even though no dependency names `@forms/cards`.
+    let result = compile_fixture_result(
+        &[
+            ("src/@entry.moth", "@forms/cards value\n\n~[:[value]]\n"),
+            ("src/@mod.moth", ""),
+            ("src/forms/cards.moth", "value #= 1\n"),
+            ("src/a/forms/@package.moth", "$export @x\nvalue #= 2\n"),
+            ("src/b/forms/@package.moth", "$export @cards\nvalue #= 3\n"),
+        ],
+        false,
+        BuildProfile::Dev,
+    );
+    let (primary, related) = diagnostic_sites(&result, "MOTH-IMPORT-0006");
+    assert!(
+        primary.0.ends_with("b/forms/@package.moth"),
+        "the discarded claimant's route operand owns the eager collision: {primary:?}"
+    );
+    assert_eq!((primary.1, primary.2), (0, 8));
+    assert!(
+        related.is_none(),
+        "the local source is named through the diagnostic path, not a related package site"
+    );
+}
+
+#[test]
+fn deeper_route_under_an_ambiguous_base_does_not_reject_a_distinct_local_source() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // The ambiguous facades publish the deeper route `forms/x/y`, but the project imports only
+    // its own `forms/x` source. The route must stay ambiguous without colliding with the
+    // ancestor local key; ancestor overlap is not the local dependency lookup rule.
+    let frontend = compile_fixture(&[
+        ("src/@entry.moth", "@forms/x value\n\n[: [value] ]\n"),
+        ("src/@mod.moth", ""),
+        ("src/forms/x.moth", "value #= \"local\"\n"),
+        (
+            "src/a/forms/@package.moth",
+            "$export @x/y\nvalue #= \"route\"\n",
+        ),
+        ("src/b/forms/@package.moth", "$export\nvalue #= \"other\"\n"),
+    ]);
+    let folded = entry_folded_output(&frontend);
+    assert!(
+        folded.contains("local"),
+        "the distinct local provider must remain importable and fold its own value: {folded:?}"
+    );
+}
+
+#[test]
+fn paired_support_alias_collision_names_the_support_facade() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temporary = tempfile::tempdir().expect("should create temporary project");
+    let project_root = temporary.path().to_path_buf();
+    let package_root = project_root.join("packages/vendor/lib");
+    fs::create_dir_all(project_root.join("src/client")).expect("should create consumer module");
+    fs::create_dir_all(project_root.join("src/alt/vendor")).expect("should create paired module");
+    fs::create_dir_all(&package_root).expect("should create package root");
+    fs::write(
+        project_root.join("@config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write project config");
+    fs::write(project_root.join("src/@entry.moth"), "[:entry]\n")
+        .expect("should write project entry");
+    fs::write(project_root.join("src/@mod.moth"), "").expect("should write project module root");
+    fs::write(
+        project_root.join("src/client/@mod.moth"),
+        "$export\nclient_label #= \"client\"\n",
+    )
+    .expect("should write sibling consumer");
+    // The paired module publishes both surfaces under one structural identity. The sibling sees
+    // only the support alias `vendor`, so the collision site must be the support facade rather
+    // than the normal root selected first by identity order.
+    fs::write(
+        project_root.join("src/alt/vendor/@mod.moth"),
+        "$export\nnormal_label #= \"normal\"\n",
+    )
+    .expect("should write paired normal facade");
+    fs::write(
+        project_root.join("src/alt/vendor/@package.moth"),
+        "$export\nsupport_label #= \"support\"\n",
+    )
+    .expect("should write paired support facade");
+    fs::write(
+        package_root.join("@package.moth"),
+        "$export @published\nvalue #= 1\n",
+    )
+    .expect("should write routed package facade");
+
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("vendor/lib", package_root, PackageOrigin::ProjectLocal)
+        .expect("the package root should register");
+
+    let mut config = Config::new(project_root.join("src"));
+    config.project_name = "docs".to_owned();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let result = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+    );
+    let (primary, related) = diagnostic_sites(&result, "MOTH-IMPORT-0006");
+    assert!(
+        primary.0.ends_with("alt/vendor/@package.moth"),
+        "the support facade that published `vendor` owns the collision site: {primary:?}"
+    );
+    assert_eq!((primary.1, primary.2), (0, 0));
+    assert!(
+        related.is_none(),
+        "the package operand is reported through its own source context, not as a related project site"
+    );
+}
+
+#[test]
 fn registered_source_package_route_unexported_leaf_reports_selection_site() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let result = compile_registered_package_project(
@@ -998,6 +1189,49 @@ fn registered_source_package_case_only_route_conflict_reports_both_sites() {
 }
 
 #[test]
+fn package_case_conflict_precedes_consumer_route_ambiguity() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // The package root imports `@forms/x`; two support facades share the basename `forms`.
+    // One facade has a same-facade `@x`/`@X` conflict, so its MOTH-RULE-0092 must be the package
+    // boundary's prepass failure. Deferring it would let the healthy facade make `forms/x`
+    // ambiguous and the root walk would report MOTH-IMPORT-0006 first.
+    let result = compile_registered_package_project(
+        "builder/test/routecase",
+        &[
+            ("@package.moth", "$export\nroot_label #= \"root\"\n"),
+            (
+                "@mod.moth",
+                "@forms/x value\n$export\npackage_value #= value\n",
+            ),
+            (
+                "a/forms/@package.moth",
+                "$export @x\nvalue #= 1\n$export @X\nother #= 2\n",
+            ),
+            ("b/forms/@package.moth", "$export @x\nvalue #= 3\n"),
+        ],
+        "@builder/test/routecase root_label\n~[:[root_label]]\n",
+    );
+    let (primary, related) = diagnostic_sites(&result, "MOTH-RULE-0092");
+    assert!(
+        primary.0.ends_with("a/forms/@package.moth"),
+        "the conflicting facade owns the diagnostic: {primary:?}"
+    );
+    let related = related.expect("case-only route conflict retains both operand sites");
+    assert!(related.0.ends_with("a/forms/@package.moth"), "{related:?}");
+    assert_eq!((primary.2, related.2), (8, 8));
+    let mut lines = [primary.1, related.1];
+    lines.sort_unstable();
+    assert_eq!(lines, [0, 2], "both authored route operands must be named");
+    let reports = super::super::create_project_modules_tests::diagnosed_reports(&result);
+    assert!(
+        !reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, diagnostic)| diagnostic.descriptor().code == "MOTH-IMPORT-0006"),
+        "consumer route ambiguity must not mask the package route conflict"
+    );
+}
+
+#[test]
 fn package_internal_route_colliding_with_binding_package_is_rejected() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temporary = tempfile::tempdir().expect("should create temporary project");
@@ -1151,48 +1385,6 @@ fn package_route_overlapping_another_registered_prefix_reports_namespace_collisi
     assert!(
         related.is_none(),
         "a registered-prefix collision names the route operand as the only authored site"
-    );
-}
-
-#[test]
-fn project_package_facade_publishes_route_interface_facts() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let frontend = compile_fixture(&[(
-        "@package.moth",
-        "$export @forms\n\
-         button #|label String| -> String:\n    \
-             return [:button:[label]]\n;\n\n\
-         $export\n\
-         root_label #= \"root\"\n",
-    )]);
-    let compilation =
-        ProjectCompilation::from_frontend(frontend).expect("the project package should assemble");
-    let assembly = compilation
-        .package_assembly()
-        .expect("a project-root @package.moth should publish the package assembly");
-    let interface = assembly.facade_interface(&compilation);
-    let route =
-        crate::compiler_frontend::semantic_identity::PublicExportRoute::from_canonical_spelling(
-            "forms".to_owned(),
-        );
-    assert!(
-        interface
-            .export_bindings
-            .iter()
-            .any(|binding| { binding.route() == &route && binding.public_name() == "button" }),
-        "the project package facade must publish its routed binding: {:?}",
-        interface
-            .export_bindings
-            .iter()
-            .map(|binding| (binding.route(), binding.public_name()))
-            .collect::<Vec<_>>()
-    );
-    assert!(
-        interface
-            .export_bindings
-            .iter()
-            .any(|binding| { binding.route().is_root() && binding.public_name() == "root_label" }),
-        "the project package facade keeps its root binding"
     );
 }
 

@@ -829,7 +829,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             // A bare namespace import names exactly the requested route's direct members. A root
             // request keeps the facade's root surface, and a nested request never exposes root,
             // deeper or sibling route members through the same shallow record.
-            if binding.route() != &requested_route {
+            if binding.route() != requested_route {
                 continue;
             }
             let declaration = view.declaration(binding.origin()).ok_or_else(|| {
@@ -914,7 +914,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         for binding in &interface.binding_exports {
-            if binding.route != requested_route {
+            if &binding.route != requested_route {
                 continue;
             }
             let Some(symbol_id) = self
@@ -1160,7 +1160,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 continue;
             }
             let Some(origin) = view
-                .exported_origin(&PublicExportRoute::ROOT, binding.public_name())
+                .exported_origin(binding.route(), binding.public_name())
                 .cloned()
             else {
                 continue;
@@ -1516,7 +1516,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 selection.source_name,
                 &selected_path,
                 selection,
-                &resolved_clause.route,
+                resolved_clause.route,
             );
         }
 
@@ -1787,7 +1787,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 } => {
                     let resolved_clause = self
                         .source_provider_dependencies
-                        .resolve_reexport(provider_selection.shell)
+                        .resolve_clause(provider_selection.shell)
                         .ok_or_else(|| {
                             InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                                 "public provider selection {:?} has no resolved provider for diagnostic path {:?}",
@@ -1799,7 +1799,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         provider_source_name,
                         selected_path,
                         selection,
-                        &resolved_clause.route,
+                        resolved_clause.route,
                     );
                 }
                 PublicExportLookupResult::ExportedExternal { symbol_id } => {

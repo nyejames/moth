@@ -4,22 +4,6 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 #[test]
 fn export_routes_survive_non_identity_path_remapping_and_source_rebinding() {
-    use crate::compiler_frontend::style_directives::{
-        PublicExportRouteOperand, SourceDirectiveKind, SourceDirectiveOperand,
-    };
-
-    fn export_annotation_route(header: &Header) -> &PublicExportRouteOperand {
-        header
-            .source_directives
-            .iter()
-            .find(|annotation| annotation.kind == SourceDirectiveKind::Export)
-            .and_then(|annotation| match &annotation.operand {
-                SourceDirectiveOperand::PublicRoute(route) => Some(route),
-                SourceDirectiveOperand::None | SourceDirectiveOperand::Expression(_) => None,
-            })
-            .expect("the declaration annotation retains its route")
-    }
-
     let source = "$export @tables/layout\nButton = | label String |\n$export @forms\n@button Button, render as render_button\n";
     let canonical = PathBuf::from("src/@mod.moth");
     let mut strings = StringTable::new();
@@ -133,12 +117,6 @@ fn export_routes_survive_non_identity_path_remapping_and_source_rebinding() {
     );
     assert_eq!(render_components(clause_route.path), ["forms"]);
 
-    let annotation_route = export_annotation_route(declaration);
-    assert_eq!(
-        annotation_route.path, declaration_route.path,
-        "the annotation route and export mode must follow one path remap"
-    );
-
     drop(sources);
     let final_sources = SourceDatabase::build(
         [&PathBuf::from("a-earlier.moth"), &canonical],
@@ -178,8 +156,6 @@ fn export_routes_survive_non_identity_path_remapping_and_source_rebinding() {
         .expect("the clause route survives rebinding");
     assert_eq!(declaration_route.span.source(), final_id);
     assert_eq!(clause_route.span.source(), final_id);
-    let annotation_route = export_annotation_route(declaration);
-    assert_eq!(annotation_route.span, declaration_route.span);
 
     let mut database = SourceDatabaseBuilder::new(final_sources);
     database
@@ -199,7 +175,6 @@ fn export_routes_survive_non_identity_path_remapping_and_source_rebinding() {
         &source[range.start() as usize..range.end() as usize]
     };
     assert_eq!(resolve(declaration_route.span), "@tables/layout");
-    assert_eq!(resolve(annotation_route.span), "@tables/layout");
     assert_eq!(resolve(clause_route.span), "@forms");
 }
 

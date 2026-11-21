@@ -292,12 +292,12 @@ fn planned_route(key: &str, facade: usize, surface: ModuleRootRole) -> PlannedRo
                 .unwrap_or(key)
                 .to_owned(),
         ),
-        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+        span: SourceSpan::new(SourceId::from_index(facade + 1), LocalSpan::source_start()),
     }
 }
 
 #[test]
-fn route_planning_classifies_exact_and_case_only_entry_collisions() {
+fn route_planning_rejects_exact_and_case_only_entry_collisions() {
     let mut entries = BTreeMap::new();
     entries.insert("child/forms".to_owned(), cross_module_entry(1));
 
@@ -308,12 +308,14 @@ fn route_planning_classifies_exact_and_case_only_entry_collisions() {
             &[],
         )
         .expect("a route folding onto a namespace entry must collide");
-        assert_eq!(collision.kind, RouteCollisionKind::ExistingNamespaceEntry);
+        assert_eq!(collision.route_key, route_key);
+        assert_eq!(collision.span.source(), SourceId::from_index(1));
+        assert!(collision.related_span.is_none());
     }
 }
 
 #[test]
-fn route_planning_classifies_distinct_facade_collisions() {
+fn route_planning_rejects_distinct_facade_collisions() {
     let collision = first_route_collision(
         &[
             planned_route("a/b/c", 0, ModuleRootRole::Support),
@@ -323,18 +325,28 @@ fn route_planning_classifies_distinct_facade_collisions() {
         &[],
     )
     .expect("two facades publishing one folded route must collide");
-    assert_eq!(collision.kind, RouteCollisionKind::FacadeRoute);
+    assert_eq!(collision.route_key, "a/b/c");
+    assert_eq!(collision.span.source(), SourceId::from_index(2));
+    assert_eq!(
+        collision
+            .related_span
+            .expect("the competing facade keeps its authored site")
+            .source(),
+        SourceId::from_index(1)
+    );
 }
 
 #[test]
-fn route_planning_classifies_source_package_prefix_collisions() {
+fn route_planning_rejects_source_package_prefix_collisions() {
     let collision = first_route_collision(
         &[planned_route("a/b", 0, ModuleRootRole::Support)],
         &BTreeMap::new(),
         &["a/b"],
     )
     .expect("a route overlapping a source-package prefix must collide");
-    assert_eq!(collision.kind, RouteCollisionKind::SourcePackage);
+    assert_eq!(collision.route_key, "a/b");
+    assert_eq!(collision.span.source(), SourceId::from_index(1));
+    assert!(collision.related_span.is_none());
 }
 
 #[test]
@@ -371,16 +383,27 @@ fn route_planning_marks_route_keys_under_an_ambiguous_base_as_ambiguous() {
     let mut namespace = ModuleNamespace::new();
     namespace.insert("forms".to_owned(), cross_module_entry(0));
     namespace.insert("forms".to_owned(), cross_module_entry(1));
-    let routes = FacadeRouteIndex::from_claims([(
-        ModuleId::from_index(0),
-        ModuleRootRole::Normal,
-        PublicExportRoute::from_canonical_spelling("x".to_owned()),
-    )]);
+    let routes = FacadeRouteIndex::from_claims([
+        (
+            ModuleId::from_index(0),
+            ModuleRootRole::Normal,
+            PublicExportRoute::from_canonical_spelling("x".to_owned()),
+        ),
+        (
+            ModuleId::from_index(1),
+            ModuleRootRole::Normal,
+            PublicExportRoute::from_canonical_spelling("y".to_owned()),
+        ),
+    ]);
 
     let (planned, ambiguous) = planned_route_entries(&namespace, &routes);
     assert!(
         planned.is_empty(),
         "no route under an ambiguous base may publish a selectable entry"
     );
-    assert_eq!(ambiguous, vec!["forms/x".to_owned()]);
+    assert_eq!(
+        ambiguous.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["forms/x", "forms/y"],
+        "the discarded claimant's route must stay ambiguous too"
+    );
 }

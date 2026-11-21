@@ -702,12 +702,18 @@ pub(crate) fn build_source_package_dependency_index(
                 shell_id
             );
         }
-        if index.insert(key, dependency_index).is_some() {
+        if let Some(previous_index) = index.insert(key, dependency_index) {
+            // One authored clause names one package surface, so a duplicate consumer/shell key
+            // means the same selection was resolved twice. Name both routes so the invariant
+            // failure identifies which surface held the slot.
+            let previous_route = &source_package_dependencies[previous_index].route;
             crate::compiler_bug!(
                 CompilerStage::ProjectBuildAssembly,
-                "ModuleId {} resolved dependency shell {:?} to more than one source-package dependency",
+                "ModuleId {} resolved dependency shell {:?} to more than one source-package dependency (routes {:?} and {:?})",
                 package_dependency.consumer_module_id.index(),
-                shell_id
+                shell_id,
+                previous_route.as_str(),
+                package_dependency.route.as_str()
             );
         }
     }

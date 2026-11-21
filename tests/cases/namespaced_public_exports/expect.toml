@@ -3,4 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "primary=button:go:private safe=safe:ok mirror=widget:re shared=field root=root bare=button:bare:private parent=root expression=button:expr:private"
+rendered_output_exact = "primary=button:go:private badge=badge:go:private safe=safe:ok mirror=widget:re alternate=widget:re shared=field root=root bare=button:bare:private parent=root expression=button:expr:private mtf=<p>button:mtf:private</p>"

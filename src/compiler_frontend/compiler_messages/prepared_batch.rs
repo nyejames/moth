@@ -341,6 +341,16 @@ impl PreparedDiagnosticBatch {
         self.prepared.len()
     }
 
+    /// Whether this batch retains a diagnostic with `code`.
+    ///
+    /// WHY: a boundary must distinguish a source diagnostic it can defer to its ordinary walk
+    ///      from a facade-publication diagnostic that no consumer lookup may mask.
+    pub(crate) fn contains_code(&self, code: &str) -> bool {
+        self.prepared
+            .iter()
+            .any(|diagnostic| diagnostic.code() == code)
+    }
+
     /// Why optional diagnostic discovery stopped for this batch's owner.
     ///
     /// WHAT: the union of stop reasons recorded before the owner captured this batch.

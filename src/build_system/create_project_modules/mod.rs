@@ -52,7 +52,7 @@
 mod compilation;
 pub(crate) mod compiled_boundary;
 mod config_boundary;
-pub(crate) mod facade_route_prepass;
+mod facade_route_prepass;
 pub(crate) mod file_reference_resolution;
 pub(crate) mod generated_store;
 pub(crate) mod module_artifact_store;

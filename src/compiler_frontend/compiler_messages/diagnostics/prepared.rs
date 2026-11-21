@@ -33,6 +33,11 @@ impl PreparedDiagnostic {
         self.draft.severity()
     }
 
+    /// The stable diagnostic code retained by this prepared row.
+    pub(crate) fn code(&self) -> &'static str {
+        self.draft.code()
+    }
+
     pub(crate) fn append_type_paths(
         &self,
         paths: &mut Vec<crate::compiler_frontend::symbols::path_interner::PathId>,

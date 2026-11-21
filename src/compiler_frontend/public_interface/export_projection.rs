@@ -301,7 +301,7 @@ fn collect_binding_exports<'a>(
                 ..
             } => {
                 let resolved_clause = source_provider_dependencies
-                    .resolve_reexport(dependency_selection.shell)
+                    .resolve_clause(dependency_selection.shell)
                     .ok_or_else(|| {
                         InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                             "binding re-export construction: provider selection {:?} has no resolved provider",
@@ -311,7 +311,7 @@ fn collect_binding_exports<'a>(
                 let selected_name_text = string_table.resolve(*selected_name);
                 let view = source_provider_dependencies.binding_view(resolved_clause.provider)?;
                 let Some(binding) = view
-                    .binding_export(&resolved_clause.route, selected_name_text)
+                    .binding_export(resolved_clause.route, selected_name_text)
                 else {
                     // Source-backed provider exports are projected by the ordinary re-export
                     // path below; this collector owns only binding-backed public exports.
@@ -969,7 +969,7 @@ fn collect_one_reexport_binding<'a>(
     if let Some((dependency_selection, selected_name)) = provider_selection {
         let resolved_clause = context
             .source_provider_dependencies
-            .resolve_reexport(dependency_selection.shell)
+            .resolve_clause(dependency_selection.shell)
             .ok_or_else(|| {
                 InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "re-export binding construction: provider selection {:?} has no resolved provider",
@@ -986,11 +986,11 @@ fn collect_one_reexport_binding<'a>(
         // The provider-side route is the authored clause's route beneath the provider facade;
         // the re-exporter's own `$export` route only decides where this binding publishes.
         let Some(provider_origin) = view
-            .exported_origin(&resolved_clause.route, selected_name_text)
+            .exported_origin(resolved_clause.route, selected_name_text)
             .cloned()
         else {
             if view
-                .binding_export(&resolved_clause.route, selected_name_text)
+                .binding_export(resolved_clause.route, selected_name_text)
                 .is_some()
             {
                 return Ok(());
@@ -1014,7 +1014,7 @@ fn collect_one_reexport_binding<'a>(
                 provider_origin,
             ),
             provenance: view
-                .export_diagnostic_provenance(&resolved_clause.route, selected_name_text),
+                .export_diagnostic_provenance(resolved_clause.route, selected_name_text),
         });
         return Ok(());
     }

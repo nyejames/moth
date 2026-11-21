@@ -439,8 +439,9 @@ fn walk_reachable_sources(
 
         {
             // Clauses and expression-qualified occurrences share the same synthetic provider
-            // closure: a per-file resolution cache keys on the retained path so a second
-            // occurrence of one provider cannot repeat provider invocation or filesystem work.
+            // closure: a per-file resolution cache keys on the retained path and clause kind so a
+            // repeated provider cannot repeat provider invocation or filesystem work, while one
+            // path used by different clause kinds keeps each policy outcome distinct.
             let mut reachable_queue = ReachableQueue { reachable, queue };
             let mut resolved_by_path = FxHashMap::default();
             let mut context = ReachableDependencyContext {
@@ -613,9 +614,10 @@ fn process_reachable_authored_dependency(
     path_fork: &mut PathInternerFork,
     reachable_queue: &mut ReachableQueue<'_>,
     source_package_dependencies: &mut Vec<ResolvedSourcePackageDependency>,
-    resolved_by_path: &mut FxHashMap<PathId, SyntheticDependencyResolution>,
+    resolved_by_path: &mut FxHashMap<(PathId, DependencyClauseKind), SyntheticDependencyResolution>,
 ) -> Result<(), SourceDiscoveryError> {
-    let resolution = match resolved_by_path.get(&provider.path) {
+    let resolution_key = (provider.path, clause_kind);
+    let resolution = match resolved_by_path.get(&resolution_key) {
         Some(resolution) => resolution.clone(),
         None => {
             let action = context.policy.handle_dependency(
@@ -693,7 +695,7 @@ fn process_reachable_authored_dependency(
                     }
                 }
             };
-            resolved_by_path.insert(provider.path, resolution.clone());
+            resolved_by_path.insert(resolution_key, resolution.clone());
             resolution
         }
     };

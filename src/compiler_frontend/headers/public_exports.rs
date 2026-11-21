@@ -42,12 +42,8 @@ use crate::compiler_frontend::headers::binding_environment::{
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleRootBoundary, ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
-use crate::compiler_frontend::headers::public_export_route_conflicts::{
-    CaseFoldedRouteIndex, CaseRouteClaim, RouteClaimOrder, fold_route_spelling,
-};
 use crate::compiler_frontend::headers::types::{DependencySelection, Header, HeaderParseFailure};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::project_globals::is_project_globals_dependency;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
@@ -264,7 +260,6 @@ fn build_source_package_public_exports(
                     },
                     Some(name_span),
                     string_table,
-                    path_fork,
                 )?;
             }
         }
@@ -353,7 +348,6 @@ fn build_source_package_public_dependencies(
                                 .map_or(selection.source_span, |alias| alias.span),
                         ),
                         string_table,
-                        path_fork,
                     )?;
                 }
             }
@@ -437,7 +431,6 @@ fn build_module_root_public_exports_pass1(
                 },
                 Some(name_span),
                 string_table,
-                path_fork,
             )?;
         }
     }
@@ -553,7 +546,6 @@ fn build_module_root_public_dependencies(
                             .map_or(selection.source_span, |alias| alias.span),
                     ),
                     string_table,
-                    path_fork,
                 )?;
             }
         }
@@ -599,10 +591,10 @@ fn resolve_public_export_dependency_or_provider(
             })?;
 
         if provider_view
-            .exported_origin(&provider_route, provider_name)
+            .exported_origin(provider_route, provider_name)
             .is_none()
             && provider_view
-                .binding_export(&provider_route, provider_name)
+                .binding_export(provider_route, provider_name)
                 .is_none()
         {
             let interface = source_provider_dependencies.interface(provider_id)?;
@@ -944,80 +936,38 @@ struct PublicExportKey {
     export_name: StringId,
 }
 
-/// Authored diagnostic sites retained alongside one facade's public export entries.
+/// Authored export-site spans for one facade, keyed by `(route, leaf)`.
 ///
-/// WHAT: the first export-site span for each `(route, leaf)`, each distinct route's operand site
-///       and the validated folded route index the second pass reuses.
-/// WHY: the second collection pass consumes this state by value; duplicate diagnostics need the
-///      first export site, and case-only route conflicts need both route operand sites.
-#[derive(Default)]
-struct PublicExportLocations {
-    exports: FxHashMap<PublicExportKey, SourceSpan>,
-    routes: FxHashMap<PathId, PublicExportRouteSite>,
-    /// Folded route keys already validated by the first pass.
-    ///
-    /// WHY: the second pass must keep the same conflict rule without re-rendering every authored
-    ///      route; moving the validated index forward also makes a repeated claim an ordinary
-    ///      conflict rather than an invariant panic.
-    route_folds: CaseFoldedRouteIndex<PathId>,
-}
-
-/// One route operand's authored site, retained to order and label case-only route conflicts.
-///
-/// WHY: `PathSyntaxId` rows follow authored order within one source, so they order route claims
-///      even when a span cannot be resolved inline or lies far into the file.
-#[derive(Clone, Copy, Debug)]
-struct PublicExportRouteSite {
-    span: SourceSpan,
-    path_syntax: PathSyntaxId,
-}
+/// WHY: the first collection pass hands these spans to the second pass by move, so duplicate
+///      diagnostics cite the first authored export site without retaining whole entries.
+type PublicExportLocations = FxHashMap<PublicExportKey, SourceSpan>;
 
 /// Accumulates public export entries for one root file and detects duplicate `(route, leaf)`
-/// names and case-only route conflicts.
+/// names. Case-only route conflicts are validated once during that facade file's preparation.
 #[derive(Default)]
 struct PublicExportCollector {
     exports: FxHashSet<PublicExportEntry>,
-    seen_exports: FxHashMap<PublicExportKey, SourceSpan>,
-    route_spans: FxHashMap<PathId, PublicExportRouteSite>,
-    /// ASCII-folded route spellings and their authored claims.
-    ///
-    /// WHY: one fold per distinct route makes case-conflict detection a map lookup rather than a
-    ///      pairwise component comparison that re-allocates for every existing route. The shared
-    ///      index keeps ordering identical to the eager facade prepass.
-    route_folds: CaseFoldedRouteIndex<PathId>,
+    seen_exports: PublicExportLocations,
 }
 
 impl PublicExportCollector {
-    /// Continue collecting into the first pass's entries, authored sites and folded route index.
+    /// Continue collecting into the first pass's entries and authored export sites.
     ///
-    /// The set and locations are consumed rather than copied: the second pass owns the first
-    /// pass's state until it hands its own back through [`Self::into_parts`].
+    /// The set and spans are consumed rather than copied: the second pass owns the first pass's
+    /// state until it hands its own back through [`Self::into_parts`].
     fn from_existing(
         exports: FxHashSet<PublicExportEntry>,
         existing_locations: Option<PublicExportLocations>,
     ) -> Self {
-        let mut collector = Self {
+        Self {
             exports,
-            ..Self::default()
-        };
-        if let Some(locations) = existing_locations {
-            collector.seen_exports = locations.exports;
-            collector.route_spans = locations.routes;
-            collector.route_folds = locations.route_folds;
+            seen_exports: existing_locations.unwrap_or_default(),
         }
-        collector
     }
 
     /// Split the collected entries from their authored diagnostic sites without copying either.
     fn into_parts(self) -> (FxHashSet<PublicExportEntry>, PublicExportLocations) {
-        (
-            self.exports,
-            PublicExportLocations {
-                exports: self.seen_exports,
-                routes: self.route_spans,
-                route_folds: self.route_folds,
-            },
-        )
+        (self.exports, self.seen_exports)
     }
 
     fn insert(
@@ -1027,7 +977,6 @@ impl PublicExportCollector {
         target: PublicExportTarget,
         span: Option<SourceSpan>,
         string_table: &StringTable,
-        path_fork: &PathInternerFork,
     ) -> PublicExportDataResult<()> {
         let export_name_text = string_table.resolve(export_name);
         if is_core_cast_trait_name(export_name_text) {
@@ -1038,10 +987,6 @@ impl PublicExportCollector {
                     span,
                 ),
             ));
-        }
-
-        if let Some(route) = route {
-            self.record_route(route, string_table, path_fork)?;
         }
 
         let key = PublicExportKey {
@@ -1063,70 +1008,6 @@ impl PublicExportCollector {
         });
         Ok(())
     }
-
-    /// Record one authored route operand and reject a distinct spelling that differs only by case.
-    ///
-    /// WHAT: folds the new route's canonical spelling once and looks it up in the facade's route
-    ///       index, ignoring ASCII case.
-    /// WHY: the collector sees every route of one facade across both collection passes, so the
-    ///      conflict is published eagerly even when no consumer references either route. Parent
-    ///      and child routes remain legal because their folded spellings differ.
-    fn record_route(
-        &mut self,
-        route: PublicExportRouteOperand,
-        string_table: &StringTable,
-        path_fork: &PathInternerFork,
-    ) -> PublicExportDataResult<()> {
-        let site = PublicExportRouteSite {
-            span: route.span,
-            path_syntax: route.path_syntax,
-        };
-        if let Some(existing_site) = self.route_spans.get_mut(&route.path) {
-            // The same route spelling can arrive from both collection passes. Keep the earliest
-            // authored claim so a later case-conflicting clause is compared against the first
-            // authored operand, not a declaration collected earlier by pass 1.
-            if site.span.source() == existing_site.span.source()
-                && site.path_syntax < existing_site.path_syntax
-            {
-                *existing_site = site;
-            }
-            return Ok(());
-        }
-
-        let route_key = route_conflict_key(route.path, path_fork, string_table);
-        let claim = CaseRouteClaim::new(
-            route.path,
-            site.span,
-            RouteClaimOrder::new(site.span.source(), site.path_syntax),
-        );
-        if let Err((earlier, later)) = self.route_folds.insert(route_key, claim) {
-            return Err(HeaderParseFailure::Diagnostic(
-                generics_traits_api::case_conflicting_public_export_route(
-                    later.id,
-                    earlier.id,
-                    Some(earlier.span),
-                    Some(later.span),
-                ),
-            ));
-        }
-
-        self.route_spans.insert(route.path, site);
-        Ok(())
-    }
-}
-
-/// One route's canonical spelling folded for case-insensitive conflict lookup.
-///
-/// WHY: folding the rendered path once per distinct route keeps every new route at one allocation
-///      and one map probe, instead of re-resolving and allocating every earlier component list.
-fn route_conflict_key(
-    path: PathId,
-    path_fork: &PathInternerFork,
-    string_table: &StringTable,
-) -> String {
-    let mut scratch = Vec::new();
-    let rendered = path_fork.render_portable(path, string_table, &mut scratch);
-    fold_route_spelling(&rendered)
 }
 
 // --------------------------

@@ -1606,15 +1606,10 @@ fn discover_modules_serial_provider_capable(
                 .find(|(_, root_path)| *root_path == &source_path)
                 .map(|(role, _)| role)
                 .filter(|role| matches!(role, ModuleRootRole::Normal | ModuleRootRole::Support));
-            if let Some(failure) =
-                facade_role.and_then(|role| prepared_facades.take_failure(seed.module_id, role))
-            {
-                return Err(failure);
-            }
-            let cached_facade =
+            let cached_outcome =
                 facade_role.and_then(|role| prepared_facades.take(seed.module_id, role));
-            let mut prepared_output = if let Some(prepared) = cached_facade {
-                syntax.adopt_facade_preparation(prepared)?
+            let mut prepared_output = if let Some(outcome) = cached_outcome {
+                syntax.adopt_facade_preparation(outcome?)?
             } else if let Some(role) = facade_role.filter(|_| prepared_facades.is_exhaustive()) {
                 return Err(graph_inventory_mismatch_error(format!(
                     "ModuleId {} {role:?} facade was present but absent from the exhaustive facade preparation cache",

@@ -8,7 +8,8 @@
 use super::*;
 use crate::compiler_frontend::compiler_messages::PathKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
-    InvalidReceiverDeclarationCode, InvalidReceiverDeclarationView,
+    CaseConflictingPublicExportRouteView, InvalidReceiverDeclarationCode,
+    InvalidReceiverDeclarationView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView,
@@ -38,11 +39,22 @@ fn assert_directive_reason<'a>(
 fn earlier_directive_span(diagnostic: DiagnosticView<'_>) -> Option<SourceSpan> {
     diagnostic.durable_labels().find_map(|label| {
         matches!(label.message, DurableLabelMessage::EarlierDirective).then_some(())?;
-        match label.site {
-            SiteRef::Absent => None,
-            SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
-        }
+        durable_label_span(label.site)
     })
+}
+
+fn previous_declaration_span(diagnostic: DiagnosticView<'_>) -> Option<SourceSpan> {
+    diagnostic.durable_labels().find_map(|label| {
+        matches!(label.message, DurableLabelMessage::PreviousDeclaration).then_some(())?;
+        durable_label_span(label.site)
+    })
+}
+
+fn durable_label_span(site: SiteRef<'_>) -> Option<SourceSpan> {
+    match site {
+        SiteRef::Absent => None,
+        SiteRef::Local(span) | SiteRef::Foreign { span, .. } => Some(span),
+    }
 }
 
 fn config_header(headers: &BoundModuleHeaders) -> &Header {
@@ -1046,7 +1058,8 @@ fn doc_and_route_stack_on_one_target() {
             .iter()
             .map(|directive| directive.kind)
             .collect::<Vec<_>>(),
-        [SourceDirectiveKind::Doc, SourceDirectiveKind::Export]
+        [SourceDirectiveKind::Doc],
+        "`$export` retains one route fact on `export_mode`, not a second annotation copy"
     );
     assert_eq!(
         rendered_public_route(&output, &path_fork, &string_table),
@@ -1099,6 +1112,114 @@ fn export_route_is_retained_on_a_multi_selection_clause() {
         "neither the provider path nor the route path is a structural file value"
     );
     assert!(output.qualified_references.is_empty());
+}
+
+#[test]
+fn same_leaf_may_publish_under_distinct_routes() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    prepare_active_root_with_role(
+        "$export @forms\n@button Button as Control\n$export @forms/validation\n@widget Button as Control\n",
+        &PathBuf::from("src/@mod.moth"),
+        ModuleRootRole::Normal,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    )
+    .expect("one leaf under two distinct routes is two public identities");
+}
+
+#[test]
+fn two_symbols_may_share_one_route() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    prepare_active_root_with_role(
+        "$export @forms\ncells #= 1\n$export @forms\nheading #= 2\n",
+        &PathBuf::from("src/@mod.moth"),
+        ModuleRootRole::Normal,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    )
+    .expect("one route is shared by several exported leaves");
+}
+
+#[test]
+fn case_only_route_conflict_cites_both_route_operands() {
+    for (source, earlier, later) in [
+        (
+            "$export @forms\nButton = | label String |\n$export @Forms\nLabel = | text String |\n",
+            "@forms",
+            "@Forms",
+        ),
+        (
+            "$export @forms/Validation\nButton = | label String |\n$export @Forms/validation\nLabel = | text String |\n",
+            "@forms/Validation",
+            "@Forms/validation",
+        ),
+    ] {
+        let diagnostics = export_route_diagnostics(source);
+        let diagnostic = diagnostics
+            .diagnostics
+            .first()
+            .expect("the route conflict should compact to one record");
+        assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0092");
+        assert!(
+            diagnostic
+                .family_view::<CaseConflictingPublicExportRouteView>()
+                .is_some()
+        );
+        assert_eq!(
+            diagnostic_primary_span(diagnostic),
+            Some(source_span_for(source, later, 0))
+        );
+        assert_eq!(
+            previous_declaration_span(diagnostic),
+            Some(source_span_for(source, earlier, 0)),
+            "the earlier authored route operand should be the related site"
+        );
+    }
+}
+
+#[test]
+fn route_conflict_labels_the_authored_order_across_collection_passes() {
+    // The re-export clause comes first in source but is collected after declaration routes, so the
+    // diagnostic must order claims by authored source, not by collection pass.
+    let source = "$export @Forms\n@button Button\n$export @forms\nLabel = | text String |\n";
+    let diagnostics = export_route_diagnostics(source);
+    let diagnostic = diagnostics
+        .diagnostics
+        .first()
+        .expect("the cross-pass route conflict should compact to one record");
+    assert_eq!(
+        diagnostic_primary_span(diagnostic),
+        Some(source_span_for(source, "@forms", 0)),
+        "the later authored declaration route is the duplicate"
+    );
+    assert_eq!(
+        previous_declaration_span(diagnostic),
+        Some(source_span_for(source, "@Forms", 0)),
+        "the earlier authored clause route should be the related site"
+    );
+}
+
+#[test]
+fn parent_and_child_export_routes_remain_legal() {
+    let source = "$export @forms\ncells #= 1\n$export @forms/validation\nvalidate #= 2\n";
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    prepare_active_root_with_role(
+        source,
+        &PathBuf::from("src/@mod.moth"),
+        ModuleRootRole::Normal,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    )
+    .expect("a parent route and its child are distinct public routes");
 }
 
 #[test]

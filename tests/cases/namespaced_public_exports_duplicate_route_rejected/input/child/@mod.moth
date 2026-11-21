@@ -1,0 +1,5 @@
+-- One target has one public destination, so differing route operands are still a duplicate
+-- directive run rather than two publications.
+$export @forms
+$export @tables
+value #= 1

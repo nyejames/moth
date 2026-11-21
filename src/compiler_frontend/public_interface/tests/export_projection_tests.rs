@@ -555,6 +555,44 @@ fn helper_reexport_preserves_role_neutral_defining_origin() {
 }
 
 #[test]
+fn changing_only_the_public_route_keeps_origin_but_changes_interface_identity() {
+    let root_seed = build_seed("$export\nvalue #= 1\n");
+    let routed_seed = build_seed("$export @forms\nvalue #= 1\n");
+    let root_binding = binding_for(&root_seed, "value");
+    let routed_binding = binding_for(&routed_seed, "value");
+
+    assert!(root_binding.route().is_root());
+    assert_eq!(routed_binding.route().as_str(), "forms");
+    assert_eq!(
+        routed_binding.origin(),
+        root_binding.origin(),
+        "the route changes where a declaration publishes, never its origin identity"
+    );
+    assert_ne!(
+        routed_binding, root_binding,
+        "the route is part of the stable export binding equality"
+    );
+
+    let interface = |seed: DirectExportSeed| {
+        let parts = seed.into_parts();
+        PublicSemanticInterface {
+            module_origin: parts.module_origin,
+            export_bindings: parts.export_bindings,
+            export_diagnostic_provenance: parts.export_diagnostic_provenance,
+            binding_exports: parts.binding_exports,
+            declarations: Vec::new(),
+            reusable_evidence: Vec::new(),
+            concrete_call_summaries: Vec::new(),
+        }
+    };
+    assert_ne!(
+        interface(routed_seed),
+        interface(root_seed),
+        "the public-interface fingerprint includes each binding's route"
+    );
+}
+
+#[test]
 fn provider_reexport_preserves_alias_and_provider_provenance() {
     let mut fixture = build_reexport_fixture(
         &[("src/@mod.moth", "placeholder #= 1\n")],

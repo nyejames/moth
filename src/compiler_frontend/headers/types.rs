@@ -647,7 +647,8 @@ pub struct Header {
     /// Ordered source-directive annotations attached to this declaration.
     ///
     /// WHAT: retained `$doc`/`$todo` and other source-directive operands whose semantics apply
-    ///       after the target header is known.
+    ///       after the target header is known. `$export` is absent because `export_mode` owns its
+    ///       one route fact.
     /// WHY: the header parser validates attachment once and the AST stage folds retained operands
     ///      with the ordinary constant-expression pipeline. No later stage re-scans directive
     ///      tokens.

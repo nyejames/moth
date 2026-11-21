@@ -389,6 +389,46 @@ fn empty_core_prelude_interface(package_prefix: &str) -> PublicSemanticInterface
     }
 }
 
+/// One completed provider interface publishing one leaf at the root and under a nested route.
+///
+/// WHY: the prelude's root-only rule must be observable when the same provider also publishes a
+///      nested binding for the same leaf, not only when the leaf exists exclusively on a route.
+fn core_prelude_interface_with_root_and_nested_constant(
+    package_prefix: &str,
+    constant_name: &str,
+    root_text: &str,
+    nested_text: &str,
+    nested_route: PublicExportRoute,
+) -> PublicSemanticInterface {
+    let mut interface = constant_core_prelude_interface(
+        package_prefix,
+        constant_name,
+        root_text,
+        PublicExportRoute::ROOT,
+    );
+    let nested_origin = OriginDeclarationId::Constant(OriginConstantId::new(
+        interface.module_origin.clone(),
+        format!("{constant_name}__nested_route"),
+    ));
+    interface.export_bindings.push(ExportBinding::new(
+        interface.module_origin.clone(),
+        nested_route,
+        constant_name.to_owned(),
+        nested_origin.clone(),
+    ));
+    interface.declarations.push(PublicDeclarationRecord {
+        origin: nested_origin,
+        synthetic_interface_provenance: Default::default(),
+        semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
+            type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+            folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
+                nested_text.to_owned(),
+            )),
+        }),
+    });
+    interface
+}
+
 /// One completed provider interface exporting a single public compile-time string constant.
 ///
 /// WHY: the prelude merge reads constant declarations only, so provider-lane tests need the same
@@ -1865,6 +1905,49 @@ fn nested_route_provider_constant_stays_out_of_the_flat_prelude() {
         &provider_dependencies,
     );
     assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
+}
+
+#[test]
+fn rooted_leaf_on_a_routed_core_provider_enters_the_flat_prelude_once() {
+    // The HTML provider publishes `shared` at the root and under `@forms`; the CSS provider
+    // publishes the same leaf only under `@tables`. The prelude must take the HTML root binding
+    // exactly once. Without the production route filter, the CSS route binding would resolve its
+    // own declaration and collide across the two official packages instead of folding the root.
+    let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[shared]")]);
+    let html_interface = core_prelude_interface_with_root_and_nested_constant(
+        "core/html",
+        "shared",
+        "from root",
+        "from html nested route",
+        PublicExportRoute::from_canonical_spelling("forms".to_owned()),
+    );
+    let css_interface = constant_core_prelude_interface(
+        "core/css",
+        "shared",
+        "from css nested route",
+        PublicExportRoute::from_canonical_spelling("tables".to_owned()),
+    );
+    let provider_dependencies =
+        standard_template_prelude_dependencies(&html_interface, &css_interface);
+
+    let (ast, string_table, path_fork) = fixture
+        .compile_moth_template_ast_with_providers(
+            "src/intro.mtf",
+            &["src/intro.mtf"],
+            &provider_dependencies,
+        )
+        .expect("the rooted Core binding must satisfy the flat prelude");
+
+    let folded = folded_content_value(&ast, &string_table, &path_fork);
+    assert_eq!(
+        folded.matches("from root").count(),
+        1,
+        "the flat prelude must take the root binding exactly once: {folded:?}"
+    );
+    assert!(
+        !folded.contains("from html nested route") && !folded.contains("from css nested route"),
+        "neither nested route binding may enter the flat prelude: {folded:?}"
+    );
 }
 
 #[test]
