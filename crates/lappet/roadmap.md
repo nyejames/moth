@@ -72,7 +72,7 @@ the current tree instead of trusting this table.
 | Host-import lowering to `moth-host-v1` names, fallible-call lowering through `out_frame` and `status` and builtin `Error` value lowering | Milestone 7 and the compiler-level adapter tests | Lappet adapters convert only what compiled Moth really emits |
 | `i64` resource-token carriage, the `staged_text_take` import and the call-scope helper exports | Milestone 7 | Milestone 3 exercised these protocols with fixtures only |
 | Builder-selected export wrappers, the host manifest and `host.assertion_failed` moved into `moth-abi-v1` | Milestone 7 and manifest-driven preflight | Lappet matches implementations against the manifest, never against guessed names |
-| Exact ObVer-qualified config declarations, project-local package libraries, immutable resolved package catalog and separate package graphs | Readiness prerequisite and milestone 8 | This compiler foundation is a hard gate before Lappet resumes; Lappet consumes it without another resolver |
+| Exact ObVer-qualified config declarations, project-local package libraries, immutable resolved package catalog and separate package graphs | Readiness prerequisite and milestone 8 | This compiler foundation is a hard gate before Lappet resumes. Lappet consumes it without another resolver |
 | Canonical public interfaces, stable dependency capabilities, ABI fingerprints and configuration/input isolation | Milestones 8 and 9 | The manager consumes compiler-owned compatibility and closure facts |
 
 The [native host ABI](../../docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf)
@@ -100,12 +100,12 @@ live in [the runtime design](docs/design.md),
 [the package-manager design](docs/package-manager.md).
 
 **Accepted compiler dependency foundation:** `@config.moth` declares an exact
-external ObVer build through `@package::2026.32.5`; `as` replaces the visible
+external ObVer build through `@package::2026.32.5`. `as` replaces the visible
 root without changing canonical identity. A fixed project-local `packages/`
 library is the default. Explicit fixed-only configuration can replace it with
 other project-local libraries. No global directory is created or searched.
 The compiler inspects only declared exact builds under
-`library/package_name/version/`; duplicate matches are errors, not precedence.
+`library/package_name/version/`. Duplicate matches are errors, not precedence.
 Each package version must have a matching name/version and `@package.moth`.
 Registered library subtrees are outside the consumer's source index, and each
 package gets its own config, graph and private globals. Direct-only dependency
