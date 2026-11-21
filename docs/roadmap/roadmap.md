@@ -8,7 +8,9 @@ infrastructure, has its own [roadmap](../../crates/lappet/roadmap.md),
 [package-manager design](../../crates/lappet/docs/package-manager.md). Its work
 happens in a separate isolated worktree and is not sequenced by this roadmap.
 Compiler integration consumes delivered capabilities without resuming paused
-compiler work. All user-facing tooling remains under `moth`.
+compiler work. The compiler's exact package build selection and local library
+foundations are a prerequisite before Lappet resumes its package work or native
+readiness milestones. All user-facing tooling remains under `moth`.
 
 The next major plans are kept inside [plans](./plans) and linked here in top to bottom order under the `Plans` heading.
 
@@ -30,6 +32,8 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 ## Sequenced work
 
 - [Namespaced public export paths](./plans/namespaced-public-export-paths-plan.md) - Queued next: Extend `$export` with explicit relative public namespace paths for declarations and direct-selection reexports across existing facades. Preserve private implementation paths, package identity and current package APIs. Complete before Core Math fast counterparts.
+
+- [Project package libraries and exact build selection](./plans/project-package-libraries-and-build-selection-plan.md) - Queued after namespaced public export paths and before Lappet resumes. Add exact ObVer-qualified config declarations, project-local package libraries, deterministic catalogue resolution and isolated package graphs. This delivers compiler foundations without a global package manager or native runtime work.
 
 - [Core Math fast counterparts](./plans/core-math-fast-counterparts-plan.md) - Queued after namespaced public export paths: Evaluate and implement a small, benchmark-justified set of explicit `fast_*` Core Math helpers, including the distinct `fast_hypot` algorithm. Reuse trusted package contracts and existing lowering machinery without changing ordinary Math.
 
