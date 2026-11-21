@@ -287,7 +287,7 @@ These declarations name exact ObVer builds. The optional `as` replaces the
 source-visible package root, not its canonical identity. Ordinary project
 sources import the selected root or its explicit public export routes without
 a build qualifier. The `::` build qualifier is initially supported only on
-external dependency declarations in config; selecting variants of ordinary
+external dependency declarations in config. Selecting variants of ordinary
 project modules is deferred.
 
 The compiler's sole default package library is `<project root>/packages/`,
@@ -317,7 +317,7 @@ the manager actually adds or authorises packages.
 
 ObVer is defined in the [canonical specification](../../../docs/docs/packages/obver.mtf).
 Its optional label distinguishes exact build identity without introducing
-SemVer prerelease precedence. V1 selects exact identifiers only; there is no
+SemVer prerelease precedence. V1 selects exact identifiers only. There is no
 implicit latest-version selection, version range, lockfile, remote download
 or package solver.
 
