@@ -198,12 +198,27 @@ instance rejects all attempted guest calls before token preflight, context
 installation or epoch-deadline changes.
 
 Returned Moth strings are copied into independently owned Rust storage before
-scope close. Apply an explicit per-result byte bound before allocating the copy,
-in addition to checking the ABI's `i32::MAX` length ceiling, span validity and
-UTF-8. Excessive or malformed guest output is a boundary fault and quarantines
-the instance. The adapter implementation checkpoint must approve a concrete
-default and any configuration surface for the smaller operational bound. It
-must not copy unbounded guest memory while that limit remains undecided.
+scope close. V1 applies two independent limits to guest-to-Rust export results:
+
+- One returned `String` may contain at most 16 MiB (16,777,216 UTF-8 bytes).
+- The total copied String data of one selected export call may contain at most
+  64 MiB (67,108,864 bytes) across the active result channel. Count every
+  present String success slot and its optional payload. On the declared
+  `Error!` edge, count the returned error message instead of inactive success
+  slots. An absent optional String contributes zero bytes.
+
+These defaults are upper bounds. An embedder may configure lower per-string
+and per-call limits for an instance, but cannot raise either above its V1
+default. The exact Rust API field names belong to the adapter implementation.
+Use checked cumulative lengths and validate each limit before allocating or
+copying guest bytes. Also enforce the native ABI's independent `i32::MAX`
+length ceiling, span validity and UTF-8. A limit violation or malformed guest
+output is a boundary fault that quarantines the instance. Discard partially
+copied results and perform no further guest call on failure.
+
+These export-result limits are distinct from the existing 16 MiB staged-entry
+and 64 MiB live-staging limits for Rust-to-Moth import results. Neither limit
+set substitutes for the other.
 
 The current fixture-only scope driver accepts one raw string and reports status
 `1` without reading the builtin error record. Replace that path with the
