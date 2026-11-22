@@ -173,11 +173,20 @@ build system's existing first-party builder selection mechanism.
 - [ ] Confirm the selected-exports artefact contract excludes a Wasm start
   section. Specify an explicit pre-instantiation rejection test and preserve
   separate generic core Wasm fixture semantics.
-- [ ] Set and document a concrete operational byte bound for exported guest
-  strings, alongside the fixed ABI length limit. Test the check without a
-  multi-gigabyte allocation. State whether callers can configure it and the
-  exact fault for a violation. Obtain Nye's approval before freezing that
-  previously unchosen value.
+- [ ] Implement the approved export-result bounds: at most 16 MiB of UTF-8
+  data per returned String and at most 64 MiB total copied String data across
+  one selected export call. Count present optional String payloads and the
+  declared Error message only on its active channel. Support stricter
+  per-instance limits without allowing callers to raise the V1 defaults.
+  Keep these independent of the Rust-to-Moth staged-text limits.
+- [ ] Check individual and cumulative byte lengths without overflow before
+  guest-memory copies or host allocation. Test exact-boundary successes,
+  one-byte excesses, multiple ordered results, optional absence, an active
+  Error message and malformed spans/UTF-8 with bounded fixtures. A guest
+  result exceeding either limit is a boundary fault that quarantines the
+  instance and discards earlier copied values. Confirm the adapter uses one
+  existing instance-limit configuration owner rather than creating a second
+  limit-policy implementation.
 - [ ] Inventory the existing single-string fixture scope driver. Document its
   replacement by the manifest adapter, including decoding status `1` as
   `AbiGuestError`, checking every ordered result, distinguishing invalid
