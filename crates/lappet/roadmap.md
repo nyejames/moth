@@ -93,10 +93,13 @@ Core operations through compiler-owned direct, helper or native providers.
 Official Core eligibility uses a trusted first-party builder catalogue, not
 custom builder self-identification. The Rust adapter uses manifest-validated
 selected exports, canonical resource/context descriptors and no implicit start
-for host-callable artefacts. The exact operational bound for copied export
-strings remains a prerequisite checkpoint, not a chosen number. These decisions
-live in [the runtime design](docs/design.md),
-[the host ABI adapter responsibilities](docs/host-abi.md) and
+for host-callable artefacts. Returned Moth strings copied into Rust have an
+approved V1 maximum of 16 MiB per String and 64 MiB of total copied String
+data per export call, with optional stricter per-instance limits. These
+export-result limits are distinct from Rust-to-Moth staged-text limits.
+The exact fault and validation contract lives in
+[the host ABI adapter responsibilities](docs/host-abi.md). The other accepted
+decisions live in [the runtime design](docs/design.md) and
 [the package-manager design](docs/package-manager.md).
 
 **Accepted compiler dependency foundation:** `@config.moth` declares an exact
@@ -120,12 +123,12 @@ remain a compiler implementation checkpoint. Those questions do not reopen
 Lappet's declaration syntax, version policy or catalogue ownership.
 
 **Remaining Lappet checkpoints:** (1) the complete Core provider and host
-capability/conformance matrix, including opaque Core result representation,
-(2) the internal trusted first-party environment certification handoff and
-(3) the operational byte bound and configuration surface for copying exported
-Moth strings into Rust. These are required implementation choices, not an
-invitation to broaden the general V1 host ABI. Native export adapters also
-wait for the compiler's selected-export manifest and concrete ABI lowerings.
+capability/conformance matrix, including opaque Core result representation and
+(2) the internal trusted first-party environment certification handoff.
+These require implementation evidence and do not broaden the general V1 host
+ABI. The export-string limits and stricter-only configuration policy are
+already approved. Native export adapters also wait for the compiler's
+selected-export manifest and concrete ABI lowerings.
 
 **Previously decided:** Nye confirmed the runtime policy defaults and host
 boundary limits on 14 November 2026, with the values unchanged.
