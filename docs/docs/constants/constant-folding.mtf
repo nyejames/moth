@@ -102,30 +102,36 @@ compilation.
 Stage 4 performs this selection after final constant values and full branch validation,
 then derives terminality and executable facts from the selected AST.
 
-### Release optimisation of ordinary functions
+### Mandatory evaluation and optional optimisation
 
-In a release build, the compiler may replace a call to an ordinary function
-with its folded result when the function's entire transitive body is
-const-safe and every argument is a compile-time constant. Parameters must be
-immutable ordinary values, the function must produce one infallible success
-slot, and calls with handling or error channels are ineligible. Assignments
-and collection mutations must target body-local bindings.
+Required `#` constants and source const-function calls must evaluate during
+Stage 4 semantic compilation in every build profile. The compiler also performs
+deterministic, semantics-preserving eager folding of pure typed expressions when
+needed or justified by measured cost. Any compile-time diagnostic retains its
+authored source meaning. Early folding preserves selected fast-operation evidence
+for `$safe_math`, failure and catch validation obligations and any data needed
+by the selected static branches.
 
-Release optimisation never changes observable work it cannot prove.
-Parameter-dependent calls, host effects, mutable-reference calls, recursive
-candidate graphs and unrepresentable result shapes stay in the runtime
-program. A refused candidate is left unchanged.
+An ordinary runtime function does not become a compile-time function merely
+because an optimiser could evaluate one call. Optional whole-function folding
+never influences static source selection, constraint verification or source
+acceptance. Debug and release must construct equivalent validated HIR from the
+same semantic inputs.
 
-Const execution is bounded by typed project settings:
+Optional post-semantic ordinary-function folding is **deferred and unimplemented**
+in the accepted architecture. The existing release-only AST speculation is
+implementation drift scheduled for removal by the active const-function
+foundation plan, not a semantic guarantee. A future pass needs benchmark
+evidence of an advantage over backend optimisation and must operate only after
+semantic verification.
 
-- `const_work_limit` limits evaluation steps for one call. The aggregate module
-  allowance is eight times this value.
-- `const_memory_limit_mb` limits retained folded value and text allocation in
-  MiB for one call, with the same aggregate multiplier.
+Required const execution remains bounded by typed project settings:
 
-A configured value above the compiler maximum for either setting is rejected
-as a project configuration error. A release call that exhausts a budget
-remains at runtime and produces a deduplicated `Note` naming the effective
-limit and, for a configurable limit, the setting to raise. Required const
-evaluation reports an error instead.
+- `const_work_limit` limits evaluation steps for one required const call. The
+  aggregate module allowance is eight times this value.
+- `const_memory_limit_mb` limits retained folded value and text allocation
+  in MiB for one required call, with the same aggregate multiplier.
 
+Configured values above compiler maxima are project configuration errors.
+Exhausting a required const budget reports a source error. No release-only
+ordinary-function speculation or budget `Note` is part of the target design.
