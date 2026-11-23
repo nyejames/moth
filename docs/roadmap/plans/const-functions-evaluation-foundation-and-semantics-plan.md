@@ -1,19 +1,19 @@
-# Const Functions: Shared Evaluation Foundation and Semantics Implementation Plan
+# Const Functions: Profile-Independent Semantics and Shared Evaluation Foundation Implementation Plan
 
 > **For agentic workers:** Implement this plan one independently reviewable phase at a time. Follow repository `AGENTS.md`, the canonical code style and testing rules and the phase review gates below. Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` when available. A phase may be committed, integrated and paused before the next one starts.
 
-**Goal:** Make const-function execution smaller, more efficient and easier to extend by sharing direct typed-expression value evaluation, then add match statements, native multi-return/multi-bind and immutable receiver methods.
+**Goal:** Enforce profile-independent semantic compilation and validated HIR, remove optional early whole-function speculation, assess folding machinery for justified cost and necessity, then simplify and extend required const-function execution.
 
-**Architecture:** Retain Stage 4's compact typed `ExprId` graph, `ConstValueStore`, the existing iterative `FoldContext` and the prepared const instruction/frame machine. Separate computing a value from committing an AST replacement, then remove redundant rewriting for proven-safe expression forms. Keep TIR as the sole template authority and HIR as the first backend-facing IR.
+**Architecture:** Stage 4 owns required const execution, TIR, deterministic static selection and only semantics-preserving eager folding. Identical semantic inputs produce equivalent validated HIR and semantic summaries in debug and release; profile-dependent work belongs downstream. Remove ordinary-call release speculation rather than relocating it. Retain the compact typed `ExprId` graph, `ConstValueStore` and prepared interpreter, separating value computation from AST replacement where useful.
 
 **Tech stack:** Rust, Moth compiler frontend, typed AST, TIR, existing integration runner and frontend benchmark instrumentation.
 
-**Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/loops/collection-loops.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
+**Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/directives/constraints.mtf`, `docs/docs/loops/collection-loops.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
 
-**Status:** Queued
-**Current slice:** Phase 0, current-tree discovery and baseline
+**Status:** Active - implementation ready to begin on this PR branch after review
+**Current slice:** Foundation Phase A, profile-sensitive semantic path inventory and baseline
 **Blockers:** None known
-**Next action:** Activate on a fresh branch when scheduled. Re-read current authorities and measure the existing implementation before editing it.
+**Next action:** Execute Foundation Phase A on this branch after review. The three foundation gates must complete before the const-language feature phases or later roadmap work.
 
 ## Global constraints
 
@@ -22,34 +22,42 @@
 - One authoritative operation/value meaning. Reuse resolved typed operations, numeric/cast/Core evaluators, `ConstValueStore` and TIR.
 - Preserve zero, one and multiple ordered success slots without tuples. Preserve a distinct error channel and distinct Never contract.
 - Preserve immutable source expression rows during evaluation. Create replacement expression rows only when a compiler consumer needs them.
-- Keep required source const calls mandatory in all profiles. Keep ordinary-call release speculation conservative, optional and non-diagnostic on refusal.
+- Preserve mandatory required const calls in all profiles. Remove release-only ordinary-call speculation, candidate evaluation and candidate notes/budgets; no replacement late optimiser in this plan.
 - Preserve determinism, evaluation order, source provenance, finite work/memory limits, transactionality and cross-module semantic identities.
 - Prefer small direct Rust changes and deletion over wrappers, registries, compatibility layers, caches or speculative generality.
 - Preserve benchmark and test ownership. Benchmark fixtures never substitute for correctness tests.
 - Do not edit generated documentation or benchmark history directly.
-- The requested roadmap placement is immediately after Core Math fast counterparts. This plan may pause after any completed phase and resume against a newer `main`.
+- This is the first sequenced roadmap plan. Complete Foundation Phases A-C before other queued compiler work; later feature phases may pause at validated phase boundaries.
 
 ## Review focus
 
-Five failure classes must have an explicit regression owner in the phases below.
+Seven failure classes have explicit regression owners in the phases below.
 
-1. **Required versus speculative calls:** Required const failures remain source diagnostics. Refused release candidates remain the original runtime calls with unchanged checks.
-2. **Lazy execution:** Inactive logical operands, match guards, match arms, catches and handlers never execute, even when they contain a failing operation.
-3. **Value identity and provenance:** Refused value staging publishes nothing. Successful values preserve exact numeric types, source-config origins and structural resource anchors.
-4. **Native multi-results and aliases:** A producer executes once. Ordered success slots remain distinct. Multi-bind reads every incoming value before changing existing destinations.
-5. **Limits and nested execution:** Long expressions, nested calls, loops, large values and template output remain bounded and produce the correct source or infrastructure failure lane.
+1. **Profile independence:** Identical semantic inputs yield equivalent validated HIR, primary diagnostics, semantic summaries and constraint verdicts in debug/release.
+2. **Premature erasure:** Erased ordinary calls, inferred failure, checked argument operations, multi-return order and match guard CFG no longer change acceptance between profiles.
+3. **Selected fast semantics:** `$safe_math` observes selected fast operations even after deterministic pure folding; `$infallible` checks runtime failure, while statically invalid expressions retain their source diagnostics.
+4. **Static selection:** Only required const values and specified deterministic eager pure folding affect source selection, never optional whole-function evaluation.
+5. **Dead validation:** Inactive code retains required catch, assertion and authored fast-use validation without creating executable HIR.
+6. **Required versus optional calls:** Required const failures remain diagnostics; ordinary calls remain runtime calls regardless of profile.
+7. **Lazy execution:** Inactive logical operands, match guards, match arms, catches and handlers never execute, even when they contain a failing operation.
+8. **Value identity and provenance:** Refused value staging publishes nothing. Successful values preserve exact numeric types, source-config origins and structural resource anchors.
+9. **Native multi-results and aliases:** A producer executes once. Ordered success slots remain distinct. Multi-bind reads every incoming value before changing existing destinations.
+10. **Limits and nested execution:** Long expressions, nested calls, loops, large values and template output remain bounded and produce the correct source or infrastructure failure lane.
 
 ## Accepted design and language scope
 
 ### Accepted implementation
 
-1. Shared value-only evaluator API over the existing `FoldContext`.
-2. Measured reduction of redundant const-interpreter expression rewriting, with specialised fallback for operations requiring execution state.
-3. Match statements using the full existing resolved pattern vocabulary, including guards, captures and defaults.
-4. Multiple success results from const functions and multi-bind in their bodies, using Moth's native ordered result slots.
-5. Immutable non-generic const receiver methods on eligible same-file nominal struct and choice receivers, with existing receiver visibility and call syntax.
-6. Investigation of stepped collection loops. Implement only if the current collection frame can preserve the complete runtime contract without a disproportionate second execution mechanism.
-7. Realistic package-style integration and performance coverage for repeated HTML/CSS helper computation.
+1. A single profile-independent AST/HIR semantic pipeline, a permanent canonical debug/release HIR-equivalence test and an audit of all profile-dependent semantic paths.
+2. Remove early optional ordinary-function speculation and all uniquely associated proof/work/notes machinery, preserving unrelated validation evidence.
+3. Independently assess each eager/folded operation for mandatory semantic consumers, compile-time and code complexity cost and potential downstream backend optimisation; retain, simplify or remove based on evidence.
+4. Shared value-only evaluator API over the existing `FoldContext`.
+5. Measured reduction of redundant const-interpreter expression rewriting, with specialised fallback for operations requiring execution state.
+6. Match statements using the full existing resolved pattern vocabulary, including guards, captures and defaults.
+7. Multiple success results from const functions and multi-bind in their bodies, using Moth's native ordered result slots.
+8. Immutable non-generic const receiver methods on eligible same-file nominal struct and choice receivers, with existing receiver visibility and call syntax.
+9. Investigation of stepped collection loops. Implement only if the current collection frame can preserve the complete runtime contract without a disproportionate second execution mechanism.
+10. Realistic package-style integration and performance coverage for repeated HTML/CSS helper computation.
 
 ### Held outside this implementation
 
@@ -58,9 +66,9 @@ Five failure classes must have an explicit regression owner in the phases below.
 - Fallible success/error return contracts, Never const functions and zero-success-result const functions.
 - Recursive const-function call graphs and recursive declaration dependencies.
 - General const propagation through runtime locals, arbitrary const-evaluation caching and whole-program partial evaluation.
-- Broader speculative release eligibility, including multi-result ordinary functions.
+- Any optional ordinary-function folding, including scalar calls. This is a low-priority future post-semantic optimisation subject to evidence that backend optimisers are insufficient.
 
-These items do **not** all have accepted future semantics. Generic const support and extended release eligibility need a dedicated design and performance case. Mutable parameters, error slots, Never, zero results and recursion remain open semantic questions until explicitly accepted. Neither this plan nor a progress-matrix entry promises their eventual inclusion.
+These items do **not** all have accepted future semantics. Generic const support and future post-semantic whole-function optimisation each need a dedicated design and performance case. Mutable parameters, error slots, Never, zero results and recursion remain open semantic questions until explicitly accepted. Neither this plan nor a progress-matrix entry promises their eventual inclusion.
 
 ### Permanently enforced compile-time boundary
 
@@ -71,9 +79,11 @@ Keep the ordinary language's exclusions, such as tuple values, macros and operat
 ### Scope distinctions
 
 - Match **inside const-function execution** does not introduce general static match specialisation of ordinary runtime code.
-- Allowing multi-result **required** const calls does not widen release-only ordinary-call candidacy.
+- Allowing multi-result **required** const calls does not introduce optional ordinary-function evaluation.
 - Immutable const methods do not enable methods on anonymous data-only const records or bypass same-file receiver ownership.
-- Const evaluation remains eager for already-known pure subexpressions but never eagerly executes unreachable work.
+- Required constant evaluation remains eager where language semantics need values. Retained pure eager folding must be deterministic, justified and preserve selected-operation evidence; never evaluate unreachable work.
+- Static branch selection uses only required const values and established deterministic eager expression folding, never optional whole-function evaluation.
+- Explicit test compilation is a semantic input. Debug/release are optimisation and instrumentation profiles, not source semantics.
 - A declaration with no calls still receives its normal static eligibility/type checks. Its parameterised body need not execute.
 
 ## Current repository map and architectural evidence
@@ -86,10 +96,10 @@ Source ownership and likely changes:
 - `src/compiler_frontend/ast/const_eval/mod.rs`: `FoldContext::fold_walk` directly reads typed expression views, uses local `PathId` lookup and stages values. Separate value result from replacement commit.
 - `src/compiler_frontend/ast/const_values/store.rs`: Canonical value store and transactional `stage_values`, including multiple roots. Reuse, preserve failure rollback.
 - `src/compiler_frontend/ast/const_values/const_execution/values.rs`: Interpreter `fold_to_constant` currently asks folder for an expression then reads its `ConstValueId`. Consume value-only result.
-- `src/compiler_frontend/ast/const_values/const_execution/rewrite.rs`: Required/release call rewriting, nested call execution, lazy logical completion, catch provenance. Retain necessary lazy/effectful paths, eliminate redundant rebuilds.
+- `src/compiler_frontend/ast/const_values/const_execution/rewrite.rs`: Currently mixes required call rewriting with release-only speculation. Remove ordinary-call candidacy and associated rewrites, retain required lazy/handler execution and delete redundant rebuilds.
 - `src/compiler_frontend/ast/const_values/const_execution/execute.rs`: Prepared instruction frames, bindings, loops, returns, template adapter. Use direct value evaluation where safe, add statement semantics.
 - `src/compiler_frontend/ast/const_values/const_execution/instructions.rs`: Prepares one executable instruction vocabulary. Replace explicit match/multi-bind/stepped-loop refusals as phases land.
-- `src/compiler_frontend/ast/const_values/const_execution/eligibility.rs`: Const-body operation eligibility and separately conservative release proof. Add justified method support without broadening release proofs.
+- `src/compiler_frontend/ast/const_values/const_execution/eligibility.rs`: Retain required const eligibility; delete unused release-only candidacy/proof. Add justified method support.
 - `src/compiler_frontend/ast/const_values/const_execution/places.rs` and `state.rs`: Projections, aliases, mutation, frame and handler state. Reuse local state and capture/update semantics.
 - `src/compiler_frontend/ast/const_values/const_execution/budget.rs`: Bounded execution and allocation charges. Preserve or strengthen cost coverage.
 - `src/compiler_frontend/ast/statements/value_production/expression_build.rs`: `commit_constant_result_block` for existing multi-result trusted host folds. Reuse for const-function result slots.
@@ -97,15 +107,75 @@ Source ownership and likely changes:
 - `src/compiler_frontend/ast/field_access/receiver_calls/`: Source receiver resolution, ownership, visibility and call shape. Extend the existing method dispatch path.
 - `src/compiler_frontend/ast/module_ast/environment/function_signatures.rs`: Const receiver declaration refusal and source-method signature validation. Keep invalid declarations rejected early.
 - `src/compiler_frontend/ast/templates/tir/`: Authoritative template composition and constant folding. Remain sole template owner.
-- `src/compiler_frontend/ast/module_ast/finalization/finalizer.rs`: Release speculation after static selection, before freeze/HIR. Keep existing boundary and conservative refusal.
+- `src/compiler_frontend/ast/module_ast/finalization/finalizer.rs`: Delete the early release speculation barrier and profile-dependent branches. Preserve independent fast-use, dead catch and assertion validation obligations.
+
+- `src/compiler_frontend/hir/constraint_facts/`, `hir/constraint_verification.rs`, HIR builder/validation, borrow/lifetime analysis and public-interface/fingerprint owners: verify profile-independent semantics and remove release-fold-only compensations without losing unrelated authored evidence.
 
 The current value walk already provides most of the proposed shared foundation. `fold_root` wraps that work with AST metadata handling and `commit_replacement`. Interpreter `evaluate_expression_inner` often rewrites an expression, folds it and extracts a value from the replacement. This repeated representation work is the first removal candidate.
 
 The current instruction compiler explicitly rejects `NodeKind::Match` and `NodeKind::MultiBind` and rejects collection loops with a step. `ConstFunctionExecutable::return_slots` and `execute_body` already use vectors. Single-result restrictions remain at const declaration preparation and required-call rewriting. `commit_constant_result_block` already supports the ordered multi-result replacement shape.
 
+## Accepted semantic and optimisation boundaries
+
+- **Semantic inputs:** Identical source, canonical dependencies, project configuration, explicitly selected compilation/test mode and builder-provided semantic capability inputs produce equivalent validated HIR regardless of debug/release or physical target. Different entries, registrations or capabilities supplied by builders are distinct semantic inputs and may legitimately produce different HIR.
+- **Profile-free semantics:** Stage 4 AST construction, required const evaluation, TIR, static selection, HIR construction and mandatory constraints, borrow/lifetime and public-summary verification cannot branch on the optimisation profile. Remove profile parameters from their APIs where possible. Observation-only counters are permitted but cannot change semantic state, IDs, diagnostics or ordering.
+- **Runtime constraints:** `$fast_math` selects arithmetic semantics. `$safe_math` rejects reachable selected fast use even if deterministic Stage 4 folding removes the operation. `$infallible` protects reachable runtime execution, not the compiler from issuing existing diagnostics for statically invalid arithmetic. Compile-time-only const functions remain ineligible for runtime constraint annotations.
+- **Static selection:** Required compile-time results and deterministic, justified pure eager folding may select branches. Optional whole-function evaluation must never affect selection, even if run in every build profile.
+- **Profile separation:** Debug instrumentation and release physical strategies operate after semantic verification, or use observation-only hooks before it. Test-only declarations/checks require an explicit test compilation mode; within that mode debug/release remain equivalent.
+- **No compulsory early fold:** Evaluate every existing folding subsystem for required semantics, retained proof evidence, cost in debug/release, maintained complexity and plausible later optimisation. Retain when mandatory or measured useful, simplify shared machinery or remove otherwise. Mere eligibility is not a reason to fold at AST time.
+- **Future optimisation:** A future optional ordinary-function folding pass may consume verified HIR or a derived executable IR, never source-validity authority. This plan removes the current optional pass without replacing it; revisit only after backend optimiser and measured performance comparisons.
+- **Permanent comparison:** Use a stable structural semantic-HIR projection across debug/release and compare CFG, executable operation kind and mode, types, call identities, result/error channels, failure/control evidence and semantic public summaries. Ignore only incidental ID numbering and presentation/instrumentation metadata. Compare acceptance and primary diagnostics separately. Cover generated instances and cross-module interfaces.
+
+## Foundation Phase A: Baseline, profile audit and folding-system assessment
+
+**Purpose:** Establish evidence and exact ownership before modifying semantic code. This phase starts immediately and precedes every other queued compiler roadmap plan.
+
+**Files:** `src/compiler_frontend/{ast,hir,analysis}/`, module compiler services and build-profile handoff, `tests/cases/source_constraint_*`, existing parity tests, frontend benchmark owners and `docs/bug-reports.md`.
+
+- [ ] Read current authorities and reproduce the R1 debug/release cases already recorded: erased folded local/divisor, later local invalidation, inferred-lane `Invoke`, multi-result ordering, cast wrapper, erased checked argument, transitive fast use and guard `SideEffectingPrelude`. Capture exact profile verdicts and diagnostics before changes.
+- [ ] Trace every `FrontendBuildProfile`, `BuildProfile` and backend/builder-sensitive path that can influence AST/HIR construction, generated instantiation, static selection, diagnostics, constraint summaries, public interfaces or reuse fingerprints. Distinguish explicit semantic inputs, prohibited profile choices, observation-only measurements and post-verification physical decisions.
+- [ ] Map current eager operator folding, mandatory const calls, optional ordinary-call candidate evaluation, TIR, static selection and HIR proof/failure contributors, noting every `ExprId` rewrite, `ConstValueId` creation and required consumer.
+- [ ] Audit each early folding subsystem against a retain/simplify/remove decision with concrete necessary semantic users, additional Rust code/maintained state, frontend compile time and memory in both profiles and potential equivalent later backend optimisations. Measure representative workloads; compare all-profile early folding against faster debug compilation only when legality and static selection remain unchanged.
+- [ ] Inventory existing HIR structural/snapshot facilities and choose a minimal canonical semantic comparison that handles stable call/type identities and generated sidecars without source-span matching, a second IR or an overly permissive normaliser. Define test owner and CI lane.
+- [ ] Inspect all other queued roadmap plans for now-invalid profile, static-selection, HIR and test-mode assumptions. Record specific owners and update affected plans, avoiding speculative rewrites of unrelated areas.
+
+**Exit:** Profile-dependence map, reproduced regressions, folding-system decisions with measurements, exact deletion candidates and one reviewable HIR parity test design. No second evaluator.
+
+## Foundation Phase B: Delete optional ordinary-call speculation
+
+**Purpose:** Fix the confirmed semantic boundary violation by removing optional runtime-function evaluation before HIR, not by migrating it to a new HIR transaction pass.
+
+**Files:** `ast/module_ast/finalization/finalizer.rs`, `ast/const_values/const_execution/{mod,rewrite,eligibility,execute,budget}.rs`, `ast/const_eval/mod.rs`, `ast/mod.rs`, HIR constraints/failure owners, public-interface and sidecar publication plus `tests/cases/`.
+
+- [ ] Pin debug/release diagnostics and JS runtime results for each confirmed R1 variant; include formerly foldable ordinary scalar functions that now remain runtime calls in both profiles, and mandatory const functions that still fold in both.
+- [ ] Remove `rewrite_release_calls` from AST finalisation, candidate discovery/whole-body proof, speculative auxiliary argument execution and rollback, release-only budgets/notes and unused profile-specific evaluator machinery. Retain one required const executor; add no dormant feature switch or new post-HIR optimiser.
+- [ ] Audit `AstReleaseErasedCallSite`, erased-call ledgers, pre-fold Boolean/failure projections, fast-operation witnesses and proof-only HIR markers individually. Delete only machinery exclusively needed to compensate for erased release calls. Retain independent deferred catch, inert assertion-message, inactive-branch validation and selected fast-use obligations, including where no executable HIR is produced.
+- [ ] Remove build-profile access from AST/HIR semantic APIs wherever feasible. Preserve explicit project/test semantic inputs, source diagnostics, target-independent numeric meaning and observation-only counters. Fix all confirmed unrelated profile-dependent semantic drift found in Phase A before proceeding.
+- [ ] Verify ordinary call effects/CFG, imported/transitive and generic summaries, interface fingerprints, inferred failures, guard lowering and backend runtime output remain correct. No release budget Note survives. Required const budget diagnostics continue to work.
+- [ ] Re-run affected integration, Rust, generated sidecar, constraints and parity cases; review deletion opportunities beyond immediate R1 repair.
+
+**Exit:** Optional ordinary-function folding is absent, semantic profile branches are gone and authored evidence is verified identically in both builds. Resolve R1 only after all reproduced divergences pass.
+
+## Foundation Phase C: Permanent parity verification and simplified stage contract
+
+**Purpose:** Prevent new profile-sensitive semantic behaviour before continuing const-function features.
+
+**Files:** HIR tests and snapshot/structural validation, integration harness, semantic interface and fingerprint tests, validation configuration and canonical documentation.
+
+- [ ] Add a durable debug/release semantic-HIR structural comparison in normal validation: same semantic inputs, CFG, operations, types, result and failure channels, calls, selected numeric semantics, semantic provenance, generated instances and public summaries. Do not compare ephemeral arena IDs literally or normalise semantic differences away.
+- [ ] Pair this with acceptance, primary-diagnostic and runtime-value checks for numeric constraints, checked and fast operations, static selection, dead tail and assertion/catch obligations, required const/TIR, cross-module imports and trusted foreign summaries.
+- [ ] Include an explicit test-compilation semantic-input control when the test-mode implementation exists; until then, record the gate for the later testing plan without inventing test mode now. Debug/release within any mode must agree.
+- [ ] Verify no build-profile semantic branch remains through the module compile service, generated work or AST/HIR lowering. Any unrelated confirmed divergence blocks the gate until corrected or explicitly escalated as a design blocker.
+- [ ] Refresh benchmark/allocations/expression-row baselines without release speculation. Record the concrete complexity removals and retain/simplify/remove decisions for remaining eager folding. Update permanent documentation to describe *delivered* invariants only.
+- [ ] Run selected constraints/HIR tests, documentation and validation gates per the current guides. Run the full final merge-readiness gate after all foundation changes; document any unrun check rather than claiming it passed.
+
+**Exit:** Canonical semantic HIR, source acceptance, diagnostics, constraint guarantees and interface summaries are profile-independent and guarded by automated regression coverage. Do not start the const feature phases before this gate completes.
+
+---
+
 ## Phase and pause protocol
 
-Each phase below is a stable stop point. Execute its tasks in order, but choose the smallest coherent independently testable implementation slices within them.
+The foundation gates A-C are mandatory and sequential. The subsequent feature phases retain their independent pause and review points. Execute tasks in order, with the smallest coherent testable slices.
 
 **At phase start:**
 1. Read current `AGENTS.md` and routed canonical references. Inspect changed areas on the current branch.
@@ -134,15 +204,15 @@ Each phase below is a stable stop point. Execute its tasks in order, but choose 
 
 ---
 
-## Phase 0: Confirm the current baseline and establish evidence
+## Phase 0: Reassess the shared evaluator after the profile cleanup
 
-**Purpose:** Measure the cost of const execution and confirm the smallest correct refactor before changing expression evaluation. This plan and its roadmap entry already exist when Phase 0 starts.
+**Purpose:** Measure required const execution after the foundation gates and confirm the smallest refactor. Reuse Phase A baselines; do not preserve obsolete release candidate paths.
 
 **Files:** `const_eval/mod.rs`, `const_execution/{execute,rewrite,values,budget}.rs`, `module_ast/finalization/expression_census.rs`, `compiler_frontend/instrumentation/`, the benchmark owners and existing `tests/cases/const_function_*`.
 
 ### Task 0.1: Trace and classify actual work
 
-- [ ] Map the execution path for eager ordinary folding, required call rewriting, constant declaration resolution, imported const functions, interpreted statements, TIR folding and release speculation. Annotate when each path creates an `ExprId`, stages a `ConstValueId`, walks a subtree and charges work.
+- [ ] Map the execution path for retained eager folding, required call rewriting, constant declaration resolution, imported const functions, interpreted statements and TIR folding. Annotate when each path creates an `ExprId`, stages a `ConstValueId`, walks a subtree and charges work.
 - [ ] Confirm `FoldContext::fold_walk` reads an immutable expression prefix using a lookup callback. Confirm `fold_root` stages values and optionally commits `ExpressionOp::Constant`, including multi-result host handling.
 - [ ] Trace `ConstInterpreter::evaluate_expression_inner`, `RewriteWalk::complete`, `fold_to_constant`, `rewrite_expression_children` and the specialised projection/catch/template paths. Identify actual duplicate traversals and allocations, not merely similar names.
 - [ ] Inspect existing expression census and counters before adding any new counter. Record which work is append-only and which expression rows remain reachable after finalisation.
@@ -169,7 +239,7 @@ Inspect existing owners before adding fixtures:
 - `const_function_structural_text_refusal_rejected`
 - `const_function_execution_limit_rejected`
 - `const_function_memory_limit_rejected`
-- `const_function_release_folding_success`
+- the former `const_function_release_folding_success` fixture (replace its optional-release expectation with ordinary-runtime parity and retain required-const coverage)
 
 Use the filtered integration runner, for example:
 
@@ -210,12 +280,12 @@ Check that each filter selects real tests. Do not use a passing zero-test run as
 - [ ] Extract the value-computation portion of `fold_root`. Keep one actual `fold_walk` and one semantic implementation for numeric, cast, logical, comparison and trusted Core operations.
 - [ ] Make `constant_fold`, `fold_expression_with_constants` and related expression-oriented callers commit replacements only when they need a rewritten `ExprId`.
 - [ ] Change `ConstInterpreter::fold_to_constant` to consume the value directly instead of constructing `ExpressionOp::Constant` and reading the new row back.
-- [ ] Preserve per-call and aggregate work/memory accounting. Check that removing rewriting does not accidentally avoid previously charged work. Do not charge speculative discovery as required execution unless the existing budget contract calls for it.
+- [ ] Preserve per-call and aggregate work/memory accounting. Check that removing rewriting does not accidentally avoid previously charged work. Release speculative discovery and notes were removed in Foundation Phase B.
 - [ ] Remove the superseded result-extraction path and any now-unused metadata/clones. Do not leave compatibility wrappers around old signatures.
 
 ### Task 1.4: Validate and inspect the result
 
-- [ ] Run focused unit tests, existing const-function integration cases and release-refusal cases.
+- [ ] Run focused unit tests, required const-function integration cases and ordinary-call profile-parity cases.
 - [ ] Compare expression-row growth and elapsed time with Phase 0 for pure repeated expressions and composite values.
 - [ ] Audit new borrowing/lifetime constraints. The evaluator reads expression rows while candidate values stage, so no mutable builder borrow should leak into the walk.
 - [ ] Review whether `const_eval/mod.rs` should split by real responsibilities. A split is justified only if it removes mixed ownership or materially improves the current code.
@@ -322,7 +392,7 @@ Check that each filter selects real tests. Do not use a passing zero-test run as
 - [ ] Validate the executed slot count and types against the prepared executable and call shape before committing any replacement.
 - [ ] Stage and publish all result values transactionally through existing value-store operations. Commit the ordered result block using `commit_constant_result_block`.
 - [ ] Preserve per-slot provenance and the call's authored metadata. Do not merge result values into one synthetic aggregate.
-- [ ] Keep scalar-only release eligibility unchanged, including its benign refusal behaviour for non-scalar/multi-result candidates.
+- [ ] Keep ordinary multi-result functions as ordinary runtime calls in every profile; release-only eligibility no longer exists.
 
 ### Task 4.3: Evaluate multi-slot producers at receiving sites
 
@@ -354,7 +424,7 @@ Start with `const_multiple_result_slots_rejected` and `adversarial_multi_bind_in
 - [ ] Cover a nested multi-result const call, `return pair()` forwarding, a multi-result producer used in multi-bind and cross-file import/publication. Check permitted multi-result `if`/`match`/`catch` receiving sites.
 - [ ] Cover new declarations, existing mutable updates, mixed targets, alias-sensitive updates and evaluated-once effects on local state. Confirm a failing producer or invalid shape never partially commits bindings or published values.
 - [ ] Assert incorrect slot count/type diagnostics at receiving sites and no silent first-slot truncation.
-- [ ] Check that a released ordinary multi-return candidate remains a runtime call while a required const multi-return executes.
+- [ ] Verify ordinary multi-return calls remain runtime calls in both profiles while required const multi-return calls execute during Stage 4.
 
 **Phase 4 exit:** Required const functions support multiple ordered ordinary success slots, expression-to-result forwarding and const-body multi-bind. Multi-valued producers evaluate once at receiving sites, while scalar consumers remain single-valued. The existing native result block remains the only AST multi-result replacement representation. Zero-result, fallible, Never and generic const signatures remain outside scope.
 
@@ -391,7 +461,7 @@ Start with `const_multiple_result_slots_rejected` and `adversarial_multi_bind_in
 - [ ] Reuse `ConstInterpreter::execute_body` and existing budgets. Do not build separate method frames, method registries or a method-specific value representation.
 - [ ] Reuse Phase 4 result-slot completion for a const method returning multiple values.
 - [ ] Confirm imported nominal methods execute from stable semantic interface facts without donor-local `ExprId` or `TypeId` leakage.
-- [ ] Keep release ordinary-method eligibility unchanged unless an existing conservative proof already admits it.
+- [ ] Keep ordinary receiver methods as runtime calls in every profile; explicitly marked const methods remain required compile-time calls.
 
 ### Task 5.4: Validate method semantics
 
@@ -477,7 +547,7 @@ Review all changed modules using `moth-code-review-guide.md`. Specifically searc
 - unnecessary expression rebuilds, clones and allocations
 - overlapping helper APIs or staged compatibility wrappers
 - broad state bags, long parameter lists or unexplained lint suppressions
-- duplicate const versus release eligibility checks with unclear ownership
+- remaining unused speculative eligibility or profile-sensitive semantic decisions
 - dead enum variants and unsupported branches superseded by new semantics
 - fresh values losing source/config/resource provenance
 - stale WHAT/WHY comments and inaccurate `mod.rs` architecture maps
@@ -555,4 +625,4 @@ Important boundaries:
 
 ## Completion definition
 
-Const functions execute against one typed AST/value foundation. Value-only computation no longer requires a temporary replacement expression. Necessary call/handler/template execution remains explicit and lazy. Match statements, multiple success slots, multi-bind and eligible immutable receiver methods work through established compiler owners. Stepped collection loops have either landed with full parity or a concrete deferred decision. Release speculation remains conservative, packages demonstrate useful const helpers and the codebase carries less redundant state and rewriting.
+Const functions execute against one typed AST/value foundation. Value-only computation no longer requires a temporary replacement expression. Necessary call/handler/template execution remains explicit and lazy. Match statements, multiple success slots, multi-bind and eligible immutable receiver methods work through established compiler owners. Stepped collection loops have either landed with full parity or a concrete deferred decision. Optional whole-function speculation remains removed, profile-independent HIR is guarded by tests, packages demonstrate useful const helpers and the codebase carries less redundant state and rewriting.
