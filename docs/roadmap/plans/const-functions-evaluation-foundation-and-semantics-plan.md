@@ -174,7 +174,7 @@ lowering pass is needed.
 - [ ] Trace every `FrontendBuildProfile`, `BuildProfile` and backend/builder-sensitive path that can influence AST/HIR construction, generated instantiation, static selection, diagnostics, constraint summaries, public interfaces or reuse fingerprints. Distinguish explicit semantic inputs, prohibited profile choices, observation-only measurements and post-verification physical decisions.
 - [ ] Map current eager operator folding, mandatory const calls, optional ordinary-call candidate evaluation, TIR, static selection and HIR proof/failure contributors, noting every `ExprId` rewrite, `ConstValueId` creation and required consumer.
 - [ ] Audit each early folding subsystem against a retain/simplify/remove decision: mandatory semantic consumers, code/state complexity, frontend time and memory in both profiles, and equivalent later backend optimisation. Measure representative workloads. Preserve currently specified static selection and source diagnostics as a hard constraint: dropping an eager fold that changes those facts is a language change requiring separate approval, never an unreviewed performance refactor.
-- [ ] Inventory existing HIR structural/snapshot facilities and choose a minimal canonical semantic comparison that handles stable call/type identities and generated sidecars without source-span matching, a second IR or an overly permissive normaliser. Define test owner and CI lane.
+- [ ] Inspect the real project compilation fixtures in `src/build_system/tests/compile_project_frontend_tests/mod.rs`, which accept `BuildProfile` and expose each `CompiledModuleArtifact.module.executable.hir`. Start with `HirDisplayContext::render_module` and identify any missing semantic side-table/public-summary fields; use test-only comparisons, not a second HIR representation or production serializer.
 - [ ] Inspect all other queued roadmap plans for now-invalid profile, static-selection, HIR and test-mode assumptions. Record specific owners and update affected plans, avoiding speculative rewrites of unrelated areas.
 
 **Exit:** Profile-dependence map, reproduced regressions, folding-system decisions with measurements, exact deletion candidates and one reviewable HIR parity test design. No second evaluator.
@@ -200,12 +200,12 @@ lowering pass is needed.
 
 **Files:** HIR tests and snapshot/structural validation, integration harness, semantic interface and fingerprint tests, validation configuration and canonical documentation.
 
-- [ ] Add a durable debug/release semantic-HIR structural comparison in normal validation: same semantic inputs, CFG, operations, types, result and failure channels, calls, selected numeric semantics, semantic provenance, generated instances and public summaries. Do not compare ephemeral arena IDs literally or normalise semantic differences away.
-- [ ] Pair this with acceptance, primary-diagnostic and runtime-value checks for numeric constraints, checked and fast operations, static selection, dead tail and assertion/catch obligations, required const/TIR, cross-module imports and trusted foreign summaries.
+- [ ] Add an unfeature-gated Rust parity test under `src/build_system/tests/compile_project_frontend_tests/`. Compile the **same physical fixture root and builder capability surface** independently with `BuildProfile::Dev` and `Release`, then compare each base module and generated sidecar by stable semantic owner. Reuse `HirDisplayContext::render_module` for CFG, operations, numeric modes, types, call targets and result slots; assert any omitted constraint/failure/provenance facts and public summaries separately. Do not create another compiler entry or generic serializer. If harmless local IDs differ, add a test-only bijective ID mapping that preserves references, never regex-strip IDs or operations.
+- [ ] Pair structural comparison with acceptance, exact diagnostic labels and runtime output for the R1 inventory, numeric constraints, static selection, dead validation, required const/TIR, imported calls and trusted foreign summaries. Compare semantic public interfaces/fingerprints explicitly: equal rendered HIR by itself does not cover those side tables.
 - [ ] Include an explicit test-compilation semantic-input control when the test-mode implementation exists; until then, record the gate for the later testing plan without inventing test mode now. Debug/release within any mode must agree.
-- [ ] Verify no build-profile semantic branch remains through the module compile service, generated work or AST/HIR lowering. Any unrelated confirmed divergence blocks the gate until corrected or explicitly escalated as a design blocker.
+- [ ] Recheck every `FrontendBuildProfile` use and profile-sensitive semantic branch in module compilation, generated materialisation and AST/HIR. Every surviving profile use must be demonstrated as downstream physical choice or genuinely observation-only; no no-op forwarding. Correct any unrelated confirmed semantic divergence before closing the foundation.
 - [ ] Refresh benchmark/allocations/expression-row baselines without release speculation. Record the concrete complexity removals and retain/simplify/remove decisions for remaining eager folding. Update permanent documentation to describe *delivered* invariants only.
-- [ ] Run selected constraints/HIR tests, documentation and validation gates per the current guides. Run the full final merge-readiness gate after all foundation changes; document any unrun check rather than claiming it passed.
+- [ ] Keep the parity comparison in the default `cargo test -p moth --lib`/normal validation lane, not under `show_hir`, benchmark flags or an opt-in matrix. Mutation-check the test comparator with one deliberate opcode/CFG difference. Run selected constraint/HIR cases and appropriate phase gates per `validation.mtf`; only claim final merge readiness after the full gate passes.
 
 **Exit:** Canonical semantic HIR, source acceptance, diagnostics, constraint guarantees and interface summaries are profile-independent and guarded by automated regression coverage. Do not start the const feature phases before this gate completes.
 
@@ -231,7 +231,7 @@ The foundation gates A-C are mandatory and sequential. The subsequent feature ph
 
 **At phase close:**
 1. Review all changed source and tests against the style guide and code-review guide. Look for duplicates, allocations, stale code and inadequate WHY comments.
-2. Verify source diagnostics, budget refusal and cross-module cases relevant to that phase.
+2. Verify source diagnostics, required-const budget exhaustion and cross-module cases relevant to that phase; release-only candidate budget refusal disappears in Phase B.
 3. Run targeted tests for intermediate commits, `just validate` at important phase boundaries and `just validate-full` only for final merge readiness, per `validation.mtf`.
 4. Update canonical documentation and the progress matrix only for actual contract/status changes.
 5. Update this plan's small status block and record the exact next action. Keep evidence, benchmark details and commits in the phase handover or Git history.
@@ -242,55 +242,19 @@ The foundation gates A-C are mandatory and sequential. The subsequent feature ph
 
 ---
 
-## Phase 0: Reassess the shared evaluator after the profile cleanup
+## Phase 0: Reassess the shared evaluator after profile cleanup
 
-**Purpose:** Measure required const execution after the foundation gates and confirm the smallest refactor. Reuse Phase A baselines; do not preserve obsolete release candidate paths.
+**Purpose:** Focus measurements on remaining required const execution after the foundation gates. Phase A already owns the whole-compiler baseline and Phase C measures after release speculation is removed.
 
 **Files:** `const_eval/mod.rs`, `const_execution/{execute,rewrite,values,budget}.rs`, `module_ast/finalization/expression_census.rs`, `compiler_frontend/instrumentation/`, the benchmark owners and existing `tests/cases/const_function_*`.
 
-### Task 0.1: Trace and classify actual work
+### Task 0.1: Identify and benchmark redundant const work
 
-- [ ] Map the execution path for retained eager folding, required call rewriting, constant declaration resolution, imported const functions, interpreted statements and TIR folding. Annotate when each path creates an `ExprId`, stages a `ConstValueId`, walks a subtree and charges work.
-- [ ] Confirm `FoldContext::fold_walk` reads an immutable expression prefix using a lookup callback. Confirm `fold_root` stages values and optionally commits `ExpressionOp::Constant`, including multi-result host handling.
-- [ ] Trace `ConstInterpreter::evaluate_expression_inner`, `RewriteWalk::complete`, `fold_to_constant`, `rewrite_expression_children` and the specialised projection/catch/template paths. Identify actual duplicate traversals and allocations, not merely similar names.
-- [ ] Inspect existing expression census and counters before adding any new counter. Record which work is append-only and which expression rows remain reachable after finalisation.
-- [ ] Document which operations cannot bypass rewriting without violating lazy evaluation, handler ownership, aliasing or call semantics.
+- [ ] Trace `FoldContext::fold_walk`, `fold_root`, `ConstInterpreter::evaluate_expression_inner`, `RewriteWalk`, `fold_to_constant` and `rewrite_expression_children` against the current implementation. Count duplicate traversals, appended expression rows, staging and clones. Identify which lazy, handler, projection and TIR operations still need specialised rewriting.
+- [ ] Reuse Phase A/C benchmark data, then measure representative scalar, repeated nested call, collection, catch, `Dec`, imported helper and structural-template workloads with existing counters. Add only attribution-critical benchmark instrumentation. Use `just bench-check` where useful; keep raw measurements local.
+- [ ] Verify existing `const_function_constant_call_success`, `const_function_logical_short_circuit_success`, `const_function_rebuilt_catch_success`, `const_function_collection_operations_success`, `const_function_nested_template_call_success`, `const_function_imported_success`, `const_function_structural_text_refusal_rejected` and the work/memory-limit cases. Ensure each selector actually runs.
 
-### Task 0.2: Record reproducible performance baselines
-
-- [ ] Build representative small cases: scalar arithmetic, repeated pure expressions in a loop, deep nested const calls, composite construction, mutable local collections, catches, templates, imports and structural strings.
-- [ ] Add a small, realistic `@core/html`/`@core/css`-style benchmark using a local fixture. Benchmark repeated helper invocation and template/string composition without modifying public package APIs.
-- [ ] Capture per-case time, existing expression-storage census and fold counters, value-store allocation and work-budget consumption where already observable. Check whether dedicated const-interpreter rebuild counts actually exist. If attribution is impossible, add narrowly scoped benchmark-gated counters only where necessary, then remove temporary instrumentation unless it proves useful beyond this investigation. Measure peak memory only if a practical profiler provides defensible evidence.
-- [ ] Run the repository's non-recording benchmark checks where applicable. Record the toolchain, command, input and variance. Raw runs remain local.
-- [ ] Establish a minimal evidence-backed success criterion: fewer redundant expression rows or traversals, lower time/memory on representative cases, or a demonstrable reduction in owned machinery with no meaningful regression.
-
-### Task 0.3: Verify the baseline tests
-
-Inspect existing owners before adding fixtures:
-
-- `const_function_constant_call_success`
-- `const_function_logical_short_circuit_success`
-- `const_function_rebuilt_catch_success`
-- `const_function_collection_operations_success`
-- `const_function_nested_template_call_success`
-- `const_function_imported_success`
-- `const_function_structural_text_refusal_rejected`
-- `const_function_execution_limit_rejected`
-- `const_function_memory_limit_rejected`
-- the former `const_function_release_folding_success` fixture (replace its optional-release expectation with ordinary-runtime parity and retain required-const coverage)
-
-Use the filtered integration runner, for example:
-
-```bash
-cargo run --quiet -- tests --case const_function_constant_call_success --backend html
-cargo test -p moth --lib const_eval
-```
-
-Check that each filter selects real tests. Do not use a passing zero-test run as evidence.
-
-**Phase 0 exit:** A short architecture map, baseline results, existing test inventory and precise Phase 1 API/replacement decision. No speculative new IR or evaluator has been introduced.
-
-**Review:** Confirm the recorded costs belong to const execution rather than ordinary expression construction, TIR or an unrelated frontend stage.
+**Exit:** Measured redundant-work owners, retained semantic special cases and exact API/test targets for Phases 1-2. No new evaluator or global cache.
 
 ## Phase 1: Extract value-only evaluation from AST replacement
 
@@ -579,7 +543,7 @@ The runtime contract must remain exact:
 
 ### Task 7.3: Conduct a final simplification and correctness audit
 
-Review all changed modules using `moth-code-review-guide.md`. Specifically search for:
+Review changed modules under repository `AGENTS.md`, its routed style guide and the checklist below. The previously attached `moth-code-review-guide.md` is not a tracked repo file and must not be a required checkout path. Search for:
 
 - duplicate arithmetic, cast, pattern or projection evaluation
 - unnecessary expression rebuilds, clones and allocations
@@ -605,12 +569,19 @@ Review all changed modules using `moth-code-review-guide.md`. Specifically searc
 
 Documentation ownership follows repository `AGENTS.md` and `docs/roadmap/roadmap.md`. A roadmap plan is an implementation work item, not the permanent owner of language semantics.
 
-### This PR, before implementation
+### This PR and foundation implementation
 
-- Add this plan as a queued item **immediately after Core Math fast counterparts** in `docs/roadmap/roadmap.md`.
-- Do **not** update the current Const functions progress-matrix status. No compiler feature changes in this PR.
-- Do **not** change canonical language behaviour by editing docs to imply the proposed features already compile.
-- Keep the plan's queued status concise. Phase implementation may be paused independently.
+This PR already consolidated and activated the plan at the top of the roadmap,
+retired the separate release-folding plan and recorded optional post-HIR folding
+as deferred in the progress matrix. The canonical references now describe the
+**accepted target design**, while the progress matrix and open R1 bug explicitly
+identify the current release-only AST behaviour pending deletion.
+
+During Foundation Phases A-C, replace transitional implementation-drift
+wording with delivered facts, remove old release budget/eligibility advice and
+update progress status only when implementation changes. Close R1 only after
+the preserved probes and permanent parity gate pass. Update `index.md` only
+if a file or ownership boundary actually changes.
 
 ### On completing a semantic phase
 
