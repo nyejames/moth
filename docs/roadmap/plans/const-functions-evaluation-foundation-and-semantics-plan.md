@@ -129,17 +129,37 @@ ordinary functions returning fixed values: `divisor() -> I32` returns
 `2`, `numerator() -> I32` returns `8`, `identity(value I32) -> I32`
 returns its argument, and `flag() -> Bool` returns `true`.
 
-| Case | Distinguishing authored source inside `probe` | Required result in both profiles |
-|---|---|---|
-| F1 | `$infallible probe |value I32| -> I32`; `d I32 = divisor()`; `discarded I32 = value // d catch: assert(false); ;`; return `discarded` | Reject `MOTH-RULE-0091`, `trap_assertion`, label annotation and assertion |
-| F2 | `$infallible probe |value I32| -> I32`; `return value // divisor()` | Reject `escaping_error`, annotation label, no secondary label |
-| F3 | F1 with `d I32 = 2`, followed by `n I32 = divisor()`; handled expression becomes `n // d` | Reject `trap_assertion`, annotation and assertion |
-| F4 | `$infallible probe |value I32| -> I32, Error!`; `d I32 = 2`; `return numerator() // d` | Reject `escaping_error`, annotation and division |
-| F5 | `$fast_math $infallible probe |value I32| -> I32, I32`; `d I32 = 2`; `return numerator(), value // d` | Reject `trap_division`, annotation and division |
-| F6 | `$fast_math $infallible probe || -> I32`; `return identity(8 // divisor())` | Reject `trap_division`, annotation and division, even when the outer call could fold |
-| F7 | F1 with `d I32 = 2`, then `n I64 = cast divisor()`; handled expression remains `value // d` | Reject `trap_assertion`, annotation and assertion |
-| F8 | Statement-level `$infallible` on `discarded I32 = numerator() // d catch: assert(false); ;`, where `d I32 = 2` | Existing reject/reject control: `trap_assertion`, statement annotation and assertion |
-| F9 | Match guard `1 if identity_bool(flag() and flag()) => ~x = 2` in a `match` over `x ~= 1`, with `else => ~x = 3` | Accept/accept, no `MOTH-RULE-0088 side_effecting_prelude`; assert `x == 2` |
+- **F1 - folded local:** Under `$infallible`, a `probe |value I32| -> I32`
+  stores `d I32 = divisor()`, then evaluates `value // d` with a catch handler
+  containing `assert(false)`. Reject `MOTH-RULE-0091` / `trap_assertion` with
+  annotation and assertion labels.
+- **F2 - direct operand:** `$infallible probe |value I32| -> I32` returns
+  `value // divisor()`. Reject `escaping_error` with an annotation label
+  and no secondary label.
+- **F3 - local proof invalidation:** F1 instead declares `d I32 = 2`, then
+  `n I32 = divisor()` and evaluates `n // d` under the failing catch.
+  Reject `trap_assertion` with annotation and assertion labels.
+- **F4 - inferred-lane `Invoke`:** `$infallible probe |value I32| -> I32, Error!`
+  declares `d I32 = 2` and returns `numerator() // d`. Reject
+  `escaping_error`, labelling the annotation and division.
+- **F5 - multi-return ordering:** `$fast_math $infallible probe |value I32|
+  -> I32, I32` declares `d I32 = 2` and returns
+  `numerator(), value // d`. Reject `trap_division` with annotation and
+  division labels.
+- **F6 - wholesale folded argument:** `$fast_math $infallible probe ||
+  -> I32` returns `identity(8 // divisor())`. Reject `trap_division`
+  with annotation and division labels even when the outer call could fold.
+- **F7 - cast-wrapped folded value:** F1 instead declares `d I32 = 2`
+  followed by `n I64 = cast divisor()`, then handles `value // d` with
+  `assert(false)`. Reject `trap_assertion` with both labels.
+- **F8 - statement boundary:** A normal `probe |value I32| -> I32`
+  declares `d I32 = 2` and attaches statement-level `$infallible`
+  to the handled `numerator() // d` expression whose handler asserts
+  false. Existing reject/reject control: `trap_assertion` with the
+  statement annotation and assertion labels.
+- **F9 - match guard:** The complete reproducer below must be accepted
+  in both profiles with `x == 2`, without `MOTH-RULE-0088` /
+  `side_effecting_prelude`.
 
 For F9, use the ordinary statement-match spelling (not a `match` keyword):
 
