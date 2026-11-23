@@ -138,7 +138,7 @@ Use ordinary `Error!` and `catch` for expected recoverable application failures.
 
 Optional diagnostic instrumentation in production source must remain strictly observational and never depend on test-only helpers. It cannot make production semantically valid only in a test build, silently change public failure contracts or bypass borrow/lifetime validation.
 
-Before implementing any removable debug/test assertion, settle its exact syntax, build/profile activation, typing of inactive checks, evaluation/side-effect constraints and lowering. Keep test instrumentation separate from release optimisation so an optimised test may retain test checks while an ordinary release artefact does not.
+Test compilation is an explicit semantic input, not a debug profile. Test-only declarations and checks may be selected by that mode without changing normal production compilation. Debug and release within either mode must construct equivalent validated semantic HIR. If a removable debug-only instrumentation check is desired, it must be inserted after semantic verification and cannot affect typed source acceptance, evaluation side effects or mandatory assertions. Before adding any such feature, decide its exact syntax and prove those constraints. Keep ordinary `assert` unchanged in all profiles.
 
 Enhanced comparison reporting and a test-only nonfatal `check` operation are candidates, not accepted V1 syntax. Reported nonfatal failures, if introduced, must leave the test failed even when execution continues. Do not add a second panic mechanism.
 
@@ -215,7 +215,7 @@ Exercise real directory projects and complete compiler/build services, with focu
 - Test-only provider cycles rejected; dependency package tests invisible to the importing project's test namespace.
 - Valid/invalid `$test` signatures and placement, compile errors in helpers, test source location preservation and source-order-independent discovery.
 - Fatal assertion failure stops only that test execution; typed returned errors, runtime traps and host/infrastructure failures remain distinguishable; timeouts always bound the test.
-- Debug/release test and ordinary release behaviour match the eventually accepted assertion/instrumentation policy.
+- Explicit test-mode compilation may select test-only declarations and checks; the same semantic inputs produce equivalent validated HIR, diagnostics and public summaries in debug and release within that mode. Any profile-specific instrumentation is post-semantic and cannot remove source-observable effects. Ordinary `assert` remains present in release.
 - Test filters, zero-match reporting, reruns and incremental invalidation after private production or test-only helper edits.
 - At least one project-level integration case against a builder-produced artefact, with an explicit capability error for unsupported test hosts.
 
