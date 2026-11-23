@@ -1,4 +1,4 @@
-The project package facade exposes a project's public API to external consumers. It is the `@package.moth` file at the selected project root. That file is an ordinary support root of the project's structural module, not a separate facade node.
+The project package facade defines the project's external package API. It is the `@package.moth` file at the selected project root. That file is an ordinary support root of the project's structural module, not a separate facade node.
 
 ### The package surface
 
@@ -6,7 +6,7 @@ One optional `@package.moth` at the selected project directory is the external p
 
 The directory may also contain `@mod.moth`, `@entry.moth` and `@config.moth`. The project can be an application and a package at the same time.
 
-The support root may publish functions, structs, choices, type aliases, traits, compile-time constants and direct-selection re-exports with `$export`. Helpers are shared with the other roots, but no root can import another root's local declarations.
+The support root may publish functions, structs, choices, type aliases, traits, compile-time constants and direct-selection re-exports with `$export`. Each publication may sit at the facade root or under one public route. Helpers are shared with the other roots, but no root can import another root's local declarations.
 
 ### Facade restrictions
 
@@ -17,7 +17,7 @@ The facade:
 - cannot depend on `@project`
 - cannot expose a semantic fact that depends on project-private context
 - rejects top-level runtime work, direct fragments and builder-slot contributions
-- has no implicit start and no route
+- has no implicit start and no page route
 - never becomes an application entry
 
 Support roots and the project package facade reject root runtime and page fragments rather than merely staying inactive. The facade has no entry lifecycle to activate.
@@ -31,9 +31,13 @@ The compiler produces one immutable module artefact with optional normal and sup
 - reachable generated functions
 - package runtime requirements permitted by the target
 
-Assembly never recompiles or mutates the facade.
+The support interface carries its public routes, so package assembly records
+each routed binding beneath its facade-relative route. That publishes route and
+interface metadata for the project package. It does not make the project package
+a consumable dependency: general project-package acquisition and consumption
+remain deferred. Assembly never recompiles or mutates the facade.
 
-Without a project-root `@package.moth`, the project has no externally consumable Moth package surface, even when it has `@mod.moth`.
+Without a project-root `@package.moth`, the project has no external package interface to assemble, even when it has `@mod.moth`.
 
 The facade package identity comes from the `project` record's `name` field.
 
@@ -47,13 +51,13 @@ The validator does not treat implementation-only dependence as a reusable packag
 
 Every registered Moth-source package publishes its external API through a directly contained `@package.moth`. A `@mod.moth` alone never satisfies registration, though it may still own a separate internal normal-position scope. The external project package follows the same facade rule. Binding-backed packages have no source facade.
 
-For example, `packages/core/html/@package.moth`, `packages/core/css/@package.moth` and `packages/builder/web/site/@package.moth` publish their package surfaces. A compiler-shipped set that has lost a required facade is damaged and reports an infrastructure failure. A malformed third-party registered package reports a structure diagnostic naming `@package.moth`.
+For example, `packages/core/html/@package.moth`, `packages/core/css/@package.moth` and `packages/builder/web/site/@package.moth` publish their package surfaces. A compiler-shipped set that has lost a required facade is damaged and reports an infrastructure failure. A malformed third-party registered package reports a structure diagnostic naming `@package.moth`. A registered source package's public routes sit beneath its registered package path and never create another package root.
 
 Importing a package never activates its entry. A builder that registers a source package publishes that package's declared API surface, not a project facade.
 
 ### Dependency package facades
 
-A dependency package exposes its facade and immutable artefacts to consumers. Consumers never see the dependency's private `@project`.
+A dependency package supplied to the build exposes its facade and immutable artefacts to consumers. Registered source packages are the delivered consumable dependency form. Consumers never see the dependency's private `@project`. A registered source package's facade-root names and public routes are reachable only beneath its exact registered prefix. General project-package acquisition and third-party package consumption remain deferred.
 
 No declaration exposed through a dependency package facade may directly or transitively depend on that dependency's private `@project`. Private declarations may use the dependency's own `@project` only when no external package export can reach or expose them.
 

@@ -14,7 +14,7 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
 };
 use crate::compiler_frontend::ast::templates::styles::whitespace::TemplateWhitespacePassProfile;
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateTirPhase, TemplateTirReference, TemplateWrapperReference,
+    TemplateIrStore, TemplateTirPhase, TemplateTirReference, TemplateWrapperReference,
 };
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
@@ -334,5 +334,19 @@ impl Template {
         {
             self.tir_reference.phase = TemplateTirPhase::Finalized;
         }
+    }
+
+    /// Returns the diagnostic site for a rejected standalone `$in` helper.
+    ///
+    /// WHAT: the authored `$in` token when the store retains it, otherwise the template opener.
+    /// WHY: a rebuilt or imported helper may have no authored site in this store, so the opener
+    ///      keeps the diagnostic local instead of dropping its location.
+    pub(crate) fn slot_insert_diagnostic_span(
+        &self,
+        template_ir_store: &TemplateIrStore,
+    ) -> Option<SourceSpan> {
+        template_ir_store
+            .slot_insert_directive_span(self.tir_reference.root)
+            .or(self.span)
     }
 }

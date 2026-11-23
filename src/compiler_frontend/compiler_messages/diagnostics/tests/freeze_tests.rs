@@ -287,6 +287,7 @@ fn freeze_unowned_domain_resolves_no_spans() {
         SiteRef::Foreign {
             span,
             context: Some(context),
+            ..
         } if span == exact_span(0, 1) && std::ptr::eq(context, report.context())
     ));
 
@@ -805,6 +806,65 @@ fn freeze_resolves_type_words_through_their_domain_snapshot() {
             (boolean.clone(), boolean.clone()),
         ]
     );
+}
+
+#[test]
+fn record_limit_keeps_the_retained_foreign_label_owner() {
+    // The first diagnostic is retained verbatim. The second exceeds the store's record limit
+    // and becomes the capacity stand-in, which this one-record budget refuses. Truncation must
+    // neither drop the retained foreign label's donor domain nor reinterpret its span through
+    // the project context.
+    let package = StablePackageIdentity::project_local("freeze-truncated-donor");
+    let handle = FrozenIdentityHandle::for_domain(package.clone());
+    let mut batch = PendingDiagnostics::default();
+    let project = batch.add_domain(None, DomainSource::Sources(SourceDatabase::empty()));
+    let _donor = batch.add_domain(
+        Some(package),
+        DomainSource::Sources(SourceDatabase::empty()),
+    );
+    batch.push(
+        project,
+        None,
+        duplicate_declaration(StringId::from_index(1), Some(exact_span(10, 2)))
+            .with_label(
+                Some(exact_span(0, 2)),
+                Some(LabelDraftMessage::PreviousDeclaration),
+            )
+            .with_label_frozen_identity_handle(0, handle.clone()),
+    );
+    batch.push(project, None, unreachable_match_arm(Some(exact_span(4, 1))));
+    batch.push(project, None, unreachable_match_arm(Some(exact_span(6, 1))));
+
+    let limits = DiagnosticLimits {
+        records: 2,
+        ..DiagnosticLimits::production()
+    };
+    let set = batch.freeze(StringTable::new().freeze(), limits, InstallMode::Frozen);
+
+    let context = handle
+        .get()
+        .expect("truncation must still install the retained diagnostic's donor domain");
+    let (_, view) = set
+        .iter()
+        .next()
+        .expect("the first diagnostic stays stored");
+    assert_eq!(
+        set.iter().count(),
+        2,
+        "the retained diagnostic and its capacity stand-in remain"
+    );
+    let label = view
+        .durable_labels()
+        .next()
+        .expect("the retained diagnostic keeps its previous-claim label");
+    assert!(matches!(
+        label.site,
+        SiteRef::Foreign {
+            span,
+            context: Some(site_context),
+            ..
+        } if span == exact_span(0, 2) && std::ptr::eq(site_context, context)
+    ));
 }
 
 #[test]

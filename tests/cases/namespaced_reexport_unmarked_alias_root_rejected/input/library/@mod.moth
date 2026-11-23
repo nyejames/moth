@@ -1,0 +1,4 @@
+@provider button as private_button
+
+$export @mirror
+@provider button as mirrored_button

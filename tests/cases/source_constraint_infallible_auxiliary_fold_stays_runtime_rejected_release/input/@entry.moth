@@ -1,0 +1,14 @@
+make_names #|| -> {String}:
+    return {"a", "b"}
+;
+
+keep |x I32| -> I32:
+    return x
+;
+
+$infallible
+probe |value I32| -> I32:
+    return keep(value // make_names().length())
+;
+
+~[: [probe(8)]]

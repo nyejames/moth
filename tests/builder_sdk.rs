@@ -1882,3 +1882,71 @@ fn missing_source_file_root_keeps_the_path_infrastructure_error() {
     );
     assert!(!builder.build_ran.get());
 }
+
+#[test]
+fn registered_package_generic_runtime_helper_diagnostic_names_donor_site() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(
+        project_dir.path(),
+        "@builder/game/ui render\nresult = render(\"Priya\", 1)\n~[:[result]]\n",
+        false,
+    );
+    let ui_dir = tempfile::tempdir().expect("should create package directory");
+    fs::write(
+        ui_dir.path().join("@package.moth"),
+        "$export\nrender type T |x String, value T| -> String:\n    return [\n        $in style: [x]\n    ]\n;\n",
+    )
+    .expect("should write package source");
+    let builder = UiPackageBuilder {
+        ui_root: ui_dir.path().to_path_buf(),
+    };
+
+    let error = build_project(&builder, BuildRequest::new(project_dir.path()))
+        .expect_err("a runtime-dependent helper in a replayed generic must be rejected");
+    let messages = error.messages().join("\n");
+    assert!(messages.contains("MOTH-SYNTAX-0022"), "{messages}");
+    assert!(
+        messages.contains("|@package.moth|4:9|"),
+        "the diagnostic must name the authored `$in` in the donor package: {messages}"
+    );
+}
+
+#[test]
+fn registered_package_generic_late_template_diagnostics_name_donor_site() {
+    for (shape, package_source, code, site) in [
+        (
+            "nested insert",
+            "$export\nrender type T |text String, value T| -> String:\n    return [:[$in style:[text]]]\n;\n",
+            "MOTH-RULE-0052",
+            "|@package.moth|3:12|",
+        ),
+        (
+            "const return",
+            "$export\nrender type T |text String, value T| -> String:\n    return [\n        $in style: [: red]\n    ]\n;\n",
+            "MOTH-SYNTAX-0022",
+            "|@package.moth|4:9|",
+        ),
+    ] {
+        let project_dir = tempfile::tempdir().expect("should create project directory");
+        write_project(
+            project_dir.path(),
+            "@builder/game/ui render\nresult = render(\"Priya\", 1)\n~[:[result]]\n",
+            false,
+        );
+        let ui_dir = tempfile::tempdir().expect("should create package directory");
+        fs::write(ui_dir.path().join("@package.moth"), package_source)
+            .expect("should write package source");
+        let builder = UiPackageBuilder {
+            ui_root: ui_dir.path().to_path_buf(),
+        };
+
+        let error = build_project(&builder, BuildRequest::new(project_dir.path()))
+            .expect_err("an invalid template in a replayed generic must be rejected");
+        let messages = error.messages().join("\n");
+        assert!(messages.contains(code), "{shape}: {messages}");
+        assert!(
+            messages.contains(site),
+            "{shape}: the diagnostic must name the donor package site: {messages}"
+        );
+    }
+}

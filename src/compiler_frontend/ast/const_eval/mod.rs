@@ -51,6 +51,7 @@ use crate::compiler_frontend::external_packages::{
 };
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
+use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -70,6 +71,14 @@ pub(crate) enum ConstantFoldError {
     Infrastructure(Box<InfrastructureErrors>),
 }
 
+/// One active const call site and the source domain that owns its span.
+#[derive(Clone, Debug)]
+pub(crate) struct OwnedConstCallSite {
+    pub span: SourceSpan,
+    /// `None` keeps a consumer-local call site from inheriting a provider body's owner during unwind.
+    pub owner: Option<FrozenIdentityHandle>,
+}
+
 /// One typed budget refusal with the effective limit and the setting that raises it.
 #[derive(Clone, Debug)]
 pub(crate) struct ConstBudgetExhaustion {
@@ -80,10 +89,14 @@ pub(crate) struct ConstBudgetExhaustion {
     pub aggregate: bool,
     /// Innermost source location that spent the allowance.
     pub span: Option<SourceSpan>,
+    /// Declaring-domain owner of `span`, when the allowance was spent in a provider body.
+    pub span_owner: Option<FrozenIdentityHandle>,
     /// Innermost refused call site, which owns Note deduplication and display.
     pub call_span: Option<SourceSpan>,
+    /// Declaring-domain owner of `call_span`.
+    pub call_span_owner: Option<FrozenIdentityHandle>,
     /// Active const-call sites, outermost first, retained for required diagnostics.
-    pub call_chain: Vec<SourceSpan>,
+    pub call_chain: Vec<OwnedConstCallSite>,
 }
 
 impl ConstBudgetExhaustion {
@@ -113,8 +126,16 @@ impl ConstBudgetExhaustion {
             effective_limit,
             self.span,
         );
-        for span in self.call_chain.iter().rev() {
-            diagnostic = diagnostic.with_label(Some(*span), Some(LabelDraftMessage::ConstCallSite));
+        if let Some(owner) = self.span_owner {
+            diagnostic = diagnostic.with_primary_frozen_identity_handle(owner);
+        }
+        for site in self.call_chain.into_iter().rev() {
+            let index = diagnostic.label_count();
+            diagnostic =
+                diagnostic.with_label(Some(site.span), Some(LabelDraftMessage::ConstCallSite));
+            if let Some(owner) = site.owner {
+                diagnostic = diagnostic.with_label_frozen_identity_handle(index, owner);
+            }
         }
         diagnostic
     }

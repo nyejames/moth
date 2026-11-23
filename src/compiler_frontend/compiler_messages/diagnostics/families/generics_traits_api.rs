@@ -9,7 +9,7 @@ use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
     CountFact, FactCapacityError, FactCodec, IdRemap, OptStringFact, OptTokenFact, OptTypeFact,
-    OptUnitFact, StringFact, TypeFact, UnitCode, UnitFact, unit_code,
+    OptUnitFact, PathFact, StringFact, TypeFact, UnitCode, UnitFact, unit_code,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
     LabelDraftMessage, LabelMessageCode,
@@ -18,15 +18,15 @@ use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
 use crate::compiler_frontend::compiler_messages::render::{
-    render_duplicate_public_export, render_duplicate_trait_requirement,
-    render_generic_bound_private_surface_leak, render_invalid_function_signature,
-    render_invalid_generic_application, render_invalid_generic_instantiation,
-    render_invalid_generic_parameter, render_invalid_parameter_contract,
-    render_invalid_receiver_declaration, render_invalid_this_usage,
-    render_invalid_trait_conformance, render_invalid_trait_incompatibility,
-    render_invalid_trait_keyword_usage, render_private_type_in_exported_api, render_title_only,
-    render_trait_name_used_as_type, render_trait_private_surface_leak, render_unknown_trait,
-    render_unsupported_trait_feature,
+    render_case_conflicting_public_export_route, render_duplicate_public_export,
+    render_duplicate_trait_requirement, render_generic_bound_private_surface_leak,
+    render_invalid_function_signature, render_invalid_generic_application,
+    render_invalid_generic_instantiation, render_invalid_generic_parameter,
+    render_invalid_parameter_contract, render_invalid_receiver_declaration,
+    render_invalid_this_usage, render_invalid_trait_conformance,
+    render_invalid_trait_incompatibility, render_invalid_trait_keyword_usage,
+    render_private_type_in_exported_api, render_title_only, render_trait_name_used_as_type,
+    render_trait_private_surface_leak, render_unknown_trait, render_unsupported_trait_feature,
 };
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticSeverity, GenericApplicationErrorReason, GenericInferenceSubject,
@@ -39,6 +39,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 unit_code! {
@@ -1603,6 +1604,37 @@ pub(crate) fn duplicate_public_export(
 }
 
 diagnostic_family! {
+    CASE_CONFLICTING_PUBLIC_EXPORT_ROUTE {
+        internal: 3092,
+        stable: "MOTH-RULE-0092",
+        category: DiagnosticCategory::Rule,
+        severity: DiagnosticSeverity::Error,
+        title: "Case-conflicting public export routes",
+        facts: [route: PathFact, previous_route: PathFact],
+        labels: [LabelMessageCode::PREVIOUS_DECLARATION],
+        extra: None,
+        ctor: manual,
+        view: CaseConflictingPublicExportRouteView,
+        render: render_case_conflicting_public_export_route,
+    }
+}
+
+/// Store one case-only public route conflict and the earlier route operand site.
+pub(crate) fn case_conflicting_public_export_route(
+    route: PathId,
+    previous_route: PathId,
+    previous_span: Option<SourceSpan>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    let draft =
+        DiagnosticDraft::with_facts(&CASE_CONFLICTING_PUBLIC_EXPORT_ROUTE, span, |cursor| {
+            cursor.push::<PathFact>(&route)?;
+            cursor.push::<PathFact>(&previous_route)
+        });
+    draft.with_label(previous_span, Some(LabelDraftMessage::PreviousDeclaration))
+}
+
+diagnostic_family! {
     PRIVATE_TYPE_IN_EXPORTED_API {
         internal: 3082,
         stable: "MOTH-RULE-0082",
@@ -1772,6 +1804,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES:
     INVALID_TRAIT_KEYWORD_USAGE,
     INVALID_EXPORT_TARGET,
     DUPLICATE_PUBLIC_EXPORT,
+    CASE_CONFLICTING_PUBLIC_EXPORT_ROUTE,
     PRIVATE_TYPE_IN_EXPORTED_API,
     INVALID_TRAIT_INCOMPATIBILITY,
 ];

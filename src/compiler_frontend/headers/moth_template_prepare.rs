@@ -10,7 +10,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
 use crate::compiler_frontend::headers::qualified_references::{
-    HeaderExpressionRange, collect_qualified_references,
+    HeaderExpressionRange, collect_export_operand_paths, collect_qualified_references,
 };
 use crate::compiler_frontend::headers::synthetic_content_header::{
     SyntheticContentHeaderInput, synthetic_content_header,
@@ -23,6 +23,7 @@ use crate::compiler_frontend::paths::file_references::classify_prepared_file_ref
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 
 use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenIndex, TokenRange};
@@ -46,6 +47,7 @@ pub(crate) fn prepare_moth_template_file(
     owner: SourceTokenOwner,
     source_file: PathId,
     path_syntax: Arc<PathSyntaxTable>,
+    style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
@@ -80,9 +82,18 @@ pub(crate) fn prepare_moth_template_file(
         // heads), so one bounded scan of the retained body is the complete occurrence set.
         // The synthetic content body is compile-time content, so every occurrence is
         // const-required.
+        let export_operand_paths = collect_export_operand_paths(
+            canonical,
+            [context.body_range],
+            path_syntax.as_ref(),
+            style_directives,
+            string_table,
+        )
+        .map_err(FileFrontendPrepareFailure::Infrastructure)?;
         let occurrences = collect_qualified_references(
             canonical,
             [HeaderExpressionRange::const_required(0, context.body_range)],
+            &export_operand_paths,
             context.file_id,
             0,
             path_syntax.as_ref(),
@@ -92,10 +103,12 @@ pub(crate) fn prepare_moth_template_file(
         .map_err(|failure| {
             FileFrontendPrepareFailure::from_header_parse(failure, DiagnosticBag::new())
         })?;
-        let consumed_path_syntax_ids: Vec<_> = occurrences
-            .iter()
-            .map(|occurrence| occurrence.dependency.path_syntax)
-            .collect();
+        let mut consumed_path_syntax_ids = export_operand_paths;
+        consumed_path_syntax_ids.extend(
+            occurrences
+                .iter()
+                .map(|occurrence| occurrence.dependency.path_syntax),
+        );
         (content_header, consumed_path_syntax_ids, occurrences)
     };
     let mut headers = vec![content_header];

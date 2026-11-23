@@ -6,8 +6,8 @@
 //!      liveness. Lowering omits statically infallible handlers and dead statements after a
 //!      terminator, so the ordinary HIR scan cannot see the calls and range guards they still
 //!      select. Recording at the skip point keeps the lowering optimisations without losing the
-//!      evidence. Release folding keeps both kinds of omitted body unfolded, so this walk sees
-//!      the same selected source in both profiles.
+//!      evidence. Release speculation never folds a catch handler body or a handled subject, so
+//!      this walk sees the same selected source in both profiles.
 //!
 //! The expression walk owns calls, nested value blocks and owned runtime template handoffs; the
 //! statement walk owns `-> !` calls and statement range guards. Each nested value block is visited
@@ -56,7 +56,7 @@ impl<'a> HirBuilder<'a> {
     /// WHAT: walks a skipped handler body or the statements remaining after a terminator.
     /// WHY: both skip paths omit selected source for the same optimisation reason, so one walker
     ///      owns their call sites and fast range-guard witnesses. The release producer never folds
-    ///      an authored-dead statement or a statically pruned catch handler, so both walked bodies
+    ///      an authored-dead statement, a catch handler or a handled subject, so both walked bodies
     ///      still contain the calls and operations the selected-source evidence describes.
     pub(in crate::compiler_frontend::hir) fn record_skipped_statement_evidence(
         &mut self,

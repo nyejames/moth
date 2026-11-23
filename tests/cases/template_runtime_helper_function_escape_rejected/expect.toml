@@ -1,0 +1,18 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0022"]
+message_contains = [
+  "resolve during compilation",
+  "Place the insert in the receiving template application",
+  "use a direct `$in name: ...` for a named slot",
+  "Loose body content fills positional slots in order, then the default slot",
+  "For a function return, return ordinary `String` content",
+]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+reason = "invalid_template_structure.helper_outside_wrapper_slot"
+path = "input/@entry.moth"
+line = 2
+column = 13

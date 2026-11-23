@@ -55,6 +55,9 @@ fn file_reference_failure_draft(failure: ResolvedFileReferenceFailure) -> Diagno
             extension,
             span,
         } => unsupported_source_file_kind(path, extension, Some(span)),
+        ResolvedFileReferenceFailure::MothTargetHasNoValue { span } => {
+            invalid_expression(InvalidExpressionReason::MothFileHasNoValue, Some(span))
+        }
     }
 }
 

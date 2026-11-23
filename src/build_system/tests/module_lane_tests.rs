@@ -12,6 +12,7 @@ use crate::build_system::create_project_modules::module_artifact_store::{
 use crate::build_system::create_project_modules::module_identity::ModuleId;
 use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
+use crate::build_system::create_project_modules::seed_completed_package_materialisations;
 use crate::build_system::test_support::synthetic_source_root;
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
@@ -60,6 +61,7 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::module_compilation::artefact::{
     EntryRootMetadata, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
+use crate::compiler_frontend::module_compilation::generated::test_fixtures::generated_identity;
 use crate::compiler_frontend::module_compilation::{
     CompiledModuleArtifact, CompletedGeneratedFunction, GeneratedFunctionSidecar, Module,
     ModuleExternalImport, ModuleRootActivity,
@@ -805,7 +807,7 @@ fn materialisation_lookup_resolves_the_exact_template_row() {
         .find(|(identity, _)| **identity == second_identity)
         .expect("the second identity should be published with its own row");
     assert_eq!(
-        location.template_index, 1,
+        location.row_index, 1,
         "the row index must be the declaring context's own position, not the publication order"
     );
     let _context = store.materialisation_context_at(location);
@@ -857,6 +859,177 @@ fn same_generated_declaration_across_project_and_package_boundaries_fails() {
     };
     assert_eq!(report.stage, CompilerStage::ProjectBuildAssembly);
     assert_eq!(report.message.as_ref(), expected_message.as_str());
+}
+
+/// WHAT: seeding one boundary borrows the completed package row index instead of copying it.
+/// WHY:  copying every completed package row per canonical boundary rehashes the same rows once
+///       per package. Many independent packages then make canonical publication quadratic.
+#[test]
+fn seeding_many_completed_packages_borrows_their_materialisation_rows() {
+    const PACKAGE_COUNT: usize = 32;
+
+    let mut expected_origins = Vec::with_capacity(PACKAGE_COUNT);
+    let mut expected_declarations = Vec::with_capacity(PACKAGE_COUNT);
+    let mut packages = Vec::with_capacity(PACKAGE_COUNT * 2);
+    for index in 0..PACKAGE_COUNT {
+        let name = format!("const_{index}");
+        let module_origin = StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local(&name),
+            String::new(),
+            ModuleRootRole::Normal,
+        );
+        let origin = OriginFunctionId::new_free(module_origin, "decorate".to_owned());
+        expected_origins.push(origin.clone());
+        let mut module = minimal_lane_module(PathBuf::from("@mod.moth"), false);
+        module.metadata.materialisation_context = Some(Arc::new(
+            ModuleMaterialisationContext::from_const_origins_for_test(vec![Some(origin)]),
+        ));
+        packages.push(CompiledSourcePackage {
+            package_identity: StablePackageIdentity::source_package(
+                PackageOrigin::ProjectLocal,
+                &name,
+            ),
+            root_module_id: ModuleId::from_index(0),
+            boundary: test_graph_boundary(vec![module], &name, ""),
+        });
+
+        let name = format!("generic_{index}");
+        let declaration = generated_identity(&name).declaration().clone();
+        expected_declarations.push(declaration.clone());
+        let mut module = minimal_lane_module(PathBuf::from("@mod.moth"), false);
+        module.metadata.materialisation_context = Some(Arc::new(
+            ModuleMaterialisationContext::from_identities_for_test(vec![declaration]),
+        ));
+        packages.push(CompiledSourcePackage {
+            package_identity: StablePackageIdentity::source_package(
+                PackageOrigin::ProjectLocal,
+                &name,
+            ),
+            root_module_id: ModuleId::from_index(0),
+            boundary: test_graph_boundary(vec![module], &name, ""),
+        });
+    }
+    let completed = test_package_registry(packages);
+
+    let registry = seed_completed_package_materialisations(&completed);
+
+    assert_eq!(
+        registry.local_materialisation_count(),
+        0,
+        "the boundary seed must not copy completed package rows into its local maps"
+    );
+    assert_eq!(
+        registry.borrowed_completed_entry_count(),
+        PACKAGE_COUNT * 2,
+        "every completed generic and const row must resolve through the borrowed index"
+    );
+    for origin in &expected_origins {
+        assert!(
+            registry.const_function(origin).is_some(),
+            "the borrowed seed must resolve every package const row"
+        );
+    }
+    for declaration in &expected_declarations {
+        assert!(
+            registry.resolves_materialisation(declaration),
+            "the borrowed seed must resolve every package generic row"
+        );
+    }
+}
+
+#[test]
+fn same_const_origin_across_project_and_package_boundaries_fails() {
+    let origin = OriginFunctionId::new_free(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("html"),
+            String::new(),
+            ModuleRootRole::Normal,
+        ),
+        "decorate".to_owned(),
+    );
+    let expected_message = format!(
+        "Const function origin {:?} is published by both project module 0 and source package @html",
+        origin
+    );
+    let mut project_module = minimal_lane_module(PathBuf::from("@entry.moth"), true);
+    project_module.metadata.materialisation_context = Some(Arc::new(
+        ModuleMaterialisationContext::from_const_origins_for_test(vec![Some(origin.clone())]),
+    ));
+    let project = test_graph_boundary(vec![project_module], "test", "page");
+
+    let mut package_module = minimal_lane_module(PathBuf::from("@mod.moth"), false);
+    package_module.metadata.materialisation_context = Some(Arc::new(
+        ModuleMaterialisationContext::from_const_origins_for_test(vec![Some(origin)]),
+    ));
+    let package = test_graph_boundary(vec![package_module], "html", "");
+
+    let registry = test_package_registry(vec![CompiledSourcePackage {
+        package_identity: StablePackageIdentity::source_package(
+            PackageOrigin::ProjectLocal,
+            "html",
+        ),
+        root_module_id: ModuleId::from_index(0),
+        boundary: package,
+    }]);
+
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ProjectFrontendCompilation::new(
+            project,
+            registry,
+            ResourceInputRegistry::new(),
+            Vec::new(),
+            synthetic_source_root(),
+        )
+    }));
+    let report = match payload {
+        Err(payload) => payload
+            .downcast::<CompilerBugReport>()
+            .unwrap_or_else(|_| panic!("expected a CompilerBugReport payload")),
+        Ok(_) => panic!("one const origin must not cross boundaries"),
+    };
+    assert_eq!(report.stage, CompilerStage::ProjectBuildAssembly);
+    assert_eq!(report.message.as_ref(), expected_message.as_str());
+}
+
+#[test]
+fn source_packages_cannot_publish_the_same_const_origin() {
+    let origin = OriginFunctionId::new_free(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("const_a"),
+            String::new(),
+            ModuleRootRole::Normal,
+        ),
+        "decorate".to_owned(),
+    );
+    let package = |name: &str, origin: OriginFunctionId| {
+        let mut module = minimal_lane_module(PathBuf::from("@mod.moth"), false);
+        module.metadata.materialisation_context = Some(Arc::new(
+            ModuleMaterialisationContext::from_const_origins_for_test(vec![Some(origin)]),
+        ));
+        CompiledSourcePackage {
+            package_identity: StablePackageIdentity::source_package(
+                PackageOrigin::ProjectLocal,
+                name,
+            ),
+            root_module_id: ModuleId::from_index(0),
+            boundary: test_graph_boundary(vec![module], name, ""),
+        }
+    };
+
+    let mut registry = CompletedSourcePackageRegistry::new();
+    registry
+        .publish(package("const_a", origin.clone()), &[])
+        .expect("the first package const row should publish");
+    let failure = registry
+        .publish(package("const_b", origin.clone()), &[])
+        .expect_err("a const origin published by two packages must be rejected");
+    assert_eq!(
+        failure.message.as_ref(),
+        format!(
+            "Const function origin {:?} was published by source packages @const_a and @const_b",
+            origin
+        )
+    );
 }
 
 #[test]
@@ -2198,66 +2371,6 @@ fn materialisation_rows_iterate_in_deterministic_publication_order() {
 }
 
 #[test]
-fn package_registry_materialisation_rows_iterate_in_publication_order() {
-    let beta_identity = generated_test_identity("beta");
-    let alpha_identity = generated_test_identity("alpha");
-    let mut registry = CompletedSourcePackageRegistry::new();
-
-    let mut beta_module = minimal_lane_module(PathBuf::from("packages/beta/@mod.moth"), false);
-    beta_module.metadata.materialisation_context = Some(Arc::new(
-        ModuleMaterialisationContext::from_identities_for_test(vec![
-            beta_identity.declaration().clone(),
-        ]),
-    ));
-    registry
-        .publish(
-            CompiledSourcePackage {
-                package_identity: StablePackageIdentity::source_package(
-                    PackageOrigin::ProjectLocal,
-                    "beta",
-                ),
-                root_module_id: ModuleId::from_index(0),
-                boundary: test_graph_boundary(vec![beta_module], "beta", ""),
-            },
-            &[],
-        )
-        .expect("beta package publishes first");
-
-    let mut alpha_module = minimal_lane_module(PathBuf::from("packages/alpha/@mod.moth"), false);
-    alpha_module.metadata.materialisation_context = Some(Arc::new(
-        ModuleMaterialisationContext::from_identities_for_test(vec![
-            alpha_identity.declaration().clone(),
-        ]),
-    ));
-    registry
-        .publish(
-            CompiledSourcePackage {
-                package_identity: StablePackageIdentity::source_package(
-                    PackageOrigin::ProjectLocal,
-                    "alpha",
-                ),
-                root_module_id: ModuleId::from_index(0),
-                boundary: test_graph_boundary(vec![alpha_module], "alpha", ""),
-            },
-            &[],
-        )
-        .expect("alpha package publishes second");
-
-    let order = registry
-        .materialisation_locations()
-        .map(|(identity, _)| identity.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        order,
-        vec![
-            beta_identity.declaration().clone(),
-            alpha_identity.declaration().clone()
-        ],
-        "package materialisation rows must iterate in publication order"
-    );
-}
-
-#[test]
 fn late_package_duplicate_leaves_registry_unchanged() {
     let shared_identity = generated_test_identity("shared");
     let mut registry = CompletedSourcePackageRegistry::new();
@@ -2268,7 +2381,7 @@ fn late_package_duplicate_leaves_registry_unchanged() {
             shared_identity.declaration().clone(),
         ]),
     ));
-    registry
+    let first_package_id = registry
         .publish(
             CompiledSourcePackage {
                 package_identity: StablePackageIdentity::source_package(
@@ -2309,9 +2422,9 @@ fn late_package_duplicate_leaves_registry_unchanged() {
     );
     assert_eq!(registry.by_prefix("late"), None);
     assert_eq!(
-        registry.materialisation_locations().count(),
-        1,
-        "materialisation rows must remain unchanged"
+        registry.materialisation_owner(shared_identity.declaration()),
+        Some(first_package_id),
+        "the failing package must leave the first package's row owner unchanged"
     );
 }
 

@@ -1,0 +1,6 @@
+-- Parenthesis depth does not make an export a directive run.
+helper #= 1
+
+render || -> String:
+    return ($export @missing symbol)
+;

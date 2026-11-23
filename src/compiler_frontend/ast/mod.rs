@@ -351,8 +351,8 @@ pub(crate) fn normalize_fast_operation_witnesses(witnesses: &mut Vec<AstFastOper
 ///      that keeps the call. HIR projects each row through the same call-target mapping and
 ///      inactive-static-branch filter as authored and skipped call evidence. The span is mandatory
 ///      because every projected row carries its authored call site; the release producer declines
-///      to erase a spanless call instead. Authored-dead statements and statically pruned catch
-///      handlers are never folded, so every recorded row belongs to source HIR lowered.
+///      to erase a spanless call instead. Catch handler bodies and handled subjects are never
+///      folded, so every recorded row belongs to source HIR lowered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct AstReleaseErasedCallSite {
     /// The callable body whose expression release speculation folded.
@@ -361,12 +361,6 @@ pub(crate) struct AstReleaseErasedCallSite {
     pub(crate) target: PathId,
     /// The authored span of the erased call expression.
     pub(crate) span: SourceSpan,
-    /// Whether an enclosing catch owns this call's recoverable failure.
-    ///
-    /// WHAT: recorded from the rewrite walk's catch-subject containment.
-    /// WHY: debug keeps the call and its failure edge enters the handler, while the erased call
-    ///      has no such edge. HIR widens `may_fail` only for escaping erased failures.
-    pub(crate) failure_caught: bool,
 }
 
 /// Unified AST output for all source files in one compilation unit.
@@ -408,7 +402,9 @@ pub struct Ast {
     /// WHY: `$safe_math` and `$infallible` verification run after release speculation, so a folded
     ///      call has no HIR block that could evidence its callee. The ledger keeps the call site
     ///      visible to HIR projection without retaining the erased expression tree or disabling a
-    ///      profitable fold. It is empty in debug builds because no call is erased there.
+    ///      profitable fold. Catch handler bodies and handled subjects stay at runtime, so every
+    ///      row is executable source HIR lowered. It is empty in debug builds because no call is
+    ///      erased there.
     pub(crate) release_erased_call_sites: Vec<AstReleaseErasedCallSite>,
 
     /// Pre-fold failure facts for every concrete callable in `nodes`, keyed by callable identity.

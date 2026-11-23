@@ -1,0 +1,3 @@
+-- This private source folder shares the published route spelling. Public lookups must never fall
+-- through to it when the route does not export the selected leaf.
+suffix #= "private"

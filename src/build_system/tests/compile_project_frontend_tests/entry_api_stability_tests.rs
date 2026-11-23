@@ -36,14 +36,16 @@ fn only_project_artifact(frontend: &ProjectFrontendCompilation) -> &CompiledModu
 /// The accepted public-interface fingerprint content excludes source locations, so diagnostic
 /// provenance is not part of the invalidation decision. Everything else is the complete
 /// canonical interface.
-fn interface_fingerprint_content(interface: &PublicSemanticInterface) -> PublicSemanticInterface {
+pub(super) fn interface_fingerprint_content(
+    interface: &PublicSemanticInterface,
+) -> PublicSemanticInterface {
     let mut canonical = interface.clone();
     canonical.export_diagnostic_provenance.clear();
     canonical
 }
 
 /// Returns the facade interface whose portable module path ends with `suffix`.
-fn normal_interface_for<'a>(
+pub(super) fn normal_interface_for<'a>(
     frontend: &'a ProjectFrontendCompilation,
     suffix: &str,
 ) -> &'a PublicSemanticInterface {
@@ -64,7 +66,7 @@ fn normal_interface_for<'a>(
 ///
 /// WHY: a `.mtf` file value and a qualified `content` reference must publish the same concrete
 ///      constant text, not merely compile.
-fn exported_constant_text(interface: &PublicSemanticInterface, name: &str) -> String {
+pub(super) fn exported_constant_text(interface: &PublicSemanticInterface, name: &str) -> String {
     let declaration = interface
         .declarations
         .iter()
@@ -154,7 +156,7 @@ fn reachable_project_context(artifact: &CompiledModuleArtifact) -> bool {
         .contains_class(SyntheticInterfaceClass::ProjectContext)
 }
 
-fn reachable_external_functions(
+pub(super) fn reachable_external_functions(
     artifact: &CompiledModuleArtifact,
 ) -> rustc_hash::FxHashSet<ExternalFunctionId> {
     let hir = &artifact.module.executable.hir;

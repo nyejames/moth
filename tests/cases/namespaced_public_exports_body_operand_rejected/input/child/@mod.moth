@@ -1,0 +1,7 @@
+-- A trailing token is an invalid route operand even though no statement can be exported.
+helper #= 1
+
+render || -> String:
+    $export @helper extra
+    return "x"
+;

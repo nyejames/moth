@@ -8,7 +8,7 @@
 //! owner is the only physical resolver for directory paths, so later stages receive settled
 //! targets and cannot rediscover the filesystem. It never parses expressions or reads bytes.
 
-use crate::builder_surface::SourceFileKindRegistry;
+use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::InvalidCompileTimePathReason;
@@ -38,6 +38,18 @@ use super::resource_inputs::ResourceInputRegistry;
 use super::source_tree_index::{
     SourceClassification, SourceOwnership, SourceRecordIndex, SourceTreeIndex,
 };
+
+/// The compiler source kind named by a recognised physical source filename.
+///
+/// WHAT: looks at the canonical file's extension only; alias spellings never participate.
+/// WHY: the single-file resolver has no source-tree index, so the file that owns the bytes must
+///      decide Moth-versus-content while active-builder support remains a registry concern.
+fn physical_source_kind(canonical: &Path) -> Option<SourceFileKind> {
+    canonical
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(SourceFileKind::from_extension)
+}
 
 /// One directory-boundary physical file-reference resolver.
 ///
@@ -297,6 +309,40 @@ impl<'a> FileReferenceResolver<'a> {
                         ))
                     })?;
                 let target_record = self.source_tree_index.source(target_source_index);
+                // The source index retains the canonical physical entry's classification when
+                // visible spellings disagree, so a content-spelled alias cannot disguise a Moth
+                // source. A Moth target has no `content` file value and must never be published
+                // as a content target or enter the content worklist.
+                if matches!(
+                    target_record.classification(),
+                    SourceClassification::CompilerSemantic(SourceFileKind::Moth)
+                ) {
+                    return Ok(ResolvedFileReference {
+                        source_file,
+                        path_syntax: reference.path_syntax,
+                        class: reference.class,
+                        outcome: ResolvedFileReferenceOutcome::Diagnostic(
+                            ResolvedFileReferenceFailure::MothTargetHasNoValue {
+                                span: reference.span,
+                            },
+                        ),
+                    });
+                }
+                // A provider-owned physical entry is recognised source kind beside compiler
+                // semantic content. It supplies imports and runtime assets, so a content-spelled
+                // alias must report that typed rejection here instead of reaching the index
+                // invariant for a non-compiler-semantic target.
+                if matches!(
+                    target_record.classification(),
+                    SourceClassification::ProviderOwned(_)
+                ) {
+                    return Ok(self.diagnostic_outcome(
+                        source_file,
+                        reference,
+                        authored_path,
+                        InvalidCompileTimePathReason::ProviderOwnedContentTarget,
+                    ));
+                }
                 if !target_record.supported() {
                     let extension = canonical
                         .extension()
@@ -1099,6 +1145,16 @@ impl<'a> SingleFileReferenceResolver<'a> {
         }
 
         if matches!(reference.class, PreparedFileReferenceClass::ContentSource) {
+            if physical_source_kind(&canonical) == Some(SourceFileKind::Moth) {
+                return Ok(SingleFileResolvedReference {
+                    outcome: SingleFileReferenceOutcome::Diagnostic(
+                        ResolvedFileReferenceFailure::MothTargetHasNoValue {
+                            span: reference.span,
+                        },
+                    ),
+                    ..result
+                });
+            }
             let extension = canonical
                 .extension()
                 .and_then(|extension| extension.to_str())

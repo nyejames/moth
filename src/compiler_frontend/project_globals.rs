@@ -23,8 +23,8 @@ use crate::compiler_frontend::public_interface::{
     PublicSemanticInterface,
 };
 use crate::compiler_frontend::semantic_identity::{
-    ExportBinding, OriginConstantId, OriginDeclarationId, StableModuleOriginIdentity,
-    StablePackageIdentity,
+    ExportBinding, OriginConstantId, OriginDeclarationId, PublicExportRoute,
+    StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -149,6 +149,7 @@ impl ProjectGlobalsInterface {
 
             export_bindings.push(ExportBinding::new(
                 module_origin.clone(),
+                PublicExportRoute::ROOT,
                 name.clone(),
                 declaration_origin.clone(),
             ));

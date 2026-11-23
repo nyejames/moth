@@ -500,6 +500,7 @@ impl CompilerFrontend<'static> {
                     owner,
                     source_file,
                     path_syntax,
+                    context.style_directives,
                     local_string_table,
                     local_path_fork,
                 )

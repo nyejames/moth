@@ -399,7 +399,7 @@ fn compile_single_file_frontend_with_target(
         &builder_surface.source_file_kinds,
         module_roots,
     );
-    let namespace_set = ModuleNamespaceSet::for_single_file(
+    let mut namespace_set = ModuleNamespaceSet::for_single_file(
         source_package_indexes,
         &builder_surface.binding_packages,
         &project_path_resolver,
@@ -483,7 +483,7 @@ fn compile_single_file_frontend_with_target(
                 };
                 let mut inventories = discover_source_package_inventories(
                     config,
-                    &namespace_set,
+                    &mut namespace_set,
                     &project_path_resolver,
                     style_directives,
                     &mut external_imports,
@@ -686,7 +686,7 @@ fn compile_single_file_frontend_with_target(
             let modules = ModuleArtifactStore::new(1);
             let generated_store = BoundaryGeneratedFunctionStore::default();
             let provider_materialisations =
-                super::seed_completed_package_materialisations(&completed_source_packages)?;
+                super::seed_completed_package_materialisations(&completed_source_packages);
             let provider_binding_index = super::build_provider_binding_index(&[]);
             let package_binding_index = super::build_source_package_dependency_index(
                 &provider_binding_index,
@@ -729,9 +729,15 @@ fn compile_single_file_frontend_with_target(
                 #[cfg(feature = "timers")]
                 timing_module_context,
             );
+            // The diagnosed consumer can carry a provider-owned primary or label while no route
+            // collision ever ran. Register every completed package domain before the premerge
+            // report freezes so those named handles resolve in the package source database.
             return boracle_result
                 .map(|input| SingleFileFrontendResult::Boracle(Box::new(input)))
-                .map_err(BoundaryPremergeFailure::from);
+                .map_err(|failure| {
+                    BoundaryPremergeFailure::from(failure)
+                        .with_completed_package_donors(&completed_source_packages)
+                });
         }
         #[cfg(not(feature = "boracle"))]
         let _ = target;

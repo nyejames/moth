@@ -1,12 +1,13 @@
 //! Published declaring-module materialisation contexts available to one compilation boundary.
 //!
-//! WHAT: an identity-keyed registry of the generic templates already completed providers exposed,
-//!       plus the resolved template one generated request will materialise from.
-//! WHY:  materialising a concrete generic needs the *declaring* module's validated template, which
-//!       may live in an earlier project module or a completed source package. The build system
-//!       populates this registry as it publishes each provider, then lends it to the compiler for
-//!       the duration of one module transaction. The compiler resolves templates from it and never
-//!       reaches into a build-system store.
+//! WHAT: an identity-keyed registry of the generic templates and const function bodies already
+//!       completed providers exposed, plus the resolved template one generated request will
+//!       materialise from.
+//! WHY:  materialising a concrete generic, or folding an imported const function, needs the
+//!       *declaring* module's validated context, which may live in an earlier project module or a
+//!       completed source package. The build system populates this registry as it publishes each
+//!       provider, then lends it to the compiler for the duration of one module transaction. The
+//!       compiler resolves templates from it and never reaches into a build-system store.
 
 use crate::compiler_frontend::ast::generic_functions::{
     ModuleMaterialisationContext, ModuleMaterialisationPreparation,
@@ -31,6 +32,8 @@ pub(crate) struct PublishedMaterialisation {
     /// Completed source-package seeds and any other cross-boundary publication re-intern by
     /// spelling through [`ModuleMaterialisationContext::rebased_for_requester`] for every request.
     pub(crate) rebase_required: bool,
+    /// Completed package that published this row; `None` for the boundary's own rows.
+    pub(crate) package_index: Option<usize>,
 }
 
 /// One published const function body row and the declaring context that owns it.
@@ -38,31 +41,193 @@ pub(crate) struct PublishedMaterialisation {
 pub(crate) struct PublishedConstFunction {
     pub(crate) context: Arc<ModuleMaterialisationContext>,
     pub(crate) row_index: usize,
-    /// See [`PublishedMaterialisation::rebase_required`].
+    /// Whether the context was published from a different identity domain.
+    ///
+    /// A provider that retains its own const identity pair always rebases the selected closure
+    /// through a synthetic declaring-domain mount. This marker is consulted only when that pair is
+    /// absent: a cross-boundary seed then falls back to the generic spelling-based rebase, while a
+    /// same-boundary publication can use its retained rows directly.
     pub(crate) rebase_required: bool,
+    /// Completed package that published this row; `None` for the boundary's own rows.
+    pub(crate) package_index: Option<usize>,
 }
 
-/// Every declaring-module materialisation template published in one compilation boundary.
+/// Immutable index of every materialisation row completed source packages expose.
 ///
-/// Entries are shared by `Arc`, so the registry keeps resolving correctly as the build system's
-/// artefact storage grows behind it.
-#[derive(Default)]
-pub(crate) struct ProviderMaterialisationRegistry {
+/// WHAT: owns the same two identity maps as a boundary registry, built once by the completed
+///       source-package registry and updated one package at a time.
+/// WHY:  each canonical package needs the rows of every earlier package, but copying and
+///       rehashing those rows per boundary grows quadratically. A boundary registry borrows this
+///       shared index and keeps only its own publications in the local maps.
+#[derive(Clone, Default)]
+pub(crate) struct CompletedMaterialisationIndex {
     published: FxHashMap<GeneratedDeclarationIdentity, PublishedMaterialisation>,
     const_functions: FxHashMap<OriginFunctionId, PublishedConstFunction>,
 }
 
+impl CompletedMaterialisationIndex {
+    pub(crate) fn reserve(&mut self, materialisations: usize, const_functions: usize) {
+        self.published.reserve(materialisations);
+        self.const_functions.reserve(const_functions);
+    }
+
+    /// Record one generic materialisation row a completed package published.
+    ///
+    /// A completed package finished before every later boundary forked, so its retained identity
+    /// domain is always foreign to a requester and the row always needs the spelling-based
+    /// rebase. The marker is not a parameter because no caller can legitimately clear it.
+    pub(crate) fn insert_materialisation(
+        &mut self,
+        identity: GeneratedDeclarationIdentity,
+        context: Arc<ModuleMaterialisationContext>,
+        template_index: usize,
+        package_index: usize,
+    ) {
+        self.published
+            .entry(identity)
+            .or_insert(PublishedMaterialisation {
+                context,
+                template_index,
+                rebase_required: true,
+                package_index: Some(package_index),
+            });
+    }
+
+    /// Record one const function row a completed package published. See
+    /// [`Self::insert_materialisation`] for why the rebase marker is always set.
+    pub(crate) fn insert_const_function(
+        &mut self,
+        origin: OriginFunctionId,
+        context: Arc<ModuleMaterialisationContext>,
+        row_index: usize,
+        package_index: usize,
+    ) {
+        self.const_functions
+            .entry(origin)
+            .or_insert(PublishedConstFunction {
+                context,
+                row_index,
+                rebase_required: true,
+                package_index: Some(package_index),
+            });
+    }
+
+    fn materialisation(
+        &self,
+        identity: &GeneratedDeclarationIdentity,
+    ) -> Option<&PublishedMaterialisation> {
+        self.published.get(identity)
+    }
+
+    fn const_function(&self, origin: &OriginFunctionId) -> Option<&PublishedConstFunction> {
+        self.const_functions.get(origin)
+    }
+
+    /// Completed package that published one generic row.
+    pub(crate) fn materialisation_owner_index(
+        &self,
+        identity: &GeneratedDeclarationIdentity,
+    ) -> Option<usize> {
+        self.published
+            .get(identity)
+            .and_then(|row| row.package_index)
+    }
+
+    /// Completed package that published one const row.
+    pub(crate) fn const_function_owner_index(&self, origin: &OriginFunctionId) -> Option<usize> {
+        self.const_functions
+            .get(origin)
+            .and_then(|row| row.package_index)
+    }
+}
+
+/// Every declaring-module materialisation row published in one compilation boundary.
+///
+/// Completed-package rows live in one shared [`CompletedMaterialisationIndex`]; only the
+/// boundary's own rows occupy the local maps. Entries are shared by `Arc`, so lookups keep
+/// resolving as the build system's artefact storage grows behind the registry.
+#[derive(Default)]
+pub(crate) struct ProviderMaterialisationRegistry {
+    published: FxHashMap<GeneratedDeclarationIdentity, PublishedMaterialisation>,
+    const_functions: FxHashMap<OriginFunctionId, PublishedConstFunction>,
+    completed: Option<Arc<CompletedMaterialisationIndex>>,
+}
+
 impl ProviderMaterialisationRegistry {
+    /// Share the immutable index of every completed package row.
+    pub(crate) fn borrow_completed_index(&mut self, index: Arc<CompletedMaterialisationIndex>) {
+        self.completed = Some(index);
+    }
+
+    /// Resolve one declaring template, preferring this boundary's own publication.
+    fn published_template(
+        &self,
+        identity: &GeneratedDeclarationIdentity,
+    ) -> Option<&PublishedMaterialisation> {
+        self.published.get(identity).or_else(|| {
+            self.completed
+                .as_deref()
+                .and_then(|completed| completed.materialisation(identity))
+        })
+    }
+
+    /// Resolve one const function body row, preferring this boundary's own publication.
+    pub(crate) fn const_function(
+        &self,
+        origin: &OriginFunctionId,
+    ) -> Option<&PublishedConstFunction> {
+        self.const_functions.get(origin).or_else(|| {
+            self.completed
+                .as_deref()
+                .and_then(|completed| completed.const_function(origin))
+        })
+    }
+
+    fn completed_materialisation(
+        &self,
+        identity: &GeneratedDeclarationIdentity,
+    ) -> Option<&PublishedMaterialisation> {
+        self.completed
+            .as_deref()
+            .and_then(|completed| completed.materialisation(identity))
+    }
+
+    fn completed_const_function(
+        &self,
+        origin: &OriginFunctionId,
+    ) -> Option<&PublishedConstFunction> {
+        self.completed
+            .as_deref()
+            .and_then(|completed| completed.const_function(origin))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn local_materialisation_count(&self) -> usize {
+        self.published.len() + self.const_functions.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn resolves_materialisation(&self, identity: &GeneratedDeclarationIdentity) -> bool {
+        self.published_template(identity).is_some()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn borrowed_completed_entry_count(&self) -> usize {
+        self.completed.as_deref().map_or(0, |completed| {
+            completed.published.len() + completed.const_functions.len()
+        })
+    }
+
     /// Diagnose a declaring-context collision without mutating the registry.
     ///
     /// Re-publishing the same declaring context and template row is idempotent.
-    pub(crate) fn preflight_publish(
+    fn preflight_publish(
         &self,
         identity: &GeneratedDeclarationIdentity,
         context: &Arc<ModuleMaterialisationContext>,
         template_index: usize,
     ) -> Result<(), InfrastructureFailure> {
-        if let Some(existing) = self.published.get(identity) {
+        if let Some(existing) = self.published_template(identity) {
             if Arc::ptr_eq(&existing.context, context) && existing.template_index == template_index
             {
                 return Ok(());
@@ -76,34 +241,6 @@ impl ProviderMaterialisationRegistry {
                 ),
             ));
         }
-        Ok(())
-    }
-
-    /// Preflight and record one published declaring context for a generic declaration it owns.
-    ///
-    /// WHY: within one lane an identity resolves to exactly one declaring context, and each lane
-    ///      proves that before publishing here: the module store rejects an identity published by
-    ///      two materialisation contexts, and the package registry rejects one published by two
-    ///      packages. Neither proof sees the other lane, so a cross-lane collision can reach this
-    ///      call. Diagnose it here instead of allowing the later publication to replace the
-    ///      earlier one and deferring the error until the boundary handoff.
-    ///
-    /// Re-publishing the same declaring context and template row is idempotent.
-    pub(crate) fn publish(
-        &mut self,
-        identity: GeneratedDeclarationIdentity,
-        context: Arc<ModuleMaterialisationContext>,
-        template_index: usize,
-        rebase_required: bool,
-    ) -> Result<(), InfrastructureFailure> {
-        self.preflight_publish(&identity, &context, template_index)?;
-        self.published
-            .entry(identity)
-            .or_insert(PublishedMaterialisation {
-                context,
-                template_index,
-                rebase_required,
-            });
         Ok(())
     }
 
@@ -149,7 +286,7 @@ impl ProviderMaterialisationRegistry {
         }
         let mut pending_consts = FxHashMap::default();
         for (origin, row_index) in &const_rows {
-            self.preflight_const_function(origin, context, *row_index)?;
+            self.preflight_publish_const(origin, context, *row_index)?;
             if let Some(&existing_index) = pending_consts.get(origin) {
                 if existing_index != *row_index {
                     return Err(InfrastructureFailure::internal(
@@ -165,35 +302,46 @@ impl ProviderMaterialisationRegistry {
             }
         }
         // Every row passed preflight above, so record them without re-running those checks.
+        // Preflight resolved completed-package rows too, so a row that already resolves through the
+        // borrowed index is idempotent here and stays out of the local maps; copying it would
+        // duplicate every completed row inside each boundary.
         for (identity, template_index) in rows {
-            self.published
-                .entry(identity.clone())
-                .or_insert(PublishedMaterialisation {
-                    context: Arc::clone(context),
-                    template_index,
-                    rebase_required,
-                });
+            if self.completed_materialisation(identity).is_none() {
+                self.published
+                    .entry(identity.clone())
+                    .or_insert(PublishedMaterialisation {
+                        context: Arc::clone(context),
+                        template_index,
+                        rebase_required,
+                        package_index: None,
+                    });
+            }
         }
         for (origin, row_index) in const_rows {
-            self.const_functions
-                .entry(origin)
-                .or_insert(PublishedConstFunction {
-                    context: Arc::clone(context),
-                    row_index,
-                    rebase_required,
-                });
+            if self.completed_const_function(&origin).is_none() {
+                self.const_functions
+                    .entry(origin)
+                    .or_insert(PublishedConstFunction {
+                        context: Arc::clone(context),
+                        row_index,
+                        rebase_required,
+                        package_index: None,
+                    });
+            }
         }
         Ok(())
     }
 
     /// Diagnose a const function row collision without mutating the registry.
-    fn preflight_const_function(
+    ///
+    /// Re-publishing the same declaring context and row is idempotent.
+    fn preflight_publish_const(
         &self,
         origin: &OriginFunctionId,
         context: &Arc<ModuleMaterialisationContext>,
         row_index: usize,
     ) -> Result<(), InfrastructureFailure> {
-        if let Some(existing) = self.const_functions.get(origin)
+        if let Some(existing) = self.const_function(origin)
             && !(Arc::ptr_eq(&existing.context, context) && existing.row_index == row_index)
         {
             return Err(InfrastructureFailure::internal(
@@ -205,21 +353,6 @@ impl ProviderMaterialisationRegistry {
             ));
         }
         Ok(())
-    }
-
-    /// Resolve one published const function body row by stable origin.
-    pub(crate) fn const_function(
-        &self,
-        origin: &OriginFunctionId,
-    ) -> Option<&PublishedConstFunction> {
-        self.const_functions.get(origin)
-    }
-
-    fn published_template(
-        &self,
-        identity: &GeneratedDeclarationIdentity,
-    ) -> Option<&PublishedMaterialisation> {
-        self.published.get(identity)
     }
 }
 

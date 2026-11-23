@@ -1,18 +1,27 @@
-A facade can re-export declarations from another source file or package without defining a wrapper. Place `$export` immediately before a direct-selection dependency clause in `@mod.moth` or `@package.moth`.
+A facade can re-export declarations from another source file or package without
+defining a wrapper. Place `$export` immediately before a direct-selection
+dependency clause in `@mod.moth` or `@package.moth`. Add one `@route` operand to
+publish the selected names under a public route instead of the facade root.
 
 ### Direct-selection re-exports
 
 [codeblock, $code "moth":
+    -- library/@mod.moth
     $export
     @components/card CardData as Card, render_card
 
-    $export
+    $export @forms/numbers
     @core/math PI, sin
 ]
 
-This publishes `Card`, `render_card`, `PI` and `sin` through the facade. `CardData` remains available under its original name only if the facade also selects it without an alias. A leaf `as` alias is both the local selected name and the public name.
+This publishes `Card` and `render_card` at the facade root and `PI` and `sin`
+under the nested `forms/numbers` route, reached as `@library/forms/numbers PI`.
+`CardData` remains available under its original name only if the facade also
+selects it without an alias. A leaf `as` alias is both the local selected name
+and the public name.
 
-One directive applies to all names on the following clause. An ordinary unmarked dependency clause stays private:
+One directive applies to all names on the following clause. An ordinary
+unmarked dependency clause stays private:
 
 [codeblock, $code "moth":
     @components/card CardData as LocalCard
@@ -20,25 +29,92 @@ One directive applies to all names on the following clause. An ordinary unmarked
 
 `LocalCard` is now bound in this file, but is not public.
 
-### Selection syntax
+### Route ownership
 
-The provider path and first selected name must begin on the same physical line. A comma continues the list across a newline:
+The route operand belongs to the exporting facade. It is not a path into the
+provider and not the provider's own route. The selection after the clause still
+names the provider surface:
 
 [codeblock, $code "moth":
-    $export
+    -- library/@mod.moth
+    $export @mirror
+    @provider/nested widget as widget_label
+]
+
+The provider publishes `widget` under its own `nested` route. It is a child
+module of `library`, so `@provider/nested` resolves from the `library` module
+root. The facade selects it through that path. Its public path is
+`@library/mirror`, so consumers write `@library/mirror widget_label`.
+`widget_label` is the public leaf because the alias names it. A provider route
+is never inherited into the re-export path.
+
+A route never renames anything. Explicit selections and `as` aliases decide
+which declarations cross the facade and what each public leaf is called. Two
+`$export` directives on one clause are a duplicate even when their routes
+differ, because one target has one public destination.
+
+### Selection syntax
+
+The route operand stays on the `$export` line. The provider path and first
+selected name must begin on the same physical line after it. A comma continues
+the list across a newline:
+
+[codeblock, $code "moth":
+    $export @forms
     @components/card CardData,
         render_card
 ]
 
 Without a comma, a newline ends the clause. A trailing comma is invalid because another selected name is required.
 
-Re-exports require a nonempty list of flat, explicit selections. Whole namespaces, namespace aliases, nested selections, wildcard exports and export lists are unsupported. Receiver methods remain attached to their receiver type and cannot be re-exported as separate selected names.
+Re-exports require a nonempty list of flat, explicit selections. Whole namespaces, namespace aliases, nested selections, wildcard exports and export lists are unsupported. A route operand does not add nested selection syntax. Receiver methods remain attached to their receiver type and cannot be re-exported as separate selected names.
 
 ### Public identity and validation
 
-Re-exports preserve the selected declaration's origin, type and callable error contract. They cannot expose an unknown or inaccessible private declaration. Exported names must be unique across direct declarations and re-exported selections in one facade.
+Re-exports preserve the selected declaration's origin, type and callable error
+contract through any number of hops. The publishing facade owns the binding. A
+route changes where that binding appears, not its origin identity.
 
-A private callable's inferred implicit failure cannot escape through a public callable without an appropriate declared error slot or local handling. See @../project-structure/#public-api (Public API) for the public contract.
+The public identity is `(route, leaf)`. Distinct names in one route merge into
+one public namespace. Two selected names that resolve to the same leaf in one
+route report `MOTH-RULE-0081` at both sites. The same leaf in different routes
+is legal when it comes from one selected target.
+
+That limit follows from local binding. A routed re-export still binds its public
+leaf as a local name in the facade, so two different targets that both use
+`widget` collide as local names (`MOTH-IMPORT-0009`) even when their routes
+differ. Two `$export` directives on one clause, even with different routes, are
+a duplicate directive diagnostic with both sites.
+
+Any two distinct route spellings in one facade must differ by more than ASCII
+case. `@forms` and `@Forms` report `MOTH-RULE-0092` at both operands. A route
+that overlaps a consumer-visible child or source key or a registered source or
+binding package prefix reports `MOTH-IMPORT-0006` eagerly, even when no consumer
+references it. A case-only match counts as a collision.
+
+Two facades that share one visible key create an ambiguous base. Identical route
+claims from different facades behind that base stay latent, and the base and
+each such route report `MOTH-IMPORT-0006` on use. A route behind an ambiguous
+base that overlaps a different visible provider, such as a selectable child
+facade or one of its routes, a local source or a registered package prefix, is
+an eager `MOTH-IMPORT-0006` collision even when unused.
+
+Exported local names must be unique across direct declarations and re-exported
+selections in one facade. A re-export cannot expose an unknown or inaccessible
+private declaration.
+
+A private file or directory in the exporting module may share a route spelling
+and stays private. An undeclared route, a deeper route that the facade never
+published or a leaf missing from a declared route reports an import diagnostic.
+It never falls through to a private path.
+
+Receiver methods stay attached to their receiver type. A routed type carries its
+methods for callers, but a method is not a selectable leaf and cannot be
+re-exported separately (`MOTH-IMPORT-0011`).
+
+A private callable's inferred implicit failure cannot escape through a public
+callable without an appropriate declared error slot or local handling. See
+@../project-structure/#public-api (Public API) for the public contract.
 
 ### Related references
 

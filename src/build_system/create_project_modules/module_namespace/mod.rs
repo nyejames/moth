@@ -17,12 +17,20 @@
 //! - no `read_dir`, `exists`, `canonicalize` or fallback-candidate probing runs after the
 //!   indexes exist
 //! - provider-backed paths follow the same owning-module-root contract as compiler-semantic paths
+//!
+//! Public-route publication lives in the `route_publication` child. It consumes the facade route
+//! prepass index, validates `<facade>/<route>` claims against these namespace tables and builds the
+//! collision failures. This module keeps namespace construction, resolution and the boundary
+//! wrappers that invoke publication. Facade preparation, route claims and their cache belong to
+//! `facade_route_prepass` and never move here.
 
+use super::facade_route_prepass::FacadeRouteIndex;
 use super::module_identity::{ModuleId, ModuleIdentityTable};
 use super::project_module_graph::{ProjectModuleGraph, is_support_visible_in_identity_table};
 use super::project_structure_diagnostics::{
     entry_root_package_prefix_collision_error, reserved_package_namespace_root_claim_error,
 };
+use super::source_loading::SelectedSourceTextMap;
 use super::source_package_discovery::SourcePackageBoundaryIndexes;
 use super::source_tree_index::{
     SourceClassification, SourceLogicalIdentity, SourceOwnership, SourceRecordIndex,
@@ -46,14 +54,35 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDepende
 use crate::compiler_frontend::paths::path_resolution::{
     ProjectPathResolver, explicit_dependency_source_kind,
 };
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::semantic_identity::{ModuleRootRole, PublicExportRoute};
+use crate::compiler_frontend::source::{SourceDatabase, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+
+mod route_publication;
+
+pub(super) use route_publication::{
+    DeferredPackageRouteCollision, PackageRootFacadeSite, PackageRouteDonorRequest,
+    PackageRouteDonorRequests, PackageRouteSources, RoutePublicationFailure,
+    deferred_package_collision_failure, resolve_deferred_package_route_site,
+};
+use route_publication::{
+    ProjectRouteClaimSite, RouteCollisionSite, insert_facade_route_entries,
+    route_collision_failure, validate_package_route_claims,
+    validate_package_route_namespace_collisions, validate_package_route_prefix_collisions,
+    validate_published_package_routes_against_consumers,
+};
+
+#[cfg(test)]
+use route_publication::{
+    PlannedRouteEntry, RouteCollision, first_route_collision, planned_route_entries,
+    prepared_route_collision_failure,
+};
+
 /// One explicit namespace entry for one dependency path within one module namespace.
 ///
 /// Entries are tagged records with no precedence chain: a same-module source is never
@@ -74,6 +103,18 @@ enum NamespaceEntry {
         target_module_id: ModuleId,
         surface: ModuleRootRole,
     },
+    /// One declared public route beneath the same facade a `CrossModule` entry selects.
+    ///
+    /// WHAT: resolves to the facade's normal or support surface with an exact route suffix. The
+    ///       entry is a distinct provider path, never a prefix or a directory.
+    /// WHY: routes are content-derived namespace facts published by the facade prepass. Keeping
+    ///      them in a separate variant stops the private-boundary bypass check from treating a
+    ///      route as an importable module subtree.
+    PublicRoute {
+        target_module_id: ModuleId,
+        surface: ModuleRootRole,
+        route: PublicExportRoute,
+    },
 }
 
 /// One boundary-aware namespace for one indexed module.
@@ -88,15 +129,41 @@ struct ModuleNamespace {
     ///
     /// Entries remain present so private-boundary prefix checks still work, but resolution
     /// rejects an ambiguous key before selecting any target.
-    ambiguous_keys: std::collections::BTreeSet<String>,
+    ambiguous_keys: BTreeSet<String>,
+    /// Every facade identity inserted behind each consumer-relative key.
+    ///
+    /// WHAT: retains all `CrossModule` claimants even when the entry table keeps only the first
+    ///       spelling. A key with one retained entry can still hide several facades from a
+    ///       case-folded or support-basename collision.
+    /// WHY: route planning and eager collision validation must inspect every visible facade, not
+    ///      merely the structurally retained row that resolution uses as context.
+    facade_claimants: BTreeMap<String, Vec<(ModuleId, ModuleRootRole)>>,
+    /// Visible facade keys whose own preparation raised a source diagnostic.
+    ///
+    /// WHAT: consumer-relative keys such as `widgets` whose facade could not prepare.
+    /// WHY: a lookup beneath one of these keys must reach the facade's walk-owned diagnostic
+    ///      instead of falling through to the route-miss lane at `MOTH-IMPORT-0015`.
+    unavailable_facades: BTreeSet<String>,
 }
 
 impl ModuleNamespace {
     fn new() -> Self {
         Self {
             entries: BTreeMap::new(),
-            ambiguous_keys: std::collections::BTreeSet::new(),
+            ambiguous_keys: BTreeSet::new(),
+            facade_claimants: BTreeMap::new(),
+            unavailable_facades: BTreeSet::new(),
         }
+    }
+
+    fn mark_unavailable_facade(&mut self, facade_key: String) {
+        self.unavailable_facades.insert(facade_key);
+    }
+
+    fn is_under_unavailable_facade(&self, key: &str) -> bool {
+        self.unavailable_facades
+            .iter()
+            .any(|facade_key| is_same_or_nested_path(key, facade_key))
     }
 
     /// Insert one visible identity without applying precedence.
@@ -105,6 +172,18 @@ impl ModuleNamespace {
     /// entry stays only as structural context for private-boundary detection; it can never win
     /// resolution while its key remains ambiguous.
     fn insert(&mut self, key: String, entry: NamespaceEntry) {
+        if let NamespaceEntry::CrossModule {
+            target_module_id,
+            surface,
+        } = &entry
+        {
+            let claimants = self.facade_claimants.entry(key.clone()).or_default();
+            let claimant = (*target_module_id, *surface);
+            if !claimants.contains(&claimant) {
+                claimants.push(claimant);
+            }
+        }
+
         let case_collisions = self
             .entries
             .keys()
@@ -125,6 +204,27 @@ impl ModuleNamespace {
             .iter()
             .any(|ambiguous_key| ambiguous_key.eq_ignore_ascii_case(key))
     }
+}
+
+/// Whether `key` names `prefix` itself or a path nested below it at a `/` boundary.
+///
+/// Case-sensitive: namespace keys and package prefixes are already folded through their owning
+/// case-collision rules, so these lookups never fold spellings a second time.
+fn is_same_or_nested_path(key: &str, prefix: &str) -> bool {
+    key == prefix
+        || key
+            .strip_prefix(prefix)
+            .is_some_and(|remainder| remainder.starts_with('/'))
+}
+
+/// One resolved registered package surface and the public route the consumer named.
+///
+/// WHY: the exact prefix and the public route are separate ownership facts, so resolution returns
+///      them together without reconstructing the prefix from the authored key or searching the
+///      package boundary again.
+struct RegisteredPackageSurface<'a> {
+    dependency_prefix: &'a str,
+    route: PublicExportRoute,
 }
 
 /// Which compilation boundary a resolved target belongs to.
@@ -150,6 +250,13 @@ pub(crate) enum ResolvedDependency {
         provider_module_id: ModuleId,
         provider_surface: ModuleRootRole,
         consumer_module_id: ModuleId,
+        /// The exact public route beneath the provider facade, absent for its root surface.
+        ///
+        /// WHAT: an owned spelling that later binding passes to the provider interface view.
+        /// WHY: the consumer's authored key loses the facade prefix during resolution, and the
+        ///      provider interface may expose the same leaf under several routes. Carrying the
+        ///      resolved route keeps binding from re-deriving it from a path it cannot split.
+        route: Option<PublicExportRoute>,
         #[cfg(test)]
         root_file: PathBuf,
     },
@@ -157,9 +264,21 @@ pub(crate) enum ResolvedDependency {
     SourcePackageSurface {
         consumer_module_id: ModuleId,
         dependency_prefix: String,
+        /// The exact public route on the package root facade; `ROOT` selects its own surface.
+        ///
+        /// WHY: the consumer's authored key loses the registered prefix, and the completed
+        ///      package interface may expose the same leaf under several routes. Carrying the
+        ///      resolved route keeps later binding from re-deriving it from a path it cannot split.
+        route: PublicExportRoute,
         #[cfg(test)]
         root_file: PathBuf,
     },
+    /// A package facade or registered package boundary whose own preparation failed.
+    ///
+    /// WHY: the consumer must not turn an unavailable facade into a route-miss diagnostic. The
+    ///      facade's boundary walk owns its source diagnostic and reports it at that boundary's
+    ///      turn; this variant only keeps discovery from aborting earlier with `0015`.
+    UnavailableSourcePackage,
     /// A registered binding-backed package handled by frontend dependency binding.
     BindingPackage,
 }
@@ -186,6 +305,23 @@ pub(crate) struct ModuleNamespaceSet {
     binding_package_paths: BTreeSet<String>,
     /// Retained source-package boundary indexes shared by indexed and synthetic consumers.
     package_boundary_indexes: SourcePackageBoundaryIndexes,
+    /// Published routes of each registered package boundary's root support facade.
+    ///
+    /// WHAT: maps a registered package prefix to its root `@package.moth` routes, keyed by their
+    ///       one owned canonical spelling and valued by the authored operand span.
+    /// WHY: an external consumer names `@<prefix>/<route>`. The route must resolve through the
+    ///      exact owning package root, and the package's internal namespaces cannot supply this
+    ///      fact because their keys are boundary-relative. Retaining only the root support
+    ///      facade's owned spellings keeps internal child-facade routes private to the package.
+    ///      No package identity is stored here: the boundary index owns it, and a collision looks
+    ///      it up only when the package's report domain is actually needed.
+    package_public_routes: BTreeMap<String, BTreeMap<String, SourceSpan>>,
+    /// Registered package prefixes whose root support facade or boundary-wide publication failed.
+    ///
+    /// WHY: a lookup beneath such a prefix belongs to the failing boundary's walk diagnostic, not
+    ///      to the private-route or route-miss lanes. A failed internal child facade stays scoped
+    ///      to its own namespace key and does not make an unrelated external path unavailable.
+    unavailable_source_packages: BTreeSet<String>,
     /// Bounded local collision facts for each prepared synthetic owning root, without source IDs.
     single_file_dependency_keys: BTreeMap<PathBuf, BTreeSet<String>>,
 }
@@ -241,6 +377,7 @@ impl<'a> DirectoryDependencyResolution<'a> {
     pub(crate) fn path_fork(self) -> &'a PathInternerFork {
         self.path_fork
     }
+
     /// Rebind this boundary context to the path fork that issued a retained provider path.
     ///
     /// Header preparation may extend the boundary table with module-local dependency paths. Those
@@ -311,6 +448,20 @@ impl<'a> DirectoryDependencyResolution<'a> {
     }
 }
 
+/// The outcome of publishing one package boundary's declared facade routes.
+///
+/// WHY: a collision with a registered package prefix needs that package's authored site, which a
+/// later registered boundary has not published yet. Reporting it during attachment would degrade
+/// the diagnostic to one site, so the orchestration keeps the collision pending until every
+/// package claim exists and reports it at the publisher's turn, as HEAD did.
+pub(super) enum PackageRouteAttachment {
+    /// Every planned route was published in this boundary.
+    Published,
+    /// Publication stopped on another registered package's prefix; the caller reports at this
+    /// boundary's turn with the competing site resolved after every package's claims are known.
+    Deferred(DeferredPackageRouteCollision),
+}
+
 impl ModuleNamespaceSet {
     /// Iterate the independently indexed source-package boundaries in deterministic prefix order.
     ///
@@ -323,6 +474,191 @@ impl ModuleNamespaceSet {
         self.package_boundary_indexes.iter()
     }
 
+    /// The registered package prefixes in deterministic package order.
+    ///
+    /// WHAT: an owned snapshot of the prefixes, so a caller that also mutates this set can iterate
+    ///       every boundary without holding a borrow of the registry.
+    /// WHY: package route prepublication prepares each boundary and then attaches its routes to
+    ///      this same set. Re-reading the registry after each mutation would either hold a
+    ///      forbidden borrow or need a second copy of the registration order.
+    pub(crate) fn source_package_prefixes(&self) -> Vec<String> {
+        self.package_boundary_indexes
+            .iter()
+            .map(|(prefix, _)| prefix.to_owned())
+            .collect()
+    }
+
+    /// One registered package boundary's index, addressed by its exact prefix.
+    pub(crate) fn source_package_boundary(&self, package_prefix: &str) -> Option<&SourceTreeIndex> {
+        self.package_boundary_indexes.get(package_prefix)
+    }
+
+    /// Publish one registered package boundary's declared facade routes.
+    ///
+    /// WHAT: inserts every route of the boundary's normal and support facades into that boundary's
+    ///       module namespaces, then retains the root support facade's routes for external
+    ///       `@<prefix>/<route>` selection.
+    /// WHY: internal package consumers resolve their own facades exactly as project modules do,
+    ///      while external consumers may select only the package's published root surface. Route
+    ///      publication happens before either the package walk or project namespaces run, so a
+    ///      consumer never sees a partially published boundary.
+    pub(super) fn attach_package_facade_routes(
+        &mut self,
+        package_prefix: &str,
+        routes: &FacadeRouteIndex,
+        source_files: &SourceDatabase,
+        selected_source_texts: &mut SelectedSourceTextMap,
+    ) -> Result<PackageRouteAttachment, PreparedFailure> {
+        let Self {
+            package_namespaces,
+            package_boundary_indexes,
+            package_public_routes,
+            binding_package_paths,
+            ..
+        } = self;
+        let package_index = package_boundary_indexes
+            .get(package_prefix)
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "facade route prepublication named unregistered source package @{package_prefix}"
+                    ),
+                )
+            })
+            .map_err(PreparedFailure::from)?;
+        let namespaces = package_namespaces
+            .get_mut(package_prefix)
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "source package @{package_prefix} has no prepared namespace set for route publication"
+                    ),
+                )
+            })
+            .map_err(PreparedFailure::from)?;
+        match insert_facade_route_entries(
+            namespaces,
+            package_index.module_identities(),
+            routes,
+            package_boundary_indexes,
+            binding_package_paths,
+            Some(RouteCollisionSite {
+                source_tree_index: package_index,
+                source_files,
+                package_root_facades: None,
+                package_public_routes: None,
+            }),
+            Some(&mut *selected_source_texts),
+        ) {
+            Ok(None) => {}
+            Ok(Some(mut collision)) => {
+                if let Some(provider_prefix) = collision.registered_package_prefix.take() {
+                    return Ok(PackageRouteAttachment::Deferred(
+                        DeferredPackageRouteCollision {
+                            publisher_prefix: package_prefix.to_owned(),
+                            provider_prefix,
+                            route_key: collision.route_key,
+                            span: collision.span,
+                        },
+                    ));
+                }
+                // Every other collision keeps one authored site in this boundary. That includes a
+                // binding-package prefix overlap, which owns no package source site to report.
+                return Err(route_collision_failure(collision).into_single_domain_prepared());
+            }
+            Err(failure) => return Err(failure.into_single_domain_prepared()),
+        }
+
+        let Some(root_module_id) = package_index
+            .module_identities()
+            .module_id_for_directory(package_index.entry_root())
+        else {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "Source package @{package_prefix} has no module rooted at its indexed entry root"
+            );
+        };
+        let root_claims = routes.routes(root_module_id, ModuleRootRole::Support);
+        if root_claims.is_empty() {
+            return Ok(PackageRouteAttachment::Published);
+        }
+        // Only this boundary's newly published claims need the internal eager check. Claims from
+        // earlier packages have already passed this scan, and the project pass validates every
+        // package against project-local identities once project namespaces exist.
+        // Only this package's own namespaces share the source database that resolves a matching
+        // local provider. Another package's boundary-local ModuleIds and SourceIds are foreign.
+        validate_package_route_claims(
+            namespaces.iter(),
+            package_prefix,
+            package_boundary_indexes,
+            root_claims
+                .iter()
+                .map(|claim| (claim.route.as_str(), claim.span)),
+            ProjectRouteClaimSite::PackageLocal {
+                source_tree_index: package_index,
+                source_files,
+            },
+            Some(selected_source_texts),
+        )
+        .map_err(RoutePublicationFailure::into_single_domain_prepared)?;
+        package_public_routes.insert(
+            package_prefix.to_owned(),
+            root_claims
+                .iter()
+                .map(|claim| (claim.route.as_str().to_owned(), claim.span))
+                .collect(),
+        );
+        Ok(PackageRouteAttachment::Published)
+    }
+
+    /// Mark every facade of one package boundary as unavailable to its internal consumers.
+    ///
+    /// WHAT: for each consumer namespace, marks the visible `CrossModule` key that targets a
+    ///       facade whose own preparation raised a source diagnostic.
+    /// WHY: internal lookups under that key must reach the boundary walk's diagnostic instead of
+    ///      being misreported as an undeclared route.
+    pub(super) fn mark_package_facades_unavailable(
+        &mut self,
+        package_prefix: &str,
+        unavailable_facades: &[(ModuleId, ModuleRootRole)],
+    ) {
+        let Some(namespaces) = self.package_namespaces.get_mut(package_prefix) else {
+            return;
+        };
+        for namespace in namespaces {
+            let facade_keys = namespace
+                .entries
+                .iter()
+                .filter_map(|(key, entry)| match entry {
+                    NamespaceEntry::CrossModule {
+                        target_module_id,
+                        surface,
+                    } if unavailable_facades
+                        .iter()
+                        .any(|(id, role)| id == target_module_id && role == surface) =>
+                    {
+                        Some(key.clone())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            for key in facade_keys {
+                namespace.mark_unavailable_facade(key);
+            }
+        }
+    }
+
+    /// Mark one registered package boundary as unavailable to external consumers.
+    ///
+    /// WHY: its own prepass failure or a failed facade makes every unresolved lookup beneath the
+    ///      prefix a boundary-owned diagnostic rather than a route miss.
+    pub(super) fn mark_source_package_unavailable(&mut self, package_prefix: &str) {
+        self.unavailable_source_packages
+            .insert(package_prefix.to_owned());
+    }
+
     /// Build the complete namespace set from the project index, graph and package boundary
     /// indexes.
     ///
@@ -331,23 +667,133 @@ impl ModuleNamespaceSet {
     /// source-backed package surface entries and the per-package module namespaces. The
     /// package indexes are moved into the set and retained for package-file lookups during
     /// resolution.
+    #[cfg(test)]
     pub(crate) fn build(
         source_tree_index: &SourceTreeIndex,
         project_module_graph: &ProjectModuleGraph,
         package_boundary_indexes: SourcePackageBoundaryIndexes,
         binding_packages: &ExternalPackageRegistry,
+        facade_routes: &FacadeRouteIndex,
         string_table: &mut StringTable,
     ) -> Result<Self, PreparedFailure> {
         let mut namespaces =
             Self::for_source_packages(package_boundary_indexes, binding_packages, string_table)?;
-        namespaces.project_namespaces =
-            build_project_namespaces(source_tree_index, project_module_graph);
+        namespaces
+            .attach_project_namespaces(
+                source_tree_index,
+                None,
+                &BTreeMap::new(),
+                None,
+                project_module_graph,
+                facade_routes,
+                string_table,
+            )
+            .map_err(RoutePublicationFailure::into_single_domain_prepared)?;
+        Ok(namespaces)
+    }
+
+    /// Whether any prepared package published at least one external route.
+    ///
+    /// A package set with no routes has no cross-boundary claim to validate, so the caller can
+    /// skip both the package source map and every folded collision index.
+    pub(super) fn publishes_package_routes(&self) -> bool {
+        self.package_public_routes
+            .values()
+            .any(|routes| !routes.is_empty())
+    }
+
+    /// Validate cross-package route claims as soon as every package namespace is known.
+    ///
+    /// WHAT: checks published package routes against registered package prefixes, registered
+    ///       package namespaces and binding paths before project namespaces are attached.
+    /// WHY: these claims depend only on package facts, so a collision must not wait for a
+    ///      consumer import. Keeping the failure in this walk preserves the established package
+    ///      prepass ordering before any project publication failure.
+    pub(super) fn validate_package_route_collisions(
+        &self,
+        package_sources: &PackageRouteSources<'_>,
+    ) -> Result<(), RoutePublicationFailure> {
+        validate_package_route_prefix_collisions(
+            &self.package_public_routes,
+            &self.package_boundary_indexes,
+            &self.binding_package_paths,
+            package_sources,
+        )?;
+        validate_package_route_namespace_collisions(
+            &self.package_public_routes,
+            &self.package_namespaces,
+            &self.package_boundary_indexes,
+            package_sources,
+        )
+    }
+
+    /// Build the project boundary's namespaces after its facade routes are published.
+    ///
+    /// WHAT: builds one namespace per project module, inserts the declared public-route entries
+    ///       and validates reserved-root claims.
+    /// WHY: the caller may need the package boundary namespaces (and therefore package
+    ///      diagnostics) before it prepares project facade headers. Keeping source-package and
+    ///      project attachment separate preserves the existing package-before-project failure
+    ///      ordering while still publishing project routes before project discovery.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "project attachment keeps the project index, source database, package facade sites, selection map, graph, facade routes and string table as separate inputs"
+    )]
+    pub(super) fn attach_project_namespaces(
+        &mut self,
+        source_tree_index: &SourceTreeIndex,
+        source_files: Option<&SourceDatabase>,
+        package_root_facades: &BTreeMap<String, PackageRootFacadeSite>,
+        mut selected_source_texts: Option<&mut SelectedSourceTextMap>,
+        project_module_graph: &ProjectModuleGraph,
+        facade_routes: &FacadeRouteIndex,
+        string_table: &mut StringTable,
+    ) -> Result<(), RoutePublicationFailure> {
+        self.project_namespaces = build_project_namespaces(source_tree_index, project_module_graph);
+        // A reserved-root (`core`/`builder`) claim is the stronger authored failure. Validate it
+        // before route publication so a route reaching a registered package cannot mask it.
         validate_reserved_package_namespace_claims(
-            &namespaces.project_namespaces,
+            &self.project_namespaces,
             source_tree_index,
             string_table,
-        )?;
-        Ok(namespaces)
+        )
+        .map_err(RoutePublicationFailure::single_domain)?;
+        let Self {
+            project_namespaces,
+            package_boundary_indexes,
+            binding_package_paths,
+            package_public_routes,
+            ..
+        } = self;
+        let route_collision_site = source_files.map(|source_files| RouteCollisionSite {
+            source_tree_index,
+            source_files,
+            package_root_facades: Some(package_root_facades),
+            package_public_routes: Some(package_public_routes),
+        });
+        if let Some(collision) = insert_facade_route_entries(
+            project_namespaces,
+            source_tree_index.module_identities(),
+            facade_routes,
+            package_boundary_indexes,
+            binding_package_paths,
+            route_collision_site,
+            selected_source_texts.as_deref_mut(),
+        )? {
+            // Project attachment runs after every package inventory, so the competing package
+            // site is already known and reports here without deferral.
+            return Err(route_collision_failure(collision));
+        }
+        // Cross-package claims were validated once every package inventory existed, before any
+        // project preparation. This attachment only adds project-local consumers.
+        let consumers = project_namespaces.iter().collect::<Vec<_>>();
+        validate_published_package_routes_against_consumers(
+            &consumers,
+            package_public_routes,
+            package_boundary_indexes,
+            ProjectRouteClaimSite::from_source_database(source_tree_index, source_files),
+            selected_source_texts,
+        )
     }
 
     /// Synthetic consumers keep local namespace claims separate from reachable source membership.
@@ -425,7 +871,11 @@ impl ModuleNamespaceSet {
         Ok(namespaces)
     }
 
-    fn for_source_packages(
+    /// Build only the source-package boundary namespaces.
+    ///
+    /// WHY: project namespaces wait until the facade route prepass has published the project's
+    ///      declared routes, while package boundaries keep their existing construction order.
+    pub(super) fn for_source_packages(
         package_boundary_indexes: SourcePackageBoundaryIndexes,
         binding_packages: &ExternalPackageRegistry,
         string_table: &mut StringTable,
@@ -441,6 +891,8 @@ impl ModuleNamespaceSet {
             package_namespaces,
             binding_package_paths,
             package_boundary_indexes,
+            package_public_routes: BTreeMap::new(),
+            unavailable_source_packages: BTreeSet::new(),
             single_file_dependency_keys: BTreeMap::new(),
         })
     }
@@ -549,13 +1001,35 @@ impl ModuleNamespaceSet {
             ));
         }
 
+        // A published route is a namespace identity, not a physical directory. Resolve an exact
+        // route before the hidden-directory guard, which exists to keep private physical paths
+        // (and route misses) closed.
+        if let Some(entry @ NamespaceEntry::PublicRoute { .. }) = namespace.entries.get(&key) {
+            return resolve_entry(
+                entry,
+                source_tree_index,
+                consumer_module_id,
+                dependency_path,
+                dependency_span,
+                string_table,
+            );
+        }
+
         if let Some(package) = self.resolve_package_dependency(
             provider,
             consumer_module_id,
-            namespace.entries.keys().map(String::as_str),
+            namespace
+                .entries
+                .keys()
+                .chain(namespace.ambiguous_keys.iter())
+                .map(String::as_str),
             &key,
         )? {
             return Ok(package);
+        }
+
+        if namespace.is_under_unavailable_facade(&key) {
+            return Ok(ResolvedDependency::UnavailableSourcePackage);
         }
 
         // Package prefixes are validated independently and may contain underscore components, so
@@ -608,15 +1082,11 @@ impl ModuleNamespaceSet {
     fn binding_package_prefix_for_key<'a>(&'a self, provider_path: &str) -> Option<&'a str> {
         self.binding_package_paths
             .iter()
-            .filter(|package_path| {
-                provider_path == package_path.as_str()
-                    || provider_path
-                        .strip_prefix(package_path.as_str())
-                        .is_some_and(|remainder| remainder.starts_with('/'))
-            })
+            .filter(|package_path| is_same_or_nested_path(provider_path, package_path.as_str()))
             .max_by_key(|package_path| package_path.len())
             .map(String::as_str)
     }
+
     fn resolve_provider_target(
         &self,
         provider_path: PathId,
@@ -681,6 +1151,7 @@ impl ModuleNamespaceSet {
                 .canonical_path()
                 .to_path_buf()),
             Some(NamespaceEntry::CrossModule { .. })
+            | Some(NamespaceEntry::PublicRoute { .. })
             | Some(NamespaceEntry::SameModuleSource { .. }) => Err(
                 imports::cross_module_import_not_exported(provider_path, dependency_span),
             ),
@@ -756,7 +1227,7 @@ impl ModuleNamespaceSet {
     ) -> Result<Option<ResolvedDependency>, DiagnosticDraft> {
         let dependency_path = provider.path;
         let dependency_span = Some(provider.span);
-        let source_package_surface = self.find_source_package_surface(key);
+        let source_package_surface = self.find_source_package_dependency(key);
         let binding_package_prefix = self.binding_package_prefix_for_key(key);
 
         if source_package_surface.is_some() && binding_package_prefix.is_some() {
@@ -779,7 +1250,7 @@ impl ModuleNamespaceSet {
             return Ok(Some(ResolvedDependency::BindingPackage));
         }
 
-        if let Some((dependency_prefix, _root_file)) = source_package_surface {
+        if let Some(surface) = source_package_surface {
             if local_dependency_keys.any(|entry_key| package_paths_overlap(entry_key, key)) {
                 return Err(imports::ambiguous_import_target(
                     dependency_path,
@@ -787,12 +1258,29 @@ impl ModuleNamespaceSet {
                 ));
             }
 
+            #[cfg(test)]
+            let root_file = self
+                .package_boundary_indexes
+                .get(surface.dependency_prefix)
+                .and_then(SourceTreeIndex::package_public_root_file)
+                .expect("a resolved package surface must name a registered support facade")
+                .to_path_buf();
+
             return Ok(Some(ResolvedDependency::SourcePackageSurface {
                 consumer_module_id,
-                dependency_prefix: dependency_prefix.to_owned(),
+                dependency_prefix: surface.dependency_prefix.to_owned(),
+                route: surface.route,
                 #[cfg(test)]
-                root_file: _root_file.to_path_buf(),
+                root_file,
             }));
+        }
+
+        if self
+            .unavailable_source_packages
+            .iter()
+            .any(|prefix| is_same_or_nested_path(key, prefix))
+        {
+            return Ok(Some(ResolvedDependency::UnavailableSourcePackage));
         }
 
         if self.is_source_package_private_path(key) {
@@ -822,14 +1310,43 @@ impl ModuleNamespaceSet {
         Ok(None)
     }
 
-    /// Match the complete registered package prefix without traversing its private facade.
-    fn find_source_package_surface(&self, provider_path: &str) -> Option<(&str, &Path)> {
+    /// Match one registered package surface without traversing its private implementation.
+    ///
+    /// WHAT: accepts the exact registered prefix with its root route, or one exact declared root
+    ///       facade route below that prefix. Anything else beneath a prefix stays private.
+    /// WHY: the registered prefix is the only ownership fact. A nested suffix is importable only
+    ///      when the package root support facade published that exact spelling; there is no
+    ///      filesystem probe, case-folded fallback or deeper-path acceptance.
+    fn find_source_package_dependency(
+        &self,
+        provider_path: &str,
+    ) -> Option<RegisteredPackageSurface<'_>> {
         for (dependency_prefix, package_index) in self.package_boundary_indexes.iter() {
             if dependency_prefix == provider_path {
-                return package_index
-                    .package_public_root_file()
-                    .map(|root_file| (dependency_prefix, root_file));
+                // A boundary without a published support facade exposes no external surface.
+                package_index.package_public_root_file()?;
+                return Some(RegisteredPackageSurface {
+                    dependency_prefix,
+                    route: PublicExportRoute::ROOT,
+                });
             }
+            let Some(route_spelling) = provider_path
+                .strip_prefix(dependency_prefix)
+                .and_then(|remainder| remainder.strip_prefix('/'))
+            else {
+                continue;
+            };
+            let route_is_published = self
+                .package_public_routes
+                .get(dependency_prefix)
+                .is_some_and(|routes| routes.contains_key(route_spelling));
+            if !route_is_published || package_index.package_public_root_file().is_none() {
+                continue;
+            }
+            return Some(RegisteredPackageSurface {
+                dependency_prefix,
+                route: PublicExportRoute::from_canonical_spelling(route_spelling.to_owned()),
+            });
         }
         None
     }
@@ -878,6 +1395,10 @@ fn first_reserved_package_namespace_claim<'a>(
                 NamespaceEntry::CrossModule {
                     target_module_id, ..
                 } => identities.record(*target_module_id).root_directory(),
+                // A route is only reachable beneath a facade entry that the same namespace would
+                // already have validated. Its key can never claim a reserved first component on
+                // its own, so checking it here would only restate the facade claim.
+                NamespaceEntry::PublicRoute { .. } => continue,
                 // Provider-owned files are ordinary resources, not compiler-semantic source
                 // claims on the package namespace.
                 NamespaceEntry::SameModuleProvider { .. } => continue,
@@ -1191,7 +1712,7 @@ fn support_package_key(identities: &ModuleIdentityTable, support_id: ModuleId) -
 /// Resolve a namespace entry to a `ResolvedDependency`, looking up the canonical path and root file
 /// from the owning boundary's `SourceTreeIndex`.
 ///
-/// For a same-module source, the entry's `supported` flag is checked so a recognized-but-
+/// For a same-module source, the source record's `supported` flag is checked so a recognized-but-
 /// unsupported extension (for example `.md` without builder selection) produces the
 /// `UnsupportedSourceFileKind` diagnostic without a filesystem probe.
 fn resolve_entry(
@@ -1225,32 +1746,51 @@ fn resolve_entry(
         NamespaceEntry::CrossModule {
             target_module_id,
             surface,
-        } => {
+        } => Ok(ResolvedDependency::CrossModule {
+            provider_module_id: *target_module_id,
+            provider_surface: *surface,
+            consumer_module_id,
+            route: None,
             #[cfg(test)]
-            let root_file = index
-                .module_identities()
-                .record(*target_module_id)
-                .root_file(*surface)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "cross-module namespace selected missing {surface:?} surface for ModuleId {}",
-                        target_module_id.index()
-                    )
-                })
-                .to_path_buf();
-            Ok(ResolvedDependency::CrossModule {
-                provider_module_id: *target_module_id,
-                provider_surface: *surface,
-                consumer_module_id,
-                #[cfg(test)]
-                root_file,
-            })
-        }
+            root_file: cross_module_root_file(index, *target_module_id, *surface),
+        }),
+        NamespaceEntry::PublicRoute {
+            target_module_id,
+            surface,
+            route,
+        } => Ok(ResolvedDependency::CrossModule {
+            provider_module_id: *target_module_id,
+            provider_surface: *surface,
+            consumer_module_id,
+            route: Some(route.clone()),
+            #[cfg(test)]
+            root_file: cross_module_root_file(index, *target_module_id, *surface),
+        }),
         NamespaceEntry::SameModuleProvider { .. } => Err(imports::missing_import_target(
             dependency_path,
             dependency_span,
         )),
     }
+}
+
+/// The provider root handle recorded with one resolved cross-module dependency in tests.
+#[cfg(test)]
+fn cross_module_root_file(
+    index: &SourceTreeIndex,
+    target_module_id: ModuleId,
+    surface: ModuleRootRole,
+) -> PathBuf {
+    index
+        .module_identities()
+        .record(target_module_id)
+        .root_file(surface)
+        .unwrap_or_else(|| {
+            panic!(
+                "cross-module namespace selected missing {surface:?} surface for ModuleId {}",
+                target_module_id.index()
+            )
+        })
+        .to_path_buf()
 }
 
 /// Reject path components that cannot participate in a module-root-relative dependency.
@@ -1338,10 +1878,7 @@ fn reject_explicit_source_extension(
 }
 
 /// Convert dependency-path components to a portable forward-slash namespace key.
-fn portable_dependency_key(
-    components: &[crate::compiler_frontend::symbols::string_interning::StringId],
-    string_table: &StringTable,
-) -> String {
+fn portable_dependency_key(components: &[StringId], string_table: &StringTable) -> String {
     components
         .iter()
         .map(|component| string_table.resolve(*component))
@@ -1401,5 +1938,5 @@ fn find_module_bypass_prefix<'a>(
 }
 
 #[cfg(test)]
-#[path = "tests/module_namespace_tests.rs"]
+#[path = "../tests/module_namespace_tests.rs"]
 mod tests;

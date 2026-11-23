@@ -324,6 +324,44 @@ fn selected_source_finalization_before_retention_survives_adoption() {
 }
 
 #[test]
+fn capacity_cleanup_preserves_outstanding_checkout_invariant() {
+    let rejected_path = PathBuf::from("/project/rejected.moth");
+    let outstanding_path = PathBuf::from("/project/outstanding.moth");
+    let mut string_table = StringTable::new();
+    let database = SourceDatabase::build(
+        [&rejected_path, &outstanding_path],
+        &rejected_path,
+        None,
+        &mut string_table,
+    )
+    .expect("source identities should build");
+    let rejected_id = database
+        .get_by_canonical_path(&rejected_path)
+        .expect("rejected source should be registered")
+        .id;
+    let outstanding_id = database
+        .get_by_canonical_path(&outstanding_path)
+        .expect("outstanding source should be registered")
+        .id;
+    let mut sources = SourceDatabaseBuilder::new(database);
+    let _outstanding = sources.split().1.take_span_builder(outstanding_id);
+
+    sources.discard_pending_span_builders_for_capacity_rejected_sources(&[rejected_id]);
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        sources.adopt_pending_span_builders();
+    }))
+    .expect_err("capacity cleanup must not hide another source's outstanding span producer");
+    assert_source_loading_compiler_bug(
+        panic,
+        &format!(
+            "pending span producer source {} was not retained before adoption; this is a compiler bug",
+            outstanding_id.index()
+        ),
+    );
+}
+
+#[test]
 fn source_finalization_rejects_the_compilation_root() {
     let database = SourceDatabase::empty();
     let mut sources = SourceDatabaseBuilder::new(database);

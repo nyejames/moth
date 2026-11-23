@@ -2120,3 +2120,69 @@ fn premerge_failure_keeps_every_diagnosed_failure_beside_its_siblings() {
         "a premerge failure must keep every diagnosed batch beside its siblings"
     );
 }
+
+#[test]
+fn late_span_builder_checkout_surfaces_infrastructure_during_preparation_cleanup() {
+    use super::{append_cleanup_failure, finish_prepared_source_owner};
+    use crate::build_system::create_project_modules::source_loading::SelectedSourceTextMap;
+    use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
+    use crate::compiler_frontend::compiler_messages::PreparedFailure;
+    use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+    use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseBuilder};
+    use std::path::Path;
+
+    let mut strings = StringTable::new();
+    let path = Path::new("/project/late-finalize.moth");
+    let mut source = SourceDatabase::build(std::iter::once(path), path, None, &mut strings)
+        .expect("fixture source should register");
+    let source_id = source
+        .get_by_canonical_path(path)
+        .expect("fixture source should have a slot")
+        .id;
+    source
+        .retain_text(source_id, "value #= 1\n".to_owned())
+        .expect("fixture text should retain");
+    let mut builder = SourceDatabaseBuilder::new(source);
+    let _held = builder.split().1.take_span_builder(source_id);
+    let failure = finish_prepared_source_owner(
+        builder,
+        SelectedSourceTextMap::default(),
+        None,
+        &mut strings,
+    )
+    .expect_err("a checked-out span builder must fail late finalization");
+    assert!(
+        failure.source.is_none(),
+        "a checked-out span builder cannot produce a finished package owner"
+    );
+    let PreparedFailure::Infrastructure(errors) = failure.failure else {
+        panic!("late finalization must be an infrastructure failure");
+    };
+    let causes = errors.iter().collect::<Vec<_>>();
+    assert_eq!(causes.len(), 1);
+    assert_eq!(causes[0].kind, InfrastructureFailureKind::Internal);
+    assert!(
+        causes[0].message.contains("outstanding span producer"),
+        "the late producer must keep its typed cause: {}",
+        causes[0].message
+    );
+    let collision = PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(token_lexical::logical_path_capacity()),
+        StringTable::new(),
+        None,
+        None,
+    );
+    let failure = append_cleanup_failure(
+        BoundaryPremergeFailure::project(vec![PreparedFailure::Diagnosed(collision)]),
+        PreparedFailure::Infrastructure(errors),
+    );
+    assert_eq!(
+        failure.failures.len(),
+        1,
+        "late finalization must take infrastructure precedence over the collision diagnostic"
+    );
+    assert!(
+        matches!(failure.failures[0], PreparedFailure::Infrastructure(_)),
+        "the surviving failure must be the late infrastructure cause"
+    );
+}

@@ -4345,7 +4345,9 @@ fn configured_budget_facts_and_advice_name_typed_units() {
         setting: Some("const_work_limit"),
         aggregate: false,
         span: None,
+        span_owner: None,
         call_span: None,
+        call_span_owner: None,
         call_chain: Vec::new(),
     });
     let facts = compile_time_error_facts(work);
@@ -4362,7 +4364,9 @@ fn configured_budget_facts_and_advice_name_typed_units() {
         setting: Some("const_memory_limit_mb"),
         aggregate: true,
         span: None,
+        span_owner: None,
         call_span: None,
+        call_span_owner: None,
         call_chain: Vec::new(),
     };
     let mut string_table = StringTable::new();
@@ -4384,7 +4388,9 @@ fn configured_budget_facts_and_advice_name_typed_units() {
         setting: None,
         aggregate: false,
         span: None,
+        span_owner: None,
         call_span: None,
+        call_span_owner: None,
         call_chain: Vec::new(),
     };
     let advice = release_advice(&retained_values, &mut string_table);
@@ -4405,7 +4411,9 @@ fn configured_budget_facts_and_advice_name_typed_units() {
         setting: None,
         aggregate: false,
         span: None,
+        span_owner: None,
         call_span: None,
+        call_span_owner: None,
         call_chain: Vec::new(),
     };
     let advice = release_advice(&pieces, &mut string_table);
@@ -4422,7 +4430,9 @@ fn configured_budget_facts_and_advice_name_typed_units() {
         setting: None,
         aggregate: false,
         span: None,
+        span_owner: None,
         call_span: None,
+        call_span_owner: None,
         call_chain: Vec::new(),
     };
     let advice = release_advice(&call_depth, &mut string_table);
@@ -4464,7 +4474,9 @@ fn fixed_safety_limit_facts_preserve_the_effective_limit() {
         setting: None,
         aggregate: false,
         span: None,
+        span_owner: None,
         call_span: None,
+        call_span_owner: None,
         call_chain: Vec::new(),
     });
     let facts = compile_time_error_facts(call_depth);
@@ -4507,8 +4519,13 @@ fn budget_diagnostic_labels_the_call_chain_innermost_first() {
         setting: Some("const_work_limit"),
         aggregate: false,
         span: Some(inner),
+        span_owner: None,
         call_span: Some(inner),
-        call_chain: vec![outer],
+        call_span_owner: None,
+        call_chain: vec![OwnedConstCallSite {
+            span: outer,
+            owner: None,
+        }],
     };
     assert_call_site_labels(exhaustion, &[outer]);
 
@@ -4521,8 +4538,19 @@ fn budget_diagnostic_labels_the_call_chain_innermost_first() {
         setting: Some("const_work_limit"),
         aggregate: false,
         span: Some(inner),
+        span_owner: None,
         call_span: Some(inner),
-        call_chain: vec![outer, inner],
+        call_span_owner: None,
+        call_chain: vec![
+            OwnedConstCallSite {
+                span: outer,
+                owner: None,
+            },
+            OwnedConstCallSite {
+                span: inner,
+                owner: None,
+            },
+        ],
     };
     assert_call_site_labels(depth_refusal, &[inner, outer]);
 }

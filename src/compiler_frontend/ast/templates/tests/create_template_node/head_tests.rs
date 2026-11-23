@@ -38,6 +38,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{
     FileValueResolutionServices, ScopeContext, Stage0ResolutionFacts, TopLevelDeclarationTable,
 };
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::CompactDiagnosticBagForTest;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -137,11 +138,15 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
     let TemplateError::Infrastructure(error) = error else {
         panic!("stale directive argument authority must remain an infrastructure failure");
     };
+    // The contract is the failure lane: stale authority is an internal AST-construction
+    // failure, never a diagnostic or panic. Which authority check trips first is incidental.
     let error = &error.primary;
-    assert!(
-        error.message.contains("missing same-store template"),
+    assert_eq!(
+        error.kind,
+        InfrastructureFailureKind::Internal,
         "unexpected infrastructure error: {error:?}"
     );
+    assert_eq!(error.stage, CompilerStage::AstConstruction);
 }
 
 fn imported_const_template_context(

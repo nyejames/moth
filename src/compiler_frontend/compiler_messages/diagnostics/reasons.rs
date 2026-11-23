@@ -475,6 +475,16 @@ pub enum InvalidConfigReason {
         prefix: StringId,
         entry_folder: StringId,
     },
+    /// A registered project-local source package used the configured project package name.
+    ///
+    /// Both package identities would then collapse onto the same stable project-local name, so
+    /// unrelated module and declaration origins can become equal even when nothing imports them.
+    /// The diagnostic names the project package, the registered prefix and the package root.
+    ProjectPackagePrefixCollision {
+        project_name: StringId,
+        prefix: StringId,
+        package_root: StringId,
+    },
     /// A local project source claim used a reserved package namespace root.
     ///
     /// `@core` and `@builder` group compiler-shipped and builder-owned packages, so no local
@@ -809,6 +819,10 @@ pub enum InvalidCompileTimePathReason {
     /// The target is the exact reserved `@config.moth` file, reached either directly or through a
     /// physical alias such as a symlink.
     ReservedConfigFile,
+    /// The target is a provider-owned input file, reached directly or through a physical alias.
+    ///
+    /// Provider-owned files supply imports and runtime assets; they have no content file value.
+    ProviderOwnedContentTarget,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -899,6 +913,23 @@ pub enum InvalidGenericParameterReason {
     DuplicateTraitBound,
 }
 
+/// Why an authored `$export` public route cannot name a namespace suffix.
+///
+/// WHAT: the route spelling failures that remain after tokenization.
+/// WHY: a route is a directive operand, not a dependency or file path, so its diagnostics keep
+///      directive wording and must not imply provider resolution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum InvalidExportRouteReason {
+    /// The route spelled the site root (`@/`) instead of a suffix under the facade.
+    PublicRoot,
+    /// The first route component was `.` rather than a public namespace segment.
+    CurrentDirectorySegment,
+    /// A route component stepped up with `..`.
+    ParentDirectorySegment,
+    /// A route component carried a file extension rather than naming a namespace segment.
+    ExtensionSegment,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidTemplateDirectiveReason {
     UnknownDirective,
@@ -911,6 +942,12 @@ pub enum InvalidTemplateDirectiveReason {
     DirectiveNotAllowedHere,
     /// Directive received parenthesized arguments it does not accept.
     UnexpectedArguments,
+    /// `$export` received an operand that is not one bare `@route` path.
+    InvalidExportRouteOperand,
+    /// `$export` received a route spelling its public namespace contract rejects.
+    InvalidExportRoute {
+        reason: InvalidExportRouteReason,
+    },
     /// `$slot` received an invalid target declaration.
     InvalidSlotTarget,
     /// `$slot ... = ...` received a default that is not a compile-time `String`.

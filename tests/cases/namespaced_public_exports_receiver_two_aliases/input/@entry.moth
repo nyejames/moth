@@ -1,0 +1,6 @@
+@first/shape Shape as FirstShape
+@second/shape Shape as SecondShape
+
+first = FirstShape("first")
+second = SecondShape("second")
+io.line([:first=[first.measure()] second=[second.measure()]])

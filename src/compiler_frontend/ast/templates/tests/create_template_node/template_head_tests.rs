@@ -1,5 +1,6 @@
 use super::*;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::{
     InvalidLoopHeaderCode, InvalidLoopHeaderView,
 };
@@ -301,11 +302,15 @@ fn template_head_expression_preserves_infrastructure_failure() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("stale template authority must remain an infrastructure failure");
     };
+    // The contract is the failure lane: stale authority is an internal AST-construction
+    // failure, never a diagnostic or panic. Which authority check trips first is incidental.
     let error = &error.primary;
-    assert!(
-        error.message.contains("missing same-store template"),
+    assert_eq!(
+        error.kind,
+        InfrastructureFailureKind::Internal,
         "unexpected infrastructure error: {error:?}"
     );
+    assert_eq!(error.stage, CompilerStage::AstConstruction);
 }
 
 #[test]

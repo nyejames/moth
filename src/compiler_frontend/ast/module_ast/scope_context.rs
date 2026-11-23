@@ -801,6 +801,17 @@ impl ContextKind {
     pub fn allows_const_record_coercion(&self) -> bool {
         self.is_constant_context()
     }
+
+    /// Contexts where a stored `$in` helper may be read.
+    ///
+    /// WHY: a helper is a compile-time routing value, so only template bodies and constant
+    ///      initializers or headers can compose it into a receiving template application.
+    pub(crate) fn admits_structural_helpers(&self) -> bool {
+        matches!(
+            self,
+            ContextKind::Template | ContextKind::Constant | ContextKind::ConstantHeader
+        )
+    }
 }
 
 impl ScopeContext {

@@ -1,4 +1,7 @@
-Declarations are private to their module by default. In `@mod.moth` and `@package.moth`, place `$export` on its own line before a declaration to include it in that facade's public API.
+Declarations are private to their module by default. In `@mod.moth` and
+`@package.moth`, place `$export` before a declaration to include it in that
+facade's public API. Add one `@route` operand to publish it under a public route
+instead.
 
 ### Exporting declarations
 
@@ -19,11 +22,143 @@ Declarations are private to their module by default. In `@mod.moth` and `@packag
 
 `public_name` and `render` are visible through the module's normal facade. `private_helper` remains private. An unmarked facade exports nothing.
 
-`$export` applies to the next eligible top-level item only. It must occupy its own line, with no operands. Comment-only lines may intervene, but a blank line breaks attachment. It is valid only in the two facade files, including when both exist in one directory. It does not apply in `@entry.moth`, ordinary helper files or the build-only `@config.moth`, which has no export surface.
+`$export` applies to the next eligible top-level item only. It takes no operand
+or one bare `@route` path after its name. It may share a line with other source
+directives, such as `$doc [: Public form.] $export @forms`, because only the
+target must begin on a later line. Comment-only lines may intervene, but a blank
+line breaks attachment. It is valid only in the two facade files, including when
+both exist in one directory. It does not apply in `@entry.moth`, ordinary helper
+files or the build-only `@config.moth`, which has no export surface.
 
-The directive can mark a function, struct, choice, transparent type alias, trait or compile-time `#` constant. The `#` marker controls when a constant is evaluated, not whether it is public.
+The directive can mark a function, struct, choice, transparent type alias,
+trait or compile-time `#` constant. The `#` marker controls when a constant is
+evaluated, not whether it is public.
 
-Runtime bindings, mutable bindings, executable statements, templates, page fragments, trait conformances and incompatibilities cannot be exported. Receiver methods are exposed through their public receiver type, not exported independently.
+Runtime bindings, mutable bindings, executable statements, templates, page
+fragments, trait conformances and incompatibilities cannot be exported.
+Receiver methods are exposed through their public receiver type, not exported
+independently. A routed receiver type carries its methods for callers.
+
+### Public routes
+
+A route publishes an exported name under a namespace below the facade. The
+facade root stays the default:
+
+[codeblock, $code "moth":
+    -- child/@mod.moth
+    $export
+    root_value #= "root"
+
+    $export @forms
+    button #|label String| -> String:
+        return label
+    ;
+
+    $export @forms
+    badge #|label String| -> String:
+        return [:badge:[label]]
+    ;
+
+    $export @forms/validation
+    validate |value String| -> String:
+        return value
+    ;
+]
+
+[codeblock, $code "moth":
+    @child root_value
+    @child/forms button as primary_button, badge
+    @child/forms/validation validate as validate_form
+]
+
+`button` and `badge` merge into the `forms` route. Distinct names may share a
+route. `validate` sits in the nested `forms/validation` route and does not
+appear in `forms`. A consumer names each public route below the facade. A bare
+`@child` clause exposes only root members, so it reaches `root_value` but not
+`button`.
+
+A route names where a binding is published, never what it selects or how the
+leaf is spelled. The route operand belongs to the declaring facade and resolves
+from that facade. It is not inherited from a provider. If `child` re-exports
+`@provider/nested widget` under `$export @mirror`, the public path is
+`@child/mirror`, not `@child/nested`. Aliases still decide the public leaf:
+
+[codeblock, $code "moth":
+    -- library/@mod.moth
+    $export @forms
+    @shapes Shape as Form, wrap_message as shape_label
+]
+
+`@library/forms Form` and `@library/forms shape_label` are public. The aliases
+are the only local and public names: `Shape` and `wrap_message` are not bound in
+this facade. Select either original spelling separately when it must cross too.
+
+Route operands use dependency-path spelling. A route is a suffix under its
+facade: `@/` is rejected as a public root (`MOTH-SYNTAX-0021`), a bare `@` fails
+as an empty path (`MOTH-SYNTAX-0018`), and `.` or `..` steps and file extensions
+are invalid. The compiler also rejects an extra token and a malformed operand.
+One target has one public destination, so two `$export` directives on that
+target are a duplicate (`MOTH-SYNTAX-0021`) even when their routes differ, and
+the diagnostic labels both directives:
+
+[codeblock, $code "moth":
+    -- Error: one target has one public destination
+    $export @forms
+    $export @tables
+    value #= 1
+]
+
+A route never publishes a whole namespace, a namespace alias or a wildcard.
+Only declarations and flat direct selections cross the facade.
+
+### Route identity and conflicts
+
+The public identity of a routed export is `(route, leaf)`. Repeated `$export`
+directives may add distinct leaves to one route. A duplicate leaf in the same
+route is `MOTH-RULE-0081`, reported at both authored sites.
+
+Any two distinct route spellings in one facade must differ by more than ASCII
+case. `@forms` and `@Forms` conflict with `MOTH-RULE-0092` at both route
+operands, including when the conflict appears deeper in a multi-segment route.
+
+A routed re-export still binds its public leaf as a local name in the facade.
+Publishing one selected target under two routes keeps its one local leaf and
+works. A direct declaration that shares a local leaf with a routed re-export
+collides before publication. Two different provider targets that both use the
+same leaf also collide (`MOTH-IMPORT-0009`), even when their routes differ. A
+facade therefore can't put two distinct declarations with the same leaf name in
+different routes.
+
+Concrete route overlaps are rejected eagerly, even when no consumer references
+the route. A route that overlaps a different visible provider, such as a
+selectable child facade or one of its routes, a local source or child namespace
+key, or a registered source or binding package prefix, reports
+`MOTH-IMPORT-0006`. A case-only match counts as a collision. The diagnostic
+names both authored sites when both exist.
+
+Two facades that share one visible key create an ambiguous base. The base and
+every route beneath it are ambiguous. Identical route claims from different
+facades behind that base stay latent and report `MOTH-IMPORT-0006` when a
+consumer names them, like the base itself. A route behind an ambiguous base that
+overlaps a different visible provider, such as a selectable child facade or one
+of its routes, a local source or a registered package prefix, is a concrete
+collision rejected eagerly with `MOTH-IMPORT-0006` even when no consumer names
+it. Other ambiguity remains a use-site failure, not an eager publication
+failure.
+
+A private directory inside the exporting module may share a route spelling. It
+stays private. `@child/forms suffix` finds only a `suffix` exported under the
+route, never a file in `child/forms/`. An undeclared route or leaf reports an
+import diagnostic instead of falling through to a private file.
+
+A route is visible exactly where its facade is visible. That means from the
+parent of a normal child module, from consumers allowed to use a scoped support
+package, and from anywhere a registered source package is registered. Its names
+sit beneath the facade path or registered package path.
+
+The `.mtf` prelude stays root-only. Only facade-root constants from
+`@core/html` and `@core/css` enter it. A routed export never adds a prelude
+name, and `@core/html as html` does not enable `html.tables.cells`.
 
 ### Re-exporting dependencies
 
@@ -37,7 +172,11 @@ A facade may publish selected declarations defined in another file without movin
     @core/math PI, sin
 ]
 
-One `$export` publishes every selected name in its dependency clause. The alias `Card` is the public name. `CardData` is not also published unless selected separately. Bare namespaces and namespace aliases cannot be re-exported.
+One `$export` publishes every selected name in its dependency clause. The alias
+`Card` is the public name. `CardData` is not also published unless selected
+separately. A route operand publishes the selection under that route instead of
+the facade root. Bare namespaces, namespace aliases and wildcard selections
+cannot be re-exported.
 
 An ordinary dependency clause without `$export` binds names for the facade's own use but does not publish them. See @../packages/#public-reexports (Public re-exports) for selection and alias rules.
 
@@ -45,13 +184,19 @@ An ordinary dependency clause without `$export` binds names for the facade's own
 
 Files in one module can bind shared helper declarations through ordinary dependencies. Declarations authored directly in any root file remain local to that root. Other roots and helper files cannot read them, even if the roots share a directory.
 
-Consumers in another module can bind only the applicable facade's explicitly exported names. A normal module publishes through `@mod.moth`. A scoped support or external project package publishes through `@package.moth`. Resolution never falls back between facades or bypasses one with a filesystem path.
+Consumers in another module can bind only the applicable facade's explicitly
+exported names, including names published under a public route. A normal module
+publishes through `@mod.moth`. A scoped support or external project package
+publishes through `@package.moth`. Route visibility follows facade visibility.
+Bare `@child` exposes root members only, while `@child/forms` reaches the route
+surface. Resolution never falls back between facades, to a private file or to a
+physical directory that shares a route spelling.
 
 See @#module-roots (Module roots) for file roles and @../packages/#module-visibility (Module visibility) for the complete access rules.
 
 ### Public API contracts
 
-An exported signature must not expose private types, inaccessible trait requirements or project-private context. Exported functions and public receiver methods also need closed error contracts: implicit built-in failures must be handled or delivered through an explicit built-in `Error!` result. A custom error result needs local recovery or explicit mapping. The same rules apply to re-exports.
+An exported signature must not expose private types, inaccessible trait requirements or project-private context. Exported functions and public receiver methods also need closed error contracts: implicit built-in failures must be handled or delivered through an explicit built-in `Error!` result. A custom error result needs local recovery or explicit mapping. The same rules apply to re-exports and routed publications.
 
 See @../functions/#returns-and-multiple-values (Returns and multiple values) and @../errors/#propagation (Error propagation) for error handling.
 

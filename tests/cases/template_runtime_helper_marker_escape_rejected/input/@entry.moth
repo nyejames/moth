@@ -1,0 +1,6 @@
+runtime_name || -> String:
+    return [:red]
+;
+
+x = runtime_name()
+~[$in style: [x]]

@@ -47,12 +47,13 @@ use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
 use crate::compiler_frontend::declaration_syntax::signature_members::FunctionSignatureSyntax;
+use crate::compiler_frontend::headers::binding_environment::ReceiverMethodVisibility;
 use crate::compiler_frontend::headers::module_symbols::DeclarationId;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::style_directives::source_constraints_from_annotations;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 
@@ -523,37 +524,60 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         receiver_methods: &ReceiverMethodCatalog,
     ) -> Result<(), ExpressionParseError> {
         for file_visibility in self.binding_environment.file_visibility_by_source.values() {
-            for visible_methods in file_visibility.visible_receiver_methods.values() {
-                for visible_method in visible_methods {
-                    let Some(method_entry) = receiver_methods
-                        .by_function_path
-                        .get(visible_method.target.local_path())
-                    else {
-                        continue;
-                    };
-
-                    // Two different methods for the same receiver key were made visible
-                    // under the same local name. This should not happen for source methods
-                    // because they travel with their type, but we keep the guard.
-                    if let Some(_previous) = visible_methods.iter().find(|other| {
-                        other.target != visible_method.target
-                            && receiver_methods
-                                .by_function_path
-                                .get(other.target.local_path())
-                                .is_some_and(|entry| entry.receiver == method_entry.receiver)
-                    }) {
-                        let diagnostic = generics_traits_api::invalid_receiver_declaration(
-                            InvalidReceiverDeclarationReason::DuplicateVisibleMethod,
-                            visible_method.span,
-                        );
-                        return Err(diagnostic.into());
-                    }
-                }
-            }
+            validate_visible_receiver_methods(
+                &file_visibility.visible_receiver_methods,
+                receiver_methods,
+            )?;
         }
 
         Ok(())
     }
+}
+
+/// Validate one file's visible receiver methods against the resolved receiver catalog.
+///
+/// WHAT: rejects a visible name that binds two different declarations on the same receiver.
+/// WHY: one imported declaration can be visible through several consumer-local aliases. Those
+///      aliases share a stable origin and are not a collision; only different declarations are.
+pub(in crate::compiler_frontend::ast) fn validate_visible_receiver_methods(
+    visible_receiver_methods: &FxHashMap<StringId, Vec<ReceiverMethodVisibility>>,
+    receiver_methods: &ReceiverMethodCatalog,
+) -> Result<(), ExpressionParseError> {
+    for visible_methods in visible_receiver_methods.values() {
+        for visible_method in visible_methods {
+            // A generated materialisation validates the restored file visibility before
+            // `install_closed_environment` registers the captured methods, so a visible entry can
+            // lack its catalogue row here. A missing row carries no receiver fact for the
+            // duplicate guard, so keep checking the others.
+            let Some(method_entry) = receiver_methods
+                .by_function_path
+                .get(visible_method.target.local_path())
+            else {
+                continue;
+            };
+
+            // Two different methods for the same receiver key were made visible under the same
+            // local name. This should not happen for source methods because they travel with
+            // their type, but we keep the guard.
+            if visible_methods.iter().any(|other| {
+                !other
+                    .target
+                    .same_function_declaration(&visible_method.target)
+                    && receiver_methods
+                        .by_function_path
+                        .get(other.target.local_path())
+                        .is_some_and(|entry| entry.receiver == method_entry.receiver)
+            }) {
+                let diagnostic = generics_traits_api::invalid_receiver_declaration(
+                    InvalidReceiverDeclarationReason::DuplicateVisibleMethod,
+                    visible_method.span,
+                );
+                return Err(diagnostic.into());
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Constructs a generic function template from a resolved header and signature.

@@ -28,15 +28,16 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidTemplateDirectiveReason,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::{
     ConstraintDirectiveSpans, SourceConstraintSet, SourceDirectiveKind, SourceModifierOperand,
-    StatementSourceConstraintAttachment, StyleDirectiveKind,
+    StatementSourceConstraintAttachment, StyleDirectiveKind, StyleDirectiveSpec,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
-    SourceTokens, TokenCursor, TokenRange, TokenTag,
+    SourceTokens, TokenCursor, TokenRange, TokenRef, TokenTag,
 };
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::utilities::token_scan::{
@@ -46,19 +47,146 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use std::rc::Rc;
 use std::sync::Arc;
 
+/// Resolve the source-modifier contract declared by one directive spec.
+///
+/// WHAT: returns the directive kind and operand contract only when the spec is a source modifier
+///       admitted at a source position.
+/// WHY: header attachment and the structural-discovery operand scan read the same spec fact; a
+///      template-only or wrong-context name keeps its existing later owner instead of gaining a
+///      second header diagnostic.
+pub(crate) fn source_modifier_contract(
+    spec: &StyleDirectiveSpec,
+) -> Option<(SourceDirectiveKind, SourceModifierOperand)> {
+    if !spec.contexts.allows_source_modifier() {
+        return None;
+    }
+    match spec.kind {
+        StyleDirectiveKind::SourceModifier { target, operand } => {
+            Some((target.directive_kind(), operand))
+        }
+        _ => None,
+    }
+}
+
+/// Whether one token is the operand token an optional public-route capture takes.
+///
+/// WHAT: an `$export` operand is the single `PATH` token immediately after its name.
+/// WHY: structural discovery consumes exactly the row that operand grammar owns, so the capture
+///      helper and the consumption scan share this adjacency rule instead of re-deriving it.
+pub(crate) fn is_optional_public_route_operand(token: TokenRef<'_>) -> bool {
+    token.tag() == TokenTag::PATH
+}
+
+/// One optional `$export` public route operand.
+///
+/// WHAT: the facade-relative public suffix path, its exact authored span and the authored path
+///       row that produced it.
+/// WHY: a route names a public namespace under the declaring facade, never a dependency or
+///      source-file path. Retaining the path row lets preparation exclude the operand from
+///      structural file references without rescanning the file's path table by span. This is the
+///      authored boundary-local operand; the stable cross-module route value is
+///      [`PublicExportRoute`](crate::compiler_frontend::semantic_identity::PublicExportRoute).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PublicExportRouteOperand {
+    pub(crate) path: PathId,
+    pub(crate) span: SourceSpan,
+    pub(crate) path_syntax: PathSyntaxId,
+}
+
+/// Typed operand retained by one source directive annotation.
+///
+/// WHAT: no operand, one expression token range, or one resolved public route.
+/// WHY: `$doc` and `$todo` fold an expression with the ordinary constant pipeline while `$export`
+///      retains a path identity. One typed enum keeps every reader from reinterpreting an
+///      optional range by directive name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SourceDirectiveOperand {
+    None,
+    Expression(TokenRange),
+    PublicRoute(PublicExportRouteOperand),
+}
+
+impl SourceDirectiveOperand {
+    /// The authored expression range retained for a folded operand.
+    ///
+    /// Routes are namespace identities rather than expressions, so they deliberately return
+    /// `None` here and never enter expression, ordering or file-value lanes.
+    pub(crate) fn expression_range(&self) -> Option<TokenRange> {
+        match self {
+            Self::Expression(range) => Some(*range),
+            Self::None | Self::PublicRoute(_) => None,
+        }
+    }
+
+    /// Remap the path identity retained by a public route operand.
+    ///
+    /// WHAT: updates the route path when the owning file's local fork merges into the module's
+    ///       shared path table.
+    /// WHY: the attached annotation and `HeaderExportMode` retain the same route, so both copies
+    ///      must follow the one path remap.
+    pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+        if let Self::PublicRoute(route) = self {
+            route.path = remap.get(route.path);
+        }
+    }
+
+    /// Move this operand's authored spans into a finalised source identity.
+    pub(crate) fn rebind_source_identity(&mut self, file_id: SourceId) {
+        match self {
+            Self::None => {}
+            Self::Expression(range) => *range = range.rebind_source(file_id),
+            Self::PublicRoute(route) => {
+                route.span = SourceSpan::new(file_id, route.span.local());
+            }
+        }
+    }
+}
+
+/// Capture-local failure lane for source-directive operands.
+///
+/// WHAT: separates authored operand diagnostics from malformed retained path handles.
+/// WHY: the header and statement attachment owners convert this lane into their own failure
+///      types, so a stale path-table handle is never reported as a user syntax error.
+#[derive(Debug)]
+pub(crate) enum SourceOperandCaptureError {
+    Diagnostic(DiagnosticDraft),
+    Infrastructure(InfrastructureFailure),
+}
+
+impl From<DiagnosticDraft> for SourceOperandCaptureError {
+    fn from(diagnostic: DiagnosticDraft) -> Self {
+        Self::Diagnostic(diagnostic)
+    }
+}
+
+impl From<InfrastructureFailure> for SourceOperandCaptureError {
+    fn from(error: InfrastructureFailure) -> Self {
+        Self::Infrastructure(error)
+    }
+}
+
+impl From<SourceOperandCaptureError> for ExpressionParseError {
+    fn from(error: SourceOperandCaptureError) -> Self {
+        match error {
+            SourceOperandCaptureError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            SourceOperandCaptureError::Infrastructure(error) => Self::Infrastructure(error.into()),
+        }
+    }
+}
+
 /// One recognised source directive waiting for its target construct.
 ///
-/// WHAT: the directive kind, authored name and span, plus the operand's source-qualified token
-///       range.
+/// WHAT: the directive kind, authored name and span, plus its typed operand.
 /// WHY: attachment must validate each directive independently after the whole contiguous run is
-///      known. Retaining the range lets the AST stage fold the operand with the same parser and
-///      constant store as every other expression.
+///      known. Retaining the expression range lets the AST stage fold documentation and `$todo`
+///      operands with the same parser and constant store as every other expression, while an
+///      export route retains its already-resolved path identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceDirectiveAnnotation {
     pub(crate) kind: SourceDirectiveKind,
     pub(crate) name_id: StringId,
     pub(crate) span: SourceSpan,
-    pub(crate) operand: Option<TokenRange>,
+    pub(crate) operand: SourceDirectiveOperand,
 }
 
 /// Projects one directive attachment list onto the lexical constraint set it declares.
@@ -96,20 +224,25 @@ pub(crate) fn constraint_directive_spans(
 
 /// Captures one source directive's operand from the token after its name.
 ///
-/// WHAT: at outer source depth, the next `STYLE_DIRECTIVE`, newline or EOF ends the operand; a
-///       newline inside balanced syntax stays part of it. A real EOF reached with a group still
-///       open reports the missing closer through the shared EOF diagnostic, while a bounded
-///       statement view that ends mid-group leaves the report to its caller's boundary diagnostic.
+/// WHAT: at outer source depth, the next `STYLE_DIRECTIVE`, newline or EOF ends an expression
+///       operand; a newline inside balanced syntax stays part of it. An optional public route is
+///       exactly one `PATH` token resolved through the caller's file-owned path table. A real EOF
+///       reached with a group still open reports the missing closer through the shared EOF
+///       diagnostic, while a bounded statement view that ends mid-group leaves the report to its
+///       caller's boundary diagnostic.
 /// WHY: `$doc [$md: ...]` must not treat the nested `$md` as the next outer directive, and a
-///       multi-line balanced operand must keep all of its tokens. The caller owns target-line
-///       validation after the complete run is captured.
+///       multi-line balanced operand must keep all of its tokens. The header stage resolves route
+///       rows from its preparing table, while the AST stage resolves them through the immutable
+///       table attached to the canonical source owner. The caller owns target-line validation
+///       after the complete run is captured.
 pub(crate) fn capture_source_directive_operand(
     cursor: &mut TokenCursor<'_>,
     operand_contract: SourceModifierOperand,
     name_id: StringId,
     directive_span: SourceSpan,
+    path_syntax: &PathSyntaxTable,
     string_table: &mut StringTable,
-) -> Result<Option<TokenRange>, DiagnosticDraft> {
+) -> Result<SourceDirectiveOperand, SourceOperandCaptureError> {
     match operand_contract {
         SourceModifierOperand::None => {
             let current = cursor.current();
@@ -124,9 +257,60 @@ pub(crate) fn capture_source_directive_operand(
                     Some(name_id),
                     InvalidTemplateDirectiveReason::UnexpectedArguments,
                     current.map(|token| token.source_span()),
-                ));
+                )
+                .into());
             }
-            Ok(None)
+            Ok(SourceDirectiveOperand::None)
+        }
+        SourceModifierOperand::OptionalPublicRoute => {
+            let Some(first) = cursor.current() else {
+                return Ok(SourceDirectiveOperand::None);
+            };
+            if matches!(
+                first.tag(),
+                TokenTag::NEWLINE | TokenTag::STYLE_DIRECTIVE | TokenTag::EOF
+            ) {
+                return Ok(SourceDirectiveOperand::None);
+            }
+            if !is_optional_public_route_operand(first) {
+                return Err(templates::invalid_template_directive(
+                    Some(name_id),
+                    InvalidTemplateDirectiveReason::InvalidExportRouteOperand,
+                    Some(first.source_span()),
+                )
+                .into());
+            }
+
+            let Some(path_syntax_id) = first.path_syntax_id() else {
+                crate::compiler_bug!(
+                    CompilerStage::HeaderParsing,
+                    "public export route path token had no path syntax handle",
+                );
+            };
+            let path_row = path_syntax.try_path_for_token(path_syntax_id, first.source_span())?;
+            let route = PublicExportRouteOperand {
+                path: path_row.root,
+                span: first.source_span(),
+                path_syntax: path_syntax_id,
+            };
+            cursor.advance();
+
+            // A route is exactly one path operand. Anything else on the same line is a second
+            // operand or trailing syntax, reported at the first offending token.
+            if let Some(trailing) = cursor.current()
+                && !matches!(
+                    trailing.tag(),
+                    TokenTag::NEWLINE | TokenTag::STYLE_DIRECTIVE | TokenTag::EOF
+                )
+            {
+                return Err(templates::invalid_template_directive(
+                    Some(name_id),
+                    InvalidTemplateDirectiveReason::InvalidExportRouteOperand,
+                    Some(trailing.source_span()),
+                )
+                .into());
+            }
+            Ok(SourceDirectiveOperand::PublicRoute(route))
         }
         SourceModifierOperand::RequiredSingleString => {
             let start = cursor.position();
@@ -141,14 +325,16 @@ pub(crate) fn capture_source_directive_operand(
                     Some(name_id),
                     InvalidTemplateDirectiveReason::MissingArgument,
                     Some(directive_span),
-                ));
+                )
+                .into());
             }
             if first.is_some_and(|token| token.shape().open_parenthesis_is_attached()) {
                 return Err(templates::invalid_template_directive(
                     Some(name_id),
                     InvalidTemplateDirectiveReason::UnexpectedArguments,
                     first.map(|token| token.source_span()),
-                ));
+                )
+                .into());
             }
 
             let mut depth = NestingDepth::default();
@@ -181,18 +367,20 @@ pub(crate) fn capture_source_directive_operand(
                     Some(eof.source_span()),
                     None,
                     string_table,
-                ));
+                )
+                .into());
             }
 
             let end = cursor.position();
             TokenRange::try_new_for(cursor.source_tokens(), start, end)
-                .map(Some)
+                .map(SourceDirectiveOperand::Expression)
                 .map_err(|_| {
                     templates::invalid_template_directive(
                         Some(name_id),
                         InvalidTemplateDirectiveReason::InvalidArgument { detail: None },
                         Some(directive_span),
                     )
+                    .into()
                 })
         }
     }
@@ -221,7 +409,7 @@ pub(crate) fn fold_source_directive_operand(
     context: &ScopeContext,
     resources: SourceOperandFoldResources<'_, '_>,
 ) -> Result<(StringId, SourceSpan), ExpressionParseError> {
-    let Some(operand) = annotation.operand else {
+    let Some(operand) = annotation.operand.expression_range() else {
         return Err(templates::invalid_template_directive(
             Some(annotation.name_id),
             InvalidTemplateDirectiveReason::MissingArgument,
@@ -374,6 +562,12 @@ pub(crate) fn parse_statement_source_directive_run(
         string_table,
         path_fork,
     } = resources;
+    let source = cursor.canonical_owner().cloned().ok_or_else(|| {
+        InfrastructureFailure::internal(
+            CompilerStage::AstConstruction,
+            "source directive operand has no canonical source owner",
+        )
+    })?;
     let mut annotations: Vec<SourceDirectiveAnnotation> = Vec::new();
 
     loop {
@@ -431,6 +625,7 @@ pub(crate) fn parse_statement_source_directive_run(
         // The capture helper reads from the token after the directive name.
         cursor.advance();
         let operand_start = cursor.position();
+        let path_syntax = source.path_syntax_table()?;
         let operand = {
             let token_cursor = cursor.token_cursor_mut();
             capture_source_directive_operand(
@@ -438,14 +633,15 @@ pub(crate) fn parse_statement_source_directive_run(
                 operand_contract,
                 name_id,
                 directive_span,
+                path_syntax,
                 &mut *string_table,
             )?
         };
-        // `capture_source_directive_operand` leaves a bare directive on its own token and
-        // advances a directive with an operand to the next boundary. Normalize both shapes so a
-        // contiguous run advances exactly once per directive. A following directive stays in
-        // place so the separator check can inspect its authored adjacency, and a newline stays in
-        // place so the run can record that the target starts on a later line.
+        // `capture_source_directive_operand` leaves the next token in place for a bare directive
+        // and advances past a consumed operand. Normalize both shapes so a contiguous run
+        // advances exactly once per directive. A following directive stays in place so the
+        // separator check can inspect its authored adjacency, and a newline stays in place so
+        // the run can record that the target starts on a later line.
         if cursor.position() == operand_start
             && !matches!(
                 cursor.current_tag(),
@@ -529,12 +725,6 @@ pub(crate) fn parse_statement_source_directive_run(
     // `$doc` still accepts them: documentation on a compile-time binding is ordinary metadata.
     let compile_time_declaration_target = statement_target_is_compile_time_declaration(cursor);
     let target_span = cursor.current_span();
-    let source = cursor.canonical_owner().cloned().ok_or_else(|| {
-        InfrastructureFailure::internal(
-            CompilerStage::AstConstruction,
-            "source directive operand has no canonical source owner",
-        )
-    })?;
     let doc_sink = context
         .publish_source_docs
         .then(|| Rc::clone(&context.source_docs));

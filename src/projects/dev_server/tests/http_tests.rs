@@ -130,6 +130,51 @@ fn unrepresentable_output_name_serves_html_without_dev_injection() {
 }
 
 #[test]
+fn authored_dev_client_marker_does_not_suppress_generated_page_injection() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let output_dir = root.join("dev");
+    fs::create_dir_all(&output_dir).expect("should create output dir");
+    fs::write(
+        output_dir.join("index.html"),
+        "<html><head><!-- moth-dev-client --><script>bootstrap()</script></head><body>Hello</body></html>",
+    )
+    .expect("should write page with an authored marker");
+
+    let build_state = configure_build_state(&output_dir, Some(PathBuf::from("index.html")), true);
+
+    match prepare_static_response("/", None, &build_state) {
+        PreparedResponse::Text {
+            status_line, body, ..
+        } => {
+            assert_eq!(status_line, "200 OK");
+            assert_eq!(
+                body.matches("new EventSource(").count(),
+                1,
+                "every pristine generated page installs exactly one dev client"
+            );
+            assert_eq!(
+                body.matches("<!-- moth-dev-client -->").count(),
+                2,
+                "the authored marker is retained beside the installed client"
+            );
+            let hook = body
+                .find("globalThis.__moth_record_entry_failure")
+                .expect("generated page installs the startup report hook");
+            let bootstrap = body
+                .find("bootstrap()")
+                .expect("authored bootstrap present");
+            assert!(
+                hook < bootstrap,
+                "the dev client must run before authored bootstrap scripts"
+            );
+        }
+        PreparedResponse::Bytes { .. } => panic!("html page should be served as text"),
+        PreparedResponse::Redirect { .. } => panic!("root page should not redirect"),
+    }
+}
+
+#[test]
 fn nested_html_request_uses_stored_error_page_during_failed_build() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();

@@ -165,6 +165,7 @@ define_stable_reason_keys! {
         &InvalidConfigCode::ResourceOutputPathCollision => "invalid_config.resource_output_path_collision",
         &InvalidConfigCode::ResourceOutputPathReserved => "invalid_config.resource_output_path_reserved",
         &InvalidConfigCode::EntryRootPackagePrefixCollision => "invalid_config.entry_root_package_prefix_collision",
+        &InvalidConfigCode::ProjectPackagePrefixCollision => "invalid_config.project_package_prefix_collision",
         &InvalidConfigCode::ReservedPackageNamespaceRootClaim => "invalid_config.reserved_package_namespace_root_claim",
         &InvalidConfigCode::SourcePackageMissingRoot => "invalid_config.source_package_missing_root",
         &InvalidConfigCode::NoRootModuleEntries => "invalid_config.no_root_module_entries",
@@ -357,6 +358,7 @@ define_stable_reason_keys! {
         &InvalidCompileTimePathCode::EscapesProjectRoot => "invalid_compile_time_path.escapes_project_root",
         &InvalidCompileTimePathCode::HiddenPath => "invalid_compile_time_path.hidden_path",
         &InvalidCompileTimePathCode::ReservedConfigFile => "invalid_compile_time_path.reserved_config_file",
+        &InvalidCompileTimePathCode::ProviderOwnedContentTarget => "invalid_compile_time_path.provider_owned_content_target",
     },
 
     InvalidTypeAnnotationReason => {
@@ -434,6 +436,11 @@ define_stable_reason_keys! {
         &InvalidTemplateDirectiveCode::InvalidArgument => "invalid_template_directive.invalid_argument",
         &InvalidTemplateDirectiveCode::DirectiveNotAllowedHere => "invalid_template_directive.directive_not_allowed_here",
         &InvalidTemplateDirectiveCode::UnexpectedArguments => "invalid_template_directive.unexpected_arguments",
+        &InvalidTemplateDirectiveCode::InvalidExportRouteOperand => "invalid_template_directive.invalid_export_route_operand",
+        &InvalidTemplateDirectiveCode::InvalidExportRoutePublicRoot => "invalid_template_directive.export_route_public_root",
+        &InvalidTemplateDirectiveCode::InvalidExportRouteCurrentDirectorySegment => "invalid_template_directive.export_route_current_directory_segment",
+        &InvalidTemplateDirectiveCode::InvalidExportRouteParentDirectorySegment => "invalid_template_directive.export_route_parent_directory_segment",
+        &InvalidTemplateDirectiveCode::InvalidExportRouteExtensionSegment => "invalid_template_directive.export_route_extension_segment",
         &InvalidTemplateDirectiveCode::InvalidSlotTarget => "invalid_template_directive.invalid_slot_target",
         &InvalidTemplateDirectiveCode::InvalidSlotDefault => "invalid_template_directive.invalid_slot_default",
         &InvalidTemplateDirectiveCode::InvalidSuppliedTarget => "invalid_template_directive.invalid_supplied_target",

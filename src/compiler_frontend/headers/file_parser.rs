@@ -24,14 +24,18 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
+use crate::compiler_frontend::headers::dependency_paths::validate_export_route;
 use crate::compiler_frontend::headers::file_dependency_clauses::parse_and_record_dependency;
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
 use crate::compiler_frontend::headers::header_dispatch::{
     HeaderDeclarationMetadata, create_header,
 };
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
+use crate::compiler_frontend::headers::public_export_route_conflicts::{
+    PublicExportRouteClaim, case_conflicting_public_export_route_diagnostic,
+};
 use crate::compiler_frontend::headers::qualified_references::{
-    collect_qualified_references, push_header_expression_ranges,
+    collect_export_operand_paths, collect_qualified_references, push_header_expression_ranges,
 };
 use crate::compiler_frontend::headers::start_capture::capture_runtime_template_range_from_cursor;
 use crate::compiler_frontend::headers::symbol_collection::is_receiver_method_candidate;
@@ -51,8 +55,9 @@ use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::file_name_is_config_file;
 use crate::compiler_frontend::style_directives::{
-    SourceDirectiveAnnotation, SourceDirectiveKind, SourceModifierOperand,
-    capture_source_directive_operand,
+    SourceDirectiveAnnotation, SourceDirectiveKind, SourceDirectiveOperand, SourceModifierOperand,
+    SourceOperandCaptureError, StyleDirectiveRegistry, capture_source_directive_operand,
+    source_modifier_contract,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -68,6 +73,58 @@ type FileParserResult<T> = Result<T, HeaderParseFailure>;
 fn diagnostic_failure(diagnostic: DiagnosticDraft) -> HeaderParseFailure {
     HeaderParseFailure::Diagnostic(diagnostic)
 }
+
+impl From<SourceOperandCaptureError> for HeaderParseFailure {
+    fn from(error: SourceOperandCaptureError) -> Self {
+        match error {
+            SourceOperandCaptureError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            SourceOperandCaptureError::Infrastructure(error) => Self::Infrastructure(error),
+        }
+    }
+}
+
+/// Derive one header or dependency clause's export mode from its attached directive run.
+///
+/// WHAT: finds the single `$export` annotation, validates its optional route spelling and carries
+///       the retained route onto the public mode.
+/// WHY: declarations and dependency clauses attach through different parse branches but must
+///      derive the same public fact from one authored annotation. Duplicate directives are
+///      rejected before this point, so one lookup cannot hide a second route.
+fn export_mode_for(
+    annotations: &[SourceDirectiveAnnotation],
+    context: &HeaderParseContext<'_>,
+) -> FileParserResult<HeaderExportMode> {
+    let Some(annotation) = annotations
+        .iter()
+        .find(|annotation| annotation.kind == SourceDirectiveKind::Export)
+    else {
+        return Ok(HeaderExportMode::Private);
+    };
+
+    let route = match annotation.operand {
+        SourceDirectiveOperand::None => None,
+        SourceDirectiveOperand::PublicRoute(route) => {
+            if let Err(reason) =
+                validate_export_route(route.path, context.path_fork, context.string_table)
+            {
+                return Err(diagnostic_failure(templates::invalid_template_directive(
+                    Some(annotation.name_id),
+                    InvalidTemplateDirectiveReason::InvalidExportRoute { reason },
+                    Some(route.span),
+                )));
+            }
+            Some(route)
+        }
+        SourceDirectiveOperand::Expression(_) => {
+            crate::compiler_bug!(
+                CompilerStage::HeaderParsing,
+                "`$export` retained an expression operand though its contract accepts only a public route",
+            );
+        }
+    };
+    Ok(HeaderExportMode::Public { route })
+}
+
 /// Resolve one checked source-owned token at a canonical cursor index.
 ///
 /// All Stage 0 facts come from the canonical source owner; retained parser state stores only
@@ -252,24 +309,13 @@ fn source_directive_for(
         )));
     };
 
-    if !spec.contexts.allows_source_modifier() {
-        return Err(diagnostic_failure(templates::invalid_template_directive(
+    source_modifier_contract(spec).ok_or_else(|| {
+        diagnostic_failure(templates::invalid_template_directive(
             Some(name_id),
             InvalidTemplateDirectiveReason::WrongContext,
             Some(span),
-        )));
-    }
-    match spec.kind {
-        crate::compiler_frontend::style_directives::StyleDirectiveKind::SourceModifier {
-            target,
-            operand,
-        } => Ok((target.directive_kind(), operand)),
-        _ => Err(diagnostic_failure(templates::invalid_template_directive(
-            Some(name_id),
-            InvalidTemplateDirectiveReason::WrongContext,
-            Some(span),
-        ))),
-    }
+        ))
+    })
 }
 
 /// Whether one declaration header accepts the source directive's declared target.
@@ -611,14 +657,7 @@ fn parse_headers_in_file_inner(
                     .take()
                     .map(|run| run.annotations)
                     .unwrap_or_default();
-                let is_export = annotations
-                    .iter()
-                    .any(|annotation| annotation.kind == SourceDirectiveKind::Export);
-                let export_mode = if is_export {
-                    HeaderExportMode::Public
-                } else {
-                    HeaderExportMode::Private
-                };
+                let export_mode = export_mode_for(&annotations, context)?;
                 parse_and_record_dependency(
                     cursor,
                     file_id,
@@ -721,6 +760,7 @@ fn parse_headers_in_file_inner(
                     operand_contract,
                     name_id,
                     current_span,
+                    &context.path_syntax,
                     context.string_table,
                 )?;
                 let annotation = SourceDirectiveAnnotation {
@@ -780,17 +820,10 @@ fn handle_symbol_item(
         name_id,
         current_span,
         current_index,
-        source_directives,
+        mut source_directives,
     } = symbol;
     // `$export` is the only authored public-surface form. An unmarked declaration stays private.
-    let export_mode = if source_directives
-        .iter()
-        .any(|directive| directive.kind == SourceDirectiveKind::Export)
-    {
-        HeaderExportMode::Public
-    } else {
-        HeaderExportMode::Private
-    };
+    let export_mode = export_mode_for(&source_directives, context)?;
     let Some(follower_index) = TokenIndex::try_from_index(cursor.position().index()) else {
         crate::compiler_bug!(
             CompilerStage::HeaderParsing,
@@ -891,6 +924,10 @@ fn handle_symbol_item(
             directive,
         )));
     }
+    // `$export` has already contributed its one route fact to `export_mode` and passed target
+    // validation. Keeping the annotation would retain a second copy of the route through every
+    // path remap and source rebind without any production reader.
+    source_directives.retain(|directive| directive.kind != SourceDirectiveKind::Export);
     header.source_directives = source_directives;
 
     // Structural directive targets are already settled by the pending-run preflight and
@@ -1182,6 +1219,37 @@ pub(super) fn finish_file_output(
         ));
     }
 
+    if context.file_role.is_export_capable() {
+        // Every route of one facade is authored in its single facade root file, so declaration
+        // and clause claims are merged here while their original PathIds and authored order are
+        // still available. Stage 0 and header binding consume this validation instead of
+        // rebuilding folded-route indexes from cross-boundary summaries.
+        let claims = state
+            .headers
+            .iter()
+            .filter_map(|header| header.export_mode.route())
+            .chain(
+                state
+                    .file_dependency_clauses
+                    .iter()
+                    .filter_map(|clause| clause.export_mode.route()),
+            )
+            .map(|route| PublicExportRouteClaim {
+                route: route.path,
+                span: route.span,
+                path_syntax: route.path_syntax,
+            });
+        if let Some(diagnostic) = case_conflicting_public_export_route_diagnostic(
+            claims,
+            &*context.path_fork,
+            context.string_table,
+        ) {
+            return Err(FileFrontendPrepareFailure::Diagnosed(
+                state.into_error(diagnostic),
+            ));
+        }
+    }
+
     if matches!(
         context.file_role,
         FileRole::Normal | FileRole::ActiveApiOnlyModuleRoot(_) | FileRole::ReachedApiFacadeRoot(_)
@@ -1221,6 +1289,7 @@ pub(super) fn finish_file_output(
     if let Err(failure) = attach_structural_file_facts(
         &mut output,
         &canonical_owner,
+        &context.style_directives,
         context.string_table,
         context.path_fork,
     ) {
@@ -1244,6 +1313,7 @@ pub(super) fn finish_file_output(
 fn attach_structural_file_facts(
     output: &mut FileFrontendPrepareOutput,
     canonical: &SourceTokens,
+    style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), HeaderParseFailure> {
@@ -1264,7 +1334,22 @@ fn attach_structural_file_facts(
             .iter()
             .map(|clause| clause.dependency.path_syntax),
     );
+    // A public export route is directive-owned namespace syntax. Its path row must never become
+    // a structural provider or file-value reference.
+    consumed_path_syntax_ids.extend(
+        output
+            .file_dependency_clauses
+            .iter()
+            .filter_map(|clause| clause.export_mode.route().map(|route| route.path_syntax))
+            .chain(
+                output
+                    .headers
+                    .iter()
+                    .filter_map(|header| header.export_mode.route().map(|route| route.path_syntax)),
+            ),
+    );
     let mut qualified_reference_ranges = Vec::new();
+    let mut header_ranges = Vec::new();
     fn append_source_range_paths(
         output: &mut Vec<crate::compiler_frontend::paths::path_syntax::PathSyntaxId>,
         canonical: &SourceTokens,
@@ -1300,6 +1385,20 @@ fn attach_structural_file_facts(
             )
             .into());
         }
+        header_ranges.clear();
+        push_header_expression_ranges(header, header_index, canonical, &mut header_ranges)?;
+        // A `$export` in a retained range can never attach to an eligible target. Consume the
+        // exact row its optional-public-route operand owns before either recognition lane sees
+        // it; the AST statement, expression and template owners stay the diagnostic owners.
+        consumed_path_syntax_ids.extend(collect_export_operand_paths(
+            canonical,
+            header_ranges
+                .iter()
+                .map(|expression_range| expression_range.range),
+            output.path_syntax.table(),
+            style_directives,
+            string_table,
+        )?);
         if is_config_file {
             // Config syntax paths are values, not qualified-reference occurrences.
             continue;
@@ -1311,12 +1410,7 @@ fn attach_structural_file_facts(
         if !config_owned {
             // Ordinary expression context: recognize `PATH SYMBOL` occurrences in this header's
             // body, initializer and defaults.
-            push_header_expression_ranges(
-                header,
-                header_index,
-                canonical,
-                &mut qualified_reference_ranges,
-            )?;
+            qualified_reference_ranges.append(&mut header_ranges);
             continue;
         }
 
@@ -1324,17 +1418,13 @@ fn attach_structural_file_facts(
         // rows are still consumed so the file-reference classifier never treats them as file
         // values. Reuse the same range collection the expression lane uses instead of repeating
         // its header match.
-        let mut config_owned_ranges = Vec::new();
-        push_header_expression_ranges(header, header_index, canonical, &mut config_owned_ranges)?;
-        for expression_range in config_owned_ranges {
+        for expression_range in header_ranges.iter().copied() {
             // A source-directive operand is metadata syntax, not part of the config contract
             // value. Keep it in the ordinary expression lane so its content and qualified
             // references stay visible to ordering and file-reference discovery.
-            if header
-                .source_directives
-                .iter()
-                .any(|directive| directive.operand == Some(expression_range.range))
-            {
+            if header.source_directives.iter().any(|directive| {
+                directive.operand.expression_range() == Some(expression_range.range)
+            }) {
                 qualified_reference_ranges.push(
                     crate::compiler_frontend::headers::qualified_references::HeaderExpressionRange::const_required(
                         header_index,
@@ -1361,6 +1451,7 @@ fn attach_structural_file_facts(
     let qualified_references = collect_qualified_references(
         canonical,
         qualified_reference_ranges,
+        &consumed_path_syntax_ids,
         output.file_id,
         first_occurrence_shell_ordinal,
         output.path_syntax.table(),

@@ -452,6 +452,7 @@ fn compile_fixture(
             owner,
             interned_path,
             path_syntax,
+            &style_directives,
             &mut string_table,
             &mut path_fork,
         )

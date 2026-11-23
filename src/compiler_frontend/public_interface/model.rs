@@ -19,7 +19,8 @@ use crate::compiler_frontend::external_packages::CanonicalBindingSymbolIdentity;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::public_call_summary::{PublicCallParameterAccess, PublicCallSummary};
 use crate::compiler_frontend::semantic_identity::{
-    ExportBinding, OriginDeclarationId, OriginFunctionId, StableModuleOriginIdentity,
+    ExportBinding, OriginDeclarationId, OriginFunctionId, PublicExportRoute,
+    StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -531,13 +532,15 @@ pub(crate) struct PublicInterfaceDraft {
 
 /// One binding-backed symbol re-exported by a source module.
 ///
-/// WHAT: owns the source-facing public name plus the canonical binding package identity,
-/// structured symbol path and declaration category.
+/// WHAT: owns the public route and source-facing public name plus the canonical binding package
+/// identity, structured symbol path and declaration category.
 /// WHY: build-local `ExternalSymbolId` values cannot cross a source-module interface. A consumer
 /// resolves this stable identity through the binding package registry supplied to its own build.
+/// The route is part of the published surface and therefore participates in interface equality.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PublicBindingExport {
     pub(crate) exporting_module: StableModuleOriginIdentity,
+    pub(crate) route: PublicExportRoute,
     pub(crate) public_name: String,
     pub(crate) target: CanonicalBindingSymbolIdentity,
 }
@@ -547,8 +550,10 @@ pub(crate) struct PublicBindingExport {
 /// Authored declaration spans retain their original [`SourceSpan`] source identity and byte range;
 /// synthetic/generated declarations use `None`. Semantic identity remains independent from this
 /// diagnostic metadata, while consumers can attach the span directly to collision diagnostics.
+/// The route keys provenance by the same published identity as its export binding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PublicExportDiagnosticProvenance {
+    pub(crate) route: PublicExportRoute,
     pub(crate) public_name: String,
     pub(crate) span: Option<SourceSpan>,
 }

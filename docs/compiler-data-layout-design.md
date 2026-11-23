@@ -1058,7 +1058,7 @@ pub(super) struct DiagnosticExtraRecord {
 the string-id arena. One extra record can point at its labels, foreign sites and string list together,
 so an unusual diagnostic does not force a second word into every common record.
 
-A foreign site is an 8-byte `ForeignSiteRecord`: a selector word (0 for the primary span, related-site index + 1 for a related site) and an index into the report-owned frozen identity-context references. The span stays in the record's primary field or in its related-site record, so the row never carries a span. Equal frozen identities share one entry.
+A foreign site is an 8-byte `ForeignSiteRecord`: a selector word and an index into the report-owned frozen identity-context references. The low bits of the selector name the slot (0 for the primary span, related-site index + 1 for a related site); the high bit, `HOST_PATH_DISPLAY_FLAG`, marks a collision donor site that renders its canonical host path instead of its logical path. The span stays in the record's primary field or in its related-site record, so the row never carries a span. Equal frozen identities share one entry.
 
 Before creating a new extra kind, the owner must check whether the diagnostic can carry a smaller,
 clearer semantic fact instead. Side storage is an escape hatch for genuinely variable or unusual

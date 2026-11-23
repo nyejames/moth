@@ -187,7 +187,9 @@ fn template_budget_error(
         setting,
         aggregate,
         span,
+        span_owner: None,
         call_span: None,
+        call_span_owner: None,
         call_chain: Vec::new(),
     })
 }

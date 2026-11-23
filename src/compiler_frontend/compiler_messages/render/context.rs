@@ -15,8 +15,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
-use crate::compiler_frontend::source::FrozenIdentityContext;
 use crate::compiler_frontend::source::line_index::{LineIndex, LinePosition};
+use crate::compiler_frontend::source::{FrozenIdentityContext, FrozenSitePathDisplay};
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 #[cfg(test)]
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -163,9 +163,20 @@ impl<'a> DiagnosticRenderContext<'a> {
         match site {
             SiteRef::Absent => None,
             SiteRef::Local(span) => self.resolve_span(span),
-            SiteRef::Foreign { span, context } => {
-                context.and_then(|context| self.resolve_span_in_frozen(context, span))
-            }
+            SiteRef::Foreign {
+                span,
+                context,
+                path_display,
+            } => context.and_then(|context| {
+                // Ordinary package diagnostics keep their boundary-relative logical path. Only a
+                // site that opted into canonical-host display, because two boundaries can spell
+                // the same logical file, resolves through its physical path.
+                self.resolve_span_in_frozen(
+                    context,
+                    span,
+                    path_display == FrozenSitePathDisplay::CanonicalHost,
+                )
+            }),
         }
     }
 
@@ -175,7 +186,7 @@ impl<'a> DiagnosticRenderContext<'a> {
         }
 
         match self.frozen_identity {
-            Some(frozen) => self.resolve_span_in_frozen(frozen, span),
+            Some(frozen) => self.resolve_span_in_frozen(frozen, span, false),
             None => None,
         }
     }
@@ -184,6 +195,7 @@ impl<'a> DiagnosticRenderContext<'a> {
         self,
         frozen: &'identity FrozenIdentityContext,
         span: SourceSpan,
+        prefer_host_path: bool,
     ) -> Option<DiagnosticPrimaryPosition<'identity>> {
         let source = span.source();
         let slot = frozen.get(source)?;
@@ -192,9 +204,14 @@ impl<'a> DiagnosticRenderContext<'a> {
         let start = line_index.position(range.start())?;
         let end = line_index.position(range.end())?;
         let line = line_text_or_empty_file_eof(line_index, start)?;
-        let path_id = frozen.source_logical_path(source)?;
-        let mut scratch = Vec::new();
-        let path = PathBuf::from(frozen.render_path(path_id, &mut scratch));
+        let path = if prefer_host_path {
+            slot.canonical_os_path
+                .as_deref()
+                .map(PathBuf::from)
+                .or_else(|| frozen_logical_path(frozen, source))?
+        } else {
+            frozen_logical_path(frozen, source)?
+        };
 
         Some(DiagnosticPrimaryPosition {
             source,
@@ -206,6 +223,13 @@ impl<'a> DiagnosticRenderContext<'a> {
             line,
         })
     }
+}
+
+/// Render one frozen source's logical path for display when no physical path exists.
+fn frozen_logical_path(frozen: &FrozenIdentityContext, source: SourceId) -> Option<PathBuf> {
+    let path_id = frozen.source_logical_path(source)?;
+    let mut scratch = Vec::new();
+    Some(PathBuf::from(frozen.render_path(path_id, &mut scratch)))
 }
 
 /// Build a resolved label from its source position and message.

@@ -27,7 +27,7 @@ use crate::compiler_frontend::ast::AstBuildResult;
 #[cfg(test)]
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_public_folded_value;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::module_compilation::ConstExecutionLimits;
+use crate::compiler_frontend::module_compilation::ProviderMaterialisationRegistry;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -73,9 +73,11 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
     pub(crate) path_fork:
         &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
+    /// Completed provider rows that recover imported const function bodies during generated AST
+    /// construction; the boundary registry is borrowed, never copied.
+    pub(crate) provider_materialisations: &'a ProviderMaterialisationRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
-    pub(crate) const_execution_limits: ConstExecutionLimits,
     /// The requesting module owns generated work in current-schema attribution.
     #[cfg(feature = "timers")]
     pub(crate) timing_context: Option<crate::timing::TimingContext>,

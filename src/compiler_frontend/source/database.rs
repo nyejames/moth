@@ -531,6 +531,18 @@ impl SourceDatabase {
         }
     }
 
+    /// Whether a registered source has never had a load attempt recorded.
+    pub(crate) fn is_source_pending(&self, id: SourceId) -> bool {
+        self.get(id)
+            .is_some_and(|slot| matches!(slot.load, SourceLoadStatus::Pending))
+    }
+
+    /// Whether a registered source already recorded invalid UTF-8 as its terminal outcome.
+    pub(crate) fn is_source_non_utf8(&self, id: SourceId) -> bool {
+        self.get(id)
+            .is_some_and(|slot| matches!(slot.load, SourceLoadStatus::NonUtf8))
+    }
+
     /// Move one loaded source snapshot into a record owned by its preassigned slot.
     ///
     /// A slot that already holds a snapshot or a load failure is a lifecycle violation, so the
@@ -1210,6 +1222,21 @@ impl SourceDatabaseBuilder {
             }
         }
         Ok(())
+    }
+
+    /// Drop pending span builders for snapshots explicitly rejected by the size policy.
+    ///
+    /// WHAT: removes only builders whose source identity is listed by the retention owner.
+    /// WHY: an authored snapshot rejected as too large is an intentional failure outcome; its
+    ///      producer-local table has no owner and must not reach the loaded-source adoption
+    ///      invariant. Every other pending builder represents a real ownership violation and must
+    ///      still surface the adoption invariant instead of being silently discarded.
+    pub(crate) fn discard_pending_span_builders_for_capacity_rejected_sources(
+        &mut self,
+        rejected: &[SourceId],
+    ) {
+        self.pending_builders
+            .retain(|source, _| !rejected.contains(source));
     }
 
     /// Move builders collected while discovery was loading selected source text into the

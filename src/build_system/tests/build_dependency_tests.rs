@@ -1506,6 +1506,83 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
 }
 
 #[test]
+fn build_html_project_unused_routed_js_reexport_does_not_emit_runtime_artifacts() {
+    // A facade may re-export a JavaScript provider under a nested route; an import of that route
+    // whose function is never called must still plan no glue, runtime module, import map or
+    // deferred provider asset. The route changes where the binding publishes, not reachability.
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(src.join("api")).expect("should create api module directory");
+    fs::write(
+        root.join("@config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@entry.moth"),
+        "@api/tools get_number\n\nvalue = 1\n~[: value=[value] ]\n",
+    )
+    .expect("should write page");
+    fs::write(
+        src.join("api/@mod.moth"),
+        "$export @tools\n@drawing.js get_number\n",
+    )
+    .expect("should write routed facade");
+    fs::write(
+        src.join("api/drawing.js"),
+        "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> I32, Error!\n */\nexport function getNumber() { return mothOk(7); }\n",
+    )
+    .expect("should write js");
+
+    let builder = HtmlProjectBuilder::new();
+    let result = successful_compilation_value(
+        build_project(
+            &builder,
+            root.to_str().expect("temp dir should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+            &mut discovery_stops,
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
+
+    let outputs = BuiltOutputs::index(&result.project);
+    outputs.none_matching("generated glue module", |path| {
+        path.starts_with(GLUE_MODULE_PREFIX)
+    });
+    outputs.none_matching("runtime module", |path| {
+        path.starts_with("_moth/js/runtime/")
+    });
+    let deferred_javascript = result
+        .project
+        .deferred_resources
+        .iter()
+        .map(|resource| portable_output_spelling(&resource.relative_output_path))
+        .filter(|path| path.ends_with(".js"))
+        .collect::<Vec<_>>();
+    assert!(
+        deferred_javascript.is_empty(),
+        "an unused routed JS re-export must not defer a provider asset: {deferred_javascript:?}"
+    );
+
+    let html = html_text(outputs.at("src/index.html"));
+    assert!(
+        !html.contains("<script type=\"module\">"),
+        "an unused routed JS re-export should not force a module script"
+    );
+    assert!(
+        !html.contains("import { __moth_glue_fn"),
+        "an unused routed JS re-export should not add a glue preamble"
+    );
+    assert!(
+        !html.contains("<script type=\"importmap\">"),
+        "an unused routed JS re-export should not emit an import map"
+    );
+}
+
+#[test]
 fn build_html_project_unused_html_canvas_markup_does_not_emit_runtime_artifacts() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");

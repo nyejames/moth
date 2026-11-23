@@ -1,0 +1,8 @@
+$export
+Shape = |
+    label String,
+|
+
+measure |this Shape| -> String:
+    return [:shape:[this.label]]
+;

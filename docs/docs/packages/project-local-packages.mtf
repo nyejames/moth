@@ -34,7 +34,12 @@ A module with `@mod.moth` or `@entry.moth` occupies the normal-position owner ro
 
 ### Public surface
 
-Consumers see only declarations and direct-selection re-exports marked with `$export` in the support facade. Internal implementation files remain private unless the facade re-exports selected declarations.
+Consumers see only declarations and direct-selection re-exports marked with
+`$export` in the support facade. A facade may publish some names at its root
+and others under a public route. A route appears under the package path, for
+example `@markdown/forms`, and is visible exactly where the support package is
+visible. Internal implementation files remain private unless the facade
+re-exports selected declarations.
 
 Shared helpers in a paired directory must obey the intersection of imports legal to every root that can consume them.
 
@@ -42,11 +47,11 @@ Shared helpers in a paired directory must obey the intersection of imports legal
 
 The support facade may depend on ordinary files it owns, any descendant module in its private subtree, support packages from a strictly outer scope and registered packages. It may not depend on its parent, normal sibling consumers or same-scope support siblings.
 
-Consumers see only the support facade's `$export` surface. They cannot address `@markdown/parser` or another implementation path.
+Consumers see only the support facade's `$export` surface. They cannot address `@markdown/parser` or another implementation path. A public route such as `@markdown/forms` is not a filesystem path, so it exposes only names the facade published there.
 
-### Depended-on package roots do not produce routes
+### Depended-on package roots do not produce pages
 
-Support roots are API-only. They reject top-level runtime work, direct fragments and builder-slot contributions, export declarations instead and produce no HTML artefact. Only `@entry.moth` creates a page. Importing a support package never activates an entry in its directory. See @../project-structure/#html-routing-and-artifacts (HTML routing and artefacts).
+Support roots are API-only. They reject top-level runtime work, direct fragments and builder-slot contributions, export declarations instead and produce no HTML artefact. Public export routes are not page routes. Only `@entry.moth` creates a page. Importing a support package never activates an entry in its directory. See @../project-structure/#html-routing-and-artifacts (HTML routing and artefacts).
 
 Support packages may hold reusable ordinary `#` constants and expose them through their public surface. They do not need custom project metadata. Project metadata remains the separate `@config.moth` contract.
 
@@ -55,6 +60,8 @@ Support packages may hold reusable ordinary `#` constants and expose them throug
 Local support packages stay outside the reserved Core and Builder namespaces. An importable local facade, helper or dependency alias cannot claim `core` or `builder`, compared case-insensitively. A directory name alone never triggers that rejection: entry-only modules, their private helpers, directories containing only entry modules and plain asset directories remain legal. Unrelated `html/`, `css/`, `styles/` and `web/` folders also stay legal.
 
 A project folder whose full path matches a registered source package path, such as `core/html/` or `builder/web/site/`, collides whichever module owns it, even when it holds no importable surface. An ancestor folder such as `core/` alone stays legal. A binding-backed package has no source module, so an asset folder at a registered binding path such as `builder/web/canvas/` stays legal.
+
+A registered ProjectLocal source package prefix must differ from the project package name configured in `@config.moth`. Both would otherwise use the same stable project-local identity, so unrelated module and declaration origins could become equal even when nothing imports them. Stage 0 rejects the registration before package indexing and names the project name, registered prefix and package root.
 
 Copying a source-backed package directory to a non-colliding local path gives an ordinary support package through its own `@package.moth`. Copying it to a registered source package path, such as `core/html/`, hits the collision above. Copying a binding-backed asset tree creates no package and registers no symbols. Neither copy inherits the registered package's origin, namespace or capabilities.
 

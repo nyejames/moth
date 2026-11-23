@@ -7204,6 +7204,55 @@ contract = "language.templates.escaped_insert_helper_standalone_rejected"
 role = "primary"
 
 [[case]]
+id = "template_runtime_helper_function_escape_rejected"
+path = "template_runtime_helper_function_escape_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.escaped_insert_helper_standalone_rejected"
+role = "boundary"
+
+[[case]]
+id = "template_runtime_helper_marker_escape_rejected"
+path = "template_runtime_helper_marker_escape_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.escaped_insert_helper_standalone_rejected"
+role = "boundary"
+
+[[case]]
+id = "template_stored_helper_runtime_use_rejected"
+path = "template_stored_helper_runtime_use_rejected"
+tags = ["integration","templates","diagnostics","modules"]
+contract = "language.templates.escaped_insert_helper_standalone_rejected"
+role = "boundary"
+
+[[case]]
+id = "template_stored_helper_projection_runtime_use_rejected"
+path = "template_stored_helper_projection_runtime_use_rejected"
+tags = ["integration","templates","diagnostics","modules"]
+contract = "language.templates.escaped_insert_helper_standalone_rejected"
+role = "boundary"
+
+[[case]]
+id = "template_runtime_helper_binding_escape_rejected"
+path = "template_runtime_helper_binding_escape_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.escaped_insert_helper_standalone_rejected"
+role = "boundary"
+
+[[case]]
+id = "template_runtime_helper_used_binding_escape_rejected"
+path = "template_runtime_helper_used_binding_escape_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.escaped_insert_helper_standalone_rejected"
+role = "boundary"
+
+[[case]]
+id = "template_runtime_helper_const_call_argument_rejected"
+path = "template_runtime_helper_const_call_argument_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.escaped_insert_helper_standalone_rejected"
+role = "boundary"
+
+[[case]]
 id = "template_body_literal_text"
 path = "template_body_literal_text"
 tags = ["integration","templates"]
@@ -7705,6 +7754,13 @@ id = "template_slot_defaults_imported_wrapper"
 path = "template_slot_defaults_imported_wrapper"
 tags = ["integration", "templates", "slots", "imports"]
 contract = "language.templates.slot_defaults_imported_wrapper"
+role = "primary"
+
+[[case]]
+id = "template_runtime_css_imported_wrapper_slot"
+path = "template_runtime_css_imported_wrapper_slot"
+tags = ["integration", "templates", "slots", "imports", "runtime"]
+contract = "language.templates.runtime_css_imported_wrapper_slot"
 role = "primary"
 
 [[case]]
@@ -22521,4 +22577,326 @@ id = "config_named_template_source_reserved_rejected"
 path = "config_named_template_source_reserved_rejected"
 tags = ["integration", "paths", "dependencies", "modules", "diagnostics"]
 contract = "language.dependencies.config_named_template_key_is_reserved"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports"
+path = "namespaced_public_exports"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports"]
+contract = "language.dependencies.namespaced_public_exports_execute"
+role = "primary"
+
+[[case]]
+id = "namespaced_public_exports_unexported_leaf_rejected"
+path = "namespaced_public_exports_unexported_leaf_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_unexported_leaf_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_private_path_bypass_rejected"
+path = "namespaced_public_exports_private_path_bypass_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_private_path_bypass_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_deeper_route_rejected"
+path = "namespaced_public_exports_deeper_route_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_deeper_route_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_bare_parent_member_rejected"
+path = "namespaced_public_exports_bare_parent_member_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_bare_parent_member_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_route_collision_rejected"
+path = "namespaced_public_exports_route_collision_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_route_collision_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_ambiguous_base_route_rejected"
+path = "namespaced_public_exports_ambiguous_base_route_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_ambiguous_base_route_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_route_case_order_rejected"
+path = "namespaced_public_exports_route_case_order_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_route_case_order_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_bare_route_member_rejected"
+path = "namespaced_public_exports_bare_route_member_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_bare_route_member_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_paired_support_success"
+path = "namespaced_public_exports_paired_support_success"
+tags = ["integration", "dependencies", "packages", "facade", "namespace-bindings", "exports"]
+contract = "language.dependencies.namespaced_public_exports_paired_support_feature"
+role = "primary"
+
+[[case]]
+id = "namespaced_public_exports_bare_route_root_member_rejected"
+path = "namespaced_public_exports_bare_route_root_member_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_bare_route_root_member_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_reexport_origins"
+path = "namespaced_reexport_origins"
+tags = ["integration", "dependencies", "packages", "facade", "namespace-bindings", "exports", "aliases", "external-packages", "runtime"]
+contract = "language.dependencies.namespaced_reexport_origins_execute"
+role = "primary"
+
+[[case]]
+id = "namespaced_reexport_duplicate_leaf_rejected"
+path = "namespaced_reexport_duplicate_leaf_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_reexport_duplicate_leaf_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_reexport_unmarked_dependency_rejected"
+path = "namespaced_reexport_unmarked_dependency_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_reexport_unmarked_dependency_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_reexport_transitive_route_rejected"
+path = "namespaced_reexport_transitive_route_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_reexport_transitive_route_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_reexport_missing_provider_member_rejected"
+path = "namespaced_reexport_missing_provider_member_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_reexport_missing_provider_member_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_reexport_provider_error_rejected"
+path = "namespaced_reexport_provider_error_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_reexport_provider_error_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_reexport_receiver_selection_rejected"
+path = "namespaced_reexport_receiver_selection_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_reexport_receiver_selection_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_reexport_cycle_rejected"
+path = "namespaced_reexport_cycle_rejected"
+tags = ["integration", "dependencies", "packages", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_reexport_cycle_rejected"
+role = "adversarial"
+
+[[case]]
+id = "namespaced_package_routes"
+path = "namespaced_package_routes"
+tags = ["integration", "source-packages", "packages", "facade", "dependencies", "namespace-bindings", "runtime"]
+contract = "language.dependencies.namespaced_package_routes_acceptance"
+role = "primary"
+
+[[case]]
+id = "namespaced_reexport_unmarked_alias_root_rejected"
+path = "namespaced_reexport_unmarked_alias_root_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_reexport_unmarked_alias_root_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_private_route_spelling_rejected"
+path = "namespaced_public_exports_private_route_spelling_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_private_route_spelling_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_invalid_route_rejected"
+path = "namespaced_public_exports_invalid_route_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_invalid_route_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_duplicate_route_rejected"
+path = "namespaced_public_exports_duplicate_route_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_duplicate_route_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_invalid_operand_rejected"
+path = "namespaced_public_exports_invalid_operand_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_invalid_operand_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_ambiguous_base_route_child_facade_rejected"
+path = "namespaced_public_exports_ambiguous_base_route_child_facade_rejected"
+tags = ["integration", "packages", "facade", "dependencies", "namespace-bindings", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_ambiguous_base_route_child_facade_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_ambiguous_base_route_mixed_child_rejected"
+path = "namespaced_public_exports_ambiguous_base_route_mixed_child_rejected"
+tags = ["integration", "packages", "facade", "dependencies", "namespace-bindings", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_ambiguous_base_route_mixed_child_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_body_placement_rejected"
+path = "namespaced_public_exports_body_placement_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_body_placement_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_body_operand_rejected"
+path = "namespaced_public_exports_body_operand_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_body_operand_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_entry_block_placement_rejected"
+path = "namespaced_public_exports_entry_block_placement_rejected"
+tags = ["integration", "dependencies", "entry-start", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_entry_block_placement_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_const_catch_placement_rejected"
+path = "namespaced_public_exports_const_catch_placement_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_const_catch_placement_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_match_arm_boundary_rejected"
+path = "namespaced_public_exports_match_arm_boundary_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_match_arm_boundary_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_expression_position_rejected"
+path = "namespaced_public_exports_expression_position_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_expression_position_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_grouped_expression_rejected"
+path = "namespaced_public_exports_grouped_expression_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_grouped_expression_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_inline_else_rejected"
+path = "namespaced_public_exports_inline_else_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_inline_else_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_colon_arm_boundary_rejected"
+path = "namespaced_public_exports_colon_arm_boundary_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_colon_arm_boundary_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_template_head_rejected"
+path = "namespaced_public_exports_template_head_rejected"
+tags = ["integration", "dependencies", "facade", "namespace-bindings", "exports", "diagnostics"]
+contract = "language.dependencies.namespaced_public_exports_template_head_rejected"
+role = "boundary"
+
+[[case]]
+id = "namespaced_public_exports_receiver_two_aliases"
+path = "namespaced_public_exports_receiver_two_aliases"
+tags = ["integration", "dependencies", "packages", "facade", "namespace-bindings", "exports", "receiver-methods", "aliases", "runtime"]
+contract = "language.dependencies.namespaced_public_exports_receiver_two_aliases_acceptance"
+role = "primary"
+
+[[case]]
+id = "namespaced_public_exports_receiver_two_routes"
+path = "namespaced_public_exports_receiver_two_routes"
+tags = ["integration", "dependencies", "packages", "facade", "namespace-bindings", "exports", "receiver-methods", "aliases", "runtime"]
+contract = "language.dependencies.namespaced_public_exports_receiver_two_routes_acceptance"
+role = "primary"
+
+[[case]]
+id = "generic_body_imported_concrete_receiver_success"
+path = "generic_body_imported_concrete_receiver_success"
+tags = ["integration", "generics", "dependencies", "receiver-methods", "runtime"]
+contract = "language.generics.generic_body_calls_imported_concrete_receiver_method"
+role = "primary"
+
+[[case]]
+id = "source_constraint_infallible_unrouted_handler_fallback_accepted"
+path = "source_constraint_infallible_unrouted_handler_fallback_accepted"
+tags = ["integration", "directives", "numeric", "constraints", "runtime"]
+contract = "language.directives.infallible_unrouted_handler_fallback_stays_unexecuted"
+role = "primary"
+
+[[case]]
+id = "source_constraint_infallible_unrouted_handler_fallback_accepted_release"
+path = "source_constraint_infallible_unrouted_handler_fallback_accepted_release"
+tags = ["integration", "directives", "numeric", "constraints", "runtime", "release"]
+contract = "language.directives.infallible_unrouted_handler_fallback_stays_unexecuted"
+role = "boundary"
+
+[[case]]
+id = "source_constraint_infallible_folded_divisor_handler_trap_rejected"
+path = "source_constraint_infallible_folded_divisor_handler_trap_rejected"
+tags = ["integration", "directives", "numeric", "constraints", "diagnostics"]
+contract = "language.directives.infallible_folded_divisor_keeps_handler_trap"
+role = "primary"
+
+[[case]]
+id = "source_constraint_infallible_folded_divisor_handler_trap_rejected_release"
+path = "source_constraint_infallible_folded_divisor_handler_trap_rejected_release"
+tags = ["integration", "directives", "numeric", "constraints", "diagnostics", "release"]
+contract = "language.directives.infallible_folded_divisor_keeps_handler_trap"
+role = "boundary"
+
+[[case]]
+id = "source_constraint_infallible_auxiliary_fold_stays_runtime_rejected"
+path = "source_constraint_infallible_auxiliary_fold_stays_runtime_rejected"
+tags = ["integration", "directives", "numeric", "constraints", "diagnostics"]
+contract = "language.directives.infallible_auxiliary_fold_stays_runtime"
+role = "primary"
+
+[[case]]
+id = "source_constraint_infallible_auxiliary_fold_stays_runtime_rejected_release"
+path = "source_constraint_infallible_auxiliary_fold_stays_runtime_rejected_release"
+tags = ["integration", "directives", "numeric", "constraints", "diagnostics", "release"]
+contract = "language.directives.infallible_auxiliary_fold_stays_runtime"
 role = "boundary"

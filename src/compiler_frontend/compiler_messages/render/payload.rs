@@ -9,11 +9,11 @@ use super::*;
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
-    DuplicatePublicExportView, DuplicateTraitRequirementView, GenericBoundPrivateSurfaceLeakView,
-    InvalidTraitConformanceNames, InvalidTraitConformanceShape, InvalidTraitConformanceView,
-    InvalidTraitIncompatibilityView, InvalidTraitKeywordUsageView, PrivateTypeInExportedApiView,
-    TraitNameUsedAsTypeView, TraitPrivateSurfaceLeakView, UnknownTraitView,
-    UnsupportedTraitFeatureView, decode_invalid_trait_conformance_names,
+    CaseConflictingPublicExportRouteView, DuplicatePublicExportView, DuplicateTraitRequirementView,
+    GenericBoundPrivateSurfaceLeakView, InvalidTraitConformanceNames, InvalidTraitConformanceShape,
+    InvalidTraitConformanceView, InvalidTraitIncompatibilityView, InvalidTraitKeywordUsageView,
+    PrivateTypeInExportedApiView, TraitNameUsedAsTypeView, TraitPrivateSurfaceLeakView,
+    UnknownTraitView, UnsupportedTraitFeatureView, decode_invalid_trait_conformance_names,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
     AmbiguousImportTargetView, BareFileImportView, CrossModuleImportNotExportedView,
@@ -808,7 +808,7 @@ pub(crate) fn render_unsupported_trait_feature(
 }
 fn duplicate_public_export_message(name: StringId, context: DiagnosticRenderContext<'_>) -> String {
     format!(
-        "Duplicate public export '{}' in module public surface. Each exported name must be unique.",
+        "Duplicate public export '{}' in the same public export route. Each exported name must be unique within its route.",
         context.string_table.resolve(name)
     )
 }
@@ -822,6 +822,35 @@ pub(crate) fn render_duplicate_public_export(
 ) -> RenderedPayload {
     RenderedPayload {
         message: duplicate_public_export_message(view.name, context),
+        guidance: Vec::new(),
+    }
+}
+
+fn case_conflicting_public_export_route_message(
+    route: PathId,
+    previous_route: PathId,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    format!(
+        "Public export route '@{}' differs from '@{}' only by ASCII case. Routes under one facade must be unambiguous.",
+        context.render_path(route),
+        context.render_path(previous_route)
+    )
+}
+
+/// WHAT: renders the case-only route conflict from both route operand path facts.
+/// WHY: the authored spellings are the only evidence that distinguishes the two claims.
+pub(crate) fn render_case_conflicting_public_export_route(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &CaseConflictingPublicExportRouteView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: case_conflicting_public_export_route_message(
+            view.route,
+            view.previous_route,
+            context,
+        ),
         guidance: Vec::new(),
     }
 }

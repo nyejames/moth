@@ -14,7 +14,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedDeclarationIdentity, ModuleRootRole, StableModuleOriginIdentity,
+    GeneratedDeclarationIdentity, ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::FrozenStringTable;
@@ -105,11 +105,11 @@ fn optional_surface_mismatch(
     }
 }
 
-/// Exact location of one published materialisation template inside this store.
+/// Exact location of one published materialisation row inside this store.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct MaterialisationContextLocation {
     pub(crate) artifact_id: CompiledModuleArtifactId,
-    pub(crate) template_index: usize,
+    pub(crate) row_index: usize,
 }
 
 pub(crate) struct ModuleArtifactStore {
@@ -123,11 +123,19 @@ pub(crate) struct ModuleArtifactStore {
     ///       validates duplicate contexts at publication before any module requests them.
     contexts_by_declaration:
         FxHashMap<GeneratedDeclarationIdentity, MaterialisationContextLocation>,
-    /// Every published materialisation row in deterministic publication order.
+    /// Boundary-owned index of every published const function row by stable origin.
+    ///
+    /// WHAT: mirrors `contexts_by_declaration` for the const-body lane. A consumer importing an
+    ///       exported const function must resolve the declaring context and exact retained row
+    ///       even when the provider publishes no generic templates at all.
+    const_contexts_by_origin: FxHashMap<OriginFunctionId, MaterialisationContextLocation>,
+    /// Every published generic materialisation row in deterministic publication order.
     ///
     /// WHAT: the contiguous lane that keeps cross-boundary duplicate registration and boundary
     ///       handoff iteration deterministic without depending on hash-map iteration order.
     materialisation_rows: Vec<(GeneratedDeclarationIdentity, MaterialisationContextLocation)>,
+    /// Every published const function row in deterministic publication order.
+    const_materialisation_rows: Vec<(OriginFunctionId, MaterialisationContextLocation)>,
 }
 
 #[derive(Debug)]
@@ -135,6 +143,7 @@ pub(crate) struct ModuleSuccessPublication {
     module_index: usize,
     artifact_id: CompiledModuleArtifactId,
     materialisation_rows: Vec<(GeneratedDeclarationIdentity, MaterialisationContextLocation)>,
+    const_materialisation_rows: Vec<(OriginFunctionId, MaterialisationContextLocation)>,
 }
 
 impl ModuleArtifactStore {
@@ -143,7 +152,9 @@ impl ModuleArtifactStore {
             slots: vec![ProviderSlot::Unavailable; module_count],
             artifacts: Vec::with_capacity(module_count),
             contexts_by_declaration: FxHashMap::default(),
+            const_contexts_by_origin: FxHashMap::default(),
             materialisation_rows: Vec::new(),
+            const_materialisation_rows: Vec::new(),
         }
     }
 
@@ -174,12 +185,13 @@ impl ModuleArtifactStore {
 
         let artifact_id = CompiledModuleArtifactId(self.artifacts.len());
         // Preflight every materialisation row before any mutation: a failing publication must
-        // leave the store unchanged. One temporary set keeps the intra-context duplicate check
-        // linear; the retained lane remains the contiguous `materialisation_rows` vector.
+        // leave the store unchanged. One temporary set per row kind keeps the intra-context
+        // duplicate check linear; the retained lanes remain the contiguous row vectors.
         let mut rows = Vec::new();
-        let mut seen_rows = FxHashSet::default();
+        let mut const_rows = Vec::new();
         if let Some(context) = artifact.module.metadata.materialisation_context.as_ref() {
-            for (identity, template_index) in context.declaration_rows() {
+            let mut seen_rows = FxHashSet::default();
+            for (identity, row_index) in context.declaration_rows() {
                 if !seen_rows.insert(identity) {
                     crate::compiler_bug!(
                         crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
@@ -193,16 +205,45 @@ impl ModuleArtifactStore {
                         "Generated declaration identity {:?} was published by more than one materialisation context (artifact {} row {} and artifact {} row {})",
                         identity,
                         existing.artifact_id.0,
-                        existing.template_index,
+                        existing.row_index,
                         artifact_id.0,
-                        template_index
+                        row_index
                     );
                 }
                 rows.push((
                     identity.clone(),
                     MaterialisationContextLocation {
                         artifact_id,
-                        template_index,
+                        row_index,
+                    },
+                ));
+            }
+
+            let mut seen_const_origins = FxHashSet::default();
+            for (origin, row_index) in context.const_function_rows() {
+                if !seen_const_origins.insert(origin) {
+                    crate::compiler_bug!(
+                        crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                        "Const function origin {:?} is duplicated inside one materialisation context",
+                        origin
+                    );
+                }
+                if let Some(existing) = self.const_contexts_by_origin.get(origin) {
+                    crate::compiler_bug!(
+                        crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                        "Const function origin {:?} was published by more than one materialisation context (artifact {} row {} and artifact {} row {})",
+                        origin,
+                        existing.artifact_id.0,
+                        existing.row_index,
+                        artifact_id.0,
+                        row_index
+                    );
+                }
+                const_rows.push((
+                    origin.clone(),
+                    MaterialisationContextLocation {
+                        artifact_id,
+                        row_index,
                     },
                 ));
             }
@@ -212,6 +253,7 @@ impl ModuleArtifactStore {
             module_index: module_id.index(),
             artifact_id,
             materialisation_rows: rows,
+            const_materialisation_rows: const_rows,
         })
     }
 
@@ -219,8 +261,12 @@ impl ModuleArtifactStore {
         self.artifacts.reserve(1);
         self.contexts_by_declaration
             .reserve(publication.materialisation_rows.len());
+        self.const_contexts_by_origin
+            .reserve(publication.const_materialisation_rows.len());
         self.materialisation_rows
             .reserve(publication.materialisation_rows.len());
+        self.const_materialisation_rows
+            .reserve(publication.const_materialisation_rows.len());
     }
 
     pub(crate) fn commit_success(
@@ -233,6 +279,11 @@ impl ModuleArtifactStore {
             self.contexts_by_declaration
                 .insert(identity.clone(), location);
             self.materialisation_rows.push((identity, location));
+        }
+        for (origin, location) in publication.const_materialisation_rows {
+            self.const_contexts_by_origin
+                .insert(origin.clone(), location);
+            self.const_materialisation_rows.push((origin, location));
         }
         self.slots[publication.module_index] = ProviderSlot::Successful(publication.artifact_id);
     }
@@ -438,7 +489,7 @@ impl ModuleArtifactStore {
             })
     }
 
-    /// Iterate every published materialisation location with its declaration identity.
+    /// Iterate every published generic materialisation location with its declaration identity.
     pub(crate) fn materialisation_locations(
         &self,
     ) -> impl Iterator<
@@ -450,6 +501,15 @@ impl ModuleArtifactStore {
         self.materialisation_rows
             .iter()
             .map(|(identity, location)| (identity, *location))
+    }
+
+    /// Iterate every published const function row with its stable origin.
+    pub(crate) fn const_materialisation_locations(
+        &self,
+    ) -> impl Iterator<Item = (&OriginFunctionId, MaterialisationContextLocation)> + '_ {
+        self.const_materialisation_rows
+            .iter()
+            .map(|(origin, location)| (origin, *location))
     }
 
     fn transition_unavailable(

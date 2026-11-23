@@ -1,0 +1,11 @@
+trap_if_zero |value I32| -> I32:
+    return 1 // value
+;
+
+$infallible
+probe |value I32| -> I32:
+    discarded I32 = value // 2 catch then trap_if_zero(1)
+    return discarded
+;
+
+~[: accepted=[probe(8)] ]

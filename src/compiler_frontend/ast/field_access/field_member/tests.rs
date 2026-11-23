@@ -131,6 +131,7 @@ fn receiver_authored_field_uses_foreign_effective_tir() {
         path_fork: &path_fork,
         expression_builder: &mut expression_builder,
         const_values: &const_values,
+        member_span: None,
     })
     .expect("effective TIR classification should succeed")
     .expect("receiver-authored const field should resolve")
@@ -269,6 +270,7 @@ fn resolved_default_field_uses_foreign_effective_tir() {
         path_fork: &path_fork,
         expression_builder: &mut expression_builder,
         const_values: &const_values,
+        member_span: None,
     })
     .expect("effective TIR classification should succeed")
     .expect("resolved const default should resolve")
@@ -355,6 +357,7 @@ fn resolved_field_default_uses_constant_content_without_reexpansion() {
         path_fork: &paths,
         expression_builder: &mut expression_builder,
         const_values: &const_values,
+        member_span: None,
     })
     .expect("field resolution succeeds")
     .expect("field exists");

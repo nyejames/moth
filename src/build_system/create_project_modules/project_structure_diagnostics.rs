@@ -113,10 +113,13 @@ pub(super) fn reserved_package_namespace_root_claim_error(
     capture_structure_diagnostic(diagnostic, string_table)
 }
 
-/// Freeze the diagnostic into a diagnosed failure, handing the populated table to the batch.
+/// Freeze one Stage 0 authored diagnostic into a diagnosed failure, handing the populated table
+/// to the batch.
 ///
 /// Stage 0 aborts discovery on these errors, so the caller's table is empty after the handoff.
-fn capture_structure_diagnostic(
+/// Structure and package-registration rejections share it because both abort before any source
+/// owner is handed on.
+pub(super) fn capture_structure_diagnostic(
     diagnostic: DiagnosticDraft,
     string_table: &mut StringTable,
 ) -> PreparedFailure {

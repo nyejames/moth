@@ -137,6 +137,9 @@ pub(super) fn ensure_source_snapshot_fits(
     byte_length: usize,
     provenance: SourceProvenance,
 ) -> Result<(), SourceDatabaseError> {
+    #[cfg(test)]
+    let limit = super::test_snapshot_limit::forced_snapshot_limit().unwrap_or(u32::MAX as usize);
+    #[cfg(not(test))]
     let limit = u32::MAX as usize;
     if byte_length < limit {
         return Ok(());

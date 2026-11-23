@@ -53,6 +53,8 @@ mod render_bridge_tests;
 #[path = "tests/span_tests.rs"]
 mod span_tests;
 #[cfg(test)]
+mod test_snapshot_limit;
+#[cfg(test)]
 pub(crate) mod test_support;
 
 #[cfg(feature = "data_layout_memory_probe")]
@@ -61,7 +63,9 @@ pub(crate) use database::{
     FrozenSourceDatabase, SourceCapacityError, SourceDatabase, SourceDatabaseBuilder,
     SourceDatabaseError, SourceSpanBuilders,
 };
-pub(crate) use frozen_identity::{FrozenIdentityContext, FrozenIdentityHandle};
+pub(crate) use frozen_identity::{
+    FrozenIdentityContext, FrozenIdentityHandle, FrozenSitePathDisplay,
+};
 pub(crate) use id::SourceId;
 pub(crate) use record::{SourceKind, SourceProvenance, SourceRecord, SourceSlot};
 pub(crate) use registration::SourceRegistrationIndex;
@@ -71,3 +75,5 @@ pub(crate) use span::{
     ExtendedSpanBuilder, LocalSpan, SourceSpan, SpanCapacityError, SpanJoinError,
     SpanResolutionSources,
 };
+#[cfg(test)]
+pub(crate) use test_snapshot_limit::ForcedSourceSnapshotLimitGuard;

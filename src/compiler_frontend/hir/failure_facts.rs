@@ -59,13 +59,13 @@ pub(crate) struct HirConstraintEvidence {
     pub(crate) selected_call_sites: Vec<HirSelectedCallSite>,
     /// Selected call sites erased by release folding whose enclosing expression HIR lowered.
     ///
-    /// WHAT: the release-erased calls with the failure containment debug lowering preserved.
+    /// WHAT: the release-erased calls that replaced ordinary executable source.
     /// WHY: `selected_call_sites` intentionally carries fast-use evidence without regard to
     ///      liveness, because fast selection is not a liveness property. A callee's trap or
     ///      escaping-failure hazard is liveness-conditioned, though, so `$infallible` may only
     ///      treat the erased call as executable when its surrounding expression was lowered.
-    ///      Statically pruned catch handlers are excluded from release speculation, so they
-    ///      produce no erased rows.
+    ///      Catch handler bodies and handled subjects are excluded from release speculation, so a
+    ///      row here always belongs to lowered executable source and its failure escapes.
     pub(crate) live_erased_call_sites: Vec<HirLiveErasedCallSite>,
 }
 
@@ -83,20 +83,18 @@ pub(crate) struct HirSelectedCallSite {
     pub(crate) span: Option<SourceSpan>,
 }
 
-/// One live release-erased call, including the failure containment debug lowering preserved.
+/// One executable ordinary call that release folding erased.
 ///
-/// WHAT: the resolved target, authored span and whether an enclosing catch owns its recoverable
-///       failure.
-/// WHY: an erased call retains its trap hazard, but only an escaping call widens `may_fail`.
-///      Reusing [`HirSelectedCallSite`] would force every selected-site producer to carry a
-///      containment bit it cannot know. The span is required because every projected row carries
-///      its authored call site; release folding skips authored-dead statements and statically
-///      pruned catch handlers, so a recorded row always belongs to source HIR lowered.
+/// WHAT: the resolved target and authored span.
+/// WHY: the erased call retains the trap and escaping-failure hazards a debug build would observe
+///      at the runtime call. Reusing [`HirSelectedCallSite`] would lose the executable distinction
+///      that skipped-handler evidence deliberately lacks. The span is required because every
+///      projected row carries its authored call site, and the producer declines to erase a
+///      spanless call.
 #[derive(Clone, Debug)]
 pub(crate) struct HirLiveErasedCallSite {
     pub(crate) target: CallTarget,
     pub(crate) span: SourceSpan,
-    pub(crate) failure_caught: bool,
 }
 
 /// The one accumulator for [`HirSelectedCallSite`] rows.

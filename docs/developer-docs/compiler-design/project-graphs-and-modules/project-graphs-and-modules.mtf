@@ -142,7 +142,7 @@ Determinism lets parallel compilation merge results in canonical order. Diagnost
 ## Compiler references
 
 - @https://github.com/nyejames/moth/blob/main/src/build_system/create_project_modules/module_identity.rs (Structural module identities)
-- @https://github.com/nyejames/moth/blob/main/src/build_system/create_project_modules/module_namespace.rs (Facade and dependency namespaces)
+- @https://github.com/nyejames/moth/blob/main/src/build_system/create_project_modules/module_namespace/mod.rs (Facade and dependency namespaces; public-route publication lives in its `route_publication` child)
 - @https://github.com/nyejames/moth/blob/main/src/compiler_frontend/headers/public_exports.rs (Public interface export construction)
 
 ## Exit state

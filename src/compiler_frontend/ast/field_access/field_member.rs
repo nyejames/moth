@@ -9,6 +9,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::MemberStepContext;
+use super::parse_chain::{expression_is_slot_insert_helper, reject_runtime_slot_insert_helper};
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::{
@@ -30,6 +31,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::queries::TypeKind;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::source::SourceSpan;
 use moth_lexical::numeric::grammar::NumericLiteralKind;
 
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
@@ -73,6 +75,8 @@ struct FieldMemberResolution<'a> {
     path_fork: &'a PathInternerFork,
     expression_builder: &'a mut AstExpressionBuilder,
     const_values: &'a ConstValueStore,
+    /// Authored member span. Reports a stored `$in` helper projected outside composition.
+    member_span: Option<SourceSpan>,
 }
 
 // --------------------------
@@ -350,6 +354,20 @@ struct ConstRecordFieldFacts {
     is_const_record: bool,
 }
 
+fn projected_field_is_slot_insert_helper(
+    field: ProjectedField,
+    scope_context: &ScopeContext,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+) -> Result<bool, ExpressionParseError> {
+    match field {
+        ProjectedField::Expression(id) => {
+            expression_is_slot_insert_helper(id, scope_context, expression_builder, const_values)
+        }
+        ProjectedField::Constant(id) => Ok(const_values.is_slot_insert_template(id)),
+    }
+}
+
 fn projected_field_facts(
     field: ProjectedField,
     expression_builder: &AstExpressionBuilder,
@@ -483,6 +501,7 @@ fn resolve_field_member(
         path_fork,
         expression_builder,
         const_values,
+        member_span,
     } = input;
 
     let projected_field = match receiver_value {
@@ -495,6 +514,13 @@ fn resolve_field_member(
         )?,
         None => None,
     };
+    // A stored `$in` helper projected from a const record follows the identifier rule, so a
+    // runtime value read is rejected before it reaches HIR as a non-renderable template.
+    if let (Some(field), Some(scope)) = (projected_field, scope_context)
+        && projected_field_is_slot_insert_helper(field, scope, expression_builder, const_values)?
+    {
+        reject_runtime_slot_insert_helper(scope, member_span)?;
+    }
     let projected_facts = projected_field
         .map(|field| projected_field_facts(field, expression_builder, const_values))
         .transpose()?;
@@ -635,6 +661,8 @@ pub(super) fn resolve_field_member_for_known_receiver(
         path_fork,
         expression_builder,
         const_values,
+        // WHY: a known receiver has no authored value, so no const-record field is projected.
+        member_span: None,
     })
 }
 
@@ -735,6 +763,7 @@ pub(super) fn parse_field_member_access_typed(
             path_fork,
             expression_builder,
             const_values,
+            member_span,
         })?
     };
 

@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "label=shape:ok area=6 unit=7 mirror=tw bump=42 base=5 ext=done"

@@ -23,10 +23,10 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_unknown_directive,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CssTemplateWarning, DiagnosticSeverity, HtmlTemplateWarning, InvalidTemplateDirectiveReason,
-    InvalidTemplateSlotReason, InvalidTemplateStructureReason, MalformedTemplateReason,
-    StoredTemplateHeadConflict, TemplateHeadConflictOwner, TemplateHeadConflictReason,
-    TemplateHeadItemKind,
+    CssTemplateWarning, DiagnosticSeverity, HtmlTemplateWarning, InvalidExportRouteReason,
+    InvalidTemplateDirectiveReason, InvalidTemplateSlotReason, InvalidTemplateStructureReason,
+    MalformedTemplateReason, StoredTemplateHeadConflict, TemplateHeadConflictOwner,
+    TemplateHeadConflictReason, TemplateHeadItemKind,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -84,6 +84,11 @@ unit_code! {
         InvalidSuppliedTarget = 17,
         InvalidSuppliedDefault = 18,
         MissingSuppliedBody = 19,
+        InvalidExportRouteOperand = 20,
+        InvalidExportRoutePublicRoot = 21,
+        InvalidExportRouteCurrentDirectorySegment = 22,
+        InvalidExportRouteParentDirectorySegment = 23,
+        InvalidExportRouteExtensionSegment = 24,
     }
 }
 
@@ -105,6 +110,21 @@ impl InvalidTemplateDirectiveCode {
             InvalidTemplateDirectiveReason::UnexpectedArguments => {
                 (Self::UnexpectedArguments, None)
             }
+            InvalidTemplateDirectiveReason::InvalidExportRouteOperand => {
+                (Self::InvalidExportRouteOperand, None)
+            }
+            InvalidTemplateDirectiveReason::InvalidExportRoute { reason } => match reason {
+                InvalidExportRouteReason::PublicRoot => (Self::InvalidExportRoutePublicRoot, None),
+                InvalidExportRouteReason::CurrentDirectorySegment => {
+                    (Self::InvalidExportRouteCurrentDirectorySegment, None)
+                }
+                InvalidExportRouteReason::ParentDirectorySegment => {
+                    (Self::InvalidExportRouteParentDirectorySegment, None)
+                }
+                InvalidExportRouteReason::ExtensionSegment => {
+                    (Self::InvalidExportRouteExtensionSegment, None)
+                }
+            },
             InvalidTemplateDirectiveReason::InvalidSlotTarget => (Self::InvalidSlotTarget, None),
             InvalidTemplateDirectiveReason::InvalidSlotDefault => (Self::InvalidSlotDefault, None),
             InvalidTemplateDirectiveReason::InvalidSuppliedTarget => {
@@ -142,6 +162,29 @@ impl InvalidTemplateDirectiveCode {
                 InvalidTemplateDirectiveReason::DirectiveNotAllowedHere
             }
             Self::UnexpectedArguments => InvalidTemplateDirectiveReason::UnexpectedArguments,
+            Self::InvalidExportRouteOperand => {
+                InvalidTemplateDirectiveReason::InvalidExportRouteOperand
+            }
+            Self::InvalidExportRoutePublicRoot => {
+                InvalidTemplateDirectiveReason::InvalidExportRoute {
+                    reason: InvalidExportRouteReason::PublicRoot,
+                }
+            }
+            Self::InvalidExportRouteCurrentDirectorySegment => {
+                InvalidTemplateDirectiveReason::InvalidExportRoute {
+                    reason: InvalidExportRouteReason::CurrentDirectorySegment,
+                }
+            }
+            Self::InvalidExportRouteParentDirectorySegment => {
+                InvalidTemplateDirectiveReason::InvalidExportRoute {
+                    reason: InvalidExportRouteReason::ParentDirectorySegment,
+                }
+            }
+            Self::InvalidExportRouteExtensionSegment => {
+                InvalidTemplateDirectiveReason::InvalidExportRoute {
+                    reason: InvalidExportRouteReason::ExtensionSegment,
+                }
+            }
             Self::InvalidSlotTarget => InvalidTemplateDirectiveReason::InvalidSlotTarget,
             Self::InvalidSlotDefault => InvalidTemplateDirectiveReason::InvalidSlotDefault,
             Self::InvalidSuppliedTarget => InvalidTemplateDirectiveReason::InvalidSuppliedTarget,

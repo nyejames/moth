@@ -2377,6 +2377,7 @@ fn completed_service_diagnoses_retained_generic_assertion_and_custom_catch_sites
                     crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
                         span,
                         context,
+                        ..
                     } => span
                         .byte_range(context.expect("foreign site identity should be installed"))
                         .start() as usize,

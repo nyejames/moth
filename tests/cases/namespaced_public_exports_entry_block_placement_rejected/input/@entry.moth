@@ -1,0 +1,9 @@
+-- An entry root owns no export surface, including inside a nested block.
+value = 1
+
+if value is 1:
+    $export @missing symbol
+    value = 2
+;
+
+[:entry]

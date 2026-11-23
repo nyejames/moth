@@ -42,6 +42,15 @@ pub(crate) struct TemplateBuildState {
     /// WHY: the durable template span starts at the opener, while the diagnostics that reject a
     ///      body-only directive outside a template body report at the directive token.
     pub(crate) body_only_directive_span: Option<SourceSpan>,
+    /// Authored `$in` token span when the head declares a slot insert helper.
+    ///
+    /// WHAT: transient parser-local copy of the helper directive location; the TIR side table
+    ///       keeps it durable.
+    /// WHY: finalization rejects an escaped helper at the authored `$in`, not at the template
+    ///      opener, so a multiline helper reports its placement line. The head parser runs before
+    ///      `TemplateConstructionContext::finish` allocates the TIR root, so the span has no store
+    ///      id yet and waits here.
+    pub(crate) slot_insert_directive_span: Option<SourceSpan>,
 }
 
 impl TemplateBuildState {
@@ -54,6 +63,7 @@ impl TemplateBuildState {
             child_wrapper_after: None,
             child_wrappers: vec![],
             body_only_directive_span: None,
+            slot_insert_directive_span: None,
         }
     }
 

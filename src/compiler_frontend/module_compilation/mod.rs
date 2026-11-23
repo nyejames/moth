@@ -43,9 +43,9 @@ pub(crate) use artefact::{CompiledModuleArtifact, ModuleExternalImport, ModuleRo
 pub(crate) use artefact::{Module, ResolvedConstFragment};
 pub(crate) use context::ModuleCompilationContext;
 pub(crate) use generated::{
-    CompletedGeneratedFunction, GeneratedFunctionDelta, GeneratedFunctionId,
-    GeneratedFunctionSidecar, KnownGeneratedFunctions, ProviderMaterialisationRegistry,
-    validate_completed_generated_record,
+    CompletedGeneratedFunction, CompletedMaterialisationIndex, GeneratedFunctionDelta,
+    GeneratedFunctionId, GeneratedFunctionSidecar, KnownGeneratedFunctions,
+    ProviderMaterialisationRegistry, validate_completed_generated_record,
 };
 #[cfg(test)]
 pub(crate) use options::AST_RECOVERY_WORK_TOKENS;

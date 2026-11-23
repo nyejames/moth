@@ -10,8 +10,8 @@
 use super::{
     AliasTarget, ConstFunctionExecutable, ConstValueId, ProjectedConstant,
     budget::{
-        ExecutionBudget, MAX_EXPRESSION_DEPTH, MAX_HANDLER_DEPTH, MAX_LOOP_ITERATIONS,
-        charge_new_value_text,
+        CallDepthRefusal, ExecutionBudget, MAX_CALL_DEPTH, MAX_EXPRESSION_DEPTH, MAX_HANDLER_DEPTH,
+        MAX_LOOP_ITERATIONS, charge_new_value_text,
     },
     instructions::{ConstInstruction, ConstInstructionKind},
     labels,
@@ -27,7 +27,8 @@ use super::{
 };
 use crate::compiler_frontend::ast::ast_nodes::{LoopBindings, RangeLoopSpec};
 use crate::compiler_frontend::ast::const_eval::{
-    ConstBudgetCategory, ConstBudgetUnit, ConstantFoldError,
+    ConstBudgetCategory, ConstBudgetExhaustion, ConstBudgetUnit, ConstantFoldError,
+    OwnedConstCallSite,
 };
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringValue, ConstValuePayload, ConstValueStore,
@@ -56,7 +57,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -101,14 +102,29 @@ enum FrameMode {
 
 impl ConstInterpreter<'_> {
     /// Run one prepared function body with freshly bound parameters.
+    ///
+    /// `body` is the executable's identity in the executables table. Call sites inside it resolve
+    /// their authored owner through that identity; `None` covers direct executor entry that has no
+    /// table row.
     pub(super) fn execute_body(
         &mut self,
+        body: Option<PathId>,
         executable: &ConstFunctionExecutable,
         mut parameter_values: FrameBindings,
     ) -> Result<Vec<ConstValueId>, ConstantFoldError> {
         let saved_aliases = std::mem::take(&mut self.state.aliases);
         let saved_handler_bodies = self.state.handler_bodies.take();
         let saved_rewritten_handlers = std::mem::take(&mut self.state.rewritten_handlers);
+        let saved_body = std::mem::replace(&mut self.state.current_body, body);
+        // The budget span names the source that spends the allowance. A callee leaves its last
+        // instruction there, and its first frame charges before reading its own instruction span,
+        // so enter the callee's source now and restore the caller's span on unwind. Otherwise a
+        // refusal on entry or after return pairs one body's span with the other body's donor.
+        let saved_span = self.budget.span;
+        self.budget.span = executable
+            .instructions
+            .first()
+            .and_then(|instruction| instruction.span);
         self.state.handler_bodies = Some(Rc::clone(&executable.handler_bodies));
         let result = self.execute_frames(
             &executable.instructions,
@@ -118,7 +134,10 @@ impl ConstInterpreter<'_> {
         self.state.aliases = saved_aliases;
         self.state.handler_bodies = saved_handler_bodies;
         self.state.rewritten_handlers = saved_rewritten_handlers;
-        let result = result?;
+        self.state.current_body = saved_body;
+        self.budget.span = saved_span;
+        let result = result
+            .map_err(|error| attach_donor_identity(error, executable.donor_identity.as_ref()))?;
         Ok(self.state.pending_handler_return.take().unwrap_or(result))
     }
 
@@ -834,6 +853,67 @@ impl ConstInterpreter<'_> {
         super::places::fallible_handler_instructions(self.builder, self.state, expression)
     }
 
+    /// Enter one interpreted call, converting a depth refusal into its budget diagnostic.
+    ///
+    /// WHY: the budget owns the frame stack and its hard bound, while this interpreter owns the
+    ///      executables table that resolves each call site's declaring-domain owner.
+    pub(super) fn enter_call(&mut self, span: Option<SourceSpan>) -> Result<(), ConstantFoldError> {
+        self.budget
+            .enter_call(span, self.state.current_body)
+            .map_err(|refusal| ConstantFoldError::Budget(self.call_depth_exhaustion(refusal)))
+    }
+
+    /// Resolve one body identity's declaring-domain owner.
+    ///
+    /// Donor handles stay in the executables table; a diagnostic clones one only when it must own
+    /// it. An identity without a table row cannot name a donor boundary.
+    pub(super) fn body_donor_identity(&self, body: Option<PathId>) -> Option<FrozenIdentityHandle> {
+        self.executables
+            .get(&body?)
+            .and_then(|executable| executable.donor_identity.clone())
+    }
+
+    /// Build the owned chain for the active calls, outermost first.
+    ///
+    /// Only a diagnostic construction path calls this, so a successful call never clones a donor
+    /// handle.
+    fn active_call_chain(&self) -> Vec<OwnedConstCallSite> {
+        let mut chain = Vec::with_capacity(self.budget.call_stack.len());
+        for frame in &self.budget.call_stack {
+            if let Some(span) = frame.span {
+                chain.push(OwnedConstCallSite {
+                    span,
+                    owner: self.body_donor_identity(frame.owner_body),
+                });
+            }
+        }
+        chain
+    }
+
+    /// Convert a call-depth refusal into the budget diagnostic the refused call owns.
+    fn call_depth_exhaustion(&self, refusal: CallDepthRefusal) -> ConstBudgetExhaustion {
+        let owner = self.body_donor_identity(refusal.owner_body);
+        let mut call_chain = self.active_call_chain();
+        if let Some(span) = refusal.span {
+            call_chain.push(OwnedConstCallSite {
+                span,
+                owner: owner.clone(),
+            });
+        }
+        ConstBudgetExhaustion {
+            category: ConstBudgetCategory::Work,
+            unit: ConstBudgetUnit::CallFrames,
+            limit: MAX_CALL_DEPTH as u64,
+            setting: None,
+            aggregate: false,
+            span: refusal.span,
+            span_owner: owner.clone(),
+            call_span: refusal.span,
+            call_span_owner: owner,
+            call_chain,
+        }
+    }
+
     /// Attach the active call chain to the first escaping diagnostic of this attempt.
     ///
     /// WHY: call labels belong to the diagnostic, while the chain describes budgeted call nesting.
@@ -843,20 +923,15 @@ impl ConstInterpreter<'_> {
         if self.state.call_chain_attached {
             return error;
         }
-        let chain: Vec<SourceSpan> = self
-            .budget
-            .call_stack
-            .iter()
-            .filter_map(|(_, span)| *span)
-            .collect();
+        let chain = self.active_call_chain();
         match error {
             ConstantFoldError::Diagnostic(diagnostic) => {
                 self.state.call_chain_attached = true;
-                ConstantFoldError::Diagnostic(attach_call_site_labels(diagnostic, &chain))
+                ConstantFoldError::Diagnostic(attach_call_site_labels(diagnostic, chain))
             }
             ConstantFoldError::NumericFailure(diagnostic) => {
                 self.state.call_chain_attached = true;
-                ConstantFoldError::NumericFailure(attach_call_site_labels(diagnostic, &chain))
+                ConstantFoldError::NumericFailure(attach_call_site_labels(diagnostic, chain))
             }
             ConstantFoldError::Budget(mut exhaustion) => {
                 if exhaustion.call_chain.is_empty() {
@@ -1071,13 +1146,60 @@ fn nearest_loop(frames: &[ExecFrame]) -> Option<usize> {
     })
 }
 
+/// Resolve a foreign body's diagnostic spans against its declaring source domain.
+fn attach_donor_identity(
+    error: ConstantFoldError,
+    donor_identity: Option<&FrozenIdentityHandle>,
+) -> ConstantFoldError {
+    let Some(donor_identity) = donor_identity else {
+        return error;
+    };
+    match error {
+        ConstantFoldError::Diagnostic(diagnostic) => {
+            ConstantFoldError::Diagnostic(attach_donor_to_diagnostic(diagnostic, donor_identity))
+        }
+        ConstantFoldError::NumericFailure(diagnostic) => ConstantFoldError::NumericFailure(
+            attach_donor_to_diagnostic(diagnostic, donor_identity),
+        ),
+        ConstantFoldError::Budget(mut exhaustion) => {
+            if exhaustion.span_owner.is_none() {
+                exhaustion.span_owner = Some(donor_identity.clone());
+            }
+            if exhaustion.call_span_owner.is_none() {
+                exhaustion.call_span_owner = Some(donor_identity.clone());
+            }
+            ConstantFoldError::Budget(exhaustion)
+        }
+        other => other,
+    }
+}
+
+/// Attach a provider body's declaring domain to the diagnostic that escaped it.
+///
+/// The innermost provider body owns its diagnostic before any caller adds call-site labels. Once a
+/// primary owner exists, a later provider unwind must leave every label alone: consumer-local call
+/// sites deliberately carry no owner and must stay local.
+fn attach_donor_to_diagnostic(
+    mut diagnostic: DiagnosticDraft,
+    donor_identity: &FrozenIdentityHandle,
+) -> DiagnosticDraft {
+    if diagnostic.primary_frozen_identity_handle().is_none() {
+        diagnostic.attach_frozen_identity_handle_if_missing(donor_identity.clone());
+    }
+    diagnostic
+}
+
 /// Label one escaping diagnostic with every active const call site.
 fn attach_call_site_labels(
     mut diagnostic: DiagnosticDraft,
-    chain: &[SourceSpan],
+    chain: Vec<OwnedConstCallSite>,
 ) -> DiagnosticDraft {
-    for span in chain.iter().rev() {
-        diagnostic = diagnostic.with_label(Some(*span), Some(LabelDraftMessage::ConstCallSite));
+    for site in chain.into_iter().rev() {
+        let index = diagnostic.label_count();
+        diagnostic = diagnostic.with_label(Some(site.span), Some(LabelDraftMessage::ConstCallSite));
+        if let Some(owner) = site.owner {
+            diagnostic = diagnostic.with_label_frozen_identity_handle(index, owner);
+        }
     }
     diagnostic
 }

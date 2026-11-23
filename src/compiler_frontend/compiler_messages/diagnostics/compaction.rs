@@ -12,7 +12,7 @@ use super::extras::{
     DiagnosticExtraDraft, DiagnosticExtraId, DiagnosticExtraRecord, DiagnosticListRange,
     ExtraDataDraft, ExtraDataKind, ExtraDataRef,
 };
-use super::foreign::{ForeignSiteDraft, ForeignSiteRecord, ForeignSlot};
+use super::foreign::{ForeignSiteDraft, ForeignSiteRecord, ForeignSlot, HOST_PATH_DISPLAY_FLAG};
 use super::labels::{
     DraftType, GenericSubstitutionRecord, LabelMessageCode, LabelWord, SecondaryDiagnosticLabel,
 };
@@ -20,7 +20,9 @@ use super::reasons::{CapacityResource, DiagnosticCapacityResource};
 use super::record::DiagnosticRecord;
 use super::store::{DiagnosticId, DiagnosticStore, PRIMARY_SELECTOR};
 use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::source::{FrozenIdentityContext, FrozenIdentityHandle};
+use crate::compiler_frontend::source::{
+    FrozenIdentityContext, FrozenIdentityHandle, FrozenSitePathDisplay,
+};
 use std::sync::Arc;
 
 /// The outcome of compacting one draft.
@@ -354,12 +356,17 @@ impl DiagnosticStore {
         let site_start = self.foreign_sites.len();
         let site_count = foreign_sites.len();
         for site in foreign_sites {
-            let selector = match site.slot {
+            let selector_slot = match site.slot {
                 ForeignSlot::Primary => PRIMARY_SELECTOR,
                 ForeignSlot::Label(index) => {
                     u32::try_from(index + 1).expect("a label index fits in u32")
                 }
             };
+            let path_display_flag = match site.context.path_display() {
+                FrozenSitePathDisplay::Logical => 0,
+                FrozenSitePathDisplay::CanonicalHost => HOST_PATH_DISPLAY_FLAG,
+            };
+            let selector = selector_slot | path_display_flag;
             let context = Self::identity_index(&site.context, contexts);
             self.foreign_sites
                 .push(ForeignSiteRecord { selector, context });

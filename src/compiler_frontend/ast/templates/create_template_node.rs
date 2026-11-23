@@ -671,6 +671,9 @@ impl Template {
         let template_id = tir_reference.root;
         let mut template_ir_store = context.template_ir_store.borrow_mut();
         template_ir_store.set_template_kind(template_id, build_state.kind.to_owned())?;
+        if let Some(directive_span) = build_state.slot_insert_directive_span {
+            template_ir_store.set_slot_insert_directive_span(template_id, directive_span)?;
+        }
         drop(template_ir_store);
 
         let template = Template {

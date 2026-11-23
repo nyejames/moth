@@ -43,6 +43,7 @@ unit_code! {
         EscapesProjectRoot = 9,
         HiddenPath = 10,
         ReservedConfigFile = 11,
+        ProviderOwnedContentTarget = 12,
     }
 }
 
@@ -61,6 +62,9 @@ impl InvalidCompileTimePathCode {
             InvalidCompileTimePathReason::EscapesProjectRoot => Self::EscapesProjectRoot,
             InvalidCompileTimePathReason::HiddenPath => Self::HiddenPath,
             InvalidCompileTimePathReason::ReservedConfigFile => Self::ReservedConfigFile,
+            InvalidCompileTimePathReason::ProviderOwnedContentTarget => {
+                Self::ProviderOwnedContentTarget
+            }
         }
     }
 
@@ -97,6 +101,9 @@ impl InvalidCompileTimePathCode {
             Self::EscapesProjectRoot => InvalidCompileTimePathReason::EscapesProjectRoot,
             Self::HiddenPath => InvalidCompileTimePathReason::HiddenPath,
             Self::ReservedConfigFile => InvalidCompileTimePathReason::ReservedConfigFile,
+            Self::ProviderOwnedContentTarget => {
+                InvalidCompileTimePathReason::ProviderOwnedContentTarget
+            }
         })
     }
 }
@@ -453,6 +460,7 @@ unit_code! {
         ModuleRootFileNotRegularFile = 92,
         ConfigFileSelectedAsEntry = 93,
         ReservedPackageNamespaceRootClaim = 94,
+        ProjectPackagePrefixCollision = 95,
     }
 }
 
@@ -517,6 +525,9 @@ impl InvalidConfigCode {
             }
             InvalidConfigReason::EntryRootPackagePrefixCollision { .. } => {
                 Self::EntryRootPackagePrefixCollision
+            }
+            InvalidConfigReason::ProjectPackagePrefixCollision { .. } => {
+                Self::ProjectPackagePrefixCollision
             }
             InvalidConfigReason::ReservedPackageNamespaceRootClaim { .. } => {
                 Self::ReservedPackageNamespaceRootClaim
@@ -943,6 +954,11 @@ fn invalid_config_string_ids(
             prefix,
             entry_folder,
         } => strings.extend([*prefix, *entry_folder]),
+        InvalidConfigReason::ProjectPackagePrefixCollision {
+            project_name,
+            prefix,
+            package_root,
+        } => strings.extend([*project_name, *prefix, *package_root]),
         InvalidConfigReason::ReservedPackageNamespaceRootClaim { root, source } => {
             strings.extend([*root, *source]);
         }
@@ -1230,6 +1246,13 @@ pub(crate) fn decode_invalid_config(
             InvalidConfigReason::EntryRootPackagePrefixCollision {
                 prefix: strings.take()?,
                 entry_folder: strings.take()?,
+            }
+        }
+        InvalidConfigCode::ProjectPackagePrefixCollision => {
+            InvalidConfigReason::ProjectPackagePrefixCollision {
+                project_name: strings.take()?,
+                prefix: strings.take()?,
+                package_root: strings.take()?,
             }
         }
         InvalidConfigCode::ReservedPackageNamespaceRootClaim => {

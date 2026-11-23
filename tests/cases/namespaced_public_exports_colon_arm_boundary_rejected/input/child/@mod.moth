@@ -1,0 +1,8 @@
+-- A colon-spelled arm header is a statement boundary, not a target.
+classify |value I32| -> I32:
+    if value is:
+        1 => return 1
+        $export @missing symbol
+        next:
+    ;
+;

@@ -1,0 +1,6 @@
+-- An export in expression position is not a statement-position directive run.
+helper #= 1
+
+render || -> String:
+    return $export @helper value
+;

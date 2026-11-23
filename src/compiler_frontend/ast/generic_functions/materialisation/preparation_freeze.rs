@@ -21,7 +21,9 @@ use super::visibility::{
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::AstImportedFunctionContract;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstExecutionMeter, ConstValueId, ConstValueStore,
+};
 use crate::compiler_frontend::ast::module_ast::environment::{
     AstModuleLookups, ResolvedPublicTraitRoot,
 };
@@ -77,7 +79,7 @@ use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::TraitId;
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 /// Construction-only snapshot used to project stable generic inputs before executable lowering.
@@ -152,6 +154,11 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) style_directives: StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
+    /// Requester module's aggregate const-work meter.
+    ///
+    /// Generated sidecars and their nested requests share this handle, while every attempt keeps
+    /// its own step counter and every sidecar keeps its own folded-value store.
+    pub(crate) const_execution_meter: Rc<RefCell<ConstExecutionMeter>>,
     pub(super) nominal_blueprints:
         FxHashMap<CanonicalTypeIdentity, NominalMaterialisationBlueprint>,
 }
@@ -732,6 +739,7 @@ impl ModuleMaterialisationCapture {
                 style_directives: self.style_directives,
                 build_profile: self.build_profile,
                 template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
+                const_execution_meter: const_values.execution_meter(),
                 nominal_blueprints: self.nominal_blueprints,
             },
         })

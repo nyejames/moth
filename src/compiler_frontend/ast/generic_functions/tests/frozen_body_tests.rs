@@ -59,6 +59,7 @@ use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::hir_builder::lower_module;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::module_compilation::ProviderMaterialisationRegistry;
 use crate::compiler_frontend::module_compilation::generated::install_generated_request_contracts;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::file_references::{
@@ -1789,6 +1790,7 @@ fn detachment_releases_recursive_lookup_owners_before_ast_lowering() {
     ] {
         let mut sibling_strings = strings.clone_preserving_inherited_prefix();
         let mut sibling_paths = paths.fork_source().fork_for_module();
+        let provider_materialisations = empty_provider_materialisations();
         let materialised = if use_frozen_provider {
             frozen
                 .materialise_ast_at(
@@ -1797,6 +1799,7 @@ fn detachment_releases_recursive_lookup_owners_before_ast_lowering() {
                         identity,
                         requester_context: &requester,
                         requester_call_span: None,
+                        provider_materialisations: &provider_materialisations,
                         external_package_registry: &requester.external_package_registry,
                         string_table: &mut sibling_strings,
                         path_fork: &mut sibling_paths,
@@ -1804,7 +1807,6 @@ fn detachment_releases_recursive_lookup_owners_before_ast_lowering() {
                         build_profile: requester.build_profile,
                         template_const_loop_iteration_limit: requester
                             .template_const_loop_iteration_limit,
-                        const_execution_limits: Default::default(),
                         #[cfg(feature = "timers")]
                         timing_context: None,
                     },
@@ -1899,6 +1901,7 @@ fn published_siblings_materialise_independently_and_leave_the_retained_context_f
             .string_table
             .clone_preserving_inherited_prefix();
         let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
+        let provider_materialisations = empty_provider_materialisations();
         fixture
             .context
             .materialise_ast_at(
@@ -1907,6 +1910,7 @@ fn published_siblings_materialise_independently_and_leave_the_retained_context_f
                     identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,
+                    provider_materialisations: &provider_materialisations,
                     external_package_registry: &fixture.preparation.external_package_registry,
                     string_table: &mut live_strings,
                     path_fork: &mut path_fork,
@@ -1915,7 +1919,6 @@ fn published_siblings_materialise_independently_and_leave_the_retained_context_f
                     template_const_loop_iteration_limit: fixture
                         .preparation
                         .template_const_loop_iteration_limit,
-                    const_execution_limits: Default::default(),
                     #[cfg(feature = "timers")]
                     timing_context: None,
                 },
@@ -2476,6 +2479,7 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
         .preparation
         .string_table
         .clone_preserving_inherited_prefix();
+    let provider_materialisations = empty_provider_materialisations();
     let materialised = fixture
         .context
         .materialise_ast_at(
@@ -2484,6 +2488,7 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
                 identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
+                provider_materialisations: &provider_materialisations,
                 external_package_registry: &fixture.preparation.external_package_registry,
                 string_table: &mut live_strings,
                 path_fork: &mut path_fork,
@@ -2492,7 +2497,6 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
                 template_const_loop_iteration_limit: fixture
                     .preparation
                     .template_const_loop_iteration_limit,
-                const_execution_limits: Default::default(),
                 #[cfg(feature = "timers")]
                 timing_context: None,
             },
@@ -2612,6 +2616,7 @@ fn const_template_parameter_default_survives_detach_freeze_and_sidecar_local_reb
     drop(donor_paths);
     drop(declaring_resources);
 
+    let provider_materialisations = empty_provider_materialisations();
     let materialised = context
         .materialise_ast_at(
             0,
@@ -2619,13 +2624,13 @@ fn const_template_parameter_default_survives_detach_freeze_and_sidecar_local_reb
                 identity: &identity,
                 requester_context: &requester,
                 requester_call_span: None,
+                provider_materialisations: &provider_materialisations,
                 external_package_registry: &requester.external_package_registry,
                 string_table: &mut strings,
                 path_fork: &mut paths,
                 style_directives: &requester.style_directives,
                 build_profile: requester.build_profile,
                 template_const_loop_iteration_limit: requester.template_const_loop_iteration_limit,
-                const_execution_limits: Default::default(),
                 #[cfg(feature = "timers")]
                 timing_context: None,
             },
@@ -2835,6 +2840,7 @@ fn frozen_resource_body_materialises_into_a_sidecar_local_table() {
         .preparation
         .string_table
         .clone_preserving_inherited_prefix();
+    let provider_materialisations = empty_provider_materialisations();
     let materialised = fixture
         .context
         .materialise_ast_at(
@@ -2843,6 +2849,7 @@ fn frozen_resource_body_materialises_into_a_sidecar_local_table() {
                 identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
+                provider_materialisations: &provider_materialisations,
                 external_package_registry: &fixture.preparation.external_package_registry,
                 string_table: &mut live_strings,
                 path_fork: &mut path_fork,
@@ -2851,7 +2858,6 @@ fn frozen_resource_body_materialises_into_a_sidecar_local_table() {
                 template_const_loop_iteration_limit: fixture
                     .preparation
                     .template_const_loop_iteration_limit,
-                const_execution_limits: Default::default(),
                 #[cfg(feature = "timers")]
                 timing_context: None,
             },
@@ -2927,6 +2933,7 @@ fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
             .preparation
             .string_table
             .clone_preserving_inherited_prefix();
+        let provider_materialisations = empty_provider_materialisations();
         fixture
             .context
             .materialise_ast_at(
@@ -2935,6 +2942,7 @@ fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
                     identity: &fixture.identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,
+                    provider_materialisations: &provider_materialisations,
                     external_package_registry: &fixture.preparation.external_package_registry,
                     string_table: &mut live_strings,
                     path_fork: &mut path_fork,
@@ -2943,7 +2951,6 @@ fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
                     template_const_loop_iteration_limit: fixture
                         .preparation
                         .template_const_loop_iteration_limit,
-                    const_execution_limits: Default::default(),
                     #[cfg(feature = "timers")]
                     timing_context: None,
                 },
@@ -3098,6 +3105,7 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
             .preparation
             .string_table
             .clone_preserving_inherited_prefix();
+        let provider_materialisations = empty_provider_materialisations();
         fixture
             .context
             .materialise_ast_at(
@@ -3106,6 +3114,7 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
                     identity: &fixture.identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,
+                    provider_materialisations: &provider_materialisations,
                     external_package_registry: &fixture.preparation.external_package_registry,
                     string_table: &mut live_strings,
                     path_fork: &mut path_fork,
@@ -3114,7 +3123,6 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
                     template_const_loop_iteration_limit: fixture
                         .preparation
                         .template_const_loop_iteration_limit,
-                    const_execution_limits: Default::default(),
                     #[cfg(feature = "timers")]
                     timing_context: None,
                 },
@@ -3474,6 +3482,59 @@ fn provider_context_rebases_same_index_foreign_paths_by_spelling_for_the_request
     );
 }
 
+#[cfg(feature = "data_layout_memory_probe")]
+#[test]
+fn const_closure_rebase_records_requester_remap_ledger_totals() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    crate::compiler_frontend::instrumentation::prepare_memory_ledger();
+    crate::compiler_frontend::instrumentation::reset_memory_ledger();
+
+    let mut provider_strings = StringTable::new();
+    let mut provider_builder = PathInternerBuilder::new();
+    let provider_function_path = provider_builder
+        .try_intern_portable_path("provider/@package.moth/decorate", &mut provider_strings)
+        .expect("provider const path should fit");
+    let provider_path_table = Arc::new(provider_builder.freeze());
+    let provider_source_strings = Arc::new(provider_strings.freeze());
+    let origin = OriginFunctionId::new_free(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("test"),
+            "main".to_owned(),
+            ModuleRootRole::Normal,
+        ),
+        "decorate".to_owned(),
+    );
+    let mut context = ModuleMaterialisationContext::from_const_origins_with_identity_for_test(
+        vec![Some(origin)],
+        provider_path_table,
+        provider_source_strings,
+    );
+    context.const_functions[0].function_path = provider_function_path;
+
+    let mut requester_fork = PathInternerFork::empty();
+    let mut requester_strings = StringTable::new();
+    let rows = context
+        .rebased_const_closure_for_requester(&[0], &mut requester_fork, &mut requester_strings)
+        .expect("the const closure should rebase")
+        .expect("the context retains its const identity pair");
+    assert_eq!(rows.len(), 1, "the selected const row should rebase once");
+
+    let snapshot = crate::compiler_frontend::instrumentation::snapshot_memory_ledger();
+    crate::compiler_frontend::instrumentation::reset_memory_ledger();
+    assert_eq!(
+        snapshot.requester_remap_count, 1,
+        "one const closure rebase must record one requester remap"
+    );
+    assert!(
+        snapshot.requester_remap_used_bytes > 0,
+        "the const closure mapping must contribute used bytes"
+    );
+    assert!(
+        snapshot.requester_remap_capacity_bytes >= snapshot.requester_remap_used_bytes,
+        "the recorded capacity must cover the mapped rows"
+    );
+}
+
 #[test]
 fn incomplete_or_missing_retained_identity_pair_rejects_rebase() {
     let mut incomplete = ModuleMaterialisationContext::from_identities_for_test(vec![
@@ -3642,6 +3703,10 @@ pub(super) fn closure_request(
     )
 }
 
+fn empty_provider_materialisations() -> ProviderMaterialisationRegistry {
+    ProviderMaterialisationRegistry::default()
+}
+
 pub(super) fn materialise_closure_request(
     declaring: &ModuleMaterialisationPreparation,
     requester: &ModuleMaterialisationPreparation,
@@ -3649,6 +3714,7 @@ pub(super) fn materialise_closure_request(
     strings: &mut StringTable,
     paths: &mut PathInternerFork,
 ) -> super::MaterialisedGenericAst {
+    let provider_materialisations = empty_provider_materialisations();
     declaring
         .materialise_ast(
             identity,
@@ -3656,7 +3722,7 @@ pub(super) fn materialise_closure_request(
             None,
             strings,
             paths,
-            Default::default(),
+            &provider_materialisations,
             #[cfg(feature = "timers")]
             None,
         )
@@ -4448,6 +4514,7 @@ fn repeated_bounded_forwarding_preserves_bodyless_receiver_parameter_owner() {
         .clone()
         .expect("the fixture must exercise a public nominal parameter identity");
     let mut paths = path_fork.fork_source().fork_for_module();
+    let provider_materialisations = empty_provider_materialisations();
     for name in ["outer", "middle", "inner"] {
         assert_eq!(
             identity.declaration().defining_name(),
@@ -4461,7 +4528,7 @@ fn repeated_bounded_forwarding_preserves_bodyless_receiver_parameter_owner() {
                 None,
                 &mut strings,
                 &mut paths,
-                Default::default(),
+                &provider_materialisations,
                 #[cfg(feature = "timers")]
                 None,
             )

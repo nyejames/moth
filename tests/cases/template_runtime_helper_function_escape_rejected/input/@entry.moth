@@ -1,0 +1,5 @@
+render |x String| -> String:
+    return [$in style: [x]]
+;
+
+~[:static body]

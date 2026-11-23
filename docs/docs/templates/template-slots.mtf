@@ -180,7 +180,9 @@ through an immediate parent:
 ]
 
 The stored helper is flattened into the immediate parent's slot-routing
-stream. An insert with no matching immediate parent remains invalid.
+stream. It is legal only while it remains a constant that compilation can
+resolve into that routing. An insert with no matching immediate parent remains
+invalid.
 
 Imported wrappers, re-exports and constant-record projections preserve their
 slot defaults and routing.
@@ -196,6 +198,34 @@ Runtime lowering appends the routed contributions through normal string
 accumulators. Presence comes from routing, not from whether rendered content is
 nonempty.
 
-Unresolved slot or insert artefacts after routing are invalid template
-structure.
+### Structural helpers in runtime values @#structural-helpers-in-runtime-values
+
+`$in`, `$slot` and `$supplied` are structural directives. They resolve during
+compilation, even when their content executes at runtime. A standalone `$in`
+must not escape into a runtime value, including from a function that is never
+called. A `String` return annotation does not make it legal, and a nonconstant
+binding cannot hold one:
+
+[codeblock, $code "moth":
+    -- Error: the insert escapes as a function value
+    style_for |colour String| -> String:
+        return [$in style: [colour]]
+    ;
+]
+
+In this example the diagnostic points at the authored `$in` token.
+
+Return ordinary content instead and place the insert in the receiving
+application. Here a runtime function produces CSS text that a direct `$in style`
+routes into the slot:
+
+[codeblock, $code "moth":
+    style_for |colour String| -> String:
+        return [:color: [colour];]
+    ;
+
+    card #= [:<article style="[$slot style]">[$slot]</article>]
+
+    ~[card: [$in style: [style_for("red")]] body]
+]
 

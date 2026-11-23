@@ -4,8 +4,8 @@
 //!       targets for release preparation, and rewrites release-eligible calls in executable
 //!       bodies while preserving synthetic-interface provenance.
 //! WHY: folding runs before expression freezing and HIR lowering, so the final AST must already
-//!      contain the replacement. A release attempt that cannot prove a fold leaves the exact
-//!      runtime call and its folded children in place.
+//!      contain the replacement. A release attempt that cannot prove a fold restores the exact
+//!      authored runtime call and its children.
 //! MUST NOT: own executable preparation, the executed-frame machine or eligibility policy. It
 //!           invokes those owners and keeps only the AST rewrite transaction.
 
@@ -61,8 +61,6 @@ struct ConstCallSite {
     span: Option<SourceSpan>,
     value_mode: ValueMode,
     result_type: TypeId,
-    /// Whether an enclosing catch owns this call's recoverable failure.
-    failure_caught: bool,
 }
 
 /// A prepared catch body selected for one catch expression.
@@ -158,11 +156,11 @@ pub(crate) fn rewrite_release_calls(
         return Ok((Vec::new(), Vec::new()));
     }
 
-    // Authored-dead statements and statically pruned catch handlers keep their runtime
-    // expressions. HIR lowering omits exactly that source and records its selected evidence, so a
-    // debug build never executes it either. A per-statement decision also keeps a const
-    // template's shared definition spans from hiding a live call: the same authored call can be
-    // dead in one use and live in another.
+    // Authored-dead statements keep their runtime expressions. HIR lowering omits exactly that
+    // source and records its selected evidence, so a debug build never executes it either. A
+    // per-statement decision also keeps a const template's shared definition spans from hiding a
+    // live call: the same authored call can be dead in one use and live in another. Catch handler
+    // bodies need no entries because release speculation never enters them.
     let mut unexecuted_expression_roots = FxHashSet::default();
     collect_unexecuted_expression_roots(
         ast,
@@ -233,14 +231,23 @@ pub(crate) fn rewrite_release_calls(
                             .map(|setting| services.string_table.intern(setting));
                         // Every producer charges its allowance as a `usize`, so the recorded
                         // `u64` limit always fits back into one.
-                        notes.push(choices_control_flow::release_folding_budget_stopped(
+                        let mut note = choices_control_flow::release_folding_budget_stopped(
                             exhaustion.unit,
                             usize::try_from(exhaustion.limit)
                                 .expect("const execution limits are charged as `usize`"),
                             setting,
                             scope,
                             span,
-                        ));
+                        );
+                        let owner = if exhaustion.call_span.is_some() {
+                            exhaustion.call_span_owner
+                        } else {
+                            exhaustion.span_owner
+                        };
+                        if let Some(owner) = owner {
+                            note = note.with_primary_frozen_identity_handle(owner);
+                        }
+                        notes.push(note);
                     }
                     false
                 }
@@ -253,11 +260,10 @@ pub(crate) fn rewrite_release_calls(
                 // the node's callable. Nested candidate execution uses `InterpretedBody` walks,
                 // which record nothing.
                 erased_call_sites.extend(state.release_erased_calls.drain(..).map(
-                    |(target, span, failure_caught)| AstReleaseErasedCallSite {
+                    |(target, span)| AstReleaseErasedCallSite {
                         function: owner,
                         target,
                         span,
-                        failure_caught,
                     },
                 ));
             }
@@ -296,7 +302,12 @@ fn release_call_targets(
         {
             targets.push(path);
         }
-        view.visit_children(|child| roots.push(child.id()));
+        match view.operation() {
+            // Release speculation never folds a catch handler body or a handled subject, so no
+            // call under a catch needs a prepared candidate.
+            ExpressionOperationView::ValueBlock(ValueBlock::Catch(_)) => {}
+            _ => view.visit_children(|child| roots.push(child.id())),
+        }
     }
     Ok(targets)
 }
@@ -361,6 +372,8 @@ enum RewriteStep {
         expression: ExprId,
         base: usize,
         call: ConstCallSite,
+        /// Erased-call rows present before this call's arguments were rewritten.
+        erased_calls_base: usize,
     },
     CompleteLogical {
         expression: ExprId,
@@ -488,7 +501,8 @@ impl RewriteWalk<'_, '_> {
                     expression,
                     base,
                     call,
-                } => self.complete_call(expression, base, &call)?,
+                    erased_calls_base,
+                } => self.complete_call(expression, base, &call, erased_calls_base)?,
                 RewriteStep::CompleteLogical {
                     expression,
                     base,
@@ -624,16 +638,22 @@ impl RewriteWalk<'_, '_> {
         if self.mode.is_release() && span.is_none() {
             return Ok(None);
         }
-        // A direct catch subject owns the recovery facts its enclosing catch validates. Replacing
-        // it with a constant would erase that recovery channel and leave an invalid catch block, so
-        // release speculation leaves the call at runtime. Calls merely nested inside a handled
-        // subject still fold and carry their containment into the erased-call ledger.
-        if self.mode.is_release()
-            && view.failure_facts().is_some_and(|facts| {
+        if self.mode.is_release() {
+            // A direct catch subject owns the recovery facts its enclosing catch validates.
+            // Replacing it with a constant would erase that recovery channel and leave an invalid
+            // catch block, so release speculation leaves the call at runtime.
+            if view.failure_facts().is_some_and(|facts| {
                 matches!(facts.disposition, FailureDisposition::HandledByCatch { .. })
-            })
-        {
-            return Ok(None);
+            }) {
+                return Ok(None);
+            }
+            // A nested call inside a handled subject keeps its runtime expression too. Folding it
+            // can prove the enclosing checked operation total, which would erase the failure edge
+            // that selected the catch handler before debug HIR ever sees it. The contract requires
+            // semantic reachability to be checked before optimisation erases evidence.
+            if failure_caught {
+                return Ok(None);
+            }
         }
         let is_const_target = call.metadata().evaluation == CallableEvaluation::Const
             || matches!(
@@ -663,7 +683,6 @@ impl RewriteWalk<'_, '_> {
             span,
             value_mode: view.value_mode(),
             result_type,
-            failure_caught,
         }))
     }
 
@@ -688,10 +707,11 @@ impl RewriteWalk<'_, '_> {
         fold_auxiliary: bool,
         failure_caught: bool,
     ) -> Result<(), ConstantFoldError> {
-        // Authored-dead statements and statically pruned catch handlers keep their runtime
-        // expressions byte-for-byte. HIR lowering omits exactly that source and preserves its
-        // selected evidence, so folding here would only invent a live erased call from code no
-        // profile executes.
+        // Authored-dead statements keep their runtime expressions byte-for-byte because no profile
+        // executes them. HIR lowering omits exactly that source and preserves its selected
+        // evidence, so folding here would only invent a live erased call. Handled subjects stay at
+        // runtime for the same evidence reason: a fold can prove the protected expression total
+        // and erase the failure edge that selected its handler.
         if self
             .unexecuted_expression_roots
             .is_some_and(|dead_roots| dead_roots.contains(&expression))
@@ -773,6 +793,7 @@ impl RewriteWalk<'_, '_> {
                 expression,
                 base,
                 call,
+                erased_calls_base: self.interpreter.state.release_erased_calls.len(),
             }),
             None => self.steps.push(RewriteStep::Complete {
                 expression,
@@ -790,7 +811,19 @@ impl RewriteWalk<'_, '_> {
             _ => None,
         };
         let mut children = Vec::new();
-        view.visit_children(|child| children.push(child.id()));
+        match view.operation() {
+            // Release speculation never enters a catch handler body. A handler may be statically
+            // pruned once the protected value is proved total, and release folding runs before
+            // that proof, so a folded handler call could fabricate live evidence for code HIR
+            // never routes. Keeping the handler at runtime preserves both profiles' selected
+            // evidence.
+            ExpressionOperationView::ValueBlock(ValueBlock::Catch(block))
+                if self.mode.is_release() =>
+            {
+                children.push(block.handled_value);
+            }
+            _ => view.visit_children(|child| children.push(child.id())),
+        }
         for child in children.into_iter().rev() {
             // Every failure inside a catch subject is recovered by that catch. A handler body is
             // not protected by its own catch, but inherits an enclosing subject's containment.
@@ -830,6 +863,9 @@ impl RewriteWalk<'_, '_> {
                 Err(ConstantFoldError::Budget(mut exhaustion)) => {
                     if exhaustion.call_span.is_none() {
                         exhaustion.call_span = call.span;
+                        exhaustion.call_span_owner = self
+                            .interpreter
+                            .body_donor_identity(self.interpreter.state.current_body);
                     }
                     return Err(ConstantFoldError::Budget(exhaustion));
                 }
@@ -915,6 +951,7 @@ impl RewriteWalk<'_, '_> {
         expression: ExprId,
         base: usize,
         call: &ConstCallSite,
+        erased_calls_base: usize,
     ) -> Result<(), ConstantFoldError> {
         // Move the completed argument pairs off the scratch stack: every path below either
         // replaces them with one completed call pair or leaves the runtime call's pair in their
@@ -922,35 +959,18 @@ impl RewriteWalk<'_, '_> {
         let arguments = self.results.split_off(base);
         let Some(executable) = self.interpreter.executables.get(&call.path) else {
             if self.mode.is_release() {
-                self.results.push((
-                    expression,
-                    fallback_with_rewritten_children(
-                        expression,
-                        &arguments,
-                        self.interpreter.builder,
-                    )?,
-                ));
+                self.revert_refused_call(expression, erased_calls_base);
                 return Ok(());
             }
             return Err(required_call_error(call, self.interpreter.string_table));
         };
         let Some(argument_values) = self.fold_call_arguments(call, &arguments)? else {
-            self.results.push((
-                expression,
-                fallback_with_rewritten_children(expression, &arguments, self.interpreter.builder)?,
-            ));
+            self.revert_refused_call(expression, erased_calls_base);
             return Ok(());
         };
         if argument_values.len() != executable.parameters.len() {
             if self.mode.is_release() {
-                self.results.push((
-                    expression,
-                    fallback_with_rewritten_children(
-                        expression,
-                        &arguments,
-                        self.interpreter.builder,
-                    )?,
-                ));
+                self.revert_refused_call(expression, erased_calls_base);
                 return Ok(());
             }
             return Err(required_call_error(call, self.interpreter.string_table));
@@ -961,10 +981,10 @@ impl RewriteWalk<'_, '_> {
             .map(|(path, _)| *path)
             .zip(argument_values.iter().copied())
             .collect::<FrameBindings>();
-        self.interpreter.budget.enter_call(call.path, call.span)?;
+        self.interpreter.enter_call(call.span)?;
         let returns = self
             .interpreter
-            .execute_body(executable, parameter_values)
+            .execute_body(Some(call.path), executable, parameter_values)
             .map_err(|error| self.interpreter.attach_call_chain(error));
         self.interpreter.budget.leave_call();
         let returns = match returns {
@@ -974,46 +994,28 @@ impl RewriteWalk<'_, '_> {
                 // must not replace it with a less specific call site.
                 if exhaustion.call_span.is_none() {
                     exhaustion.call_span = call.span;
+                    exhaustion.call_span_owner = self
+                        .interpreter
+                        .body_donor_identity(self.interpreter.state.current_body);
                 }
                 return Err(ConstantFoldError::Budget(exhaustion));
             }
             Err(error) if self.mode.is_release() && release_can_preserve_runtime(&error) => {
-                self.results.push((
-                    expression,
-                    fallback_with_rewritten_children(
-                        expression,
-                        &arguments,
-                        self.interpreter.builder,
-                    )?,
-                ));
+                self.revert_refused_call(expression, erased_calls_base);
                 return Ok(());
             }
             Err(error) => return Err(error),
         };
         if returns.len() != 1 || executable.return_slots.len() != 1 {
             if self.mode.is_release() {
-                self.results.push((
-                    expression,
-                    fallback_with_rewritten_children(
-                        expression,
-                        &arguments,
-                        self.interpreter.builder,
-                    )?,
-                ));
+                self.revert_refused_call(expression, erased_calls_base);
                 return Ok(());
             }
             return Err(required_call_error(call, self.interpreter.string_table));
         }
         if executable.return_slots[0] != call.result_type {
             if self.mode.is_release() {
-                self.results.push((
-                    expression,
-                    fallback_with_rewritten_children(
-                        expression,
-                        &arguments,
-                        self.interpreter.builder,
-                    )?,
-                ));
+                self.revert_refused_call(expression, erased_calls_base);
                 return Ok(());
             }
             return Err(InfrastructureFailure::internal(
@@ -1024,8 +1026,11 @@ impl RewriteWalk<'_, '_> {
         }
         // The call is about to be erased. Release rewriting must leave the selected call site in
         // the AST ledger so HIR constraint evidence still sees this callee, exactly as a debug
-        // build that keeps the runtime call does. Nested candidate execution runs interpreted
-        // walks, so a callee's internal folds are never recorded against this caller.
+        // build that keeps the runtime call does. The producer declines authored-dead statements,
+        // catch handler bodies and handled subjects, so every row belongs to lowered executable
+        // source.
+        // Nested candidate execution runs interpreted walks, so a callee's internal folds are
+        // never recorded against this caller.
         if self.mode.is_release() {
             // `const_call_site` only recognises a release call whose expression carries an
             // authored span, and the record's span is that same view span.
@@ -1035,11 +1040,10 @@ impl RewriteWalk<'_, '_> {
                     "release erased a call site without an authored span"
                 );
             };
-            self.interpreter.state.release_erased_calls.push((
-                call.path,
-                span,
-                call.failure_caught,
-            ));
+            self.interpreter
+                .state
+                .release_erased_calls
+                .push((call.path, span));
         }
         let mut inherited_provenance = self
             .interpreter
@@ -1072,6 +1076,24 @@ impl RewriteWalk<'_, '_> {
         )?;
         self.results.push((expression, replacement));
         Ok(())
+    }
+
+    /// Keep a refused release candidate's call at runtime exactly as authored.
+    ///
+    /// WHAT: completes the call as its own replacement, discarding every speculative argument
+    ///       rewrite completed for it and the erased-call rows those rewrites recorded. The
+    ///       argument pairs were already taken off the scratch stack, so dropping them is the
+    ///       whole AST restoration.
+    /// WHY: a debug build evaluates each argument as authored. Committing an auxiliary fold under
+    ///      a call that stays at runtime would expose an optimiser-created value to HIR evidence
+    ///      and the numeric proof without the runtime call debug retains, which can change
+    ///      `$infallible` verdicts in release only.
+    fn revert_refused_call(&mut self, expression: ExprId, erased_calls_base: usize) {
+        self.interpreter
+            .state
+            .release_erased_calls
+            .truncate(erased_calls_base);
+        self.results.push((expression, expression));
     }
 
     fn complete_logical(
@@ -1232,29 +1254,6 @@ impl ConstInterpreter<'_> {
         }
         Ok(rewritten)
     }
-}
-
-/// A runtime call a release candidate could not fold, with any folded children retained.
-fn fallback_with_rewritten_children(
-    expression: ExprId,
-    replacements: &[(ExprId, ExprId)],
-    builder: &mut AstExpressionBuilder,
-) -> Result<ExprId, ConstantFoldError> {
-    // The fallback only exists to install rewritten children. With no rewritten child, rebuilding
-    // the parent would allocate an equivalent expression and inherit no new provenance.
-    if replacements
-        .iter()
-        .all(|(original, replacement)| original == replacement)
-    {
-        return Ok(expression);
-    }
-    let rewritten = rewrite_expression_children(
-        builder,
-        builder.own(expression),
-        builder.own_slice(replacements),
-    )?
-    .id();
-    inherit_replaced_provenance(builder, expression, rewritten, replacements)
 }
 
 /// Keep synthetic-interface provenance when an expression replaces its children.

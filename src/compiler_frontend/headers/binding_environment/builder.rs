@@ -32,7 +32,9 @@ use crate::compiler_frontend::public_interface::{
     ProviderInterfaceId, PublicDeclarationSemantics, ResolvedDependencyClause,
     SourceProviderDependencySet,
 };
-use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginDeclarationId};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, OriginDeclarationId, PublicExportRoute,
+};
 use crate::compiler_frontend::source::{SourceDatabase, SourceKind, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
@@ -802,6 +804,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             "resolved provider clause must retain its authored shell identity"
         );
         let provider_id = resolved_clause.provider;
+        let requested_route = resolved_clause.route;
         self.register_provider_semantics_once(provider_id)?;
         let view = self
             .source_provider_dependencies
@@ -823,6 +826,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             dependency.dependency.path,
         ));
         for binding in &interface.export_bindings {
+            // A bare namespace import names exactly the requested route's direct members. A root
+            // request keeps the facade's root surface, and a nested request never exposes root,
+            // deeper or sibling route members through the same shallow record.
+            if binding.route() != requested_route {
+                continue;
+            }
             let declaration = view.declaration(binding.origin()).ok_or_else(|| {
                 super::diagnostics::missing_dependency_target(
                     &dependency.dependency.path,
@@ -905,6 +914,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         for binding in &interface.binding_exports {
+            if &binding.route != requested_route {
+                continue;
+            }
             let Some(symbol_id) = self
                 .external_package_registry
                 .resolve_canonical_symbol(&binding.target)
@@ -967,13 +979,15 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 local_path: method_path,
             };
 
+            // One declaration can be visible through several consumer-local aliases. The method
+            // origin is the shared identity; the local path names only one alias binding.
             let methods = file_visibility
                 .visible_receiver_methods
                 .entry(method_name)
                 .or_default();
             if !methods
                 .iter()
-                .any(|method| method.target.local_path() == target.local_path())
+                .any(|method| method.target.same_function_declaration(&target))
             {
                 methods.push(ReceiverMethodVisibility {
                     target: target.clone(),
@@ -1143,7 +1157,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .map_err(|_| token_lexical::logical_path_capacity())?;
 
         for binding in &interface.export_bindings {
-            let Some(origin) = view.exported_origin(binding.public_name()).cloned() else {
+            // The fixed prelude deliberately selects only root-level provider constants.
+            if !binding.route().is_root() {
+                continue;
+            }
+            let Some(origin) = view
+                .exported_origin(binding.route(), binding.public_name())
+                .cloned()
+            else {
                 continue;
             };
             let Some(declaration) = self
@@ -1196,6 +1217,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         prelude_constants: &mut Vec<TemplatePreludeConstant>,
     ) {
         for entry in entries {
+            // Nested routes are never flattened into the fixed `.mtf` constant prelude.
+            if entry.route.is_some() {
+                continue;
+            }
             let Some(path) = entry.target.source_path() else {
                 continue;
             };
@@ -1493,6 +1518,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 selection.source_name,
                 &selected_path,
                 selection,
+                resolved_clause.route,
             );
         }
 
@@ -1526,6 +1552,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         provider_name: StringId,
         local_path: &PathId,
         selection: &DependencySelection,
+        route: &PublicExportRoute,
     ) -> BuilderResult<ResolvedSelectedTarget> {
         self.register_provider_semantics_once(provider_id)?;
         let view = self
@@ -1534,7 +1561,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let interface = self.source_provider_dependencies.interface(provider_id)?;
         let provider_name_text = self.string_table.resolve(provider_name);
 
-        if let Some(origin) = view.exported_origin(provider_name_text).cloned() {
+        if let Some(origin) = view.exported_origin(route, provider_name_text).cloned() {
             // Preserve the successful-interface invariant: an exported origin must carry its
             // declaration record before either a clause or an occurrence may bind it.
             if view.declaration(&origin).is_none() {
@@ -1556,7 +1583,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             });
         }
 
-        if let Some(binding) = view.binding_export(provider_name_text) {
+        if let Some(binding) = view.binding_export(route, provider_name_text) {
             let Some(symbol_id) = self
                 .external_package_registry
                 .resolve_canonical_symbol(&binding.target)
@@ -1760,9 +1787,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     diagnostic_path,
                     ..
                 } => {
-                    let provider_id = self
+                    let resolved_clause = self
                         .source_provider_dependencies
-                        .resolve_reexport(provider_selection.shell)
+                        .resolve_clause(provider_selection.shell)
                         .ok_or_else(|| {
                             InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                                 "public provider selection {:?} has no resolved provider for diagnostic path {:?}",
@@ -1770,10 +1797,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                             ))
                         })?;
                     return self.resolve_provider_selected_target(
-                        provider_id,
+                        resolved_clause.provider,
                         provider_source_name,
                         selected_path,
                         selection,
+                        resolved_clause.route,
                     );
                 }
                 PublicExportLookupResult::ExportedExternal { symbol_id } => {

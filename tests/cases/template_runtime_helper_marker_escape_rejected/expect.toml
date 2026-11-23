@@ -1,0 +1,23 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0022"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+reason = "invalid_template_structure.helper_outside_wrapper_slot"
+path = "input/@entry.moth"
+line = 6
+column = 3
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0022"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+reason = "invalid_template_structure.helper_outside_wrapper_slot"
+path = "input/@entry.moth"
+line = 6
+column = 3

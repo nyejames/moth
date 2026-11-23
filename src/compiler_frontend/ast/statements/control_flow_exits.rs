@@ -740,14 +740,12 @@ fn finite_loop_exits(
 /// WHAT: walks every statement sequence in `nodes` in authored order through the same exit
 ///       summary that owns terminality, and records each expression root directly owned by a
 ///       statement in an unreachable tail, including every statement of a folded-false `while`
-///       body, the dead inner tails of reachable value blocks, and every statement of a catch
-///       handler whose protected value is statically infallible.
+///       body and the dead inner tails of reachable value blocks.
 /// WHY: release speculation must fold only calls that can execute, and HIR lowering already omits
-///      the same statements while preserving their selected evidence. A statically pruned catch
-///      handler is omitted for the same reason: its protected value cannot fail, so no profile
-///      runs the handler. Deciding the skip per statement occurrence keeps a const template's
-///      shared definition spans from making a live use look dead, which a module-wide span set
-///      cannot do.
+///      the same statements while preserving their selected evidence. Catch handler bodies need no
+///      roots because release speculation never enters them. Deciding the skip per
+///      statement occurrence keeps a const template's shared definition spans from making a live
+///      use look dead, which a module-wide span set cannot do.
 ///
 /// A dead statement's folder entry skips its whole expression graph at that root, so only the
 /// statement's directly owned roots are needed. One scratch owns the exit analysis and a
@@ -1053,34 +1051,10 @@ fn collect_value_block_dead_roots(
                 );
             }
         }
-        ValueBlock::Catch(value_catch) => {
-            if let FallibleHandling::Handler { body, .. } = &value_catch.handler {
-                // A statically infallible protected value prunes this handler before HIR, so no
-                // profile runs its body. Keep the body byte-for-byte like any authored-dead
-                // statement: release folding must not replace calls or fast operations that the
-                // skipped-source walk reports for constraint evidence. The protected value still
-                // folds normally; only the handler's statements are dead.
-                let handler_is_pruned = expressions
-                    .view(value_catch.handled_value)
-                    .ok()
-                    .and_then(|view| view.failure_facts())
-                    .is_some_and(|facts| facts.is_statically_infallible_catch());
-                if handler_is_pruned {
-                    for dead_node in body {
-                        record_dead_node_roots(dead_node, dead_roots);
-                    }
-                } else {
-                    collect_sequence_dead_roots(
-                        body,
-                        expressions,
-                        constants,
-                        dead_roots,
-                        scratch,
-                        depth,
-                    );
-                }
-            }
-        }
+        // Release speculation never enters a catch handler body, so its statements need no
+        // dead-root entries. The handled value still contributes its block header to the
+        // expression walk.
+        ValueBlock::Catch(_) => {}
     }
 }
 

@@ -1,0 +1,19 @@
+@helpers insert
+
+local_insert #= [$in style: [: red]]
+local_pattern #= (slot_value = [$in style: blue])
+alias #= local_pattern.slot_value
+
+same || -> String:
+    return local_insert
+;
+
+imported || -> String:
+    return insert
+;
+
+aliased || -> String:
+    return alias
+;
+
+~[:static body]

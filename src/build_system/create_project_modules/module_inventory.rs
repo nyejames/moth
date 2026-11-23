@@ -25,7 +25,7 @@ use crate::compiler_frontend::headers::parse_file_headers::FileRole;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{
-    ModuleRootFiles, ModuleRootRole, StableModuleOriginIdentity,
+    ModuleRootFiles, ModuleRootRole, PublicExportRoute, StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::{
     SourceDatabase, SourceId as CompilerSourceId, SourceSpanBuilders,
@@ -45,6 +45,7 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::facade_route_prepass::FacadePreparationCache;
 use super::file_reference_resolution::FileReferenceResolver;
 use super::module_identity::ModuleId;
 use super::module_namespace::{DirectoryDependencyResolution, ResolvedDependency};
@@ -165,10 +166,14 @@ pub(crate) struct CheckOnlyProviderBinding {
     pub(crate) dependency_shell_id: DependencyShellId,
     pub(crate) provider_module_id: ModuleId,
     pub(crate) provider_surface: ModuleRootRole,
+    /// Exact public route beneath the provider facade, absent for its root surface.
+    pub(crate) route: Option<PublicExportRoute>,
 }
 pub(crate) struct CheckOnlySourcePackageDependency {
     pub(crate) dependency_shell_id: DependencyShellId,
     pub(crate) dependency_prefix: String,
+    /// Exact public route on the package root facade; `ROOT` selects its own surface.
+    pub(crate) route: PublicExportRoute,
 }
 /// The check-only jobs stay in a separate lane so no caller can accidentally publish their
 /// interfaces, generated functions, resource associations, graph edges or backend roots.
@@ -219,10 +224,14 @@ enum ResolvedDirectoryDependencyEffect {
         provider_module_id: ModuleId,
         provider_surface: ModuleRootRole,
         dependency_shell_id: DependencyShellId,
+        /// Exact public route beneath the provider facade, absent for its root surface.
+        route: Option<PublicExportRoute>,
     },
     SourcePackage {
         dependency_prefix: String,
         dependency_shell_id: DependencyShellId,
+        /// Exact public route on the package root facade; `ROOT` selects its own surface.
+        route: PublicExportRoute,
     },
 }
 
@@ -373,6 +382,7 @@ fn apply_resolved_directory_dependency(
             provider_module_id,
             provider_surface,
             consumer_module_id,
+            route,
             ..
         } => {
             add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
@@ -406,11 +416,13 @@ fn apply_resolved_directory_dependency(
                     provider_module_id: *provider_module_id,
                     provider_surface: *provider_surface,
                     dependency_shell_id: provider.dependency_shell_id,
+                    route: route.clone(),
                 });
         }
         ResolvedDependency::SourcePackageSurface {
             consumer_module_id,
             dependency_prefix,
+            route,
             ..
         } => {
             add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
@@ -423,7 +435,13 @@ fn apply_resolved_directory_dependency(
                 .push(ResolvedDirectoryDependencyEffect::SourcePackage {
                     dependency_prefix: dependency_prefix.clone(),
                     dependency_shell_id: provider.dependency_shell_id,
+                    route: route.clone(),
                 });
+        }
+        ResolvedDependency::UnavailableSourcePackage => {
+            // The package boundary owns its source diagnostic and reports it at its own walk
+            // turn. Resolving the clause here keeps this walk from misreporting a route miss.
+            add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
         }
         ResolvedDependency::BindingPackage => {
             add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
@@ -623,6 +641,8 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
+    prepared_facades: &mut FacadePreparationCache,
+    source_module_origins: Option<Arc<SourceModuleOriginTable>>,
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
@@ -639,6 +659,8 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
         external_imports,
         directory_dependency_resolution,
         resource_inputs,
+        prepared_facades,
+        source_module_origins,
         include_check_only,
         selected_source_texts,
         string_table,
@@ -664,6 +686,8 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
+    prepared_facades: &mut FacadePreparationCache,
+    source_module_origins: Option<Arc<SourceModuleOriginTable>>,
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
@@ -680,6 +704,8 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
         external_imports,
         directory_dependency_resolution,
         resource_inputs,
+        prepared_facades,
+        source_module_origins,
         include_check_only,
         selected_source_texts,
         string_table,
@@ -696,6 +722,13 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
 fn discover_all_modules_in_boundary(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
+    #[cfg_attr(
+        not(test),
+        allow(
+            unused_variables,
+            reason = "only the focused-test origin fallback reads the source database"
+        )
+    )]
     source_files: &SourceDatabase,
     source_spans: &mut SourceSpanBuilders<'_>,
     project_module_graph: &mut ProjectModuleGraph,
@@ -703,6 +736,8 @@ fn discover_all_modules_in_boundary(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
+    prepared_facades: &mut FacadePreparationCache,
+    source_module_origins: Option<Arc<SourceModuleOriginTable>>,
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
@@ -710,15 +745,31 @@ fn discover_all_modules_in_boundary(
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, PreparedFailure> {
     let seeds = module_seeds_in_module_id_order(project_module_graph);
-    let source_origin_lookup = project_module_graph
-        .build_source_origin_lookup(directory_dependency_resolution.source_tree_index())?;
-    // Construct one immutable source-origin table for this project or package boundary. Prepared
-    // module payloads retain only cloned `Arc` handles, never per-module origin rows.
-    let source_module_origins = Arc::new(SourceModuleOriginTable::from_graph_ownership(
-        source_files,
-        &source_origin_lookup,
-    ));
-    drop(source_origin_lookup);
+    // The boundary's route prepass has already built this table for the facades it prepared, so
+    // the project and package walks reuse it. Only focused tests walk without a prepass; keep
+    // their fallback out of production, where a missing table would mean a skipped boundary.
+    let source_module_origins = match source_module_origins {
+        Some(origins) => origins,
+        #[cfg(test)]
+        None => {
+            let source_origin_lookup = project_module_graph
+                .build_source_origin_lookup(directory_dependency_resolution.source_tree_index())?;
+            // Construct one immutable source-origin table for this project or package boundary.
+            // Prepared module payloads retain only cloned `Arc` handles, never per-module origin
+            // rows.
+            let origins = Arc::new(SourceModuleOriginTable::from_graph_ownership(
+                source_files,
+                &source_origin_lookup,
+            ));
+            drop(source_origin_lookup);
+            origins
+        }
+        #[cfg(not(test))]
+        None => crate::compiler_bug!(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            "a production boundary walk must receive the origin table built by its facade prepass"
+        ),
+    };
 
     let module_error_allowance = config.frontend_options().max_errors_per_module;
     let ModuleCompilationJobBatch {
@@ -740,6 +791,7 @@ fn discover_all_modules_in_boundary(
         },
         external_imports,
         resource_inputs,
+        prepared_facades,
         include_check_only,
         string_table,
         path_interner,
@@ -906,10 +958,10 @@ fn finalize_owned_module_source_spans(
 ///
 /// The source table retains the canonical candidate identities so indexed file-reference
 /// resolution uses the same module-root and ownership rules as a canonical module. The requested
-/// source and every non-Moth content target it reaches are prepared and retained in this job, while
-/// no target becomes another module root. Provider clauses, external package discovery and
-/// resolution rows are all job-local; file references use a fresh resource registry whose IDs die
-/// with the job.
+/// source and every same-module source it reaches, Moth helper or content file, are prepared and
+/// retained in this job, while no target becomes another module root. Provider clauses, external
+/// package discovery and resolution rows are all job-local; file references use a fresh resource
+/// registry whose IDs die with the job.
 #[allow(
     clippy::too_many_arguments,
     reason = "transient module preparation keeps owner and source identities, candidate sources and source-tree lookup, directives and preparation context, mutable spans/imports/selected texts, resolver and dependency resolution, origin data and string/path fork sources separate"
@@ -998,31 +1050,43 @@ fn prepare_check_only_module(
 
     let mut provider_bindings = Vec::new();
     let mut source_package_dependencies = Vec::new();
-    let mut pending_module_sources = VecDeque::from([source_index]);
-    let mut queued_module_sources = BTreeSet::from([source_index]);
+    // Pending sources are drained in source-index order rather than discovery order: a deeper
+    // content level must not report its eager preparation failure before a lower-index sibling
+    // that was already pending. The FIFO below is only the walk's staging queue.
+    let mut pending_sources = BTreeSet::from([source_index]);
+    let mut queued_sources = BTreeSet::from([source_index]);
+    let mut staged_sources = VecDeque::new();
+    let mut discovered_sources = Vec::new();
     // Resolve file-value paths against a job-local resource registry. The prepared payload retains
     // the settled occurrence table, while physical source IDs and missing watches are discarded
     // with this resolver instead of entering the canonical resource registry.
     let mut transient_resource_inputs = ResourceInputRegistry::new();
     let mut file_reference_resolver =
         FileReferenceResolver::new(source_tree_index, &mut transient_resource_inputs);
-    let mut pending_content_sources = BTreeSet::new();
-    let mut prepared_content_sources = BTreeSet::new();
 
-    // Same-module clauses form a source closure inside the transient job. Every reached Moth
-    // source is prepared into the one module-local header set, while cross-module and
-    // source-package clauses remain job-local binding metadata.
-    while let Some(current_source_index) = pending_module_sources.pop_front() {
+    // Same-module clauses form a source closure inside the transient job. Every reached source,
+    // Moth or content, is prepared into the one module-local header set, while cross-module and
+    // source-package clauses remain job-local binding metadata. One queue covers every
+    // compiler-semantic target, so a `.mtf` target cannot arrive in a Moth lane and a deeper
+    // content level cannot strand an authored provider occurrence.
+    while let Some(current_source_index) = pending_sources.pop_first() {
         let current_source = source_tree_index.source(current_source_index);
         if !matches!(
             current_source.classification(),
-            SourceClassification::CompilerSemantic(SourceFileKind::Moth)
-        ) || !matches!(
+            SourceClassification::CompilerSemantic(_)
+        ) {
+            return Err(graph_inventory_mismatch_error(format!(
+                "ModuleId {} reached check-only source row {} that is not compiler semantic",
+                owner_module_id.index(),
+                current_source_index.index()
+            )));
+        }
+        if !matches!(
             current_source.ownership(),
             SourceOwnership::Owned(owner) if owner == owner_module_id
         ) {
             return Err(graph_inventory_mismatch_error(format!(
-                "ModuleId {} reached check-only source row {} outside its owned Moth source set",
+                "ModuleId {} reached check-only source row {} outside its owned source set",
                 owner_module_id.index(),
                 current_source_index.index()
             )));
@@ -1037,7 +1101,7 @@ fn prepare_check_only_module(
                     current_source_index.index()
                 ))
             })?;
-        let current_file_path = current_source.canonical_path().to_path_buf();
+        let current_file_path = current_source.canonical_path();
         let input_result = {
             let (syntax_string_table, selected_source_texts, syntax_path_fork) =
                 syntax.source_preparation_inputs_and_path_fork_mut();
@@ -1059,7 +1123,7 @@ fn prepare_check_only_module(
         // `prepare_source` already returns the premerge lane, so propagate directly without
         // building an intermediate vessel.
         let mut prepared_output = syntax.prepare_source(input, source_spans)?;
-        let consumer_role = source
+        let consumer_role = current_source
             .logical_identity()
             .module_origin()
             .map(|origin| origin.role())
@@ -1072,12 +1136,12 @@ fn prepare_check_only_module(
             source_files: preparation_context.source_files,
             consumer_module_id: owner_module_id,
             consumer_role,
-            source_path: &current_file_path,
+            source_path: current_file_path,
         };
         {
             let mut walk = DirectoryDependencyWalkState {
-                queued: &mut queued_module_sources,
-                queue: &mut pending_module_sources,
+                queued: &mut queued_sources,
+                queue: &mut staged_sources,
                 effects: Vec::new(),
             };
             let mut resolved_by_path = FxHashMap::default();
@@ -1099,121 +1163,51 @@ fn prepare_check_only_module(
                         provider_module_id,
                         provider_surface,
                         dependency_shell_id,
+                        route,
                     } => provider_bindings.push(CheckOnlyProviderBinding {
                         dependency_shell_id,
                         provider_module_id,
                         provider_surface,
+                        route,
                     }),
                     ResolvedDirectoryDependencyEffect::SourcePackage {
                         dependency_prefix,
                         dependency_shell_id,
+                        route,
                     } => source_package_dependencies.push(CheckOnlySourcePackageDependency {
                         dependency_shell_id,
                         dependency_prefix,
+                        route,
                     }),
                 }
             }
         }
+        // Authored-clause targets join the ordered pending set after the walk settles their
+        // identity. Draining here keeps the next prepared source deterministic and source-index
+        // ordered.
+        while let Some(target_source_index) = staged_sources.pop_front() {
+            pending_sources.insert(target_source_index);
+        }
 
-        let mut discovered_content_sources = Vec::new();
+        discovered_sources.clear();
         for file_reference in prepared_output.structural_file_references.iter() {
             let resolved = syntax.resolve_file_reference(
                 &mut file_reference_resolver,
                 owner_module_id,
                 prepared_output.path_syntax.table(),
                 file_reference,
-                &mut discovered_content_sources,
+                &mut discovered_sources,
             )?;
             syntax.record_resolved_file_reference(resolved)?;
         }
-        discovered_content_sources.sort_unstable();
-        discovered_content_sources.dedup();
-        for target_source_index in discovered_content_sources {
-            if prepared_content_sources.insert(target_source_index) {
-                pending_content_sources.insert(target_source_index);
+        discovered_sources.sort_unstable();
+        discovered_sources.dedup();
+        for target_source_index in discovered_sources.drain(..) {
+            if queued_sources.insert(target_source_index) {
+                pending_sources.insert(target_source_index);
             }
         }
         syntax.retain_prepared_output(current_order, prepared_output)?;
-    }
-
-    // A `.mtf` or `.md` file-value target contributes its synthetic `content` declaration to this
-    // check-only source's own prepared header set. It is not a Moth root and therefore never gets a
-    // separate graph/check-only job. Process nested content references in SourceId order so a
-    // content source can itself depend on another content source without a second traversal.
-    while let Some(target_source_index) = pending_content_sources.pop_first() {
-        let target = source_tree_index.source(target_source_index);
-        let target_kind = match target.classification() {
-            SourceClassification::CompilerSemantic(kind) => *kind,
-            _ => {
-                return Err(graph_inventory_mismatch_error(format!(
-                    "ModuleId {} content target source ID {} is not compiler semantic",
-                    owner_module_id.index(),
-                    target_source_index.index()
-                )));
-            }
-        };
-        if target_kind == SourceFileKind::Moth {
-            // `.moth` targets are classified as source-kind/no-value references, not content
-            // sources. Keep this defensive arm from manufacturing another transient Moth root if
-            // a classifier ever hands one to the content lane.
-            continue;
-        }
-        if !matches!(
-            target.ownership(),
-            SourceOwnership::Owned(owner) if owner == owner_module_id
-        ) {
-            return Err(graph_inventory_mismatch_error(format!(
-                "ModuleId {} content target source ID {} is not owned by its consumer",
-                owner_module_id.index(),
-                target_source_index.index()
-            )));
-        }
-        let target_order = source_order.get(&target_source_index).copied().ok_or_else(|| {
-            graph_inventory_mismatch_error(format!(
-                "ModuleId {} content target source ID {} is absent from its candidate source set",
-                owner_module_id.index(),
-                target_source_index.index()
-            ))
-        })?;
-        let target_input_result = {
-            let (syntax_string_table, selected_source_texts, syntax_path_fork) =
-                syntax.source_preparation_inputs_and_path_fork_mut();
-            prepare_owned_source_input(
-                target_source_index,
-                source_tree_index,
-                preparation_context.source_files,
-                source_spans,
-                style_directives,
-                syntax_string_table,
-                syntax_path_fork,
-                selected_source_texts,
-            )
-        };
-        let target_input = target_input_result.map_err(|error| {
-            let path_table = Arc::new(syntax.path_fork_mut().shared_table());
-            error.into_failure(syntax.string_table_mut(), path_table)
-        })?;
-        // Already in the premerge lane; propagate without an intermediate vessel.
-        let target_output = syntax.prepare_source(target_input, source_spans)?;
-        let mut nested_content_sources = Vec::new();
-        for file_reference in target_output.structural_file_references.iter() {
-            let resolved = syntax.resolve_file_reference(
-                &mut file_reference_resolver,
-                owner_module_id,
-                target_output.path_syntax.table(),
-                file_reference,
-                &mut nested_content_sources,
-            )?;
-            syntax.record_resolved_file_reference(resolved)?;
-        }
-        nested_content_sources.sort_unstable();
-        nested_content_sources.dedup();
-        for nested_source_index in nested_content_sources {
-            if prepared_content_sources.insert(nested_source_index) {
-                pending_content_sources.insert(nested_source_index);
-            }
-        }
-        syntax.retain_prepared_output(target_order, target_output)?;
     }
 
     // `finish` already returns the premerge lane; propagate directly. The final boundary
@@ -1427,6 +1421,7 @@ fn discover_modules_serial_provider_capable(
     context: ModuleDiscoveryContext<'_, '_>,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     resource_inputs: &mut ResourceInputRegistry,
+    prepared_facades: &mut FacadePreparationCache,
     include_check_only: bool,
     string_table: &StringTable,
     path_interner: &PathInternerBuilder,
@@ -1551,33 +1546,55 @@ fn discover_modules_serial_provider_capable(
                 .source(source_index)
                 .canonical_path()
                 .to_path_buf();
-            let input_result = crate::timed_stage_attributed!(
-                crate::timing::TimingMetric::FrontendPrepare,
-                timing_context,
-                {
-                    let (syntax_string_table, selected_source_texts, syntax_path_fork) =
-                        syntax.source_preparation_inputs_and_path_fork_mut();
-                    prepare_owned_source_input(
-                        source_index,
-                        source_tree_index,
-                        source_files,
-                        source_spans,
-                        style_directives,
-                        syntax_string_table,
-                        syntax_path_fork,
-                        selected_source_texts,
-                    )
-                },
-            );
-            let input = match input_result {
-                Ok(input) => input,
-                Err(error) => {
-                    let path_table = Arc::new(syntax.path_fork_mut().shared_table());
-                    return Err(error.into_failure(syntax.string_table_mut(), path_table));
-                }
+            // A facade root handled by the route prepass is adopted or diagnosed, never
+            // re-tokenized or re-parsed. An exhaustive cache covers every present facade with
+            // either one prepared source or one retained source failure, so a missing entry is a
+            // compiler invariant failure. A cache constructed without a prepass stays
+            // non-exhaustive and keeps the ordinary preparation path.
+            let facade_role = seed
+                .root_files
+                .present()
+                .find(|(_, root_path)| *root_path == &source_path)
+                .map(|(role, _)| role)
+                .filter(|role| matches!(role, ModuleRootRole::Normal | ModuleRootRole::Support));
+            let cached_outcome =
+                facade_role.and_then(|role| prepared_facades.take(seed.module_id, role));
+            let mut prepared_output = if let Some(outcome) = cached_outcome {
+                syntax.adopt_facade_preparation(outcome?)?
+            } else if let Some(role) = facade_role.filter(|_| prepared_facades.is_exhaustive()) {
+                return Err(graph_inventory_mismatch_error(format!(
+                    "ModuleId {} {role:?} facade was present but absent from the exhaustive facade preparation cache",
+                    seed.module_id.index(),
+                )));
+            } else {
+                let input_result = crate::timed_stage_attributed!(
+                    crate::timing::TimingMetric::FrontendPrepare,
+                    timing_context,
+                    {
+                        let (syntax_string_table, selected_source_texts, syntax_path_fork) =
+                            syntax.source_preparation_inputs_and_path_fork_mut();
+                        prepare_owned_source_input(
+                            source_index,
+                            source_tree_index,
+                            source_files,
+                            source_spans,
+                            style_directives,
+                            syntax_string_table,
+                            syntax_path_fork,
+                            selected_source_texts,
+                        )
+                    },
+                );
+                let input = match input_result {
+                    Ok(input) => input,
+                    Err(error) => {
+                        let path_table = Arc::new(syntax.path_fork_mut().shared_table());
+                        return Err(error.into_failure(syntax.string_table_mut(), path_table));
+                    }
+                };
+                // Already in the premerge lane; propagate without an intermediate vessel.
+                syntax.prepare_source(input, source_spans)?
             };
-            // Already in the premerge lane; propagate without an intermediate vessel.
-            let mut prepared_output = syntax.prepare_source(input, source_spans)?;
             let consumer_role = source_tree_index
                 .source(source_index)
                 .logical_identity()
@@ -1619,19 +1636,23 @@ fn discover_modules_serial_provider_capable(
                             provider_module_id,
                             provider_surface,
                             dependency_shell_id,
+                            route,
                         } => resolved_edges.push(ResolvedDependencyEdge {
                             provider_module_id,
                             provider_surface,
                             consumer_module_id: seed.module_id,
                             dependency_shell_id,
+                            route,
                         }),
                         ResolvedDirectoryDependencyEffect::SourcePackage {
                             dependency_prefix,
                             dependency_shell_id,
+                            route,
                         } => source_package_dependencies.push(ResolvedSourcePackageDependency {
                             consumer_module_id: seed.module_id,
                             dependency_prefix,
                             dependency_shell_id,
+                            route,
                         }),
                     }
                 }

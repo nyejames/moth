@@ -1,0 +1,8 @@
+@helper Label
+
+describe type T |label Label, value T| -> String:
+    return label.render()
+;
+
+message = describe(Label("imported concrete receiver"), "!")
+~[:[message]]

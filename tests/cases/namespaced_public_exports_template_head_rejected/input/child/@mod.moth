@@ -1,0 +1,4 @@
+-- A template head owns the directive rejection; the operand must not leak.
+render || -> String:
+    return [: [$export @missing symbol: body] ]
+;

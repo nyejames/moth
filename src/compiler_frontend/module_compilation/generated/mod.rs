@@ -42,7 +42,9 @@ pub(crate) use artefacts::{
     GeneratedFunctionSidecar, validate_completed_generated_record,
 };
 pub(crate) use known::KnownGeneratedFunctions;
-pub(crate) use provider_materialisations::ProviderMaterialisationRegistry;
+pub(crate) use provider_materialisations::{
+    CompletedMaterialisationIndex, ProviderMaterialisationRegistry,
+};
 
 #[cfg(test)]
 pub(crate) use convergence::{builtin_failure_diagnostic, infer_builtin_failure_summaries};

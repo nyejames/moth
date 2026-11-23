@@ -574,7 +574,7 @@ pub(crate) fn invalid_template_structure_message(reason: InvalidTemplateStructur
             )
         }
         InvalidTemplateStructureReason::HelperOutsideWrapperSlot => {
-            "`$in name: ...` is a template contribution helper, not a standalone value. Keep it inside a template application that receives the contribution.".to_string()
+            "`$in name: ...` and other structural template directives resolve during compilation and cannot escape as a standalone runtime value.".to_string()
         }
         InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedInsert => {
             "Runtime template control-flow bodies cannot leave unresolved `$in name: ...` helpers.".to_string()
@@ -704,6 +704,21 @@ pub(crate) fn render_invalid_template_structure(
             "This Markdown block already has a section marker.".to_string(),
             vec![
                 "A heading, paragraph or list item can carry one `@#id` marker. Remove the extra marker."
+                    .to_string(),
+            ],
+        ),
+        InvalidTemplateStructureCode::HelperOutsideWrapperSlot => (
+            invalid_template_structure_message(
+                InvalidTemplateStructureReason::HelperOutsideWrapperSlot,
+            ),
+            vec![
+                "Place the insert in the receiving template application: use a direct `$in name: ...` for a named slot."
+                    .to_string(),
+                "Loose body content fills positional slots in order, then the default slot."
+                    .to_string(),
+                "For a function return, return ordinary `String` content and insert it at the call site."
+                    .to_string(),
+                "For a parameter default, use a constant value or compose the template in the function body."
                     .to_string(),
             ],
         ),

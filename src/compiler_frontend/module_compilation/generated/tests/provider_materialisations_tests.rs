@@ -8,7 +8,10 @@
 use super::*;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::module_compilation::generated::test_fixtures::generated_identity;
-use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedDeclarationIdentity, ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
+    StablePackageIdentity,
+};
 
 use std::sync::Arc;
 
@@ -22,20 +25,30 @@ fn context(names: &[&str]) -> Arc<ModuleMaterialisationContext> {
     ))
 }
 
+fn const_origin(name: &str) -> OriginFunctionId {
+    OriginFunctionId::new_free(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("test"),
+            "main".to_owned(),
+            ModuleRootRole::Normal,
+        ),
+        name.to_owned(),
+    )
+}
+
+fn const_context(origin: &OriginFunctionId) -> Arc<ModuleMaterialisationContext> {
+    Arc::new(ModuleMaterialisationContext::from_const_origins_for_test(
+        vec![Some(origin.clone())],
+    ))
+}
+
 #[test]
 fn a_published_identity_resolves_to_its_own_declaring_row() {
     let mut registry = ProviderMaterialisationRegistry::default();
     let published = context(&["first", "second"]);
-    for (identity, template_index) in published.declaration_rows() {
-        registry
-            .publish(
-                identity.clone(),
-                Arc::clone(&published),
-                template_index,
-                false,
-            )
-            .expect("each unique declaration identity publishes");
-    }
+    registry
+        .publish_context(&published)
+        .expect("each unique declaration identity publishes");
 
     let resolved = registry
         .published_template(&declaration("second"))
@@ -64,10 +77,10 @@ fn a_cross_lane_publish_for_the_same_identity_is_diagnosed() {
     let project_module = context(&["shared"]);
 
     registry
-        .publish(declaration("shared"), Arc::clone(&package_seed), 0, false)
+        .publish_context(&package_seed)
         .expect("the package seed publishes");
     let error = registry
-        .publish(declaration("shared"), Arc::clone(&project_module), 0, false)
+        .publish_context(&project_module)
         .expect_err("a different declaring context must be diagnosed");
     assert!(
         error.message.contains("multiple declaring contexts"),
@@ -85,15 +98,101 @@ fn a_cross_lane_publish_for_the_same_identity_is_diagnosed() {
 }
 
 #[test]
+fn a_borrowed_completed_generic_row_rejects_a_different_declaring_context() {
+    let package_seed = context(&["shared"]);
+    let mut index = CompletedMaterialisationIndex::default();
+    index.insert_materialisation(declaration("shared"), Arc::clone(&package_seed), 0, 3);
+    let mut registry = ProviderMaterialisationRegistry::default();
+    registry.borrow_completed_index(Arc::new(index));
+
+    let project_module = context(&["shared"]);
+    let error = registry
+        .publish_context(&project_module)
+        .expect_err("a borrowed package row must participate in cross-lane collision checks");
+    assert!(
+        error.message.contains("multiple declaring contexts"),
+        "collision should identify the borrowed declaring context: {}",
+        error.message
+    );
+    let resolved = registry
+        .published_template(&declaration("shared"))
+        .expect("the borrowed package row remains published");
+    assert!(Arc::ptr_eq(&resolved.context, &package_seed));
+}
+
+#[test]
+fn replaying_a_borrowed_completed_generic_row_stays_borrowed() {
+    let package_seed = context(&["shared"]);
+    let mut index = CompletedMaterialisationIndex::default();
+    index.insert_materialisation(declaration("shared"), Arc::clone(&package_seed), 0, 3);
+    let mut registry = ProviderMaterialisationRegistry::default();
+    registry.borrow_completed_index(Arc::new(index));
+
+    registry
+        .publish_context(&package_seed)
+        .expect("replaying the same borrowed row is idempotent");
+    assert_eq!(
+        registry.local_materialisation_count(),
+        0,
+        "a replayed borrowed row must not be copied into the local registry"
+    );
+    assert_eq!(registry.borrowed_completed_entry_count(), 1);
+}
+
+#[test]
+fn a_borrowed_completed_const_row_rejects_a_different_declaring_context() {
+    let origin = const_origin("shared");
+    let package_seed = const_context(&origin);
+    let mut index = CompletedMaterialisationIndex::default();
+    index.insert_const_function(origin.clone(), Arc::clone(&package_seed), 0, 4);
+    let mut registry = ProviderMaterialisationRegistry::default();
+    registry.borrow_completed_index(Arc::new(index));
+
+    let project_module = const_context(&origin);
+    let error = registry
+        .publish_context(&project_module)
+        .expect_err("a borrowed const package row must participate in collision checks");
+    assert!(
+        error.message.contains("multiple declaring contexts"),
+        "collision should identify the borrowed const declaring context: {}",
+        error.message
+    );
+    let resolved = registry
+        .const_function(&origin)
+        .expect("the borrowed const package row remains published");
+    assert!(Arc::ptr_eq(&resolved.context, &package_seed));
+}
+
+#[test]
+fn replaying_a_borrowed_completed_const_row_stays_borrowed() {
+    let origin = const_origin("shared");
+    let package_seed = const_context(&origin);
+    let mut index = CompletedMaterialisationIndex::default();
+    index.insert_const_function(origin.clone(), Arc::clone(&package_seed), 0, 4);
+    let mut registry = ProviderMaterialisationRegistry::default();
+    registry.borrow_completed_index(Arc::new(index));
+
+    registry
+        .publish_context(&package_seed)
+        .expect("replaying the same borrowed const row is idempotent");
+    assert_eq!(
+        registry.local_materialisation_count(),
+        0,
+        "a replayed borrowed const row must not be copied into the local registry"
+    );
+    assert_eq!(registry.borrowed_completed_entry_count(), 1);
+}
+
+#[test]
 fn republishing_the_same_declaring_row_is_idempotent() {
     let mut registry = ProviderMaterialisationRegistry::default();
     let published = context(&["shared"]);
 
     registry
-        .publish(declaration("shared"), Arc::clone(&published), 0, false)
+        .publish_context(&published)
         .expect("the first publication succeeds");
     registry
-        .publish(declaration("shared"), Arc::clone(&published), 0, false)
+        .publish_context(&published)
         .expect("the same context and row may be published idempotently");
 
     let resolved = registry
@@ -108,7 +207,7 @@ fn a_context_publish_is_atomic_when_a_later_row_collides() {
     let mut registry = ProviderMaterialisationRegistry::default();
     let package_seed = context(&["shared"]);
     registry
-        .publish(declaration("shared"), Arc::clone(&package_seed), 0, false)
+        .publish_context(&package_seed)
         .expect("the package seed publishes");
     let project_module = context(&["fresh", "shared"]);
     let error = registry

@@ -29,10 +29,11 @@ use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure
 use crate::compiler_frontend::instrumentation::MemoryLedgerSnapshot;
 #[cfg(test)]
 use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
+use crate::compiler_frontend::module_compilation::CompletedMaterialisationIndex;
 use crate::compiler_frontend::module_compilation::Module;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedDeclarationIdentity, StablePackageIdentity,
+    GeneratedDeclarationIdentity, OriginFunctionId, StablePackageIdentity,
 };
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabaseRetentionMetrics};
@@ -711,13 +712,6 @@ impl PackageBoundaryId {
     }
 }
 
-/// Exact cross-package location of one published materialisation template.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PackageMaterialisationLocation {
-    pub(crate) package_id: PackageBoundaryId,
-    pub(crate) location: MaterialisationContextLocation,
-}
-
 /// One incrementally maintained registry of completed source-package boundaries.
 ///
 /// WHAT: stores completed packages contiguously, resolves package prefixes to dense
@@ -732,12 +726,16 @@ pub(crate) struct CompletedSourcePackageRegistry {
     by_prefix: FxHashMap<String, PackageBoundaryId>,
     provider_packages: Vec<Vec<PackageBoundaryId>>,
     consumer_packages: Vec<Vec<PackageBoundaryId>>,
-    declarations_by_identity:
-        FxHashMap<GeneratedDeclarationIdentity, PackageMaterialisationLocation>,
     /// Retained source databases aligned with `packages`, used for package warning rendering.
     source_databases: Vec<Option<Arc<SourceDatabase>>>,
-    /// Every published package materialisation row in deterministic publication order.
-    materialisation_rows: Vec<(GeneratedDeclarationIdentity, PackageMaterialisationLocation)>,
+    /// Shared immutable index of every generic and const row completed packages published.
+    ///
+    /// WHAT: owns the same identity maps as a boundary registry, rebuilt in place only while a
+    ///       package commits.
+    /// WHY:  every boundary needs all earlier package rows. Copying them into each boundary
+    ///       registry rehashes the completed set once per package, so many independent packages
+    ///       make the canonical lane quadratic. Borrowing one Arc keeps each boundary local.
+    materialisation_index: Arc<CompletedMaterialisationIndex>,
 }
 
 #[derive(Debug)]
@@ -745,7 +743,8 @@ pub(crate) struct SourcePackagePublication {
     package_id: PackageBoundaryId,
     prefix: String,
     resolved_providers: Vec<PackageBoundaryId>,
-    materialisation_rows: Vec<(GeneratedDeclarationIdentity, PackageMaterialisationLocation)>,
+    materialisation_rows: Vec<(GeneratedDeclarationIdentity, MaterialisationContextLocation)>,
+    const_materialisation_rows: Vec<(OriginFunctionId, MaterialisationContextLocation)>,
 }
 
 impl CompletedSourcePackageRegistry {
@@ -768,8 +767,7 @@ impl CompletedSourcePackageRegistry {
             provider_packages: Vec::new(),
             consumer_packages: Vec::new(),
             source_databases: Vec::new(),
-            declarations_by_identity: FxHashMap::default(),
-            materialisation_rows: Vec::new(),
+            materialisation_index: Arc::new(CompletedMaterialisationIndex::default()),
         }
     }
 
@@ -843,24 +841,52 @@ impl CompletedSourcePackageRegistry {
                     ),
                 ));
             }
-            if let Some(existing) = self.declarations_by_identity.get(identity) {
+            if let Some(existing) = self
+                .materialisation_index
+                .materialisation_owner_index(identity)
+            {
                 return Err(InfrastructureFailure::internal(
                     CompilerStage::ProjectBuildAssembly,
                     format!(
                         "Generated declaration identity {:?} was published by source packages @{} and @{}",
                         identity,
-                        self.package(existing.package_id)?.package_prefix(),
+                        self.package(PackageBoundaryId::from_index(existing))?
+                            .package_prefix(),
                         prefix
                     ),
                 ));
             }
-            materialisation_rows.push((
-                identity.clone(),
-                PackageMaterialisationLocation {
-                    package_id: PackageBoundaryId(self.packages.len()),
-                    location,
-                },
-            ));
+            materialisation_rows.push((identity.clone(), location));
+        }
+
+        let mut const_materialisation_rows = Vec::new();
+        let mut seen_const_origins = FxHashSet::default();
+        for (origin, location) in package.boundary.modules.const_materialisation_locations() {
+            if !seen_const_origins.insert(origin) {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "Const function origin {:?} is duplicated inside source package @{}",
+                        origin, prefix
+                    ),
+                ));
+            }
+            if let Some(existing) = self
+                .materialisation_index
+                .const_function_owner_index(origin)
+            {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "Const function origin {:?} was published by source packages @{} and @{}",
+                        origin,
+                        self.package(PackageBoundaryId::from_index(existing))?
+                            .package_prefix(),
+                        prefix
+                    ),
+                ));
+            }
+            const_materialisation_rows.push((origin.clone(), location));
         }
 
         let package_id = PackageBoundaryId(self.packages.len());
@@ -869,6 +895,7 @@ impl CompletedSourcePackageRegistry {
             prefix,
             resolved_providers,
             materialisation_rows,
+            const_materialisation_rows,
         })
     }
 
@@ -882,6 +909,7 @@ impl CompletedSourcePackageRegistry {
             prefix,
             resolved_providers,
             materialisation_rows,
+            const_materialisation_rows,
         } = publication;
 
         self.packages.push(package);
@@ -891,11 +919,25 @@ impl CompletedSourcePackageRegistry {
         self.provider_packages.push(resolved_providers);
         self.consumer_packages.push(Vec::new());
         self.by_prefix.insert(prefix, package_id);
-        for (identity, location) in &materialisation_rows {
-            self.declarations_by_identity
-                .insert(identity.clone(), *location);
-            self.materialisation_rows
-                .push((identity.clone(), *location));
+        let package = &self.packages[package_id.index()];
+        let index = Arc::make_mut(&mut self.materialisation_index);
+        for (identity, location) in materialisation_rows {
+            let context = Arc::clone(
+                package
+                    .boundary
+                    .modules
+                    .materialisation_context_at(location),
+            );
+            index.insert_materialisation(identity, context, location.row_index, package_id.index());
+        }
+        for (origin, location) in const_materialisation_rows {
+            let context = Arc::clone(
+                package
+                    .boundary
+                    .modules
+                    .materialisation_context_at(location),
+            );
+            index.insert_const_function(origin, context, location.row_index, package_id.index());
         }
         for provider_index in 0..self.provider_packages[package_id.index()].len() {
             let provider_id = self.provider_packages[package_id.index()][provider_index];
@@ -948,16 +990,35 @@ impl CompletedSourcePackageRegistry {
             .and_then(Option::as_ref)
     }
 
+    /// Iterate each completed package's stable identity and finalized report source database.
+    ///
+    /// A diagnosed consumer can carry a package-owned span without a collision request. The
+    /// report then needs the package domain registered before freezing, exactly as it does for a
+    /// collision donor.
+    #[cfg(feature = "boracle")]
+    pub(crate) fn report_donors(
+        &self,
+    ) -> impl Iterator<Item = (&StablePackageIdentity, &Arc<SourceDatabase>)> + '_ {
+        self.packages
+            .iter()
+            .zip(&self.source_databases)
+            .filter_map(|(package, source)| {
+                source
+                    .as_ref()
+                    .map(|source| (&package.package_identity, source))
+            })
+    }
+
     pub(crate) fn reserve_commit(&mut self, publication: &SourcePackagePublication) {
         self.packages.reserve(1);
         self.source_databases.reserve(1);
         self.by_prefix.reserve(1);
         self.provider_packages.reserve(1);
         self.consumer_packages.reserve(1);
-        self.declarations_by_identity
-            .reserve(publication.materialisation_rows.len());
-        self.materialisation_rows
-            .reserve(publication.materialisation_rows.len());
+        Arc::make_mut(&mut self.materialisation_index).reserve(
+            publication.materialisation_rows.len(),
+            publication.const_materialisation_rows.len(),
+        );
         for provider_id in &publication.resolved_providers {
             self.consumer_packages[provider_id.index()].reserve(1);
         }
@@ -1043,18 +1104,32 @@ impl CompletedSourcePackageRegistry {
         self.packages.get(index)
     }
 
-    /// Iterate every cross-package materialisation location in deterministic package order.
-    pub(crate) fn materialisation_locations(
+    /// One completed package that published a generic materialisation identity.
+    pub(crate) fn materialisation_owner(
         &self,
-    ) -> impl Iterator<
-        Item = (
-            &GeneratedDeclarationIdentity,
-            PackageMaterialisationLocation,
-        ),
-    > + '_ {
-        self.materialisation_rows
-            .iter()
-            .map(|(identity, location)| (identity, *location))
+        identity: &GeneratedDeclarationIdentity,
+    ) -> Option<PackageBoundaryId> {
+        self.materialisation_index
+            .materialisation_owner_index(identity)
+            .map(PackageBoundaryId::from_index)
+    }
+
+    /// One completed package that published a const function origin.
+    pub(crate) fn const_materialisation_owner(
+        &self,
+        origin: &OriginFunctionId,
+    ) -> Option<PackageBoundaryId> {
+        self.materialisation_index
+            .const_function_owner_index(origin)
+            .map(PackageBoundaryId::from_index)
+    }
+
+    /// Share the immutable index of every completed materialisation row.
+    ///
+    /// The handle keeps the index alive. Holding one across this registry's next package commit
+    /// makes that commit clone the whole index instead of extending it in place.
+    pub(crate) fn materialisation_index(&self) -> Arc<CompletedMaterialisationIndex> {
+        Arc::clone(&self.materialisation_index)
     }
 
     /// Validate that every recorded dependency edge follows publication order.
@@ -1521,6 +1596,28 @@ pub(crate) struct ProjectFrontendCompilation {
 }
 
 impl ProjectFrontendCompilation {
+    /// Sum retained path nodes across every successful project and package module artefact.
+    ///
+    /// WHY: cross-boundary const materialisation must mount only the selected closure, not every
+    ///      predecessor mount its provider inherited. A chain regression measures this total.
+    #[cfg(test)]
+    pub(crate) fn total_module_path_node_rows(&self) -> usize {
+        let artifact_path_rows =
+            |artifact: &CompiledModuleArtifact| artifact.module.executable.path_table.len();
+        let project_rows = self
+            .project
+            .successful_artefacts_in_module_id_order()
+            .map(artifact_path_rows)
+            .sum::<usize>();
+        let package_rows = self
+            .source_packages
+            .iter()
+            .flat_map(|package| package.boundary.successful_artefacts_in_module_id_order())
+            .map(artifact_path_rows)
+            .sum::<usize>();
+        project_rows + package_rows
+    }
+
     pub(crate) fn new(
         project: CompiledGraphBoundary,
         source_packages: CompletedSourcePackageRegistry,
@@ -1536,22 +1633,30 @@ impl ProjectFrontendCompilation {
         }
 
         // The project store and package registry already enforce uniqueness inside their own
-        // lanes, so the final handoff only needs to prove that one generated declaration
-        // identity is never published by both a project boundary and a source package. Iterate
-        // the package index directly and allocate no owner strings unless a collision exists.
-        let mut package_owners =
-            FxHashMap::<&GeneratedDeclarationIdentity, PackageBoundaryId>::default();
-        for (identity, location) in source_packages.materialisation_locations() {
-            package_owners.insert(identity, location.package_id);
-        }
+        // lanes, so the final handoff only needs to prove that one generated declaration identity
+        // or const function origin is never published by both a project boundary and a source
+        // package. Query each package registry's retained index directly; materialising another
+        // owner map would copy every package row just to read it once.
         for (identity, location) in project.modules.materialisation_locations() {
-            if let Some(package_id) = package_owners.get(identity) {
+            if let Some(package_id) = source_packages.materialisation_owner(identity) {
                 crate::compiler_bug!(
                     CompilerStage::ProjectBuildAssembly,
                     "Generated declaration identity {:?} is published by both project module {} and source package @{}",
                     identity,
                     location.artifact_id.index(),
-                    source_packages.package(*package_id)?.package_prefix()
+                    source_packages.package(package_id)?.package_prefix()
+                );
+            }
+        }
+
+        for (origin, location) in project.modules.const_materialisation_locations() {
+            if let Some(package_id) = source_packages.const_materialisation_owner(origin) {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
+                    "Const function origin {:?} is published by both project module {} and source package @{}",
+                    origin,
+                    location.artifact_id.index(),
+                    source_packages.package(package_id)?.package_prefix()
                 );
             }
         }

@@ -37,6 +37,7 @@ use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::project_globals::{
     is_project_globals_dependency, is_project_globals_namespace,
 };
+use crate::compiler_frontend::semantic_identity::{ModuleRootRole, PublicExportRoute};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
     SourceRegistrationIndex, SourceSpanBuilders,
@@ -186,9 +187,16 @@ impl CollectReachableInputsError {
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedDependencyEdge {
     pub(super) provider_module_id: ModuleId,
-    pub(super) provider_surface: crate::compiler_frontend::semantic_identity::ModuleRootRole,
+    pub(super) provider_surface: ModuleRootRole,
     pub(super) consumer_module_id: ModuleId,
     pub(super) dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId,
+    /// Exact public route beneath the provider facade, absent for its root surface.
+    ///
+    /// WHY: binding resolves the authored shell against one provider interface and must look up
+    ///      the selected leaf under the route the consumer actually named. The route is a Stage 0
+    ///      resolution fact, so it travels on the edge rather than being re-derived from a path
+    ///      the consumer no longer holds.
+    pub(super) route: Option<PublicExportRoute>,
 }
 
 /// One authored dependency from a module to a separately compiled source-package facade.
@@ -197,6 +205,12 @@ pub(crate) struct ResolvedSourcePackageDependency {
     pub(super) consumer_module_id: ModuleId,
     pub(super) dependency_prefix: String,
     pub(super) dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId,
+    /// The exact public route on the package root facade; `ROOT` selects the package's own surface.
+    ///
+    /// WHY: the package interface exposes route bindings beside root bindings. Binding must look up
+    ///      the selected leaf under the route the consumer named, and the route is a Stage 0
+    ///      resolution fact that would otherwise be lost before interface binding.
+    pub(super) route: PublicExportRoute,
 }
 
 /// Mutable traversal outputs shared by the source-dependency queue helpers.

@@ -1,0 +1,15 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0081"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0081"
+path = "input/library/@mod.moth"
+line = 5
+column = 11
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/library/@mod.moth"
+line = 2

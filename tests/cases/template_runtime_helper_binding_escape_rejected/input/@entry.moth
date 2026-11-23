@@ -1,0 +1,8 @@
+runtime_name || -> String:
+    return [:red]
+;
+
+value = [
+    $in style: [: [runtime_name()]]
+]
+~[:static body]

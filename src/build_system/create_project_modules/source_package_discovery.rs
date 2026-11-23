@@ -9,13 +9,18 @@
 
 use crate::builder_surface::definition::damaged_package_set_report;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
-use crate::builder_surface::{ProvidedSourceRoot, SourceFileKindRegistry, SourcePackageRegistry};
+use crate::builder_surface::{
+    PackageOrigin, ProvidedSourceRoot, SourceFileKindRegistry, SourcePackageRegistry,
+};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::{InvalidConfigReason, PreparedFailure};
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::projects::settings::Config;
 
+use super::project_structure_diagnostics::capture_structure_diagnostic;
 use super::source_tree_index::SourceTreeIndex;
 
 use std::fs;
@@ -55,6 +60,19 @@ impl SourcePackageBoundaryIndexes {
             .map(|entry| (entry.package_prefix.as_str(), &entry.index))
     }
 
+    /// Look up one registered package boundary by its exact `@`-stripped prefix.
+    ///
+    /// WHY: route prepublication addresses a boundary by its registered prefix and the vector is
+    ///      already sorted, so binary search keeps that lookup logarithmic. External dependency
+    ///      routing deliberately walks every boundary instead: it must test route suffixes and
+    ///      private-path rejection against the full registration set, not one known prefix.
+    pub(crate) fn get(&self, package_prefix: &str) -> Option<&SourceTreeIndex> {
+        self.indexes
+            .binary_search_by(|entry| entry.package_prefix.as_str().cmp(package_prefix))
+            .ok()
+            .map(|index| &self.indexes[index].index)
+    }
+
     /// Derive the resolver's narrow package-root view from indexed facts.
     ///
     /// WHAT: projects each boundary index to its canonical root directory and selected
@@ -77,6 +95,39 @@ impl SourcePackageBoundaryIndexes {
 
         PreparedSourcePackageRoots::from_entries(entries)
     }
+}
+
+/// Reject a registered project-local package that reuses the project package name.
+///
+/// WHAT: compares every project-local source-backed package prefix with the configured project
+///       package name before any package boundary is indexed.
+/// WHY: [`StablePackageIdentity::project_local`] and [`StablePackageIdentity::source_package`]
+///      both key a project-local identity by that one name. Reusing the name would make unrelated
+///      module and declaration origins equal, so const and generic rows could collide even when
+///      nothing imports or calls either package. The identity model itself deliberately stays
+///      unchanged, so the ambiguous registration is rejected instead.
+pub(crate) fn reject_project_package_prefix_collision(
+    config: &Config,
+    source_packages: &SourcePackageRegistry,
+    string_table: &mut StringTable,
+) -> Result<(), PreparedFailure> {
+    for package in source_packages.iter() {
+        if package.metadata.origin != PackageOrigin::ProjectLocal
+            || package.package_prefix != config.project_name
+        {
+            continue;
+        }
+        let ProvidedSourceRoot::Filesystem(root) = &package.root;
+        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+        let reason = InvalidConfigReason::ProjectPackagePrefixCollision {
+            project_name: diagnostic_strings.intern(&config.project_name),
+            prefix: diagnostic_strings.intern(&package.package_prefix),
+            package_root: diagnostic_strings.intern_path(root),
+        };
+        let diagnostic = config.config_diagnostic("name", reason, &mut diagnostic_strings);
+        return Err(capture_structure_diagnostic(diagnostic, string_table));
+    }
+    Ok(())
 }
 
 /// Build one source-package boundary index per registered source-backed package.

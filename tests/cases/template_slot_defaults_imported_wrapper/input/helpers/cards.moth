@@ -1,1 +1,2 @@
 card #= [:title=[$slot title = "Imported fallback"]|body=[$slot = "Imported body fallback"]]
+stored_title #= [$in title:Stored title]

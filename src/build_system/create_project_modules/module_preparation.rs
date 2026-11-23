@@ -39,7 +39,9 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::path_interner::{PathInternerFork, PathInternerForkSource};
+use crate::compiler_frontend::symbols::path_interner::{
+    PathId, PathInternError, PathInternerFork, PathInternerForkSource,
+};
 use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableForkSource};
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
@@ -434,6 +436,23 @@ pub(super) struct ModuleSyntaxDiscovery<'a, 'texts> {
 pub(super) struct RegisteredModuleSources {
     pub(super) candidate_source_ids: Vec<SourceId>,
     pub(super) source_module_origins: Arc<SourceModuleOriginTable>,
+}
+
+/// One facade root's completed preparation retained for its module's later discovery walk.
+///
+/// WHAT: keeps the prepared output beside the string/path delta that issued its identities and the
+///       byte and warning facts the walk would otherwise accumulate while preparing the facade.
+/// WHY: consumer namespaces need public route facts before any module walk runs, yet the walk must
+///      consume exactly this output instead of tokenizing or parsing the facade a second time.
+///      The local domains travel with the output so adoption can merge them into the walk's own
+///      domain before the output is retained.
+pub(super) struct FacadePreparedSource {
+    pub(super) output: FileFrontendPrepareOutput,
+    pub(super) string_table: StringTable,
+    pub(super) string_base_len: usize,
+    pub(super) path_fork: PathInternerFork,
+    pub(super) source_byte_len: usize,
+    pub(super) warnings: Vec<DiagnosticDraft>,
 }
 
 impl ModulePreparationContext<'_> {
@@ -872,16 +891,8 @@ impl ModulePreparationContext<'_> {
             // authored entries that exhausted the table.
             let path_remap = path_fork
                 .merge_delta_from(&chunk.local_path_fork, &remap)
-                .map_err(|error| match error {
-                    crate::compiler_frontend::symbols::path_interner::PathInternError::TableFull => {
-                        PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(DiagnosticBag::from(token_lexical::source_span_capacity(
-                            0,
-                            u32::MAX,
-                            SourceSpanCapacityResource::LogicalPath,
-                            None,
-                        )), string_table.take_for_handoff(), None, None))
-                    }
-                    error => PreparedFailure::Infrastructure(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!("file preparation path merge failed: {error:?}")).into()),
+                .map_err(|error| {
+                    path_delta_merge_failure(error, string_table, "file preparation")
                 })?;
 
             let path_remap_is_identity = path_remap.is_identity();
@@ -1232,6 +1243,82 @@ impl ModuleSyntaxDiscovery<'_, '_> {
         )
     }
 
+    /// Render one retained path through this discovery's live string and path domains.
+    ///
+    /// WHY: the facade route prepass owns the path identity of an authored `$export` route before
+    ///      any module walk exists; it renders that identity through the same fork that issued it
+    ///      rather than copying route components into a parallel spelling.
+    pub(super) fn render_portable_path(&self, path: PathId) -> String {
+        self.path_fork
+            .render_portable(path, &self.string_table, &mut Vec::new())
+    }
+
+    /// Take the local string/path delta and accumulated facts that must travel with one facade
+    /// output to the module walk that will retain it.
+    ///
+    /// WHY: the prepass prepares one facade root without finishing the module. Handing back the
+    ///      output alone would strand its local `StringId`/`PathId` domain and drop its warnings,
+    ///      so the adopting walk could neither remap nor account for it.
+    pub(super) fn into_facade_prepared_source(
+        self,
+        output: FileFrontendPrepareOutput,
+        string_base_len: usize,
+    ) -> FacadePreparedSource {
+        FacadePreparedSource {
+            output,
+            string_table: self.string_table,
+            string_base_len,
+            path_fork: self.path_fork,
+            source_byte_len: self.source_byte_count,
+            warnings: self.warnings,
+        }
+    }
+
+    /// Adopt one prepass-prepared facade into this walk's live string and path domains.
+    ///
+    /// WHAT: merges the facade's string delta, then its path delta through that string remap, and
+    ///       rewrites the prepared output into the walk's domain before the caller consumes its
+    ///       authored dependencies and retains it.
+    /// WHY: the prepass and the walk fork from the same boundary sources but into separate local
+    ///      domains. Rewriting once at adoption keeps every retained `StringId`/`PathId` valid for
+    ///      the rest of the module without re-preparing the facade or leaving two domains alive.
+    pub(super) fn adopt_facade_preparation(
+        &mut self,
+        prepared: FacadePreparedSource,
+    ) -> Result<FileFrontendPrepareOutput, PreparedFailure> {
+        let FacadePreparedSource {
+            mut output,
+            string_table,
+            string_base_len,
+            path_fork,
+            source_byte_len,
+            mut warnings,
+        } = prepared;
+
+        let string_remap = self
+            .string_table
+            .merge_delta_from(&string_table, string_base_len);
+        let path_remap = self
+            .path_fork
+            .merge_delta_from(&path_fork, &string_remap)
+            .map_err(|error| {
+                path_delta_merge_failure(error, &mut self.string_table, "facade route prepass")
+            })?;
+
+        output.remap_string_ids(&string_remap)?;
+        output.remap_path_ids(&path_remap)?;
+        // Warnings were detached from the output by `prepare_source`; they still hold the
+        // facade-local string/path IDs and must follow the same remap or they name another
+        // facade's identifier text.
+        for warning in &mut warnings {
+            warning.remap_string_ids(&string_remap);
+            warning.remap_path_ids(&path_remap);
+        }
+        self.source_byte_count += source_byte_len;
+        self.warnings.extend(warnings);
+        Ok(output)
+    }
+
     /// Resolve one prepared file-reference row while keeping the source table and its string
     /// table in their distinct owned lanes. The build resolver never receives an expression or
     pub(super) fn resolve_file_reference(
@@ -1519,6 +1606,41 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             },
             warnings,
         ))
+    }
+}
+
+/// Map a failed path-delta merge into its project-build failure lane.
+///
+/// WHAT: authored exhaustion of the compact path table becomes a deterministic source-capacity
+///       diagnostic; every other path-interner error stays an internal failure.
+/// WHY: both the chunk merge tail and facade adoption merge a delta into the module fork, so one
+///      owner keeps their string-table handoff and failure lanes identical.
+fn path_delta_merge_failure(
+    error: PathInternError,
+    string_table: &mut StringTable,
+    operation: &str,
+) -> PreparedFailure {
+    match error {
+        PathInternError::TableFull => {
+            PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+                DiagnosticBag::from(token_lexical::source_span_capacity(
+                    0,
+                    u32::MAX,
+                    SourceSpanCapacityResource::LogicalPath,
+                    None,
+                )),
+                string_table.take_for_handoff(),
+                None,
+                None,
+            ))
+        }
+        error => PreparedFailure::Infrastructure(
+            InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!("{operation} path merge failed: {error:?}"),
+            )
+            .into(),
+        ),
     }
 }
 

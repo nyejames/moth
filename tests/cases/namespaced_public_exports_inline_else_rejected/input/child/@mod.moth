@@ -1,0 +1,5 @@
+-- An inline else body is a real statement start.
+render |flag Bool| -> String:
+    if flag: return "yes" else $export @missing symbol;
+    return "no"
+;

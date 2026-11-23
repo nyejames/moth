@@ -6,7 +6,7 @@
 //! locations re-encode the decoded page name.
 
 use crate::build_system::output::{parse_native_relative_path, percent_encode_url_path};
-use crate::projects::dev_server::dev_client::{DEV_CLIENT_MARKER, dev_client_snippet};
+use crate::projects::dev_server::dev_client::dev_client_snippet;
 use crate::projects::dev_server::state::{ServedArtifactSnapshot, ServedHtmlEntrySnapshot};
 use crate::projects::routing::{HtmlSiteConfig, PageUrlStyle, prefix_origin};
 use std::path::{Component, Path, PathBuf};
@@ -39,11 +39,11 @@ pub enum ResolvedRequest {
     InvalidPath,
 }
 
+/// Install the development client into pristine generated HTML.
+///
+/// The HTTP handler passes freshly captured output bytes for each response, so authored content
+/// that happens to contain `DEV_CLIENT_MARKER` is not evidence of an earlier injection.
 pub fn inject_dev_client(html: &str, origin: &str, build_version: u64, entry: &str) -> String {
-    if html.contains(DEV_CLIENT_MARKER) {
-        return html.to_owned();
-    }
-
     let snippet = dev_client_snippet(origin, build_version, Some(entry));
     let lowercase_html = html.to_ascii_lowercase();
     // Install at the start of the generated head, before even head-local classic scripts.

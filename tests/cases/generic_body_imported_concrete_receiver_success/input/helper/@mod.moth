@@ -1,0 +1,8 @@
+$export
+Label = |
+    text String,
+|
+
+render |this Label| -> String:
+    return this.text
+;

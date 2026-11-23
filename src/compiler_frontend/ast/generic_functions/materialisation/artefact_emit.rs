@@ -16,6 +16,7 @@ use super::stable_types::{
     import_canonical_folded_value,
 };
 use super::{MaterialisedGenericAst, ModuleMaterialisationInput};
+use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::AstBuildContext;
 use crate::compiler_frontend::ast::AstImportedFunctionContract;
@@ -63,7 +64,7 @@ use crate::compiler_frontend::public_interface::{
 #[cfg(test)]
 use crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity;
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, OriginFunctionId,
+    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModuleRootRole, OriginFunctionId,
     StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::FrozenIdentityHandle;
@@ -141,6 +142,61 @@ fn complete_identity_arcs<'a>(
             incomplete_pair_message,
         )),
     }
+}
+
+/// Stable spelling of one package origin inside a synthetic materialisation mount.
+fn package_origin_domain_component(origin: PackageOrigin) -> &'static str {
+    match origin {
+        PackageOrigin::Core => "core",
+        PackageOrigin::Builder => "builder",
+        PackageOrigin::ProjectLocal => "project_local",
+        PackageOrigin::Dependency => "dependency",
+    }
+}
+
+/// Stable spelling of one module-root role inside a synthetic materialisation mount.
+fn module_role_domain_component(role: ModuleRootRole) -> &'static str {
+    match role {
+        ModuleRootRole::Normal => "normal",
+        ModuleRootRole::Support => "support",
+        ModuleRootRole::Entry => "entry",
+        ModuleRootRole::Shared => "shared",
+        ModuleRootRole::SyntheticProjectContext => "project_context",
+    }
+}
+
+/// Intern the disjoint consumer-domain mount for one declaring module's const closure.
+///
+/// WHAT: builds a synthetic component chain from the stable module origin, then interns it in the
+///       requester's path fork.
+/// WHY: two registered packages can spell the same authored declaration path. Mounting their
+///      whole retained closures under stable per-module subtrees keeps executable rows disjoint in
+///      the requester without changing any stable origin identity.
+fn intern_const_domain_mount(
+    origin: &StableModuleOriginIdentity,
+    path_fork: &mut PathInternerFork,
+    strings: &mut StringTable,
+) -> Option<PathId> {
+    // Authored paths are component sequences. A NUL-bearing component cannot be produced by
+    // source parsing or a filesystem name, so this root namespace can never alias an authored
+    // module or declaration path.
+    const CONST_DOMAIN_ROOT: &str = "\0@const-materialisation";
+    let package = origin.package();
+    let mut components = Vec::with_capacity(8);
+    components.push(strings.intern(CONST_DOMAIN_ROOT));
+    components.push(strings.intern(package_origin_domain_component(package.origin())));
+    for component in package.name().split('/').filter(|part| !part.is_empty()) {
+        components.push(strings.intern(component));
+    }
+    components.push(strings.intern(module_role_domain_component(origin.role())));
+    for component in origin
+        .logical_module_path()
+        .split('/')
+        .filter(|part| !part.is_empty())
+    {
+        components.push(strings.intern(component));
+    }
+    path_fork.try_intern_components(&components)
 }
 
 impl ModuleMaterialisationContext {
@@ -263,8 +319,9 @@ impl ModuleMaterialisationContext {
 
     /// Rebase only the selected retained const rows into a requester's path/string domain.
     ///
-    /// WHAT: re-interns the const issuing table, then clones and remaps exactly the rows named by
-    ///       `row_indices` in their published order.
+    /// WHAT: clones the rows named by `row_indices`, mounts exactly the source paths they
+    ///       reference below a synthetic subtree owned by the declaring module, then remaps them
+    ///       in their published order.
     /// WHY:  reachability is decided from the published row index before any row copy. A provider
     ///       can retain thousands of unrelated const bodies, and copying the whole module context
     ///       for one import would make a cold consumer import proportional to the provider.
@@ -277,14 +334,6 @@ impl ModuleMaterialisationContext {
         let Some((path_table, source_strings)) = self.const_identity_arcs()? else {
             return Ok(None);
         };
-        let path_remap = path_fork
-            .remap_table_from_strings(path_table, source_strings.as_ref(), destination_strings)
-            .ok_or_else(|| {
-                InfrastructureFailure::internal(
-                    CompilerStage::GenericMaterialisation,
-                    "published const identity tables could not be re-interned",
-                )
-            })?;
         let mut rows = row_indices
             .iter()
             .map(|index| {
@@ -301,6 +350,55 @@ impl ModuleMaterialisationContext {
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;
+        // Record exactly the source paths these rows reference. The issuing table can contain
+        // mounts inherited from earlier imports, and re-interning all of them would repeat each
+        // predecessor's domain in every consumer.
+        let probe = PathIdRemap::recording();
+        for row in &mut rows {
+            row.remap_path_ids(&probe);
+        }
+        let mut required_paths = probe.take_recorded();
+        required_paths.sort_unstable();
+        required_paths.dedup();
+        // Spelling alone gives independent package boundaries the same consumer path for an
+        // equally spelled declaration. The const lane keys executables and declarations by that
+        // path, so mount the selected retained closure under its stable module origin before
+        // remapping. Stable origins still travel unchanged on every row.
+        let mount = match self.module_origin.as_ref() {
+            Some(origin) => Some(
+                intern_const_domain_mount(origin, path_fork, destination_strings).ok_or_else(
+                    || {
+                        InfrastructureFailure::internal(
+                            CompilerStage::GenericMaterialisation,
+                            "published const domain mount could not be interned",
+                        )
+                    },
+                )?,
+            ),
+            None => None,
+        };
+        let path_remap = match mount {
+            Some(mount) => path_fork.remap_selected_table_from_strings_below(
+                mount,
+                &required_paths,
+                path_table,
+                source_strings.as_ref(),
+                destination_strings,
+            ),
+            None => path_fork.remap_table_from_strings(
+                path_table,
+                source_strings.as_ref(),
+                destination_strings,
+            ),
+        }
+        .ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::GenericMaterialisation,
+                "published const identity tables could not be re-interned",
+            )
+        })?;
+        #[cfg(feature = "data_layout_memory_probe")]
+        crate::compiler_frontend::instrumentation::record_requester_remap(&path_remap);
         #[cfg(test)]
         super::const_materialisation::reuse_probe::record_selected_rows(&rows);
         for row in &mut rows {
@@ -434,9 +532,9 @@ impl GenericTemplateArtefact {
             path_fork,
             external_package_registry,
             style_directives,
+            provider_materialisations,
             build_profile,
             template_const_loop_iteration_limit,
-            const_execution_limits,
             #[cfg(feature = "timers")]
             timing_context,
         } = input;
@@ -469,9 +567,9 @@ impl GenericTemplateArtefact {
             config_resolution: None,
             build_config_values: Arc::new(Default::default()),
             builder_root_slots: None,
-            provider_materialisations: None,
+            provider_materialisations: Some(provider_materialisations),
             template_const_loop_iteration_limit,
-            const_execution_limits,
+            const_execution_limits: requester_context.const_execution_meter.borrow().limits,
             capacity_estimate: FrontendArenaCapacityEstimate::default(),
             #[cfg(feature = "timers")]
             timing_context,
@@ -479,7 +577,11 @@ impl GenericTemplateArtefact {
             timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Generated,
         };
         let (mut phase_context, string_table_ref, path_fork_ref) =
-            AstPhaseContext::from_build_context(build_context, Arc::new(Default::default()))?;
+            AstPhaseContext::from_build_context_with_execution_meter(
+                build_context,
+                Arc::new(Default::default()),
+                Rc::clone(&requester_context.const_execution_meter),
+            )?;
         crate::timing_scope_attributed!(
             timing_guard_generated_ast_total,
             crate::timing::TimingMetric::FrontendGeneratedAstTotal,

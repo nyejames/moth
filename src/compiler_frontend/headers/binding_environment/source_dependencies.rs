@@ -126,10 +126,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             SourceDependencyAccess::Internal | SourceDependencyAccess::DirectSourceExport => true,
             SourceDependencyAccess::PublicExport { exported_entries } => {
                 exported_entries.iter().any(|entry| {
-                    entry
-                        .target
-                        .source_path()
-                        .is_some_and(|path| path == nominal_type_path)
+                    entry.route.is_none()
+                        && entry
+                            .target
+                            .source_path()
+                            .is_some_and(|path| path == nominal_type_path)
                 })
             }
         }

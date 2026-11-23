@@ -439,6 +439,535 @@ fn directory_physical_aliases_to_config_file_are_rejected_before_dispatch() {
 
 #[cfg(unix)]
 #[test]
+fn directory_content_aliases_to_moth_sources_are_rejected_before_admission() {
+    // A visible alias can give a Moth source an authored `.mtf` spelling. Admitting it as content
+    // would publish a `content` lookup against the root file's own declarations, so the shared
+    // physical resolver must reject the kind mismatch before any target or worklist entry exists.
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().expect("test root should be created");
+    let root = temp.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("source root should be created");
+    fs::write(src.join("@entry.moth"), "content #= \"private\"\n")
+        .expect("entry root should be created");
+    symlink("@entry.moth", src.join("alias.mtf")).expect("content alias should be created");
+
+    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
+    let canonical_src = fs::canonicalize(&src).expect("entry root should canonicalize");
+    let mut discovery_strings = StringTable::new();
+    let mut config = Config::new(canonical_root);
+    config.project_name = String::from("moth_content_alias_fixture");
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    let source_packages = SourcePackageRegistry::default();
+    let external_import_providers = ExternalImportProviderRegistry::default();
+    let index = SourceTreeIndex::discover(
+        canonical_src.clone(),
+        SourceTreeProjectContext {
+            validated_output_settings: None,
+            config_source: None,
+        },
+        &config,
+        &source_packages,
+        &source_file_kinds,
+        &external_import_providers,
+        &mut discovery_strings,
+    )
+    .expect("source tree index should build");
+    let consumer_module = index
+        .module_identities()
+        .module_id_for_directory(&canonical_src)
+        .expect("the selected entry root should be a module");
+
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let source_files = SourceDatabase::empty();
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut path_syntax = PathSyntaxTable::new();
+    let path = path_fork
+        .try_intern_portable_path("alias.mtf", &mut strings)
+        .expect("test path fits");
+    let path_syntax_id = path_syntax
+        .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+        .expect("test path syntax row should fit");
+    let reference = PreparedFileReference {
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+        source_file: SourceId::COMPILATION_ROOT,
+        path_syntax: path_syntax_id,
+        class: PreparedFileReferenceClass::ContentSource,
+    };
+    let mut discovered_content_sources = Vec::new();
+    let resolved = FileReferenceResolver::new(&index, &mut resource_inputs)
+        .resolve(
+            consumer_module,
+            &path_syntax,
+            &reference,
+            &source_files,
+            &mut strings,
+            &path_fork,
+            &mut discovered_content_sources,
+        )
+        .expect("a Moth content alias should stay a typed outcome");
+
+    assert!(
+        matches!(
+            resolved.outcome,
+            ResolvedFileReferenceOutcome::Diagnostic(
+                ResolvedFileReferenceFailure::MothTargetHasNoValue { .. }
+            )
+        ),
+        "a `.mtf` alias to a Moth source must report the Moth-file value diagnostic, got {:?}",
+        resolved.outcome
+    );
+    assert!(
+        discovered_content_sources.is_empty(),
+        "a rejected kind mismatch must not enter the content worklist"
+    );
+    assert!(resource_inputs.records().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn conflicting_content_aliases_follow_the_physical_source_kind() {
+    // Two visible spellings can resolve to one physical file with different extensions. The
+    // retained record must follow the recognised physical entry, not whichever alias sorts
+    // first, so a template helper stays content and a Moth helper stays a non-content source.
+    use super::super::source_tree_index::SourceClassification;
+    use crate::builder_surface::SourceFileKind;
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().expect("test root should be created");
+    let root = temp.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("source root should be created");
+    fs::write(src.join("@entry.moth"), "value = 1\n").expect("entry root should be created");
+    fs::write(src.join("helper.moth"), "helper #= 1\n").expect("Moth helper should be created");
+    fs::write(src.join("template.mtf"), "[:template]\n")
+        .expect("template helper should be created");
+    symlink("helper.moth", src.join("alias.mtf")).expect("Moth content alias should be created");
+    symlink("template.mtf", src.join("alias.moth")).expect("template Moth alias should be created");
+
+    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
+    let canonical_src = fs::canonicalize(&src).expect("entry root should canonicalize");
+    let mut discovery_strings = StringTable::new();
+    let mut config = Config::new(canonical_root);
+    config.project_name = String::from("moth_conflicting_alias_fixture");
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    let source_packages = SourcePackageRegistry::default();
+    let external_import_providers = ExternalImportProviderRegistry::default();
+    let index = SourceTreeIndex::discover(
+        canonical_src.clone(),
+        SourceTreeProjectContext {
+            validated_output_settings: None,
+            config_source: None,
+        },
+        &config,
+        &source_packages,
+        &source_file_kinds,
+        &external_import_providers,
+        &mut discovery_strings,
+    )
+    .expect("source tree index should build");
+    let consumer_module = index
+        .module_identities()
+        .module_id_for_directory(&canonical_src)
+        .expect("the selected entry root should be a module");
+
+    let canonical_helper = fs::canonicalize(src.join("helper.moth")).expect("helper should exist");
+    let canonical_template =
+        fs::canonicalize(src.join("template.mtf")).expect("template should exist");
+    let helper_index = index
+        .source_index_for_canonical_path(&canonical_helper)
+        .expect("the Moth helper should be indexed");
+    assert!(
+        matches!(
+            index.source(helper_index).classification(),
+            SourceClassification::CompilerSemantic(SourceFileKind::Moth)
+        ),
+        "the physical `.moth` entry must decide the retained kind"
+    );
+    let template_index = index
+        .source_index_for_canonical_path(&canonical_template)
+        .expect("the template helper should be indexed");
+    assert!(
+        matches!(
+            index.source(template_index).classification(),
+            SourceClassification::CompilerSemantic(SourceFileKind::MothTemplate)
+        ),
+        "a visible `.moth` alias must not disguise the physical `.mtf` entry"
+    );
+
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let source_files = SourceDatabase::empty();
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut path_syntax = PathSyntaxTable::new();
+    let path = path_fork
+        .try_intern_portable_path("alias.mtf", &mut strings)
+        .expect("test path fits");
+    let path_syntax_id = path_syntax
+        .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+        .expect("test path syntax row should fit");
+    let reference = PreparedFileReference {
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+        source_file: SourceId::COMPILATION_ROOT,
+        path_syntax: path_syntax_id,
+        class: PreparedFileReferenceClass::ContentSource,
+    };
+    let mut discovered_content_sources = Vec::new();
+    let resolved = FileReferenceResolver::new(&index, &mut resource_inputs)
+        .resolve(
+            consumer_module,
+            &path_syntax,
+            &reference,
+            &source_files,
+            &mut strings,
+            &path_fork,
+            &mut discovered_content_sources,
+        )
+        .expect("a conflicting-kind alias should stay a typed outcome");
+
+    let ResolvedFileReferenceOutcome::Diagnostic(failure) = resolved.outcome else {
+        panic!(
+            "the physical Moth helper must not be admitted as content, got {:?}",
+            resolved.outcome
+        );
+    };
+    assert!(matches!(
+        failure,
+        ResolvedFileReferenceFailure::MothTargetHasNoValue { .. }
+    ));
+    assert_eq!(
+        compact_resolved_failure_for_test(failure)
+            .views()
+            .next()
+            .and_then(|view| view.reason_key()),
+        Some("invalid_expression.moth_file_has_no_value")
+    );
+    assert!(discovered_content_sources.is_empty());
+    assert!(resource_inputs.records().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn physical_root_surfaces_keep_their_authored_moth_kind() {
+    // A symlinked root surface has a differently named canonical target. The authored root role
+    // must keep the record's Moth kind so a direct content reference to the physical target is
+    // still rejected as a Moth file.
+    use super::super::source_tree_index::SourceClassification;
+    use crate::builder_surface::SourceFileKind;
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().expect("test root should be created");
+    let root = temp.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("source root should be created");
+    fs::write(src.join("entry.mtf"), "[:entry]\n").expect("entry target should be created");
+    symlink("entry.mtf", src.join("@entry.moth")).expect("entry root should be created");
+
+    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
+    let canonical_src = fs::canonicalize(&src).expect("entry root should canonicalize");
+    let mut discovery_strings = StringTable::new();
+    let mut config = Config::new(canonical_root);
+    config.project_name = String::from("moth_root_alias_fixture");
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    let source_packages = SourcePackageRegistry::default();
+    let external_import_providers = ExternalImportProviderRegistry::default();
+    let index = SourceTreeIndex::discover(
+        canonical_src.clone(),
+        SourceTreeProjectContext {
+            validated_output_settings: None,
+            config_source: None,
+        },
+        &config,
+        &source_packages,
+        &source_file_kinds,
+        &external_import_providers,
+        &mut discovery_strings,
+    )
+    .expect("source tree index should build");
+    let consumer_module = index
+        .module_identities()
+        .module_id_for_directory(&canonical_src)
+        .expect("the selected entry root should be a module");
+
+    let canonical_entry = fs::canonicalize(src.join("entry.mtf")).expect("entry should exist");
+    let entry_index = index
+        .source_index_for_canonical_path(&canonical_entry)
+        .expect("the entry surface should be indexed");
+    let entry_record = index.source(entry_index);
+    assert!(
+        matches!(
+            entry_record.classification(),
+            SourceClassification::CompilerSemantic(SourceFileKind::Moth)
+        ),
+        "the authored root role must keep the Moth kind"
+    );
+
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let source_files = SourceDatabase::empty();
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut path_syntax = PathSyntaxTable::new();
+    let path = path_fork
+        .try_intern_portable_path("entry.mtf", &mut strings)
+        .expect("test path fits");
+    let path_syntax_id = path_syntax
+        .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+        .expect("test path syntax row should fit");
+    let reference = PreparedFileReference {
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+        source_file: SourceId::COMPILATION_ROOT,
+        path_syntax: path_syntax_id,
+        class: PreparedFileReferenceClass::ContentSource,
+    };
+    let mut discovered_content_sources = Vec::new();
+    let resolved = FileReferenceResolver::new(&index, &mut resource_inputs)
+        .resolve(
+            consumer_module,
+            &path_syntax,
+            &reference,
+            &source_files,
+            &mut strings,
+            &path_fork,
+            &mut discovered_content_sources,
+        )
+        .expect("a root-surface alias should stay a typed outcome");
+
+    assert!(
+        matches!(
+            resolved.outcome,
+            ResolvedFileReferenceOutcome::Diagnostic(
+                ResolvedFileReferenceFailure::MothTargetHasNoValue { .. }
+            )
+        ),
+        "the root surface must keep Moth semantics, got {:?}",
+        resolved.outcome
+    );
+    assert!(discovered_content_sources.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn directory_rejects_content_aliases_to_provider_owned_files() {
+    // A content-spelled alias can resolve to an ordinary provider-owned input. Reaching the index
+    // invariant with an InfrastructureFailure would blame the compiler for authored source; the
+    // resolver must instead publish a typed user diagnostic before admission.
+    use std::os::unix::fs::symlink;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+
+    let temp = tempfile::tempdir().expect("test root should be created");
+    let root = temp.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("source root should be created");
+    fs::write(src.join("@entry.moth"), "value = 1\n").expect("entry root should be created");
+    fs::write(src.join("drawing.js"), "export const drawing = 1;\n")
+        .expect("provider source should be created");
+    symlink("drawing.js", src.join("alias.mtf")).expect("provider content alias should be created");
+
+    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
+    let canonical_src = fs::canonicalize(&src).expect("entry root should canonicalize");
+    let mut discovery_strings = StringTable::new();
+    let mut config = Config::new(canonical_root);
+    config.project_name = String::from("moth_provider_alias_fixture");
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    let source_packages = SourcePackageRegistry::default();
+    let mut external_import_providers = ExternalImportProviderRegistry::default();
+    external_import_providers.register(Arc::new(super::ResolvingCountingProvider::new(Arc::new(
+        AtomicUsize::new(0),
+    ))));
+    let index = SourceTreeIndex::discover(
+        canonical_src.clone(),
+        SourceTreeProjectContext {
+            validated_output_settings: None,
+            config_source: None,
+        },
+        &config,
+        &source_packages,
+        &source_file_kinds,
+        &external_import_providers,
+        &mut discovery_strings,
+    )
+    .expect("source tree index should build");
+    let consumer_module = index
+        .module_identities()
+        .module_id_for_directory(&canonical_src)
+        .expect("the selected entry root should be a module");
+
+    let canonical_drawing =
+        fs::canonicalize(src.join("drawing.js")).expect("the provider source should exist");
+    let drawing_index = index
+        .source_index_for_canonical_path(&canonical_drawing)
+        .expect("the provider source should be indexed");
+    assert!(
+        matches!(
+            index.source(drawing_index).classification(),
+            super::super::source_tree_index::SourceClassification::ProviderOwned(_)
+        ),
+        "the physical provider entry must keep provider ownership"
+    );
+
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let source_files = SourceDatabase::empty();
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut path_syntax = PathSyntaxTable::new();
+    let path = path_fork
+        .try_intern_portable_path("alias.mtf", &mut strings)
+        .expect("test path fits");
+    let path_syntax_id = path_syntax
+        .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+        .expect("test path syntax row should fit");
+    let reference = PreparedFileReference {
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+        source_file: SourceId::COMPILATION_ROOT,
+        path_syntax: path_syntax_id,
+        class: PreparedFileReferenceClass::ContentSource,
+    };
+    let mut discovered_content_sources = Vec::new();
+    let resolved = FileReferenceResolver::new(&index, &mut resource_inputs)
+        .resolve(
+            consumer_module,
+            &path_syntax,
+            &reference,
+            &source_files,
+            &mut strings,
+            &path_fork,
+            &mut discovered_content_sources,
+        )
+        .expect("a provider-owned alias should stay a typed outcome");
+
+    let ResolvedFileReferenceOutcome::Diagnostic(failure) = resolved.outcome else {
+        panic!(
+            "a provider-owned target must not resolve as content, got {:?}",
+            resolved.outcome
+        );
+    };
+    assert_eq!(
+        invalid_path_reason(failure),
+        Some(InvalidCompileTimePathCode::ProviderOwnedContentTarget)
+    );
+    assert_eq!(
+        compact_resolved_failure_for_test(failure)
+            .views()
+            .next()
+            .and_then(|view| view.reason_key()),
+        Some("invalid_compile_time_path.provider_owned_content_target")
+    );
+    assert!(discovered_content_sources.is_empty());
+    assert!(resource_inputs.records().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn synthetic_content_alias_to_a_moth_helper_is_rejected() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().expect("test root should be created");
+    let root = fs::canonicalize(temp.path()).expect("test root should canonicalize");
+    fs::write(root.join("helper.moth"), "helper #= 1\n").expect("Moth helper should be created");
+    symlink("helper.moth", root.join("alias.mtf")).expect("content alias should be created");
+
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let mut resolver =
+        SingleFileReferenceResolver::new(root.clone(), &source_file_kinds, &mut resource_inputs);
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut path_syntax = PathSyntaxTable::new();
+    let owner = root.join("main.moth");
+    let path = path_fork
+        .try_intern_portable_path("alias.mtf", &mut strings)
+        .expect("test path fits");
+    let path_syntax_id = path_syntax
+        .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+        .expect("test path syntax row should fit");
+    let reference = PreparedFileReference {
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+        source_file: SourceId::COMPILATION_ROOT,
+        path_syntax: path_syntax_id,
+        class: PreparedFileReferenceClass::ContentSource,
+    };
+
+    let resolved = resolver
+        .resolve(&owner, &path_syntax, &reference, &mut strings, &path_fork)
+        .expect("a Moth alias should stay a typed outcome");
+    let SingleFileReferenceOutcome::Diagnostic(failure) = resolved.outcome else {
+        panic!(
+            "a `.mtf` alias to a Moth helper must not resolve as content, got {:?}",
+            resolved.outcome
+        );
+    };
+    assert!(matches!(
+        failure,
+        ResolvedFileReferenceFailure::MothTargetHasNoValue { .. }
+    ));
+    assert_eq!(
+        compact_resolved_failure_for_test(failure)
+            .views()
+            .next()
+            .and_then(|view| view.reason_key()),
+        Some("invalid_expression.moth_file_has_no_value")
+    );
+    assert!(resource_inputs.records().is_empty());
+    assert!(resource_inputs.missing_watch_interests().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn synthetic_content_alias_to_a_provider_owned_file_stays_typed() {
+    // Single-file resolution has no provider registry, so it classifies the physical `.js` entry
+    // as an unsupported content kind rather than reaching the directory index invariant. Keep that
+    // user-facing outcome typed, with no resource record or watch interest.
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().expect("test root should be created");
+    let root = fs::canonicalize(temp.path()).expect("test root should canonicalize");
+    fs::write(root.join("drawing.js"), "export const drawing = 1;\n")
+        .expect("provider source should be created");
+    symlink("drawing.js", root.join("alias.mtf")).expect("content alias should be created");
+
+    let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let mut resolver =
+        SingleFileReferenceResolver::new(root.clone(), &source_file_kinds, &mut resource_inputs);
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut path_syntax = PathSyntaxTable::new();
+    let owner = root.join("main.moth");
+    let path = path_fork
+        .try_intern_portable_path("alias.mtf", &mut strings)
+        .expect("test path fits");
+    let path_syntax_id = path_syntax
+        .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+        .expect("test path syntax row should fit");
+    let reference = PreparedFileReference {
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+        source_file: SourceId::COMPILATION_ROOT,
+        path_syntax: path_syntax_id,
+        class: PreparedFileReferenceClass::ContentSource,
+    };
+
+    let resolved = resolver
+        .resolve(&owner, &path_syntax, &reference, &mut strings, &path_fork)
+        .expect("a provider-owned alias should stay a typed outcome");
+    let SingleFileReferenceOutcome::Diagnostic(
+        ResolvedFileReferenceFailure::UnsupportedSourceFileKind { extension, .. },
+    ) = resolved.outcome
+    else {
+        panic!(
+            "a provider-owned target must not resolve as content, got {:?}",
+            resolved.outcome
+        );
+    };
+    assert_eq!(strings.resolve(extension), "js");
+    assert!(resource_inputs.records().is_empty());
+    assert!(resource_inputs.missing_watch_interests().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
 fn synthetic_physical_aliases_to_config_file_are_rejected_before_dispatch() {
     use std::os::unix::fs::symlink;
 

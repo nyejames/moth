@@ -1,0 +1,57 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 1
+reason = "invalid_template_structure.helper_outside_wrapper_slot"
+path = "input/@entry.moth"
+line = 7
+column = 20
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 2
+reason = "invalid_template_structure.helper_outside_wrapper_slot"
+path = "input/@entry.moth"
+line = 11
+column = 26
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 3
+reason = "invalid_template_structure.helper_outside_wrapper_slot"
+path = "input/@entry.moth"
+line = 15
+column = 29
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 1
+reason = "invalid_template_structure.helper_outside_wrapper_slot"
+path = "input/@entry.moth"
+line = 7
+column = 20
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 2
+reason = "invalid_template_structure.helper_outside_wrapper_slot"
+path = "input/@entry.moth"
+line = 11
+column = 26
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+occurrence = 3
+reason = "invalid_template_structure.helper_outside_wrapper_slot"
+path = "input/@entry.moth"
+line = 15
+column = 29

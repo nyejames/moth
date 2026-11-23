@@ -57,12 +57,12 @@ use crate::compiler_frontend::headers::module_symbols::{
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginConstantId, OriginDeclarationId, OriginFunctionId, OriginTraitId,
-    OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+    OriginTypeCategory, OriginTypeId, PublicExportRoute, StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -224,6 +224,7 @@ pub(in crate::compiler_frontend) fn build_direct_export_seed(
         source_provider_dependencies,
         external_registry,
         string_table,
+        path_fork,
     )?;
 
     Ok(
@@ -240,6 +241,7 @@ fn collect_binding_exports<'a>(
     source_provider_dependencies: &'a SourceProviderDependencySet<'a>,
     external_registry: &ExternalPackageRegistry,
     string_table: &StringTable,
+    path_fork: &PathInternerFork,
 ) -> Result<Vec<PublicBindingExport>, InfrastructureFailure> {
     // Synthetic single-file compilation does not construct a Stage 0 module namespace and never
     // publishes a provider interface. Binding-backed re-exports belong to canonical graph jobs,
@@ -298,8 +300,8 @@ fn collect_binding_exports<'a>(
                 source_name: selected_name,
                 ..
             } => {
-                let provider_id = source_provider_dependencies
-                    .resolve_reexport(dependency_selection.shell)
+                let resolved_clause = source_provider_dependencies
+                    .resolve_clause(dependency_selection.shell)
                     .ok_or_else(|| {
                         InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                             "binding re-export construction: provider selection {:?} has no resolved provider",
@@ -307,8 +309,10 @@ fn collect_binding_exports<'a>(
                         ))
                     })?;
                 let selected_name_text = string_table.resolve(*selected_name);
-                let view = source_provider_dependencies.binding_view(provider_id)?;
-                let Some(binding) = view.binding_export(selected_name_text) else {
+                let view = source_provider_dependencies.binding_view(resolved_clause.provider)?;
+                let Some(binding) = view
+                    .binding_export(resolved_clause.route, selected_name_text)
+                else {
                     // Source-backed provider exports are projected by the ordinary re-export
                     // path below; this collector owns only binding-backed public exports.
                     continue;
@@ -320,20 +324,27 @@ fn collect_binding_exports<'a>(
 
         exports.push(PublicBindingExport {
             exporting_module: module_origin.clone(),
+            route: stable_public_export_route(entry.route, path_fork, string_table),
             public_name: string_table.resolve(entry.export_name).to_owned(),
             target,
         });
     }
 
-    exports.sort_by(|left, right| left.public_name.cmp(&right.public_name));
+    exports.sort_by(|left, right| {
+        left.route
+            .cmp(&right.route)
+            .then_with(|| left.public_name.cmp(&right.public_name))
+    });
     exports.dedup_by(|left, right| left == right);
     for pair in exports.windows(2) {
-        if pair[0].public_name == pair[1].public_name {
+        if pair[0].route == pair[1].route && pair[0].public_name == pair[1].public_name {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::AstConstruction,
                 format!(
-                    "binding re-export construction: duplicate public export name '{}' in module {:?}",
-                    pair[0].public_name, module_origin
+                    "binding re-export construction: duplicate public export '{}' in route '{}' in module {:?}",
+                    pair[0].public_name,
+                    pair[0].route.as_str(),
+                    module_origin
                 ),
             ));
         }
@@ -716,7 +727,9 @@ fn collect_free_export_bindings(
 ) -> Result<(Vec<ExportBinding>, Vec<PublicExportDiagnosticProvenance>), InfrastructureFailure> {
     let mut export_bindings = Vec::new();
     let mut export_diagnostic_provenance = Vec::new();
-    let mut seen_public_names: FxHashSet<String> = FxHashSet::default();
+    let mut seen_public_names: FxHashSet<(PublicExportRoute, String)> = FxHashSet::default();
+    let mut directly_projected_exports: FxHashSet<(Option<PathId>, StringId)> =
+        FxHashSet::default();
 
     for header in sorted_headers {
         if !is_directly_defined_public_export(header)
@@ -728,7 +741,7 @@ fn collect_free_export_bindings(
         // A directly-defined public authored declaration always has a defining name. A missing
         // name is an impossible metadata gap that must not silently omit a public export from the
         // seed.
-        let Some(name) = path_name(header.declaration_path, path_fork, string_table) else {
+        let Some(name_id) = path_fork.component(header.declaration_path) else {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::AstConstruction,
                 format!(
@@ -737,6 +750,7 @@ fn collect_free_export_bindings(
                 ),
             ));
         };
+        let name = string_table.resolve(name_id);
 
         let Some(origin) =
             free_export_declaration_origin(header, module_origin, module_symbols, name)
@@ -746,14 +760,19 @@ fn collect_free_export_bindings(
             // namespace. That exclusion is intentional.
             continue;
         };
-        seen_public_names.insert(name.to_owned());
+        let route_path = header.export_mode.route().map(|route| route.path);
+        directly_projected_exports.insert((route_path, name_id));
+        let route = stable_public_export_route(route_path, path_fork, string_table);
+        seen_public_names.insert((route.clone(), name.to_owned()));
         let public_name = name.to_owned();
         export_bindings.push(ExportBinding::new(
             module_origin.clone(),
+            route.clone(),
             public_name.clone(),
             origin,
         ));
         export_diagnostic_provenance.push(PublicExportDiagnosticProvenance {
+            route,
             public_name,
             span: header.name_span,
         });
@@ -762,7 +781,8 @@ fn collect_free_export_bindings(
     // Collect re-export bindings from the module root's public export entries. These entries
     // cover declarations from private files re-exported through the root's public export
     // surface.
-    // Directly-defined exports already collected above are skipped by checking the public name.
+    // Directly-defined exports were already projected above. Skip them by their raw
+    // `(route, leaf)` key before re-export projection builds an owned route and binding.
     let reexport_bindings = collect_reexport_bindings(
         source_module_origins,
         module_origin,
@@ -770,14 +790,17 @@ fn collect_free_export_bindings(
         sorted_headers,
         module_symbols,
         source_provider_dependencies,
+        &directly_projected_exports,
         string_table,
         path_fork,
     )?;
     for reexport in reexport_bindings {
-        if seen_public_names.insert(reexport.binding.public_name().to_owned()) {
-            let public_name = reexport.binding.public_name().to_owned();
+        let route = reexport.binding.route().clone();
+        let public_name = reexport.binding.public_name().to_owned();
+        if seen_public_names.insert((route.clone(), public_name.clone())) {
             export_bindings.push(reexport.binding);
             export_diagnostic_provenance.push(PublicExportDiagnosticProvenance {
+                route,
                 public_name,
                 span: reexport.provenance,
             });
@@ -785,14 +808,23 @@ fn collect_free_export_bindings(
     }
 
     // Deterministic order independent of hash-map iteration and declaration scheduling: sort by
-    // public name, then by declaration category so two bindings can never tie ambiguously.
+    // route and public name, then by declaration category so two bindings can never tie
+    // ambiguously.
     export_bindings.sort_by(|left, right| {
-        left.public_name().cmp(right.public_name()).then_with(|| {
-            declaration_category_rank(left.origin()).cmp(&declaration_category_rank(right.origin()))
-        })
+        left.route()
+            .cmp(right.route())
+            .then_with(|| left.public_name().cmp(right.public_name()))
+            .then_with(|| {
+                declaration_category_rank(left.origin())
+                    .cmp(&declaration_category_rank(right.origin()))
+            })
     });
 
-    export_diagnostic_provenance.sort_by(|left, right| left.public_name.cmp(&right.public_name));
+    export_diagnostic_provenance.sort_by(|left, right| {
+        left.route
+            .cmp(&right.route)
+            .then_with(|| left.public_name.cmp(&right.public_name))
+    });
     Ok((export_bindings, export_diagnostic_provenance))
 }
 
@@ -819,6 +851,7 @@ fn collect_reexport_bindings(
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
+    directly_projected_exports: &FxHashSet<(Option<PathId>, StringId)>,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
 ) -> Result<Vec<ReexportBinding>, InfrastructureFailure> {
@@ -863,6 +896,9 @@ fn collect_reexport_bindings(
         .get(active_root_source)
     {
         for entry in entries {
+            if directly_projected_exports.contains(&(entry.route, entry.export_name)) {
+                continue;
+            }
             collect_one_reexport_binding(&mut bindings, entry, &context)?;
         }
     }
@@ -931,9 +967,9 @@ fn collect_one_reexport_binding<'a>(
     // Cross-module re-exports resolve through the immutable provider interface selected by
     // Stage 0. The origin remains provider-owned while this module owns the public alias.
     if let Some((dependency_selection, selected_name)) = provider_selection {
-        let provider_id = context
+        let resolved_clause = context
             .source_provider_dependencies
-            .resolve_reexport(dependency_selection.shell)
+            .resolve_clause(dependency_selection.shell)
             .ok_or_else(|| {
                 InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                     "re-export binding construction: provider selection {:?} has no resolved provider",
@@ -942,13 +978,21 @@ fn collect_one_reexport_binding<'a>(
             })?;
         let provider_interface = context
             .source_provider_dependencies
-            .interface(provider_id)?;
+            .interface(resolved_clause.provider)?;
         let selected_name_text = context.string_table.resolve(*selected_name);
         let view = context
             .source_provider_dependencies
-            .binding_view(provider_id)?;
-        let Some(provider_origin) = view.exported_origin(selected_name_text).cloned() else {
-            if view.binding_export(selected_name_text).is_some() {
+            .binding_view(resolved_clause.provider)?;
+        // The provider-side route is the authored clause's route beneath the provider facade;
+        // the re-exporter's own `$export` route only decides where this binding publishes.
+        let Some(provider_origin) = view
+            .exported_origin(resolved_clause.route, selected_name_text)
+            .cloned()
+        else {
+            if view
+                .binding_export(resolved_clause.route, selected_name_text)
+                .is_some()
+            {
                 return Ok(());
             }
             return Err(InfrastructureFailure::internal(
@@ -960,13 +1004,17 @@ fn collect_one_reexport_binding<'a>(
             ));
         };
         let export_name = context.string_table.resolve(entry.export_name).to_owned();
+        let route =
+            stable_public_export_route(entry.route, context.path_fork, context.string_table);
         bindings.push(ReexportBinding {
             binding: ExportBinding::new(
                 context.module_origin.clone(),
+                route,
                 export_name,
                 provider_origin,
             ),
-            provenance: view.export_diagnostic_provenance(selected_name_text),
+            provenance: view
+                .export_diagnostic_provenance(resolved_clause.route, selected_name_text),
         });
         return Ok(());
     }
@@ -1023,9 +1071,10 @@ fn collect_one_reexport_binding<'a>(
     // Determine the declaration category from the header kind and build the origin.
     let origin = reexport_declaration_origin(header, target_origin, name)?;
     let export_name = context.string_table.resolve(entry.export_name).to_owned();
+    let route = stable_public_export_route(entry.route, context.path_fork, context.string_table);
 
     bindings.push(ReexportBinding {
-        binding: ExportBinding::new(context.module_origin.clone(), export_name, origin),
+        binding: ExportBinding::new(context.module_origin.clone(), route, export_name, origin),
         provenance: header.name_span,
     });
 
@@ -1173,6 +1222,27 @@ fn declaration_category_rank(origin: &OriginDeclarationId) -> u8 {
         OriginDeclarationId::Trait(_) => 3,
     }
 }
+/// Convert one authored facade-relative route path into the owned stable route value.
+///
+/// WHAT: renders the path-table identity with the canonical `/` join and maps the absent route to
+///       the facade root.
+/// WHY: header facts retain boundary-local `PathId`s, but export bindings cross module and build
+///      boundaries. This is the one conversion point between those two representations.
+fn stable_public_export_route(
+    route: Option<PathId>,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> PublicExportRoute {
+    match route {
+        None => PublicExportRoute::ROOT,
+        Some(path) => PublicExportRoute::from_canonical_spelling(path_fork.render_portable(
+            path,
+            string_table,
+            &mut Vec::new(),
+        )),
+    }
+}
+
 fn path_name<'a>(
     path: PathId,
     path_fork: &PathInternerFork,

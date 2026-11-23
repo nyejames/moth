@@ -584,6 +584,7 @@ fn foreign_primary_keeps_its_span_and_adds_a_site_row() {
         SiteRef::Foreign {
             span,
             context: Some(context),
+            ..
         } if span == exact_span(2, 3) && std::ptr::eq(context, context_owner.as_ref())
     ));
     assert_eq!(foreign_contexts.len(), 1);

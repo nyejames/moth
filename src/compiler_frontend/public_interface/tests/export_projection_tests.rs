@@ -31,16 +31,19 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     BoundModuleHeaders, FileRole, Header, HeaderKind, bind_module_headers, prepare_header_syntax,
 };
 use crate::compiler_frontend::public_interface::{
-    DirectExportSeed, PublicExportDiagnosticProvenance, PublicSemanticInterface,
-    SourceProviderDependency, SourceProviderDependencySet, build_direct_export_seed,
-    build_public_source_nominal_origin_index, build_public_source_trait_origin_index,
+    DirectExportSeed, PublicBindingExport, PublicExportDiagnosticProvenance,
+    PublicSemanticInterface, SourceProviderDependency, SourceProviderDependencySet,
+    build_direct_export_seed, build_public_source_nominal_origin_index,
+    build_public_source_trait_origin_index,
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, FunctionOriginKind, ModuleRootRole, OriginConstantId, OriginDeclarationId,
-    OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
-    StablePackageIdentity,
+    OriginFunctionId, OriginTraitId, OriginTypeCategory, OriginTypeId, PublicExportRoute,
+    StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpan};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
+};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::symbols::identity::{DependencySelectionId, DependencyShellId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -440,6 +443,7 @@ fn same_module_reexport_preserves_alias_origin_and_authored_provenance() {
             .get(&fixture.active_root_file_id)
             .expect("active root source path should be prepared"),
         [PublicExportEntry {
+            route: None,
             export_name: fixture.string_table.intern("PublicValue"),
             target: PublicExportTarget::SourceDeclaration { path: target_path },
         }]
@@ -511,6 +515,7 @@ fn helper_reexport_preserves_role_neutral_defining_origin() {
             .get(&fixture.active_root_file_id)
             .expect("active root source path should be prepared"),
         [PublicExportEntry {
+            route: None,
             export_name: fixture.string_table.intern("PublicValue"),
             target: PublicExportTarget::SourceDeclaration { path: target_path },
         }]
@@ -550,6 +555,44 @@ fn helper_reexport_preserves_role_neutral_defining_origin() {
 }
 
 #[test]
+fn changing_only_the_public_route_keeps_origin_but_changes_interface_identity() {
+    let root_seed = build_seed("$export\nvalue #= 1\n");
+    let routed_seed = build_seed("$export @forms\nvalue #= 1\n");
+    let root_binding = binding_for(&root_seed, "value");
+    let routed_binding = binding_for(&routed_seed, "value");
+
+    assert!(root_binding.route().is_root());
+    assert_eq!(routed_binding.route().as_str(), "forms");
+    assert_eq!(
+        routed_binding.origin(),
+        root_binding.origin(),
+        "the route changes where a declaration publishes, never its origin identity"
+    );
+    assert_ne!(
+        routed_binding, root_binding,
+        "the route is part of the stable export binding equality"
+    );
+
+    let interface = |seed: DirectExportSeed| {
+        let parts = seed.into_parts();
+        PublicSemanticInterface {
+            module_origin: parts.module_origin,
+            export_bindings: parts.export_bindings,
+            export_diagnostic_provenance: parts.export_diagnostic_provenance,
+            binding_exports: parts.binding_exports,
+            declarations: Vec::new(),
+            reusable_evidence: Vec::new(),
+            concrete_call_summaries: Vec::new(),
+        }
+    };
+    assert_ne!(
+        interface(routed_seed),
+        interface(root_seed),
+        "the public-interface fingerprint includes each binding's route"
+    );
+}
+
+#[test]
 fn provider_reexport_preserves_alias_and_provider_provenance() {
     let mut fixture = build_reexport_fixture(
         &[("src/@mod.moth", "placeholder #= 1\n")],
@@ -559,6 +602,10 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
         .path_fork
         .try_intern_portable_path("provider/Imported", &mut fixture.string_table)
         .expect("test path fits");
+    let reexport_route = fixture
+        .path_fork
+        .try_intern_portable_path("forms", &mut fixture.string_table)
+        .expect("test route path fits");
     let provider_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("provider"),
         "provider/@mod.moth".to_owned(),
@@ -572,10 +619,12 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
         module_origin: provider_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             provider_origin,
+            PublicExportRoute::ROOT,
             "Imported".to_owned(),
             provider_constant_origin.clone(),
         )],
         export_diagnostic_provenance: vec![PublicExportDiagnosticProvenance {
+            route: PublicExportRoute::ROOT,
             public_name: "Imported".to_owned(),
             span: None,
         }],
@@ -587,6 +636,7 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
             shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
         },
         interface: &provider_interface,
     }])
@@ -598,6 +648,7 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
             .get(&fixture.active_root_file_id)
             .expect("active root source path should be prepared"),
         [PublicExportEntry {
+            route: Some(reexport_route),
             export_name: fixture.string_table.intern("PublicImported"),
             target: PublicExportTarget::ProviderSelection {
                 diagnostic_path: target_path,
@@ -625,12 +676,18 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
     .expect("provider re-export projection should succeed");
 
     let binding = binding_for(&seed, "PublicImported");
-    assert_eq!(binding.origin(), &provider_constant_origin);
+    assert_eq!(
+        binding.origin(),
+        &provider_constant_origin,
+        "the re-export publishes under a route without changing the provider origin",
+    );
+    assert_eq!(binding.route().as_str(), "forms");
     let provenance = seed
         .export_diagnostic_provenance()
         .iter()
         .find(|entry| entry.public_name == "PublicImported")
         .expect("provider re-export should retain provider provenance under the alias");
+    assert_eq!(provenance.route.as_str(), "forms");
     assert_eq!(
         provenance.span, None,
         "synthetic provider fixtures carry no authored source span",
@@ -677,6 +734,10 @@ fn external_binding_export_identity_resolves_in_independent_registry() {
         "external-binding-reexport",
     );
     let export_name = fixture.string_table.intern("PublicLength");
+    let forms_route = fixture
+        .path_fork
+        .try_intern_portable_path("forms", &mut fixture.string_table)
+        .expect("test route path fits");
     fixture.module_symbols.module_root_public_exports.insert(
         *fixture
             .module_symbols
@@ -684,6 +745,7 @@ fn external_binding_export_identity_resolves_in_independent_registry() {
             .get(&fixture.active_root_file_id)
             .expect("active root source path should be prepared"),
         [PublicExportEntry {
+            route: Some(forms_route),
             export_name,
             target: PublicExportTarget::External(ExternalSymbolId::Function(donor_length)),
         }]
@@ -707,6 +769,15 @@ fn external_binding_export_identity_resolves_in_independent_registry() {
         panic!("exactly one binding export should be projected");
     };
     assert_eq!(export.public_name, "PublicLength");
+    assert_eq!(
+        export.route.as_str(),
+        "forms",
+        "the authored route is where the binding publishes, not part of its binding identity",
+    );
+    assert_eq!(
+        export.exporting_module, fixture.module_origin,
+        "the re-exporting facade owns the published binding, not the binding package",
+    );
 
     // Identity resolves to the consumer's own function; the donor's raw id does not cross.
     assert_eq!(
@@ -726,6 +797,446 @@ fn external_binding_export_identity_resolves_in_independent_registry() {
             .get_function_by_id(donor_length)
             .and_then(|function| function.const_eval),
         None,
+    );
+}
+
+#[test]
+fn two_publishing_hops_keep_original_origins_and_authored_provenance() {
+    let provider_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("origin-package"),
+        "origin/@mod.moth".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let function_origin = OriginDeclarationId::Function(OriginFunctionId::new_free(
+        provider_origin.clone(),
+        "twice".to_owned(),
+    ));
+    let type_origin = OriginDeclarationId::Type(OriginTypeId::new(
+        provider_origin.clone(),
+        "Counter".to_owned(),
+        OriginTypeCategory::Struct,
+    ));
+    let constant_origin = OriginDeclarationId::Constant(OriginConstantId::new(
+        provider_origin.clone(),
+        "BASE".to_owned(),
+    ));
+    let provider_route = PublicExportRoute::from_canonical_spelling("nested/inner".to_owned());
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let authored_spans: Vec<SourceSpan> = ["twice", "Counter", "BASE"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| {
+            SourceSpan::new(
+                SourceId::from_index(7),
+                LocalSpan::exact(10 + index as u32 * 10, name.len() as u32, &mut span_builder)
+                    .expect("test span fits"),
+            )
+        })
+        .collect();
+    let provider_interface = PublicSemanticInterface {
+        module_origin: provider_origin.clone(),
+        export_bindings: vec![
+            ExportBinding::new(
+                provider_origin.clone(),
+                provider_route.clone(),
+                "twice".to_owned(),
+                function_origin.clone(),
+            ),
+            ExportBinding::new(
+                provider_origin.clone(),
+                provider_route.clone(),
+                "Counter".to_owned(),
+                type_origin.clone(),
+            ),
+            ExportBinding::new(
+                provider_origin,
+                provider_route.clone(),
+                "BASE".to_owned(),
+                constant_origin.clone(),
+            ),
+        ],
+        export_diagnostic_provenance: vec![
+            PublicExportDiagnosticProvenance {
+                route: provider_route.clone(),
+                public_name: "twice".to_owned(),
+                span: Some(authored_spans[0]),
+            },
+            PublicExportDiagnosticProvenance {
+                route: provider_route.clone(),
+                public_name: "Counter".to_owned(),
+                span: Some(authored_spans[1]),
+            },
+            PublicExportDiagnosticProvenance {
+                route: provider_route.clone(),
+                public_name: "BASE".to_owned(),
+                span: Some(authored_spans[2]),
+            },
+        ],
+        binding_exports: Vec::new(),
+        declarations: Vec::new(),
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    };
+    let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
+        kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
+            shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: provider_route.clone(),
+        },
+        interface: &provider_interface,
+    }])
+    .expect("one authored provider should register");
+
+    // First publishing facade: republishes the origin provider's `nested/inner` surface at
+    // `inner`, adding one hop without changing any origin.
+    let mut first_fixture = build_reexport_fixture(
+        &[("src/@mod.moth", "placeholder #= 1\n")],
+        "first-publisher",
+    );
+    let inner_path = first_fixture
+        .path_fork
+        .try_intern_portable_path("inner", &mut first_fixture.string_table)
+        .expect("test route path fits");
+    let first_diagnostic_path = first_fixture
+        .path_fork
+        .try_intern_portable_path("origin/nested", &mut first_fixture.string_table)
+        .expect("test path fits");
+    let selection_shell = DependencyShellId::new(SourceId::from_index(0), 0);
+    let mut first_entry = |index: u32, name: &str| PublicExportEntry {
+        route: Some(inner_path),
+        export_name: first_fixture.string_table.intern(name),
+        target: PublicExportTarget::ProviderSelection {
+            selection: DependencySelectionId::new(selection_shell, index),
+            source_name: first_fixture.string_table.intern(name),
+            diagnostic_path: first_diagnostic_path,
+        },
+    };
+    first_fixture
+        .module_symbols
+        .module_root_public_exports
+        .insert(
+            *first_fixture
+                .module_symbols
+                .source_paths_by_source_id
+                .get(&first_fixture.active_root_file_id)
+                .expect("active root source path should be prepared"),
+            [
+                first_entry(0, "twice"),
+                first_entry(1, "Counter"),
+                first_entry(2, "BASE"),
+            ]
+            .into_iter()
+            .collect(),
+        );
+    let first_seed = build_direct_export_seed(
+        &first_fixture.source_module_origins,
+        first_fixture.active_root_file_id,
+        &first_fixture.headers,
+        &first_fixture.module_symbols,
+        &provider_dependencies,
+        &ExternalPackageRegistry::default(),
+        &first_fixture.string_table,
+        &first_fixture.path_fork,
+    )
+    .expect("first publishing hop should project");
+    let first_parts = first_seed.into_parts();
+    assert_eq!(
+        first_parts.export_bindings.len(),
+        3,
+        "the first publisher should republish every selected origin",
+    );
+    for binding in &first_parts.export_bindings {
+        assert_eq!(binding.route().as_str(), "inner");
+        assert_eq!(binding.exporting_module(), &first_fixture.module_origin);
+    }
+    assert_eq!(
+        first_parts.export_diagnostic_provenance.len(),
+        3,
+        "the first publisher must retain the origin's authored provenance",
+    );
+    for (name, expected_span) in [
+        ("twice", authored_spans[0]),
+        ("Counter", authored_spans[1]),
+        ("BASE", authored_spans[2]),
+    ] {
+        let entry = first_parts
+            .export_diagnostic_provenance
+            .iter()
+            .find(|entry| entry.public_name == name)
+            .unwrap_or_else(|| panic!("no first-hop provenance for `{name}`"));
+        assert_eq!(entry.route.as_str(), "inner");
+        assert_eq!(entry.span, Some(expected_span));
+    }
+    let first_interface = PublicSemanticInterface {
+        module_origin: first_parts.module_origin,
+        export_bindings: first_parts.export_bindings,
+        export_diagnostic_provenance: first_parts.export_diagnostic_provenance,
+        binding_exports: first_parts.binding_exports,
+        declarations: Vec::new(),
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    };
+
+    // Second publishing facade: republishes the first publisher's `inner` surface at
+    // `mirror/deep`. A second distinct module identity must own this binding while the origins
+    // and provenance still name the original declarations.
+    let second_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
+        kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
+            shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: PublicExportRoute::from_canonical_spelling("inner".to_owned()),
+        },
+        interface: &first_interface,
+    }])
+    .expect("the first publisher should register as a provider");
+    let mut second_fixture = build_reexport_fixture(
+        &[("src/@mod.moth", "placeholder #= 1\n")],
+        "second-publisher",
+    );
+    let final_path = second_fixture
+        .path_fork
+        .try_intern_portable_path("mirror/deep", &mut second_fixture.string_table)
+        .expect("test route path fits");
+    let second_diagnostic_path = second_fixture
+        .path_fork
+        .try_intern_portable_path("first/inner", &mut second_fixture.string_table)
+        .expect("test path fits");
+    let mut second_entry = |index: u32, source_name: &str, export_name: &str| PublicExportEntry {
+        route: Some(final_path),
+        export_name: second_fixture.string_table.intern(export_name),
+        target: PublicExportTarget::ProviderSelection {
+            selection: DependencySelectionId::new(selection_shell, index),
+            source_name: second_fixture.string_table.intern(source_name),
+            diagnostic_path: second_diagnostic_path,
+        },
+    };
+    second_fixture
+        .module_symbols
+        .module_root_public_exports
+        .insert(
+            *second_fixture
+                .module_symbols
+                .source_paths_by_source_id
+                .get(&second_fixture.active_root_file_id)
+                .expect("active root source path should be prepared"),
+            [
+                second_entry(0, "twice", "twice"),
+                second_entry(1, "Counter", "Counter"),
+                second_entry(2, "BASE", "FALLBACK_BASE"),
+            ]
+            .into_iter()
+            .collect(),
+        );
+    let second_seed = build_direct_export_seed(
+        &second_fixture.source_module_origins,
+        second_fixture.active_root_file_id,
+        &second_fixture.headers,
+        &second_fixture.module_symbols,
+        &second_dependencies,
+        &ExternalPackageRegistry::default(),
+        &second_fixture.string_table,
+        &second_fixture.path_fork,
+    )
+    .expect("second publishing hop should project");
+    let second_parts = second_seed.into_parts();
+    assert_eq!(
+        second_parts.export_bindings.len(),
+        3,
+        "the second publisher should republish every selected name",
+    );
+    for binding in &second_parts.export_bindings {
+        assert_eq!(binding.route().as_str(), "mirror/deep");
+        assert_eq!(
+            binding.exporting_module(),
+            &second_fixture.module_origin,
+            "the second publisher owns the binding, not either earlier facade",
+        );
+        assert_ne!(binding.exporting_module(), &first_fixture.module_origin);
+    }
+    let origin_for = |name: &str| {
+        second_parts
+            .export_bindings
+            .iter()
+            .find(|binding| binding.public_name() == name)
+            .unwrap_or_else(|| panic!("no binding for `{name}`"))
+            .origin()
+            .clone()
+    };
+    assert_eq!(origin_for("twice"), function_origin);
+    assert_eq!(origin_for("Counter"), type_origin);
+    assert_eq!(origin_for("FALLBACK_BASE"), constant_origin);
+    assert_eq!(
+        second_parts.export_diagnostic_provenance.len(),
+        3,
+        "the second publisher must retain the original authored provenance",
+    );
+    let span_for = |name: &str| {
+        second_parts
+            .export_diagnostic_provenance
+            .iter()
+            .find(|entry| entry.public_name == name)
+            .unwrap_or_else(|| panic!("no provenance for `{name}`"))
+            .clone()
+    };
+    for (name, expected_span) in [
+        ("twice", authored_spans[0]),
+        ("Counter", authored_spans[1]),
+        ("FALLBACK_BASE", authored_spans[2]),
+    ] {
+        let entry = span_for(name);
+        assert_eq!(entry.route.as_str(), "mirror/deep");
+        assert_eq!(entry.span, Some(expected_span));
+    }
+}
+
+#[test]
+fn binding_backed_reexport_preserves_canonical_identity_and_route() {
+    let mut donor_registry = ExternalPackageRegistry::new();
+    register_core_text_package(&mut donor_registry);
+    let (donor_length, _) = donor_registry
+        .resolve_package_function("@core/text", "length")
+        .expect("donor should register Core Text length");
+    let canonical_target = donor_registry
+        .canonical_symbol_identity(ExternalSymbolId::Function(donor_length))
+        .expect("donor length should have a canonical identity");
+
+    // A second registry registers an unrelated `length` first, so its local id for Core Text
+    // `length` differs from the donor's. Resolution must use the canonical identity, never the
+    // donor's raw id.
+    let mut consumer_registry = ExternalPackageRegistry::new();
+    let decoy_id = consumer_registry
+        .register_function(ExternalFunctionDef {
+            name: "length".to_owned(),
+            parameters: Vec::new(),
+            return_contract: external_returns(Vec::new(), None),
+            const_eval: None,
+            numeric_contract: ExternalNumericContract::Unknown,
+            lowerings: ExternalFunctionLowerings::default(),
+        })
+        .expect("decoy test function should register");
+    register_core_text_package(&mut consumer_registry);
+    let (consumer_length, _) = consumer_registry
+        .resolve_package_function("@core/text", "length")
+        .expect("consumer should register Core Text length");
+    assert_eq!(
+        donor_length, decoy_id,
+        "precondition: the donor's raw id names the consumer's decoy",
+    );
+    assert_ne!(consumer_length, donor_length);
+
+    let mut fixture = build_reexport_fixture(
+        &[("src/@mod.moth", "placeholder #= 1\n")],
+        "binding-backed-two-hop-reexport",
+    );
+    let provider_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("provider"),
+        "provider/@mod.moth".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let provider_route = PublicExportRoute::from_canonical_spelling("nested".to_owned());
+    let provider_interface = PublicSemanticInterface {
+        module_origin: provider_origin.clone(),
+        export_bindings: Vec::new(),
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: vec![PublicBindingExport {
+            exporting_module: provider_origin,
+            route: provider_route.clone(),
+            public_name: "length".to_owned(),
+            target: canonical_target.clone(),
+        }],
+        declarations: Vec::new(),
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    };
+    let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
+        kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
+            shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: provider_route,
+        },
+        interface: &provider_interface,
+    }])
+    .expect("one authored provider should register");
+
+    let ext_route = fixture
+        .path_fork
+        .try_intern_portable_path("ext", &mut fixture.string_table)
+        .expect("test route path fits");
+    let diagnostic_path = fixture
+        .path_fork
+        .try_intern_portable_path("provider/nested", &mut fixture.string_table)
+        .expect("test path fits");
+    fixture.module_symbols.module_root_public_exports.insert(
+        *fixture
+            .module_symbols
+            .source_paths_by_source_id
+            .get(&fixture.active_root_file_id)
+            .expect("active root source path should be prepared"),
+        [PublicExportEntry {
+            route: Some(ext_route),
+            export_name: fixture.string_table.intern("public_length"),
+            target: PublicExportTarget::ProviderSelection {
+                selection: DependencySelectionId::new(
+                    DependencyShellId::new(SourceId::from_index(0), 0),
+                    0,
+                ),
+                source_name: fixture.string_table.intern("length"),
+                diagnostic_path,
+            },
+        }]
+        .into_iter()
+        .collect(),
+    );
+
+    let seed = build_direct_export_seed(
+        &fixture.source_module_origins,
+        fixture.active_root_file_id,
+        &fixture.headers,
+        &fixture.module_symbols,
+        &provider_dependencies,
+        &donor_registry,
+        &fixture.string_table,
+        &fixture.path_fork,
+    )
+    .expect("binding-backed two-hop re-export projection should succeed");
+
+    let parts = seed.into_parts();
+    let [export] = parts.binding_exports.as_slice() else {
+        panic!("exactly one binding export should be projected");
+    };
+    assert_eq!(
+        export.public_name, "public_length",
+        "the re-exporter's public alias is the published leaf",
+    );
+    assert_eq!(
+        export.exporting_module, fixture.module_origin,
+        "the re-exporter owns the published binding, not the binding package",
+    );
+    assert_eq!(
+        export.route.as_str(),
+        "ext",
+        "the re-exporter's route replaces the provider route",
+    );
+    assert_eq!(
+        parts.export_bindings.len(),
+        0,
+        "a binding-backed selection has no source declaration binding",
+    );
+    assert_eq!(
+        consumer_registry.resolve_canonical_symbol(&export.target),
+        Some(ExternalSymbolId::Function(consumer_length)),
+        "the canonical identity resolves in a registry whose local ids differ",
+    );
+    assert_eq!(
+        consumer_registry
+            .get_function_by_id(consumer_length)
+            .expect("consumer Core Text length should be registered")
+            .const_eval,
+        Some(ExternalConstEvalOp::Text(TextConstEvalOp::Length)),
+    );
+    assert_eq!(
+        consumer_registry
+            .get_function_by_id(donor_length)
+            .and_then(|function| function.const_eval),
+        None,
+        "the donor raw id names the decoy in the consumer registry",
     );
 }
 
@@ -1034,6 +1545,7 @@ fn module_symbols_with_module_root_export_targets(
         .iter()
         .filter_map(|target| {
             Some(PublicExportEntry {
+                route: None,
                 export_name: path_fork.try_component(*target)?,
                 target: PublicExportTarget::SourceDeclaration { path: *target },
             })
@@ -1054,6 +1566,7 @@ fn add_source_package_export_target(
     export_name: crate::compiler_frontend::symbols::string_interning::StringId,
 ) {
     let entry = PublicExportEntry {
+        route: None,
         export_name,
         target: PublicExportTarget::SourceDeclaration { path: *target },
     };

@@ -576,9 +576,13 @@ fn fold_signature_default(
                         Some(scope.external_package_registry.as_ref()),
                     )?;
                     if matches!(kind, TemplateConstValueKind::SlotInsertHelper) {
+                        let helper_span = {
+                            let store = scope.template_ir_store.borrow();
+                            template.slot_insert_diagnostic_span(&store)
+                        };
                         return Err(templates::invalid_template_structure(
                             InvalidTemplateStructureReason::HelperOutsideWrapperSlot,
-                            template.span,
+                            helper_span,
                         )
                         .into());
                     }

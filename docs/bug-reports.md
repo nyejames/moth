@@ -6,54 +6,105 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 
 ## Open
 
-### Dev server snapshot can expose files outside its output root through symlinks
+### Function-local constant inserts are rejected before composition
 
-- Found: Static-file Correctness audit, 2026-11. Confirmed by code trace at `72330758a`. Runtime reproduction was unavailable because Cargo is not installed.
-- Where: `capture_served_artifacts` in `src/projects/dev_server/build_loop.rs`, consumed by `resolve_request_with_file_exists` in `src/projects/dev_server/static_files.rs` and `prepare_static_response` in `src/projects/dev_server/http.rs`.
-- Observed: An existing unowned `_dev/external` symlink to a readable directory outside `_dev` does not invalidate an otherwise successful output write when it is not a planned destination. Snapshot capture follows it and stores the external files under output-relative keys. `GET /external/secret.txt` then serves those bytes. Individual output destinations are canonically checked, and HTML entry validation rejects external symlinks, but snapshot capture has no matching containment check. Exposure is more serious when the dev server binds to a non-loopback interface.
-- Investigate: Constrain snapshot capture to canonical targets inside the output root, including file and directory symlinks. Preserve legitimate contained symlinks and the immutable-generation contract. Add an HTTP regression with an unrelated external symlink present before a successful build.
+- Found: runtime template helper escape fix review, 2026-11. Confirmed by a source probe. Reported as pre-existing.
+- Where: final-value validation of function-body constant bindings.
+- Observed: inside an ordinary function, `insert #= [$in title:Priya]` is rejected with `MOTH-SYNTAX-0022` at `$in`, even when the only use composes it into `[card:[insert]]` and `card` defines `[$slot title]`. The equivalent stored insert at module scope is accepted for composition.
+- Investigate: preserve function-local constant insert helpers until their receiving template consumes them, while still rejecting helpers that escape as runtime values.
 
-### Authored HTML marker can suppress dev-client injection
+### Stored inserts read through namespaces or constant records do not compose
 
-- Found: Static-file Correctness audit, 2026-11. Confirmed by code trace at `72330758a`. Runtime reproduction was unavailable because Cargo is not installed.
-- Where: `inject_dev_client` in `src/projects/dev_server/static_files.rs`, called by `prepare_static_response` in `src/projects/dev_server/http.rs`.
-- Observed: A supported Moth root contribution `[$in head:<!-- moth-dev-client -->]` renders the exact `DEV_CLIENT_MARKER` into generated HTML. `inject_dev_client` treats that authored comment as proof that injection already happened and returns the page unchanged. The response therefore lacks the EventSource subscription and startup-error hooks required for development reporting. Production HTTP injects independently into pristine snapshot bytes for each GET, so the idempotence shortcut does not protect a necessary production state.
-- Investigate: Ensure the normal HTTP path installs the client on each pristine generated HTML response regardless of authored marker text, before bootstrap scripts. Add a generated-HTML/HTTP regression and retain an idempotence check only if another production caller needs it.
+- Found: runtime template helper escape fix verification and final integration audit, 2026-11. Confirmed by source probes. The integration audit reproduced the namespace forms on base `84cc4c945` and checkpoint `df60b63ac`.
+- Where: template heads route a bare identifier helper, including a directly imported one, through `declaration_reference_expression` and `rebuild_const_template_reference`. A qualified namespace leaf such as `h.insert` stays a plain reference, and `resolve_field_member` in `src/compiler_frontend/ast/field_access/field_member.rs` returns a const-record field read without rebuilding the helper as a template.
+- Observed: `[card: [h.insert] body]` in a runtime function or a module binding fails with `MOTH-INFRA-0001` at HIR lowering. In a `~[...]` fragment it failed with `MOTH-INFRA-0001` on base and now reports a misleading `MOTH-SYNTAX-0022` "cannot escape as a standalone runtime value", because statement-root templates keep the enclosing `Module` context kind. With `pattern #= (slot_value = [$in style: red])`, the constant `stored #= [card: [pattern.slot_value] body]` is rejected with `MOTH-SYNTAX-0022` as not fully foldable, and `[card: [pattern.slot_value] [n]]` in a runtime function fails with `MOTH-INFRA-0001`. `template-slots.mtf` says imported wrappers and constant-record projections preserve slot routing. Runtime value reads of these spellings outside templates are rejected with `MOTH-SYNTAX-0022`.
+- Investigate: rebuild a stored helper read through a namespace leaf or record projection as a template in composition positions, as identifier heads already do, then add success coverage for constant, runtime-template and `~[...]` composition.
 
-### `$infallible` release-only rejection from an erased fallback call
+### Stored insert reads are gated by context kind rather than position
 
-- Found: release/debug divergence audit, 2026-11. Confirmed defect; pre-dates this branch, reproduced by probe on the current branch.
-- Where: release-erased call projection into `HirConstraintEvidence::live_erased_call_sites` in `src/compiler_frontend/hir/hir_builder/metadata.rs` from `Ast::release_erased_call_sites`, consumed by the `$infallible` escaping-failure analysis.
-- Observed: a probe defines `trap_if_zero |value I32| -> I32: return 1 // value` and a `$infallible` boundary containing `discarded I32 = value // 2 catch then trap_if_zero(1)`. Debug check accepts with no warnings. Release build rejects MOTH-RULE-0091 at the `$infallible` directive: "`$infallible` forbids escaping recoverable errors, but this boundary can return an `Error`". The divisor literal 2 cannot fail, so the fallback cannot run; release folding still erases the fallback call and HIR treats that erased row as live evidence.
-- Investigate: release-erased rows are inserted as live unconditionally. Keep a liveness link to the catch handler a folded call came from, or stop release speculation from folding fallback source that HIR cannot route. Add matching debug/release cases.
+- Found: runtime template helper escape fix final review verification, 2026-11. Confirmed by source probes on base `84cc4c945` and the candidate.
+- Where: `ContextKind::admits_structural_helpers` in `src/compiler_frontend/ast/module_ast/scope_context.rs`, used by `reject_runtime_slot_insert_helper` in `src/compiler_frontend/ast/field_access/parse_chain.rs`. Template heads and call arguments inside them inherit the template parsing context, while `parse_statement_template` in `src/compiler_frontend/ast/statements/body_dispatch.rs` keeps the enclosing kind.
+- Observed: with `local #= [$in style: [: red]]` and `show |text String| -> String`, the expression template `x = [: [show(local)]]` fails with `MOTH-INFRA-0001` "non-renderable template constant", because the call argument is admitted as if it were a composition position. The statement root `~[: [show(local)]]` correctly rejects the read with `MOTH-SYNTAX-0022` (`MOTH-RULE-0052` on base). Parsing statement roots in the template context would fix the `~[...]` namespace diagnostic above but turn this correct rejection into `MOTH-INFRA-0001` and change catch eligibility in `~[...]` heads.
+- Investigate: admit stored helpers only in direct template head or body value positions, through a composition flag that call-argument and operand parsing do not inherit, then parse statement roots in the template context with a rejection fixture for catch in `~[...]` heads.
 
-### `$infallible` accepts a handler trap erased by release folding
+### Constant collections of stored inserts reach HIR
 
-- Found: release/debug divergence audit, 2026-11. Confirmed defect; pre-dates this branch, reproduced by probe on the current branch.
-- Where: HIR catch lowering in `src/compiler_frontend/hir/hir_expression.rs` and the skipped-handler walk in `src/compiler_frontend/hir/hir_expression/constraint_evidence.rs`. The contract is stated in `docs/docs/directives/constraints.mtf`: "Semantic reachability is checked after static selection, but before optional optimisation erases evidence."
-- Observed: a probe defines `divisor || -> I32: return 2` and a `$infallible` boundary containing `discarded I32 = value // divisor() catch:` with `assert(false)` in the handler. Debug check rejects MOTH-RULE-0091 at the `$infallible` directive: "`$infallible` forbids reachable traps, but this boundary's assertion may fail." Release build accepts and emits the project. Release folding replaces `divisor()` with 2, so the lowered protected division no longer routes an error edge to the handler and its assertion never reaches trap analysis; the skipped-handler evidence walk records only calls and fast uses.
-- Investigate: preserve trap and assertion evidence for a handler pruned after folding, as the pre-fold failure contributors and pre-fold `Bool` conditions already are. Add matching debug/release cases.
+- Found: runtime template helper escape fix final integration audit, 2026-11. Confirmed by a source probe on the candidate and reported identical on checkpoint `df60b63ac`.
+- Where: runtime reads of constant collection elements, outside the stored-helper checks in `src/compiler_frontend/ast/field_access/`.
+- Observed: `items #= {[$in style: red], [$in style: blue]}` with `loop items |item|: ~out = item` in a runtime function fails with `MOTH-INFRA-0001` "Template constant reached HIR constant expression lowering before AST materialized it".
+- Investigate: classify a collection whose elements are stored `$in` helpers when it is read as a runtime value and report `MOTH-SYNTAX-0022` at the read.
+
+### Borrow diagnostic names an internal HIR temporary
+
+- Found: runtime template helper escape fix final integration audit, 2026-11. Confirmed by a source probe.
+- Where: borrow diagnostics that render a compiler-introduced HIR temporary as a user name.
+- Observed: `items #= {[:red], [:blue]}` with `out ~= ""` and `loop items |item|: ~out = item` in a function reports `MOTH-BORROW-0003` "Cannot mutably access `out` while shared alias `__hir_tmp_0` is still needed later".
+- Investigate: whether the loop over a constant collection should borrow at all here, and render compiler temporaries by their authored source expression rather than their internal name.
+
+### Dev server snapshot containment checks and reads symlink targets by name
+
+- Found: dev-server symlink containment fix review, 2026-11. Confirmed by code trace; requires a concurrent writer inside the output root, so stable trees are contained.
+- Where: `capture_served_artifacts` in `src/projects/dev_server/build_loop.rs` canonicalises a symlink target, checks it is inside the output root, then reopens the target by path.
+- Observed: if capture pauses after verifying a contained alias, the alias is retargeted to another contained file and its former target is replaced by an out-of-root symlink, the reopen publishes the external bytes under the alias's HTTP key. The directory branch also checks and reopens by name. An unowned hard link to an external file is served in both the old and new code; path containment cannot distinguish it.
+- Investigate: anchor traversal at the verified output-root handle and open entries beneath it (openat with no-follow semantics, or a capability-style filesystem crate), then read the same handles. This needs platform-specific APIs or a new dependency, so decide the approach before implementing. Decide separately whether hard links to external files are inside the boundary.
+
+### `$infallible` verification consumes release-folded HIR
+
+- Found: release/debug divergence investigation, 2026-11. Accepted outstanding correctness defect, confirmed by probes on this branch. The demonstrated cases are recorded in the implementation plan rather than as expected-failing tests.
+- Where: `rewrite_release_calls` in `src/compiler_frontend/ast/const_values/const_execution/rewrite.rs` runs from `src/compiler_frontend/ast/module_ast/finalization/finalizer.rs` and rewrites pure constant calls before HIR exists. `BlockLiteralFacts` and the constraint walkers in `src/compiler_frontend/hir/constraint_facts/` then verify the folded HIR through `src/compiler_frontend/hir/constraint_verification.rs`.
+- Observed: debug keeps the authored call and rejects, release folds it and accepts, for a local defined from a folded call, a direct folded divisor, an earlier local invalidated by a later folded call, a folded call inside an `Invoke` terminator, a multi-value return order, a wholesale fold that erases a checked argument and a cast-wrapped folded value. The constraints reference already requires checks before optional optimisation erases evidence. The overview currently has HIR receive the final folded AST.
+- Investigate: fix under the Release call folding after semantic verification plan. Move optional release call folding after HIR construction and semantic constraint verification, verify authored HIR, preserve control flow, evaluation order, failure evidence and cross-module constraint summaries and delete the pre-fold compensations that exist only for the current ordering.
 
 ### Repeated work in single-file namespace validation
 
 - Found: Core/Builder package namespace and config filename final review, 2026-11.
-- Where: `ModuleNamespaceSet::for_single_file` in `src/build_system/create_project_modules/module_namespace.rs` and `single_file_namespace_inventory` / `eligible_child_directories` in `src/build_system/create_project_modules/source_tree_index.rs`.
+- Where: `ModuleNamespaceSet::for_single_file` in `src/build_system/create_project_modules/module_namespace/mod.rs` and `single_file_namespace_inventory` / `eligible_child_directories` in `src/build_system/create_project_modules/source_tree_index.rs`.
 - Observed: a selected `@entry.moth` or `@mod.moth` builds a `ProjectModuleGraph` and project namespaces only to validate reserved-root claims, then discards them. The registered-prefix collision probe for an ordinary selected file can list the same parent directories again for each registered source package prefix. No user-visible cost has been measured.
 - Investigate only if measurements show a material cost. Bounded single-file mode uses the graph and namespaces to validate reserved-root claims, then discards them. Later synthetic traversal resolves dependencies from inventory keys and filesystem facts, so there are no later project namespaces to reuse. For ordinary files, the prefix probe already shares the root listing. Measure repeated listings below that root before grouping prefixes by shared parents.
 
 ### Deferred catch eligibility skipped in inactive static-`if` branches
 
-- Found: failure-fact retention review follow-up, 2026-11. Confirmed defect; pre-dates this branch.
+- Found: failure-fact retention review follow-up, 2026-11. Confirmed defect; pre-dates this branch. Needs a design decision; see Investigate.
 - Where: `StaticIfCandidate::publish` in `src/compiler_frontend/ast/module_ast/finalization/static_if_specialization.rs` rewrites the AST before `AstBuiltinFailureSummaries::compute` in `src/compiler_frontend/ast/module_ast/finalization/finalizer.rs`, so a discarded branch never reaches failure classification.
 - Observed: a catch whose eligibility needs the deferred private-call check is rejected when live but accepted in an inactive static-`if` branch. Example: `flaky(1, 2) catch then 0` where an infallible generic `flaky` returns its divisor, placed inside `if false:`. Debug and release both accept it. Syntax, type and immediate catch-eligibility checks still run while parsing, so only the deferred private-call check is lost. The same ordering exists on `main` (read from code, not re-executed there), so this is not a `bug-fixes` regression.
-- Investigate: `docs/docs/branching/statement-if.mtf` requires both bodies to be frontend-validated before a known `Bool` selects one, and `tests/cases/catch_and_inactive_branch_source_validation_rejected` already pins syntax and type validation in discarded branches. Preserve the discarded branch's deferred catch checks as validation-only facts, or compute failure summaries before static selection. Add matching debug/release rejection cases.
+- Attempted fix (reverted, 2026-11): collect the discarded branch's deferred checks before selection and validate them in AST finalisation against the retained summaries, using a conservative Active/Unknown/Inactive call graph.
+  - Five review rounds each found a false rejection, where an inactive branch rejected what the live form accepts. Each came from AST summaries that differ from live convergence:
+    - trait-bound generic instances;
+    - unmaterialised generic instances reached through ordinary callers;
+    - recursion into the callable that owns the discarded region;
+    - handler reachability through that owner (`helper` comparing two `probe` calls under a safety catch);
+    - a caller with its own escaping failure that depends on the owner.
+  - Making every such dependency `Unknown` also skips live rejections for inactive custom-error compatibility and assertion-message checks.
+  - A scope-parenting slip in `create_branch` also leaked discarded `$safe_math` evidence into HIR (`inactive_static_branch_evidence_is_pruned_while_the_selected_branch_is_kept`).
+- Investigate: exact verdicts need the live, pre-selection facts. Options:
+  - compute failure summaries over both branches before static selection (changes summary ownership and ordering);
+  - carry the deferred checks across the AST/HIR boundary and validate them after convergence as validation-only facts, which needs a decision on how this squares with "inactive code publishes no generated request, HIR, effect";
+  - reuse the assertion-validation materialisation lane for discarded catches, subject to the same decision.
+
+  `docs/docs/branching/statement-if.mtf` requires both bodies to be frontend-validated before a known `Bool` selects one, and `tests/cases/catch_and_inactive_branch_source_validation_rejected` already pins syntax and type validation in discarded branches. Add matching debug/release rejection cases.
 
 ### JS projected call arguments still retarget when a later argument rebinds the base
 
-- Found: projected-alias backend audit, 2026-11. Confirmed by Node probe on the current branch; pre-dates it.
-- Where: `src/compiler_frontend/hir/hir_expression/calls.rs` keeps an earlier projected argument as an unevaluated place load while a later argument's nested call is flushed into the prelude before the enclosing call. The JS computed-place helpers now capture their base storage when constructed (`src/backends/js/runtime/places.rs`), so the retarget comes from that construction happening after the hoisted later argument ran.
-- Observed: `read_count(holder.items, replace(~holder))` returns the replacement's length: the `replace(~holder)` call is lowered into a prelude temp before `__moth_field(holder, "items")` is constructed, so the earlier argument observes the rebound holder. Mutable projected alias declarations and collection-loop iterable temporaries are fixed by base capture; only hoisted call arguments still read the post-mutation base.
-- Investigate: keep projected argument construction at its source evaluation position, or capture the projected storage before emitting prelude statements for later arguments. Add a Node-executed case.
+- Found: projected-alias backend audit, 2026-11. Confirmed by Node probe on the current branch; pre-dates it. Needs a design decision; see Investigate.
+- Where: `src/compiler_frontend/hir/hir_expression/calls.rs` keeps an earlier projected or copied argument as an unevaluated place load while a later argument's nested call is flushed into the prelude before the enclosing call. The JS computed-place helpers capture their base storage when constructed (`src/backends/js/runtime/places.rs`), so the retarget comes from that construction happening after the hoisted later argument ran.
+- Observed: `read_count(holder.items, replace(~holder))` returns the replacement's length. The same ordering affects whole-place copies (`read_count(copy holder, replace_holder(~holder))` returns 3 instead of 2) and nested fields (`read_count(outer.inner.items, replace_inner(~outer.inner))`). Authored index projections cannot reach this path because places only carry field projections.
+- Attempted fix (reverted, 2026-11): capturing earlier operands into compiler locals in HIR before borrow checking fixed the runtime order but kept changing borrow verdicts relative to the existing behaviour. Four review rounds each found new divergences:
+  - mutable-capture actor (`old = pair.first; set_first(~pair.first, stamp())` accepted);
+  - alias liveness through a capture (`observe(writer.first, rewrite(~pair))` accepted);
+  - copy independence (`keep(copy pair, stamp())` falsely tied to `pair`);
+  - early shared borrow (`set_first(~pair.first, read_slot(writer))` rejected);
+  - same-call copy read (`f(copy pair, ~pair, stamp())` accepted);
+  - designated cells after scope exit;
+  - a copy checked at the capture instead of at the call;
+  - copy-source liveness across a branch merge;
+  - `__hir_tmp_*` named in a diagnostic.
+
+  The current borrow verdicts are computed on late-evaluation HIR, so any HIR-level capture alters what the checker sees.
+- Investigate: decide where source-order operand evaluation is owned. Options:
+  - borrow-check the existing HIR unchanged, then reorder operand evaluation in a post-borrow-check lowering step consumed by the JS backend (verdicts unchanged by construction);
+  - redefine borrow verdicts under source-order evaluation as a deliberate language decision, then capture in HIR.
+
+  Either way, add Node-executed cases for the projected, copied and nested-field shapes.
 
 ### Rooted in-memory template sources may not reach disk resources on Windows
 
@@ -68,3 +119,45 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Where: `mutable_alias_write_targets_from_expression` in `src/compiler_frontend/analysis/borrow_checker/transfer/access.rs`. A projected mutable alias targets the union of the holder's designated cells (the pre-correction identity) and the containing allocation roots observed at binding time. A freshly built allocation has no older root: its identity is encoded as the holder cell or as empty provenance, and that identity cannot be transported precisely through joins, whole-binding alias chains, calls or scope exits.
 - Observed: `holder ~= Pair({1}, {0}); writer ~= holder.first; ~holder = Pair({2}, {3}); read = holder.first.length(); return read + writer.length()` is rejected with MOTH-BORROW-0003 even though `writer` observes the old allocation and the read observes the replacement. The value-backed form `holder ~= same_pair(original)` is rejected the same way when the rebound holder is read before the final writer read (`mutable_projected_alias_rebound_holder_while_writer_live_rejected`). Allocation-root-only targets accepted unsafe programs wherever the fresh alternative was lost: a join (`mutable_projected_alias_join_fresh_alternative_rejected`), a whole-binding alias transport (`mutable_projected_alias_join_alias_chain_rejected`), a loop back edge (`mutable_projected_alias_loop_back_edge_rejected`) and a scope exit (`mutable_projected_alias_scope_exit_conflict_rejected`). Those rejection cases are now pinned in debug and release. A projection that is only read after the rebind, with no live mutable alias, still passes (`projected_alias_survives_source_rebinding_accepted`).
 - Investigate: represent a freshly built allocation as an explicit transported root, for example a generation carried with the projected referent, so targets can stay allocation-rooted through joins, alias chains, calls and scope exits. Then drop the holder-cell union and restore the accepted F1 shape.
+
+### Registered package roots below the project root are rediscovered as project sources
+
+- Found: namespaced exports follow-up F5 audit, 2026-11. Confirmed by code trace and a fixture artefact; pre-dates this branch. Needs a design decision; see Investigate.
+- Where: the project source walk in `src/build_system/create_project_modules/source_tree_index.rs` does not exclude canonical roots already registered as source packages.
+- Observed: a registered package directory inside the project root is also indexed as a project-local support module, so its authored warnings appear twice; a co-located package `@entry.moth` could enter the project graph and become an active output. Directories at an exact registered prefix are also rejected as `EntryRootPackagePrefixCollision` (`src/vendor/lib` registered as `@vendor/lib`).
+- Attempted fixes (reverted, 2026-11), both meant to implement the decision to exclude these roots from the project walk:
+  - Skip-policy exclusion (registered canonical roots dropped from every walk). The folder vanished from consumers that still need it:
+    - file values and bounded single-file provider imports lost the package boundary;
+    - single-file prefix probing missed collisions;
+    - case-only siblings were dropped;
+    - synthetic fallback admitted package-private files;
+    - descendant scans followed directory cycles;
+    - first-error order changed.
+  - Package-owned identity marker (root kept as a non-compiled identity with a private boundary key). Remaining divergences:
+    - a `$export` route from the marker facade reaches an unfinished slot (internal error);
+    - a package registered at its own folder prefix (`src/lib` as `@lib`) reports `MOTH-IMPORT-0006`;
+    - self-match probes hide later real collisions;
+    - single-file mode accepts the marker's normal facade and binds where the existing code reports ambiguity;
+    - reserved-root diagnostics depend on the mode;
+    - a package root symlink into its own module is rejected;
+    - nested package validation order changes.
+
+  The root sits inside the project tree, so it interacts with every Stage 0 consumer: routes, namespaces, reserved roots, single-file inventory, symlink validation and package indexing order.
+- Investigate: decide the ownership model before implementing. Options:
+  - reject a registered root inside the project walk with a typed configuration diagnostic (smallest; disallows vendoring inside `src`);
+  - split module identity from compile-graph membership (ModuleRootTable keeps package roots for privacy, the graph holds project modules only), which needs a Stage 0 contract change for dense `ModuleId`;
+  - keep the identity marker, but define each Stage 0 consumer's behaviour for marker roots explicitly first.
+
+### Unused generic function bodies accept standalone `$in` helpers
+
+- Found: runtime template helper escape fix review, 2026-11. Confirmed by probes on this branch and pre-dates the fix.
+- Where: generic function body validation. A generic function's body is finalized only when an instance is materialised, so an unused generic body never reaches the final-value helper rejection in `normalize_expression_template_node`.
+- Observed: `render type T |value T| -> String: return [$in style: [: red]];` with no call is accepted, while `result = render("x"); ~[:[result]]` reports MOTH-SYNTAX-0022 at the helper. The same split occurs for a runtime-dependent helper: `render type T |value T, x String| -> String: return [$in style: [x]];` is accepted while unused and rejected once instantiated.
+- Investigate: validate the authored generic body once before instantiation or materialise every generic body for validation without publishing an instance. The helper shape is not type-dependent, so a pre-instantiation validation pass may suffice. Check that it does not reject generic bodies that are valid only under an instance's type arguments.
+
+### Imported const template helper defaults lack a donor `$in` label
+
+- Found: runtime template helper escape fix verification, 2026-11. Confirmed by a two-module probe and pre-dates this branch.
+- Where: `fold_signature_default` in `src/compiler_frontend/ast/statements/functions.rs` validates the rebuilt default template, and `PublicConstTemplate` in `src/compiler_frontend/folded_value.rs` carries no donor `$in` site. The primary diagnostic correctly points at the importing reference because the stored const insert is legal in its donor, but there is no related label at the authored directive.
+- Observed: `helpers/utils.moth` declares `insert #= [$in style: [: red]]`, `helpers/@mod.moth` exports `@utils insert` and `@entry.moth` uses `@helpers insert` as `render |value String = insert| -> String`. The compiler reports one MOTH-SYNTAX-0022 on the `insert` reference in the default at `@entry.moth:3:24`. It does not point to the authored `$in` at `helpers/utils.moth:2:5`.
+- Investigate: carry diagnostic provenance for the donor `$in` site on public const templates, separate from semantic equality and fingerprints. Attach it as a related label and keep the primary at the invalid use site. The fallback to the use-site span is correct when no authored site is available.

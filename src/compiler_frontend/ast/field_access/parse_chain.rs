@@ -19,15 +19,17 @@ use crate::compiler_frontend::ast::expressions::parse_expression::complete_pendi
 use crate::compiler_frontend::ast::place_access::{
     ReceiverSourceState, classify_expression_source_state,
 };
+use crate::compiler_frontend::ast::templates::template::TemplateType;
 use crate::compiler_frontend::ast::templates::tir::public_const_rebuild::rebuild_const_template_reference;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::compiler_messages::{
     InvalidAssignmentTargetReason, InvalidFieldAccessReason, InvalidReceiverCallReason,
-    ValueReceiverContext,
+    InvalidTemplateStructureReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -113,6 +115,78 @@ pub(crate) fn reference_expression_from_declaration(
         base_span,
         context.kind.is_constant_context(),
     )
+}
+
+/// Rejects a stored `$in` helper read outside a composition context.
+///
+/// WHAT: callers classify the read value as a helper first. Identifier, namespace leaf and
+///       const-record field reads all report through this one rule.
+/// WHY: composition stays legal in template and constant contexts, while a runtime value read
+///      is rejected here rather than reaching HIR as a non-renderable template.
+pub(super) fn reject_runtime_slot_insert_helper(
+    context: &ScopeContext,
+    span: Option<SourceSpan>,
+) -> Result<(), ExpressionParseError> {
+    if context.kind.admits_structural_helpers() {
+        return Ok(());
+    }
+    Err(templates::invalid_template_structure(
+        InvalidTemplateStructureReason::HelperOutsideWrapperSlot,
+        span,
+    )
+    .into())
+}
+
+fn declaration_is_slot_insert_helper(
+    declaration: &Declaration,
+    context: &ScopeContext,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+) -> Result<bool, ExpressionParseError> {
+    let Some(initializer) = declaration.value.initializer() else {
+        return Ok(declaration
+            .value
+            .default()
+            .is_some_and(|id| const_values.is_slot_insert_template(id)));
+    };
+    expression_is_slot_insert_helper(initializer, context, expression_builder, const_values)
+}
+
+/// Classifies an authored value as a stored `$in` helper.
+///
+/// WHAT: reads a same-store template root's `SlotInsert` kind, or a stored constant's
+///       `SlotInsertTemplate` kind through `Coerce` views and `Coerced` wrappers.
+pub(super) fn expression_is_slot_insert_helper(
+    expression: ExprId,
+    context: &ScopeContext,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+) -> Result<bool, ExpressionParseError> {
+    let view = expression_builder.view(expression)?;
+    match view.operation() {
+        ExpressionOperationView::Constant(id) => Ok(const_values.is_slot_insert_template(id)),
+        ExpressionOperationView::Coerce { value, .. } => {
+            expression_is_slot_insert_helper(value.id(), context, expression_builder, const_values)
+        }
+        ExpressionOperationView::Template(template_value) => {
+            let is_slot_insert = context
+                .template_ir_store
+                .borrow()
+                .get_template(template_value.tir_reference.root)
+                .map(|template_ir| matches!(template_ir.kind, TemplateType::SlotInsert(_)))
+                .ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::AstConstruction,
+                        "Identifier template reference pointed at a missing same-store template.",
+                    )
+                })?;
+            Ok(is_slot_insert)
+        }
+        // WHY: only a stored constant, a coerced view of one, or a template can classify as a
+        //      slot-insert helper; walking every other composite here would charge each runtime
+        //      reference for classifying its whole initializer.
+        _ => Ok(false),
+    }
 }
 
 /// Builds the expression payload for a declaration reference whose consumer requires a
@@ -226,6 +300,12 @@ fn declaration_reference_expression(
     base_span: Option<SourceSpan>,
     resolve_constant: bool,
 ) -> Result<OwnedExpr, ExpressionParseError> {
+    // WHY: classification also validates that a same-store template authority still exists, so
+    //      it runs in every context, and only the rejection is limited to runtime values.
+    if declaration_is_slot_insert_helper(reference_arg, context, expression_builder, const_values)?
+    {
+        reject_runtime_slot_insert_helper(context, base_span)?;
+    }
     let initializer = reference_arg.value.initializer();
     let default = reference_arg.value.default();
     let const_record_state = match (initializer, default) {

@@ -1,0 +1,5 @@
+$export @first
+@shapes Shape
+
+$export @second
+@shapes Shape

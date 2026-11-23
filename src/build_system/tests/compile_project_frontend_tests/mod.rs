@@ -66,16 +66,26 @@ fn boundary_has_timing(
     boundary: crate::timing::TimingBoundaryId,
     metric: crate::timing::TimingMetric,
 ) -> bool {
+    boundary_timing_samples(snapshot, boundary, metric) > 0
+}
+
+#[cfg(feature = "timers")]
+fn boundary_timing_samples(
+    snapshot: &crate::timing::BenchmarkObservationSnapshot,
+    boundary: crate::timing::TimingBoundaryId,
+    metric: crate::timing::TimingMetric,
+) -> u64 {
     snapshot
         .boundaries
         .iter()
         .find(|record| record.id == boundary)
-        .is_some_and(|record| {
+        .and_then(|record| {
             record
                 .timings
                 .iter()
-                .any(|aggregate| aggregate.metric == metric && aggregate.samples > 0)
+                .find(|aggregate| aggregate.metric == metric)
         })
+        .map_or(0, |aggregate| aggregate.samples)
 }
 
 #[cfg(feature = "timers")]
@@ -344,6 +354,8 @@ mod entry_api_stability_tests;
 mod package_materialisation_tests;
 #[path = "provider_sources_tests.rs"]
 mod provider_sources_tests;
+#[path = "public_export_route_tests.rs"]
+mod public_export_route_tests;
 #[path = "release_speculation_scope_tests.rs"]
 mod release_speculation_scope_tests;
 #[path = "scheduling_budget_tests.rs"]

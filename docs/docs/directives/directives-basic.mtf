@@ -15,8 +15,9 @@ when their own contract allows it.
 ]
 
 `$export` publishes declarations or direct-selection dependency clauses from
-`@mod.moth` and `@package.moth`. `$config` marks an explicitly typed
-top-level compile-time binding as a build input.
+`@mod.moth` and `@package.moth`, at the facade root or under one public route.
+`$config` marks an explicitly typed top-level compile-time binding as a build
+input.
 
 `$doc` documents a declaration. `$todo` annotates a declaration or
 statement. Both take a compile-time `String` value, often written as a
@@ -41,7 +42,8 @@ target.
 
 Directives use `$name`, `$name value` or `$name key = value`, according
 to their contract. Parenthesized calls like `$name(...)` are invalid.
-`$export` and `$config` take no operand.
+`$config` takes no operand. `$export` takes no operand or one bare `@route`
+path.
 
 Template-head directives include `$before`, `$after`, `$fresh`,
 `$slot`, `$in`, `$supplied`, `$note`, `$raw`, `$md`, `$html`, `$css`,

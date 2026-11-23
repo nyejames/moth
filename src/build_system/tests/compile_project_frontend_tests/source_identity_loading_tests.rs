@@ -591,6 +591,26 @@ fn directory_frontend_registers_package_and_project_boundaries() {
         project_boundary,
         crate::timing::TimingMetric::BoundaryCompile
     ));
+    let package_inventory_samples = boundary_timing_samples(
+        &snapshot,
+        package_boundary,
+        crate::timing::TimingMetric::BoundaryInventory,
+    );
+    assert!(
+        package_inventory_samples >= 2,
+        "the package boundary inventory total must include its facade prepass and route \
+         attachment as well as the later module walk: {package_inventory_samples} samples"
+    );
+    let project_inventory_samples = boundary_timing_samples(
+        &snapshot,
+        project_boundary,
+        crate::timing::TimingMetric::BoundaryInventory,
+    );
+    assert!(
+        project_inventory_samples >= 2,
+        "the project boundary inventory total must include its facade prepass and route \
+         attachment as well as the later module walk: {project_inventory_samples} samples"
+    );
 
     let own_modules = snapshot
         .modules
@@ -693,6 +713,9 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
     )
     .expect("should write config");
     fs::write(dir.join("@entry.moth"), "value = 1\n").expect("should write project root");
+    fs::create_dir_all(dir.join("child")).expect("should create child module dir");
+    fs::write(dir.join("child").join("@mod.moth"), "$export\nvalue #= 2\n")
+        .expect("should write child facade");
 
     let mut config = Config::new(dir.clone());
     config.project_name = "moth_incremental_file_prepare_fixture".to_owned();
@@ -725,22 +748,30 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
     let project_modules = snapshot
         .modules
         .iter()
-        .filter(|module| {
-            module.key.boundary() == project_boundary
-                && module.logical_identity == config.project_name
-        })
+        .filter(|module| module.key.boundary() == project_boundary)
         .collect::<Vec<_>>();
-    assert_eq!(
-        project_modules.len(),
-        1,
-        "the incremental directory compile must register exactly one project module"
-    );
+    let project_root = project_modules
+        .iter()
+        .find(|module| module.logical_identity == config.project_name)
+        .expect("the incremental directory compile must register its project root");
     assert!(
-        module_has_timing(
-            project_modules[0],
-            crate::timing::TimingMetric::FrontendPrepare
-        ),
+        module_has_timing(project_root, crate::timing::TimingMetric::FrontendPrepare),
         "incremental directory discovery must record frontend.prepare for its own module"
+    );
+    let facade_module = project_modules
+        .iter()
+        .find(|module| module.logical_identity.ends_with("child"))
+        .expect("the project facade child module must be registered");
+    let facade_prepare_samples = facade_module
+        .timings
+        .iter()
+        .find(|timing| timing.metric == crate::timing::TimingMetric::FrontendPrepare)
+        .map(|timing| timing.samples);
+    assert!(
+        facade_prepare_samples.is_some_and(|samples| samples >= 2),
+        "the Stage 0 facade prepass must attribute its owned-input and header-preparation stages \
+         to `frontend.prepare`; the module walk must not be the first attributable preparation: \
+         {facade_prepare_samples:?}"
     );
 }
 

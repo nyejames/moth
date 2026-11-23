@@ -124,6 +124,45 @@ impl SourceDiscoveryError {
         }
     }
 
+    /// Convert a cleanup failure while leaving the shared root string table in place.
+    ///
+    /// WHAT: captures a diagnostic draft against the run root's string IDs instead of taking the
+    ///       caller's table. Premerge and infrastructure failures keep their existing lanes.
+    /// WHY: collision cleanup can diagnose several package owners in one pass. The first batch
+    ///      must not consume the root table that later batches still reference; otherwise the
+    ///      second capacity diagnostic validates its IDs against an empty table and masks every
+    ///      authored failure as infrastructure.
+    pub(crate) fn into_failure_with_root_string_table(
+        self,
+        string_table: &StringTable,
+        path_table: Arc<PathTable>,
+    ) -> PreparedFailure {
+        match self {
+            SourceDiscoveryError::Diagnostic(diagnostic) => {
+                match PreparedDiagnosticBatch::capture_from_root_string_table(
+                    DiagnosticBag::from(diagnostic),
+                    string_table,
+                    None,
+                    || Some(path_table),
+                ) {
+                    Ok(batch) => PreparedFailure::Diagnosed(batch),
+                    Err(error) => PreparedFailure::Infrastructure(error.into()),
+                }
+            }
+            SourceDiscoveryError::Premerge(failure) => failure,
+            SourceDiscoveryError::Finalized(_) => {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
+                    "finalized discovery failures own a finished SourceDatabase; match Finalized \
+                     explicitly instead of converting through into_failure_with_root_string_table"
+                )
+            }
+            SourceDiscoveryError::Infrastructure(error) => {
+                PreparedFailure::Infrastructure(error.into())
+            }
+        }
+    }
+
     /// Admit this failure into its source owner's slot.
     ///
     /// The owner's first failure is kept. A later diagnostic is dropped before capture, so it

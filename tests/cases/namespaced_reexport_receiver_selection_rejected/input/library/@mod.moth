@@ -1,0 +1,4 @@
+-- `tick` is a receiver method of the routed `Counter` type, so it travels with the type and is
+-- not an independently selectable public name.
+$export @forms
+@provider/nested Counter, tick

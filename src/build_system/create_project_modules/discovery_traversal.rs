@@ -27,7 +27,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 use crate::compiler_frontend::paths::path_normalization::{
     is_relative_dependency_path, join_and_normalize_path,
 };
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::semantic_identity::{ModuleRootRole, PublicExportRoute};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
 use crate::compiler_frontend::symbols::path_interner::{
@@ -439,8 +439,9 @@ fn walk_reachable_sources(
 
         {
             // Clauses and expression-qualified occurrences share the same synthetic provider
-            // closure: a per-file resolution cache keys on the retained path so a second
-            // occurrence of one provider cannot repeat provider invocation or filesystem work.
+            // closure: a per-file resolution cache keys on the retained path and clause kind so a
+            // repeated provider cannot repeat provider invocation or filesystem work, while one
+            // path used by different clause kinds keeps each policy outcome distinct.
             let mut reachable_queue = ReachableQueue { reachable, queue };
             let mut resolved_by_path = FxHashMap::default();
             let mut context = ReachableDependencyContext {
@@ -579,6 +580,7 @@ enum SyntheticDependencyResolution {
     PackageSurface {
         consumer_module_id: ModuleId,
         dependency_prefix: String,
+        route: PublicExportRoute,
     },
     HandledPackage,
 }
@@ -612,9 +614,10 @@ fn process_reachable_authored_dependency(
     path_fork: &mut PathInternerFork,
     reachable_queue: &mut ReachableQueue<'_>,
     source_package_dependencies: &mut Vec<ResolvedSourcePackageDependency>,
-    resolved_by_path: &mut FxHashMap<PathId, SyntheticDependencyResolution>,
+    resolved_by_path: &mut FxHashMap<(PathId, DependencyClauseKind), SyntheticDependencyResolution>,
 ) -> Result<(), SourceDiscoveryError> {
-    let resolution = match resolved_by_path.get(&provider.path) {
+    let resolution_key = (provider.path, clause_kind);
+    let resolution = match resolved_by_path.get(&resolution_key) {
         Some(resolution) => resolution.clone(),
         None => {
             let action = context.policy.handle_dependency(
@@ -649,10 +652,12 @@ fn process_reachable_authored_dependency(
                     ResolvedDependency::SourcePackageSurface {
                         consumer_module_id,
                         dependency_prefix,
+                        route,
                         ..
                     } => SyntheticDependencyResolution::PackageSurface {
                         consumer_module_id,
                         dependency_prefix,
+                        route,
                     },
                     _ => SyntheticDependencyResolution::HandledPackage,
                 }
@@ -690,7 +695,7 @@ fn process_reachable_authored_dependency(
                     }
                 }
             };
-            resolved_by_path.insert(provider.path, resolution.clone());
+            resolved_by_path.insert(resolution_key, resolution.clone());
             resolution
         }
     };
@@ -700,11 +705,13 @@ fn process_reachable_authored_dependency(
         SyntheticDependencyResolution::PackageSurface {
             consumer_module_id,
             dependency_prefix,
+            route,
         } => {
             source_package_dependencies.push(ResolvedSourcePackageDependency {
                 consumer_module_id,
                 dependency_prefix,
                 dependency_shell_id: provider.dependency_shell_id,
+                route,
             });
             add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
         }

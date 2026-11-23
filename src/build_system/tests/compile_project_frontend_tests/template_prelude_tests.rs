@@ -169,6 +169,80 @@ fn project_local_html_support_package_does_not_replace_the_core_package() {
 }
 
 #[test]
+fn nested_route_exports_stay_out_of_the_mtf_prelude_but_bind_by_explicit_provider_path() {
+    // The fixed prelude is exactly the official Core root constants. A nested route exported by a
+    // project support facade, even one whose leaf is spelled `p`, must not become a flat template
+    // binding. The `.mtf` body still binds it through an explicit qualified provider occurrence,
+    // and a `.moth` consumer binds it through an explicit dependency clause.
+    let files = &[
+        (
+            "src/@entry.moth",
+            "@docs intro_content\n@docs project_heading\n\n[: [intro_content] [project_heading] ]\n",
+        ),
+        (
+            "src/docs/@mod.moth",
+            "@guide/forms routed_heading\n\n$export\n@intro content as intro_content\n$export\nproject_heading #= routed_heading\n",
+        ),
+        (
+            "src/docs/intro.mtf",
+            "[p, center: [@guide/forms routed_heading]]",
+        ),
+        (
+            "src/guide/@package.moth",
+            "$export @forms\np #= \"project p\"\n$export @forms\nrouted_heading #= \"route heading\"\n",
+        ),
+    ];
+    let mut minimal_surface = BuilderSurface::with_mandatory_core();
+    let compiled = successful_compilation_value(compile_fixture_result_with_surface(
+        files,
+        BuildProfile::Dev,
+        &mut minimal_surface,
+    ));
+
+    let folded = entry_folded_output(&compiled);
+    assert!(
+        folded.contains("<p style=\"text-align: center;\">"),
+        "the official @core/html `p` and @core/css `center` root bindings must stay unchanged: {folded:?}"
+    );
+    assert!(
+        folded.contains("</p>"),
+        "the official @core/html `p` must own the bare `p` spelling: {folded:?}"
+    );
+    assert!(
+        !folded.contains("project p"),
+        "a nested route constant must not enter the flat prelude through its leaf spelling: {folded:?}"
+    );
+    assert_eq!(
+        folded.matches("route heading").count(),
+        2,
+        "the qualified template occurrence and the explicit dependency clause must both bind the routed constant: {folded:?}"
+    );
+
+    // Without the explicit provider path the nested leaf is not a template binding at all.
+    let bare_files = &[
+        (
+            "src/@entry.moth",
+            "@docs intro_content\n\n~[: [intro_content] ]\n",
+        ),
+        (
+            "src/docs/@mod.moth",
+            "$export\n@intro content as intro_content\n",
+        ),
+        ("src/docs/intro.mtf", "[routed_heading]"),
+        (
+            "src/guide/@package.moth",
+            "$export @forms\nrouted_heading #= \"route heading\"\n",
+        ),
+    ];
+    let mut minimal_surface = BuilderSurface::with_mandatory_core();
+    let signatures = fixture_error_signatures(bare_files, &mut minimal_surface);
+    assert!(
+        signatures.iter().any(|(code, _)| code == "MOTH-RULE-0034"),
+        "a bare nested leaf must stay outside the .mtf scope: {signatures:?}"
+    );
+}
+
+#[test]
 fn single_file_template_input_materialises_both_prelude_packages() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");

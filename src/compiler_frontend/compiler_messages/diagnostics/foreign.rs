@@ -6,7 +6,9 @@
 //! by the report and rows refer to it by index. Spans stay in their usual fields, so readers find them in the same
 //! place whether or not they are foreign.
 
-use crate::compiler_frontend::source::{FrozenIdentityContext, FrozenIdentityHandle, SourceSpan};
+use crate::compiler_frontend::source::{
+    FrozenIdentityContext, FrozenIdentityHandle, FrozenSitePathDisplay, SourceSpan,
+};
 
 /// Which span of a draft a foreign site belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,8 +28,26 @@ pub(super) struct ForeignSiteDraft {
 /// span and `label + 1` for a label. `context` indexes the report's foreign identity-context list.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ForeignSiteRecord {
+    /// `selector_slot` plus `HOST_PATH_DISPLAY_FLAG` when this site renders by canonical path.
     pub(super) selector: u32,
     pub(super) context: u32,
+}
+
+/// High selector bit: this donor site renders its canonical host path.
+pub(super) const HOST_PATH_DISPLAY_FLAG: u32 = 1 << 31;
+
+impl ForeignSiteRecord {
+    pub(super) fn selector_slot(self) -> u32 {
+        self.selector & !HOST_PATH_DISPLAY_FLAG
+    }
+
+    pub(super) fn path_display(self) -> FrozenSitePathDisplay {
+        if self.selector & HOST_PATH_DISPLAY_FLAG == 0 {
+            FrozenSitePathDisplay::Logical
+        } else {
+            FrozenSitePathDisplay::CanonicalHost
+        }
+    }
 }
 
 // Two words: the selector and the context index. The span stays with its record or label, so the row is 8 bytes.
@@ -45,5 +65,7 @@ pub(crate) enum SiteRef<'a> {
         span: SourceSpan,
         /// `None` keeps an unresolved foreign span from falling back to the report's local identity.
         context: Option<&'a FrozenIdentityContext>,
+        /// Donor-chosen presentation for this exact site.
+        path_display: FrozenSitePathDisplay,
     },
 }

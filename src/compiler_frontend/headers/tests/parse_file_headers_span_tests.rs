@@ -2,6 +2,182 @@ use super::*;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
+#[test]
+fn export_routes_survive_non_identity_path_remapping_and_source_rebinding() {
+    let source = "$export @tables/layout\nButton = | label String |\n$export @forms\n@button Button, render as render_button\n";
+    let canonical = PathBuf::from("src/@mod.moth");
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
+        .expect("the routed source should register");
+    let source_id = sources
+        .get_by_canonical_path(&canonical)
+        .expect("the routed source identity")
+        .id;
+    let scope = path_fork
+        .try_intern_filesystem_path(&canonical, &mut strings)
+        .expect("the routed source path fits");
+    let mut spans = ExtendedSpanBuilder::new();
+    let tokens = tokenize(
+        source,
+        scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        &mut path_fork,
+        source_id,
+        &mut spans,
+    )
+    .expect("the routed source should tokenize");
+    let (owner, path_syntax) = super::canonical_handoff(tokens);
+    let options = HeaderParseOptions {
+        selected_file: Some((
+            source_id,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
+        )),
+        ..Default::default()
+    };
+    let mut prepared = parse_file_headers_with_table(
+        owner,
+        scope,
+        path_syntax,
+        &options,
+        &mut strings,
+        &mut path_fork,
+        0,
+        0,
+        &mut spans,
+    )
+    .expect("the routed facade should prepare");
+
+    let declaration = prepared
+        .headers
+        .iter()
+        .find(|header| matches!(header.kind, HeaderKind::Struct { .. }))
+        .expect("the routed declaration should parse");
+    let declaration_route = declaration
+        .export_mode
+        .route()
+        .expect("the declaration retains its route");
+    let clause_route = prepared.file_dependency_clauses[0]
+        .export_mode
+        .route()
+        .expect("the dependency clause retains its route");
+    let original_declaration_path = declaration_route.path;
+    let original_clause_path = clause_route.path;
+
+    let mut merged_strings = StringTable::new();
+    let mut merged_paths = PathInternerFork::empty();
+    // A destination-only path forces every source path ID to shift, so an unremapped route
+    // cannot accidentally keep resolving through the inherited identity prefix.
+    merged_paths
+        .try_intern_portable_path("destination-only", &mut merged_strings)
+        .expect("the remap seed path fits");
+    merged_strings.intern("unrelated");
+    let string_remap = merged_strings.merge_from(&strings);
+    let path_remap = merged_paths
+        .merge_delta_from(&path_fork, &string_remap)
+        .expect("source paths should remap");
+    prepared
+        .remap_string_ids(&string_remap)
+        .expect("prepared strings should remap");
+    prepared
+        .remap_path_ids(&path_remap)
+        .expect("prepared paths should remap");
+
+    let declaration = prepared
+        .headers
+        .iter()
+        .find(|header| matches!(header.kind, HeaderKind::Struct { .. }))
+        .expect("the routed declaration survives remapping");
+    let declaration_route = declaration
+        .export_mode
+        .route()
+        .expect("the declaration route survives remapping");
+    let clause_route = prepared.file_dependency_clauses[0]
+        .export_mode
+        .route()
+        .expect("the clause route survives remapping");
+    assert_ne!(
+        declaration_route.path, original_declaration_path,
+        "the fixture must force a non-identity path remap"
+    );
+    assert_ne!(clause_route.path, original_clause_path);
+    let render_components = |path| {
+        let mut components = Vec::new();
+        merged_paths.resolve_components(path, &mut components);
+        components
+            .iter()
+            .map(|&component| merged_strings.resolve(component))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        render_components(declaration_route.path),
+        ["tables", "layout"]
+    );
+    assert_eq!(render_components(clause_route.path), ["forms"]);
+
+    drop(sources);
+    let final_sources = SourceDatabase::build(
+        [&PathBuf::from("a-earlier.moth"), &canonical],
+        &canonical,
+        None,
+        &mut merged_strings,
+    )
+    .expect("the final source membership should register");
+    let final_id = final_sources
+        .get_by_canonical_path(&canonical)
+        .expect("the final canonical source")
+        .id;
+    assert_ne!(
+        final_id,
+        SourceId::COMPILATION_ROOT,
+        "the fixture must force a non-identity source rebind"
+    );
+    let final_path = merged_paths
+        .try_intern_filesystem_path(&canonical, &mut merged_strings)
+        .expect("the final logical path fits");
+    prepared
+        .rebind_source_identity(final_id, final_path, &mut merged_paths)
+        .expect("the routed source should rebind");
+
+    let declaration = prepared
+        .headers
+        .iter()
+        .find(|header| matches!(header.kind, HeaderKind::Struct { .. }))
+        .expect("the routed declaration survives rebinding");
+    let declaration_route = declaration
+        .export_mode
+        .route()
+        .expect("the declaration route survives rebinding");
+    let clause_route = prepared.file_dependency_clauses[0]
+        .export_mode
+        .route()
+        .expect("the clause route survives rebinding");
+    assert_eq!(declaration_route.span.source(), final_id);
+    assert_eq!(clause_route.span.source(), final_id);
+
+    let mut database = SourceDatabaseBuilder::new(final_sources);
+    database
+        .sources_mut()
+        .retain_text(final_id, source.to_owned())
+        .expect("retain source snapshot");
+    database.retain_span_builder(final_id, spans);
+    database
+        .finish_source(final_id)
+        .expect("the routed source should finalise");
+    database
+        .assemble_finalized_tables()
+        .expect("the original span table should assemble");
+    let database = database.finish().expect("install original span table");
+    let resolve = |span: SourceSpan| {
+        let range = span.byte_range(&database);
+        &source[range.start() as usize..range.end() as usize]
+    };
+    assert_eq!(resolve(declaration_route.span), "@tables/layout");
+    assert_eq!(resolve(clause_route.span), "@forms");
+}
+
 /// Preparation retains exact dependency and file-path ranges across identity normalization.
 #[test]
 fn dependency_ranges_survive_string_remapping_and_source_rebinding() {

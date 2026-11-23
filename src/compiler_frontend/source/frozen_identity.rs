@@ -34,6 +34,15 @@ use std::sync::Arc;
 /// exactly once at the final render boundary. Retained tokens always carry this handle alongside
 /// their `SourceId`; they never expose a donor ID without an owner that can resolve it after the
 /// mutable source builder is dropped.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum FrozenSitePathDisplay {
+    /// Boundary-relative logical path: the established presentation for package diagnostics.
+    #[default]
+    Logical,
+    /// Canonical host path, used only where two boundaries can spell the same logical file.
+    CanonicalHost,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct FrozenIdentityHandle {
     identity: Arc<std::sync::OnceLock<Arc<FrozenIdentityContext>>>,
@@ -43,6 +52,8 @@ pub(crate) struct FrozenIdentityHandle {
     /// retain the owning package identity while its frozen context is still late-bound. The
     /// domain is shared by cheap handle clones and is not inferred from a colliding SourceId.
     domain: Option<Arc<StablePackageIdentity>>,
+    /// How renderers spell a position resolved through this handle.
+    path_display: FrozenSitePathDisplay,
 }
 
 impl PartialEq for FrozenIdentityHandle {
@@ -58,19 +69,52 @@ impl FrozenIdentityHandle {
         Self {
             identity: Arc::new(std::sync::OnceLock::new()),
             domain: None,
+            path_display: FrozenSitePathDisplay::Logical,
         }
     }
 
     /// Create a handle whose spans belong to one stable project/package identity domain.
     pub(crate) fn for_domain(domain: StablePackageIdentity) -> Self {
+        Self::for_domain_with_path_display(domain, FrozenSitePathDisplay::Logical)
+    }
+
+    /// Create a domain handle for a cross-boundary collision.
+    ///
+    /// WHY: two boundaries can spell the same logical file, so collision sites resolve exact
+    ///      physical ownership. Ordinary package diagnostics keep the logical presentation.
+    pub(crate) fn for_collision_domain(domain: StablePackageIdentity) -> Self {
+        Self::for_domain_with_path_display(domain, FrozenSitePathDisplay::CanonicalHost)
+    }
+
+    /// Create a domain-less handle for a collision whose primary site uses the report's context.
+    ///
+    /// WHY: a project-local primary and a package donor can relativise to the same file, so both
+    ///      sides of that cross-boundary report use the physical-path basis.
+    pub(crate) fn for_collision_local() -> Self {
+        Self {
+            identity: Arc::new(std::sync::OnceLock::new()),
+            domain: None,
+            path_display: FrozenSitePathDisplay::CanonicalHost,
+        }
+    }
+
+    fn for_domain_with_path_display(
+        domain: StablePackageIdentity,
+        path_display: FrozenSitePathDisplay,
+    ) -> Self {
         Self {
             identity: Arc::new(std::sync::OnceLock::new()),
             domain: Some(Arc::new(domain)),
+            path_display,
         }
     }
 
     pub(crate) fn domain(&self) -> Option<&StablePackageIdentity> {
         self.domain.as_deref()
+    }
+
+    pub(crate) fn path_display(&self) -> FrozenSitePathDisplay {
+        self.path_display
     }
 
     pub(crate) fn install(

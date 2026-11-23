@@ -1,0 +1,1 @@
+card #= [:<article style="[$slot style]">[$slot]</article>]

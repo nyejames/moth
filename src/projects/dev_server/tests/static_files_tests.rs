@@ -19,13 +19,14 @@ fn site_config(page_url_style: PageUrlStyle, redirect_index_html: bool) -> HtmlS
 }
 
 #[test]
-fn injection_precedes_page_scripts_and_happens_once() {
+fn injection_precedes_page_scripts_including_authored_marker_pages() {
     for html in [
         "<html><head><script>bootstrap()</script></head><body>Hello</body></html>",
         "<html><head><!-- <script>unused()</script> --><script>bootstrap()</script></head><body>Hello</body></html>",
         "<html><HEAD><title>Hello</title></HEAD><body><script>bootstrap()</script></body></html>",
         "<html><body><script>bootstrap()</script></body></html>",
         "<html><body><h1>Hello</h1></body></html>",
+        "<html><head><!-- moth-dev-client --><script>bootstrap()</script></head><body>Hello</body></html>",
     ] {
         let injected = inject_dev_client(html, "/", 7, "docs/index.html");
         assert_eq!(injected.matches("new EventSource(").count(), 1);
@@ -38,10 +39,6 @@ fn injection_precedes_page_scripts_and_happens_once() {
                 "hooks must exist before classic page bootstrap"
             );
         }
-        assert_eq!(
-            inject_dev_client(&injected, "/", 7, "docs/index.html"),
-            injected
-        );
     }
 }
 

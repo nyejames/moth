@@ -13,7 +13,7 @@ use super::{
     TemplateWorkBudget,
 };
 use crate::compiler_frontend::ast::const_eval::{
-    ConstBudgetCategory, ConstBudgetExhaustion, ConstBudgetUnit, ConstantFoldError,
+    ConstBudgetCategory, ConstBudgetUnit, ConstantFoldError,
 };
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstValue, ConstValueField,
@@ -48,9 +48,37 @@ pub(super) struct ExecutionBudget {
     /// Active interpreted function calls with their call sites, outermost first.
     ///
     /// Call depth is a resource bound and the chain labels escaping diagnostics, so it stays with
-    /// the budget rather than with control-flow state.
-    pub(super) call_stack: Vec<(PathId, Option<SourceSpan>)>,
+    /// the budget rather than with control-flow state. A frame keeps only compact body paths;
+    /// owned donor handles are resolved when a diagnostic escapes.
+    pub(super) call_stack: Vec<ConstCallFrame>,
 }
+
+/// One active interpreted call: where it is written and which body contains that site.
+///
+/// WHY: the interpreter resolves the owning body's donor handle from the executables table only
+///      when a call chain escapes. Storing the compact path here avoids cloning an Arc-backed
+///      handle on every successful call.
+pub(super) struct ConstCallFrame {
+    /// Authored call site in the caller's source.
+    pub(super) span: Option<SourceSpan>,
+    /// Body that contains `span`; `None` means consumer-local source.
+    pub(super) owner_body: Option<PathId>,
+}
+
+/// A call refused by the hard call-depth bound.
+///
+/// WHY: the budget owns the limit, but only the interpreter can resolve a body's donor identity
+///      into the diagnostic's owned handles.
+#[derive(Debug)]
+pub(super) struct CallDepthRefusal {
+    pub(super) span: Option<SourceSpan>,
+    pub(super) owner_body: Option<PathId>,
+}
+
+const _: () = assert!(
+    std::mem::size_of::<ConstCallFrame>() == 12,
+    "the call stack is entered on every interpreted call; growing its frame needs a measured reason"
+);
 
 impl ExecutionBudget {
     pub(super) fn new(meter: Rc<RefCell<ConstExecutionMeter>>) -> Self {
@@ -188,27 +216,13 @@ impl ExecutionBudget {
 
     pub(super) fn enter_call(
         &mut self,
-        path: PathId,
         span: Option<SourceSpan>,
-    ) -> Result<(), ConstantFoldError> {
+        owner_body: Option<PathId>,
+    ) -> Result<(), CallDepthRefusal> {
         if self.call_stack.len() >= MAX_CALL_DEPTH {
-            return Err(ConstantFoldError::Budget(ConstBudgetExhaustion {
-                category: ConstBudgetCategory::Work,
-                unit: ConstBudgetUnit::CallFrames,
-                limit: MAX_CALL_DEPTH as u64,
-                setting: None,
-                aggregate: false,
-                span,
-                call_span: span,
-                call_chain: self
-                    .call_stack
-                    .iter()
-                    .filter_map(|(_, call_span)| *call_span)
-                    .chain(span)
-                    .collect(),
-            }));
+            return Err(CallDepthRefusal { span, owner_body });
         }
-        self.call_stack.push((path, span));
+        self.call_stack.push(ConstCallFrame { span, owner_body });
         Ok(())
     }
 

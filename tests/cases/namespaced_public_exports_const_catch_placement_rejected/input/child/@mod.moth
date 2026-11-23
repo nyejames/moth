@@ -1,0 +1,5 @@
+-- A constant cast catch handler is statement dispatch, so an export there is impossible.
+count #I32 = cast "0" catch:
+    $export @missing extra
+    then 0
+;

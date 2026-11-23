@@ -74,8 +74,15 @@ pub(super) fn compile_check_only_jobs_after_canonical(
     string_table: &StringTable,
     path_interner: &PathInternerBuilder,
 ) -> Result<Vec<PreparedDiagnosticBatch>, PreparedFailure> {
+    // Most completed packages have no deferred check-only jobs. Building provider indexes for
+    // them would repeat package materialisation work per package with no consumer. The caller
+    // still adopts and finalises the source owner after this returns.
+    if check_only_jobs.is_empty() {
+        return Ok(Vec::new());
+    }
+
     let mut provider_materialisations =
-        seed_completed_package_materialisations(context.completed_packages())?;
+        seed_completed_package_materialisations(context.completed_packages());
     seed_boundary_materialisations(&mut provider_materialisations, provider_store)?;
 
     let provider_binding_index = build_provider_binding_index(provider_bindings);

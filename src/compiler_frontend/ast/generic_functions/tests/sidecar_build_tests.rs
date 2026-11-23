@@ -95,7 +95,12 @@ fn requester_template_contract_slots_use_nonidentity_generated_domain_remap() {
             crate::compiler_frontend::ast::module_ast::build_context::AstTimingMetricFamily::Generated,
     };
     let (mut phase_context, strings, paths) =
-        AstPhaseContext::from_build_context(build_context, Arc::new(Default::default())).unwrap();
+        AstPhaseContext::from_build_context_with_execution_meter(
+            build_context,
+            Arc::new(Default::default()),
+            Rc::clone(&requester.const_execution_meter),
+        )
+        .unwrap();
     let builtin_manifest =
         crate::compiler_frontend::builtins::error_type::register_builtin_error_types(
             paths, strings,

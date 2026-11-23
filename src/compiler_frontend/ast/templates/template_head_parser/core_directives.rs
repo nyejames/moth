@@ -91,9 +91,11 @@ pub(super) fn maybe_parse_structural_helper_directive(
         directive_kind,
         StyleDirectiveKind::Core(CoreStyleDirectiveKind::In)
     ) {
+        let directive_span = token_stream.current_span();
         let in_name = string_table.intern(INSERT_DIRECTIVE_NAME);
         let slot_name = parse_in_target(in_name, token_stream, string_table)?;
         build_state.kind = TemplateType::SlotInsert(SlotKey::named(slot_name));
+        build_state.slot_insert_directive_span = Some(directive_span);
         return Ok(true);
     }
 

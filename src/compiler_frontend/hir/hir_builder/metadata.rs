@@ -431,14 +431,14 @@ impl<'a> HirBuilder<'a> {
                     continue;
                 }
                 let target = self.resolve_call_target_or_error(&site.target)?;
-                // Release speculation skips authored-dead statements and statically pruned catch
-                // handlers, so every row it records belongs to source HIR lowered.
+                // Release speculation never folds a catch handler body or a handled subject, so
+                // every recorded row is ordinary executable source that HIR lowered. No row needs
+                // per-handler containment: a call that can fail here really does escape.
                 insert_live_erased_site_in_source_order(
                     &mut live_erased_call_sites,
                     HirLiveErasedCallSite {
                         target,
                         span: site.span,
-                        failure_caught: site.failure_caught,
                     },
                     span_sources,
                 );

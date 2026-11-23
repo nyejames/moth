@@ -361,6 +361,45 @@ fn preparation_classifies_slot_insert_helpers() {
     ));
 }
 
+/// An escaped root `$in` helper keeps helper identity even when its own content
+/// is runtime-dependent.
+///
+/// WHAT: the root is a `SlotInsert` with one runtime function-call body.
+/// WHY: finalization uses this classification to reject the helper instead of
+///      handing a neutral runtime template to HIR.
+#[test]
+fn preparation_classifies_runtime_dependent_root_slot_insert_as_helper() {
+    let (slot_insert, _) = prepare_root(
+        TemplateType::SlotInsert(SlotKey::Default),
+        |builder, table, expressions, _| {
+            let expression = runtime_expression(expressions, table);
+            let dynamic_node =
+                builder.push_dynamic_expression_node(expression, TemplateSegmentOrigin::Body, None);
+            builder.push_sequence_node(vec![dynamic_node], None)
+        },
+        TemplatePreparationMode::Value,
+    )
+    .expect("runtime-dependent slot insert preparation should succeed");
+
+    assert!(
+        !slot_insert.facts.is_const_evaluable_shape,
+        "the fixture must stay runtime-dependent to exercise the classification boundary"
+    );
+    assert_eq!(
+        slot_insert.facts.final_value_kind,
+        TemplateConstValueKind::NonConst,
+        "a runtime-dependent helper must stay non-constant for const gates"
+    );
+    assert!(
+        matches!(
+            slot_insert.outcome,
+            TemplatePreparationOutcome::SlotInsertHelper
+        ),
+        "an escaped root insert must stay a helper, not runtime content: {:?}",
+        slot_insert.outcome
+    );
+}
+
 #[test]
 fn preparation_mode_controls_const_required_conditional_validation() {
     let build_conditional = |builder: &mut TemplateIrBuilder<'_>,

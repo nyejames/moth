@@ -35,6 +35,8 @@ pub(crate) use declaration_semantics::{
 };
 pub(in crate::compiler_frontend::ast) use declaration_table::ResolvedConstantSet;
 pub(crate) use declaration_table::TopLevelDeclarationTable;
+#[cfg(test)]
+pub(in crate::compiler_frontend::ast) use function_signatures::validate_visible_receiver_methods;
 pub(in crate::compiler_frontend::ast) use input::AstEnvironmentInput;
 pub(in crate::compiler_frontend::ast) use lookups::{AstModuleEnvironment, AstModuleLookups};
 pub(crate) use resolved_public_trait_roots::{

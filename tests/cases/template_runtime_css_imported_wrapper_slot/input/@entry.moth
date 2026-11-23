@@ -1,0 +1,11 @@
+@helpers/card card
+
+style_for |colour String| -> String:
+    return [:color: [colour];]
+;
+
+body_for |name String| -> String:
+    return [:Hello, [name]]
+;
+
+~[card:[$in style:[style_for("red")]][body_for("Priya")]]

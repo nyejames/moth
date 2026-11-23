@@ -10,9 +10,13 @@ use super::scope_context::{ContextKind, ScopeContext};
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_resolution::validate_no_recursive_runtime_structs;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
+    InvalidReceiverDeclarationCode, InvalidReceiverDeclarationView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
     InvalidDeclarationCode, InvalidDeclarationView,
 };
@@ -23,7 +27,13 @@ use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::datatypes::{BuiltinScalarReceiver, ReceiverKey, builtin_type_ids};
 use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::headers::binding_environment::FileVisibility;
+use crate::compiler_frontend::headers::binding_environment::{
+    FileVisibility, ReceiverMethodVisibility, SourceFunctionTarget,
+};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, OriginFunctionId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+    StablePackageIdentity,
+};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -170,6 +180,122 @@ fn production_lookup_rejects_provider_private_entry_through_value_carried_fallba
 }
 
 #[test]
+fn receiver_method_lookup_skips_a_visible_entry_absent_from_the_catalog() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let method_name = string_table.intern("label");
+    let receiver = ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::String);
+    let source_file = interned_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
+
+    // A visible entry can lack its catalogue row. That absence cannot prove the receiver lacks
+    // the method and must not end the search for a later entry.
+    let absent_visible_path = interned_path(
+        &["src", "pending", "label"],
+        &mut string_table,
+        &mut path_fork,
+    );
+    let matching_path = interned_path(&["src", "label"], &mut string_table, &mut path_fork);
+    assert_ne!(absent_visible_path, matching_path);
+
+    let mut matching_entry = empty_receiver_entry(matching_path, source_file, receiver.to_owned());
+    // Name visibility and value carriage are independent, so the fallback must not be able to
+    // resolve this entry; only the visible walk can.
+    matching_entry.value_carried = false;
+    let mut catalog = ReceiverMethodCatalog::default();
+    catalog.by_receiver_and_name.insert(
+        (receiver.to_owned(), method_name),
+        vec![matching_entry.to_owned()],
+    );
+    catalog
+        .by_method_name
+        .insert(method_name, vec![matching_entry.to_owned()]);
+    catalog
+        .by_function_path
+        .insert(matching_path, matching_entry.to_owned());
+
+    let mut visibility = FileVisibility::default();
+    visibility.visible_receiver_methods.insert(
+        method_name,
+        vec![
+            ReceiverMethodVisibility {
+                target: SourceFunctionTarget::Local(absent_visible_path),
+                span: None,
+            },
+            ReceiverMethodVisibility {
+                target: SourceFunctionTarget::Local(matching_path),
+                span: None,
+            },
+        ],
+    );
+
+    let context = context_for_source_file(source_file, catalog, &path_fork)
+        .with_file_visibility(Arc::new(visibility));
+    let resolved = context
+        .lookup_receiver_method(&receiver, method_name)
+        .expect("a missing catalogue row must not hide a later visible method on the receiver");
+    assert_eq!(
+        resolved.function_path, matching_entry.function_path,
+        "lookup should resolve the receiver's own visible entry after skipping the absent one"
+    );
+}
+
+#[test]
+fn receiver_method_lookup_keeps_value_carried_fallback_past_an_absent_visible_entry() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let method_name = string_table.intern("label");
+    let receiver = ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::String);
+    let source_file = interned_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
+
+    let absent_visible_path = interned_path(
+        &["src", "pending", "label"],
+        &mut string_table,
+        &mut path_fork,
+    );
+    let value_carried_path = interned_path(
+        &["src", "carried", "label"],
+        &mut string_table,
+        &mut path_fork,
+    );
+    assert_ne!(absent_visible_path, value_carried_path);
+
+    // The value-carried entry is not the absent visible path, so only a continued visible
+    // walk reaches the fallback.
+    let value_carried_entry =
+        empty_receiver_entry(value_carried_path, source_file, receiver.to_owned());
+    let mut catalog = ReceiverMethodCatalog::default();
+    catalog.by_receiver_and_name.insert(
+        (receiver.to_owned(), method_name),
+        vec![value_carried_entry.to_owned()],
+    );
+    catalog
+        .by_method_name
+        .insert(method_name, vec![value_carried_entry.to_owned()]);
+    catalog
+        .by_function_path
+        .insert(value_carried_path, value_carried_entry);
+
+    let mut visibility = FileVisibility::default();
+    visibility.visible_receiver_methods.insert(
+        method_name,
+        vec![ReceiverMethodVisibility {
+            target: SourceFunctionTarget::Local(absent_visible_path),
+            span: None,
+        }],
+    );
+
+    let context = context_for_source_file(source_file, catalog, &path_fork)
+        .with_file_visibility(Arc::new(visibility));
+    let resolved = context
+        .lookup_receiver_method(&receiver, method_name)
+        .expect("a missing catalogue row must not discard the value-carried fallback");
+    assert_eq!(
+        resolved.function_path, value_carried_path,
+        "the value-carried method should dispatch when the visible entry has no catalogue row"
+    );
+}
+
+#[test]
 fn visible_method_lookup_prefers_same_file_before_catalog_fallback() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -252,6 +378,100 @@ fn visible_method_lookup_uses_stable_catalog_fallback_order() {
     assert_eq!(
         resolved.function_path, first_entry.function_path,
         "catalog fallback lookup should resolve using stable catalog order"
+    );
+}
+
+#[test]
+fn visible_receiver_methods_compare_declaration_origins_not_alias_paths() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let method_name = string_table.intern("reset");
+    let source_file = interned_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
+    let receiver = ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Char);
+    let first_path = interned_path(
+        &["src", "first", "reset"],
+        &mut string_table,
+        &mut path_fork,
+    );
+    let second_path = interned_path(
+        &["src", "second", "reset"],
+        &mut string_table,
+        &mut path_fork,
+    );
+
+    let mut catalog = ReceiverMethodCatalog::default();
+    for function_path in [first_path, second_path] {
+        catalog.by_function_path.insert(
+            function_path,
+            empty_receiver_entry(function_path, source_file, receiver.to_owned()),
+        );
+    }
+
+    let module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("shapes"),
+        "shapes/@mod.moth".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let receiver_origin = OriginTypeId::new(
+        module_origin.clone(),
+        "Shape".to_owned(),
+        OriginTypeCategory::Struct,
+    );
+    let first_origin = OriginFunctionId::new_receiver(
+        module_origin.clone(),
+        "reset".to_owned(),
+        receiver_origin.clone(),
+    );
+    let second_module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("other_shapes"),
+        "other_shapes/@mod.moth".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let second_origin =
+        OriginFunctionId::new_receiver(second_module_origin, "reset".to_owned(), receiver_origin);
+    let aliased = |origin, local_path| ReceiverMethodVisibility {
+        target: SourceFunctionTarget::Imported { origin, local_path },
+        span: None,
+    };
+
+    let mut same_origin_visibility = FxHashMap::default();
+    same_origin_visibility.insert(
+        method_name,
+        vec![
+            aliased(first_origin.clone(), first_path),
+            aliased(first_origin.clone(), second_path),
+        ],
+    );
+    super::environment::validate_visible_receiver_methods(&same_origin_visibility, &catalog)
+        .expect("one method imported through two aliases is not a collision");
+
+    let mut distinct_origin_visibility = FxHashMap::default();
+    distinct_origin_visibility.insert(
+        method_name,
+        vec![
+            aliased(first_origin.clone(), first_path),
+            aliased(second_origin, second_path),
+        ],
+    );
+    let error = super::environment::validate_visible_receiver_methods(
+        &distinct_origin_visibility,
+        &catalog,
+    )
+    .expect_err("different methods visible for one receiver and name must still be rejected");
+    let ExpressionParseError::Diagnostic(diagnostic) = error else {
+        panic!("expected a source diagnostic, got {error:?}");
+    };
+    let diagnostics = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = diagnostics
+        .first()
+        .expect("the duplicate visible method guard emits one diagnostic");
+    let facts = diagnostic
+        .family_view::<InvalidReceiverDeclarationView>()
+        .expect("the duplicate visible method guard should retain typed declaration facts");
+    assert_eq!(
+        facts.code,
+        InvalidReceiverDeclarationCode::DuplicateVisibleMethod,
+        "genuinely different receiver methods must keep their diagnostic"
     );
 }
 

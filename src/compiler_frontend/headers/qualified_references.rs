@@ -21,8 +21,12 @@ use crate::compiler_frontend::headers::dependency_target::{
 use crate::compiler_frontend::headers::types::{
     Header, HeaderKind, HeaderParseFailure, SyntheticContentPayload,
 };
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
+use crate::compiler_frontend::style_directives::{
+    SourceDirectiveKind, SourceModifierOperand, StyleDirectiveRegistry,
+    is_optional_public_route_operand, source_modifier_contract,
+};
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
@@ -30,6 +34,7 @@ use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenIndex, Toke
 use crate::compiler_frontend::utilities::token_scan::{
     TokenFactView, recognize_qualified_selection,
 };
+use rustc_hash::FxHashSet;
 
 /// One expression-bearing token range owned by a prepared header shell.
 ///
@@ -124,6 +129,83 @@ impl QualifiedReferenceOccurrence {
     }
 }
 
+/// Collect the path rows owned by `$export` operands inside the supplied ranges.
+///
+/// WHAT: for every source-modifier `$export` token, returns the row of the token immediately
+///       after its name when that token is the optional public-route operand.
+/// WHY: an impossible body, initializer or template-head export is rejected by AST, but its
+///      authored operand row must never become a structural provider, content or ordering fact
+///      first. Consuming the exact row the operand grammar owns keeps that rejection canonical.
+///
+/// A source with no authored path row cannot own an operand, and a source with no style-directive
+/// token cannot contain `$export`. Both are already retained preparation facts, so either one
+/// skips the token walk without adding a lexical pass or an index.
+pub(crate) fn collect_export_operand_paths(
+    canonical: &SourceTokens,
+    ranges: impl IntoIterator<Item = TokenRange>,
+    path_syntax: &PathSyntaxTable,
+    style_directives: &StyleDirectiveRegistry,
+    string_table: &StringTable,
+) -> Result<Vec<PathSyntaxId>, InfrastructureFailure> {
+    if path_syntax.is_empty() || canonical.token_stats().style_directives == 0 {
+        return Ok(Vec::new());
+    }
+    let mut paths = Vec::new();
+    for range in ranges {
+        if range.is_empty() {
+            continue;
+        }
+        if range.source() != canonical.source() {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "export-operand scan received a range from another source",
+            ));
+        }
+        let mut cursor = canonical.cursor(range).map_err(|error| {
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("export-operand scan range was invalid: {error:?}"),
+            )
+        })?;
+        while let Some(token) = cursor.advance() {
+            if token.is_eof() {
+                break;
+            }
+            if token.tag() != TokenTag::STYLE_DIRECTIVE {
+                continue;
+            }
+            let Some(name_id) = token.string_id() else {
+                continue;
+            };
+            let Some(spec) = style_directives.find(string_table.resolve(name_id)) else {
+                continue;
+            };
+            let Some((kind, operand)) = source_modifier_contract(spec) else {
+                continue;
+            };
+            if kind != SourceDirectiveKind::Export
+                || !matches!(operand, SourceModifierOperand::OptionalPublicRoute)
+            {
+                continue;
+            }
+            let Some(operand_token) = cursor.current() else {
+                continue;
+            };
+            if !is_optional_public_route_operand(operand_token) {
+                continue;
+            }
+            let Some(path_syntax_id) = operand_token.path_syntax_id() else {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
+                    "public export operand path token had no path syntax handle",
+                ));
+            };
+            paths.push(path_syntax_id);
+        }
+    }
+    Ok(paths)
+}
+
 /// Recognize every expression-qualified selection inside the supplied token ranges.
 ///
 /// WHAT: sorts and trims the caller's expression ranges, walks them once and emits one occurrence
@@ -139,9 +221,14 @@ impl QualifiedReferenceOccurrence {
 /// identical typed diagnostics in expression position. An alias after the selected symbol is the
 /// same invalid-`as` syntax diagnostic the clause lane reports, raised here because no later
 /// caller can see the authored `as`.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the scan's token owner, ranges, consumed rows, file identity, shell ordinal, path table, string table and path fork are independent borrows with no shared owner"
+)]
 pub(crate) fn collect_qualified_references(
     canonical: &SourceTokens,
     ranges: impl IntoIterator<Item = HeaderExpressionRange>,
+    consumed_path_syntax_ids: &[PathSyntaxId],
     file_id: SourceId,
     first_shell_ordinal: u32,
     path_syntax: &PathSyntaxTable,
@@ -156,6 +243,13 @@ pub(crate) fn collect_qualified_references(
         .into());
     }
 
+    // A directive-owned row is namespace or metadata syntax. It never becomes an occurrence,
+    // even when its authored shape looks like `@provider symbol`.
+    let consumed: FxHashSet<PathSyntaxId> = consumed_path_syntax_ids
+        .iter()
+        .copied()
+        .filter(|id| !id.is_none())
+        .collect();
     let ranges: Vec<HeaderExpressionRange> = ranges
         .into_iter()
         .filter(|range| !range.range.is_empty())
@@ -218,6 +312,9 @@ pub(crate) fn collect_qualified_references(
             let Some(selection) = recognize_qualified_selection(view, index) else {
                 continue;
             };
+            if consumed.contains(&selection.path_syntax_id) {
+                continue;
+            }
             if unsupported_alias_span.is_none()
                 && let Some(follower) = index.checked_add(2).and_then(|follower| view.get(follower))
                 && follower.tag == TokenTag::AS
@@ -491,9 +588,10 @@ pub(crate) fn push_const_required_expression_ranges(
 
     // Source-directive operands fold before their target is emitted, exactly like a const
     // initializer, so their qualified references must create the same ordering edge and content
-    // dependency. They are const-required regardless of the target header kind.
+    // dependency. A public export route is a namespace identity rather than an expression, so
+    // only typed expression operands contribute a range.
     for directive in &header.source_directives {
-        if let Some(operand) = directive.operand {
+        if let Some(operand) = directive.operand.expression_range() {
             push(operand);
         }
     }

@@ -37,7 +37,7 @@ use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
-use crate::compiler_frontend::module_compilation::ConstExecutionLimits;
+use crate::compiler_frontend::module_compilation::ProviderMaterialisationRegistry;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
@@ -106,9 +106,12 @@ impl ModuleMaterialisationCapture {
 }
 
 impl ModuleMaterialisationPreparation {
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "one prepared materialisation request keeps requester context, live interner tables, limits and timing separate"
+    #[cfg_attr(
+        feature = "timers",
+        allow(
+            clippy::too_many_arguments,
+            reason = "one prepared materialisation request keeps requester context, live interner tables, the borrowed provider registry and timing separate"
+        )
     )]
     pub(crate) fn materialise_ast(
         &self,
@@ -117,7 +120,7 @@ impl ModuleMaterialisationPreparation {
         requester_call_span: Option<SourceSpan>,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
-        const_execution_limits: ConstExecutionLimits,
+        provider_materialisations: &ProviderMaterialisationRegistry,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<MaterialisedGenericAst, PreparedFailure> {
         let (declaring_context, template_index) = self
@@ -138,9 +141,9 @@ impl ModuleMaterialisationPreparation {
                 string_table,
                 path_fork,
                 style_directives: &self.style_directives,
+                provider_materialisations,
                 build_profile: self.build_profile,
                 template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
-                const_execution_limits,
                 #[cfg(feature = "timers")]
                 timing_context,
             },
@@ -249,6 +252,16 @@ where
         &mut value_services,
     )?;
 
+    // Finalization runs after the emitter releases its parsing context, so retain the exact
+    // body owner rather than inferring ownership from the declaring or reporting context.
+    let body_owner = environment
+        .lookups
+        .generic_function_templates_by_path
+        .get(&function_path)
+        .and_then(|template| template.body_tokens.as_ref())
+        .and_then(|body| body.frozen_identity_handle())
+        .cloned();
+
     let request = GenericFunctionInstantiationRequest::generated(
         identity.declaration(),
         function_path,
@@ -292,12 +305,21 @@ where
             crate::timing::TimingMetric::FrontendGeneratedAstFinalise,
             timing_context
         );
-        AstFinalizer::new(phase_context, environment, path_fork).finalize(
-            emitted,
-            &[],
-            MaterialisationContextRetention::ForDeferredRequests,
-            string_table,
-        )?
+        AstFinalizer::new(phase_context, environment, path_fork)
+            .finalize(
+                emitted,
+                &[],
+                MaterialisationContextRetention::ForDeferredRequests,
+                string_table,
+            )
+            .map_err(|mut failure| {
+                if let (Some(owner), PreparedFailure::Diagnosed(batch)) =
+                    (&body_owner, &mut failure)
+                {
+                    batch.attach_frozen_identity_handle_if_missing(owner.clone());
+                }
+                failure
+            })?
     };
     // The declaring source owns authored field provenance. Imported or synthetic requester
     // blueprints omit those spans, so donor-first merging keeps source ranges stable.

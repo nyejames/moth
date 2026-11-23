@@ -22,7 +22,7 @@
 
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
-use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::const_values::store::{ConstExecutionMeter, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::build_config::{
@@ -267,6 +267,38 @@ impl<'a> AstPhaseContext<'a> {
         context: AstBuildContext<'a>,
         source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
     ) -> Result<(Self, &'a mut StringTable, &'a mut PathInternerFork), InfrastructureFailure> {
+        let mut const_values = ConstValueStore::default();
+        const_values.set_const_execution_limits(context.const_execution_limits);
+        Self::from_build_context_with_store(
+            context,
+            source_build_config_contract_names,
+            const_values,
+        )
+    }
+
+    /// Split a build context whose value store must charge an existing aggregate meter.
+    ///
+    /// WHY: generated sidecars join the requester module's allowance before their first fold. The
+    ///      meter is a construction input here, so a sidecar path cannot silently allocate and
+    ///      keep a fresh module meter. The meter already carries the configured limits, so the
+    ///      build context's copy is not installed again.
+    pub(in crate::compiler_frontend) fn from_build_context_with_execution_meter(
+        context: AstBuildContext<'a>,
+        source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
+        const_execution_meter: Rc<RefCell<ConstExecutionMeter>>,
+    ) -> Result<(Self, &'a mut StringTable, &'a mut PathInternerFork), InfrastructureFailure> {
+        Self::from_build_context_with_store(
+            context,
+            source_build_config_contract_names,
+            ConstValueStore::with_execution_meter(const_execution_meter),
+        )
+    }
+
+    fn from_build_context_with_store(
+        context: AstBuildContext<'a>,
+        source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
+        const_values: ConstValueStore,
+    ) -> Result<(Self, &'a mut StringTable, &'a mut PathInternerFork), InfrastructureFailure> {
         let AstBuildContext {
             build_profile,
             external_package_registry,
@@ -281,7 +313,7 @@ impl<'a> AstPhaseContext<'a> {
             builder_root_slots,
             provider_materialisations,
             template_const_loop_iteration_limit,
-            const_execution_limits,
+            const_execution_limits: _,
             capacity_estimate,
             #[cfg(feature = "timers")]
             timing_context,
@@ -293,8 +325,6 @@ impl<'a> AstPhaseContext<'a> {
             capacity_estimate,
         )));
         let expression_builder = AstExpressionBuilder::with_capacity_estimate(capacity_estimate)?;
-        let mut const_values = ConstValueStore::default();
-        const_values.set_const_execution_limits(const_execution_limits);
         Ok((
             Self {
                 external_package_registry,

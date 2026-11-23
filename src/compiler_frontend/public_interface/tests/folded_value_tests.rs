@@ -52,7 +52,7 @@ use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
 };
 use crate::compiler_frontend::semantic_identity::{
-    ExportBinding, OriginDeclarationId, OriginTypeId,
+    ExportBinding, OriginDeclarationId, OriginTypeId, PublicExportRoute,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -140,6 +140,7 @@ fn constant_root(
 fn constant_binding(name: &str) -> ExportBinding {
     ExportBinding::new(
         module_origin(),
+        PublicExportRoute::ROOT,
         name.to_owned(),
         OriginDeclarationId::Constant(constant_origin(name)),
     )

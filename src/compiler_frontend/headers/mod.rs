@@ -23,6 +23,7 @@ pub(crate) mod moth_template_prepare;
 mod ordering_hints;
 pub(crate) mod parse_file_headers;
 pub(crate) mod plain_markdown_prepare;
+pub(crate) mod public_export_route_conflicts;
 mod public_exports;
 pub(crate) mod qualified_references;
 mod start_capture;

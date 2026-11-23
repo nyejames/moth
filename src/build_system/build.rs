@@ -1352,12 +1352,14 @@ fn validate_facade_declaration_provenance(
                 .export_bindings
                 .iter()
                 .find(|binding| binding.origin() == &declaration.origin)
-                .map(|binding| binding.public_name())
-                .and_then(|public_name| {
+                .and_then(|binding| {
                     facade_interface
                         .export_diagnostic_provenance
                         .iter()
-                        .find(|provenance| provenance.public_name == public_name)
+                        .find(|provenance| {
+                            provenance.route == *binding.route()
+                                && provenance.public_name == binding.public_name()
+                        })
                         .and_then(|provenance| provenance.span)
                 });
             return Err(ProjectAssemblyError::project_context_escape(

@@ -8,4 +8,4 @@ code = "MOTH-SYNTAX-0022"
 reason = "invalid_template_structure.helper_outside_wrapper_slot"
 path = "input/@entry.moth"
 line = 5
-column = 52
+column = 53

@@ -37,6 +37,7 @@ builder extension point, so availability never depends on the selected builder:
 `$in name`:
 
 - contributes content to one named slot
+- is a structural helper, not a standalone runtime value (see @../templates/#structural-helpers-in-runtime-values (Structural helpers in runtime values))
 - accepts a bare name only, not a String expression or a positional target
 - can appear only once per head
 - a routed contribution, including an explicitly empty one, suppresses that slot occurrence's default

@@ -1,5 +1,8 @@
 use super::*;
 use crate::compiler_frontend::ast::const_eval::FoldServices;
+use crate::compiler_frontend::ast::templates::tir::TemplateIrNodeId;
+use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
 
 fn runtime_template_handoff_from_expression(
     expressions: &AstExpressionBuilder,
@@ -1073,83 +1076,79 @@ fn nested_const_template_folds_through_final_view() {
     );
 }
 
-/// Proves that a slot-insert helper artifact surviving composition is rejected
-/// after final view traversal, not silently passed to HIR.
-#[test]
-fn helper_artifact_rejected_after_final_view_traversal() {
-    let mut string_table = StringTable::new();
-    let mut expressions = AstExpressionBuilder::new().unwrap();
-    let mut constants = ConstValueStore::default();
-    let _path_fork = PathInternerFork::empty();
-    let text = string_table.intern("slot insert content");
-
+/// Normalizes one standalone `$in` root whose body is built by `build_body`.
+///
+/// The store, template expression and finalization context are fixed so both artifact tests spell
+/// only their distinct body shape.
+fn normalize_slot_insert_root(
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    string_table: &mut StringTable,
+    template_span: Option<SourceSpan>,
+    directive_span: Option<SourceSpan>,
+    build_body: impl FnOnce(&mut TemplateIrBuilder<'_>, Option<SourceSpan>) -> TemplateIrNodeId,
+) -> Result<(), TemplateNormalizationError> {
+    let slot_name = string_table.intern("style");
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
-    let context = TemplateViewContext::default();
-
-    // Build a TIR root with simple text. The template kind is SlotInsert,
-    // which finalization must reject as a helper artifact.
     let template_id = {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let text_node = builder.push_text_node(
-            text,
-            "slot insert content".len(),
-            TemplateSegmentOrigin::Body,
-            None,
-        );
-        let root = builder.push_sequence_node(vec![text_node], None);
+        let body_node = build_body(&mut builder, template_span);
+        let root = builder.push_sequence_node(vec![body_node], template_span);
         builder.finish_template(
             root,
             Style::default(),
-            TemplateType::SlotInsert(SlotKey::Default),
+            TemplateType::SlotInsert(SlotKey::named(slot_name)),
             TemplateIrSummary::default(),
-            None,
+            template_span,
         )
     };
+    if let Some(directive_span) = directive_span {
+        template_ir_store
+            .borrow_mut()
+            .set_slot_insert_directive_span(template_id, directive_span)
+            .expect("retain the authored insert span");
+    }
 
     let template = template_with_reference(
         TemplateTirReference {
             root: template_id,
             phase: TemplateTirPhase::Composed,
-            context,
+            context: TemplateViewContext::default(),
         },
-        None,
+        template_span,
     );
-
     let mut expression = expressions
         .template(template, ValueMode::ImmutableOwned)
         .expect("template expression")
         .id();
-
     let mut context = TemplateNormalizationContext {
-        expression_builder: &mut expressions,
-        const_values: &mut constants,
+        expression_builder: expressions,
+        const_values: constants,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        string_table: &mut string_table,
-        template_ir_store: Rc::clone(&template_ir_store),
+        string_table,
+        template_ir_store,
         external_package_registry: None,
         module_resources: None,
         expression_pending: Vec::new(),
         expression_results: Vec::new(),
     };
+    normalize_expression_templates(&mut expression, &mut context)
+}
 
-    let result = normalize_expression_templates(&mut expression, &mut context);
-    assert!(
-        result.is_err(),
-        "slot-insert helper artifact must be rejected after final view traversal"
-    );
-
+/// Asserts one normalization run rejected a standalone `$in` helper and returns its primary site.
+fn helper_rejection_primary_span(
+    result: Result<(), TemplateNormalizationError>,
+) -> Option<SourceSpan> {
     let TemplateNormalizationError::Diagnostic(diagnostic) =
-        result.expect_err("error was asserted above")
+        result.expect_err("a standalone slot insert must be rejected")
     else {
-        panic!(
-            "helper artifact rejection should produce a diagnostic, not an infrastructure error"
-        );
+        panic!("helper rejection should produce a diagnostic, not an infrastructure error");
     };
     let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
     let view = compact
         .first()
-        .expect("the helper artifact diagnostic should compact");
+        .expect("the helper rejection diagnostic should compact");
     let facts = view
         .family_view::<InvalidTemplateStructureView>()
         .expect("the diagnostic should use the template-structure family");
@@ -1157,6 +1156,104 @@ fn helper_artifact_rejected_after_final_view_traversal() {
         facts.reason,
         InvalidTemplateStructureCode::HelperOutsideWrapperSlot,
         "diagnostic must be HelperOutsideWrapperSlot"
+    );
+    match view.primary_site() {
+        SiteRef::Local(span) => Some(span),
+        SiteRef::Absent => None,
+        SiteRef::Foreign { .. } => {
+            panic!("a local helper rejection must not carry a foreign site")
+        }
+    }
+}
+
+/// Proves that a slot-insert helper artifact surviving composition is rejected
+/// after final view traversal, not silently passed to HIR.
+#[test]
+fn helper_artifact_rejected_after_final_view_traversal() {
+    let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let text = string_table.intern("slot insert content");
+
+    let result = normalize_slot_insert_root(
+        &mut expressions,
+        &mut constants,
+        &mut string_table,
+        None,
+        None,
+        |builder, span| {
+            builder.push_text_node(
+                text,
+                "slot insert content".len(),
+                TemplateSegmentOrigin::Body,
+                span,
+            )
+        },
+    );
+
+    assert_eq!(
+        helper_rejection_primary_span(result),
+        None,
+        "the fixture authors no helper directive span"
+    );
+}
+
+/// Proves that a root `$in` helper stays a structural helper when its own
+/// content is runtime-dependent.
+///
+/// WHAT: the TIR root is a `SlotInsert` whose body is one dynamic expression.
+/// WHY: runtime dependence of the body must not reclassify the escaped root as
+///      ordinary runtime `String` content and hand it to HIR.
+#[test]
+fn dynamic_slot_insert_helper_artifact_rejected_after_final_view_traversal() {
+    let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let mut path_fork = PathInternerFork::empty();
+
+    let style_path = path_fork
+        .try_intern_portable_path("style", &mut string_table)
+        .expect("test path fits");
+    let runtime_expression = expressions
+        .reference_with_type_id(
+            style_path,
+            builtin_type_ids::STRING,
+            None,
+            ValueMode::ImmutableReference,
+            ConstRecordState::RuntimeValue,
+        )
+        .expect("reference expression")
+        .id();
+
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let template_span = SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(40, 12, &mut span_builder).expect("test span should fit"),
+    );
+    let directive_span = SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(52, 3, &mut span_builder).expect("test span should fit"),
+    );
+
+    let result = normalize_slot_insert_root(
+        &mut expressions,
+        &mut constants,
+        &mut string_table,
+        Some(template_span),
+        Some(directive_span),
+        |builder, span| {
+            builder.push_dynamic_expression_node(
+                runtime_expression,
+                TemplateSegmentOrigin::Body,
+                span,
+            )
+        },
+    );
+
+    assert_eq!(
+        helper_rejection_primary_span(result),
+        Some(directive_span),
+        "helper diagnostic must name the authored `$in` token, not the template opener"
     );
 }
 

@@ -72,6 +72,10 @@ pub(crate) enum TemplatePreparationMode {
 pub(crate) struct TemplatePreparationFacts {
     pub(crate) is_const_evaluable_shape: bool,
     pub(crate) has_unfilled_slot_occurrences: bool,
+    /// True when nested `$in` contributions remain unconsumed in this exact view.
+    ///
+    /// A standalone root helper is represented by `final_value_kind` and `outcome` instead. This
+    /// fact gates the runtime control-flow scan for nested contributions only.
     pub(crate) has_escaped_insert_helpers: bool,
     pub(crate) final_value_kind: TemplateConstValueKind,
 }
@@ -93,7 +97,8 @@ pub(crate) struct TemplatePreparation {
 /// Refreshes a parser-owned generic template kind from complete preparation facts.
 ///
 /// Structural helper kinds (`$in`, `$slot`, `$supplied`) and a discarded `$note` keep their
-/// parser-assigned identity: their parent body owns what happens next.
+/// parser-assigned identity: an enclosing body owns their resolution, and finalization rejects a
+/// surviving `$in` helper before HIR.
 pub(crate) fn refresh_kind_from_preparation(
     kind: &mut TemplateType,
     facts: &TemplatePreparationFacts,
@@ -416,15 +421,31 @@ fn prepare_tir_view_in_scope(
         .store()
         .get_template(view.root_ref())
         .ok_or_else(|| missing_template_error(view.root_ref()))?;
-    let const_value_kind = if !facts.const_evaluable {
-        TemplateConstValueKind::NonConst
-    } else if matches!(template.kind, TemplateType::SlotInsert(_)) {
-        if facts.has_slot_insertions {
-            TemplateConstValueKind::NonConst
-        } else {
-            TemplateConstValueKind::SlotInsertHelper
-        }
-    } else if matches!(template.kind, TemplateType::SlotDefinition(_)) {
+
+    // A `$in` root with no nested insertions is itself the escaped helper. Its body may be
+    // runtime-dependent, but the helper identity must survive `Value` preparation so finalization
+    // can reject it before HIR. A const-evaluable standalone helper is a `SlotInsertHelper` in
+    // both modes. A runtime-dependent one stays `NonConst`, so const gates keep their existing
+    // non-constant diagnostic, and only `Value` preparation carries the helper identity through
+    // the outcome. Nested insertions remain contributions an owning template must resolve, so
+    // they keep their existing runtime classification.
+    let standalone_slot_insert =
+        matches!(template.kind, TemplateType::SlotInsert(_)) && !facts.has_slot_insertions;
+    let const_evaluable_helper = standalone_slot_insert && facts.const_evaluable;
+    let value_mode_helper =
+        standalone_slot_insert && matches!(mode, TemplatePreparationMode::Value);
+
+    // A structural directive is never a compile-time value. A const-evaluable standalone helper
+    // was already classified above; every other structural shape is non-const.
+    let not_a_const_value = !facts.const_evaluable
+        || matches!(
+            template.kind,
+            TemplateType::SlotInsert(_) | TemplateType::SlotDefinition(_)
+        );
+
+    let const_value_kind = if const_evaluable_helper {
+        TemplateConstValueKind::SlotInsertHelper
+    } else if not_a_const_value {
         TemplateConstValueKind::NonConst
     } else if facts.has_unresolved_slots || facts.has_resolved_slot_sources {
         TemplateConstValueKind::WrapperTemplate
@@ -446,12 +467,16 @@ fn prepare_tir_view_in_scope(
             }
         }
         TemplateConstValueKind::NonConst => {
-            TemplatePreparationOutcome::Runtime(if facts.has_slot_insertions {
-                RuntimeTemplateReason::SlotContribution
+            if value_mode_helper {
+                TemplatePreparationOutcome::SlotInsertHelper
             } else {
-                walk.runtime_reason
-                    .unwrap_or(RuntimeTemplateReason::RuntimeExpression)
-            })
+                TemplatePreparationOutcome::Runtime(if facts.has_slot_insertions {
+                    RuntimeTemplateReason::SlotContribution
+                } else {
+                    walk.runtime_reason
+                        .unwrap_or(RuntimeTemplateReason::RuntimeExpression)
+                })
+            }
         }
     };
 
@@ -460,6 +485,8 @@ fn prepare_tir_view_in_scope(
         facts: TemplatePreparationFacts {
             is_const_evaluable_shape: facts.const_evaluable,
             has_unfilled_slot_occurrences: facts.has_unfilled_slots,
+            // Standalone root helpers are represented by the final kind and outcome above.
+            // This fact reports only unconsumed nested contributions.
             has_escaped_insert_helpers: facts.has_slot_insertions,
             final_value_kind: const_value_kind,
         },

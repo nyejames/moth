@@ -218,6 +218,7 @@ impl<'a> RecordRef<'a> {
                     .get(site.context as usize)
                     .expect("foreign-site row indexes the owning report's context list")
                     .as_deref(),
+                path_display: site.path_display(),
             },
             (Some(span), None) => SiteRef::Local(span),
             (None, _) => SiteRef::Absent,
@@ -264,6 +265,6 @@ impl<'a> RecordRef<'a> {
         let extra = self.extra()?;
         self.store.foreign_sites[extra.foreign_sites.range()]
             .iter()
-            .find(|site| site.selector == selector)
+            .find(|site| site.selector_slot() == selector)
     }
 }

@@ -56,7 +56,7 @@ use crate::compiler_frontend::ast::templates::template_folding::{
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureErrors;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -116,6 +116,18 @@ pub(crate) struct ConstFunctionExecutable {
     /// `ExecutionState::rewritten_handlers` as it produces the rebuild, so selection never depends
     /// on an authored span or on the rebuilt expression having been prepared.
     handler_bodies: Rc<FxHashMap<ExprId, Rc<[ConstInstruction]>>>,
+    /// Declaring-domain owner for a body imported from a provider boundary.
+    ///
+    /// Reparsed provider spans belong to the donor source database, not the consumer's. Execution
+    /// diagnostics carry this handle so report rendering resolves them against the authored file.
+    donor_identity: Option<FrozenIdentityHandle>,
+}
+
+impl ConstFunctionExecutable {
+    /// Mark this executable's body as owned by a foreign declaring domain.
+    pub(crate) fn set_donor_identity(&mut self, donor_identity: FrozenIdentityHandle) {
+        self.donor_identity = Some(donor_identity);
+    }
 }
 
 /// One resolved field or index step inside an interpreted place.
@@ -199,6 +211,7 @@ pub(crate) fn executable_for_body(
         return_slots: return_slots.success().to_vec(),
         instructions: compile_body(body)?,
         handler_bodies: Rc::new(FxHashMap::default()),
+        donor_identity: None,
     })
 }
 

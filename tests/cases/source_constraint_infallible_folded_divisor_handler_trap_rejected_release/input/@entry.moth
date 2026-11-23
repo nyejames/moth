@@ -1,0 +1,13 @@
+divisor || -> I32:
+    return 2
+;
+
+$infallible
+probe |value I32| -> I32:
+    discarded I32 = value // divisor() catch:
+        assert(false)
+    ;
+    return discarded
+;
+
+~[: [probe(8)]]

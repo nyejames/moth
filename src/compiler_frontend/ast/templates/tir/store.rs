@@ -140,6 +140,12 @@ pub(crate) struct TemplateIrStore {
     ///      name is not recoverable from the node or its helper. Diagnostics that reject an
     ///      escaped insert name the authored constant instead of the helper definition.
     insert_contribution_names: FxHashMap<TemplateIrNodeId, StringId>,
+    /// Authored `$in` token spans for slot insert helper templates.
+    ///
+    /// WHAT: maps one slot insert helper template to its authored directive site.
+    /// WHY: only slot insert helpers need the site, so a sparse side table keeps the
+    ///      optional span out of every `TemplateIr` row.
+    slot_insert_directive_spans: FxHashMap<TemplateIrId, SourceSpan>,
     /// Routed payloads a composed wrapper application dropped because only `$supplied`
     /// guards consume their keys.
     ///
@@ -176,6 +182,7 @@ impl TemplateIrStore {
             retained_collection_headers: Vec::new(),
             rebuilt_const_template_roots: FxHashMap::default(),
             insert_contribution_names: FxHashMap::default(),
+            slot_insert_directive_spans: FxHashMap::default(),
             presence_only_payloads: FxHashMap::default(),
             presence_only_payload_nodes: Vec::new(),
         }
@@ -208,6 +215,7 @@ impl TemplateIrStore {
             retained_collection_headers: Vec::new(),
             rebuilt_const_template_roots: FxHashMap::default(),
             insert_contribution_names: FxHashMap::default(),
+            slot_insert_directive_spans: FxHashMap::default(),
             presence_only_payloads: FxHashMap::default(),
             presence_only_payload_nodes: Vec::new(),
         }
@@ -452,9 +460,11 @@ impl TemplateIrStore {
 
     /// Publishes one derived version and carries its source's template-level side facts.
     ///
-    /// WHAT: pushes the version, then gives it the source's presence-only payload range.
-    /// WHY: every derivation path publishes here, so a formatted, copied or composed
-    ///      version cannot silently drop a const-validation obligation its source owed.
+    /// WHAT: pushes the version, then gives it the source's presence-only payload range and its
+    ///       authored insert directive span.
+    /// WHY: every derivation path publishes here, so a formatted, copied or composed version
+    ///      cannot silently drop a const-validation obligation or the authored helper site its
+    ///      source owed.
     fn publish_derived_template(
         &mut self,
         source: TemplateIrId,
@@ -463,6 +473,9 @@ impl TemplateIrStore {
         let template_id = self.push_template(derived);
         if let Some(range) = self.presence_only_payloads.get(&source).copied() {
             self.presence_only_payloads.insert(template_id, range);
+        }
+        if let Some(span) = self.slot_insert_directive_spans.get(&source).copied() {
+            self.slot_insert_directive_spans.insert(template_id, span);
         }
         template_id
     }
@@ -474,6 +487,24 @@ impl TemplateIrStore {
     ) -> Result<(), InfrastructureFailure> {
         let template = self.template_mut(id)?;
         template.kind = kind;
+        Ok(())
+    }
+
+    /// Retains the authored `$in` token span for one parsed slot insert template.
+    pub(crate) fn set_slot_insert_directive_span(
+        &mut self,
+        id: TemplateIrId,
+        span: SourceSpan,
+    ) -> Result<(), InfrastructureFailure> {
+        if self.get_template(id).is_none() {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "TIR store cannot retain an insert directive span for unknown template {id}."
+                ),
+            ));
+        }
+        self.slot_insert_directive_spans.insert(id, span);
         Ok(())
     }
 
@@ -638,6 +669,11 @@ impl TemplateIrStore {
 
     pub(crate) fn get_template(&self, id: TemplateIrId) -> Option<&TemplateIr> {
         self.templates.get(id.index())
+    }
+
+    /// Returns the authored `$in` token span retained for one slot insert template.
+    pub(crate) fn slot_insert_directive_span(&self, id: TemplateIrId) -> Option<SourceSpan> {
+        self.slot_insert_directive_spans.get(&id).copied()
     }
 
     pub(super) fn template_mut(

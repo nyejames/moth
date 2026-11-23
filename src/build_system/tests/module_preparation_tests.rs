@@ -3150,3 +3150,79 @@ fn forced_path_exhaustion_during_chunk_merge_reports_capacity_diagnostic() {
         "the diagnosed batch must retain its original string-table identity"
     );
 }
+
+#[test]
+fn adopted_facade_warning_follows_the_non_identity_string_remap() {
+    let mut fixture = frontend_preparation_fixture(&[("main.moth", "")]);
+    let input = fixture
+        .input_files
+        .pop()
+        .expect("fixture should contain one source");
+    let source_id = input.source_id();
+    let stable_origin = StableModuleOriginIdentity::from_relative_logical_path(
+        StablePackageIdentity::project_local("facade-warning-adoption"),
+        Path::new(""),
+        ModuleRootRole::Normal,
+    )
+    .expect("test module origin should construct");
+    let source_module_origins = Arc::new(super::SourceModuleOriginTable::from_synthetic_origin(
+        &fixture.frontend.source_files,
+        &stable_origin,
+    ));
+    let preparation_context = super::ModulePreparationContext {
+        source_files: &fixture.frontend.source_files,
+        style_directives: &fixture.frontend.style_directives,
+        module_error_allowance: None,
+    };
+    let mut selected_source_texts = super::super::source_loading::SelectedSourceTextMap::default();
+    let mut syntax = preparation_context
+        .begin_syntax_discovery(
+            stable_origin,
+            super::RegisteredModuleSources {
+                candidate_source_ids: vec![source_id],
+                source_module_origins,
+            },
+            Default::default(),
+            Some((fixture.entry_file_path.clone(), FileRole::ActiveEntryRoot)),
+            std::mem::take(&mut fixture.frontend.string_table),
+            std::mem::replace(&mut fixture.frontend.path_fork, PathInternerFork::empty()),
+            &mut selected_source_texts,
+            #[cfg(feature = "timers")]
+            None,
+        )
+        .expect("syntax discovery should start for the fixture source");
+    syntax.string_table.intern("destination_only_identifier");
+
+    // The prepared facade owns the warning's local StringId zero. The destination table has no
+    // matching base row, so merging must remap it; the warning has to follow that remap.
+    let mut facade_strings = StringTable::new();
+    let warning_name = facade_strings.intern("facade_warning_identifier");
+    let warning = crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::identifier_naming_convention(
+        warning_name,
+        crate::compiler_frontend::compiler_messages::diagnostics::reasons::NamingConvention::LowercaseWithUnderscores,
+        None,
+    );
+    let prepared = super::FacadePreparedSource {
+        output: FileFrontendPrepareOutput::empty_for_test(),
+        string_table: facade_strings,
+        string_base_len: 0,
+        path_fork: PathInternerFork::empty(),
+        source_byte_len: 0,
+        warnings: vec![warning],
+    };
+    syntax
+        .adopt_facade_preparation(prepared)
+        .expect("the facade preparation should adopt");
+
+    let warnings = std::mem::take(&mut syntax.warnings);
+    let compact = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
+    let facts = compact
+        .views()
+        .find_map(|warning| warning.family_view::<IdentifierNamingConventionView>())
+        .expect("the adopted warning should remain a naming-convention warning");
+    assert_eq!(
+        syntax.string_table.resolve(facts.name),
+        "facade_warning_identifier",
+        "the warning must resolve through the facade string remap, not the destination row"
+    );
+}

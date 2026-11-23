@@ -2537,21 +2537,7 @@ fn check_only_qualified_occurrence_reaches_the_same_provider_binding_as_a_clause
             binding.dependency_shell_id.ordinal, 0,
             "each source's first authored shell is ordinal zero"
         );
-        let names: Vec<String> = job
-            .prepared
-            .semantic
-            .prepared_header_syntax
-            .module_symbols
-            .module_file_paths
-            .iter()
-            .map(|path| {
-                job.prepared.semantic.path_fork.render_portable(
-                    *path,
-                    &job.prepared.semantic.string_table,
-                    &mut Vec::new(),
-                )
-            })
-            .collect();
+        let names = check_only_prepared_file_names(job);
         check_only_sources.extend(names);
     }
     check_only_sources.sort();
@@ -2569,5 +2555,629 @@ fn check_only_qualified_occurrence_reaches_the_same_provider_binding_as_a_clause
             .expect("frozen adjacency is readable")
             .is_empty(),
         "check-only units must not insert canonical graph edges"
+    );
+}
+
+/// Write the const-function provider module shared by the check-only `.mtf` regressions.
+///
+/// The provider exports `button` on its root surface and reaches one same-module helper, so a
+/// successful binding proves both cross-module selection and same-module source closure.
+fn write_check_only_template_provider_fixture(root: &Path) -> PathBuf {
+    let child = root.join("child");
+    fs::create_dir_all(child.join("forms")).expect("should create module directories");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        child.join("@mod.moth"),
+        "@forms/helper suffix\n\n$export\nbutton #|label String| -> String:\n    return [:button:[label]:[suffix]]\n;\n",
+    )
+    .expect("should write child root");
+    fs::write(
+        child.join("forms").join("helper.moth"),
+        "suffix #= \"private\"\n",
+    )
+    .expect("should write provider helper");
+    child
+}
+
+/// Portable paths retained by one check-only job's prepared header set.
+fn check_only_prepared_file_names(
+    job: &crate::build_system::create_project_modules::module_inventory::CheckOnlyModuleCompilationJob,
+) -> Vec<String> {
+    let mut names = job
+        .prepared
+        .semantic
+        .prepared_header_syntax
+        .module_symbols
+        .module_file_paths
+        .iter()
+        .map(|path| {
+            job.prepared.semantic.path_fork.render_portable(
+                *path,
+                &job.prepared.semantic.string_table,
+                &mut Vec::new(),
+            )
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    names
+}
+
+/// WHAT: an unselected owned `.moth` source whose file value reaches a nested `.mtf` head that
+///       selects a cross-module provider member must publish the canonical provider binding.
+/// WHY:  the nested-content walk visited only structural file references, so a template head's
+///       qualified occurrence never resolved and `moth check` reported a missing target even
+///       though the canonically reached equivalent bound successfully.
+#[test]
+fn check_only_nested_template_occurrence_reaches_the_canonical_provider_binding() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let child = write_check_only_template_provider_fixture(&root);
+
+    fs::write(root.join("@entry.moth"), "body #= [@intro content]\n")
+        .expect("should write canonically reached consumer");
+    fs::write(root.join("orphan.moth"), "body #= @intro.mtf\n")
+        .expect("should write check-only consumer");
+    fs::write(root.join("intro.mtf"), "[@child button(\"mtf\")]\n")
+        .expect("should write nested template");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let (schedule, graph, source_tree_index, _source_files, _string_table) =
+        discover_modules_and_graph_for_test_with_check_only(
+            &config,
+            &resolver,
+            &style_directives,
+            true,
+        );
+    let (waves, canonical_bindings, _package_dependencies, check_only_jobs) = schedule.into_parts();
+
+    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
+    let root_id = source_tree_index
+        .module_identities()
+        .module_id_for_directory(&canonical_root)
+        .expect("project root module should be a graph node");
+    let canonical_child = fs::canonicalize(&child).expect("child should canonicalize");
+    let child_id = source_tree_index
+        .module_identities()
+        .module_id_for_directory(&canonical_child)
+        .expect("child module should be a graph node");
+
+    assert_eq!(
+        canonical_bindings.len(),
+        1,
+        "the canonically reached template publishes one provider edge"
+    );
+    let canonical = &canonical_bindings[0];
+    assert_eq!(canonical.provider_module_id, child_id);
+    assert_eq!(canonical.consumer_module_id, root_id);
+    assert_eq!(canonical.provider_surface, ModuleRootRole::Normal);
+    assert!(
+        canonical.route.is_none(),
+        "a root-surface selection carries no route"
+    );
+    assert!(
+        graph.has_dependency_edge(child_id, root_id),
+        "the canonical provider must precede its consumer"
+    );
+    assert_eq!(
+        graph
+            .dependency_providers(root_id)
+            .expect("frozen adjacency is readable"),
+        &[child_id]
+    );
+
+    assert_eq!(
+        check_only_jobs.len(),
+        1,
+        "only the unreached orphan becomes a check-only unit"
+    );
+    let job = &check_only_jobs[0];
+    assert_eq!(
+        job.provider_bindings.len(),
+        1,
+        "the nested template head must publish one check-only provider binding"
+    );
+    let binding = &job.provider_bindings[0];
+    assert_eq!(binding.provider_module_id, child_id);
+    assert_eq!(binding.provider_surface, ModuleRootRole::Normal);
+    assert!(
+        binding.route.is_none(),
+        "the check-only binding must retain the root-surface selection"
+    );
+    assert_eq!(
+        check_only_prepared_file_names(job),
+        vec!["intro.mtf".to_owned(), "orphan.moth".to_owned()],
+        "the nested content source must be prepared in the check-only job"
+    );
+    assert_eq!(
+        graph
+            .dependency_providers(root_id)
+            .expect("frozen adjacency is readable"),
+        &[child_id],
+        "the check-only binding must not insert a second canonical graph edge"
+    );
+
+    let canonical_job = waves
+        .iter()
+        .flatten()
+        .find(|job| job.module_id == root_id)
+        .expect("the canonically reached module should have a preparation job");
+    assert_eq!(
+        module_prepared_source_names(canonical_job),
+        vec!["@entry.moth".to_owned(), "intro.mtf".to_owned()],
+        "check-only preparation must not change the canonical module's prepared set"
+    );
+}
+
+/// WHAT: a check-only `.moth` extensionless clause may select a same-module `.mtf`; that content
+///       target must be prepared as content instead of being rejected as a non-Moth module source.
+/// WHY:  clause resolution queues every same-module target through one queue, so a content target
+///       previously reached the Moth-only check and failed with an inventory error.
+#[test]
+fn check_only_same_module_content_clause_prepares_and_binds_its_nested_provider() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let child = write_check_only_template_provider_fixture(&root);
+
+    fs::write(root.join("@entry.moth"), "value = 1\n")
+        .expect("should write canonically reached entry");
+    fs::write(
+        root.join("orphan.moth"),
+        "@intro content as page_content\nbody #= [page_content]\n",
+    )
+    .expect("should write check-only consumer");
+    fs::write(root.join("intro.mtf"), "[@child button(\"mtf\")]\n")
+        .expect("should write nested template");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let (schedule, _graph, source_tree_index, _source_files, _string_table) =
+        discover_modules_and_graph_for_test_with_check_only(
+            &config,
+            &resolver,
+            &style_directives,
+            true,
+        );
+    let (_waves, _canonical_bindings, _package_dependencies, check_only_jobs) =
+        schedule.into_parts();
+
+    let canonical_child = fs::canonicalize(&child).expect("child should canonicalize");
+    let child_id = source_tree_index
+        .module_identities()
+        .module_id_for_directory(&canonical_child)
+        .expect("child module should be a graph node");
+
+    assert_eq!(check_only_jobs.len(), 1);
+    let job = &check_only_jobs[0];
+    assert_eq!(
+        job.provider_bindings.len(),
+        1,
+        "the same-module content clause must reach the nested provider"
+    );
+    let binding = &job.provider_bindings[0];
+    assert_eq!(binding.provider_module_id, child_id);
+    assert!(
+        binding.route.is_none(),
+        "a root-surface selection carries no route"
+    );
+    assert_eq!(
+        check_only_prepared_file_names(job),
+        vec!["intro.mtf".to_owned(), "orphan.moth".to_owned(),],
+        "the clause target must be prepared exactly once"
+    );
+}
+
+/// WHAT: a `.mtf` reached through a file value may itself select another `.mtf`, whose head then
+///       selects a cross-module provider member.
+/// WHY:  each nested level must run the authored walk once; a structural-only walk prepares the
+///       content but drops the provider binding at every deeper level.
+#[test]
+fn check_only_nested_template_chain_reaches_the_provider_once() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let child = write_check_only_template_provider_fixture(&root);
+
+    fs::write(root.join("@entry.moth"), "value = 1\n")
+        .expect("should write canonically reached entry");
+    fs::write(root.join("orphan.moth"), "body #= @outer.mtf\n")
+        .expect("should write check-only consumer");
+    fs::write(root.join("outer.mtf"), "[@inner content]\n")
+        .expect("should write first nested template");
+    fs::write(root.join("inner.mtf"), "[@child button(\"mtf\")]\n")
+        .expect("should write provider-selecting template");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let (schedule, _graph, source_tree_index, _source_files, _string_table) =
+        discover_modules_and_graph_for_test_with_check_only(
+            &config,
+            &resolver,
+            &style_directives,
+            true,
+        );
+    let (_waves, _canonical_bindings, _package_dependencies, check_only_jobs) =
+        schedule.into_parts();
+
+    let canonical_child = fs::canonicalize(&child).expect("child should canonicalize");
+    let child_id = source_tree_index
+        .module_identities()
+        .module_id_for_directory(&canonical_child)
+        .expect("child module should be a graph node");
+
+    assert_eq!(check_only_jobs.len(), 1);
+    let job = &check_only_jobs[0];
+    assert_eq!(
+        job.provider_bindings.len(),
+        1,
+        "the chain must publish exactly one provider binding"
+    );
+    let binding = &job.provider_bindings[0];
+    assert_eq!(binding.provider_module_id, child_id);
+    assert!(
+        binding.route.is_none(),
+        "a root-surface selection carries no route"
+    );
+    assert_eq!(
+        check_only_prepared_file_names(job),
+        vec![
+            "inner.mtf".to_owned(),
+            "orphan.moth".to_owned(),
+            "outer.mtf".to_owned(),
+        ],
+        "every chain level must be prepared exactly once"
+    );
+}
+
+/// WHAT: an extensionless authored clause names a same-module `.mtf`, which must join the
+///       content lane and contribute that content's provider binding.
+/// WHY:  the removed content lane accepted only structural file values, so an extensionless
+///       clause to `.mtf` was pushed into the Moth lane and failed the graph inventory check.
+#[test]
+fn check_only_extensionless_clause_to_nested_template_reaches_its_provider() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let child = write_check_only_template_provider_fixture(&root);
+
+    fs::write(root.join("@entry.moth"), "value = 1\n")
+        .expect("should write canonically reached entry");
+    fs::write(root.join("orphan.moth"), "@intro\nbody #= 1\n")
+        .expect("should write extensionless check-only consumer");
+    fs::write(root.join("intro.mtf"), "[@child button(\"mtf\")]\n")
+        .expect("should write provider-selecting template");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let (schedule, _graph, source_tree_index, _source_files, _string_table) =
+        discover_modules_and_graph_for_test_with_check_only(
+            &config,
+            &resolver,
+            &style_directives,
+            true,
+        );
+    let (_waves, _canonical_bindings, _package_dependencies, check_only_jobs) =
+        schedule.into_parts();
+
+    let canonical_child = fs::canonicalize(&child).expect("child should canonicalize");
+    let child_id = source_tree_index
+        .module_identities()
+        .module_id_for_directory(&canonical_child)
+        .expect("child module should be a graph node");
+
+    assert_eq!(check_only_jobs.len(), 1);
+    let job = &check_only_jobs[0];
+    assert_eq!(
+        job.provider_bindings.len(),
+        1,
+        "the extensionless clause must reach the nested provider"
+    );
+    assert_eq!(job.provider_bindings[0].provider_module_id, child_id);
+    assert_eq!(
+        check_only_prepared_file_names(job),
+        vec!["intro.mtf".to_owned(), "orphan.moth".to_owned()],
+        "the extensionless target must be prepared once in the content lane"
+    );
+}
+
+/// WHAT: a routed provider reached only by an unreached owned source publishes exactly one
+///       job-local binding and no canonical graph edge or canonical source preparation.
+/// WHY:  an unrouted parity fixture that also has a canonical edge cannot detect duplicate
+///       publication or accidental canonical membership.
+#[test]
+fn check_only_routed_occurrence_publishes_one_binding_without_canonical_membership() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let child = write_check_only_template_provider_fixture(&root);
+    fs::write(
+        child.join("@mod.moth"),
+        "@forms/helper suffix\n\n$export @forms\nbutton #|label String| -> String:\n    return [:button:[label]:[suffix]]\n;\n",
+    )
+    .expect("should write routed child root");
+    fs::write(root.join("@entry.moth"), "value = 1\n")
+        .expect("should write canonically reached entry");
+    fs::write(root.join("orphan.moth"), "body #= @intro.mtf\n")
+        .expect("should write check-only consumer");
+    fs::write(root.join("intro.mtf"), "[@child/forms button(\"mtf\")]\n")
+        .expect("should write routed provider selection");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    let route_claims = [(child.as_path(), ModuleRootRole::Normal, "forms")];
+
+    let snapshot = discover_modules_and_graph_for_test_with_check_only_snapshot(
+        &config,
+        &resolver,
+        &style_directives,
+        true,
+        &ExternalImportProviderRegistry::empty(),
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &route_claims,
+    );
+    let (waves, canonical_bindings, _package_dependencies, check_only_jobs) =
+        snapshot.schedule.into_parts();
+
+    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
+    let root_id = snapshot
+        .source_tree_index
+        .module_identities()
+        .module_id_for_directory(&canonical_root)
+        .expect("project root module should be a graph node");
+    let canonical_child = fs::canonicalize(&child).expect("child should canonicalize");
+    let child_id = snapshot
+        .source_tree_index
+        .module_identities()
+        .module_id_for_directory(&canonical_child)
+        .expect("child module should be a graph node");
+
+    assert!(
+        canonical_bindings.is_empty(),
+        "the provider is reached only by the check-only orphan"
+    );
+    assert!(
+        snapshot
+            .graph
+            .dependency_providers(root_id)
+            .expect("frozen adjacency is readable")
+            .is_empty(),
+        "check-only route resolution must not insert a canonical graph edge"
+    );
+
+    assert_eq!(check_only_jobs.len(), 1);
+    let job = &check_only_jobs[0];
+    assert_eq!(
+        job.provider_bindings.len(),
+        1,
+        "the routed occurrence must publish exactly one binding"
+    );
+    let binding = &job.provider_bindings[0];
+    assert_eq!(binding.provider_module_id, child_id);
+    assert_eq!(binding.provider_surface, ModuleRootRole::Normal);
+    assert_eq!(
+        binding.route.as_ref().map(PublicExportRoute::as_str),
+        Some("forms")
+    );
+
+    let canonical_job = waves
+        .iter()
+        .flatten()
+        .find(|job| job.module_id == root_id)
+        .expect("the canonically reached module should have a preparation job");
+    assert_eq!(
+        module_prepared_source_names(canonical_job),
+        vec!["@entry.moth".to_owned()],
+        "the orphan-only provider chain must stay outside the canonical prepared set"
+    );
+}
+
+/// WHAT: an external provider invoked from a nested `.mtf` registers only in the check-only job's
+///       isolated package and resolution state.
+/// WHY:  nested content now runs the authored provider walk, so its external imports must stay
+///       transient rather than mutating the canonical boundary registry or resolution table.
+#[test]
+fn check_only_nested_template_external_provider_state_stays_job_local() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(root.join("@entry.moth"), "value = 1\n")
+        .expect("should write canonically reached entry");
+    fs::write(root.join("orphan.moth"), "body #= @outer.mtf\n")
+        .expect("should write check-only consumer");
+    fs::write(root.join("outer.mtf"), "[@app.js one]\n")
+        .expect("should write provider-selecting template");
+    fs::write(root.join("app.js"), "export const one = 1;\n")
+        .expect("should write provider source");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut providers = ExternalImportProviderRegistry::empty();
+    providers.register(Arc::new(ResolvingCountingProvider::new(Arc::clone(&calls))));
+
+    let snapshot = discover_modules_and_graph_for_test_with_check_only_snapshot(
+        &config,
+        &resolver,
+        &style_directives,
+        true,
+        &providers,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &[],
+    );
+    let (_waves, _canonical_bindings, _package_dependencies, check_only_jobs) =
+        snapshot.schedule.into_parts();
+
+    assert_eq!(check_only_jobs.len(), 1);
+    let job = &check_only_jobs[0];
+    let package = job
+        .external_packages
+        .get_package("@builder/test/resolving")
+        .expect("the job-local provider registration should exist");
+    assert!(
+        job.external_dependency_resolution_table
+            .get_by_package_id(package.id)
+            .is_some(),
+        "the job-local resolution row should exist"
+    );
+    assert!(
+        snapshot
+            .external_packages
+            .get_package("@builder/test/resolving")
+            .is_none(),
+        "the provider package must not leak into the canonical boundary registry"
+    );
+    assert!(
+        snapshot
+            .external_resolution_table
+            .get_by_package_id(package.id)
+            .is_none(),
+        "the provider resolution row must not leak into the canonical boundary table"
+    );
+}
+
+/// WHAT: a nested `.mtf` head selecting a registered source package records the source-package
+///       effect in the check-only job instead of only a cross-module provider binding.
+/// WHY:  a project-local support package under the entry tree resolves as a cross-module
+///       namespace; only a builder-registered package exercises the SourcePackage effect path.
+#[test]
+fn check_only_nested_template_records_a_registered_source_package_dependency() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let project = _tmp_root.path().join("project");
+    fs::create_dir_all(&project).expect("should create project root");
+    fs::write(
+        project.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(project.join("@entry.moth"), "value = 1\n")
+        .expect("should write canonically reached entry");
+    fs::write(project.join("orphan.moth"), "body #= @intro.mtf\n")
+        .expect("should write check-only consumer");
+    fs::write(
+        project.join("intro.mtf"),
+        "[@builder/test/checkpkg support_label]\n",
+    )
+    .expect("should write registered-package selection");
+
+    let package_root = _tmp_root.path().join("packages/checkpkg");
+    fs::create_dir_all(&package_root).expect("should create package root");
+    fs::write(
+        package_root.join("@package.moth"),
+        "$export\nsupport_label #= \"support\"\n",
+    )
+    .expect("should write package facade");
+
+    let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
+    source_packages
+        .register_filesystem_root(
+            "builder/test/checkpkg",
+            fs::canonicalize(&package_root).expect("package root should canonicalize"),
+            crate::builder_surface::PackageOrigin::Builder,
+        )
+        .expect("the test package root should register");
+
+    let mut config = Config::new(project.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &project.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let snapshot = discover_modules_and_graph_for_test_with_check_only_snapshot(
+        &config,
+        &resolver,
+        &style_directives,
+        true,
+        &ExternalImportProviderRegistry::empty(),
+        &source_packages,
+        &[],
+    );
+    let (_waves, canonical_bindings, canonical_package_dependencies, check_only_jobs) =
+        snapshot.schedule.into_parts();
+
+    assert!(
+        canonical_bindings.is_empty(),
+        "the package dependency is reached only by the check-only orphan"
+    );
+    assert!(
+        canonical_package_dependencies.is_empty(),
+        "the check-only orphan's package dependency must not enter the canonical lane"
+    );
+    assert_eq!(check_only_jobs.len(), 1);
+    let job = &check_only_jobs[0];
+    assert!(
+        job.provider_bindings.is_empty(),
+        "a registered source package is not a cross-module provider binding"
+    );
+    assert_eq!(
+        job.source_package_dependencies.len(),
+        1,
+        "the nested template must record one source-package dependency"
+    );
+    let dependency = &job.source_package_dependencies[0];
+    assert_eq!(dependency.dependency_prefix, "builder/test/checkpkg");
+    assert!(
+        dependency.route.is_root(),
+        "a direct selection from the package root uses its root route"
+    );
+    assert_eq!(
+        check_only_prepared_file_names(job),
+        vec!["intro.mtf".to_owned(), "orphan.moth".to_owned()],
+        "the nested template must be prepared exactly once"
     );
 }

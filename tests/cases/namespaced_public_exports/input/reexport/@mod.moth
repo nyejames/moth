@@ -1,0 +1,7 @@
+-- The same selected target is published under two distinct public routes. Each route keeps its
+-- own leaf name and binding while sharing one declaration origin.
+$export @mirror
+@provider/nested widget
+
+$export @alternate
+@provider/nested widget

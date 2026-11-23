@@ -813,10 +813,17 @@ impl ScopeContext {
         if let Some(file_visibility) = &self.file_visibility {
             if let Some(paths) = file_visibility.visible_receiver_methods.get(&method_name) {
                 for visible_method in paths {
-                    let entry = self
+                    // A visible entry can lack its catalogue row; see
+                    // `validate_visible_receiver_methods` for why. The miss says nothing about
+                    // this receiver, so keep searching instead of hiding a later entry or the
+                    // value-carried fallback.
+                    let Some(entry) = self
                         .receiver_methods
                         .by_function_path
-                        .get(visible_method.target.local_path())?;
+                        .get(visible_method.target.local_path())
+                    else {
+                        continue;
+                    };
                     if &entry.receiver == receiver {
                         return Some(entry);
                     }

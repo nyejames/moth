@@ -18,11 +18,12 @@ use crate::compiler_frontend::module_compilation::AST_RECOVERY_WORK_TOKENS;
 use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::compiler_tests::test_support::run_stack_budgeted_child;
+use crate::projects::build_command::run_build_command;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 #[cfg(feature = "timers")]
 use crate::timing::{TimingMetric, start_benchmark_collection};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(feature = "timers")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(feature = "timers")]
@@ -325,6 +326,510 @@ fn check_compiles_unselected_same_module_source_closure() {
     assert!(
         !has_errors(&outcome.messages),
         "same-module source closure should compile in check mode"
+    );
+}
+
+/// WHAT: a content alias that resolves to a Moth source must be rejected at the authored file
+///       value instead of binding the root file's own `content` declaration.
+/// WHY:  the shared physical resolver admits aliases by canonical target, so a `.mtf` spelling
+///       can hide a `.moth` kind mismatch unless resolution rejects it before admission.
+#[cfg(unix)]
+#[test]
+fn check_rejects_a_content_alias_that_resolves_to_a_moth_source() {
+    use std::os::unix::fs::symlink;
+
+    let (_temp, root) = write_page_project("content_alias_moth", "content #= \"private\"\n");
+    symlink("@entry.moth", root.join("alias.mtf")).expect("content alias should be created");
+    fs::write(root.join("orphan.moth"), "body #= @alias.mtf\n")
+        .expect("should write check-only consumer");
+
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+
+    assert!(
+        has_errors(&outcome.messages),
+        "a Moth source cannot satisfy a content file value"
+    );
+    let rows = diagnostic_identity_sequence(&outcome.messages, DiagnosticSeverity::Error, &root);
+    assert_eq!(
+        rows.len(),
+        1,
+        "the alias rejection must own the only error: {rows:?}"
+    );
+    assert_eq!(rows[0].0, "MOTH-SYNTAX-0023");
+    assert_eq!(rows[0].2, "orphan.moth");
+    assert_eq!(rows[0].3, 1);
+}
+
+/// WHAT: a `.mtf` alias whose physical target is an ordinary `.moth` helper must report the
+///       Moth-file value diagnostic at the authored reference.
+/// WHY:  the source index retains one visible spelling per physical file; trusting that spelling
+///       would admit the helper as content when the alias sorts before the physical entry.
+#[cfg(unix)]
+#[test]
+fn check_rejects_a_content_alias_whose_physical_target_is_a_moth_helper() {
+    use std::os::unix::fs::symlink;
+
+    let (_temp, root) = write_page_project("content_alias_moth_helper", "value = 1\n");
+    fs::write(root.join("helper.moth"), "helper #= 1\n")
+        .expect("should write ordinary Moth helper");
+    symlink("helper.moth", root.join("alias.mtf")).expect("content alias should be created");
+    fs::write(root.join("orphan.moth"), "body #= @alias.mtf\n")
+        .expect("should write check-only consumer");
+
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+
+    let rows = diagnostic_identity_sequence(&outcome.messages, DiagnosticSeverity::Error, &root);
+    assert_eq!(
+        rows.len(),
+        1,
+        "the alias rejection must own the only error: {rows:?}"
+    );
+    assert_eq!(rows[0].0, "MOTH-SYNTAX-0023");
+    assert_eq!(rows[0].1, Some("invalid_expression.moth_file_has_no_value"));
+    assert_eq!(rows[0].2, "orphan.moth");
+    assert_eq!(rows[0].3, 1);
+}
+
+/// WHAT: a `.moth` alias whose physical target is an ordinary `.mtf` helper must not poison a
+///       direct `@helper.mtf` content reference.
+/// WHY:  the alias spelling must not decide the physical file's kind; otherwise the guard rejects
+///       a valid template as a Moth file depending on alias sort order.
+#[cfg(unix)]
+#[test]
+fn check_accepts_a_template_helper_reached_through_a_moth_alias() {
+    use std::os::unix::fs::symlink;
+
+    let (_temp, root) = write_page_project("content_alias_template_helper", "value = 1\n");
+    fs::write(root.join("template.mtf"), "[:accepted]\n")
+        .expect("should write ordinary template helper");
+    symlink("template.mtf", root.join("alias.moth"))
+        .expect("template Moth alias should be created");
+    fs::write(root.join("orphan.moth"), "body #= @template.mtf\n")
+        .expect("should write check-only consumer");
+
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+
+    assert!(
+        !has_errors(&outcome.messages),
+        "the physical `.mtf` helper must satisfy the content reference"
+    );
+    assert!(
+        matches!(outcome.messages, Ok(CompilationOutcome::Success { .. })),
+        "the `.moth` alias must not turn the template into a Moth target"
+    );
+}
+
+/// WHAT: a `.mtf` alias whose physical target is a provider-owned `.js` input must report a typed
+///       compile-time path diagnostic instead of an internal index invariant.
+/// WHY:  the physical provider entry owns the bytes; admitting it as content reaches
+///       `indexed_source` with a non-compiler-semantic row and blames the compiler for user source.
+#[cfg(unix)]
+#[test]
+fn check_rejects_a_content_alias_to_a_provider_owned_source() {
+    use std::os::unix::fs::symlink;
+
+    let (_temp, root) = write_page_project("content_alias_provider_owned", "value = 1\n");
+    fs::write(root.join("drawing.js"), "export const drawing = 1;\n")
+        .expect("should write provider source");
+    symlink("drawing.js", root.join("alias.mtf"))
+        .expect("provider content alias should be created");
+    fs::write(root.join("orphan.moth"), "body #= @alias.mtf\n")
+        .expect("should write check-only consumer");
+
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+
+    let rows = diagnostic_identity_sequence(&outcome.messages, DiagnosticSeverity::Error, &root);
+    assert_eq!(
+        rows.len(),
+        1,
+        "the provider-target rejection must own the only error: {rows:?}"
+    );
+    assert_eq!(rows[0].0, "MOTH-RULE-0063");
+    assert_eq!(
+        rows[0].1,
+        Some("invalid_compile_time_path.provider_owned_content_target")
+    );
+    assert_eq!(rows[0].2, "orphan.moth");
+    assert_eq!(rows[0].3, 1);
+}
+
+/// WHAT: eager content-preparation errors keep source-index precedence when deeper content is
+///       discovered from an earlier file.
+/// WHY:  the unified worklist must not turn a breadth-first discovery order into diagnostic
+///       precedence; the lowest pending source index owns the first reported failure.
+#[test]
+fn check_reports_eager_nested_template_errors_in_source_index_order() {
+    let (_temp, root) = write_page_project("nested_template_precedence", "value = 1\n");
+    fs::write(
+        root.join("orphan.moth"),
+        "first #= @a.mtf\nsecond #= @z.mtf\n",
+    )
+    .expect("should write check-only consumer");
+    fs::write(root.join("a.mtf"), "[@b.mtf]\n").expect("should write first hop");
+    fs::write(root.join("b.mtf"), "[@./x name]\n").expect("should write earlier failing content");
+    fs::write(root.join("z.mtf"), "[@./y name]\n").expect("should write later failing content");
+
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+
+    let rows = diagnostic_identity_sequence(&outcome.messages, DiagnosticSeverity::Error, &root);
+    assert_eq!(
+        rows.len(),
+        1,
+        "the first eager preparation failure aborts the unit: {rows:?}"
+    );
+    assert_eq!(rows[0].0, "MOTH-IMPORT-0016");
+    assert_eq!(
+        rows[0].2, "b.mtf",
+        "source-index precedence must surface the deeper earlier source"
+    );
+    assert_eq!(rows[0].3, 1);
+}
+
+/// WHAT: an extensionless authored dependency clause in a check-only `.moth` source resolves to
+///       a same-module `.mtf` content file and its provider chain is prepared.
+/// WHY:  the former content lane accepted only `.mtf`-spelled file values; an extensionless
+///       clause resolving to `.mtf` reached the Moth lane and failed the graph inventory check.
+#[test]
+fn check_accepts_an_extensionless_clause_to_a_nested_template() {
+    let (_temp, root) = write_page_project("nested_template_extensionless", "value = 1\n");
+    write_nested_template_provider_module(&root);
+    fs::write(root.join("orphan.moth"), "@intro\nbody #= 1\n")
+        .expect("should write extensionless check-only consumer");
+    fs::write(root.join("intro.mtf"), "[@child/forms button(\"mtf\")]\n")
+        .expect("should write provider-selecting template");
+
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+
+    assert!(
+        !has_errors(&outcome.messages),
+        "the extensionless clause and its provider chain must check"
+    );
+    assert!(
+        matches!(outcome.messages, Ok(CompilationOutcome::Success { .. })),
+        "the extensionless clause must not fail graph inventory"
+    );
+}
+
+/// WHAT: a hidden target reached from a nested `.mtf` keeps the ordinary hidden-path diagnostic.
+/// WHY:  nested content preview runs the same physical resolver, so discovery must report the
+///       authored path rather than enqueue an excluded source or fail internally.
+#[test]
+fn check_rejects_a_hidden_target_reached_from_a_nested_template() {
+    let (_temp, root) = write_page_project("nested_template_hidden", "value = 1\n");
+    fs::create_dir_all(root.join("_private")).expect("should create hidden directory");
+    fs::write(root.join("orphan.moth"), "body #= @outer.mtf\n")
+        .expect("should write check-only consumer");
+    fs::write(root.join("outer.mtf"), "[@_private/inner.mtf]\n")
+        .expect("should write hidden-targeting template");
+    fs::write(root.join("_private/inner.mtf"), "[:hidden]\n").expect("should write hidden content");
+
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+
+    let rows = diagnostic_identity_sequence(&outcome.messages, DiagnosticSeverity::Error, &root);
+    assert_eq!(
+        rows.len(),
+        1,
+        "the hidden target must be the only error: {rows:?}"
+    );
+    assert_eq!(rows[0].0, "MOTH-RULE-0063");
+    assert_eq!(rows[0].1, Some("invalid_compile_time_path.hidden_path"));
+    assert_eq!(rows[0].2, "outer.mtf");
+    assert_eq!(rows[0].3, 1);
+}
+
+/// WHAT: a target owned by another module reached from a nested `.mtf` keeps the ordinary
+///       module-boundary diagnostic.
+/// WHY:  the unified worklist admits sources by ownership; a nested content level must reject a
+///       foreign target through the resolver instead of publishing it as job-local content.
+#[test]
+fn check_rejects_a_foreign_target_reached_from_a_nested_template() {
+    let (_temp, root) = write_page_project("nested_template_foreign", "value = 1\n");
+    let second = root.join("second");
+    fs::create_dir_all(&second).expect("should create foreign module directory");
+    fs::write(second.join("@mod.moth"), "value #= 1\n").expect("should write foreign module root");
+    fs::write(second.join("inner.mtf"), "[:other]\n").expect("should write foreign content");
+    fs::write(root.join("orphan.moth"), "body #= @outer.mtf\n")
+        .expect("should write check-only consumer");
+    fs::write(root.join("outer.mtf"), "[@second/inner.mtf]\n")
+        .expect("should write foreign-targeting template");
+
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+
+    let rows = diagnostic_identity_sequence(&outcome.messages, DiagnosticSeverity::Error, &root);
+    assert_eq!(
+        rows.len(),
+        1,
+        "the foreign target must be the only error: {rows:?}"
+    );
+    assert_eq!(rows[0].0, "MOTH-RULE-0063");
+    assert_eq!(
+        rows[0].1,
+        Some("invalid_compile_time_path.escapes_module_boundary")
+    );
+    assert_eq!(rows[0].2, "outer.mtf");
+    assert_eq!(rows[0].3, 1);
+}
+
+/// WHAT: check-only discovery must leave the canonical artefact byte-identical and must not add
+///       the orphan-only provider's rendered content.
+/// WHY:  nested template provider discovery mutates only transient job state; a build after
+///       `moth check` must reproduce the same canonical page.
+#[test]
+fn check_only_provider_discovery_does_not_change_the_canonical_artefact() {
+    let (_temp, root) = write_page_project("check_only_artefact", "~[:entry-only]\n");
+    fs::write(
+        root.join("@config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
+    )
+    .expect("should write config with explicit output roots");
+    write_nested_template_provider_module(&root);
+    fs::write(root.join("orphan.moth"), "body #= @outer.mtf\n")
+        .expect("should write check-only consumer");
+    fs::write(root.join("outer.mtf"), "[@inner content]\n")
+        .expect("should write first nested template");
+    fs::write(root.join("inner.mtf"), "[@child/forms button(\"mtf\")]\n")
+        .expect("should write provider-selecting template");
+
+    let builder = test_project_builder();
+    let artefact_path = root.join("_dev").join("index.html");
+
+    let build_once = || {
+        let completion = run_build_command(
+            &builder,
+            root.to_str()
+                .expect("temporary project path should be valid UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+            &root,
+            |_| {},
+        );
+        assert_eq!(
+            completion.status,
+            crate::projects::ProjectCommandStatus::Success,
+            "the canonical build should succeed"
+        );
+        fs::read_to_string(&artefact_path).expect("the canonical artefact should be readable")
+    };
+
+    let before = build_once();
+    assert!(
+        before.contains("entry-only"),
+        "the canonical artefact should render the entry"
+    );
+    assert!(
+        !before.contains("button"),
+        "the orphan-only provider output must stay outside the canonical artefact"
+    );
+
+    let check_outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+    assert!(
+        !has_errors(&check_outcome.messages),
+        "check must accept the orphan-only provider chain"
+    );
+    assert_eq!(
+        fs::read_to_string(&artefact_path).expect("check must leave the artefact in place"),
+        before,
+        "check must not change the canonical artefact"
+    );
+    assert_eq!(
+        build_once(),
+        before,
+        "a build after check must reproduce the canonical artefact"
+    );
+}
+
+/// Writes the `@forms` routed const-function provider used by the nested-template check fixtures.
+fn write_nested_template_provider_module(root: &Path) {
+    let child = root.join("child");
+    fs::create_dir_all(child.join("forms")).expect("should create provider module directories");
+    fs::write(
+        child.join("@mod.moth"),
+        "@forms/helper suffix\n\n$export @forms\nbutton #|label String| -> String:\n    return [:button:[label]:[suffix]]\n;\n",
+    )
+    .expect("should write provider root");
+    fs::write(
+        child.join("forms").join("helper.moth"),
+        "suffix #= \"private\"\n",
+    )
+    .expect("should write provider helper");
+}
+
+/// WHAT: an unselected owned source whose template chain selects a routed cross-module member
+///       must pass `moth check` without affecting the canonically reached entry.
+/// WHY:  check-only discovery used to skip qualified provider occurrences in nested `.mtf`
+///       content, so the deferred job reported a missing target that a canonical build resolves.
+#[test]
+fn check_accepts_a_nested_template_provider_selection_from_an_unselected_source() {
+    let (_temp, root) = write_page_project("nested_template_provider", "value = 1\n");
+    write_nested_template_provider_module(&root);
+    let shared = root.join("shared");
+    fs::create_dir_all(&shared).expect("should create project-local package directory");
+    fs::write(
+        shared.join("@package.moth"),
+        "$export @validation\nfield #= \"field\"\n",
+    )
+    .expect("should write project-local package");
+    fs::write(root.join("orphan.moth"), "body #= @outer.mtf\n")
+        .expect("should write check-only consumer");
+    fs::write(root.join("outer.mtf"), "[@inner content]\n")
+        .expect("should write first nested template");
+    // The nested head selects one cross-module provider member and one project-local support
+    // package member. A project-local support package resolves as a cross-module binding, so this
+    // case covers both provider kinds without claiming the registered source-package effect; the
+    // dedicated Stage 0 test covers that effect with a builder-registered package root.
+    fs::write(
+        root.join("inner.mtf"),
+        "[@child/forms button(\"mtf\")]\n\n[@shared/validation field]\n",
+    )
+    .expect("should write provider-selecting template");
+
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+
+    assert!(
+        !has_errors(&outcome.messages),
+        "a nested template provider selection must compile in check mode"
+    );
+}
+
+/// WHAT: a nested template head selecting a member the provider does not export must report the
+///       ordinary public-surface diagnostic at the authored reference.
+/// WHY:  a missing check-only provider binding would instead surface as `missing_import_target`,
+///       which misnames the cause and the file the author has to fix.
+#[test]
+fn check_reports_a_missing_nested_template_member_by_public_surface() {
+    let (_temp, root) = write_page_project("nested_template_missing_member", "value = 1\n");
+    write_nested_template_provider_module(&root);
+    fs::write(root.join("orphan.moth"), "body #= @intro.mtf\n")
+        .expect("should write check-only consumer");
+    fs::write(
+        root.join("intro.mtf"),
+        "[@child/forms nonexistent(\"mtf\")]\n",
+    )
+    .expect("should write provider-selecting template");
+
+    let outcome = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+
+    assert!(
+        has_errors(&outcome.messages),
+        "a non-exported member must be rejected"
+    );
+    let rows = diagnostic_identity_sequence(&outcome.messages, DiagnosticSeverity::Error, &root);
+    assert_eq!(
+        rows.len(),
+        1,
+        "the missing member must own the only error: {rows:?}"
+    );
+    assert_eq!(rows[0].0, "MOTH-IMPORT-0011");
+    assert_eq!(
+        rows[0].2, "intro.mtf",
+        "the diagnostic must name the authored template"
+    );
+    assert_eq!(
+        rows[0].3, 1,
+        "the diagnostic must sit on the authored reference line"
+    );
+}
+
+/// WHAT: mutually dependent nested templates must terminate and report the circular dependency on
+///       every repeated check with identical ordered identity.
+/// WHY:  authored content edges now join the check-only source closure, so a cycle must reuse the
+///       canonical dependency-cycle diagnostic rather than loop, panic or lose its binding.
+#[test]
+fn check_reports_a_nested_template_cycle_deterministically() {
+    let (_temp, root) = write_page_project("nested_template_cycle", "value = 1\n");
+    write_nested_template_provider_module(&root);
+    fs::write(root.join("orphan.moth"), "body #= @a.mtf\n")
+        .expect("should write check-only consumer");
+    fs::write(root.join("a.mtf"), "[@b content]\n").expect("should write first cycle member");
+    fs::write(
+        root.join("b.mtf"),
+        "[@a content]\n\n[@child/forms button(\"mtf\")]\n",
+    )
+    .expect("should write second cycle member");
+
+    let first = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+    let second = execute_check(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+
+    let first_rows =
+        diagnostic_identity_sequence(&first.messages, DiagnosticSeverity::Error, &root);
+    let second_rows =
+        diagnostic_identity_sequence(&second.messages, DiagnosticSeverity::Error, &root);
+    assert_eq!(
+        first_rows, second_rows,
+        "repeated check must retain identical ordered cycle diagnostics"
+    );
+    assert!(
+        !first_rows.is_empty(),
+        "the circular template dependency must be rejected"
+    );
+    assert!(
+        first_rows.iter().all(|row| row.0 == "MOTH-RULE-0033"),
+        "the cycle must stay in the circular-dependency family: {first_rows:?}"
     );
 }
 

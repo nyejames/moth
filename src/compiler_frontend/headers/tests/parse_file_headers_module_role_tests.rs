@@ -45,8 +45,7 @@ fn api_only_normal_root_keeps_exportable_headers_and_rejects_runtime_body() {
     );
     assert_eq!(headers.entry_runtime_fragment_count, 0);
     assert!(headers.headers.iter().any(|header| {
-        matches!(header.kind, HeaderKind::Struct { .. })
-            && header.export_mode == HeaderExportMode::Public
+        matches!(header.kind, HeaderKind::Struct { .. }) && header.export_mode.is_public()
     }));
 
     // API-only roots have no start-body AST consumer, so preparation must diagnose an
@@ -140,8 +139,7 @@ fn reached_root_keeps_export_surface_without_start() {
     assert_eq!(headers.entry_runtime_fragment_count, 0);
     assert!(
         headers.headers.iter().any(|header| {
-            matches!(header.kind, HeaderKind::Struct { .. })
-                && header.export_mode == HeaderExportMode::Public
+            matches!(header.kind, HeaderKind::Struct { .. }) && header.export_mode.is_public()
         }),
         "a reached facade still parses its export surface"
     );

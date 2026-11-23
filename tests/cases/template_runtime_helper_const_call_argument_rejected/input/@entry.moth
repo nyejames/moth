@@ -1,0 +1,9 @@
+truth #|value String| -> Bool:
+    return true
+;
+
+render |x String| -> Bool:
+    return false and truth([$in style: [x]])
+;
+
+~[:static body]

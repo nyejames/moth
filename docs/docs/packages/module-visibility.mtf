@@ -20,15 +20,59 @@ A rooted directory is one module. Its ordinary `.moth` files, including files in
     -- components/@mod.moth
     $export
     @utils internal_value
+
+    $export @forms
+    form_label #= "Form"
 ]
 
-The facade imports and publishes `internal_value`. Another module can now use:
+The facade imports and publishes `internal_value` at its root and
+`form_label` under the `forms` route. Another module can now use:
 
 [codeblock, $code "moth":
     @components internal_value
+    @components/forms form_label
 ]
 
 Without `$export`, the same `@utils` dependency would be private to the facade. Other modules cannot bypass the child facade using `@components/utils`.
+
+### Public route visibility
+
+A facade may publish names at its root and under public routes. Each route is a
+public namespace below the facade, and it is visible exactly where that facade
+is visible.
+
+`@components form_label` fails because `form_label` is not a root member.
+`@components/forms internal_value` fails because the route does not publish it.
+A bare route namespace is shallow: `@components/forms as forms` exposes
+`forms.form_label` and nothing from the facade root or any deeper route.
+Recursive access such as `html.tables.cells` is unsupported, so `@core/html as
+html` does not enable it.
+
+A private directory inside the exporting module may share a route spelling. It
+stays private. `@components/forms hidden_value` finds only an exported
+`hidden_value` in that route, never a file under `components/forms/`. An
+undeclared route or leaf reports an import diagnostic rather than falling
+through to the private directory.
+
+Concrete route overlaps are checked eagerly. A route that overlaps a visible
+child facade or one of its routes, a source or child namespace key or a
+registered source or binding package prefix reports `MOTH-IMPORT-0006`, even
+when no consumer references it. A case-only match counts. Two facades that share
+one visible key create an ambiguous base: identical route claims from different
+facades behind that base stay latent and the base and each such route report
+`MOTH-IMPORT-0006` on use. A route behind an ambiguous base that overlaps a
+different visible provider, such as a selectable child facade or one of its
+routes, a local source or a registered package prefix, is instead an eager
+`MOTH-IMPORT-0006` collision even when unused. Case-only route conflicts inside
+one facade report `MOTH-RULE-0092` at both operands.
+
+Registered source-package routes sit beneath the registered package path, and
+scoped project-local support routes sit beneath the support package name. A
+project-root package facade records its routes and interface in package assembly
+metadata for publication, but general project-package acquisition and
+consumption remain deferred. Registered source packages and scoped project-local
+support packages are the supported route providers. The `.mtf` prelude stays
+root-only, so a route never adds a prelude name.
 
 ### Root-local declarations
 
@@ -44,13 +88,13 @@ Direct dependency paths to root filenames or `@config.moth` are invalid. Depend 
 
 A dependency selects the surface appropriate to its consumer. It cannot fall back to the other facade. A child with only `@entry.moth` has no normal public API. Support packages have additional scoped consumer restrictions, described in @#project-local-packages (Project-local packages).
 
-A facade with no `$export` declarations or clauses has an empty public API. A cross-module import of a private name is rejected regardless of the path used.
+A facade with no `$export` declarations or clauses has an empty public API. Routes are part of that API, not a separate facade. A cross-module import of a private name is rejected regardless of the path used.
 
 ### Methods and public contracts
 
-Receiver methods follow the visibility of their nominal receiver type. A caller with a value of a public receiver type can call its methods without separately importing that type name. Naming the type in a signature, constructor or conformance still requires a suitable type binding. Methods cannot be imported or exported individually.
+Receiver methods follow the visibility of their nominal receiver type. A caller with a value of a public receiver type can call its methods without separately importing that type name. Naming the type in a signature, constructor or conformance still requires a suitable type binding. Methods cannot be imported or exported individually. A routed receiver type carries its methods, but a method is not a route leaf.
 
-Public signatures must expose only accessible types and trait evidence. Exported callables without an error slot must handle any escaping implicit built-in failure. The same guarantee applies to exposed methods and re-exports. See @../project-structure/#public-api (Public API).
+Public signatures must expose only accessible types and trait evidence. Exported callables without an error slot must handle any escaping implicit built-in failure. The same guarantee applies to exposed methods, re-exports and routed exports. See @../project-structure/#public-api (Public API).
 
 ### Dependency ordering
 

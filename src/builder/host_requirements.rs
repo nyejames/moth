@@ -233,11 +233,9 @@ fn export_requirement(
     interface: &PublicSemanticInterface,
     selected: &HostExport,
 ) -> Result<(OriginFunctionId, HostExportRequirement), Error> {
-    let Some(binding) = interface
-        .export_bindings
-        .iter()
-        .find(|binding| binding.public_name() == selected.facade_name())
-    else {
+    let Some(binding) = interface.export_bindings.iter().find(|binding| {
+        binding.route().is_root() && binding.public_name() == selected.facade_name()
+    }) else {
         return Err(Error::build(format!(
             "The export selection '{}' names '{}', but the package facade exports no declaration \
              with that name.",

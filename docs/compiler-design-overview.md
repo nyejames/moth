@@ -174,7 +174,7 @@ A rooted directory is one structural module with one `ModuleId` and one compilat
 
 Each present root is a separate root-local declaration and visibility scope. Its top-level declarations stay private to that file. Ordinary helper files are shared, prepared once and cannot see a root-local declaration. A root may bind helper declarations through ordinary dependency clauses, but it cannot read another root directly. Same-spelling declarations in disjoint roots remain independent.
 
-`@mod` and `@package` permit declarations and function bodies but reject top-level runtime statements, direct compile-time fragments and builder slots. They publish only items marked by the operand-free `$export` source directive. It attaches to one eligible declaration or strict direct-selection dependency clause and never marks a whole file public. `@entry` permits private declarations, top-level runtime work, bare const-required `[...]` fragments, explicit `~[...]` runtime fragments and registered direct builder slots, but cannot publish an interface. `$export` is invalid in `@entry`, helpers, templates and config. `$doc` attaches documentation to declarations and `$todo` annotates declarations or executable statements without creating output.
+`@mod` and `@package` permit declarations and function bodies but reject top-level runtime statements, direct compile-time fragments and builder slots. They publish only items marked by the `$export` source directive. It attaches to one eligible declaration or strict direct-selection dependency clause, never marks a whole file public, and takes an optional facade-relative public route such as `$export @forms/validation`. Bare `$export` publishes at the facade root. The route says where a binding is published, not what it selects, and `as` aliases still choose the leaf name. `@entry` permits private declarations, top-level runtime work, bare const-required `[...]` fragments, explicit `~[...]` runtime fragments and registered direct builder slots, but cannot publish an interface. `$export` is invalid in `@entry`, helpers, templates and config. `$doc` attaches documentation to declarations and `$todo` annotates declarations or executable statements without creating output.
 
 The compiler publishes an interface only for a present facade. Normal and support interfaces have separate role-qualified origins, visibility scopes and consumer positions. `@mod` and `@entry` sources occupy normal positions and `@package` sources occupy strict support positions. An entry-only module can own a support-only child, but it never gains an importable normal interface. The project package surface consumes build-supplied visibility and remains an ordinary immutable module artefact. Every registered Core and Builder source package publishes through a `@package.moth` directly contained in its registered root, so `@mod.moth` alone is insufficient. Ordinary project modules keep all optional root combinations. No dependency activates another module's entry.
 
@@ -265,7 +265,7 @@ Full table cloning is reserved for genuinely independent identity boundaries. Pr
 
 A declaration's semantic origin identifies its defining package, module and declaration. Source aliases do not change it. Private declarations gain no consumer-visible public identity. Donor-local AST, HIR and type indexes never cross semantic module boundaries.
 
-An export binding separately identifies the exporting module, public name and original declaration. Re-exporting under another name preserves the origin. Renaming that public alias changes the exporter's public-interface fingerprint, not the declaration's origin.
+An export binding separately identifies the exporting module, the facade-relative public route, the public leaf name and the original declaration. The route sits beside the leaf and uses owned canonical `/`-joined spelling across module boundaries. It never enters the declaration's origin, so the same declaration published under several routes keeps one origin and one backend identity. Distinct names merge into one route, while a repeated leaf in one route is a collision. Re-exporting under another name or route preserves the origin. Renaming the public alias or moving the binding between routes changes the exporter's public-interface fingerprint, not the declaration's origin.
 
 ### Cross-build stability
 
@@ -332,7 +332,7 @@ Semantic type, scalar storage layout and computation carrier remain distinct. A 
 
 A public interface contains the complete semantic facts observable by consumers:
 
-- exported origin identities and export bindings
+- exported origin identities and export bindings, each binding carrying its owned public route beside the leaf name
 - canonical exported type shapes
 - owned folded constants and const-template values, including structural resource/site-root pieces and exact numeric width, precision or scale
 - generic templates, bounds and required evidence
@@ -350,7 +350,7 @@ A public interface contains the complete semantic facts observable by consumers:
 - summary-carried numeric constraint guarantees for fast use, semantic traps and escaping recoverable failure
 - project-context provenance for every affected exported fact
 
-Per-function calls, capabilities, resource uses and other backend-planning facts live in `ModuleLinkFacts`, not the semantic interface. Constraint guarantees ride the existing call summary and its existing interface equality. They add no separate fingerprint domain. Exported resources carry stable origins, never donor-local IDs, output paths, routes or rendered URLs. Receiver methods stay attached to their type's exported source surface and cannot be bound, aliased or re-exported independently.
+Per-function calls, capabilities, resource uses and other backend-planning facts live in `ModuleLinkFacts`, not the semantic interface. Constraint guarantees ride the existing call summary and its existing interface equality. They add no separate fingerprint domain. Exported resources carry stable origins, never donor-local IDs, output paths, output routes or rendered URLs. Receiver methods stay attached to their type's exported source surface and cannot be bound, aliased or re-exported independently.
 
 Foreign callable evidence enters these summaries only through compiler-authorised implementation provenance. The existing closed external numeric contract records fast semantics, possible semantic traps and possible recoverable failure independently. An opaque user-provided binding has unknown absence facts, even when its signature has no `Error!` slot. Official compiler-maintained packages and approved vendored Rust libraries may supply checked per-callable facts, including known hazards, without certifying their entire package as `$safe_math` or `$infallible`. Builder registrations cannot promote themselves to trusted evidence. See the [constraints reference](docs/directives/constraints.mtf) for the guarantees checked over reachable calls.
 
@@ -383,6 +383,8 @@ Each successful base module has five distinct fingerprint domains:
 | Dormant entry activity | `@entry` start, top-level runtime work, fragments, builder-slot destinations and folded entry-local slot contributions. |
 | Runtime dependencies | Backend-neutral calls, helpers, capabilities, target-gated operations, glue requirements, resource uses and site-root requirements of executable functions/root work. |
 | Documentation | Public documentation, editor metadata and API-index data. |
+
+A binding's public export route belongs to the public interface, so adding, removing or changing a route changes that fingerprint. It changes neither the declaration-origin identity nor the implementation fingerprint of an unchanged body.
 
 Generated requests come from the active specialised AST. They are materialisation dependencies carried with link data, not runtime-dependency fingerprint contents. A changed request set follows implementation invalidation and updates the generated sidecars. Sidecars retain their own implementation, runtime and compatibility fingerprints.
 
@@ -433,7 +435,7 @@ Preparation is the sole owner of module-wide top-level declaration discovery. `P
 - tokens or source-kind payloads and source locations
 - dependency/re-export clauses, direct selections and aliases
 - declaration shells for constants, functions, structs, choices, aliases, traits and conformances
-- source directive runs and their authored names, operand ranges and target attachment, including `$config` input-contract shells, `$export` visibility and `$doc`/`$todo` annotation syntax
+- source directive runs and their authored names, operand ranges and target attachment, including `$config` input-contract shells, `$export` visibility with its optional facade-relative public route and `$doc`/`$todo` annotation syntax
 - entry-root const fragments and slot contributions with balanced template ranges
 - root-local declaration and visibility scope facts for each present root
 - dormant entry-root body separation and compile-time fragment placement information
@@ -442,6 +444,8 @@ Preparation is the sole owner of module-wide top-level declaration discovery. `P
 - diagnostics and identity/remap data
 
 Source-kind adapters may synthesise ordinary declarations. The `@mod` and `@package` roles reject authored root runtime/output activity. `@entry` retains the corresponding dormant work and fragment facts.
+
+Preparation retains public visibility and its route as one fact, `HeaderExportMode::Public { route }`, on the eligible header or retained dependency clause. The `$export` annotation is not retained a second time. Preparation stores the route here as a boundary-local `PathId` plus authored operand span; neither crosses a module or build boundary. Stage 0's facade-route summary and the public-interface projection each convert that fact into the owned canonical `/`-joined `PublicExportRoute` beside the public leaf name. It is never a dependency to resolve, a rename or a declaration-origin fact. Preparation validates it as path components, rejects an empty, `.`, `..` or extension-bearing segment and records the authored operand span for later collision diagnostics.
 
 Preparation neither checks executable bodies nor folds expressions. It attaches one contiguous run of distinct source directives to the immediately following header declaration or eligible dependency clause. Multiple directives may share a line without commas. Every repeated name is rejected with both source sites. A new directive terminates a previous operand only at the outer source-expression depth, while the target must begin on a following line. Blank lines and scope boundaries break attachment. AST statement parsing owns equivalent annotation runs inside executable bodies, without introducing a second header scan. Each directive validates its own target and semantic requirements independently of other directives and source order.
 
@@ -480,13 +484,13 @@ Local edges cover alias targets, field and signature types, explicit constant ty
 
 An `.mtf` source contributes one private synthetic `content #String` declaration. Its initialiser is a structurally built `$md` template over the original body tokens. Nested templates inherit Markdown formatting unless an explicit directive overrides it.
 
-Qualified occurrences inside `.mtf` template heads are dependencies of that generated `content` declaration. A selected same-module constant must order before `content`, and a selected cross-module or package provider must be a Stage 0 graph dependency. An explicit `@intro.mtf` file value and a qualified `@intro content` reference resolve to the same synthetic declaration identity. Both cycle directions are diagnosed by the existing owners. Stage 0 catches cross-module and provider cycles, and Stage 3 catches cycles inside one module. No template-only ordering pass, constant registry or second fold exists.
+Qualified occurrences inside `.mtf` template heads are dependencies of that generated `content` declaration. A selected same-module constant must order before `content`, and a selected cross-module or package provider must be a Stage 0 graph dependency in canonical discovery. A check-only unit records that provider dependency as a job-local binding instead, and nested content reached from a file value takes the same authored walk at every level. An explicit `@intro.mtf` file value and a qualified `@intro content` reference resolve to the same synthetic declaration identity. Both cycle directions are diagnosed by the existing owners. Stage 0 catches cross-module and provider cycles, and Stage 3 catches cycles inside one module. No template-only ordering pass, constant registry or second fold exists.
 
 Plain `.md` renders raw Markdown to HTML and contributes the same declaration shape with a synthetic string-literal initialiser. Ordering and AST folding then treat both as ordinary constants. Neither creates a separate AST, HIR, borrow or backend pipeline.
 
 A recognised optional source kind unsupported by the active builder receives a typed dependency diagnostic. Resolution never falls through to another extension candidate. `.moth` and `.mtf` are fixed compiler-supported source kinds under every builder. Plain `.md` remains builder-selectable.
 
-The fixed compiler-standard `.mtf` constant prelude merges public compile-time constants from the official Core/MothSource `@core/html` and `@core/css` provider interfaces. Their package roots are `packages/core/html` and `packages/core/css`, registered once by the common builder surface through `SourcePackageRegistry` for every builder, including custom SDK builders. An authored or builder package cannot replace either official root. Both providers precede every `.mtf` consumer in directory, single-file and check-only compilation, and a failed or blocked prelude provider blocks its consumer. Header binding rejects a public constant name exported by both providers before any consumer body evaluates, whether or not a template uses it. Both packages are compiler-shipped Core roots, so the report takes the internal infrastructure-failure lane at header parsing and names both packages and the name rather than becoming a source diagnostic. Runtime values, types and private constants do not enter the flat prelude. A public constant declared anywhere inside a providing package enters it under its exported name, including when another file in that package exports it with `as`. A re-export or alias of a declaration from another package does not. All project-specific data reaches `.mtf` through explicit qualified references. This policy is independent of builder-selected runtime packages such as `@builder/web/canvas`.
+The fixed compiler-standard `.mtf` constant prelude merges public compile-time constants from the official Core/MothSource `@core/html` and `@core/css` provider interfaces. Their package roots are `packages/core/html` and `packages/core/css`, registered once by the common builder surface through `SourcePackageRegistry` for every builder, including custom SDK builders. An authored or builder package cannot replace either official root. Both providers precede every `.mtf` consumer in directory, single-file and check-only compilation, and a failed or blocked prelude provider blocks its consumer. Header binding rejects a public constant name exported by both providers before any consumer body evaluates, whether or not a template uses it. Both packages are compiler-shipped Core roots, so the report takes the internal infrastructure-failure lane at header parsing and names both packages and the name rather than becoming a source diagnostic. Runtime values, types and private constants do not enter the flat prelude. Only a public constant exported at the provider package's facade root enters it under its exported name, including when another file in that package supplies it with `as`. A constant exported under a route never enters the flat prelude; it stays reachable only through an explicit qualified occurrence naming that route. A re-export or alias of a declaration from another package does not. All project-specific data reaches `.mtf` through explicit qualified references. This policy is independent of builder-selected runtime packages such as `@builder/web/canvas`.
 
 #### Direct Moth template service
 
@@ -830,6 +834,8 @@ One semantic preparation owner:
 - follows structural and nested-value transitions
 - detects cycles by exact view identity
 - classifies the value as foldable, runtime or helper
+- gives a const-evaluable standalone `$in` root the `SlotInsertHelper` kind so a constant binding can store it for later composition
+- keeps a runtime-dependent standalone `$in` root `NonConst` for const gates while value preparation retains its helper outcome
 - preserves lazy runtime semantics
 - treats missing authority as a compiler bug
 
@@ -848,11 +854,13 @@ AST finalisation:
 - folds fully constant ordinary template expressions into strings
 - preserves runtime conditional and loop bodies for lazy lowering
 - prepares runtime slot source and site plans
-- removes helper-only artefacts
+- removes helper-only artefacts and rejects a standalone `$in` helper in a runtime value before the HIR handoff
 - emits folded top-level fragment metadata
 - replaces runtime templates with neutral owned handoff payloads
 
 The TIR store is dropped before the completed AST leaves the stage.
+
+A stored `$in` helper read through an identifier, a namespace leaf or a const-record field stays a reference or field read that finalisation cannot classify. AST construction therefore rejects that read where it is parsed unless the parsing context is a template or constant context. The gate keys on the context kind rather than the composition position, so a statement-root `~[...]` template keeps its enclosing kind and a nested runtime position inside a template context is not covered.
 
 Root-local bare `[$in name: ...]` builder contributions fold through this AST/TIR path into `ModuleCompilerMetadata`, retaining their destination, authored span and structural value. Declaration-attached `$doc` operands also fold through ordinary const expression/template evaluation. Their compiled documentation text retains the declaration's stable identity and authored span in non-HIR metadata, not a detached entry fragment. `$todo` is validated and discarded. Both `$doc` and `$todo` remain source directives, not template comments.
 

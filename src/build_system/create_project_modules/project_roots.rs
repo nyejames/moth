@@ -13,7 +13,6 @@ use crate::builder_surface::external_import_providers::registry::ExternalImportP
 use crate::builder_surface::{SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::{CompilerStage, PreparedFailure};
-use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
@@ -21,9 +20,10 @@ use crate::projects::settings::Config;
 use std::fs;
 use std::path::PathBuf;
 
-use super::module_namespace::ModuleNamespaceSet;
 use super::project_module_graph::ProjectModuleGraph;
-use super::source_package_discovery::build_source_package_boundary_indexes;
+use super::source_package_discovery::{
+    SourcePackageBoundaryIndexes, build_source_package_boundary_indexes,
+};
 use super::source_tree_index::{SourceTreeIndex, SourceTreeProjectContext};
 
 /// Canonical directory-project root plus the canonical project module graph built from the
@@ -37,7 +37,11 @@ pub(super) struct ProjectPathResolverSetup {
     pub(super) resolver: ProjectPathResolver,
     pub(super) source_tree_index: SourceTreeIndex,
     pub(super) project_module_graph: ProjectModuleGraph,
-    pub(super) module_namespace_set: ModuleNamespaceSet,
+    /// Indexed source-package boundaries retained for namespace construction and package
+    /// compilation. Namespace construction happens after project source registration so the
+    /// facade route prepass can publish content-derived routes first, so the indexes travel to the
+    /// caller instead of being consumed here.
+    pub(super) source_package_boundary_indexes: SourcePackageBoundaryIndexes,
 }
 
 /// Build only the resolver for callers that don't need the directory module inventory.
@@ -51,7 +55,6 @@ pub(super) fn build_project_path_resolver(
     // Test-only resolver construction defaults to no external import providers; tests that
     // exercise provider-owned indexing call `build_project_path_resolver_with_index` directly.
     let external_import_providers = ExternalImportProviderRegistry::default();
-    let binding_packages = ExternalPackageRegistry::new();
     build_project_path_resolver_with_index(
         config,
         SourceTreeProjectContext {
@@ -61,7 +64,6 @@ pub(super) fn build_project_path_resolver(
         builder_source_packages,
         source_file_kinds,
         &external_import_providers,
-        &binding_packages,
         string_table,
     )
     .map(|setup| setup.resolver)
@@ -77,11 +79,15 @@ pub(super) fn build_project_path_resolver_with_index(
     builder_source_packages: &SourcePackageRegistry,
     source_file_kinds: &SourceFileKindRegistry,
     external_import_providers: &ExternalImportProviderRegistry,
-    binding_packages: &ExternalPackageRegistry,
     string_table: &mut StringTable,
 ) -> Result<ProjectPathResolverSetup, PreparedFailure> {
     let project_root = resolve_project_root(config)?;
 
+    super::source_package_discovery::reject_project_package_prefix_collision(
+        config,
+        builder_source_packages,
+        string_table,
+    )?;
     let source_package_boundary_indexes = build_source_package_boundary_indexes(
         builder_source_packages,
         source_file_kinds,
@@ -117,19 +123,11 @@ pub(super) fn build_project_path_resolver_with_index(
     // beside the graph as the sole source inventory/ownership owner.
     let project_module_graph = ProjectModuleGraph::from_source_tree_index(&source_tree_index);
 
-    let module_namespace_set = ModuleNamespaceSet::build(
-        &source_tree_index,
-        &project_module_graph,
-        source_package_boundary_indexes,
-        binding_packages,
-        string_table,
-    )?;
-
     Ok(ProjectPathResolverSetup {
         resolver,
         source_tree_index,
         project_module_graph,
-        module_namespace_set,
+        source_package_boundary_indexes,
     })
 }
 

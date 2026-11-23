@@ -491,6 +491,140 @@ fn successful_build_marks_state_ok_and_uses_declared_entry_page() {
     assert!(output_dir.join("docs/basics/index.html").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn successful_build_snapshot_serves_only_contained_symlink_targets() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("create symlinked snapshot project");
+    let root = temp.path().to_path_buf();
+    let output_dir = root.join("_dev");
+    let external = root.join("outside");
+
+    fs::create_dir_all(&external).expect("create external directory");
+    fs::write(external.join("secret.txt"), "external secret").expect("write external secret");
+    fs::create_dir_all(output_dir.join("shared")).expect("create shared output directory");
+    fs::write(output_dir.join("shared/data.txt"), "contained data")
+        .expect("write contained shared file");
+    std::os::unix::fs::symlink(&external, output_dir.join("external"))
+        .expect("symlink to an external directory");
+    std::os::unix::fs::symlink(
+        external.join("secret.txt"),
+        output_dir.join("external-secret.txt"),
+    )
+    .expect("symlink to an external file");
+    std::os::unix::fs::symlink(
+        output_dir.join("shared/data.txt"),
+        output_dir.join("alias.txt"),
+    )
+    .expect("contained file symlink");
+    std::os::unix::fs::symlink(output_dir.join("shared"), output_dir.join("alias-dir"))
+        .expect("contained directory symlink");
+    // Stale and cyclic links must not fail capture, and a cycle must not republish its subtree.
+    std::os::unix::fs::symlink(root.join("missing"), output_dir.join("dangling"))
+        .expect("dangling output symlink");
+    std::os::unix::fs::symlink(&output_dir, output_dir.join("cycle"))
+        .expect("self-referential directory symlink");
+
+    let state = Arc::new(DevServerState::new(output_dir.clone()));
+    let executor = FakeExecutor::new(vec![Ok(directory_build_result(&root, "_dev"))]);
+    let report = run_single_build_cycle(&state, &executor, &root, &Vec::new());
+    assert!(
+        report.build_ok,
+        "an unrelated output symlink must not fail an otherwise successful build"
+    );
+
+    // External, stale and cyclic links are all unpublished: none of them names a reachable
+    // output-relative file.
+    for request_path in [
+        "/external/secret.txt",
+        "/external-secret.txt",
+        "/dangling",
+        "/cycle/shared/data.txt",
+    ] {
+        let response = String::from_utf8(request_bytes(
+            Arc::clone(&state),
+            &format!("GET {request_path} HTTP/1.1\r\nHost: localhost\r\n\r\n"),
+        ))
+        .expect("response is UTF-8");
+        assert!(
+            response.starts_with("HTTP/1.1 404 NOT FOUND"),
+            "only contained symlink targets are published: {response}"
+        );
+        assert!(!response.contains("external secret"));
+    }
+
+    let alias_response = String::from_utf8(request_bytes(
+        Arc::clone(&state),
+        "GET /alias.txt HTTP/1.1\r\nHost: localhost\r\n\r\n",
+    ))
+    .expect("response is UTF-8");
+    assert!(
+        alias_response.starts_with("HTTP/1.1 200 OK") && alias_response.ends_with("contained data"),
+        "a contained file symlink remains served: {alias_response}"
+    );
+
+    let alias_directory_response = String::from_utf8(request_bytes(
+        Arc::clone(&state),
+        "GET /alias-dir/data.txt HTTP/1.1\r\nHost: localhost\r\n\r\n",
+    ))
+    .expect("response is UTF-8");
+    assert!(
+        alias_directory_response.starts_with("HTTP/1.1 200 OK")
+            && alias_directory_response.ends_with("contained data"),
+        "a contained directory symlink remains traversable: {alias_directory_response}"
+    );
+
+    let page = get_page(&state);
+    assert!(
+        page.contains("Directory"),
+        "the successful build page remains served"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn snapshot_omits_symlink_aliases_with_unverifiable_target_containment() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().expect("create permission-restricted project");
+    let root = temp.path().to_path_buf();
+    let output_dir = root.join("_dev");
+    let restricted = root.join("restricted");
+    fs::create_dir_all(&output_dir).expect("create output directory");
+    fs::write(output_dir.join("page.html"), "page").expect("write verified output page");
+    fs::create_dir_all(&restricted).expect("create restricted directory");
+    fs::write(restricted.join("secret.txt"), "restricted secret").expect("write restricted file");
+    std::os::unix::fs::symlink(
+        restricted.join("secret.txt"),
+        output_dir.join("unverifiable.txt"),
+    )
+    .expect("symlink through a restricted directory");
+    fs::set_permissions(&restricted, fs::Permissions::from_mode(0o000))
+        .expect("remove directory permissions");
+
+    if std::fs::canonicalize(output_dir.join("unverifiable.txt")).is_ok() {
+        // A privileged process bypasses the mode, so containment stays verifiable and this test
+        // cannot simulate the canonicalisation failure that omits the alias.
+        fs::set_permissions(&restricted, fs::Permissions::from_mode(0o755))
+            .expect("restore directory permissions");
+        return;
+    }
+
+    let snapshot = super::capture_served_artifacts(&output_dir)
+        .expect("an unverifiable symlink alias must not abort the snapshot");
+    fs::set_permissions(&restricted, fs::Permissions::from_mode(0o755))
+        .expect("restore directory permissions");
+
+    assert!(
+        snapshot.contains_key(Path::new("page.html")),
+        "verified output remains captured"
+    );
+    assert!(
+        !snapshot.contains_key(Path::new("unverifiable.txt")),
+        "an alias whose target containment cannot be verified stays unpublished"
+    );
+}
+
 #[test]
 fn successful_rebuild_updates_output_and_watch_roots_from_new_plan() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();

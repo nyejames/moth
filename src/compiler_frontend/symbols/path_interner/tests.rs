@@ -1305,3 +1305,116 @@ fn merge_snapshot_rejects_a_parent_that_does_not_precede_its_child() {
 fn identity_string_remap() -> StringIdRemap {
     StringTable::new().merge_delta_from(&StringTable::new(), 0)
 }
+
+#[test]
+fn selected_remap_mounts_only_requested_paths_below_the_destination_root() {
+    let mut source_strings = StringTable::new();
+    let mut builder = PathInternerBuilder::new();
+    let selected = builder
+        .try_intern_portable_path("pkg/@package.moth/value", &mut source_strings)
+        .unwrap();
+    let mut destination = builder.fork_source().fork_for_module();
+    let source_table = builder.freeze();
+
+    let mut destination_strings = StringTable::new();
+    let mount = destination
+        .try_intern_portable_path("mount", &mut destination_strings)
+        .unwrap();
+    let remap = destination
+        .remap_selected_table_from_strings_below(
+            mount,
+            &[selected],
+            &source_table,
+            &source_strings,
+            &mut destination_strings,
+        )
+        .expect("selected remap should fit the destination table");
+
+    assert_eq!(remap.get(PathId::ROOT), PathId::ROOT);
+    assert_eq!(
+        remap.mapped_len(),
+        source_table.depth(selected) as usize + 1,
+        "only the selected path and its ancestors belong to the remap"
+    );
+    let mounted = remap.get(selected);
+    let mut scratch = Vec::new();
+    assert_eq!(
+        destination.render_portable(mounted, &destination_strings, &mut scratch),
+        "mount/pkg/@package.moth/value"
+    );
+}
+
+#[test]
+fn sparse_path_remap_reuses_an_already_mapped_ancestor() {
+    let mut source_strings = StringTable::new();
+    let mut builder = PathInternerBuilder::new();
+    let first = builder
+        .try_intern_portable_path("pkg/base/first", &mut source_strings)
+        .expect("the first selected path should fit");
+    let second = builder
+        .try_intern_portable_path("pkg/base/second", &mut source_strings)
+        .expect("the second selected path should fit");
+    let mut destination = builder.fork_source().fork_for_module();
+    let source_table = builder.freeze();
+
+    let mut destination_strings = StringTable::new();
+    let mount = destination
+        .try_intern_portable_path("mount", &mut destination_strings)
+        .expect("the mount should fit");
+    let remap = destination
+        .remap_selected_table_from_strings_below(
+            mount,
+            &[first, second],
+            &source_table,
+            &source_strings,
+            &mut destination_strings,
+        )
+        .expect("both selected paths should remap");
+
+    let mut scratch = Vec::new();
+    assert_eq!(
+        destination.render_portable(remap.get(first), &destination_strings, &mut scratch),
+        "mount/pkg/base/first",
+        "the first selected path mounts its full ancestor chain"
+    );
+    assert_eq!(
+        destination.render_portable(remap.get(second), &destination_strings, &mut scratch),
+        "mount/pkg/base/second",
+        "the second path must continue from the first path's mapped ancestor"
+    );
+}
+
+#[test]
+fn sparse_path_remap_handles_a_deep_retained_route_iteratively() {
+    const DEPTH: usize = 100_000;
+    let mut source_strings = StringTable::new();
+    let mut builder = PathInternerBuilder::new();
+    let deep = std::iter::repeat_n("d", DEPTH)
+        .collect::<Vec<_>>()
+        .join("/");
+    let selected = builder
+        .try_intern_portable_path(&deep, &mut source_strings)
+        .expect("the deep route should fit the test path table");
+    let mut destination = builder.fork_source().fork_for_module();
+    let source_table = builder.freeze();
+
+    let mut destination_strings = StringTable::new();
+    let mount = destination
+        .try_intern_portable_path("mount", &mut destination_strings)
+        .expect("the mount path should fit the destination table");
+    let remap = destination
+        .remap_selected_table_from_strings_below(
+            mount,
+            &[selected],
+            &source_table,
+            &source_strings,
+            &mut destination_strings,
+        )
+        .expect("a deep selected route should remap without recursion");
+    let mounted = remap.get(selected);
+    assert_eq!(
+        destination.depth(mounted),
+        source_table.depth(selected) + 1,
+        "the mounted route must retain every source component below the mount"
+    );
+}

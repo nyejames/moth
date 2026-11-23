@@ -71,7 +71,6 @@ pub(crate) struct ConstFunctionMaterialisationTarget<'a> {
     pub(crate) type_environment: &'a mut TypeEnvironment,
     pub(crate) expression_builder: &'a mut AstExpressionBuilder,
     pub(crate) const_values: &'a mut ConstValueStore,
-    pub(crate) warnings: &'a mut DiagnosticBag,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork: &'a mut PathInternerFork,
     pub(crate) external_package_registry: &'a Arc<ExternalPackageRegistry>,
@@ -884,7 +883,8 @@ fn install_materialised_const_executables(
     target: &mut ConstFunctionMaterialisationTarget<'_>,
 ) -> Result<(), InfrastructureFailure> {
     for materialised in &closure.rows {
-        let executable = materialise_const_executable(context, materialised, &closure, target)?;
+        let mut executable = materialise_const_executable(context, materialised, &closure, target)?;
+        executable.set_donor_identity(materialised.row.body.frozen_identity_handle.clone());
         let function_path = materialised.row.function_path;
         target
             .const_function_executables
@@ -995,6 +995,10 @@ fn materialise_const_executable(
     // The consumer-domain scope must survive the body parse so the reference check sees the same
     // resolved module constants the parse used. The clone shares every module table.
     let reference_scope = scope.clone();
+    // The provider already reported authored-body warnings during its own module compile. This
+    // reparse only reconstructs an executable, so its warnings would duplicate the provider's and
+    // pair a donor `SourceId` with the consumer's source database.
+    let mut reparse_warnings = DiagnosticBag::new();
     let nodes = function_body_to_ast(
         &mut cursor,
         scope,
@@ -1002,7 +1006,7 @@ fn materialise_const_executable(
         &mut type_interner,
         target.expression_builder,
         target.const_values,
-        target.warnings,
+        &mut reparse_warnings,
         target.string_table,
         target.path_fork,
     )

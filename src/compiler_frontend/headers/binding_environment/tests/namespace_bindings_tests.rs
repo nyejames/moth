@@ -66,7 +66,7 @@ use crate::compiler_frontend::public_interface::{
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
-    OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+    OriginTraitId, OriginTypeCategory, OriginTypeId, PublicExportRoute, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{
@@ -690,6 +690,7 @@ fn provider_declaration_selection_rejects_keyword_shadow_names_before_provider_r
             SourceProviderDependencySet::new(vec![SourceProviderDependency {
                 kind: ProviderDependencyKind::Authored {
                     shell: dependency.dependency.dependency_shell_id,
+                    route: PublicExportRoute::ROOT,
                 },
                 interface: &provider,
             }])
@@ -1851,6 +1852,7 @@ fn provider_semantics_bind_once_across_many_shells() {
             .map(|(index, _)| SourceProviderDependency {
                 kind: ProviderDependencyKind::Authored {
                     shell: DependencyShellId::new(SourceId::from_index(0), index as u32),
+                    route: PublicExportRoute::ROOT,
                 },
                 interface: &provider,
             })
@@ -1949,12 +1951,14 @@ fn reversed_selection_order_keeps_one_provider_surface_identity() {
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 0),
+                route: PublicExportRoute::ROOT,
             },
             interface: &provider,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 1),
+                route: PublicExportRoute::ROOT,
             },
             interface: &provider,
         },
@@ -2002,6 +2006,7 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
         module_origin: alpha_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             alpha_origin.clone(),
+            PublicExportRoute::ROOT,
             "VALUE".to_owned(),
             alpha_value.clone(),
         )],
@@ -2037,6 +2042,7 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
         module_origin: beta_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             beta_origin.clone(),
+            PublicExportRoute::ROOT,
             "VALUE".to_owned(),
             beta_value.clone(),
         )],
@@ -2110,12 +2116,14 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 0),
+                route: PublicExportRoute::ROOT,
             },
             interface: &first_provider,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 1),
+                route: PublicExportRoute::ROOT,
             },
             interface: &second_provider,
         },
@@ -2157,6 +2165,7 @@ fn constant_provider(prefix: &str, names: &[&str]) -> PublicSemanticInterface {
         ));
         export_bindings.push(ExportBinding::new(
             module_origin.clone(),
+            PublicExportRoute::ROOT,
             (*name).to_owned(),
             origin.clone(),
         ));
@@ -2204,6 +2213,7 @@ fn alias_provider(prefix: &str, name: &str) -> PublicSemanticInterface {
         module_origin: module_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             module_origin,
+            PublicExportRoute::ROOT,
             name.to_owned(),
             origin.clone(),
         )],
@@ -2233,6 +2243,7 @@ fn trait_provider(prefix: &str, name: &str) -> PublicSemanticInterface {
         module_origin: module_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             module_origin,
+            PublicExportRoute::ROOT,
             name.to_owned(),
             origin.clone(),
         )],
@@ -2271,6 +2282,7 @@ fn struct_provider_with_receiver_method() -> PublicSemanticInterface {
         module_origin: module_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             module_origin.clone(),
+            PublicExportRoute::ROOT,
             "Box".to_owned(),
             OriginDeclarationId::Type(box_origin.clone()),
         )],
@@ -2315,6 +2327,7 @@ fn provider_selection_entry(
     diagnostic_path: PathId,
 ) -> PublicExportEntry {
     PublicExportEntry {
+        route: None,
         export_name,
         target: PublicExportTarget::ProviderSelection {
             selection: DependencySelectionId::new(shell, 0),
@@ -2371,6 +2384,7 @@ fn binding_provider_with_members(
             .into_iter()
             .map(|(name, symbol_id)| PublicBindingExport {
                 exporting_module: module_origin.clone(),
+                route: PublicExportRoute::ROOT,
                 public_name: name.to_owned(),
                 target: registry
                     .canonical_symbol_identity(ExternalSymbolId::Constant(symbol_id))
@@ -2437,7 +2451,10 @@ fn provider_selection_public_namespace_member_joins_declaration_surface() {
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let provider = constant_provider("provider", &["CONST_0"]);
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-        kind: ProviderDependencyKind::Authored { shell },
+        kind: ProviderDependencyKind::Authored {
+            shell,
+            route: PublicExportRoute::ROOT,
+        },
         interface: &provider,
     }])
     .expect("provider shell should resolve");
@@ -2510,7 +2527,10 @@ fn provider_selection_namespace_prefers_source_name_over_facade_alias() {
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let provider = constant_provider("provider", &["SOURCE", "ALIAS"]);
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-        kind: ProviderDependencyKind::Authored { shell },
+        kind: ProviderDependencyKind::Authored {
+            shell,
+            route: PublicExportRoute::ROOT,
+        },
         interface: &provider,
     }])
     .expect("provider shell should resolve");
@@ -2576,7 +2596,10 @@ fn provider_selection_public_namespace_member_joins_binding_surface() {
     let mut registry = ExternalPackageRegistry::new();
     let provider = binding_provider(&mut registry);
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-        kind: ProviderDependencyKind::Authored { shell },
+        kind: ProviderDependencyKind::Authored {
+            shell,
+            route: PublicExportRoute::ROOT,
+        },
         interface: &provider,
     }])
     .expect("provider shell should resolve");
@@ -2638,7 +2661,10 @@ fn provider_selection_namespace_binding_prefers_source_name_over_facade_alias() 
     let provider =
         binding_provider_with_members(&mut registry, &[("SOURCE", 5_101), ("ALIAS", 5_102)]);
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-        kind: ProviderDependencyKind::Authored { shell },
+        kind: ProviderDependencyKind::Authored {
+            shell,
+            route: PublicExportRoute::ROOT,
+        },
         interface: &provider,
     }])
     .expect("provider shell should resolve");
@@ -2755,7 +2781,10 @@ fn provider_selection_public_namespace_member_rejects_missing_member() {
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let provider = constant_provider("provider", &["CONST_0"]);
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-        kind: ProviderDependencyKind::Authored { shell },
+        kind: ProviderDependencyKind::Authored {
+            shell,
+            route: PublicExportRoute::ROOT,
+        },
         interface: &provider,
     }])
     .expect("provider shell should resolve");
@@ -2839,12 +2868,14 @@ fn namespace_and_direct_selection_share_provider_semantics() {
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 0),
+                route: PublicExportRoute::ROOT,
             },
             interface: &provider,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 1),
+                route: PublicExportRoute::ROOT,
             },
             interface: &provider,
         },
@@ -2912,12 +2943,14 @@ fn two_aliases_of_one_declaration_retain_one_record() {
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 0),
+                route: PublicExportRoute::ROOT,
             },
             interface: &provider,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 1),
+                route: PublicExportRoute::ROOT,
             },
             interface: &provider,
         },
@@ -2984,6 +3017,7 @@ fn missing_provider_record_fails_deterministically() {
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: ProviderDependencyKind::Authored {
             shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: PublicExportRoute::ROOT,
         },
         interface: &provider,
     }])
@@ -3056,6 +3090,7 @@ fn qualified_occurrence_binds_provider_target_without_publishing_a_name() {
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: ProviderDependencyKind::Authored {
             shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: PublicExportRoute::ROOT,
         },
         interface: &provider,
     }])
@@ -3118,6 +3153,7 @@ fn missing_qualified_provider_member_reports_the_clause_diagnostic() {
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: ProviderDependencyKind::Authored {
             shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: PublicExportRoute::ROOT,
         },
         interface: &provider,
     }])
@@ -3322,6 +3358,7 @@ fn bind_provider_occurrence(
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: ProviderDependencyKind::Authored {
             shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: PublicExportRoute::ROOT,
         },
         interface: provider,
     }])
@@ -3411,6 +3448,7 @@ fn receiver_methods_reuse_summary_by_origin_storage() {
             .map(|index| SourceProviderDependency {
                 kind: ProviderDependencyKind::Authored {
                     shell: DependencyShellId::new(SourceId::from_index(0), index),
+                    route: PublicExportRoute::ROOT,
                 },
                 interface: &provider,
             })
@@ -3435,6 +3473,104 @@ fn receiver_methods_reuse_summary_by_origin_storage() {
         environment.imported_functions_by_local_path.len(),
         1,
         "the repeated receiver contract must not duplicate the local function entry"
+    );
+}
+
+#[test]
+fn one_receiver_method_imported_through_two_aliases_has_one_visible_entry() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let provider = struct_provider_with_receiver_method();
+    let entry_source = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
+
+    let mut dependency_selections = Vec::new();
+    let dependencies = [("FirstBox", 0_u32), ("SecondBox", 1_u32)]
+        .into_iter()
+        .map(|(alias, shell_ordinal)| {
+            // Distinct dependency paths mimic two bindings of one provider type; a shared path
+            // would project both aliases onto one consumer-local path.
+            let mut dependency = test_dependency(intern_path(
+                &["shapes", alias],
+                &mut string_table,
+                &mut path_fork,
+            ));
+            dependency.dependency.dependency_shell_id =
+                DependencyShellId::new(SourceId::from_index(0), shell_ordinal);
+            add_selection(
+                &mut dependency,
+                &mut dependency_selections,
+                "Box",
+                Some(alias),
+                &mut string_table,
+            );
+            dependency
+        })
+        .collect();
+    let mut module_symbols = single_file_module_symbols(
+        dependencies,
+        dependency_selections,
+        &mut string_table,
+        &mut path_fork,
+    );
+    let provider_dependencies = SourceProviderDependencySet::new(
+        (0..2)
+            .map(|index| SourceProviderDependency {
+                kind: ProviderDependencyKind::Authored {
+                    shell: DependencyShellId::new(SourceId::from_index(0), index),
+                    route: PublicExportRoute::ROOT,
+                },
+                interface: &provider,
+            })
+            .collect(),
+    )
+    .expect("two aliases of one provider should collapse to one provider");
+
+    let environment = bind_environment(
+        &provider_dependencies,
+        &mut module_symbols,
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("two aliases of one receiver type should bind");
+
+    let visibility = environment
+        .file_visibility_by_source
+        .get(&entry_source)
+        .expect("the entry file should have visibility");
+    let method_name = string_table.intern("size");
+    let methods = visibility
+        .visible_receiver_methods
+        .get(&method_name)
+        .expect("the imported receiver method should be visible");
+    assert_eq!(
+        methods.len(),
+        1,
+        "one method origin imported through two aliases must produce one visible entry"
+    );
+    let mut method_path_for = |alias: &str| {
+        let route_path = intern_path(&["shapes", alias], &mut string_table, &mut path_fork);
+        let selected_path = path_fork
+            .try_intern_child(route_path, string_table.intern("Box"))
+            .expect("test path fits");
+        path_fork
+            .try_intern_child(selected_path, method_name)
+            .expect("test path fits")
+    };
+    let first_alias_method = method_path_for("FirstBox");
+    let second_alias_method = method_path_for("SecondBox");
+    assert_eq!(
+        *methods[0].target.local_path(),
+        first_alias_method,
+        "the visible entry should keep the first deterministic alias binding"
+    );
+    assert!(
+        environment
+            .imported_functions_by_local_path
+            .contains_key(&first_alias_method)
+            && environment
+                .imported_functions_by_local_path
+                .contains_key(&second_alias_method),
+        "both alias method paths must keep their own callable contracts"
     );
 }
 

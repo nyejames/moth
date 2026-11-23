@@ -376,7 +376,9 @@ impl ConstExecutionMeter {
             setting: Some("const_work_limit"),
             aggregate,
             span,
+            span_owner: None,
             call_span: None,
+            call_span_owner: None,
             call_chain: Vec::new(),
         }
     }
@@ -676,6 +678,21 @@ impl ConstValueStore {
     /// Clone the shared aggregate const-execution meter handle.
     pub(crate) fn execution_meter(&self) -> Rc<RefCell<ConstExecutionMeter>> {
         Rc::clone(&self.execution_meter)
+    }
+
+    /// Create a store that charges an existing aggregate meter from its first fold.
+    ///
+    /// WHY: a generated sidecar evaluates required const calls in its own value store, but those
+    ///      attempts belong to the requester module's aggregate allowance. Taking the meter as a
+    ///      construction input keeps the join explicit and never allocates a fresh meter only to
+    ///      replace it.
+    pub(crate) fn with_execution_meter(execution_meter: Rc<RefCell<ConstExecutionMeter>>) -> Self {
+        Self {
+            values: Vec::new(),
+            rows: Vec::new(),
+            values_by_path: FxHashMap::default(),
+            execution_meter,
+        }
     }
 
     /// Stage ordinary content and move only the selected roots' reachable suffix on acceptance.
@@ -1199,6 +1216,23 @@ impl ConstValueStore {
 
     pub(crate) fn payload(&self, id: ConstValueId) -> Option<&ConstValuePayload> {
         self.value(id).map(|value| &value.payload)
+    }
+
+    /// Whether a stored value is a `$in` helper, after walking transparent `Coerced` wrappers.
+    ///
+    /// WHY: a coerced helper still carries `SlotInsertTemplate` on the inner row, while the
+    ///      wrapper itself is stored as `Composite`.
+    pub(crate) fn is_slot_insert_template(&self, mut id: ConstValueId) -> bool {
+        loop {
+            match self.payload(id) {
+                Some(ConstValuePayload::Coerced(inner)) => id = *inner,
+                _ => {
+                    return self.metadata(id).is_some_and(|metadata| {
+                        metadata.value_kind == ConstValueKind::SlotInsertTemplate
+                    });
+                }
+            }
+        }
     }
 
     pub(crate) fn value_for_path(&self, path: &PathId) -> Option<ConstValueId> {

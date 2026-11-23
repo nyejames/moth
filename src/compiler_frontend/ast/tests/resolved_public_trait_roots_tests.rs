@@ -156,14 +156,14 @@ fn retains_directly_authored_active_root_public_source_traits_in_order() {
         trait_header(
             "Alpha",
             FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
-            HeaderExportMode::Public,
+            HeaderExportMode::Public { route: None },
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Beta",
             FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
-            HeaderExportMode::Public,
+            HeaderExportMode::Public { route: None },
             &mut string_table,
             &mut path_fork,
         ),
@@ -222,7 +222,7 @@ fn excludes_private_traits() {
         trait_header(
             "Public",
             FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
-            HeaderExportMode::Public,
+            HeaderExportMode::Public { route: None },
             &mut string_table,
             &mut path_fork,
         ),
@@ -280,14 +280,14 @@ fn excludes_imported_and_non_active_root_traits() {
         trait_header(
             "Local",
             FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
-            HeaderExportMode::Public,
+            HeaderExportMode::Public { route: None },
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Imported",
             FileRole::Normal,
-            HeaderExportMode::Public,
+            HeaderExportMode::Public { route: None },
             &mut string_table,
             &mut path_fork,
         ),
@@ -327,7 +327,7 @@ fn rejects_source_trait_header_resolving_to_compiler_owned_core_trait() {
     let mut headers = vec![trait_header(
         "DISPLAYABLE",
         FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
-        HeaderExportMode::Public,
+        HeaderExportMode::Public { route: None },
         &mut string_table,
         &mut path_fork,
     )];
@@ -372,14 +372,14 @@ fn excludes_non_trait_declarations() {
         function_header(
             "render",
             FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
-            HeaderExportMode::Public,
+            HeaderExportMode::Public { route: None },
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Shape",
             FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
-            HeaderExportMode::Public,
+            HeaderExportMode::Public { route: None },
             &mut string_table,
             &mut path_fork,
         ),
@@ -412,7 +412,7 @@ fn missing_trait_definition_is_infrastructure_failure() {
     let headers = vec![trait_header(
         "Orphan",
         FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
-        HeaderExportMode::Public,
+        HeaderExportMode::Public { route: None },
         &mut string_table,
         &mut path_fork,
     )];
@@ -479,14 +479,14 @@ fn retains_public_incompatibilities_symmetrically_for_direct_public_traits() {
         trait_header(
             "Alpha",
             FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
-            HeaderExportMode::Public,
+            HeaderExportMode::Public { route: None },
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Beta",
             FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
-            HeaderExportMode::Public,
+            HeaderExportMode::Public { route: None },
             &mut string_table,
             &mut path_fork,
         ),
@@ -554,14 +554,14 @@ fn private_incompatibility_relation_is_absent_from_trait_roots() {
         trait_header(
             "Alpha",
             FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
-            HeaderExportMode::Public,
+            HeaderExportMode::Public { route: None },
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Beta",
             FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
-            HeaderExportMode::Public,
+            HeaderExportMode::Public { route: None },
             &mut string_table,
             &mut path_fork,
         ),

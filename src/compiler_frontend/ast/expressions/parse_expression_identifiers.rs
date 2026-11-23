@@ -8,7 +8,7 @@ use super::choice_constructor::parse_choice_construct;
 use super::constructor_views::ParsedConstructorExpression;
 use super::error::ExpressionParseError;
 use super::expression_rpn::ExpressionRpnItem;
-use super::expression_store::{AstExpressionBuilder, ExpressionOperationView};
+use super::expression_store::AstExpressionBuilder;
 use super::external_namespace_members::project_external_constant;
 use super::function_calls::{
     ExternalFunctionCallParseInput, ParsedFunctionCallExpression,
@@ -22,6 +22,7 @@ use super::parse_expression_dispatch::{
 use super::parse_expression_input::RouteArgumentContext;
 use super::source_function_calls::{SourceCallableMemberInput, parse_source_callable_member};
 use super::struct_instance::{StructConstructorParseInput, parse_struct_constructor_expression};
+use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
@@ -29,9 +30,7 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::field_access::reference_expression_from_declaration;
 use crate::compiler_frontend::ast::receiver_methods::free_function_receiver_method_call_error;
 use crate::compiler_frontend::ast::statements::fallible_handling::fallible_catch_allowed_in_context;
-use crate::compiler_frontend::ast::templates::template::TemplateType;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::builtins::casts::traits::is_core_cast_trait_name;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -40,10 +39,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidAssignmentTargetReason, InvalidCallShapeReason,
-    InvalidTemplateSlotReason, NameNamespace, TypeUsedAsValueReason,
+    NameNamespace, TypeUsedAsValueReason,
 };
 use crate::compiler_frontend::datatypes::CallableEvaluation;
 use crate::compiler_frontend::external_packages::{ExternalConstantDef, ExternalFunctionDef};
@@ -493,39 +491,6 @@ pub(super) fn lower_resolved_declaration_expression(
             Some(token_stream.current_span()),
         )
         .into());
-    }
-
-    // Template slot inserts are only legal inside template bodies, constant
-    // initializers, or constant headers.
-    if let Some(initializer) = declaration.value.initializer()
-        && let ExpressionOperationView::Template(template_value) =
-            expression_builder.view(initializer)?.operation()
-    {
-        let is_slot_insert = context
-            .template_ir_store
-            .borrow()
-            .get_template(template_value.tir_reference.root)
-            .map(|template_ir| matches!(template_ir.kind, TemplateType::SlotInsert(_)))
-            .ok_or_else(|| {
-                InfrastructureFailure::internal(
-                    CompilerStage::AstConstruction,
-                    "Identifier template reference pointed at a missing same-store template.",
-                )
-            })?;
-        if is_slot_insert
-            && !matches!(
-                context.kind,
-                ContextKind::Template | ContextKind::Constant | ContextKind::ConstantHeader
-            )
-        {
-            return Err(templates::invalid_template_slot(
-                InvalidTemplateSlotReason::InsertOutsideParentSlot,
-                None,
-                None,
-                Some(token_stream.current_span()),
-            )
-            .into());
-        }
     }
 
     // Const records are field-access-only in runtime contexts.

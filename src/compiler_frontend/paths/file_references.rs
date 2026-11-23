@@ -122,7 +122,8 @@ fn classify_authored_path(
     }
 }
 
-fn explicit_extension(name: &str) -> Option<&str> {
+/// Return a name's explicit extension, treating a leading or trailing dot as no extension.
+pub(crate) fn explicit_extension(name: &str) -> Option<&str> {
     match name.rfind('.') {
         Some(0) | None => None,
         Some(dot) if dot + 1 < name.len() => Some(&name[dot + 1..]),
@@ -184,6 +185,12 @@ pub(crate) enum ResolvedFileReferenceFailure {
         extension: StringId,
         span: SourceSpan,
     },
+    /// A content-spelled reference resolved to a canonical Moth source.
+    ///
+    /// A visible alias can give a `.moth` file an authored content extension, but a Moth source
+    /// has no `content` file value. The physical resolver owns this canonical-target kind check so
+    /// AST never looks up a synthetic `content` declaration on a root file's ordinary scope.
+    MothTargetHasNoValue { span: SourceSpan },
 }
 
 impl ResolvedFileReferenceFailure {
@@ -191,7 +198,8 @@ impl ResolvedFileReferenceFailure {
         match self {
             Self::InvalidCompileTimePath { span, .. }
             | Self::InvalidComponent { span }
-            | Self::UnsupportedSourceFileKind { span, .. } => span,
+            | Self::UnsupportedSourceFileKind { span, .. }
+            | Self::MothTargetHasNoValue { span } => span,
         }
     }
 }

@@ -11,7 +11,9 @@ use crate::compiler_frontend::compiler_messages::compiler_errors::{
     InfrastructureDetail, InfrastructureFailure,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
-use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseError, SourceId};
+use crate::compiler_frontend::source::{
+    SourceCapacityError, SourceDatabase, SourceDatabaseError, SourceId,
+};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::utilities::portable_path_display::portable_path_text;
 use std::collections::BTreeMap;
@@ -172,6 +174,7 @@ pub(crate) fn read_registered_source(
 pub(crate) struct SelectedSourceTextMap {
     entries: BTreeMap<PathBuf, Result<String, SourceReadError>>,
     damaged_source_set: Option<DamagedSourceSet>,
+    capacity_rejected_source_ids: Vec<SourceId>,
 }
 
 #[derive(Debug)]
@@ -199,6 +202,7 @@ impl SelectedSourceTextMap {
                     report,
                 }
             }),
+            capacity_rejected_source_ids: Vec::new(),
         }
     }
 
@@ -211,6 +215,7 @@ impl SelectedSourceTextMap {
         let Self {
             entries,
             damaged_source_set,
+            ..
         } = self;
         let entry = entries
             .entry(canonical_path.to_path_buf())
@@ -299,6 +304,14 @@ impl SelectedSourceTextMap {
             match cached {
                 Ok(source) => {
                     if let Err(error) = source_files.retain_text(source_id, source) {
+                        if matches!(
+                            &error,
+                            SourceDatabaseError::Capacity(
+                                SourceCapacityError::SourceSnapshotTooLarge
+                            )
+                        ) {
+                            self.capacity_rejected_source_ids.push(source_id);
+                        }
                         first_error.get_or_insert_with(|| {
                             retained_source_error(error, source_id, source_files, path_fork)
                         });
@@ -323,6 +336,11 @@ impl SelectedSourceTextMap {
             Some(error) => Err(error),
             None => Ok(()),
         }
+    }
+
+    /// Source identities explicitly rejected because their snapshot exceeded the size policy.
+    pub(crate) fn capacity_rejected_source_ids(&self) -> &[SourceId] {
+        &self.capacity_rejected_source_ids
     }
 }
 

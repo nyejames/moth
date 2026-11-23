@@ -1,0 +1,6 @@
+@facade/first Shape as FirstShape
+@facade/second Shape as SecondShape
+
+first = FirstShape("first")
+second = SecondShape("second")
+io.line([:first=[first.measure()] second=[second.measure()]])

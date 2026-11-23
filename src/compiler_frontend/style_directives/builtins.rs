@@ -230,7 +230,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::source_modifier(
             EXPORT_DIRECTIVE_NAME,
             SourceModifierTarget::ExportablePublicApiItem,
-            SourceModifierOperand::None,
+            SourceModifierOperand::OptionalPublicRoute,
         ),
         StyleDirectiveSpec::source_modifier(
             CONFIG_DIRECTIVE_NAME,

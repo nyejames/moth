@@ -1,0 +1,3 @@
+-- A routed export takes exactly one path operand. A trailing token is not a second destination.
+$export @forms extra
+value #= 1

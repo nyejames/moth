@@ -378,7 +378,6 @@ pub(crate) fn analyze_function(
                 resolve_callee(&selected.target),
                 Some(selected.span),
                 None,
-                selected.failure_caught,
             );
         }
     }
@@ -465,7 +464,6 @@ pub(crate) fn analyze_statement_region(
                 resolve_callee(&selected.target),
                 Some(selected.span),
                 Some(selected.span),
-                selected.failure_caught,
             );
         }
     }
@@ -1105,13 +1103,7 @@ fn scan_statement_for_traps(
             }
         }
         HirStatementKind::Call { target, .. } => {
-            note_live_call_hazards(
-                analysis,
-                resolve_callee(target),
-                witness_span,
-                witness_span,
-                false,
-            );
+            note_live_call_hazards(analysis, resolve_callee(target), witness_span, witness_span);
         }
         _ => {}
     }
@@ -1129,7 +1121,6 @@ fn note_live_call_hazards(
     callee: ConstraintCalleeFacts,
     trap_span: Option<SourceSpan>,
     fail_span: Option<SourceSpan>,
-    failure_caught: bool,
 ) {
     if callee.bits.may_trap {
         record_trap_witness(
@@ -1141,7 +1132,7 @@ fn note_live_call_hazards(
     // A plain external call is infallible-shaped, so its contract cannot contribute an error
     // channel. A plain Moth-source call whose callee widened to `may_fail` has a real escape
     // path, even though lowering saw a then-infallible contract.
-    if callee.bits.may_fail && !callee.external_contract && !failure_caught {
+    if callee.bits.may_fail && !callee.external_contract {
         analysis.bits.may_fail = true;
         if analysis.fail_witness.is_none() {
             analysis.fail_witness = Some(ConstraintWitness::new(

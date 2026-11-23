@@ -76,12 +76,12 @@ use crate::compiler_frontend::compiler_messages::{
     ExternalJsDeclarationKind, GenericApplicationErrorReason, HirCapacityResource,
     HtmlTemplateWarning, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
     InvalidCompileTimePathReason, InvalidConfigReason, InvalidDependencyClauseReason,
-    InvalidExpressionReason, InvalidExternalModuleReason, InvalidGenericParameterReason,
-    InvalidHtmlSlotContributionReason, InvalidImportPathReason, InvalidLoopOperandReason,
-    InvalidMapLiteralReason, InvalidMutableAccessReason, InvalidOutputFolderReason,
-    InvalidRouteOutputReason, InvalidTemplateDirectiveReason, LoopOperandKind,
-    MalformedTemplateReason, NameNamespace, NamespaceTypeValueMisuseKind, PathKind,
-    SourceSpanCapacityResource, UnsupportedBackendFeatureReason,
+    InvalidExportRouteReason, InvalidExpressionReason, InvalidExternalModuleReason,
+    InvalidGenericParameterReason, InvalidHtmlSlotContributionReason, InvalidImportPathReason,
+    InvalidLoopOperandReason, InvalidMapLiteralReason, InvalidMutableAccessReason,
+    InvalidOutputFolderReason, InvalidRouteOutputReason, InvalidTemplateDirectiveReason,
+    LoopOperandKind, MalformedTemplateReason, NameNamespace, NamespaceTypeValueMisuseKind,
+    PathKind, SourceSpanCapacityResource, UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
 use crate::compiler_frontend::datatypes::display::{
@@ -466,7 +466,7 @@ pub(crate) fn invalid_template_directive_message(
             _ => format!("Directive '{name}' is not allowed here."),
         },
         InvalidTemplateDirectiveReason::UnexpectedArguments => match name {
-            "export" | "config" => {
+            "config" => {
                 format!(
                     "`${name}` takes no operand and must occupy its own line. Remove the operand, colon, or parentheses after it."
                 )
@@ -498,6 +498,28 @@ pub(crate) fn invalid_template_directive_message(
                 "`$css` takes at most one bare mode operand.\n                 Write `$css \"inline\": ...`, never `$css(\"inline\")` or a second value.".to_owned()
             }
             _ => format!("`${name}` takes no operand. Remove the value or parentheses after it."),
+        },
+        InvalidTemplateDirectiveReason::InvalidExportRouteOperand => {
+            "`$export` takes at most one bare `@route` path. Remove the extra token or parentheses after it."
+                .to_owned()
+        }
+        InvalidTemplateDirectiveReason::InvalidExportRoute { reason } => match reason {
+            InvalidExportRouteReason::PublicRoot => {
+                "`$export` routes name a suffix under the facade. Replace `@/` with a named suffix such as `@tables`, or omit the operand for a root export."
+                    .to_owned()
+            }
+            InvalidExportRouteReason::CurrentDirectorySegment => {
+                "`$export` route components cannot start with `.`. Remove `./`; write `$export @forms` instead of `$export @./forms`."
+                    .to_owned()
+            }
+            InvalidExportRouteReason::ParentDirectorySegment => {
+                "`$export` routes cannot step up with `..`. Write a suffix under this facade, for example `$export @tables`."
+                    .to_owned()
+            }
+            InvalidExportRouteReason::ExtensionSegment => {
+                "`$export` route components cannot carry a file extension. A route names public namespace segments, for example `$export @tables/layout`."
+                    .to_owned()
+            }
         },
         InvalidTemplateDirectiveReason::InvalidSlotTarget => {
             "`$slot` accepts no target, a name, or a positive whole-number position.\n                 Use `$slot`, `$slot title`, or `$slot 1`.".to_owned()

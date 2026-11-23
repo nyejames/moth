@@ -1,0 +1,18 @@
+@helpers pattern as imported_pattern
+@helpers as helpers
+
+local_pattern #= (slot_value = [$in style: blue])
+
+namespaced || -> String:
+    return helpers.insert
+;
+
+local_field || -> String:
+    return local_pattern.slot_value
+;
+
+imported_field || -> String:
+    return imported_pattern.slot_value
+;
+
+~[:static body]

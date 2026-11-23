@@ -1,5 +1,6 @@
-@helpers/cards card
+@helpers/cards card, stored_title
 
 plain #= [card]
 filled #= [card:[$in title:Local title]]
-~[:plain=[plain]|filled=[filled]]
+stored #= [card:[stored_title]]
+~[:plain=[plain]|filled=[filled]|stored=[stored]]

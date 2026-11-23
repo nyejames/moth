@@ -246,6 +246,16 @@ pub(crate) fn invalid_config_message(
             string_table.resolve(*entry_folder),
             string_table.resolve(*prefix),
         ),
+        InvalidConfigReason::ProjectPackagePrefixCollision {
+            project_name,
+            prefix,
+            package_root,
+        } => format!(
+            "Project package '{}' collides with registered project-local source-backed package '@{}' at '{}'. The two packages would use the same stable project-local identity, so unrelated declarations could collide even when nothing imports them. Rename the project package or the registered package prefix.",
+            string_table.resolve(*project_name),
+            string_table.resolve(*prefix),
+            string_table.resolve(*package_root),
+        ),
         InvalidConfigReason::ReservedPackageNamespaceRootClaim { root, source } => format!(
             "Project source '{}' claims the reserved package namespace root '@{}'. Compiler-shipped Core packages and builder-registered packages own those roots, so a local folder, helper source or support package must not publish a name below either. Rename the claiming folder or source file; an entry-only module keeps its directory name because it publishes nothing.",
             string_table.resolve(*source),
@@ -563,6 +573,9 @@ pub(crate) fn invalid_compile_time_path_message(
         ),
         InvalidCompileTimePathReason::ReservedConfigFile => format!(
             "Compile-time path '{path_text}' resolves to the reserved '@config.moth' file. That file is a build-owned configuration source, not a module helper, so it cannot be imported or used as a resource or content value."
+        ),
+        InvalidCompileTimePathReason::ProviderOwnedContentTarget => format!(
+            "Compile-time path '{path_text}' resolves to a provider-owned source file. Provider-owned files supply imports and runtime assets, so they cannot be used as content values."
         ),
     }
 }

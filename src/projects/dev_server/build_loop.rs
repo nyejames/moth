@@ -764,6 +764,10 @@ fn dev_server_project_root(entry_file: &Path) -> PathBuf {
     }
 }
 
+/// Capture one immutable generation of output bytes for HTTP serving.
+///
+/// Entries are published under output-relative keys only when they resolve inside `output_root`.
+/// Symlinks whose target leaves the root are omitted, while contained symlinks stay served.
 pub(crate) fn capture_served_artifacts(
     output_root: &Path,
 ) -> Result<ServedArtifactSnapshot, InfrastructureFailure> {
@@ -777,12 +781,19 @@ pub(crate) fn capture_served_artifacts(
         let canonical_directory = directory
             .canonicalize()
             .map_err(|error| artifact_snapshot_failure(&directory, error.to_string()))?;
-        if !ancestors.insert(canonical_directory) {
+        // A directory symlink can point outside the output root. Traversing it would publish
+        // foreign bytes under output-relative keys the server can resolve, so omit the subtree.
+        if !canonical_directory.starts_with(&root) {
             continue;
         }
 
-        let entries = fs::read_dir(&directory)
+        let entries = fs::read_dir(&canonical_directory)
             .map_err(|error| artifact_snapshot_failure(&directory, error.to_string()))?;
+        // A canonical directory is visited at most once per path, so a symlink cycle cannot
+        // republish its subtree forever.
+        if !ancestors.insert(canonical_directory) {
+            continue;
+        }
         for entry in entries {
             let entry =
                 entry.map_err(|error| artifact_snapshot_failure(&directory, error.to_string()))?;
@@ -791,30 +802,50 @@ pub(crate) fn capture_served_artifacts(
             let file_type = entry
                 .file_type()
                 .map_err(|error| artifact_snapshot_failure(&path, error.to_string()))?;
-            let target_metadata = if file_type.is_symlink() {
-                match fs::metadata(&path) {
-                    Ok(metadata) => Some(metadata),
+
+            // Symlinks are captured through their canonical target. A target outside the output
+            // root is not build output, even when an output symlink exposes it.
+            if file_type.is_symlink() {
+                let canonical_target = match path.canonicalize() {
+                    Ok(target) => target,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::NotFound
+                            || symlink_target_containment_unverifiable(&error) =>
+                    {
+                        continue;
+                    }
+                    Err(error) => {
+                        return Err(artifact_snapshot_failure(&path, error.to_string()));
+                    }
+                };
+                if !canonical_target.starts_with(&root) {
+                    continue;
+                }
+                let target_metadata = match fs::metadata(&canonical_target) {
+                    Ok(metadata) => metadata,
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                     Err(error) => {
                         return Err(artifact_snapshot_failure(&path, error.to_string()));
                     }
+                };
+                if target_metadata.is_dir() {
+                    directories.push((canonical_target, relative_path, ancestors.clone()));
+                    continue;
                 }
-            } else {
-                None
-            };
-            if file_type.is_dir()
-                || target_metadata
-                    .as_ref()
-                    .is_some_and(std::fs::Metadata::is_dir)
-            {
+                if !target_metadata.is_file() {
+                    continue;
+                }
+                let bytes = fs::read(&canonical_target)
+                    .map_err(|error| artifact_snapshot_failure(&path, error.to_string()))?;
+                artifacts.insert(relative_path, Arc::new(bytes));
+                continue;
+            }
+
+            if file_type.is_dir() {
                 directories.push((path, relative_path, ancestors.clone()));
                 continue;
             }
-            if !file_type.is_file()
-                && !target_metadata
-                    .as_ref()
-                    .is_some_and(std::fs::Metadata::is_file)
-            {
+            if !file_type.is_file() {
                 continue;
             }
             let bytes = fs::read(&path)
@@ -824,6 +855,38 @@ pub(crate) fn capture_served_artifacts(
     }
 
     Ok(Arc::new(artifacts))
+}
+
+/// `ERROR_INVALID_FUNCTION` from canonicalisation on a volume the Windows Mount Manager does not
+/// manage, such as an OSFMount volume. Rust reports this instead of a typed `ErrorKind`; see
+/// <https://github.com/rust-lang/rust/issues/79449>.
+#[cfg(windows)]
+const WINDOWS_ERROR_INVALID_FUNCTION: i32 = 1;
+
+/// Whether a symlink-target canonicalisation failure leaves containment unverified.
+///
+/// Windows can refuse to open a target for canonicalisation, for example a readable SMB file,
+/// with an access or sharing error even though the artefact itself is readable. Such an alias
+/// cannot be proven to stay inside the output root, so it is omitted rather than failing a
+/// successful build. Broken links are already skipped by `NotFound`, while symlink loops stay
+/// capture failures because they never resolve to a verifiable target.
+fn symlink_target_containment_unverifiable(error: &std::io::Error) -> bool {
+    if matches!(
+        error.kind(),
+        std::io::ErrorKind::PermissionDenied
+            | std::io::ErrorKind::NotConnected
+            | std::io::ErrorKind::StaleNetworkFileHandle
+            | std::io::ErrorKind::ResourceBusy
+    ) {
+        return true;
+    }
+
+    #[cfg(windows)]
+    if error.raw_os_error() == Some(WINDOWS_ERROR_INVALID_FUNCTION) {
+        return true;
+    }
+
+    false
 }
 
 fn artifact_snapshot_failure(path: &Path, detail: String) -> InfrastructureFailure {

@@ -6,7 +6,15 @@ A dependency path has three distinct roles:
 - `@module symbol, other` in statement position is an ordinary dependency clause. It binds the selected names for later statements.
 - `@file.ext` is a file value. It evaluates to a `String`.
 
-The spelling and provider rules are shared, but the roles never convert into each other. A clause never becomes a file value, and a file value never exposes a provider namespace. See @../resources/#file-paths (File paths) and @../moth-templates/#template-scope (Template scope).
+The spelling and provider rules are shared, but the roles never convert into
+each other. A clause never becomes a file value, and a file value never exposes
+a provider namespace. See @../resources/#file-paths (File paths) and
+@../moth-templates/#template-scope (Template scope).
+
+A facade may publish names under a public route. A path can then name that
+route below the facade, such as `@child/forms`. The suffix is a published
+provider path, not a physical directory or child module. See @#public-route-paths
+(Public route paths).
 
 ### Qualified expression references
 
@@ -20,25 +28,72 @@ A `PATH` token followed by exactly one `SYMBOL` token on the same physical line 
 
 A newline ends the selection. Spaces and tabs may separate the two tokens, a newline may not. The selected symbol creates no visible local binding, so it never collides with a local name or with another provider's selection. Ordinary expression suffixes still apply after the selected symbol.
 
+The provider path may include a public route below a facade. `@child/forms button("go")` selects one routed member and still binds no name. The route and leaf follow the same one-line rule.
+
 The same form works inside template heads in `.moth` templates and inside the synthetic `.mtf` body:
 
 [codeblock, $code "text":
     # Welcome to [@settings site_name]
+    # Routed: [@child/forms button("Go")]
 ]
 
-A qualified reference creates an early provider-dependency fact, not a dependency clause. The provider must expose the selected symbol under the consuming source's access rules. An unassigned top-level `@math square(12)` is rejected: a top-level path starts a dependency clause, and a call is not a valid selection list. Bind the name with a clause and call it there.
+A qualified reference creates an early provider-dependency fact, not a dependency clause. The provider must expose the selected symbol under the consuming source's access rules. That includes the exact public route and leaf for a routed selection. An unassigned top-level `@math square(12)` is rejected: a top-level path starts a dependency clause, and a call is not a valid selection list. Bind the name with a clause and call it there.
 
 ### Path families
 
 - **Module-root-relative**: dependency clauses resolve from the declaring file's owning module root. Example: inside `internal/deep/renderer.moth`, `@accounts Account` resolves to `accounts.moth`, not `internal/deep/accounts.moth`.
-- **Child module**: reaching a child normal module exposes only its `@mod.moth` facade. Dependency clauses cannot bypass that facade with paths such as `@child/internal`.
-- **Support package**: scoped `@package.moth` packages are depended on by package name. Consumers never encode ancestor paths. A support-only child remains importable only by eligible consumers through its support surface.
+- **Child module**: reaching a child normal module exposes only its `@mod.moth` facade. Dependency clauses cannot bypass that facade with paths such as `@child/internal`. A public route adds a path below the facade, such as `@child/forms`, and exposes only names published there.
+- **Support package**: scoped `@package.moth` packages are depended on by package name. Consumers never encode ancestor paths. A support-only child remains importable only by eligible consumers through its support surface. Public routes from that support facade appear under the package name, such as `@shared/validation`.
 - **Entry-only child module**: an entry-only directory has no importable normal interface. A dependency that requests one receives a missing-surface diagnostic. The entry is never activated.
 - **Core binding-backed package**: `@core/math`, `@core/text` and current peers are registered by the builder.
-- **Core source-backed package**: `@core/html` and `@core/css` are compiler-provided Moth source packages and the fixed template prelude providers. Each publishes through a directly contained `@package.moth`.
-- **Builder source-backed package**: `@builder/web/site` belongs to the HTML builder and publishes through a directly contained `@package.moth`.
+- **Core source-backed package**: `@core/html` and `@core/css` are compiler-provided Moth source packages and the fixed template prelude providers. Each publishes through a directly contained `@package.moth`. A source package that publishes routes exposes them beneath its registered package path, never as a new package root.
+- **Builder source-backed package**: `@builder/web/site` belongs to the HTML builder and publishes through a directly contained `@package.moth`. A `forms` route on that package is reached as `@builder/web/site/forms`.
 - **Builder binding-backed package**: `@builder/web/canvas` is a builder-owned runtime package with no source facade.
 - **JavaScript file**: project-local annotated JavaScript files require `.js` and a builder external import provider. The `.js` extension is kept.
+
+### Public route paths
+
+A public route is a provider path below a facade. `@child/forms` names the
+`forms` route published by `child`. It does not resolve `child/forms` as a
+physical directory, a nested module, a new package or a provider's own route.
+
+[codeblock, $code "moth":
+    @child/forms button as primary_button
+    @child/forms as forms
+    @shared/validation field
+
+    primary = primary_button("go")
+    bare = forms.button("go")
+    shared = field
+]
+
+A direct selection through a route binds one exported member. A bare route
+clause binds a shallow namespace record of exactly that route's direct members.
+Root members and deeper routes stay out. `forms.button` works.
+`forms.root_value` and `forms.validation.field` do not. Recursive member access
+is unsupported for source-backed namespaces, so `@core/html as html` does not
+enable `html.tables.cells`. Binding-backed external package namespaces can still
+expose their own nested package-local symbols.
+
+A route is visible exactly where its facade is visible. A route under a child
+normal facade is visible from the parent. A support route is visible only to
+the consumers allowed to use that support package. A registered package route
+is visible where that package is registered. Its names sit beneath the facade
+path or registered package path.
+
+A route-qualified occurrence in expression position binds no name:
+
+[codeblock, $code "moth":
+    greeting = @child/forms button("go")
+]
+
+The path and selected symbol stay on one physical line, as with any qualified
+reference. The route is exact. An undeclared route, a deeper suffix or a leaf
+missing from the declared route never falls through to private files or child
+modules.
+
+The `.mtf` prelude stays root-only. `@core/html` and `@core/css` contribute only
+their facade-root constants, so a public route never adds a prelude name.
 
 ### Resolution rules
 
@@ -50,13 +105,14 @@ A qualified reference creates an early provider-dependency fact, not a dependenc
 - Direct `.js` dependency clauses keep the `.js` extension.
 - Scoped support packages are injected by package name, not physical ancestor paths.
 - Core and builder runtime packages use their registered package path. The exact `@core` and `@builder` roots are not package targets.
-- Specific symbol bindings use flat direct selections. Direct symbol paths such as `@core/math/sin` remain invalid.
+- Specific symbol bindings use flat direct selections. A path such as `@core/math/sin` does not select a nested member. It is invalid unless the provider facade publishes `sin` as a public route. Route names come from that facade, not from guessing a file or member path.
+- Route misses report the layer they reached. An unknown facade path gives `MOTH-IMPORT-0005`, an undeclared route or deeper suffix beneath a visible facade gives `MOTH-IMPORT-0015`, a hidden-directory-shaped path that names no published route gives `MOTH-IMPORT-0016`, and a declared route with a missing selected leaf gives `MOTH-IMPORT-0011`. None falls through to a private path.
 - Direct dependency clauses on `@mod.moth`, `@package.moth`, `@entry.moth` and `@config.moth` are rejected. Depend on the module directory instead.
 - `@@name` is invalid. The leading `@` starts a dependency path and is not part of the module name.
 - A bare explicit-extension clause requires `as` or at least one direct selection. An explicit-extension clause with no registered provider gets a targeted diagnostic.
 - A recognised source extension used with an explicit extension gets an extensionless-source diagnostic. `@docs/intro.mtf content` stays invalid as a clause even though `@docs/intro.mtf` is a valid file value in expression position.
 - Moth template `.mtf` and plain Markdown `.md` content files both expose generated `content` constants. See @../moth-templates/#content-dependencies (Moth template content dependencies) and @../markdown/#markdown-dependencies (Markdown dependencies).
-- The public surface comes from `$export` declarations and direct-selection clauses in the applicable facade. See @#module-visibility (Module visibility).
+- The public surface comes from `$export` declarations and direct-selection clauses in the applicable facade, at its root or under a public route. See @#module-visibility (Module visibility).
 
 ### Same-module dependencies
 
@@ -64,7 +120,7 @@ Files in the same module can bind ordinary sibling source files directly. Same-m
 
 ### Cross-module dependencies
 
-Dependency clauses that cross into another module boundary can only access what that module's applicable facade makes public. Cross-module dependency clauses cannot bypass the public API. See @#module-visibility (Module visibility).
+Dependency clauses that cross into another module boundary can only access what that module's applicable facade makes public, at its root or under a named public route. Cross-module dependency clauses cannot bypass the public API. See @#module-visibility (Module visibility).
 
 ### Content-file dependencies
 

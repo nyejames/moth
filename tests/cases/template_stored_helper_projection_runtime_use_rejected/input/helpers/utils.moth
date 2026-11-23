@@ -1,0 +1,2 @@
+insert #= [$in style: [: red]]
+pattern #= (slot_value = [$in style: red])

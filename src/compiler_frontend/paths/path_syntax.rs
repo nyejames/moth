@@ -159,6 +159,11 @@ impl PathSyntaxTable {
         self.frozen
     }
 
+    /// Whether this source has no authored path rows to discover.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.paths.is_empty()
+    }
+
     /// Walk every authored path row with its dense handle in stable row order.
     pub(crate) fn iter(&self) -> impl Iterator<Item = (PathSyntaxId, &PathSyntax)> {
         self.paths

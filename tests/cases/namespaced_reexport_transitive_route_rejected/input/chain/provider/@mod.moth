@@ -1,0 +1,6 @@
+$export @nested
+widget #|label String| -> String:
+    return [:widget:[label]]
+;
+
+private_helper #= "not exported"

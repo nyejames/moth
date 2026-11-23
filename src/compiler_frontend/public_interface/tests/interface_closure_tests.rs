@@ -31,7 +31,7 @@ use crate::compiler_frontend::public_call_summary::{
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
-    OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+    OriginTraitId, OriginTypeCategory, OriginTypeId, PublicExportRoute, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
 use crate::compiler_frontend::source::SourceId;
@@ -208,6 +208,7 @@ fn close(
                 kind:
                     crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
                         shell: DependencyShellId::new(SourceId::from_index(0), index as u32),
+                        route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
                     },
                 interface,
             })
@@ -322,11 +323,13 @@ impl DeepReexportFixture {
         vec![
             ExportBinding::new(
                 provider_origin("facade"),
+                PublicExportRoute::ROOT,
                 "Card".to_owned(),
                 OriginDeclarationId::Type(self.card_origin.clone()),
             ),
             ExportBinding::new(
                 provider_origin("facade"),
+                PublicExportRoute::ROOT,
                 "make_card".to_owned(),
                 OriginDeclarationId::Function(self.make_origin.clone()),
             ),
@@ -505,11 +508,13 @@ fn nested_canonical_and_folded_identities_select_origins() {
         vec![
             ExportBinding::new(
                 provider_origin("facade"),
+                PublicExportRoute::ROOT,
                 "Container".to_owned(),
                 OriginDeclarationId::Type(container_origin.clone()),
             ),
             ExportBinding::new(
                 provider_origin("facade"),
+                PublicExportRoute::ROOT,
                 "NESTED".to_owned(),
                 OriginDeclarationId::Constant(constant_origin.clone()),
             ),
@@ -570,6 +575,7 @@ fn closure_clones_provider_declaration_provenance() {
     let closed = close(
         vec![ExportBinding::new(
             provider_origin("facade"),
+            PublicExportRoute::ROOT,
             "project_value".to_owned(),
             OriginDeclarationId::Function(origin.clone()),
         )],
@@ -674,12 +680,14 @@ fn disagreeing_provider_declarations_fail_deterministically() {
         SourceProviderDependency {
             kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 0),
+                route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
             },
             interface: &first,
         },
         SourceProviderDependency {
             kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 1),
+                route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
             },
             interface: &second,
         },
@@ -725,12 +733,14 @@ fn disagreeing_provider_summaries_fail_deterministically() {
         SourceProviderDependency {
             kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 0),
+                route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
             },
             interface: &first,
         },
         SourceProviderDependency {
             kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(0), 1),
+                route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
             },
             interface: &second,
         },
@@ -762,6 +772,7 @@ fn duplicate_keys_in_one_interface_fail_at_view_construction() {
     let error = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
             shell: DependencyShellId::new(SourceId::from_index(0), 0),
+            route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
         },
         interface: &duplicate,
     }])
@@ -809,6 +820,7 @@ fn disagreeing_evidence_records_fail_in_both_provider_orders() {
     );
     let bindings = vec![ExportBinding::new(
         provider_origin("facade"),
+        PublicExportRoute::ROOT,
         "Card".to_owned(),
         OriginDeclarationId::Type(card),
     )];
@@ -855,6 +867,7 @@ fn equal_repeated_evidence_materialises_once() {
     );
     let bindings = vec![ExportBinding::new(
         provider_origin("facade"),
+        PublicExportRoute::ROOT,
         "Card".to_owned(),
         OriginDeclarationId::Type(card),
     )];
@@ -926,12 +939,14 @@ fn disagreeing_provider_summary_constraint_bits_fail_deterministically() {
             SourceProviderDependency {
                 kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
                     shell: DependencyShellId::new(SourceId::from_index(0), 0),
+                    route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
                 },
                 interface: &current,
             },
             SourceProviderDependency {
                 kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
                     shell: DependencyShellId::new(SourceId::from_index(0), 1),
+                    route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
                 },
                 interface: &refreshed,
             },
@@ -973,6 +988,7 @@ fn facade_reexport_preserves_constraint_bits() {
     let closed = close(
         vec![ExportBinding::new(
             provider_origin("facade"),
+            PublicExportRoute::ROOT,
             "compute".to_owned(),
             OriginDeclarationId::Function(origin.clone()),
         )],

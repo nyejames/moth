@@ -6,9 +6,17 @@ Direct-selection and namespace dependency clauses provide compact syntax for bin
     @core/math sin, cos, PI
 
     @components render as render_component, Button as UiButton, Card
+
+    @child/forms Button as FormButton, badge
+    @child root_value
 ]
 
-Each direct selection binds one symbol into the file. `as` creates a file-local alias. One authored clause keeps one shell identity and resolves one provider surface. Selected names do not become independent provider clauses.
+Each direct selection binds one symbol into the file. `as` creates a
+file-local alias. One authored clause keeps one shell identity and resolves one
+provider surface. Selected names do not become independent provider clauses. A
+path may name a public route below a facade. The provider facade must publish
+that route and every selected leaf. The route is an explicit provider path, not
+a nested selected name.
 
 ### Direct-selection termination
 
@@ -47,6 +55,20 @@ The same rules apply when `$export` marks a direct-selection clause for re-expor
 
 A bare namespace clause brings the whole surface as a field-access-only namespace. Use `math.sin(1.0)` for values and `math.PI` for constants, but do not pass the namespace record itself as a value.
 
+A bare route path binds only that route's direct members:
+
+[codeblock, $code "moth":
+    @child/forms as forms
+
+    result = forms.button("go")
+]
+
+`forms.button` works. Root members and deeper routes are absent, so
+`forms.root_value` and `forms.validation.field` fail. The parent `@child`
+namespace holds only root exports. Recursive member access is unsupported for
+source-backed namespaces, so `@core/html as html` does not enable
+`html.tables.cells`.
+
 ### Namespace alias
 
 [codeblock, $code "moth":
@@ -78,7 +100,14 @@ Runtime top-level bindings are not bindable. See @#module-visibility (Module vis
 
 ### Namespaced access
 
-Source and module namespace clauses are shallow. External package namespaces can expose nested package-local symbols. Use field-access syntax on the namespace record, but do not pass the namespace itself as a first-class value. Source-authored receiver methods are called through receiver-call syntax rather than as namespace fields.
+Source, module and public-route namespace clauses are shallow. A route namespace
+exposes only its direct members, never facade root members or deeper routes.
+Binding-backed external package namespaces can expose nested package-local
+symbols. Use field-access syntax on the namespace record, but do not pass the
+namespace itself as a first-class value. Recursive member access on a
+source-backed namespace is unsupported, so `@core/html as html` does not enable
+`html.tables.cells`. Source-authored receiver methods are called through
+receiver-call syntax rather than as namespace fields.
 
 ### Dependency clauses are compile-time declarations
 
@@ -90,6 +119,8 @@ Dependency bindings are file-local and visible throughout the file independent o
 - Empty selection lists are unrepresentable.
 - A leading `@` inside a selection list is invalid.
 - Selections are flat identifiers and cannot contain child paths or nested selection syntax.
+- A route path belongs to the provider path before the selection list. It names one published route and does not make each leaf a nested name.
+- A leaf missing from a declared route is diagnosed. The lookup never falls through to a private file or an undeclared deeper route.
 - Duplicate selected names and duplicate local names are diagnosed.
 - A direct-selection clause binds selected declarations from the one resolved provider surface.
 - Clause-level `as` and direct selections are mutually exclusive.
@@ -101,6 +132,7 @@ Dependency bindings are file-local and visible throughout the file independent o
 - Ordinary dependency aliases are file-local.
 - A dependency alias cannot hide an existing visible name.
 - If `render` is already declared in the file, `@other render` is an error. Pick a different local name.
+- A public route that overlaps a different concrete provider, such as a visible child, local source or registered package prefix, is an eager collision even when unused. An ambiguous facade base reports `MOTH-IMPORT-0006` on use. A case-only match counts.
 - Leading-case mismatches warn. For example, binding a struct with a lowercase alias or a function with an uppercase alias triggers a warning.
 
 ### Provider clauses

@@ -67,7 +67,7 @@ Copying a package directory into a project does not grant Core or Builder identi
 
 ### Prelude is visibility policy
 
-The prelude is implicit dependency policy, not an origin or backing. The ordinary Moth prelude exposes `io` as an alias to `@core/io`. The separate `.mtf` prelude makes public compile-time constants from `@core/html` and `@core/css` visible by bare name. Package metadata remains independent of these visibility policies.
+The prelude is implicit dependency policy, not an origin or backing. The ordinary Moth prelude exposes `io` as an alias to `@core/io`. The separate `.mtf` prelude makes facade-root public compile-time constants from `@core/html` and `@core/css` visible by bare name. A routed export stays out of that flat prelude and remains reachable only through an explicit qualified occurrence. Package metadata remains independent of these visibility policies.
 
 ### Builder-selected availability
 

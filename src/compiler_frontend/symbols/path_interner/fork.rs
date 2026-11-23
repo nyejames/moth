@@ -669,12 +669,57 @@ impl PathInternerFork {
                 continue;
             }
             let parent = source_table.try_parent(old)?;
-            let remapped_parent = mapped.get(parent.index()).copied()?;
+            let remapped_parent = *mapped.get(parent.index())?;
             let component = source_table.try_component(old)?;
             let component = destination_strings.intern(source_strings.try_resolve(component)?);
             let remapped = self.try_intern_child(remapped_parent, component)?;
             mapped.push(remapped);
         }
         Some(PathIdRemap::from_full(mapped))
+    }
+
+    /// Re-intern only the selected foreign paths below an explicit destination mount.
+    ///
+    /// WHAT: maps each required source path and its ancestors, leaving every other source table
+    ///       row untouched.
+    /// WHY: a foreign closure's issuing table can retain mounts inherited from earlier imports.
+    ///      Re-interning the whole table repeats those inherited domains in every requester and
+    ///      grows path identity through a provider chain.
+    pub(crate) fn remap_selected_table_from_strings_below(
+        &mut self,
+        mount: PathId,
+        required_paths: &[PathId],
+        source_table: &PathTable,
+        source_strings: &impl StringTableResolver,
+        destination_strings: &mut StringTable,
+    ) -> Option<PathIdRemap> {
+        let mut mapped = FxHashMap::default();
+        mapped.insert(PathId::ROOT, PathId::ROOT);
+        // One reusable scratch buffer keeps the ancestor walk iterative. Re-entering this method
+        // for one path at a time would consume one native stack frame per component and can
+        // overflow on a valid deep route.
+        let mut missing = Vec::new();
+        for &path in required_paths {
+            missing.clear();
+            let mut current = path;
+            while current != PathId::ROOT && !mapped.contains_key(&current) {
+                missing.push(current);
+                current = source_table.try_parent(current)?;
+            }
+            // Begin at the mount or the already-mapped ancestor found by the walk above,
+            // then carry each newly interned destination down the missing segment chain.
+            let mut destination_parent = if current == PathId::ROOT {
+                mount
+            } else {
+                *mapped.get(&current)?
+            };
+            while let Some(child) = missing.pop() {
+                let component = source_table.try_component(child)?;
+                let component = destination_strings.intern(source_strings.try_resolve(component)?);
+                destination_parent = self.try_intern_child(destination_parent, component)?;
+                mapped.insert(child, destination_parent);
+            }
+        }
+        Some(PathIdRemap::from_sparse(mapped))
     }
 }

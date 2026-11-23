@@ -42,14 +42,13 @@ use crate::compiler_frontend::headers::binding_environment::{
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleRootBoundary, ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
-use crate::compiler_frontend::headers::types::{
-    DependencySelection, Header, HeaderExportMode, HeaderParseFailure,
-};
+use crate::compiler_frontend::headers::types::{DependencySelection, Header, HeaderParseFailure};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::project_globals::is_project_globals_dependency;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::{SourceDatabase, SourceSpan};
+use crate::compiler_frontend::style_directives::PublicExportRouteOperand;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternError, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
@@ -127,7 +126,7 @@ fn intern_public_surface_path(
 ///       contract-shell eligibility stay centralized on `HeaderKind`.
 fn is_authored_public_export(header: &Header) -> bool {
     header.file_role.is_export_capable()
-        && header.export_mode == HeaderExportMode::Public
+        && header.export_mode.is_public()
         && header.kind.is_authored_public_export_declaration()
 }
 
@@ -184,7 +183,7 @@ pub(super) fn build_public_exports(
     // Pass 2: resolve `$export`-marked dependencies against the completed authored export maps.
     build_source_package_public_dependencies(
         module_symbols,
-        &source_package_locations,
+        source_package_locations,
         resolver,
         external_package_registry,
         source_provider_dependencies,
@@ -194,7 +193,7 @@ pub(super) fn build_public_exports(
     )?;
     build_module_root_public_dependencies(
         module_symbols,
-        &module_root_locations,
+        module_root_locations,
         resolver,
         source_files,
         external_package_registry,
@@ -213,7 +212,7 @@ fn build_source_package_public_exports(
     resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> PublicExportDataResult<FxHashMap<String, FxHashMap<StringId, SourceSpan>>> {
+) -> PublicExportDataResult<FxHashMap<String, PublicExportLocations>> {
     let mut export_locations = FxHashMap::default();
     for (prefix, root_file) in resolver.source_package_public_surface_files() {
         let root_file_logical = resolver.logical_path_for_canonical_file(root_file)?;
@@ -225,7 +224,6 @@ fn build_source_package_public_exports(
         )?;
 
         let mut collector = PublicExportCollector::default();
-        let mut root_locations = FxHashMap::default();
 
         module_symbols
             .file_package_membership
@@ -255,6 +253,7 @@ fn build_source_package_public_exports(
                     Some(name_span),
                 )?;
                 collector.insert(
+                    header.export_mode.route(),
                     export_name,
                     PublicExportTarget::SourceDeclaration {
                         path: header.declaration_path,
@@ -262,14 +261,14 @@ fn build_source_package_public_exports(
                     Some(name_span),
                     string_table,
                 )?;
-                root_locations.insert(export_name, name_span);
             }
         }
 
-        export_locations.insert(prefix.clone(), root_locations);
+        let (exports, locations) = collector.into_parts();
+        export_locations.insert(prefix.clone(), locations);
         module_symbols
             .source_package_public_exports
-            .insert(prefix.clone(), collector.exports);
+            .insert(prefix.clone(), exports);
     }
 
     Ok(export_locations)
@@ -281,7 +280,7 @@ fn build_source_package_public_exports(
 )]
 fn build_source_package_public_dependencies(
     module_symbols: &mut ModuleSymbols,
-    export_locations: &FxHashMap<String, FxHashMap<StringId, SourceSpan>>,
+    mut export_locations: FxHashMap<String, PublicExportLocations>,
     resolver: &ProjectPathResolver,
     external_package_registry: &ExternalPackageRegistry,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
@@ -304,14 +303,14 @@ fn build_source_package_public_dependencies(
             .cloned()
             .unwrap_or_default();
         let mut collector =
-            PublicExportCollector::from_existing(&current_exports, export_locations.get(prefix));
+            PublicExportCollector::from_existing(current_exports, export_locations.remove(prefix));
 
         if let Some(dependencies) = module_symbols
             .file_dependency_clauses_by_source
             .get(&root_file_interned)
         {
             for dependency in dependencies {
-                if dependency.export_mode != HeaderExportMode::Public {
+                if !dependency.export_mode.is_public() {
                     continue;
                 }
 
@@ -340,6 +339,7 @@ fn build_source_package_public_dependencies(
                         Some(selection.source_span),
                     )?;
                     collector.insert(
+                        dependency.export_mode.route(),
                         export_name,
                         target,
                         Some(
@@ -370,8 +370,9 @@ fn build_module_root_public_exports_pass1(
     source_files: &SourceDatabase,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> PublicExportDataResult<FxHashMap<PathId, FxHashMap<StringId, SourceSpan>>> {
+) -> PublicExportDataResult<FxHashMap<PathId, PublicExportLocations>> {
     let mut export_locations = FxHashMap::default();
+    let mut collectors: FxHashMap<PathId, PublicExportCollector> = FxHashMap::default();
     let mut module_root_boundaries =
         build_module_root_boundaries(resolver, string_table, path_fork)?;
     module_root_boundaries
@@ -422,21 +423,24 @@ fn build_module_root_public_exports_pass1(
                 &header.declaration_path,
                 Some(name_span),
             )?;
-            let exports = module_symbols
-                .module_root_public_exports
-                .entry(logical)
-                .or_default();
-            exports.insert(PublicExportEntry {
+            collectors.entry(logical).or_default().insert(
+                header.export_mode.route(),
                 export_name,
-                target: PublicExportTarget::SourceDeclaration {
+                PublicExportTarget::SourceDeclaration {
                     path: header.declaration_path,
                 },
-            });
-            export_locations
-                .entry(logical)
-                .or_insert_with(FxHashMap::default)
-                .insert(export_name, name_span);
+                Some(name_span),
+                string_table,
+            )?;
         }
+    }
+
+    for (logical, collector) in collectors {
+        let (exports, locations) = collector.into_parts();
+        module_symbols
+            .module_root_public_exports
+            .insert(logical, exports);
+        export_locations.insert(logical, locations);
     }
 
     Ok(export_locations)
@@ -447,7 +451,7 @@ fn build_module_root_public_exports_pass1(
 )]
 fn build_module_root_public_dependencies(
     module_symbols: &mut ModuleSymbols,
-    export_locations: &FxHashMap<PathId, FxHashMap<StringId, SourceSpan>>,
+    mut export_locations: FxHashMap<PathId, PublicExportLocations>,
     _resolver: &ProjectPathResolver,
     _source_files: &SourceDatabase,
     external_package_registry: &ExternalPackageRegistry,
@@ -475,7 +479,7 @@ fn build_module_root_public_dependencies(
             .map(Vec::as_slice)
             .unwrap_or(&[]);
         for dependency in dependencies {
-            if dependency.export_mode != HeaderExportMode::Public
+            if !dependency.export_mode.is_public()
                 || !is_project_globals_dependency(
                     dependency.dependency.path,
                     &*path_fork,
@@ -500,12 +504,12 @@ fn build_module_root_public_dependencies(
             .cloned()
             .unwrap_or_default();
         let mut collector = PublicExportCollector::from_existing(
-            &current_exports,
-            export_locations.get(&root_source),
+            current_exports,
+            export_locations.remove(&root_source),
         );
 
         for dependency in dependencies {
-            if dependency.export_mode != HeaderExportMode::Public {
+            if !dependency.export_mode.is_public() {
                 continue;
             }
 
@@ -533,6 +537,7 @@ fn build_module_root_public_dependencies(
                     Some(selection.source_span),
                 )?;
                 collector.insert(
+                    dependency.export_mode.route(),
                     export_name,
                     target,
                     Some(
@@ -573,6 +578,7 @@ fn resolve_public_export_dependency_or_provider(
         source_provider_dependencies.resolve_clause(dependency.dependency.dependency_shell_id)
     {
         let provider_id = resolved_clause.provider;
+        let provider_route = resolved_clause.route;
         let provider_name = string_table.resolve(selection.source_name);
         let provider_view = source_provider_dependencies.binding_view(provider_id)?;
         let diagnostic_path = path_fork
@@ -584,8 +590,12 @@ fn resolve_public_export_dependency_or_provider(
                 ))
             })?;
 
-        if provider_view.exported_origin(provider_name).is_none()
-            && provider_view.binding_export(provider_name).is_none()
+        if provider_view
+            .exported_origin(provider_route, provider_name)
+            .is_none()
+            && provider_view
+                .binding_export(provider_route, provider_name)
+                .is_none()
         {
             let interface = source_provider_dependencies.interface(provider_id)?;
             return Err(HeaderParseFailure::Diagnostic(
@@ -915,34 +925,54 @@ fn resolve_public_export_dependency(
 //  Public export collection helper
 // --------------------------
 
-/// Accumulates public export entries for one root file and detects duplicate public names.
+/// One `(route, exported leaf)` identity inside a single facade's public surface.
+///
+/// WHAT: the authored route identity (absent for the facade root) plus the exported leaf name.
+/// WHY: a public name is unique within its route, not across the whole facade. Distinct routes
+///      may publish the same leaf independently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct PublicExportKey {
+    route: Option<PathId>,
+    export_name: StringId,
+}
+
+/// Authored export-site spans for one facade, keyed by `(route, leaf)`.
+///
+/// WHY: the first collection pass hands these spans to the second pass by move, so duplicate
+///      diagnostics cite the first authored export site without retaining whole entries.
+type PublicExportLocations = FxHashMap<PublicExportKey, SourceSpan>;
+
+/// Accumulates public export entries for one root file and detects duplicate `(route, leaf)`
+/// names. Case-only route conflicts are validated once during that facade file's preparation.
 #[derive(Default)]
 struct PublicExportCollector {
     exports: FxHashSet<PublicExportEntry>,
-    seen_names: FxHashMap<StringId, SourceSpan>,
+    seen_exports: PublicExportLocations,
 }
 
 impl PublicExportCollector {
+    /// Continue collecting into the first pass's entries and authored export sites.
+    ///
+    /// The set and spans are consumed rather than copied: the second pass owns the first pass's
+    /// state until it hands its own back through [`Self::into_parts`].
     fn from_existing(
-        exports: &FxHashSet<PublicExportEntry>,
-        existing_locations: Option<&FxHashMap<StringId, SourceSpan>>,
+        exports: FxHashSet<PublicExportEntry>,
+        existing_locations: Option<PublicExportLocations>,
     ) -> Self {
-        let mut seen_names = FxHashMap::default();
-        for entry in exports {
-            if let Some(span) =
-                existing_locations.and_then(|locations| locations.get(&entry.export_name))
-            {
-                seen_names.insert(entry.export_name, *span);
-            }
-        }
         Self {
-            exports: exports.clone(),
-            seen_names,
+            exports,
+            seen_exports: existing_locations.unwrap_or_default(),
         }
+    }
+
+    /// Split the collected entries from their authored diagnostic sites without copying either.
+    fn into_parts(self) -> (FxHashSet<PublicExportEntry>, PublicExportLocations) {
+        (self.exports, self.seen_exports)
     }
 
     fn insert(
         &mut self,
+        route: Option<PublicExportRouteOperand>,
         export_name: StringId,
         target: PublicExportTarget,
         span: Option<SourceSpan>,
@@ -959,15 +989,20 @@ impl PublicExportCollector {
             ));
         }
 
-        if let Some(first_span) = self.seen_names.get(&export_name) {
+        let key = PublicExportKey {
+            route: route.map(|route| route.path),
+            export_name,
+        };
+        if let Some(first_span) = self.seen_exports.get(&key) {
             return Err(HeaderParseFailure::Diagnostic(
                 generics_traits_api::duplicate_public_export(export_name, Some(*first_span), span),
             ));
         }
         if let Some(span) = span {
-            self.seen_names.insert(export_name, span);
+            self.seen_exports.insert(key, span);
         }
         self.exports.insert(PublicExportEntry {
+            route: key.route,
             export_name,
             target,
         });

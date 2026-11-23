@@ -2,13 +2,17 @@ use super::*;
 use crate::build_system::create_project_modules::module_identity::{
     ModuleIdentityRecord, ModuleIdentityTable,
 };
+use crate::build_system::create_project_modules::source_package_discovery::build_source_package_boundary_indexes;
 use crate::build_system::create_project_modules::source_tree_index::SourceTreeProjectContext;
-use crate::builder_surface::SourcePackageRegistry;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
-use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
+use crate::builder_surface::{
+    PackageOrigin, SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry,
+};
+use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootFiles, ModuleRootRole, StablePackageIdentity,
 };
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
 use std::path::PathBuf;
@@ -278,4 +282,615 @@ fn same_stem_moth_and_mtf_sources_remain_ambiguous() {
 
     assert_eq!(namespace.entries.len(), 1);
     assert!(namespace.is_ambiguous("src/part"));
+}
+
+fn planned_route(key: &str, facade: usize, surface: ModuleRootRole) -> PlannedRouteEntry {
+    let base_key = key.rsplit_once('/').map_or("", |(base, _)| base);
+    planned_route_with_base(key, base_key, facade, surface)
+}
+
+fn planned_route_with_base(
+    key: &str,
+    base_key: &str,
+    facade: usize,
+    surface: ModuleRootRole,
+) -> PlannedRouteEntry {
+    PlannedRouteEntry {
+        key: key.to_owned(),
+        base_key: base_key.to_owned(),
+        facade_module_id: ModuleId::from_index(facade),
+        surface,
+        route: PublicExportRoute::from_canonical_spelling(
+            key.rsplit_once('/')
+                .map(|(_, route)| route)
+                .unwrap_or(key)
+                .to_owned(),
+        ),
+        span: SourceSpan::new(SourceId::from_index(facade + 1), LocalSpan::source_start()),
+    }
+}
+
+/// Fail the test when route planning reports an internal invariant failure instead of a collision.
+fn route_planning_result(
+    result: Result<Option<RouteCollision>, RoutePublicationFailure>,
+) -> Option<RouteCollision> {
+    result.unwrap_or_else(|_| panic!("route planning must not report an invariant failure"))
+}
+
+#[test]
+fn route_planning_rejects_exact_and_case_only_entry_collisions() {
+    let mut entries = BTreeMap::new();
+    entries.insert("child/forms".to_owned(), cross_module_entry(1));
+
+    for route_key in ["child/forms", "child/Forms"] {
+        let collision = route_planning_result(first_route_collision(
+            &[planned_route(route_key, 0, ModuleRootRole::Normal)],
+            &BTreeMap::new(),
+            &entries,
+            &[],
+            &BTreeSet::new(),
+            None,
+            None,
+        ))
+        .expect("a route folding onto a namespace entry must collide");
+        assert_eq!(collision.route_key, route_key);
+        assert_eq!(collision.span.source(), SourceId::from_index(1));
+        assert!(collision.related_span.is_none());
+    }
+}
+
+#[test]
+fn route_planning_rejects_distinct_facade_collisions() {
+    let collision = route_planning_result(first_route_collision(
+        &[
+            planned_route("a/b/c", 0, ModuleRootRole::Normal),
+            planned_route("a/b/c", 1, ModuleRootRole::Normal),
+        ],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeSet::new(),
+        None,
+        None,
+    ))
+    .expect("two facades publishing one folded route must collide");
+    assert_eq!(collision.route_key, "a/b/c");
+    assert_eq!(collision.span.source(), SourceId::from_index(2));
+    assert_eq!(
+        collision
+            .related_span
+            .expect("the competing facade keeps its authored site")
+            .source(),
+        SourceId::from_index(1)
+    );
+}
+
+#[test]
+fn route_planning_rejects_source_package_prefix_collisions() {
+    let collision = route_planning_result(first_route_collision(
+        &[planned_route("a/b", 0, ModuleRootRole::Normal)],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &["a"],
+        &BTreeSet::new(),
+        None,
+        None,
+    ))
+    .expect("a route overlapping a source-package prefix must collide");
+    assert_eq!(collision.route_key, "a/b");
+    assert_eq!(collision.span.source(), SourceId::from_index(1));
+    assert!(collision.related_span.is_none());
+    assert_eq!(
+        collision.registered_package_prefix.as_deref(),
+        Some("a"),
+        "a source-package overlap must retain the prefix its deferred report resolves"
+    );
+}
+
+#[test]
+fn route_planning_keeps_binding_package_prefix_collisions_single_site() {
+    let binding_packages = BTreeSet::from(["a".to_owned()]);
+    let collision = route_planning_result(first_route_collision(
+        &[planned_route("a/b", 0, ModuleRootRole::Normal)],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &binding_packages,
+        None,
+        None,
+    ))
+    .expect("a route overlapping a binding-package prefix must collide");
+    assert_eq!(collision.route_key, "a/b");
+    assert!(
+        collision.related_span.is_none(),
+        "a binding package owns no authored content site"
+    );
+    assert!(
+        collision.registered_package_prefix.is_none(),
+        "a binding package collision must not enter the deferred package report path"
+    );
+}
+
+#[test]
+fn route_planning_validates_ambiguous_claims_against_visible_providers() {
+    let ambiguous = BTreeMap::from([(
+        "forms/cards".to_owned(),
+        vec![planned_route("forms/cards", 2, ModuleRootRole::Support)],
+    )]);
+    let mut entries = BTreeMap::new();
+    entries.insert("forms/cards".to_owned(), cross_module_entry(1));
+
+    let collision = route_planning_result(first_route_collision(
+        &[],
+        &ambiguous,
+        &entries,
+        &[],
+        &BTreeSet::new(),
+        None,
+        None,
+    ))
+    .expect("a visible child facade must reject an ambiguous-base route eagerly");
+    assert_eq!(collision.route_key, "forms/cards");
+    assert_eq!(collision.span.source(), SourceId::from_index(3));
+
+    let prefix_collision = route_planning_result(first_route_collision(
+        &[],
+        &ambiguous,
+        &BTreeMap::new(),
+        &["forms"],
+        &BTreeSet::new(),
+        None,
+        None,
+    ))
+    .expect("a registered package prefix must reject an ambiguous-base route eagerly");
+    assert_eq!(prefix_collision.route_key, "forms/cards");
+
+    assert!(
+        route_planning_result(first_route_collision(
+            &[],
+            &ambiguous,
+            &BTreeMap::new(),
+            &[],
+            &BTreeSet::new(),
+            None,
+            None,
+        ))
+        .is_none(),
+        "duplicate identical claims behind one ambiguous base must stay latent until selected"
+    );
+}
+
+#[test]
+fn route_planning_rejects_mixed_ambiguous_and_selectable_claims() {
+    let selectable = planned_route("forms/cards/detail", 1, ModuleRootRole::Normal);
+    let ambiguous = BTreeMap::from([(
+        "forms/cards/detail".to_owned(),
+        vec![planned_route(
+            "forms/cards/detail",
+            3,
+            ModuleRootRole::Support,
+        )],
+    )]);
+
+    let collision = route_planning_result(first_route_collision(
+        &[selectable],
+        &ambiguous,
+        &BTreeMap::new(),
+        &[],
+        &BTreeSet::new(),
+        None,
+        None,
+    ))
+    .expect("a healthy child route must not be shadowed by an unrelated ambiguous base");
+    assert_eq!(collision.route_key, "forms/cards/detail");
+    assert_eq!(
+        collision.span.source(),
+        SourceId::from_index(4),
+        "the ambiguous-base route operand is the primary site"
+    );
+    assert_eq!(
+        collision
+            .related_span
+            .expect("the selectable child route keeps its authored site")
+            .source(),
+        SourceId::from_index(2)
+    );
+}
+
+#[test]
+fn route_planning_rejects_colliding_claims_behind_distinct_ambiguous_bases() {
+    // `forms` and `forms/cards` are independently ambiguous bases. Their routes produce one
+    // consumer key, but neither base owns the other, so the duplicate must not stay latent.
+    let ambiguous = BTreeMap::from([(
+        "forms/cards/detail".to_owned(),
+        vec![
+            planned_route_with_base(
+                "forms/cards/detail",
+                "forms/cards",
+                1,
+                ModuleRootRole::Normal,
+            ),
+            planned_route_with_base("forms/cards/detail", "forms", 2, ModuleRootRole::Support),
+        ],
+    )]);
+
+    let collision = route_planning_result(first_route_collision(
+        &[],
+        &ambiguous,
+        &BTreeMap::new(),
+        &[],
+        &BTreeSet::new(),
+        None,
+        None,
+    ))
+    .expect("routes behind distinct ambiguous bases must collide eagerly");
+    assert_eq!(collision.route_key, "forms/cards/detail");
+    let mut sources = [
+        collision.span.source().index(),
+        collision
+            .related_span
+            .expect("the competing ambiguous base keeps its authored site")
+            .source()
+            .index(),
+    ];
+    sources.sort_unstable();
+    assert_eq!(sources, [2, 3], "both route operands must be named");
+
+    let same_base = BTreeMap::from([(
+        "forms/cards/detail".to_owned(),
+        vec![
+            planned_route_with_base(
+                "forms/cards/detail",
+                "forms/cards",
+                1,
+                ModuleRootRole::Normal,
+            ),
+            planned_route_with_base(
+                "forms/Cards/detail",
+                "forms/cards",
+                2,
+                ModuleRootRole::Support,
+            ),
+        ],
+    )]);
+    assert!(
+        route_planning_result(first_route_collision(
+            &[],
+            &same_base,
+            &BTreeMap::new(),
+            &[],
+            &BTreeSet::new(),
+            None,
+            None,
+        ))
+        .is_none(),
+        "case variants of one folded ambiguous base keep identical route claims latent"
+    );
+}
+
+#[test]
+fn route_planning_keeps_each_distinct_facade_claim_before_collision_checks() {
+    let mut namespace = ModuleNamespace::new();
+    namespace.insert("a".to_owned(), cross_module_entry(0));
+    namespace.insert("a/b".to_owned(), cross_module_entry(1));
+    let routes = FacadeRouteIndex::from_claims([
+        (
+            ModuleId::from_index(0),
+            ModuleRootRole::Normal,
+            PublicExportRoute::from_canonical_spelling("b/x".to_owned()),
+        ),
+        (
+            ModuleId::from_index(1),
+            ModuleRootRole::Normal,
+            PublicExportRoute::from_canonical_spelling("x".to_owned()),
+        ),
+    ]);
+
+    let (planned, ambiguous) = planned_route_entries(&namespace, &routes);
+    assert!(ambiguous.is_empty());
+    assert_eq!(
+        planned.len(),
+        2,
+        "two distinct facades claiming one consumer key must both reach collision validation"
+    );
+    assert_eq!(planned[0].key, "a/b/x");
+    assert_eq!(planned[1].key, "a/b/x");
+}
+
+#[test]
+fn route_planning_marks_route_keys_under_an_ambiguous_base_as_ambiguous() {
+    let mut namespace = ModuleNamespace::new();
+    namespace.insert("forms".to_owned(), cross_module_entry(0));
+    namespace.insert("forms".to_owned(), cross_module_entry(1));
+    let routes = FacadeRouteIndex::from_claims([
+        (
+            ModuleId::from_index(0),
+            ModuleRootRole::Normal,
+            PublicExportRoute::from_canonical_spelling("x".to_owned()),
+        ),
+        (
+            ModuleId::from_index(1),
+            ModuleRootRole::Normal,
+            PublicExportRoute::from_canonical_spelling("y".to_owned()),
+        ),
+    ]);
+
+    let (planned, ambiguous) = planned_route_entries(&namespace, &routes);
+    assert!(
+        planned.is_empty(),
+        "no route under an ambiguous base may publish a selectable entry"
+    );
+    assert_eq!(
+        ambiguous.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["forms/x", "forms/y"],
+        "the discarded claimant's route must stay ambiguous too"
+    );
+}
+
+/// Index one project module with a local provider row and build its namespace and source database.
+///
+/// `drop_provider_slot` skews the database against the index, which no valid compilation can
+/// produce. It is the only way a collision's `matched_local` entry fails to resolve a span.
+fn route_claim_fixture(
+    drop_provider_slot: bool,
+) -> (
+    tempfile::TempDir,
+    SourceTreeIndex,
+    SourcePackageBoundaryIndexes,
+    ModuleNamespace,
+    SourceDatabase,
+) {
+    let temporary_directory = tempfile::tempdir().expect("should create temp dir");
+    let root = std::fs::canonicalize(temporary_directory.path())
+        .expect("project root should canonicalize");
+    std::fs::write(root.join("@mod.moth"), "$export\nroot_label #= 1\n")
+        .expect("should write normal facade");
+    std::fs::write(root.join("@package.moth"), "$export\npackage_label #= 1\n")
+        .expect("should write package facade");
+    std::fs::create_dir_all(root.join("forms")).expect("should create provider folder");
+    std::fs::write(root.join("forms/x.moth"), "value #= 1\n").expect("should write provider");
+    let config = Config::new(root.clone());
+    let mut string_table = StringTable::new();
+    let index = SourceTreeIndex::discover(
+        root.clone(),
+        SourceTreeProjectContext {
+            validated_output_settings: None,
+            config_source: None,
+        },
+        &config,
+        &SourcePackageRegistry::default(),
+        &SourceFileKindRegistry::default(),
+        &ExternalImportProviderRegistry::default(),
+        &mut string_table,
+    )
+    .expect("source tree index should build");
+    let module_id = index
+        .module_identities()
+        .module_ids()
+        .next()
+        .expect("the root directory is one structural module");
+    let mut namespace = ModuleNamespace::new();
+    populate_same_module_entries(&mut namespace, &index, module_id);
+    assert!(
+        matches!(
+            namespace.entries.get("forms/x"),
+            Some(NamespaceEntry::SameModuleSource { .. })
+        ),
+        "the provider must be an indexed same-module namespace entry"
+    );
+    let mut source_files = SourceDatabase::from_ordered_registration_index(
+        &index.source_registration_index(),
+        &root,
+        None,
+        &mut string_table,
+    )
+    .expect("indexed inventory should register");
+    if drop_provider_slot {
+        let provider = root.join("forms/x.moth");
+        source_files
+            .remove_for_test_reuse(&provider)
+            .expect("the indexed provider slot should exist before skew");
+        assert!(
+            source_files.get_by_canonical_path(&provider).is_none(),
+            "the fixture must leave the collision site unavailable"
+        );
+    }
+    let mut packages = SourcePackageRegistry::default();
+    packages
+        .register_filesystem_root("forms", root, PackageOrigin::ProjectLocal)
+        .expect("the fixture package should register");
+    let package_indexes = build_source_package_boundary_indexes(
+        &packages,
+        &SourceFileKindRegistry::default(),
+        &ExternalImportProviderRegistry::default(),
+        &mut string_table,
+    )
+    .expect("the fixture package boundary should index");
+    (
+        temporary_directory,
+        index,
+        package_indexes,
+        namespace,
+        source_files,
+    )
+}
+
+fn assert_unavailable_collision_site_failure(
+    failure: RoutePublicationFailure,
+    expected_route: &str,
+) {
+    let PreparedFailure::Infrastructure(errors) = failure.failure else {
+        panic!("a detected collision with an unavailable site must not return Ok or diagnosed");
+    };
+    let causes = errors.iter().collect::<Vec<_>>();
+    assert_eq!(causes.len(), 1, "the invariant lane reports one cause");
+    assert_eq!(causes[0].kind, InfrastructureFailureKind::Internal);
+    assert_eq!(causes[0].stage, CompilerStage::ProjectBuildAssembly);
+    assert!(
+        causes[0].message.contains(expected_route),
+        "the invariant failure must name the lost route: {}",
+        causes[0].message
+    );
+    assert!(
+        failure.package_donors.is_none(),
+        "an unresolved site cannot request a package report domain"
+    );
+}
+
+#[test]
+fn exhausted_route_spelling_does_not_attach_a_label_to_the_capacity_diagnostic() {
+    use crate::compiler_frontend::symbols::path_interner::ForcedExhaustionGuard;
+
+    let _gate = ForcedExhaustionGuard::new();
+    let primary = StablePackageIdentity::project_local("route-capacity-primary");
+    let related = StablePackageIdentity::project_local("route-capacity-related");
+    let failure = prepared_route_collision_failure(
+        RouteCollision {
+            route_key: "forms/x".to_owned(),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            related_span: Some(SourceSpan::new(
+                SourceId::COMPILATION_ROOT,
+                LocalSpan::source_start(),
+            )),
+            related_package: None,
+            registered_package_prefix: None,
+        },
+        Some(&primary),
+        Some(&related),
+        false,
+    );
+    assert!(
+        matches!(failure, PreparedFailure::Diagnosed(_)),
+        "path-table exhaustion must stay a capacity diagnostic, not a panic or dropped collision"
+    );
+}
+
+#[test]
+fn package_local_route_collision_with_an_unavailable_site_fails_closed() {
+    let (_temporary_directory, index, package_indexes, namespace, source_files) =
+        route_claim_fixture(true);
+    let published = SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start());
+    let result = validate_package_route_claims(
+        std::iter::once(&namespace),
+        "forms",
+        &package_indexes,
+        std::iter::once(("x", published)),
+        ProjectRouteClaimSite::PackageLocal {
+            source_tree_index: &index,
+            source_files: &source_files,
+        },
+        None,
+    );
+    let failure = result.expect_err("a detected collision must never be skipped");
+    assert_unavailable_collision_site_failure(failure, "forms/x");
+}
+
+#[test]
+fn project_local_route_collision_with_an_unavailable_site_fails_closed() {
+    let (_temporary_directory, index, package_indexes, namespace, source_files) =
+        route_claim_fixture(true);
+    let published = SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start());
+    let result = validate_package_route_claims(
+        std::iter::once(&namespace),
+        "forms",
+        &package_indexes,
+        std::iter::once(("x", published)),
+        ProjectRouteClaimSite::ProjectLocal {
+            source_tree_index: &index,
+            source_files: &source_files,
+        },
+        None,
+    );
+    let failure = result.expect_err("a detected collision must never be skipped");
+    assert_unavailable_collision_site_failure(failure, "forms/x");
+}
+
+#[test]
+fn route_planning_with_an_unavailable_competing_site_fails_closed() {
+    let (_temporary_directory, index, package_indexes, namespace, source_files) =
+        route_claim_fixture(true);
+    let planned = [planned_route("forms/x", 0, ModuleRootRole::Normal)];
+    let Err(failure) = first_route_collision(
+        &planned,
+        &BTreeMap::new(),
+        &namespace.entries,
+        &[],
+        &BTreeSet::new(),
+        Some(RouteCollisionSite {
+            source_tree_index: &index,
+            source_files: &source_files,
+            package_root_facades: None,
+            package_public_routes: None,
+        }),
+        None,
+    ) else {
+        panic!("a detected collision with an unavailable site must fail closed");
+    };
+    assert_unavailable_collision_site_failure(failure, "forms/x");
+    // The package index only exists to keep the fixture's identity table realistic.
+    assert!(package_indexes.get("forms").is_some());
+}
+
+#[test]
+fn package_local_route_collision_keeps_both_boundary_local_sites() {
+    let (_temporary_directory, index, package_indexes, namespace, source_files) =
+        route_claim_fixture(false);
+    let published = SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start());
+    let result = validate_package_route_claims(
+        std::iter::once(&namespace),
+        "forms",
+        &package_indexes,
+        std::iter::once(("x", published)),
+        ProjectRouteClaimSite::PackageLocal {
+            source_tree_index: &index,
+            source_files: &source_files,
+        },
+        None,
+    );
+    let failure = result.expect_err("the package route collides with its local provider");
+    assert!(
+        matches!(failure.failure, PreparedFailure::Diagnosed(_)),
+        "both sites resolving must stay a user diagnostic"
+    );
+    assert!(
+        failure.package_donors.is_none(),
+        "a package-local collision resolves both sites in its own database"
+    );
+}
+
+#[test]
+fn project_local_route_collision_requests_the_package_report_domain() {
+    let (_temporary_directory, index, package_indexes, namespace, source_files) =
+        route_claim_fixture(false);
+    let published = SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start());
+    let package_identity = package_indexes
+        .get("forms")
+        .expect("the fixture registered package `forms`")
+        .stable_package_identity()
+        .clone();
+    let result = validate_package_route_claims(
+        std::iter::once(&namespace),
+        "forms",
+        &package_indexes,
+        std::iter::once(("x", published)),
+        ProjectRouteClaimSite::ProjectLocal {
+            source_tree_index: &index,
+            source_files: &source_files,
+        },
+        None,
+    );
+    let failure = result.expect_err("the local provider and package route collide");
+    assert!(
+        matches!(failure.failure, PreparedFailure::Diagnosed(_)),
+        "both sites resolving must stay a user diagnostic"
+    );
+    let donors = failure
+        .package_donors
+        .expect("the package operand needs its own report domain");
+    assert!(donors.primary.is_none());
+    let donor = donors
+        .related
+        .expect("the package operand is the related site");
+    assert_eq!(donor.dependency_prefix, "forms");
+    assert_eq!(donor.identity, package_identity);
 }

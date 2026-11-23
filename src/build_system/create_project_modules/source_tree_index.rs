@@ -257,6 +257,13 @@ struct DiscoveredSourceCandidate {
     /// named canonical target. Role inference from the canonical filename loses the surface, so
     /// classification consumes the role discovered from the visible entry instead.
     root_role: Option<ModuleRootRole>,
+    /// Whether this candidate's visible spelling is the canonical physical file itself.
+    ///
+    /// WHAT: distinguishes the entry that owns the bytes from an alias to it.
+    /// WHY: two visible spellings can disagree about one physical file's kind. The physical entry
+    ///      must decide that kind; an alias only decides when the physical filename is otherwise
+    ///      unrecognised.
+    is_physical_entry: bool,
 }
 
 /// Zero-based row handle for a source candidate in one [`SourceTreeIndex`].
@@ -945,6 +952,7 @@ impl SourceTreeIndex {
                         root_role: is_module_root
                             .then(|| module_root_role_for_file_name(file_name))
                             .flatten(),
+                        is_physical_entry: canonical_path == path,
                     });
                 } else if let Some(extension) = provider_extension {
                     // Provider-owned files are never module roots. They enter the inventory as
@@ -959,6 +967,7 @@ impl SourceTreeIndex {
                         supported: true,
                         logical_candidate_path,
                         root_role: None,
+                        is_physical_entry: canonical_path == path,
                     });
                 }
 
@@ -2040,23 +2049,31 @@ fn classify_owned_sources(
     recognized_candidates: Vec<DiscoveredSourceCandidate>,
 ) -> Result<Vec<ClassifiedSource>, InfrastructureFailure> {
     // Two visible entries can resolve to one physical source (a root symlink and its target, or
-    // two aliases). Retain one record and prefer the candidate that carries a discovered root
-    // surface role, so a symlinked `@root` does not lose its surface to its plain target spelling.
+    // two aliases). Retain one record and prefer, in order, the discovered root surface role, the
+    // canonical physical entry itself, then the first visible spelling. The physical entry owns
+    // the bytes and therefore its recognised kind; an alias to an otherwise unrecognised physical
+    // filename falls back to its own classification.
     let mut candidates =
         Vec::<DiscoveredSourceCandidate>::with_capacity(recognized_candidates.len());
     let mut position_by_canonical = FxHashMap::<PathBuf, usize>::default();
     for candidate in recognized_candidates {
-        if let Some(position) = position_by_canonical
+        let Some(position) = position_by_canonical
             .get(&candidate.canonical_path)
             .copied()
-        {
-            if candidates[position].root_role.is_none() && candidate.root_role.is_some() {
-                candidates[position] = candidate;
-            }
+        else {
+            position_by_canonical.insert(candidate.canonical_path.clone(), candidates.len());
+            candidates.push(candidate);
             continue;
+        };
+        let retained = &candidates[position];
+        let candidate_has_stronger_role =
+            retained.root_role.is_none() && candidate.root_role.is_some();
+        let candidate_is_unaliased_physical_entry = retained.root_role.is_none()
+            && !retained.is_physical_entry
+            && candidate.is_physical_entry;
+        if candidate_has_stronger_role || candidate_is_unaliased_physical_entry {
+            candidates[position] = candidate;
         }
-        position_by_canonical.insert(candidate.canonical_path.clone(), candidates.len());
-        candidates.push(candidate);
     }
 
     let mut classified = Vec::new();

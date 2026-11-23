@@ -177,7 +177,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         type_environment: &mut self.type_environment,
                         expression_builder: &mut self.context.expression_builder,
                         const_values: &mut self.context.const_values,
-                        warnings: &mut self.warnings,
                         string_table,
                         path_fork: self.path_fork,
                         external_package_registry: &self.context.external_package_registry,

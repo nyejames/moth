@@ -27,7 +27,8 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
-    ModuleRootFiles, ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+    ModuleRootFiles, ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
+    StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use std::path::PathBuf;
@@ -53,6 +54,17 @@ fn duplicate_materialisation_identity() -> GeneratedDeclarationIdentity {
         "duplicate".to_owned(),
         None,
     ))
+}
+
+fn duplicate_const_origin() -> OriginFunctionId {
+    OriginFunctionId::new_free(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("module-artifact-tests"),
+            "main".to_owned(),
+            ModuleRootRole::Normal,
+        ),
+        "decorate".to_owned(),
+    )
 }
 
 /// Build one structural graph node with exactly the given facade and entry roots.
@@ -121,7 +133,9 @@ fn boundary_with_success_artifact(
         slots: vec![ProviderSlot::Successful(CompiledModuleArtifactId(0))],
         artifacts: vec![artifact],
         contexts_by_declaration: rustc_hash::FxHashMap::default(),
+        const_contexts_by_origin: rustc_hash::FxHashMap::default(),
         materialisation_rows: Vec::new(),
+        const_materialisation_rows: Vec::new(),
     };
     CompiledGraphBoundary {
         structure: graph,
@@ -191,7 +205,9 @@ fn boundary_validation_rejects_missing_successful_artefact_row() {
         slots: vec![ProviderSlot::Successful(CompiledModuleArtifactId(0))],
         artifacts: Vec::new(),
         contexts_by_declaration: rustc_hash::FxHashMap::default(),
+        const_contexts_by_origin: rustc_hash::FxHashMap::default(),
         materialisation_rows: Vec::new(),
+        const_materialisation_rows: Vec::new(),
     };
     let boundary = CompiledGraphBoundary {
         structure: graph,
@@ -233,6 +249,59 @@ fn module_success_preflight_rejects_duplicate_rows_without_mutation() {
         ProviderSlot::Unavailable
     );
     assert_eq!(store.materialisation_locations().count(), 0);
+}
+
+#[test]
+fn module_success_preflight_rejects_duplicate_const_rows_without_mutation() {
+    let origin = duplicate_const_origin();
+    let expected_message = format!(
+        "Const function origin {:?} is duplicated inside one materialisation context",
+        origin
+    );
+    let artifact =
+        artifact_with_context(ModuleMaterialisationContext::from_const_origins_for_test(
+            vec![Some(origin.clone()), Some(origin)],
+        ));
+    let store = ModuleArtifactStore::new(1);
+
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        store.preflight_success(ModuleId::from_index(0), &artifact, None, None)
+    }))
+    .expect_err("duplicate const rows must raise a compiler bug");
+    assert_compiler_bug(payload, &expected_message);
+
+    assert_eq!(store.artifact_count(), 0);
+    assert_eq!(
+        store.slot(ModuleId::from_index(0)).unwrap(),
+        ProviderSlot::Unavailable
+    );
+    assert_eq!(store.const_materialisation_locations().count(), 0);
+}
+
+#[test]
+fn module_success_preflight_rejects_a_const_origin_from_two_contexts_without_mutation() {
+    let origin = duplicate_const_origin();
+    let mut store = ModuleArtifactStore::new(2);
+    let first = artifact_with_context(ModuleMaterialisationContext::from_const_origins_for_test(
+        vec![Some(origin.clone())],
+    ));
+    publish(&mut store, first, None, None);
+
+    let second = artifact_with_context(ModuleMaterialisationContext::from_const_origins_for_test(
+        vec![Some(origin.clone())],
+    ));
+    let expected_message = format!(
+        "Const function origin {:?} was published by more than one materialisation context (artifact 0 row 0 and artifact 1 row 0)",
+        origin
+    );
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        store.preflight_success(ModuleId::from_index(1), &second, None, None)
+    }))
+    .expect_err("a const origin from two contexts must raise a compiler bug");
+    assert_compiler_bug(payload, &expected_message);
+
+    assert_eq!(store.artifact_count(), 1);
+    assert_eq!(store.const_materialisation_locations().count(), 1);
 }
 
 #[test]

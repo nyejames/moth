@@ -57,7 +57,10 @@ fn authored(
     interface: &PublicSemanticInterface,
 ) -> SourceProviderDependency<'_> {
     SourceProviderDependency {
-        kind: ProviderDependencyKind::Authored { shell: shell_id },
+        kind: ProviderDependencyKind::Authored {
+            shell: shell_id,
+            route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
+        },
         interface,
     }
 }
@@ -120,12 +123,14 @@ fn duplicate_shell_fails_instead_of_overwriting() {
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(3), 0),
+                route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
             },
             interface: &provider,
         },
         SourceProviderDependency {
             kind: ProviderDependencyKind::Authored {
                 shell: DependencyShellId::new(SourceId::from_index(3), 0),
+                route: crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
             },
             interface: &nested,
         },
@@ -186,6 +191,7 @@ fn equal_origins_with_differing_interfaces_fail_in_either_input_order() {
     second.export_bindings.push(
         crate::compiler_frontend::semantic_identity::ExportBinding::new(
             second.module_origin.clone(),
+            crate::compiler_frontend::semantic_identity::PublicExportRoute::ROOT,
             "extra".to_owned(),
             crate::compiler_frontend::semantic_identity::OriginDeclarationId::Constant(
                 crate::compiler_frontend::semantic_identity::OriginConstantId::new(
@@ -290,15 +296,16 @@ fn grouped_reexport_lookup_uses_the_same_shell_identity() {
     )])
     .expect("one authored provider should register");
 
-    let provider_id = set
-        .resolve_reexport(DependencyShellId::new(SourceId::from_index(6), 0))
+    let resolved = set
+        .resolve_clause(DependencyShellId::new(SourceId::from_index(6), 0))
         .expect("the direct-selection re-export shell must resolve");
+    assert!(resolved.route.is_root());
     assert!(std::ptr::eq(
-        set.interface(provider_id).expect("provider resolves"),
+        set.interface(resolved.provider).expect("provider resolves"),
         &provider,
     ));
     assert!(
-        set.resolve_reexport(DependencyShellId::new(SourceId::from_index(6), 1))
+        set.resolve_clause(DependencyShellId::new(SourceId::from_index(6), 1))
             .is_none(),
         "a different shell ordinal must not borrow the re-export binding"
     );

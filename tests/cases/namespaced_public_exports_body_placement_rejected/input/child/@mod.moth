@@ -1,0 +1,5 @@
+-- A statement inside a body can never be a public export target.
+render || -> String:
+    $export @docs.mtf
+    return "x"
+;

@@ -1,0 +1,9 @@
+-- The next line-initial arm header ends the run; it does not become its target.
+classify |value I32| -> I32:
+    if value is:
+        1 =>
+            return 1
+        $export @forms
+        2 => return 2
+    ;
+;

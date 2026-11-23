@@ -245,6 +245,21 @@ impl SourceFunctionTarget {
             } => path,
         }
     }
+
+    /// Whether both targets name the same executable declaration.
+    ///
+    /// WHAT: imported targets compare by stable provider origin; every other target compares by
+    ///       its canonical local path.
+    /// WHY: one imported method declaration can be bound through several consumer-local aliases,
+    ///      so an imported target's local path identifies a binding, not the method.
+    pub(crate) fn same_function_declaration(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Imported { origin: left, .. }, Self::Imported { origin: right, .. }) => {
+                left == right
+            }
+            _ => self.local_path() == other.local_path(),
+        }
+    }
 }
 
 impl std::ops::Deref for SourceFunctionTarget {

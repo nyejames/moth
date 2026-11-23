@@ -208,6 +208,34 @@ pub(crate) fn format_label_messages_view(
     format_label_messages_from_subject(&DiagnosticSubject::new(view), context, &root)
 }
 
+/// Format the primary location and related labels against an explicit display root.
+///
+/// WHY: runtime terminal output relativises against the process cwd. Tests need the same
+///      formatting against the known project root to prove where each cross-boundary site
+///      points without mutating process-wide state.
+#[cfg(test)]
+pub(crate) fn format_terminal_locations_for_test(
+    view: DiagnosticView<'_>,
+    context: DiagnosticRenderContext<'_>,
+    root: &Path,
+) -> Vec<String> {
+    let subject = DiagnosticSubject::new(view);
+    let mut lines = Vec::new();
+    if let Some(position) = subject.primary_position(context) {
+        let path = relative_display_path_from_root(position.path.as_path(), root);
+        let line = display_line_number(i32::try_from(position.start.line).unwrap_or(i32::MAX));
+        let column =
+            display_column_number(i32::try_from(position.start.column).unwrap_or(i32::MAX));
+        lines.push(if path.is_empty() {
+            format!("{line}:{column}")
+        } else {
+            format!("{path}:{line}:{column}")
+        });
+    }
+    lines.extend(format_label_messages_from_subject(&subject, context, root));
+    lines
+}
+
 pub(crate) fn format_guidance_view(
     view: DiagnosticView<'_>,
     context: DiagnosticRenderContext<'_>,

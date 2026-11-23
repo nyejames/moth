@@ -1,0 +1,22 @@
+@child/forms button as primary_button
+@child/forms badge as badge_button
+@child/forms/validation safe_form as validate_form
+@child root_item as root_value
+@shared/validation field as shared_field
+@reexport/mirror widget as mirror_widget
+@reexport/alternate widget as alternate_widget
+@child/forms as route_ns
+@child
+
+primary = primary_button("go")
+badge = badge_button("go")
+safe = validate_form("ok")
+mirror = mirror_widget("re")
+alternate = alternate_widget("re")
+shared = shared_field
+root = root_value
+bare = route_ns.button("bare")
+parent = child.root_item
+expression = @child/forms button("expr")
+mtf = [@intro content]
+io.line([:primary=[primary] badge=[badge] safe=[safe] mirror=[mirror] alternate=[alternate] shared=[shared] root=[root] bare=[bare] parent=[parent] expression=[expression] mtf=[mtf]])

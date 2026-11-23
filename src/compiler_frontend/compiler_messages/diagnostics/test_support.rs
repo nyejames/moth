@@ -9,7 +9,9 @@ use super::view::DiagnosticView;
 use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
 use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_snapshot::TypeDisplaySnapshot;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
-use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PathKind};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, InvalidExpressionReason, PathKind,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceFailure;
 use crate::compiler_frontend::source::{
@@ -84,6 +86,12 @@ fn resolved_failure_draft_for_test(failure: ResolvedFileReferenceFailure) -> Dia
             extension,
             span,
         } => imports::unsupported_source_file_kind(path, extension, Some(span)),
+        ResolvedFileReferenceFailure::MothTargetHasNoValue { span } => {
+            token_lexical::invalid_expression(
+                InvalidExpressionReason::MothFileHasNoValue,
+                Some(span),
+            )
+        }
     }
 }
 

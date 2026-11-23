@@ -39,7 +39,7 @@ Move the shared value into an ordinary helper file when a template needs it. A h
 
 ### The fixed template prelude
 
-Exported compile-time constants from `@core/html` and `@core/css` are visible flat inside every `.mtf` body. This includes HTML helpers such as `p` and `codeblock`, and style fragments such as `center`.
+Facade-root exported compile-time constants from `@core/html` and `@core/css` are visible flat inside every `.mtf` body. This includes HTML helpers such as `p` and `codeblock`, and style fragments such as `center`.
 
 [codeblock, $code "text":
     -- docs/intro.mtf
@@ -52,7 +52,7 @@ Exported compile-time constants from `@core/html` and `@core/css` are visible fl
 
 The prelude is fixed compiler policy under every builder, including custom SDK builders. It reads the official `packages/core/html` and `packages/core/css` Moth source packages, which are registered once as Core/MothSource roots. Each package publishes through its directly contained `@package.moth`. A builder cannot replace either package or change `.mtf` availability. Both packages precede every `.mtf` consumer, so a failed prelude package blocks the consumer.
 
-The prelude supplies compile-time constants only. It is not a general template-wide import mechanism, and it never includes runtime values, types, private constants, project-local packages or arbitrary builder-registered constants. A public constant declared anywhere inside a provider package enters it under its exported name, including when another file in that package exports it with `as`. A re-export or alias of a declaration from another package does not.
+The prelude supplies compile-time constants only. It is not a general template-wide import mechanism, and it never includes runtime values, types, private constants, project-local packages or arbitrary builder-registered constants. A public constant exported at the package facade root enters it under its exported name, including when another file in that package supplies it with `as`. A routed export stays out of the prelude. A re-export or alias of a declaration from another package does not enter it.
 
 ### Collision semantics
 
@@ -82,7 +82,17 @@ Nested templates inside a `.mtf` body are valid. A nested template with no expli
 
 ### Constants versus runtime values
 
-Qualified references inside a `.mtf` file must resolve to compile-time constants. Runtime bindings, runtime functions, types, traits, methods, external runtime APIs and the generated self `content` constant are not valid template values.
+Qualified references inside a `.mtf` file must resolve through an explicit
+provider occurrence to a value that folds at compile time. Constants fold
+directly. A const function call with compile-time arguments also folds,
+including through a routed provider path such as
+[$html:<code>&#91;@child/forms button("Go")&#93;</code>]. Runtime bindings, runtime functions, types,
+traits, methods, external runtime APIs and the generated self `content` constant
+are not valid template values.
+
+The implicit prelude is narrower. It binds only facade-root constants from
+`@core/html` and `@core/css`. It never adds a routed member, a private constant
+or a same-module root-local declaration.
 
 A reference to a runtime value is rejected with `MOTH-RULE-0034` or `MOTH-RULE-0053`.
 

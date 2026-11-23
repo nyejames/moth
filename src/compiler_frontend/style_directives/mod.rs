@@ -28,9 +28,11 @@ pub(crate) use crate::compiler_frontend::compiler_messages::TemplateHeadConflict
 pub use compatibility::{TemplateHeadCompatibility, TemplateHeadTag};
 pub use registry::StyleDirectiveRegistry;
 pub(crate) use source::{
-    SourceDirectiveAnnotation, SourceOperandFoldResources, capture_source_directive_operand,
-    constraint_directive_spans, fold_source_directive_operand,
+    PublicExportRouteOperand, SourceDirectiveAnnotation, SourceDirectiveOperand,
+    SourceOperandCaptureError, SourceOperandFoldResources, capture_source_directive_operand,
+    constraint_directive_spans, fold_source_directive_operand, is_optional_public_route_operand,
     parse_statement_source_directive_run, source_constraints_from_annotations,
+    source_modifier_contract,
 };
 pub(crate) use specs::DirectiveOccurrence;
 pub(crate) use specs::{

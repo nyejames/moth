@@ -59,8 +59,8 @@ use crate::compiler_frontend::public_interface::{
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::semantic_identity::{
-    ExportBinding, OriginConstantId, OriginDeclarationId, StableModuleOriginIdentity,
-    StablePackageIdentity,
+    ExportBinding, OriginConstantId, OriginDeclarationId, PublicExportRoute,
+    StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceId, SourceKind,
@@ -82,6 +82,27 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use tempfile::TempDir;
+
+fn source_span_for(
+    source: &str,
+    needle: &str,
+    occurrence: usize,
+) -> crate::compiler_frontend::source::SourceSpan {
+    let (start, matched) = source
+        .match_indices(needle)
+        .nth(occurrence)
+        .unwrap_or_else(|| panic!("expected occurrence {occurrence} of {needle:?}"));
+    let mut span_builder = ExtendedSpanBuilder::new();
+    crate::compiler_frontend::source::SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        crate::compiler_frontend::source::LocalSpan::exact(
+            start as u32,
+            matched.len() as u32,
+            &mut span_builder,
+        )
+        .expect("template test source span should fit"),
+    )
+}
 
 fn prepare_directly(source: &str) -> (FileFrontendPrepareOutput, StringTable, ExtendedSpanBuilder) {
     let mut string_table = StringTable::new();
@@ -108,6 +129,7 @@ fn prepare_directly(source: &str) -> (FileFrontendPrepareOutput, StringTable, Ex
         owner,
         source_path,
         lexed.path_syntax,
+        &style_directives,
         &mut string_table,
         &mut path_fork,
     )
@@ -144,6 +166,7 @@ fn prepare_diagnostic(
         owner,
         source_path,
         lexed.path_syntax,
+        &style_directives,
         &mut string_table,
         &mut path_fork,
     ) {
@@ -154,6 +177,51 @@ fn prepare_diagnostic(
         panic!("expected a typed diagnostic, found {failure:?}");
     };
     diagnostic_view_for_test(error.diagnostic)
+}
+
+#[test]
+fn template_head_export_operand_is_not_a_structural_reference() {
+    // A `.mtf` template head owns its directive rejection; the export operand row must not
+    // become a Stage 0 provider, content or ordering fact before that owner reports.
+    let (output, _string_table, _span_builder) =
+        prepare_directly("[: [$export @missing symbol: body] ]");
+    assert!(
+        output.qualified_references.is_empty(),
+        "an export operand must not become a qualified occurrence"
+    );
+    assert!(
+        output.structural_file_references.references().is_empty(),
+        "an export operand must not become a structural file reference"
+    );
+}
+
+#[test]
+fn template_head_export_operand_only_leaves_trailing_classification_ordinary() {
+    // Only the immediate route operand is directive-owned. The trailing `@app.js one` keeps the
+    // ordinary qualified-selection shape instead of being swallowed with a malformed directive
+    // run.
+    let source = "[: [$export @forms @app.js one: body] ]";
+    let (output, string_table, _span_builder) = prepare_directly(source);
+    assert_eq!(output.qualified_references.len(), 1);
+    let occurrence = &output.qualified_references[0];
+    assert_eq!(
+        occurrence.dependency.span,
+        source_span_for(source, "@app.js", 0)
+    );
+    assert_eq!(string_table.resolve(occurrence.selected), "one");
+    assert!(output.structural_file_references.references().is_empty());
+
+    // A trailing bare path with no following symbol keeps the ordinary file-value class.
+    let source = "[: [$export @forms @asset.png: body] ]";
+    let (output, _string_table, _span_builder) = prepare_directly(source);
+    assert!(output.qualified_references.is_empty());
+    let references = output.structural_file_references.references();
+    assert_eq!(references.len(), 1);
+    assert_eq!(
+        references[0].class,
+        crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass::ResourceFile
+    );
+    assert_eq!(references[0].span, source_span_for(source, "@asset.png", 0));
 }
 
 #[test]
@@ -186,6 +254,7 @@ fn canonical_source_keeps_preparing_path_table_separate_until_preparation() {
         owner,
         source_path,
         lexed.path_syntax,
+        &style_directives,
         &mut string_table,
         &mut path_fork,
     )
@@ -316,7 +385,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
+        &SourceProviderDependencySet::default(),
         Some(&project_path_resolver),
         &source_files,
         &mut string_table,
@@ -389,6 +458,46 @@ fn empty_core_prelude_interface(package_prefix: &str) -> PublicSemanticInterface
     }
 }
 
+/// One completed provider interface publishing one leaf at the root and under a nested route.
+///
+/// WHY: the prelude's root-only rule must be observable when the same provider also publishes a
+///      nested binding for the same leaf, not only when the leaf exists exclusively on a route.
+fn core_prelude_interface_with_root_and_nested_constant(
+    package_prefix: &str,
+    constant_name: &str,
+    root_text: &str,
+    nested_text: &str,
+    nested_route: PublicExportRoute,
+) -> PublicSemanticInterface {
+    let mut interface = constant_core_prelude_interface(
+        package_prefix,
+        constant_name,
+        root_text,
+        PublicExportRoute::ROOT,
+    );
+    let nested_origin = OriginDeclarationId::Constant(OriginConstantId::new(
+        interface.module_origin.clone(),
+        format!("{constant_name}__nested_route"),
+    ));
+    interface.export_bindings.push(ExportBinding::new(
+        interface.module_origin.clone(),
+        nested_route,
+        constant_name.to_owned(),
+        nested_origin.clone(),
+    ));
+    interface.declarations.push(PublicDeclarationRecord {
+        origin: nested_origin,
+        synthetic_interface_provenance: Default::default(),
+        semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
+            type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+            folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
+                nested_text.to_owned(),
+            )),
+        }),
+    });
+    interface
+}
+
 /// One completed provider interface exporting a single public compile-time string constant.
 ///
 /// WHY: the prelude merge reads constant declarations only, so provider-lane tests need the same
@@ -397,6 +506,7 @@ fn constant_core_prelude_interface(
     package_prefix: &str,
     constant_name: &str,
     folded_text: &str,
+    route: PublicExportRoute,
 ) -> PublicSemanticInterface {
     let module_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::source_package(PackageOrigin::Core, package_prefix),
@@ -411,6 +521,7 @@ fn constant_core_prelude_interface(
         module_origin: module_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             module_origin,
+            route,
             constant_name.to_owned(),
             constant_origin.clone(),
         )],
@@ -507,6 +618,8 @@ $export
 collision #= "html"
 $export
 html_defaults #= HtmlDefaults(color = "green")
+$export @forms
+nested_html #= "nested"
 $export
 HtmlDefaults = | color String |
 $export
@@ -627,7 +740,7 @@ css_private #= "private"
         &self,
         moth_template_relative_path: &str,
         prepared_relative_paths: &[&str],
-        source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
+        source_provider_dependencies: &SourceProviderDependencySet<'_>,
     ) -> Result<(Ast, StringTable, PathInternerFork), PreparedFailure> {
         let (ast, string_table, path_fork) = self.compile_module_ast_with_providers(
             prepared_relative_paths,
@@ -656,7 +769,7 @@ css_private #= "private"
     fn compile_module_ast_with_providers(
         &self,
         prepared_relative_paths: &[&str],
-        source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
+        source_provider_dependencies: &SourceProviderDependencySet<'_>,
     ) -> Result<(Ast, StringTable, PathInternerFork), PreparedFailure> {
         let mut path_fork = self.source_files.fork_path_interner();
         let (headers, mut string_table) = self
@@ -811,7 +924,7 @@ css_private #= "private"
     fn prepare_and_bind_headers_with_providers(
         &self,
         prepared_relative_paths: &[&str],
-        source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
+        source_provider_dependencies: &SourceProviderDependencySet<'_>,
         path_fork: &mut PathInternerFork,
     ) -> Result<
         (
@@ -830,7 +943,7 @@ css_private #= "private"
     fn prepare_and_bind_headers_with_providers_with_table(
         &self,
         prepared_relative_paths: &[&str],
-        source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
+        source_provider_dependencies: &SourceProviderDependencySet<'_>,
         path_fork: &mut PathInternerFork,
     ) -> Result<
         (
@@ -1003,6 +1116,24 @@ css_private #= "private"
     ) -> CompilationResult<()> {
         let result =
             self.compile_moth_template_ast(moth_template_relative_path, prepared_relative_paths);
+        let source_files = self.source_files;
+        match result {
+            Ok(_) => panic!("Moth template fixture should fail"),
+            Err(failure) => Self::freeze_ast_failure(failure, source_files),
+        }
+    }
+
+    fn compile_moth_template_diagnostic_with_providers(
+        self,
+        moth_template_relative_path: &str,
+        prepared_relative_paths: &[&str],
+        source_provider_dependencies: &SourceProviderDependencySet<'_>,
+    ) -> CompilationResult<()> {
+        let result = self.compile_moth_template_ast_with_providers(
+            moth_template_relative_path,
+            prepared_relative_paths,
+            source_provider_dependencies,
+        );
         let source_files = self.source_files;
         match result {
             Ok(_) => panic!("Moth template fixture should fail"),
@@ -1525,7 +1656,7 @@ fn module_root_export_syntax_can_target_moth_template_content() {
     assert_eq!(root_output.file_dependency_clauses.len(), 1);
     assert_eq!(
         root_output.file_dependency_clauses[0].export_mode,
-        HeaderExportMode::Public
+        HeaderExportMode::Public { route: None }
     );
     assert_ne!(
         root_output.file_dependency_clauses[0].dependency.path,
@@ -1637,6 +1768,7 @@ fn moth_template_prelude_excludes_private_runtime_and_type_exports() {
         "CssToken",
         "HtmlDefaults",
         "render_html",
+        "nested_html",
     ] {
         assert!(
             !names.contains(excluded),
@@ -1781,8 +1913,18 @@ fn moth_template_sees_standard_prelude_constants_without_provider_headers() {
     let fixture =
         MothTemplateScopeFixture::new(&[("src/intro.mtf", "[test_constant][css_constant]")]);
 
-    let html_interface = constant_core_prelude_interface("core/html", "test_constant", "from html");
-    let css_interface = constant_core_prelude_interface("core/css", "css_constant", "from css");
+    let html_interface = constant_core_prelude_interface(
+        "core/html",
+        "test_constant",
+        "from html",
+        PublicExportRoute::ROOT,
+    );
+    let css_interface = constant_core_prelude_interface(
+        "core/css",
+        "css_constant",
+        "from css",
+        PublicExportRoute::ROOT,
+    );
     let provider_dependencies = SourceProviderDependencySet::new(vec![
         SourceProviderDependency {
             kind: ProviderDependencyKind::TemplatePrelude {
@@ -1812,13 +1954,84 @@ fn moth_template_sees_standard_prelude_constants_without_provider_headers() {
 }
 
 #[test]
+fn nested_route_provider_constant_stays_out_of_the_flat_prelude() {
+    // The completed-interface prelude lane must apply the same root filter as the header lane:
+    // a constant published under `@core/html/forms` is a separate route, not a flat name.
+    let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[nested_constant]")]);
+    let html_interface = constant_core_prelude_interface(
+        "core/html",
+        "nested_constant",
+        "from nested route",
+        PublicExportRoute::from_canonical_spelling("forms".to_owned()),
+    );
+    let css_interface = empty_core_prelude_interface("core/css");
+    let provider_dependencies =
+        standard_template_prelude_dependencies(&html_interface, &css_interface);
+
+    let diagnostic = fixture.compile_moth_template_diagnostic_with_providers(
+        "src/intro.mtf",
+        &["src/intro.mtf"],
+        &provider_dependencies,
+    );
+    assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
+}
+
+#[test]
+fn rooted_leaf_on_a_routed_core_provider_enters_the_flat_prelude_once() {
+    // The HTML provider publishes `shared` at the root and under `@forms`; the CSS provider
+    // publishes the same leaf only under `@tables`. The prelude must take the HTML root binding
+    // exactly once. Without the production route filter, the CSS route binding would resolve its
+    // own declaration and collide across the two official packages instead of folding the root.
+    let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[shared]")]);
+    let html_interface = core_prelude_interface_with_root_and_nested_constant(
+        "core/html",
+        "shared",
+        "from root",
+        "from html nested route",
+        PublicExportRoute::from_canonical_spelling("forms".to_owned()),
+    );
+    let css_interface = constant_core_prelude_interface(
+        "core/css",
+        "shared",
+        "from css nested route",
+        PublicExportRoute::from_canonical_spelling("tables".to_owned()),
+    );
+    let provider_dependencies =
+        standard_template_prelude_dependencies(&html_interface, &css_interface);
+
+    let (ast, string_table, path_fork) = fixture
+        .compile_moth_template_ast_with_providers(
+            "src/intro.mtf",
+            &["src/intro.mtf"],
+            &provider_dependencies,
+        )
+        .expect("the rooted Core binding must satisfy the flat prelude");
+
+    let folded = folded_content_value(&ast, &string_table, &path_fork);
+    assert_eq!(
+        folded.matches("from root").count(),
+        1,
+        "the flat prelude must take the root binding exactly once: {folded:?}"
+    );
+    assert!(
+        !folded.contains("from html nested route") && !folded.contains("from css nested route"),
+        "neither nested route binding may enter the flat prelude: {folded:?}"
+    );
+}
+
+#[test]
 fn cross_package_constant_reexport_does_not_enter_the_flat_prelude() {
     // A provider that re-exports another package's constant through its completed interface is
     // an imported alias, not a constant it declares. The alias must not enter the flat prelude,
     // and its spelling must not collide with the declaring package's real export.
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[test_constant]")]);
 
-    let html_interface = constant_core_prelude_interface("core/html", "test_constant", "from html");
+    let html_interface = constant_core_prelude_interface(
+        "core/html",
+        "test_constant",
+        "from html",
+        PublicExportRoute::ROOT,
+    );
     let reexported_declaration = html_interface.declarations[0].clone();
     let reexported_origin = reexported_declaration.origin.clone();
     let css_origin = StableModuleOriginIdentity::from_portable_path(
@@ -1830,6 +2043,7 @@ fn cross_package_constant_reexport_does_not_enter_the_flat_prelude() {
         module_origin: css_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             css_origin,
+            PublicExportRoute::ROOT,
             "test_constant".to_owned(),
             reexported_origin,
         )],
@@ -1895,6 +2109,7 @@ fn same_package_constant_reexport_enters_the_flat_prelude() {
         module_origin: css_origin.clone(),
         export_bindings: vec![ExportBinding::new(
             css_origin,
+            PublicExportRoute::ROOT,
             "stacked_constant".to_owned(),
             constant_origin.clone(),
         )],
@@ -1941,9 +2156,18 @@ fn duplicate_prelude_constants_across_official_packages_fail_before_body_evaluat
     let mut messages = Vec::new();
 
     for (first, second) in [("core/html", "core/css"), ("core/css", "core/html")] {
-        let first_interface = constant_core_prelude_interface(first, "shared_name", "from first");
-        let second_interface =
-            constant_core_prelude_interface(second, "shared_name", "from second");
+        let first_interface = constant_core_prelude_interface(
+            first,
+            "shared_name",
+            "from first",
+            PublicExportRoute::ROOT,
+        );
+        let second_interface = constant_core_prelude_interface(
+            second,
+            "shared_name",
+            "from second",
+            PublicExportRoute::ROOT,
+        );
         let provider_dependencies = SourceProviderDependencySet::new(vec![
             SourceProviderDependency {
                 kind: ProviderDependencyKind::TemplatePrelude {
@@ -2293,7 +2517,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
+        &SourceProviderDependencySet::default(),
         Some(&project_path_resolver),
         &crate::compiler_frontend::source::SourceDatabase::empty(),
         &mut string_table,

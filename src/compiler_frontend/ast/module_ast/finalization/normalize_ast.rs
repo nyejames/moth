@@ -1292,10 +1292,17 @@ fn normalize_expression_template_node(
                 materialize_runtime_template_handoff_for_hir(&template, context, &prepared)?
             }
             FinalizedTemplateValue::SlotInsertHelper => {
+                // A standalone `$in` root is a helper even when its body is runtime-dependent.
+                // A final value must reject it here; nested payloads may keep helper content
+                // for an enclosing composition to consume.
                 if helper_artifact_policy == HelperArtifactPolicy::RejectFinalHelperValue {
+                    let helper_span = {
+                        let store = context.template_ir_store.borrow();
+                        template.slot_insert_diagnostic_span(&store)
+                    };
                     return Err(templates::invalid_template_structure(
                         InvalidTemplateStructureReason::HelperOutsideWrapperSlot,
-                        template.span,
+                        helper_span,
                     )
                     .into());
                 }

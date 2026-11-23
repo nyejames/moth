@@ -77,7 +77,8 @@ use crate::compiler_frontend::public_interface::{
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
     ModuleRootFiles, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
-    OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
+    OriginTypeCategory, OriginTypeId, PublicExportRoute, StableModuleOriginIdentity,
+    StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -408,7 +409,12 @@ fn exported_binding(
     public_name: &str,
     origin: OriginDeclarationId,
 ) -> ExportBinding {
-    ExportBinding::new(facade_origin.clone(), public_name.to_owned(), origin)
+    ExportBinding::new(
+        facade_origin.clone(),
+        PublicExportRoute::ROOT,
+        public_name.to_owned(),
+        origin,
+    )
 }
 
 #[test]

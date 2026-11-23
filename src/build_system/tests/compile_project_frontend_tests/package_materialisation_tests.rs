@@ -6,12 +6,17 @@ use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
 use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
+use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::CompileTimeEvaluationErrorView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::IdentifierNamingConventionView;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReport;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureSource,
@@ -249,81 +254,240 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     );
 }
 
+/// One registered package fixture: prefix, origin, and authored files.
+pub(super) type RegisteredPackageFixture<'a> = (&'a str, PackageOrigin, &'a [(&'a str, &'a str)]);
+/// Rendered authored diagnostic site: path, zero-based line, zero-based column.
+type DiagnosticSite = (String, u32, u32);
+
 /// Compile one project with a registered source-backed package through the real builder frontend.
 ///
 /// WHY: registered packages enter the lane only through the builder surface, so both package
 ///      facade-role regressions need the same real-root registration and project entry shape.
-fn compile_registered_package_project(
+pub(super) fn compile_registered_package_project(
     package_prefix: &str,
     package_files: &[(&str, &str)],
     project_entry: &str,
 ) -> CompilationResult<ProjectFrontendCompilation> {
-    let temp = tempfile::tempdir().expect("should create temp dir");
-    let dir = temp.path().to_path_buf();
-    fs::create_dir_all(dir.join("src")).expect("should create source root");
-    fs::write(
-        dir.join("@config.moth"),
-        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    compile_registered_packages_project(
+        &[(
+            package_prefix,
+            crate::builder_surface::PackageOrigin::Builder,
+            package_files,
+        )],
+        project_entry,
     )
-    .expect("should write config");
-    fs::write(dir.join("src/@entry.moth"), project_entry).expect("should write project entry");
+}
 
-    let package_root = dir.join("packages").join(package_prefix);
-    fs::create_dir_all(&package_root).expect("should create package root");
-    for (relative_path, contents) in package_files {
-        let path = package_root.join(relative_path);
-        fs::create_dir_all(path.parent().expect("package files have a parent"))
-            .expect("should create package source directory");
-        fs::write(&path, contents).expect("should write package source");
-    }
+/// Compile one project with any number of registered source-backed packages.
+///
+/// WHY: cross-boundary route collisions need two registered packages in one ordinary build. One
+///      setup owner keeps both boundaries on the same real registration and project-entry shape
+///      the single-package helper already uses.
+pub(super) fn compile_registered_packages_project(
+    packages: &[RegisteredPackageFixture<'_>],
+    project_entry: &str,
+) -> CompilationResult<ProjectFrontendCompilation> {
+    compile_registered_packages_project_retained(packages, project_entry).1
+}
+
+/// Keep the temporary project alive when the test also renders host-relative diagnostic paths.
+pub(super) fn compile_registered_packages_project_retained(
+    packages: &[RegisteredPackageFixture<'_>],
+    project_entry: &str,
+) -> (
+    tempfile::TempDir,
+    CompilationResult<ProjectFrontendCompilation>,
+) {
+    compile_registered_packages_project_with_damaged_sources(packages, project_entry, &[])
+}
+
+pub(super) fn compile_registered_packages_project_with_damaged_sources(
+    packages: &[RegisteredPackageFixture<'_>],
+    project_entry: &str,
+    damaged_sources: &[(&str, &str, &[u8])],
+) -> (
+    tempfile::TempDir,
+    CompilationResult<ProjectFrontendCompilation>,
+) {
+    let (temp, package_roots) = write_registered_packages_project(
+        packages,
+        project_entry,
+        "src/@entry.moth",
+        damaged_sources,
+    );
+    let dir = temp.path().to_path_buf();
 
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    frontend_surface
-        .source_packages
-        .register_filesystem_root(
-            package_prefix,
-            package_root,
-            crate::builder_surface::PackageOrigin::Builder,
-        )
-        .expect("the test package root should register");
+    for (&(package_prefix, origin, _), package_root) in packages.iter().zip(package_roots) {
+        frontend_surface
+            .source_packages
+            .register_filesystem_root(package_prefix, package_root, origin)
+            .expect("the test package root should register");
+    }
 
     let mut config = Config::new(dir.join("src"));
     config.project_name = "docs".to_owned();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
-    compile_project_frontend(
+    let result = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &style_directives,
         &mut frontend_surface,
         &mut warning_owner,
+    );
+    (temp, result)
+}
+
+/// Write one project fixture with registered source-backed package roots on disk.
+///
+/// Returns the retained temporary directory and each package root in fixture order.
+fn write_registered_packages_project(
+    packages: &[RegisteredPackageFixture<'_>],
+    project_entry: &str,
+    entry_relative_path: &str,
+    damaged_sources: &[(&str, &str, &[u8])],
+) -> (tempfile::TempDir, Vec<PathBuf>) {
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = temp.path().to_path_buf();
+    fs::write(
+        dir.join("@config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
+    .expect("should write config");
+    let entry_path = dir.join(entry_relative_path);
+    fs::create_dir_all(entry_path.parent().expect("the entry has a parent"))
+        .expect("should create the entry directory");
+    fs::write(entry_path, project_entry).expect("should write project entry");
+
+    let mut package_roots = Vec::with_capacity(packages.len());
+    for &(package_prefix, _, package_files) in packages {
+        let package_root = dir.join("packages").join(package_prefix);
+        fs::create_dir_all(&package_root).expect("should create package root");
+        for &(relative_path, contents) in package_files {
+            let path = package_root.join(relative_path);
+            fs::create_dir_all(path.parent().expect("package files have a parent"))
+                .expect("should create package source directory");
+            fs::write(&path, contents).expect("should write package source");
+        }
+        for &(damaged_prefix, relative_path, bytes) in damaged_sources {
+            if damaged_prefix == package_prefix {
+                fs::write(package_root.join(relative_path), bytes)
+                    .expect("should write damaged package source");
+            }
+        }
+        package_roots.push(package_root);
+    }
+    (temp, package_roots)
+}
+
+/// Compile and execute one project with registered source packages through the HTML builder.
+///
+/// WHY: a consumer folding a package const function is only proven by the value the production
+///      runtime receives, not by frontend success alone.
+fn render_registered_packages_html(
+    packages: &[RegisteredPackageFixture<'_>],
+    project_entry: &str,
+) -> String {
+    render_registered_packages_html_with_flags(packages, project_entry, &[])
+}
+
+/// Execute one registered-package project under an explicit build profile.
+fn render_registered_packages_html_with_flags(
+    packages: &[RegisteredPackageFixture<'_>],
+    project_entry: &str,
+    flags: &[crate::compiler_frontend::Flag],
+) -> String {
+    let (temp, package_roots) =
+        write_registered_packages_project(packages, project_entry, "@entry.moth", &[]);
+    let builder = RegisteredPackagesHtmlBuilder {
+        packages: packages
+            .iter()
+            .zip(package_roots)
+            .map(|((package_prefix, _, _), package_root)| {
+                ((*package_prefix).to_owned(), package_root)
+            })
+            .collect(),
+    };
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
+    let mut built = successful_compilation_value(
+        build_project(
+            &builder,
+            temp.path()
+                .to_str()
+                .expect("temporary project path should be UTF-8"),
+            flags,
+            &BuildConfigInputSet::new(),
+            &mut discovery_stops,
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
+    let rendered =
+        crate::compiler_tests::integration_test_runner::assertions::execute_html_harness_for_test(
+            &mut built,
+        )
+        .expect("the registered package const fold should execute");
+    assert_eq!(
+        rendered.runtime_error_message(),
+        None,
+        "the executed project must not raise a runtime error: {:?}",
+        rendered.events()
+    );
+    rendered.combined_output()
 }
 
 #[test]
 fn canonical_mode_compiles_facade_only_project_as_package_assembly() {
-    let frontend = compile_fixture(&[("@package.moth", "$export\nlabel #= \"facade\"\n")]);
+    let frontend = compile_fixture(&[(
+        "@package.moth",
+        "$export @forms\nlabel #= \"facade\"\n$export @forms/deep\nvalue #= 1\n$export\nroot_label #= \"root\"\n",
+    )]);
     assert!(
         frontend.project.structure.entry_modules().is_empty(),
         "a project with no @entry.moth must select no entries"
     );
+    let facade = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .next()
+        .expect("the project package facade must still compile");
     assert!(
-        frontend
-            .project
-            .successful_artefacts_in_module_id_order()
-            .next()
-            .is_some(),
-        "the project package facade must still compile"
+        facade.module.executable.hir.start_function.is_none(),
+        "an API-only facade with nested routes must own no executable entry"
+    );
+    assert!(
+        facade.module.metadata.entry.is_none(),
+        "an API-only facade with nested routes must not publish entry metadata"
     );
 
     let compilation = crate::build_system::build::ProjectCompilation::from_frontend(frontend)
         .expect("an entryless facade project should assemble without an entry");
 
     assert_eq!(compilation.entry_count(), 0);
-    assert!(
-        compilation.package_assembly().is_some(),
-        "the project package surface should be exposed as ProjectPackageAssembly"
+    let assembly = compilation
+        .package_assembly()
+        .expect("the project package surface should be exposed as ProjectPackageAssembly");
+    let mut exported_bindings = assembly
+        .facade_interface(&compilation)
+        .export_bindings
+        .iter()
+        .map(|binding| {
+            (
+                binding.route().as_str().to_owned(),
+                binding.public_name().to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    exported_bindings.sort();
+    assert_eq!(
+        exported_bindings,
+        [
+            (String::new(), "root_label".to_owned()),
+            ("forms".to_owned(), "label".to_owned()),
+            ("forms/deep".to_owned(), "value".to_owned()),
+        ],
+        "the package surface must publish the root and nested route bindings exactly"
     );
 }
 
@@ -380,10 +544,13 @@ fn registered_triple_root_package_keeps_its_entry_dormant() {
         "builder/test/triplepkg",
         &[
             ("@mod.moth", "$export\nnormal_label #= \"normal\"\n"),
-            ("@package.moth", "$export\nsupport_label #= \"support\"\n"),
+            (
+                "@package.moth",
+                "$export @widgets\nsupport_value #= \"support\"\n$export\nsupport_label #= \"support\"\n",
+            ),
             ("@entry.moth", "package_runtime ~= 1\n"),
         ],
-        "@builder/test/triplepkg support_label\n~[:[support_label]]\n",
+        "@builder/test/triplepkg support_label\n@builder/test/triplepkg/widgets support_value\n\n~[:[support_label] [support_value]]\n",
     ));
     assert_eq!(frontend.source_packages.len(), 3);
     let package = frontend
@@ -400,6 +567,15 @@ fn registered_triple_root_package_keeps_its_entry_dormant() {
     assert!(
         artifact.normal_interface.is_some(),
         "the triple-root package keeps its normal facade"
+    );
+    assert!(
+        artifact
+            .support_interface
+            .as_ref()
+            .is_some_and(|interface| interface.export_bindings.iter().any(|binding| {
+                binding.route().as_str() == "widgets" && binding.public_name() == "support_value"
+            })),
+        "the package support facade must publish its nested route beside the dormant entry"
     );
     assert!(
         artifact.support_interface.is_some(),
@@ -433,6 +609,115 @@ fn registered_triple_root_package_keeps_its_entry_dormant() {
             .is_some_and(|entry| entry.entry_point.ends_with("src/@entry.moth")),
         "the only active project entry is the project's own @entry.moth"
     );
+}
+
+/// Retains the production HTML backend while registering source package roots.
+///
+/// WHY: a runtime assertion needs the package faces registered before the real frontend and
+///      backend run, while still exercising the ordinary `@builder/...` consumer route.
+pub(super) struct RegisteredPackagesHtmlBuilder {
+    pub(super) packages: Vec<(String, PathBuf)>,
+}
+
+impl BackendBuilder for RegisteredPackagesHtmlBuilder {
+    type Error = std::convert::Infallible;
+
+    fn frontend_surface(&self) -> BuilderSurface {
+        let mut surface = HtmlProjectBuilder::new().frontend_surface();
+        for (package_prefix, package_root) in &self.packages {
+            surface
+                .source_packages
+                .register_filesystem_root(
+                    package_prefix.clone(),
+                    package_root.clone(),
+                    PackageOrigin::Builder,
+                )
+                .expect("the test package root should register");
+        }
+        surface
+    }
+
+    fn validate_project_config(
+        &self,
+        config: &Config,
+        strings: &mut DiagnosticStringBuilder<'_>,
+    ) -> Result<(), ProjectConfigError> {
+        HtmlProjectBuilder::new().validate_project_config(config, strings)
+    }
+
+    fn build_backend(
+        &self,
+        compilation: ProjectCompilation,
+        config: &Config,
+        build_profile: BuildProfile,
+        flags: &[crate::compiler_frontend::Flag],
+        context: &mut BackendBuildContext<'_>,
+    ) -> Result<Project, crate::build_system::build::BackendInvocationFailure<Self::Error>> {
+        HtmlProjectBuilder::new().build_backend(compilation, config, build_profile, flags, context)
+    }
+}
+
+/// Which resolved path a diagnostic site assertion names.
+#[derive(Clone, Copy)]
+enum DiagnosticSitePath {
+    Logical,
+    CanonicalHost,
+}
+
+/// Render one diagnostic's primary site and, when present, its related authored site.
+pub(super) fn diagnostic_sites<T>(
+    result: &CompilationResult<T>,
+    code: &str,
+) -> (DiagnosticSite, Option<DiagnosticSite>) {
+    diagnostic_sites_with_path(result, code, DiagnosticSitePath::Logical)
+}
+
+/// Render one diagnostic's primary and related sites as canonical host paths.
+///
+/// WHY: a foreign package label resolves its own boundary-relative logical path, so two
+///      boundaries can both render `@package.moth`. Canonical paths prove which authored file
+///      owns each site; the report's site resolution still supplies the exact position.
+pub(super) fn diagnostic_canonical_sites<T>(
+    result: &CompilationResult<T>,
+    code: &str,
+) -> (DiagnosticSite, Option<DiagnosticSite>) {
+    diagnostic_sites_with_path(result, code, DiagnosticSitePath::CanonicalHost)
+}
+
+fn diagnostic_sites_with_path<T>(
+    result: &CompilationResult<T>,
+    code: &str,
+    path_display: DiagnosticSitePath,
+) -> (DiagnosticSite, Option<DiagnosticSite>) {
+    let reports = super::super::create_project_modules_tests::diagnosed_reports(result);
+    let (report, diagnostic) = reports
+        .iter()
+        .find(|(_, diagnostic)| diagnostic.descriptor().code == code)
+        .unwrap_or_else(|| panic!("expected diagnostic {code}"));
+    let context = DiagnosticRenderContext::for_report(report);
+    let site =
+        |site: crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef<'_>| {
+            let position = context
+                .site_position(site)
+                .unwrap_or_else(|| panic!("{code} site must resolve to authored source"));
+            let path = match path_display {
+                DiagnosticSitePath::Logical => portable_path_text(&position.path),
+                DiagnosticSitePath::CanonicalHost => portable_path_text(
+                    position
+                        .host_path
+                        .unwrap_or_else(|| panic!("{code} site must resolve to a physical source")),
+                ),
+            };
+            (path, position.start.line, position.start.column)
+        };
+    let related = diagnostic.durable_labels().find_map(|label| {
+        (!matches!(
+            label.site,
+            crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Absent
+        ))
+        .then_some(label.site)
+    });
+    (site(diagnostic.primary_site()), related.map(site))
 }
 
 #[test]
@@ -1724,6 +2009,7 @@ fn generated_materialisation_preserves_exact_request_span_in_recursive_diagnosti
         crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
             span,
             context,
+            ..
         } => (
             span,
             context.expect("the donor identity should be installed for the generated diagnostic"),
@@ -1894,6 +2180,7 @@ html #= ()\n",
             let crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef::Foreign {
                 span,
                 context,
+                ..
             } = label.site
             else {
                 return None;
@@ -3526,9 +3813,32 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
         &BuildConfigInputSet::new(),
         FrontendCompilationMode::Canonical,
     );
-    super::super::create_project_modules_tests::diagnosed_reports(&result);
+    let reports = super::super::create_project_modules_tests::diagnosed_reports(&result);
+    let code = reports
+        .iter()
+        .next()
+        .map(|(_, diagnostic)| diagnostic.descriptor().code)
+        .expect("the invalid package root must report");
+    let (primary, related) = diagnostic_sites(&result, code);
+    assert_eq!(
+        primary.0, "@package.moth",
+        "an ordinary package-local error keeps its boundary-relative logical path"
+    );
+    assert_eq!((primary.1, primary.2), (0, 0), "{primary:?}");
+    assert!(
+        related.is_none(),
+        "the package-local error has one authored site"
+    );
     let rendered = render_compilation_result_html(&result, &project_root);
 
+    assert!(
+        rendered.contains("--> @package.moth:1:1"),
+        "HTML must keep the logical package path: {rendered}"
+    );
+    assert!(
+        !rendered.contains("packages/builder/test/pkg/@package.moth"),
+        "an ordinary package error must not opt into canonical-host display: {rendered}"
+    );
     assert!(
         rendered.contains(package_text.trim_end()),
         "the package diagnostic should render the package snapshot: {rendered}"
@@ -3877,5 +4187,1223 @@ fn paired_root_private_declarations_keep_their_surface_origins() {
         private_roles,
         [ModuleRootRole::Normal, ModuleRootRole::Support],
         "same-named root-private functions must retain distinct surface identities"
+    );
+}
+
+#[test]
+fn paired_root_facade_warning_remaps_through_cached_adoption() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let project_root = temporary_directory.path().to_path_buf();
+    let source_root = project_root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(
+        project_root.join("@config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(source_root.join("@entry.moth"), "[:entry]\n").expect("should write entry");
+    // The normal facade interns `normal_only` before the support facade's `mixedCase` warning is
+    // adopted. Without the warning remap, the support warning's StringId resolves to the normal
+    // facade's identifier text.
+    fs::write(source_root.join("@mod.moth"), "normal_only #= 1\n")
+        .expect("should write normal facade");
+    fs::write(
+        source_root.join("@package.moth"),
+        "mixedCase #= 2\nSupport_type :: bad_variant;\n",
+    )
+    .expect("should write support facade");
+
+    let mut config = Config::new(project_root.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    let result = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+    );
+    let mut frontend = match result.expect("paired facade warning should compile") {
+        CompilationOutcome::Success {
+            value,
+            warnings: None,
+        } => value,
+        CompilationOutcome::Success {
+            warnings: Some(warnings),
+            ..
+        } => panic!("inner frontend should not freeze warnings: {warnings:?}"),
+        CompilationOutcome::Diagnosed(reports) => {
+            panic!("warning-only paired facade should compile: {reports:?}")
+        }
+    };
+    let project_source_database = frontend.project_source_database.take();
+    drop(frontend);
+    let warning_outcome = crate::build_system::build::finish_successful_project_warnings(
+        &mut warning_owner,
+        project_source_database,
+        (),
+    )
+    .expect("successful paired facade warnings should freeze");
+    let warning_names = match &warning_outcome {
+        CompilationOutcome::Success {
+            warnings: Some(warnings),
+            ..
+        } => warnings
+            .iter_severity(DiagnosticSeverity::Warning)
+            .filter_map(|(report, view)| {
+                let facts = view.family_view::<IdentifierNamingConventionView>()?;
+                Some(report.context().strings().resolve(facts.name).to_owned())
+            })
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    assert!(
+        warning_names.iter().any(|name| name == "mixedCase"),
+        "the adopted warning should resolve the support facade identifier: {warning_names:?}"
+    );
+    assert!(
+        !warning_names.iter().any(|name| name == "normal_only"),
+        "the adopted warning must not resolve through the normal facade string delta: {warning_names:?}"
+    );
+    let rendered_result: crate::projects::CompilationResult<()> = Ok(warning_outcome);
+    let rendered = render_compilation_result_html(&rendered_result, &project_root);
+    assert!(
+        rendered.contains("&#39;mixedCase&#39;"),
+        "the rendered adopted warning should show the remapped identifier: {rendered}"
+    );
+}
+
+/// Authored `@package.moth` rows for the registered const publication regressions.
+///
+/// WHAT: a parameterised entry, a nullary entry and an exported entry whose body calls a
+///       non-exported const helper.
+/// WHY: the nullary row proves arity is not the discriminator, and the helper row proves the
+///      consumer receives the entry's reachable closure rather than only exported rows.
+fn registered_const_package_source(route: Option<&str>) -> String {
+    let export = match route {
+        Some(route) => format!("$export @{route}\n"),
+        None => "$export\n".to_owned(),
+    };
+    format!(
+        "{export}decorate #|label String| -> String:\n    return [:decorated:[label]]\n;\n\n\
+         {export}nullary #|| -> I32:\n    return 7\n;\n\n\
+         {export}with_helper #|value I32| -> I32:\n    return private_add(value)\n;\n\n\
+         private_add #|value I32| -> I32:\n    return value + 1\n;\n"
+    )
+}
+
+#[test]
+fn registered_package_const_functions_fold_through_every_selection_route() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let package_prefix = "builder/test/constpkg";
+    let root_source = registered_const_package_source(None);
+    let routed_source = registered_const_package_source(Some("forms"));
+    let call_rows = "decorated #String = decorate(\"label\")\n\
+                      null_value #I32 = nullary()\n\
+                      helped #I32 = with_helper(4)\n\n\
+                      ~[:decorated=[decorated] null_value=[null_value] helped=[helped]]\n";
+    let expected = "decorated=decorated:label null_value=7 helped=5";
+
+    // Direct selection: root facade names bind without an alias.
+    let direct_entry = format!(
+        "@{package_prefix} decorate\n@{package_prefix} nullary\n@{package_prefix} with_helper\n\n{call_rows}"
+    );
+    let direct = render_registered_packages_html(
+        &[(
+            package_prefix,
+            PackageOrigin::Builder,
+            &[("@package.moth", root_source.as_str())],
+        )],
+        &direct_entry,
+    );
+    assert_eq!(
+        direct, expected,
+        "direct selection must fold the package const rows"
+    );
+
+    // Renamed selection: each import binds an ordinary local alias.
+    let renamed_entry = format!(
+        "@{package_prefix} decorate as f\n\
+         @{package_prefix} nullary as zero\n\
+         @{package_prefix} with_helper as plus_one\n\n\
+         decorated #String = f(\"label\")\n\
+         null_value #I32 = zero()\n\
+         helped #I32 = plus_one(4)\n\n\
+         ~[:decorated=[decorated] null_value=[null_value] helped=[helped]]\n"
+    );
+    let renamed = render_registered_packages_html(
+        &[(
+            package_prefix,
+            PackageOrigin::Builder,
+            &[("@package.moth", root_source.as_str())],
+        )],
+        &renamed_entry,
+    );
+    assert_eq!(
+        renamed, expected,
+        "renamed selection must fold the package const rows"
+    );
+
+    // Routed selection: the package publishes the same rows under `@forms`.
+    let routed_entry = format!(
+        "@{package_prefix}/forms decorate\n\
+         @{package_prefix}/forms nullary\n\
+         @{package_prefix}/forms with_helper\n\n{call_rows}"
+    );
+    let routed = render_registered_packages_html(
+        &[(
+            package_prefix,
+            PackageOrigin::Builder,
+            &[("@package.moth", routed_source.as_str())],
+        )],
+        &routed_entry,
+    );
+    assert_eq!(
+        routed, expected,
+        "routed selection must fold the package const rows"
+    );
+}
+
+#[test]
+fn registered_package_nullary_const_function_folds_its_published_body() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let output = render_registered_packages_html(
+        &[(
+            "builder/test/nullarypkg",
+            PackageOrigin::Builder,
+            &[(
+                "@package.moth",
+                "$export\nzero #|| -> I32:\n    return 7\n;\n",
+            )],
+        )],
+        "@builder/test/nullarypkg zero\n\nvalue #I32 = zero()\n~[:value=[value]]\n",
+    );
+    assert_eq!(
+        output, "value=7",
+        "a nullary package const function must publish the same provider body as a parameterised one"
+    );
+}
+
+#[test]
+fn two_registered_packages_publish_distinct_const_function_bodies() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // Both packages spell their exported entry and private helper identically. Rebasing by
+    // spelling alone would give both closures the same consumer paths and reuse one executable
+    // for the other origin.
+    let output = render_registered_packages_html(
+        &[
+            (
+                "builder/test/leftpkg",
+                PackageOrigin::Builder,
+                &[(
+                    "@package.moth",
+                    "$export\ndecorate #|value I32| -> I32:\n    return private_offset(value)\n;\n\
+                     private_offset #|value I32| -> I32:\n    return value + 10\n;\n",
+                )],
+            ),
+            (
+                "builder/test/rightpkg",
+                PackageOrigin::Builder,
+                &[(
+                    "@package.moth",
+                    "$export\ndecorate #|value I32| -> I32:\n    return private_offset(value)\n;\n\
+                     private_offset #|value I32| -> I32:\n    return value * 2\n;\n",
+                )],
+            ),
+        ],
+        "@builder/test/leftpkg decorate as left_decorate\n\
+         @builder/test/rightpkg decorate as right_decorate\n\n\
+         left #I32 = left_decorate(2)\n\
+         right #I32 = right_decorate(3)\n\n\
+         ~[:left=[left] right=[right]]\n",
+    );
+    assert_eq!(
+        output, "left=12 right=6",
+        "each package origin must resolve to its own published const body and private closure"
+    );
+}
+
+#[test]
+fn two_registered_packages_materialise_distinct_generic_bodies() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // The generic lane publishes two distinct declaration identities from package roots whose
+    // authored function paths share a spelling. Their generated bodies must stay separate.
+    let output = render_registered_packages_html(
+        &[
+            (
+                "builder/test/genericleft",
+                PackageOrigin::Builder,
+                &[(
+                    "@package.moth",
+                    "marker #I32 = 10\n\n\
+                     $export\nanswer type T |value T| -> I32:\n    return marker\n;\n",
+                )],
+            ),
+            (
+                "builder/test/genericright",
+                PackageOrigin::Builder,
+                &[(
+                    "@package.moth",
+                    "marker #I32 = 2\n\n\
+                     $export\nanswer type T |value T| -> I32:\n    return marker\n;\n",
+                )],
+            ),
+        ],
+        "@builder/test/genericleft answer as left_answer\n\
+         @builder/test/genericright answer as right_answer\n\n\
+         ~[:left=[left_answer(\"x\")] right=[right_answer(\"x\")]]\n",
+    );
+    assert_eq!(
+        output, "left=10 right=2",
+        "each package generic declaration identity must materialise its own body"
+    );
+}
+
+/// A public generic that imports a routed registered-package const function must fold that call
+/// when a different module instantiates the generic.
+///
+/// WHY: import projection recovers the const signature from the completed package registry during
+///      generated materialisation; without the registry the required call survives into HIR.
+#[test]
+fn registered_package_generic_folds_a_routed_const_import_across_modules() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    const CONST_SOURCE: &str = "$export @forms\n\
+         add_one #|value I32| -> I32:\n\
+             return value + 1\n\
+         ;\n";
+    const GENERIC_SOURCE: &str = "@builder/test/constleaf/forms add_one\n\n\
+         $export\n\
+         describe type T |value T| -> I32:\n\
+             return add_one(5)\n\
+         ;\n";
+    let output = render_registered_packages_html(
+        &[
+            (
+                "builder/test/constleaf",
+                PackageOrigin::Builder,
+                &[("@package.moth", CONST_SOURCE)][..],
+            ),
+            (
+                "builder/test/genericconst",
+                PackageOrigin::Builder,
+                &[("@package.moth", GENERIC_SOURCE)][..],
+            ),
+        ],
+        "@builder/test/genericconst describe\n\
+         ~[:[describe(\"x\")]]\n",
+    );
+    assert_eq!(
+        output, "6",
+        "the instantiated package generic must receive the folded routed const value"
+    );
+}
+
+#[test]
+fn registered_package_const_reparse_does_not_reemit_authored_warnings() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let package_source = "$export\ndecorate #|label String| -> String:\n    output ~= 0\n    loop 0 to 2 |BadName|:\n        ~output += 1\n    ;\n    return [: [label] [output] ]\n;\n";
+    let entry = "@builder/test/warnpkg decorate\nvalue #String = decorate(\"x\")\n~[:[value]]\n";
+    // The package root sits beside the project root, not below it. A package below the project
+    // root is also discovered as a project-local support module, and that second authored copy
+    // would report its own warning before the const reparse runs.
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let project_root = temp.path().join("project");
+    let package_root = temp.path().join("warnpkg");
+    fs::create_dir_all(&project_root).expect("should create project root");
+    fs::create_dir_all(&package_root).expect("should create package root");
+    fs::write(
+        project_root.join("@config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write project config");
+    fs::write(project_root.join("@entry.moth"), entry).expect("should write project entry");
+    fs::write(package_root.join("@package.moth"), package_source)
+        .expect("should write package source");
+    let builder = RegisteredPackagesHtmlBuilder {
+        packages: vec![("builder/test/warnpkg".to_owned(), package_root)],
+    };
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
+    let built = successful_compilation_value(
+        build_project(
+            &builder,
+            project_root
+                .to_str()
+                .expect("temporary project path should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+            &mut discovery_stops,
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
+    let result = built
+        .finish_output(Ok(()))
+        .expect("the warning-only package build should succeed");
+    let warnings = match &result {
+        CompilationOutcome::Success {
+            warnings: Some(warnings),
+            ..
+        } => warnings,
+        CompilationOutcome::Success { warnings: None, .. } => {
+            panic!("the authored package warning should be reported")
+        }
+        CompilationOutcome::Diagnosed(reports) => {
+            panic!("the warning-only package import should compile: {reports:?}")
+        }
+    };
+    let warning_sites = warnings
+        .iter_severity(DiagnosticSeverity::Warning)
+        .filter(|(_, view)| view.descriptor().code == "MOTH-RULE-0021")
+        .map(|(report, view)| {
+            let position = DiagnosticRenderContext::for_report(report)
+                .site_position(view.primary_site())
+                .expect("the entity naming warning must retain its authored site");
+            (
+                portable_path_text(&position.path),
+                position.start.line,
+                position.start.column,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        warning_sites.len(),
+        1,
+        "provider body reparsing must not duplicate the authored package warning: {warning_sites:?}"
+    );
+    assert!(
+        warning_sites[0].0.ends_with("@package.moth"),
+        "the warning must stay on the package source, not the consumer or a lost donor path: {:?}",
+        warning_sites[0]
+    );
+    assert_eq!(
+        (warning_sites[0].1, warning_sites[0].2),
+        (3, 17),
+        "the warning must retain the loop binding's package position"
+    );
+}
+
+#[test]
+fn registered_package_const_argument_mismatch_reports_an_ordinary_diagnostic() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let result = compile_registered_package_project(
+        "builder/test/constpkg",
+        &[(
+            "@package.moth",
+            "$export\ndecorate #|label String| -> String:\n    return label\n;\n",
+        )],
+        "@builder/test/constpkg decorate\nresult #String = decorate(1)\n~[:[result]]\n",
+    );
+    let reports = match &result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("a wrong const argument type must be diagnosed, not accepted")
+        }
+        Err(failures) => panic!(
+            "a wrong const argument must produce an ordinary diagnostic, not an infrastructure failure: {failures:?}"
+        ),
+    };
+    let errors = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
+    assert!(
+        errors
+            .iter()
+            .any(|(_, view)| view.descriptor().code == "MOTH-TYPE-0001"),
+        "the wrong argument type must keep its ordinary type diagnostic: {:?}",
+        errors
+            .iter()
+            .map(|(_, view)| view.descriptor().code)
+            .collect::<Vec<_>>()
+    );
+    let rendered = render_compilation_result_html(&result, std::path::Path::new("."));
+    assert!(
+        !rendered.contains("no published provider body"),
+        "a valid package const origin must never surface the missing-body internal error: {rendered}"
+    );
+}
+
+/// WHAT: a registered ProjectLocal package and the project package cannot share a name.
+/// WHY:  both package identities would use the same stable project-local name, so unrelated
+///       declarations can collide even when no function is called or imported.
+#[test]
+fn project_and_project_local_package_sharing_a_name_are_rejected() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let project_root = temp.path().join("project");
+    let package_root = temp.path().join("sharedpkg");
+    fs::create_dir_all(&project_root).expect("should create project root");
+    fs::create_dir_all(&package_root).expect("should create package root");
+    let config_text = "project #= (\n    name = \"tools\",\n)\nhtml #= ()\n";
+    fs::write(project_root.join("@config.moth"), config_text).expect("should write project config");
+    fs::write(
+        project_root.join("@package.moth"),
+        "$export\ntweak #|value I32| -> I32:\n    return value + 1\n;\n",
+    )
+    .expect("should write project package facade");
+    fs::write(project_root.join("@entry.moth"), "value = 1\n")
+        .expect("should write project entry without imports");
+    fs::write(
+        package_root.join("@package.moth"),
+        "$export\ntweak #|value I32| -> I32:\n    return value + 2\n;\n",
+    )
+    .expect("should write registered package facade");
+
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("tools", package_root, PackageOrigin::ProjectLocal)
+        .expect("the test package root should register");
+    let mut config = Config::new(project_root.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let build_config_inputs = BuildConfigInputSet::new();
+    let services = ProjectConfigParseServices {
+        style_directives: &style_directives,
+        frontend_surface: &frontend_surface,
+        build_config_inputs: &build_config_inputs,
+    };
+    let mut source_builder = Some(SourceDatabaseBuilder::new(SourceDatabase::empty()));
+    let mut string_table = StringTable::new();
+    let validated_output_settings = match load_project_config(
+        &mut config,
+        &services,
+        &mut source_builder,
+        &mut string_table,
+    ) {
+        Ok(settings) => settings,
+        Err(_) => panic!("the real config bootstrap should parse the project name"),
+    };
+    assert_eq!(config.project_name, "tools");
+    let setting_span = config
+        .setting_span("name")
+        .expect("the real config bootstrap must retain the authored name span");
+
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
+    let mut project_source_files = None;
+    let result = compile_project_frontend_with_inputs(
+        &mut config,
+        BuildProfile::Dev,
+        validated_output_settings.as_ref(),
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+        &mut project_source_files,
+        &mut source_builder,
+        &build_config_inputs,
+        FrontendCompilationMode::Canonical,
+    );
+    let reports = match &result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("a project and package sharing a name must be rejected")
+        }
+        Err(failures) => panic!(
+            "a project/package name clash must be an ordinary diagnostic, not an infrastructure failure: {failures:?}"
+        ),
+    };
+    let (report, view) = reports
+        .iter()
+        .find(|(_, view)| {
+            view.reason_key() == Some("invalid_config.project_package_prefix_collision")
+        })
+        .expect("the project/package name clash must use its typed config diagnostic");
+    assert!(
+        report
+            .context()
+            .try_source_record(setting_span.source())
+            .is_some(),
+        "the written config source must survive to the frozen report domain"
+    );
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
+        .expect("the config name collision must retain a primary site");
+    let name_value_start = config_text
+        .find("\"tools\"")
+        .expect("the config text contains the name value") as u32;
+    assert_eq!(position.start.line, 1);
+    assert_eq!(position.line, "    name = \"tools\",");
+    assert_eq!(
+        position.byte_range,
+        name_value_start..name_value_start + "\"tools\"".len() as u32,
+        "the diagnostic primary site must be the exact authored name value"
+    );
+    let rendered =
+        crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_view(
+            view,
+            DiagnosticRenderContext::for_report(report),
+        );
+    assert!(
+        rendered.contains("tools"),
+        "the diagnostic must name the shared project/package name: {rendered}"
+    );
+    assert!(
+        rendered.contains("@package.moth") || rendered.contains("sharedpkg"),
+        "the diagnostic must name the registered package root: {rendered}"
+    );
+    let full = render_compilation_result_html(&result, &project_root);
+    assert!(
+        !full.contains("no published provider body")
+            && !full.contains("multiple declaring contexts"),
+        "the clash must not surface as an internal publication failure: {full}"
+    );
+}
+
+#[test]
+fn registered_package_const_import_chain_folds_under_dev_and_release() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    const LEAF_SOURCE: &str = "$export\ninner #|value I32| -> I32:\n    return value * 3\n;\n";
+    const MIDDLE_SOURCE: &str = "@builder/test/leafpkg inner as leaf\n\
+         $export\nouter #|value I32| -> I32:\n    return leaf(value) + 2\n;\n";
+    let packages = [
+        (
+            "builder/test/leafpkg",
+            PackageOrigin::Builder,
+            &[("@package.moth", LEAF_SOURCE)][..],
+        ),
+        (
+            "builder/test/middlepkg",
+            PackageOrigin::Builder,
+            &[("@package.moth", MIDDLE_SOURCE)][..],
+        ),
+    ];
+    let entry = "@builder/test/middlepkg outer\nresult #I32 = outer(4)\n~[:[result]]\n";
+    for flags in [&[][..], &[crate::compiler_frontend::Flag::Release][..]] {
+        let rendered = render_registered_packages_html_with_flags(&packages, entry, flags);
+        assert_eq!(
+            rendered, "14",
+            "a cross-package const call chain must fold the same value under {flags:?}"
+        );
+    }
+}
+
+#[test]
+fn registered_package_const_reexport_folds_under_dev_and_release() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    const LEAF_SOURCE: &str = "$export\ninner #|value I32| -> I32:\n    return value * 3\n;\n";
+    const RE_EXPORT_SOURCE: &str = "$export\n@builder/test/leafpkg inner as leaf\n";
+    let packages = [
+        (
+            "builder/test/leafpkg",
+            PackageOrigin::Builder,
+            &[("@package.moth", LEAF_SOURCE)][..],
+        ),
+        (
+            "builder/test/reexportpkg",
+            PackageOrigin::Builder,
+            &[("@package.moth", RE_EXPORT_SOURCE)][..],
+        ),
+    ];
+    let entry = "@builder/test/reexportpkg leaf\nresult #I32 = leaf(4)\n~[:[result]]\n";
+    for flags in [&[][..], &[crate::compiler_frontend::Flag::Release][..]] {
+        let rendered = render_registered_packages_html_with_flags(&packages, entry, flags);
+        assert_eq!(
+            rendered, "12",
+            "a facade re-export of a registered const function must fold through both packages under {flags:?}"
+        );
+    }
+}
+
+#[test]
+fn routed_registered_const_call_folds_from_nested_check_only_content() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let project_root = temp.path().join("project");
+    let src = project_root.join("src");
+    let package_root = temp.path().join("routepkg");
+    fs::create_dir_all(&src).expect("should create project source root");
+    fs::create_dir_all(&package_root).expect("should create package root");
+    fs::write(
+        project_root.join("@config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write project config");
+    fs::write(src.join("@entry.moth"), "value = 1\n")
+        .expect("should write canonically reached entry");
+    fs::write(
+        src.join("orphan.moth"),
+        "@builder/test/routepkg/forms decorate as Decorate\n\
+         value #String = Decorate(\"orphan\")\n\
+         body #= @intro.mtf\n",
+    )
+    .expect("should write check-only consumer");
+    fs::write(
+        src.join("intro.mtf"),
+        "[@builder/test/routepkg/forms decorate(\"label\")]\n",
+    )
+    .expect("should write routed package selection");
+    fs::write(
+        package_root.join("@package.moth"),
+        "$export @forms\n\
+         decorate #|label String| -> String:\n\
+             return [:decorated:[label]]\n\
+         ;\n",
+    )
+    .expect("should write routed package facade");
+
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface
+        .source_packages
+        .register_filesystem_root(
+            "builder/test/routepkg",
+            package_root,
+            PackageOrigin::Builder,
+        )
+        .expect("the test package root should register");
+    let mut config = Config::new(src);
+    config.project_name = "docs".to_owned();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let mut project_source_files = None;
+    let mut project_source_builder = None;
+    let build_config_inputs = BuildConfigInputSet::new();
+    let frontend = successful_compilation_value(compile_project_frontend_with_inputs(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+        &mut project_source_files,
+        &mut project_source_builder,
+        &build_config_inputs,
+        FrontendCompilationMode::Check,
+    ));
+    warning_owner.commit_successful_warnings(SuccessfulWarningBoundary::Project, None);
+    let warnings = match warning_owner
+        .finish_successful_warnings(frontend)
+        .expect("check-only success warnings should freeze")
+    {
+        CompilationOutcome::Success { warnings, .. } => {
+            warnings.expect("the orphan package-alias warning must survive as a successful warning")
+        }
+        CompilationOutcome::Diagnosed(_) => {
+            panic!("the check-only route const call must not diagnose a missing provider body")
+        }
+    };
+    let warning_codes = warnings
+        .iter()
+        .map(|(_, view)| view.descriptor().code)
+        .collect::<Vec<_>>();
+    assert!(
+        warning_codes.contains(&"MOTH-IMPORT-0003"),
+        "Check mode must compile the orphan's package-alias binding: {warning_codes:?}"
+    );
+}
+
+#[test]
+fn single_file_const_functions_fold_local_and_registered_package_bodies() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let entry = temp.path().join("main.moth");
+    let package_root = temp.path().join("singleconst");
+    fs::create_dir_all(&package_root).expect("should create package root");
+    fs::write(
+        package_root.join("@package.moth"),
+        "$export\nscale #|value I32| -> I32:\n    return value * 7\n;\n",
+    )
+    .expect("should write package const function");
+    fs::write(
+        &entry,
+        "@builder/test/singleconst scale as package_scale\n\
+         local_scale #|value I32| -> I32:\n\
+             return value * 2\n\
+         ;\n\
+         local_result #I32 = local_scale(21)\n\
+         package_result #I32 = package_scale(6)\n\
+         result #I32 = local_result + package_result\n\
+         [: [result] ]\n",
+    )
+    .expect("should write single-file entry");
+    let mut config = Config::new(entry);
+    config.project_name = "docs".to_owned();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface
+        .source_packages
+        .register_filesystem_root(
+            "builder/test/singleconst",
+            package_root,
+            PackageOrigin::Builder,
+        )
+        .expect("the single-file package root should register");
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let frontend = successful_compilation_value(compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+    ));
+    assert_eq!(
+        entry_folded_output(&frontend).trim(),
+        "84",
+        "a single file must fold both its local const function and a registered package const function"
+    );
+}
+
+#[test]
+fn registered_package_const_chain_mounts_only_selected_closure_paths() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let project_root = temp.path().join("project");
+    let src = project_root.join("src");
+    fs::create_dir_all(&src).expect("should create project source root");
+    fs::write(
+        project_root.join("@config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write project config");
+    fs::write(
+        src.join("@entry.moth"),
+        "@builder/test/chain4 next as chain\nvalue #I32 = chain(0)\n~[:[value]]\n",
+    )
+    .expect("should write project entry");
+
+    const CHAIN_DEPTH: usize = 5;
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    for index in 0..CHAIN_DEPTH {
+        let prefix = format!("builder/test/chain{index}");
+        let package_root = temp.path().join(format!("chain{index}"));
+        fs::create_dir_all(&package_root).expect("should create package root");
+        let source = if index == 0 {
+            "$export\nnext #|value I32| -> I32:\n    return value + 10\n;\n".to_owned()
+        } else {
+            format!(
+                "@builder/test/chain{} next as previous\n\
+                 $export\nnext #|value I32| -> I32:\n    return previous(value) + 1\n;\n",
+                index - 1
+            )
+        };
+        fs::write(package_root.join("@package.moth"), source).expect("should write package source");
+        frontend_surface
+            .source_packages
+            .register_filesystem_root(&prefix, package_root, PackageOrigin::Builder)
+            .expect("package root should register");
+    }
+
+    let mut config = Config::new(src);
+    config.project_name = "docs".to_owned();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let frontend = successful_compilation_value(compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+    ));
+    let path_rows = frontend.total_module_path_node_rows();
+    assert!(
+        path_rows < 900,
+        "a {CHAIN_DEPTH}-package const chain retained {path_rows} path rows; each import must mount only the selected closure"
+    );
+}
+
+#[test]
+fn registered_package_const_assertion_keeps_the_package_source_site() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let result = compile_registered_package_project(
+        "builder/test/assertpkg",
+        &[(
+            "@package.moth",
+            "$export\nfail #|value I32| -> I32:\n    assert(value > 0, \"package assertion\")\n    return value\n;\n",
+        )],
+        "@builder/test/assertpkg fail\nvalue #I32 = fail(0)\n~[:[value]]\n",
+    );
+    let reports = match &result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("a failing package assertion must be diagnosed")
+        }
+        Err(failures) => {
+            panic!("a package assertion failure must remain an ordinary diagnostic: {failures:?}")
+        }
+    };
+    let (report, view) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .find(|(_, view)| view.descriptor().code == "MOTH-RULE-0053")
+        .expect("the assertion failure must keep its compile-time evaluation diagnostic");
+    let context = DiagnosticRenderContext::for_report(report);
+    let primary = context
+        .site_position(view.primary_site())
+        .expect("the failing assertion must retain its authored package site");
+    assert!(
+        portable_path_text(&primary.path).ends_with("@package.moth"),
+        "the failing operation must resolve in the package source: {:?}",
+        portable_path_text(&primary.path)
+    );
+    assert_eq!(
+        (primary.start.line, primary.start.column),
+        (2, 11),
+        "the failing operation must point at the authored assert condition"
+    );
+    let call_site = view
+        .durable_labels()
+        .find(|label| matches!(label.message, DurableLabelMessage::ConstCallSite))
+        .expect("the consumer call site must remain a call-chain label");
+    let call_site = context
+        .site_position(call_site.site)
+        .expect("the consumer call site must resolve in the consumer source");
+    assert!(
+        portable_path_text(&call_site.path).ends_with("@entry.moth"),
+        "the call-chain site must resolve in the consumer source: {:?}",
+        portable_path_text(&call_site.path)
+    );
+}
+
+#[test]
+fn nested_registered_package_const_failure_keeps_each_call_site_owner() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let result = compile_registered_package_project(
+        "builder/test/nestedpkg",
+        &[(
+            "@package.moth",
+            "$export\nouter #|value I32| -> I32:\n    return helper(value)\n;\nhelper #|value I32| -> I32:\n    assert(value > 0, \"nested package assertion\")\n    return value\n;\n",
+        )],
+        "@builder/test/nestedpkg outer\nresult #I32 = outer(0)\n~[:[result]]\n",
+    );
+    let reports = match &result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("a failing package assertion must be diagnosed")
+        }
+        Err(failures) => {
+            panic!("a package assertion failure must remain an ordinary diagnostic: {failures:?}")
+        }
+    };
+    let (report, view) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .find(|(_, view)| view.descriptor().code == "MOTH-RULE-0053")
+        .expect("the assertion failure must keep its compile-time evaluation diagnostic");
+    let context = DiagnosticRenderContext::for_report(report);
+    let primary = context
+        .site_position(view.primary_site())
+        .expect("the failing helper assertion must retain its package site");
+    assert!(
+        portable_path_text(&primary.path).ends_with("@package.moth"),
+        "the failing operation must resolve in the package source: {:?}",
+        portable_path_text(&primary.path)
+    );
+    assert_eq!(
+        (primary.start.line, primary.start.column),
+        (5, 11),
+        "the failing operation must point at the authored helper assert condition"
+    );
+
+    let call_sites = view
+        .durable_labels()
+        .filter(|label| matches!(label.message, DurableLabelMessage::ConstCallSite))
+        .map(|label| {
+            context
+                .site_position(label.site)
+                .expect("every const call-site label must resolve in its own source domain")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        call_sites.len(),
+        2,
+        "the exported call and the private helper call must both keep a call-site label"
+    );
+    assert!(
+        call_sites.iter().any(|site| {
+            portable_path_text(&site.path).ends_with("@entry.moth")
+                && site.line.contains("result #I32 = outer(0)")
+        }),
+        "the project call site must stay consumer-local: {call_sites:?}"
+    );
+    assert!(
+        call_sites.iter().any(|site| {
+            portable_path_text(&site.path).ends_with("@package.moth")
+                && site.line.contains("return helper(value)")
+        }),
+        "the intermediate package call site must resolve in the package source: {call_sites:?}"
+    );
+}
+
+#[test]
+fn registered_package_const_work_limit_keeps_the_package_primary_and_project_call_site() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let project_root = temp.path().join("project");
+    let src = project_root.join("src");
+    let package_root = temp.path().join("spin");
+    fs::create_dir_all(&src).expect("should create project source root");
+    fs::create_dir_all(&package_root).expect("should create package root");
+    fs::write(
+        project_root.join("@config.moth"),
+        "project #= (\n    name = \"docs\",\n    const_work_limit = 100,\n)\nhtml #= ()\n",
+    )
+    .expect("should write project config");
+    fs::write(
+        src.join("@entry.moth"),
+        "@builder/test/spinpkg spin\nresult #I32 = spin()\n~[:[result]]\n",
+    )
+    .expect("should write project entry");
+    fs::write(
+        package_root.join("@package.moth"),
+        "$export\nspin #|| -> I32:\n    loop true:\n    ;\n    return 0\n;\n",
+    )
+    .expect("should write spinning package");
+
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("builder/test/spinpkg", package_root, PackageOrigin::Builder)
+        .expect("package root should register");
+    let mut config = Config::new(src);
+    config.project_name = "docs".to_owned();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let result = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+    );
+    let reports = match &result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("a spinning package const function must exhaust the work limit")
+        }
+        Err(failures) => {
+            panic!("a work-limit refusal must remain an ordinary diagnostic: {failures:?}")
+        }
+    };
+    let (report, view) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .find(|(_, view)| view.descriptor().code == "MOTH-RULE-0053")
+        .expect("the work-limit refusal must keep its compile-time evaluation diagnostic");
+    let context = DiagnosticRenderContext::for_report(report);
+    let primary = context
+        .site_position(view.primary_site())
+        .expect("the work-limit refusal must retain its package loop site");
+    assert!(
+        portable_path_text(&primary.path).ends_with("@package.moth"),
+        "the refusal must resolve in the package source: {:?}",
+        portable_path_text(&primary.path)
+    );
+    assert!(
+        primary.line.contains("loop true"),
+        "the refusal must point at the package loop: {primary:?}"
+    );
+    let call_site = view
+        .durable_labels()
+        .find(|label| matches!(label.message, DurableLabelMessage::ConstCallSite))
+        .and_then(|label| context.site_position(label.site))
+        .expect("the project call site must remain a resolvable call-chain label");
+    assert!(
+        portable_path_text(&call_site.path).ends_with("@entry.moth")
+            && call_site.line.contains("result #I32 = spin()"),
+        "the project call site must stay consumer-local: {call_site:?}"
+    );
+}
+
+#[test]
+fn generated_sidecars_share_the_requester_aggregate_const_work_limit() {
+    use crate::compiler_frontend::module_compilation::{
+        ConstExecutionLimits, DEFAULT_CONST_EXECUTION_MEMORY_LIMIT_BYTES,
+    };
+
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // Nine instances each stay under the per-attempt ceiling; together they exceed eight
+    // attempts' worth, which is the documented module aggregate allowance.
+    const WORK_LIMIT: usize = 418;
+    const BURN_ITERATIONS: usize = 100;
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let project_root = temp.path().join("project");
+    let src = project_root.join("src");
+    let const_root = temp.path().join("constburn");
+    let generic_root = temp.path().join("genericburn");
+    fs::create_dir_all(&src).expect("should create project source root");
+    fs::create_dir_all(&const_root).expect("should create const package root");
+    fs::create_dir_all(&generic_root).expect("should create generic package root");
+    fs::write(
+        project_root.join("@config.moth"),
+        format!(
+            "project #= (\n    name = \"docs\",\n    const_work_limit = {WORK_LIMIT},\n)\nhtml #= ()\n"
+        ),
+    )
+    .expect("should write project config");
+    let type_names = ["A", "B", "C", "D", "E", "F", "G", "H", "I"];
+    let mut entry = String::from("@builder/test/genericburn describe\n\n");
+    for name in type_names {
+        entry.push_str(&format!("{name} = |value I32|\n"));
+    }
+    entry.push_str("\n~[:");
+    for (index, name) in type_names.iter().enumerate() {
+        entry.push_str(&format!("[describe({name}({index}))]"));
+    }
+    entry.push_str("]\n");
+    fs::write(src.join("@entry.moth"), entry).expect("should write project entry");
+    fs::write(
+        const_root.join("@package.moth"),
+        format!(
+            "$export @forms\n\
+             burn #|value I32| -> I32:\n\
+                 total ~= 0\n\
+                 loop 0 to {BURN_ITERATIONS} |index|:\n\
+                     ~total += index\n\
+                 ;\n\
+                 return total + value\n\
+             ;\n"
+        ),
+    )
+    .expect("should write const package");
+    fs::write(
+        generic_root.join("@package.moth"),
+        "@builder/test/constburn/forms burn\n\n\
+         $export\n\
+         describe type T |value T| -> I32:\n\
+             return burn(1)\n\
+         ;\n",
+    )
+    .expect("should write generic package");
+
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("builder/test/constburn", const_root, PackageOrigin::Builder)
+        .expect("const package root should register");
+    frontend_surface
+        .source_packages
+        .register_filesystem_root(
+            "builder/test/genericburn",
+            generic_root,
+            PackageOrigin::Builder,
+        )
+        .expect("generic package root should register");
+    let mut config = Config::new(src);
+    config.project_name = "docs".to_owned();
+    // This harness supplies `Config` directly instead of loading `@config.moth`, so the typed
+    // limits must enter the same field the config validator would populate.
+    config.const_execution_limits = ConstExecutionLimits::from_configured(
+        WORK_LIMIT,
+        DEFAULT_CONST_EXECUTION_MEMORY_LIMIT_BYTES,
+    );
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let result = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+    );
+    let reports = match &result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("nine generated sidecars must not each reset the aggregate const-work meter")
+        }
+        Err(failures) => {
+            panic!("an aggregate work refusal must remain an ordinary diagnostic: {failures:?}")
+        }
+    };
+    let (report, view) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .find(|(_, view)| view.descriptor().code == "MOTH-RULE-0053")
+        .expect("the shared aggregate must refuse a later sidecar's const work");
+    let facts = view
+        .family_view::<CompileTimeEvaluationErrorView>()
+        .expect("the aggregate refusal must keep typed budget facts");
+    assert_eq!(
+        facts.reason,
+        CompileTimeEvaluationErrorReason::ConstWorkLimitExceeded
+    );
+    assert_eq!(
+        facts.limit,
+        Some(config.const_execution_limits.max_total_steps),
+        "the refusal must charge the module aggregate, so every earlier attempt fit its own limit"
+    );
+    let context = DiagnosticRenderContext::for_report(report);
+    let primary = context
+        .site_position(view.primary_site())
+        .expect("the aggregate refusal must retain the requesting call site");
+    assert!(
+        portable_path_text(&primary.path).ends_with("@entry.moth"),
+        "the refusal must resolve at the instantiation that crossed the aggregate: {:?}",
+        portable_path_text(&primary.path)
+    );
+    assert!(
+        primary.line.contains("describe(I(8))"),
+        "the refusal must name the ninth instantiation: {primary:?}"
+    );
+}
+
+#[cfg(feature = "boracle")]
+#[test]
+fn boracle_single_file_reports_package_const_failure_through_its_donor_identity() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let project_root = temp.path().join("project");
+    let src = project_root.join("src");
+    let package_root = temp.path().join("boraclepkg");
+    fs::create_dir_all(&src).expect("should create project source root");
+    fs::create_dir_all(&package_root).expect("should create package root");
+    fs::write(
+        project_root.join("@config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write project config");
+    fs::write(
+        src.join("@entry.moth"),
+        "@builder/test/boraclepkg fail\nresult #I32 = fail(0)\n",
+    )
+    .expect("should write project entry");
+    fs::write(
+        package_root.join("@package.moth"),
+        "$export\nfail #|value I32| -> I32:\n    assert(value > 0, \"boracle package assertion\")\n    return value\n;\n",
+    )
+    .expect("should write package source");
+
+    let config = Config::new(src.join("@entry.moth"));
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface
+        .source_packages
+        .register_filesystem_root(
+            "builder/test/boraclepkg",
+            package_root,
+            PackageOrigin::Builder,
+        )
+        .expect("package root should register");
+    let result = crate::build_system::create_project_modules::compile_single_file_boracle(
+        &config,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut frontend_surface,
+        &mut string_table,
+    );
+    let reports = super::super::create_project_modules_tests::diagnosed_reports(&result);
+    let (report, view) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .find(|(_, view)| view.descriptor().code == "MOTH-RULE-0053")
+        .expect("the package assertion must keep its compile-time evaluation diagnostic");
+    let context = DiagnosticRenderContext::for_report(report);
+    let primary = context
+        .site_position(view.primary_site())
+        .expect("Boracle must retain the package assertion site through its donor identity");
+    assert!(
+        portable_path_text(&primary.path).ends_with("@package.moth"),
+        "the failing operation must resolve in the package source: {:?}",
+        portable_path_text(&primary.path)
+    );
+    assert!(
+        primary.line.contains("assert(value > 0"),
+        "the failing operation must point at the authored package assertion: {primary:?}"
+    );
+    let call_site = view
+        .durable_labels()
+        .find(|label| matches!(label.message, DurableLabelMessage::ConstCallSite))
+        .and_then(|label| context.site_position(label.site))
+        .expect("the project call site must remain a resolvable call-chain label");
+    assert!(
+        portable_path_text(&call_site.path).ends_with("@entry.moth")
+            && call_site.line.contains("result #I32 = fail(0)"),
+        "the project call site must stay consumer-local: {call_site:?}"
     );
 }
