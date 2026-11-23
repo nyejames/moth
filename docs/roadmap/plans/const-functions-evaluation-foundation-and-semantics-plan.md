@@ -141,8 +141,24 @@ returns its argument, and `flag() -> Bool` returns `true`.
 | F8 | Statement-level `$infallible` on `discarded I32 = numerator() // d catch: assert(false); ;`, where `d I32 = 2` | Existing reject/reject control: `trap_assertion`, statement annotation and assertion |
 | F9 | Match guard `1 if identity_bool(flag() and flag()) => ~x = 2` in a `match` over `x ~= 1`, with `else => ~x = 3` | Accept/accept, no `MOTH-RULE-0088 side_effecting_prelude`; assert `x == 2` |
 
-For F9, `identity_bool |value Bool| -> Bool` returns `value`. Keep the
-guard's authored match CFG rather than introducing a synthetic prelude.
+For F9, use the ordinary statement-match spelling (not a `match` keyword):
+
+```moth
+flag || -> Bool:
+    return true
+;
+identity_bool |value Bool| -> Bool:
+    return value
+;
+x ~= 1
+if x is:
+    1 if identity_bool(flag() and flag()) => ~x = 2
+    else => ~x = 3
+;
+~[: guard=[x]]
+```
+
+Keep the guard's authored match CFG rather than introducing a synthetic prelude.
 The reverted proof-marker experiment caused F9's false rejection; F9 is
 an acceptance guard, not a currently failing case. F8 was already rejected
 in both profiles. F1-F7 are the confirmed debug/release divergences.
@@ -175,7 +191,7 @@ lowering pass is needed.
 - [ ] Map current eager operator folding, mandatory const calls, optional ordinary-call candidate evaluation, TIR, static selection and HIR proof/failure contributors, noting every `ExprId` rewrite, `ConstValueId` creation and required consumer.
 - [ ] Audit each early folding subsystem against a retain/simplify/remove decision: mandatory semantic consumers, code/state complexity, frontend time and memory in both profiles, and equivalent later backend optimisation. Measure representative workloads. Preserve currently specified static selection and source diagnostics as a hard constraint: dropping an eager fold that changes those facts is a language change requiring separate approval, never an unreviewed performance refactor.
 - [ ] Inspect the real project compilation fixtures in `src/build_system/tests/compile_project_frontend_tests/mod.rs`, which accept `BuildProfile` and expose each `CompiledModuleArtifact.module.executable.hir`. Start with `HirDisplayContext::render_module` and identify any missing semantic side-table/public-summary fields; use test-only comparisons, not a second HIR representation or production serializer.
-- [ ] Inspect all other queued roadmap plans for now-invalid profile, static-selection, HIR and test-mode assumptions. Record specific owners and update affected plans, avoiding speculative rewrites of unrelated areas.
+- [ ] Recheck the roadmap plans affected by the profile and explicit test-mode contract against changes since this PR's initial survey. Its documentation-only review already covered the then-current queue; avoid repeating a blanket audit without new code evidence.
 
 **Exit:** Profile-dependence map, reproduced regressions, folding-system decisions with measurements, exact deletion candidates and one reviewable HIR parity test design. No second evaluator.
 
@@ -200,7 +216,7 @@ lowering pass is needed.
 
 **Files:** HIR tests and snapshot/structural validation, integration harness, semantic interface and fingerprint tests, validation configuration and canonical documentation.
 
-- [ ] Add an unfeature-gated Rust parity test under `src/build_system/tests/compile_project_frontend_tests/`. Compile the **same physical fixture root and builder capability surface** independently with `BuildProfile::Dev` and `Release`, then compare each base module and generated sidecar by stable semantic owner. Reuse `HirDisplayContext::render_module` for CFG, operations, numeric modes, types, call targets and result slots; assert any omitted constraint/failure/provenance facts and public summaries separately. Do not create another compiler entry or generic serializer. If harmless local IDs differ, add a test-only bijective ID mapping that preserves references, never regex-strip IDs or operations.
+- [ ] Add an unfeature-gated Rust parity test under `src/build_system/tests/compile_project_frontend_tests/`. Use **one** temporary project root and identical builder semantic capability registration, then independently compile it with `BuildProfile::Dev` and `Release` using the normal `compile_project_frontend` service. The existing `compile_fixture_result` creates a fresh directory each call, so don't invoke it twice and accidentally compare different source identities. Compare every base module and generated sidecar by stable origin. Start with `HirDisplayContext::render_module` for CFG, operation kinds, numeric modes and results, and assert omitted failure/constraint/provenance and public-interface facts explicitly. The renderer's `with_type_environment` and `with_side_table` helpers are currently guarded by `#[cfg(feature = "show_hir")]`; when using them in default unit tests, relax **only those test-facing cfg gates** to `#[cfg(any(test, feature = "show_hir"))]` and provide the published artefact's paired `TypeEnvironment` and identity context. If rendering cannot consume the published identity tables without a second owner, implement the narrow comparison over HIR fields in this test module instead. No production serializer or second IR. If incidental IDs vary, establish a test-only bijective mapping that preserves references, not regex deletion of names, IDs or operations.
 - [ ] Pair structural comparison with acceptance, exact diagnostic labels and runtime output for the R1 inventory, numeric constraints, static selection, dead validation, required const/TIR, imported calls and trusted foreign summaries. Compare semantic public interfaces/fingerprints explicitly: equal rendered HIR by itself does not cover those side tables.
 - [ ] Include an explicit test-compilation semantic-input control when the test-mode implementation exists; until then, record the gate for the later testing plan without inventing test mode now. Debug/release within any mode must agree.
 - [ ] Recheck every `FrontendBuildProfile` use and profile-sensitive semantic branch in module compilation, generated materialisation and AST/HIR. Every surviving profile use must be demonstrated as downstream physical choice or genuinely observation-only; no no-op forwarding. Correct any unrelated confirmed semantic divergence before closing the foundation.
@@ -230,7 +246,7 @@ The foundation gates A-C are mandatory and sequential. The subsequent feature ph
 6. Review correctness, style and simplification before committing.
 
 **At phase close:**
-1. Review all changed source and tests against the style guide and code-review guide. Look for duplicates, allocations, stale code and inadequate WHY comments.
+1. Review all changed source and tests against `AGENTS.md`, the routed style guide and the simplification checklist in Task 7.3. Look for duplicates, allocations, stale code and missing WHY comments.
 2. Verify source diagnostics, required-const budget exhaustion and cross-module cases relevant to that phase; release-only candidate budget refusal disappears in Phase B.
 3. Run targeted tests for intermediate commits, `just validate` at important phase boundaries and `just validate-full` only for final merge readiness, per `validation.mtf`.
 4. Update canonical documentation and the progress matrix only for actual contract/status changes.
