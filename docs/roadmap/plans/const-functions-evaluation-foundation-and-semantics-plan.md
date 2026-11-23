@@ -428,7 +428,7 @@ Start with `const_multiple_result_slots_rejected` and `adversarial_multi_bind_in
 
 **Phase 4 exit:** Required const functions support multiple ordered ordinary success slots, expression-to-result forwarding and const-body multi-bind. Multi-valued producers evaluate once at receiving sites, while scalar consumers remain single-valued. The existing native result block remains the only AST multi-result replacement representation. Zero-result, fallible, Never and generic const signatures remain outside scope.
 
-**Docs:** Update `function-declarations.mtf`, `returns-and-multiple-values.mtf` only where the const-specific contract warrants clarification and the progress matrix. Leave release eligibility wording accurate.
+**Docs:** Update `function-declarations.mtf`, `returns-and-multiple-values.mtf` only where the const-specific contract warrants clarification and the progress matrix. Confirm required const semantics remain accurate and ordinary-call release eligibility has no remaining documentation or implementation owner.
 
 **Review:** Audit every residual `single()` assumption in affected producers, return forwarding, aliases and cross-module slot validation. This phase may pause.
 
@@ -561,7 +561,7 @@ Review all changed modules using `moth-code-review-guide.md`. Specifically searc
 - [ ] Run `just validate-full` on the final integrated tree before merge readiness. Report exact commands and results, never unrun gates.
 - [ ] Delete temporary/obsolete code and update `index.md` only when significant files or responsibilities changed.
 
-**Phase 7 exit:** The accepted semantics have landed or carry a user-approved explicit deferral, required/release boundaries remain correct, final benchmarks and validation are recorded and permanent design references contain every enduring decision.
+**Phase 7 exit:** The accepted semantics have landed or carry a user-approved explicit deferral, required-const versus ordinary-runtime call boundaries remain correct, final benchmarks and validation are recorded and permanent design references contain every enduring decision.
 
 ## Documentation and status synchronisation
 
@@ -594,7 +594,7 @@ Use `docs/docs/design-scope/deferred-and-outside-scope.mtf` to distinguish:
 2. **Open design:** mutable const parameters, const error channels, const Never, zero-result const functions and recursion until a later design explicitly settles their meaning. Do not promise them in the progress matrix.
 3. **Outside const design:** runtime effects, untrusted host execution, runtime-dependent arguments, macro-like AST rewriting and physical target dependence. Do not present these as future implementation work.
 
-Generic const declarations and methods remain deferred **design investigation**, not an implementation commitment. Any future acceptance needs an explicit instantiation, compilation-cost and cross-module contract. Release optimiser eligibility remains a separate future proposal.
+Generic const declarations and methods remain deferred **design investigation**, not an implementation commitment. Any future acceptance needs an explicit instantiation, compilation-cost and cross-module contract. Optional ordinary-function optimisation remains a deferred, low-priority proposal, with no active candidate eligibility or implementation.
 
 If Phase 6 defers stepped loops, record the exact unmet parity rule or architecture cost and an evidence-based condition for revisiting it. Do not write "later" without the reason.
 
