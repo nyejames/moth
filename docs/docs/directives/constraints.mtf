@@ -142,11 +142,22 @@ external float result, a store conversion that can trap, an unproved fast trap
 or an escaping recoverable edge rejects `$infallible`. The check follows direct,
 generic, recursive and module calls through the existing monotone convergence.
 
-Semantic reachability is checked after static selection, but before optional
-optimisation erases evidence. A selected fast operation counts even when a
-later fold or dead-result elimination removes it. Inactive ordinary branches
-still receive syntax and type validation, and call provenance survives a fold
-that happens before constraint verification.
+Semantic reachability is checked after profile-independent static selection,
+before any optional optimisation can erase evidence. A selected fast operation
+counts even when an allowed deterministic Stage 4 pure fold or later dead-result
+elimination removes it. Required compile-time execution may diagnose statically
+invalid arithmetic before runtime HIR exists. This does not weaken `$infallible`:
+the compiled runtime has no escaping error or semantic trap from an operation
+successfully evaluated at compile time. `$safe_math` remains a guarantee about
+selected arithmetic semantics, not merely arithmetic instructions remaining
+after folding.
+
+Inactive ordinary branches still receive their required syntax and type
+validation. Mandatory catch, assertion and authored fast-use validation survives
+semantic selection as specified by its owning rules. Optional folding of ordinary
+runtime functions cannot contribute to static selection, change constraints or
+remove call provenance before verification. With identical semantic inputs,
+debug and release must receive equivalent constraint verdicts and validated HIR.
 
 Private and exported annotations are checked at their declaration, even when
 no selected caller reaches the function. Facades, public interfaces and
