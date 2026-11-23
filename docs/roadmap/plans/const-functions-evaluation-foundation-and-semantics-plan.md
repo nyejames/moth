@@ -18,7 +18,7 @@
 ## Global constraints
 
 - Respect the current repository `AGENTS.md`, `docs/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`.
-- Compiler semantics and const evaluation stay Stage 4-owned. Do not introduce HIR execution, another parser, another type checker or another template engine.
+- Stage 4 owns source typing, required constant evaluation, TIR and static selection. HIR owns executable control flow and downstream constraint, borrow and lifetime verification. Do not introduce HIR const execution, another parser, another type checker or another template engine.
 - One authoritative operation/value meaning. Reuse resolved typed operations, numeric/cast/Core evaluators, `ConstValueStore` and TIR.
 - Preserve zero, one and multiple ordered success slots without tuples. Preserve a distinct error channel and distinct Never contract.
 - Preserve immutable source expression rows during evaluation. Create replacement expression rows only when a compiler consumer needs them.
