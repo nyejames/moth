@@ -119,16 +119,61 @@ HIR optimiser. Do not require every eligible expression to fold eagerly: measure
 mandatory users, compilation/allocations, maintenance overhead and backend
 alternatives before retaining, simplifying or deleting each mechanism.
 
+## R1 regression inventory (preserved from the retired plan)
+
+The original release-folding plan has been deleted. These are its concrete
+regression cases and verdicts, not a request to rediscover the probes.
+Each case uses the normal frontend/integration test grammar, a debug/release
+pair and exact diagnostic code, reason and source labels. Helpers are
+ordinary functions returning fixed values: `divisor() -> I32` returns
+`2`, `numerator() -> I32` returns `8`, `identity(value I32) -> I32`
+returns its argument, and `flag() -> Bool` returns `true`.
+
+| Case | Distinguishing authored source inside `probe` | Required result in both profiles |
+|---|---|---|
+| F1 | `$infallible probe |value I32| -> I32`; `d I32 = divisor()`; `discarded I32 = value // d catch: assert(false); ;`; return `discarded` | Reject `MOTH-RULE-0091`, `trap_assertion`, label annotation and assertion |
+| F2 | `$infallible probe |value I32| -> I32`; `return value // divisor()` | Reject `escaping_error`, annotation label, no secondary label |
+| F3 | F1 with `d I32 = 2`, followed by `n I32 = divisor()`; handled expression becomes `n // d` | Reject `trap_assertion`, annotation and assertion |
+| F4 | `$infallible probe |value I32| -> I32, Error!`; `d I32 = 2`; `return numerator() // d` | Reject `escaping_error`, annotation and division |
+| F5 | `$fast_math $infallible probe |value I32| -> I32, I32`; `d I32 = 2`; `return numerator(), value // d` | Reject `trap_division`, annotation and division |
+| F6 | `$fast_math $infallible probe || -> I32`; `return identity(8 // divisor())` | Reject `trap_division`, annotation and division, even when the outer call could fold |
+| F7 | F1 with `d I32 = 2`, then `n I64 = cast divisor()`; handled expression remains `value // d` | Reject `trap_assertion`, annotation and assertion |
+| F8 | Statement-level `$infallible` on `discarded I32 = numerator() // d catch: assert(false); ;`, where `d I32 = 2` | Existing reject/reject control: `trap_assertion`, statement annotation and assertion |
+| F9 | Match guard `1 if identity_bool(flag() and flag()) => ~x = 2` in a `match` over `x ~= 1`, with `else => ~x = 3` | Accept/accept, no `MOTH-RULE-0088 side_effecting_prelude`; assert `x == 2` |
+
+For F9, `identity_bool |value Bool| -> Bool` returns `value`. Keep the
+guard's authored match CFG rather than introducing a synthetic prelude.
+The reverted proof-marker experiment caused F9's false rejection; F9 is
+an acceptance guard, not a currently failing case. F8 was already rejected
+in both profiles. F1-F7 are the confirmed debug/release divergences.
+
+Preserve opposite-direction controls, so a repair cannot simply reject
+every call: literal divisor `value // 2`, a pure wrapper around that
+expression, a call after a proved division in statement/multi-return order,
+a literal definition after a call and an already handled division followed
+by a call must remain accepted where the current source semantics permit.
+Keep `source_constraint_infallible_auxiliary_fold_stays_runtime_rejected`
+as a source diagnostic control; after removing release speculation it no
+longer asserts rollback of a candidate that cannot exist. Retain
+`source_constraints_folded_call_fast_rejected` for transitive fast-use and
+add a positive public-summary test that observes the transitive fast-use
+fact without an enclosing `$safe_math` rejection.
+
+Do not carry these cases as an implementation-only list: assert actual
+source diagnostics, selected witnesses, final HIR where relevant and
+runtime output for accepted cases. No span-equality marker or second HIR
+lowering pass is needed.
+
 ## Foundation Phase A: Baseline, profile audit and folding-system assessment
 
 **Purpose:** Establish evidence and exact ownership before modifying semantic code. This phase starts immediately and precedes every other queued compiler roadmap plan.
 
 **Files:** `src/compiler_frontend/{ast,hir,analysis}/`, module compiler services and build-profile handoff, `tests/cases/source_constraint_*`, existing parity tests, frontend benchmark owners and `docs/bug-reports.md`.
 
-- [ ] Read current authorities and reproduce the R1 debug/release cases already recorded: erased folded local/divisor, later local invalidation, inferred-lane `Invoke`, multi-result ordering, cast wrapper, erased checked argument, transitive fast use and guard `SideEffectingPrelude`. Capture exact profile verdicts and diagnostics before changes.
+- [ ] Read current authorities and run the R1 inventory above (F1-F9, opposite-direction acceptance and transitive fast-use controls). Record exact verdicts and diagnostic labels before modifying semantic code. A previously missing or already repaired case must be reported explicitly; do not invent an expected failure.
 - [ ] Trace every `FrontendBuildProfile`, `BuildProfile` and backend/builder-sensitive path that can influence AST/HIR construction, generated instantiation, static selection, diagnostics, constraint summaries, public interfaces or reuse fingerprints. Distinguish explicit semantic inputs, prohibited profile choices, observation-only measurements and post-verification physical decisions.
 - [ ] Map current eager operator folding, mandatory const calls, optional ordinary-call candidate evaluation, TIR, static selection and HIR proof/failure contributors, noting every `ExprId` rewrite, `ConstValueId` creation and required consumer.
-- [ ] Audit each early folding subsystem against a retain/simplify/remove decision with concrete necessary semantic users, additional Rust code/maintained state, frontend compile time and memory in both profiles and potential equivalent later backend optimisations. Measure representative workloads; compare all-profile early folding against faster debug compilation only when legality and static selection remain unchanged.
+- [ ] Audit each early folding subsystem against a retain/simplify/remove decision: mandatory semantic consumers, code/state complexity, frontend time and memory in both profiles, and equivalent later backend optimisation. Measure representative workloads. Preserve currently specified static selection and source diagnostics as a hard constraint: dropping an eager fold that changes those facts is a language change requiring separate approval, never an unreviewed performance refactor.
 - [ ] Inventory existing HIR structural/snapshot facilities and choose a minimal canonical semantic comparison that handles stable call/type identities and generated sidecars without source-span matching, a second IR or an overly permissive normaliser. Define test owner and CI lane.
 - [ ] Inspect all other queued roadmap plans for now-invalid profile, static-selection, HIR and test-mode assumptions. Record specific owners and update affected plans, avoiding speculative rewrites of unrelated areas.
 
@@ -140,11 +185,11 @@ alternatives before retaining, simplifying or deleting each mechanism.
 
 **Files:** `ast/module_ast/finalization/finalizer.rs`, `ast/const_values/const_execution/{mod,rewrite,eligibility,execute,budget}.rs`, `ast/const_eval/mod.rs`, `ast/mod.rs`, HIR constraints/failure owners, public-interface and sidecar publication plus `tests/cases/`.
 
-- [ ] Pin debug/release diagnostics and JS runtime results for each confirmed R1 variant; include formerly foldable ordinary scalar functions that now remain runtime calls in both profiles, and mandatory const functions that still fold in both.
-- [ ] Remove `rewrite_release_calls` from AST finalisation, candidate discovery/whole-body proof, speculative auxiliary argument execution and rollback, release-only budgets/notes and unused profile-specific evaluator machinery. Retain one required const executor; add no dormant feature switch or new post-HIR optimiser.
-- [ ] Audit `AstReleaseErasedCallSite`, erased-call ledgers, pre-fold Boolean/failure projections, fast-operation witnesses and proof-only HIR markers individually. Delete only machinery exclusively needed to compensate for erased release calls. Retain independent deferred catch, inert assertion-message, inactive-branch validation and selected fast-use obligations, including where no executable HIR is produced.
-- [ ] Remove build-profile access from AST/HIR semantic APIs wherever feasible. Preserve explicit project/test semantic inputs, source diagnostics, target-independent numeric meaning and observation-only counters. Fix all confirmed unrelated profile-dependent semantic drift found in Phase A before proceeding.
-- [ ] Verify ordinary call effects/CFG, imported/transitive and generic summaries, interface fingerprints, inferred failures, guard lowering and backend runtime output remain correct. No release budget Note survives. Required const budget diagnostics continue to work.
+- [ ] Turn F1-F9 and the acceptance controls above into debug/release integration tests with exact reasons, source labels and runtime results where appropriate. Add a HIR-level assertion that a formerly folded ordinary call remains a call in both profiles while required const functions still fold at Stage 4.
+- [ ] Remove the finalizer's `rewrite_release_calls` and `FrontendBuildProfile::Release` branch. Delete `eligibility.rs`'s `prepare_release_executable`, purity/dependency graph proofs, retained candidate types and `rewrite.rs`'s release-only target discovery, provenance, `RewriteMode::Release`, auxiliary speculation, `revert_refused_call`, `release_can_preserve_runtime` and whole-call dead-root exclusion. Remove `ExecutionState.release_erased_calls` and `ReleaseBudgetScope` diagnostic/renderer/tests that only exist for those notes. Retain `RewriteMode::RequiredExpression` and `InterpretedBody` while both have distinct consumers. Preserve `ConstValueStore::stage_values` rollback, required const budgets, general `FoldRequirement` decisions and runtime failure handling; do not delete those merely because they also supported release speculation. No dormant feature switch or late optimiser.
+- [ ] Trace `AstReleaseErasedCallSite` through `ast/mod.rs` and `hir/hir_builder/metadata.rs`; remove its HIR live-erased-call projection. Audit `pre_fold_bool_conditions` and `PreFoldConditionRoots` in the finalizer, AST control-flow exits, HIR statement/control-flow lowering and expression freeze: delete the map and special freeze roots if direct finalised AST reads now supply the same facts. Audit `pre_fold_failure_facts` and the fast-operation witness ledger **separately**: retain contributors, authored-dead catch/assertion checks and selected fast-use facts still needed without release folding. Do not remove validation-only evidence simply because its name contains 'pre-fold'.
+- [ ] Remove `FrontendBuildProfile` and its now-unneeded field/parameter propagation through `create_project_modules`, `module_compilation`, `pipeline`, AST scope/build contexts and generic materialisation, including config/direct-template services and tests. Keep build-owned `BuildProfile` as a physical/build-output choice. A remaining frontend profile dependency must have a named, verified observation-only purpose; never retain the enum as a no-op forwarder. Fix every other confirmed profile-dependent semantic divergence found in Phase A before proceeding.
+- [ ] Update `const_execution/mod.rs`, the `RewriteWalk` variants/steps and their comments to describe only required/interpreted execution. Remove no-longer-used `FxHashMap` arguments and empty release-provenance maps rather than forwarding them. Verify ordinary call effects/CFG, imported/generic summaries, interface fingerprints, inferred failures and backend output. No release budget Note survives; required const budgets still diagnose.
 - [ ] Re-run affected integration, Rust, generated sidecar, constraints and parity cases; review deletion opportunities beyond immediate R1 repair.
 
 **Exit:** Optional ordinary-function folding is absent, semantic profile branches are gone and authored evidence is verified identically in both builds. Resolve R1 only after all reproduced divergences pass.
