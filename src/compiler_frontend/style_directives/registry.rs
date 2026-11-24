@@ -4,8 +4,9 @@
 //! errors show a deterministic directive list.
 
 use crate::compiler_frontend::style_directives::builtins::frontend_built_in_directives;
-use crate::compiler_frontend::style_directives::specs::{DirectiveOccurrence, StyleDirectiveSpec};
-use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
+use crate::compiler_frontend::style_directives::specs::{
+    DirectiveOccurrence, StyleDirectiveKind, StyleDirectiveSpec,
+};
 use std::fmt::Write as _;
 use std::sync::{Arc, LazyLock};
 
@@ -40,22 +41,21 @@ impl StyleDirectiveRegistry {
         self.ordered.iter().find(|spec| spec.name == name)
     }
 
-    /// Resolve only the template-body tokenization mode for a directive.
-    pub fn body_mode_for(&self, name: &str) -> Option<TemplateBodyMode> {
-        self.find(name).map(|spec| spec.body_mode)
-    }
-
     /// Render the deterministic directive list that may appear at `occurrence`.
     ///
-    /// WHAT: filters by the spec's declared attachment contexts, so a source-position diagnostic
+    /// WHAT: filters by directive class, so a source-position diagnostic
     ///       never suggests a name that only a template head accepts and the reverse.
     /// WHY: the full registry is one ordered list, but a suggestion is only useful when the named
     ///       directive could actually be written at the failing position.
     pub fn supported_directives_for_diagnostic(&self, occurrence: DirectiveOccurrence) -> String {
         let mut rendered = String::new();
         let allowed = self.ordered.iter().filter(|spec| match occurrence {
-            DirectiveOccurrence::TemplateHead => spec.contexts.allows_template_head(),
-            DirectiveOccurrence::Source => spec.contexts.allows_source_modifier(),
+            DirectiveOccurrence::TemplateHead => {
+                !matches!(spec.kind, StyleDirectiveKind::SourceModifier { .. })
+            }
+            DirectiveOccurrence::Source => {
+                matches!(spec.kind, StyleDirectiveKind::SourceModifier { .. })
+            }
         });
         for (index, spec) in allowed.enumerate() {
             if index > 0 {

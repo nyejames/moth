@@ -121,17 +121,6 @@ fn check_depth(
         .map_err(|error| with_path(error, path))
 }
 
-fn charge_nodes(
-    budget: &mut BudgetState<'_>,
-    count: usize,
-    span: Option<Span>,
-    path: &[PathSegment],
-) -> Result<(), MonError> {
-    budget
-        .charge_nodes(count, span)
-        .map_err(|error| with_path(error, path))
-}
-
 fn charge_decoded_bytes(
     budget: &mut BudgetState<'_>,
     count: usize,
@@ -754,6 +743,8 @@ impl<'a> Parser<'a> {
                     "MON map entry is missing its value",
                 ));
             }
+            // Account for the entry before parsing its value or growing the raw map.
+            self.budget.charge_nodes(1, Some(first.span))?;
             let value = {
                 let value = self.parse_value(depth + 1)?;
                 self.path.truncate(base_len);
@@ -890,6 +881,10 @@ impl<'a> Parser<'a> {
             self.path.truncate(base_len);
             self.skip_space_and_comments();
             self.path.push(PathSegment::Index(index));
+            // Preserve the missing-value error without charging an entry that cannot be parsed.
+            if !self.at_end() {
+                self.budget.charge_nodes(1, Some(key.span))?;
+            }
             let value = {
                 let value = self.parse_value(depth + 1)?;
                 self.path.truncate(base_len);
@@ -1655,9 +1650,6 @@ fn validate_map(
                 "MON map contains a duplicate decoded key",
             ));
         }
-        // Charge the stable per-entry node cost before the entry can grow. Strings are cloned
-        // only after their additional storage is included in the decoded-byte budget.
-        charge_nodes(budget, 1, Some(key_span), path)?;
         if matches!(&key, Value::String(_)) {
             charge_decoded_bytes(budget, key_name_len, Some(key_span), path)?;
         }

@@ -8,6 +8,8 @@ Historical formal audit resolutions and the index of reports with no outstanding
 
 ## Closed reports
 
+- [AUD-0028: Directive implementation redundancy](./audits/closed_audits/AUD-0028-directive-implementation-redundancy.md)
+- [AUD-0027: Host contract redundancy](./audits/closed_audits/AUD-0027-host-contract-redundancy.md)
 - [AUD-0026: HTML runtime-glue assembly redundancy](./audits/closed_audits/AUD-0026-runtime-glue-redundancy.md)
 - [AUD-0001: Redundancy across integration and unit test support](./audits/closed_audits/AUD-0001-test-support-redundancy.md)
 - [AUD-0002: Stage 0 source discovery and preparation performance](./audits/closed_audits/AUD-0002-stage0-discovery-preparation-performance.md)
@@ -33,6 +35,16 @@ Historical formal audit resolutions and the index of reports with no outstanding
 - [AUD-0023: Numeric proof side-table performance](./audits/closed_audits/AUD-0023-numeric-proofs-performance.md)
 
 ## Resolution records
+
+- AUD-0028-F01 through F04 were accepted and closed. The directive kind owns
+  occurrence eligibility, formatters share one exclusivity rule and published
+  routes live only in export mode. Focused compiler tests and both namespaced
+  export integration cases passed. See [AUD-0028](./audits/closed_audits/AUD-0028-directive-implementation-redundancy.md#resolution-2026-11-24).
+
+- AUD-0027-F01 and F02 were accepted and closed. Host preflight shares one
+  ordered slot comparison and keeps the separate error channel. Requirements
+  dropped the redundant facade tie-breaker. Host and compiler requirement
+  tests passed. See [AUD-0027](./audits/closed_audits/AUD-0027-host-contract-redundancy.md#resolution-2026-11-24).
 
 - AUD-0026 completed without Redundancy findings at `72330758a`. Reviewed all six HTML external-JS
   runtime-glue modules, their selected-export and wrapper paths, URL and import-map assembly,

@@ -99,55 +99,20 @@ fn compare_signatures(
 ) {
     let required = import.signature();
 
-    // A count difference already explains any per-index difference, so the index comparison runs
-    // only when the two signatures have the same shape.
-    if required.parameters().len() != declared.parameters().len() {
-        errors.push(PreflightError::ParameterCountMismatch {
-            import: import.identity().clone(),
-            required: required.parameters().len(),
-            declared: declared.parameters().len(),
-        });
-    } else {
-        for (index, (required_type, declared_type)) in required
-            .parameters()
-            .iter()
-            .zip(declared.parameters())
-            .enumerate()
-        {
-            if required_type != declared_type {
-                errors.push(PreflightError::ParameterTypeMismatch {
-                    import: import.identity().clone(),
-                    index,
-                    required: required_type.clone(),
-                    declared: declared_type.clone(),
-                });
-            }
-        }
-    }
-
-    if required.success_values().len() != declared.success_values().len() {
-        errors.push(PreflightError::SuccessValueCountMismatch {
-            import: import.identity().clone(),
-            required: required.success_values().len(),
-            declared: declared.success_values().len(),
-        });
-    } else {
-        for (index, (required_type, declared_type)) in required
-            .success_values()
-            .iter()
-            .zip(declared.success_values())
-            .enumerate()
-        {
-            if required_type != declared_type {
-                errors.push(PreflightError::SuccessValueTypeMismatch {
-                    import: import.identity().clone(),
-                    index,
-                    required: required_type.clone(),
-                    declared: declared_type.clone(),
-                });
-            }
-        }
-    }
+    compare_slots(
+        import.identity(),
+        HostSlotCategory::Parameter,
+        required.parameters(),
+        declared.parameters(),
+        errors,
+    );
+    compare_slots(
+        import.identity(),
+        HostSlotCategory::SuccessValue,
+        required.success_values(),
+        declared.success_values(),
+        errors,
+    );
 
     if required.is_fallible() != declared.is_fallible() {
         errors.push(PreflightError::ErrorChannelMismatch {
@@ -155,6 +120,54 @@ fn compare_signatures(
             required: required.is_fallible(),
             declared: declared.is_fallible(),
         });
+    }
+}
+
+/// Compares one ordered slot list, suppressing positional mismatches when its counts differ.
+fn compare_slots(
+    import: &HostBindingIdentity,
+    category: HostSlotCategory,
+    required: &[HostType],
+    declared: &[HostType],
+    errors: &mut Vec<PreflightError>,
+) {
+    if required.len() != declared.len() {
+        errors.push(PreflightError::SlotCountMismatch {
+            import: import.clone(),
+            category,
+            required: required.len(),
+            declared: declared.len(),
+        });
+    } else {
+        for (index, (required_type, declared_type)) in required.iter().zip(declared).enumerate() {
+            if required_type != declared_type {
+                errors.push(PreflightError::SlotTypeMismatch {
+                    import: import.clone(),
+                    category,
+                    index,
+                    required: required_type.clone(),
+                    declared: declared_type.clone(),
+                });
+            }
+        }
+    }
+}
+
+/// The ordered signature list to which a preflight mismatch applies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostSlotCategory {
+    /// A callable parameter.
+    Parameter,
+    /// A success value, distinct from the error channel.
+    SuccessValue,
+}
+
+impl fmt::Display for HostSlotCategory {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Parameter => "parameter",
+            Self::SuccessValue => "success value",
+        })
     }
 }
 
@@ -172,28 +185,17 @@ pub enum PreflightError {
         import: HostBindingIdentity,
         declared: usize,
     },
-    /// The implementation declares a different number of parameters.
-    ParameterCountMismatch {
+    /// The implementation declares a different number of slots in this category.
+    SlotCountMismatch {
         import: HostBindingIdentity,
+        category: HostSlotCategory,
         required: usize,
         declared: usize,
     },
-    /// A parameter at `index` has a different semantic type.
-    ParameterTypeMismatch {
+    /// A slot at `index` has a different semantic type.
+    SlotTypeMismatch {
         import: HostBindingIdentity,
-        index: usize,
-        required: HostType,
-        declared: HostType,
-    },
-    /// The implementation declares a different number of success values.
-    SuccessValueCountMismatch {
-        import: HostBindingIdentity,
-        required: usize,
-        declared: usize,
-    },
-    /// A success value at `index` has a different semantic type.
-    SuccessValueTypeMismatch {
-        import: HostBindingIdentity,
+        category: HostSlotCategory,
         index: usize,
         required: HostType,
         declared: HostType,
@@ -220,43 +222,26 @@ impl fmt::Display for PreflightError {
                 "The host import '{import}' has {declared} Rust implementations, but exactly one \
                  is required."
             ),
-            Self::ParameterCountMismatch {
+            Self::SlotCountMismatch {
                 import,
+                category,
                 required,
                 declared,
             } => write!(
                 formatter,
-                "The host import '{import}' requires {required} parameter(s), but its Rust \
+                "The host import '{import}' requires {required} {category}(s), but its Rust \
                  implementation declares {declared}."
             ),
-            Self::ParameterTypeMismatch {
+            Self::SlotTypeMismatch {
                 import,
+                category,
                 index,
                 required,
                 declared,
             } => write!(
                 formatter,
-                "The host import '{import}' parameter at index {index} requires '{required}', but \
+                "The host import '{import}' {category} at index {index} requires '{required}', but \
                  its Rust implementation declares '{declared}'."
-            ),
-            Self::SuccessValueCountMismatch {
-                import,
-                required,
-                declared,
-            } => write!(
-                formatter,
-                "The host import '{import}' requires {required} success value(s), but its Rust \
-                 implementation declares {declared}."
-            ),
-            Self::SuccessValueTypeMismatch {
-                import,
-                index,
-                required,
-                declared,
-            } => write!(
-                formatter,
-                "The host import '{import}' success value at index {index} requires \
-                 '{required}', but its Rust implementation declares '{declared}'."
             ),
             Self::ErrorChannelMismatch {
                 import,

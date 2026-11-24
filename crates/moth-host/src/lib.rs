@@ -22,7 +22,9 @@ mod selection;
 
 pub use descriptor::{HostFunction, HostSignature, HostType};
 pub use identity::HostBindingIdentity;
-pub use preflight::{HostImplementation, PreflightError, PreflightErrors, preflight};
+pub use preflight::{
+    HostImplementation, HostSlotCategory, PreflightError, PreflightErrors, preflight,
+};
 pub use requirements::{
     HostExportRequirement, HostImportRequirement, HostRequirements, RequirementsError,
 };

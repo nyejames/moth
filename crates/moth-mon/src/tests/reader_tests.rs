@@ -569,49 +569,6 @@ fn typed_map_keys_keep_distinctions_and_first_duplicate_wins() {
         .expect_err("the first repeated key must fail even after distinct keys");
     assert_eq!(repeated.code, MonErrorCode::DuplicateMapKey);
     assert_eq!(repeated.path.last(), Some(&PathSegment::MapKey("1".into())));
-
-    // Exercise the budgeted index path directly with an exhausted budget: the
-    // per-key index charge fails before any further validation work.
-    let tight_schema = schema(vec![Field::required(
-        "counts",
-        SchemaType::Map {
-            key: Box::new(SchemaType::I32),
-            value: Box::new(SchemaType::I32),
-        },
-    )]);
-    let map_key = PreparedType::Fixed(FixedScalar::I32);
-    let map_value = PreparedType::Fixed(FixedScalar::I32);
-    let mut budget = BudgetState::new(tight_schema.limits());
-    budget
-        .charge_nodes(tight_schema.limits().max_nodes, None)
-        .expect("budget starts exhausted");
-    let mut path = vec![PathSegment::Field("counts".into())];
-    let key_span = Span::new(10, 11);
-    let value_span = Span::new(14, 16);
-    let entries = vec![(
-        RawValue {
-            span: key_span,
-            kind: RawKind::Number(NumericRaw {
-                text: "1",
-                normalized: "1".into(),
-                kind: NumericLiteralKind::WholeNumber,
-            }),
-        },
-        RawValue {
-            span: value_span,
-            kind: RawKind::Number(NumericRaw {
-                text: "10",
-                normalized: "10".into(),
-                kind: NumericLiteralKind::WholeNumber,
-            }),
-        },
-    )];
-    assert_eq!(
-        validate_map(entries, &map_key, &map_value, &mut budget, &mut path, 0)
-            .unwrap_err()
-            .code,
-        MonErrorCode::NodeBudget
-    );
 }
 
 #[test]

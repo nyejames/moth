@@ -28,7 +28,7 @@ Read the audit log, open findings, completed audit log and bug queue. No existin
 
 ### AUD-0027-F01: Signature-slot mismatch comparison is duplicated
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Redundancy`
 
 #### Evidence
@@ -67,7 +67,7 @@ None.
 
 ### AUD-0027-F02: Requirement export ordering has an unobservable tie-breaker
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Redundancy`
 
 #### Evidence
@@ -101,6 +101,20 @@ Run `cargo test -p moth-host` and the compiler's host requirement tests. Existin
 #### Linked findings
 
 None. This is independent of F01.
+
+## Resolution (2026-11-24)
+
+- **F01 accepted and closed.** A typed slot category shares count and positional
+  comparison and rendering. Count differences suppress only their own list.
+  Error-channel comparison stays independent, and canonical ordering and exact
+  rendered text stay unchanged.
+- **F02 accepted and closed.** Requirements sort only by export name. Selection
+  retains its facade-name tie-breaker for diagnostics. Two duplicate-name groups
+  in forward and reverse input distinguish export ordering from facade ordering.
+
+An independent review and Rust QA pass checked the implementation and tests.
+`cargo test -p moth-host`, the compiler's `host_requirements_tests` and
+changed-file Rust formatting checks passed.
 
 ## Checked and clean
 

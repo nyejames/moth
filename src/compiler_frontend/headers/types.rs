@@ -1205,9 +1205,6 @@ impl Header {
     pub fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.kind.remap_path_ids(remap);
         self.export_mode.remap_path_ids(remap);
-        for annotation in &mut self.source_directives {
-            annotation.operand.remap_path_ids(remap);
-        }
         let hints = std::mem::take(&mut self.local_ordering_hints);
         self.local_ordering_hints = hints
             .into_iter()

@@ -101,19 +101,21 @@ fn requirements_reject_a_duplicate_import_identity() {
 
 #[test]
 fn requirements_reject_a_duplicate_export_name() {
-    let error = HostRequirements::new(
-        std::iter::empty(),
-        [
-            export("update", "game_update"),
-            export("tick", "game_update"),
-        ],
-    )
-    .expect_err("a repeated Wasm export name should be rejected");
+    let exports = [
+        export("b", "game_update"),
+        export("a", "game_update"),
+        export("d", "game_start"),
+        export("c", "game_start"),
+    ];
+    for order in [exports.to_vec(), exports.into_iter().rev().collect()] {
+        let error = HostRequirements::new(std::iter::empty(), order)
+            .expect_err("a repeated Wasm export name should be rejected");
 
-    assert_eq!(
-        error,
-        RequirementsError::DuplicateExportName {
-            export_name: "game_update".to_owned(),
-        }
-    );
+        assert_eq!(
+            error,
+            RequirementsError::DuplicateExportName {
+                export_name: "game_start".to_owned(),
+            }
+        );
+    }
 }

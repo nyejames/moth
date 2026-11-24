@@ -100,121 +100,6 @@ fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token(
 }
 
 #[test]
-fn incompatible_head_item_retains_exact_multibyte_source_span() {
-    let style_directives = StyleDirectiveRegistry::built_ins();
-    let source = "// π\n[$raw, $escape_html: body]";
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let mut expression_builder = AstExpressionBuilder::new().unwrap();
-    let mut const_values = ConstValueStore::default();
-    let file_tokens = template_tokens_from_source_with_style_directives(
-        source,
-        &style_directives,
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let source_path = file_tokens.source_path;
-    let context =
-        new_constant_context_with_style_directives(source_path, &style_directives, &path_fork);
-    let canonical_owner = file_tokens.canonical_owner();
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    token_stream
-        .set_position(file_tokens.opener_index)
-        .expect("test token stream position must remain in canonical range");
-
-    let diagnostic = expect_template_diagnostic(
-        Template::new(
-            &mut token_stream,
-            source_path,
-            &context,
-            &mut expression_builder,
-            &mut const_values,
-            vec![],
-            &mut string_table,
-            &mut path_fork,
-        )
-        .expect_err("incompatible formatter directives should fail"),
-    );
-    let view = diagnostic
-        .first()
-        .expect("incompatible head item should compact to one record");
-    let facts = view
-        .family_view::<InvalidTemplateStructureView>()
-        .expect("incompatible head item should retain typed structure facts");
-    assert_eq!(
-        facts.reason,
-        InvalidTemplateStructureCode::IncompatibleHeadItem
-    );
-    let conflict = facts
-        .head_conflict
-        .expect("incompatible head item should retain its typed conflict");
-    assert_eq!(
-        conflict.reason,
-        TemplateHeadConflictReason::MultipleFormatters
-    );
-    assert_eq!(conflict.owner, TemplateHeadConflictOwner::EarlierItem);
-    assert_eq!(conflict.incoming_kind, TemplateHeadItemKind::Directive);
-    assert_eq!(conflict.earlier_kind, TemplateHeadItemKind::Directive);
-    assert_eq!(
-        view.string_ids(),
-        [
-            string_table.intern("escape_html"),
-            string_table.intern("raw"),
-        ]
-        .as_slice()
-    );
-    let label = view
-        .durable_labels()
-        .next()
-        .expect("the earlier conflicting item should carry a secondary label");
-    assert!(matches!(
-        label.message,
-        DurableLabelMessage::EarlierTemplateHeadItem
-    ));
-    let SiteRef::Local(earlier_span) = label.site else {
-        panic!("the earlier head item label should retain its local source span");
-    };
-    let earlier_range =
-        earlier_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
-    assert_eq!(
-        &source[earlier_range.start() as usize..earlier_range.end() as usize],
-        "$raw"
-    );
-
-    let SiteRef::Local(primary_span) = view.primary_site() else {
-        panic!("incompatible head item should retain its local source span");
-    };
-    assert!(
-        matches!(
-            view.primary_label_message(),
-            Some(DurableLabelMessage::ConflictsWithEarlierHeadItem)
-        ),
-        "the rejected head item should say why it was rejected",
-    );
-    assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
-    let target = "$escape_html";
-    let expected_start = source
-        .find(target)
-        .expect("the formatter directive should occur in the source")
-        as u32;
-    assert_eq!(
-        (range.start(), range.end()),
-        (expected_start, expected_start + target.len() as u32)
-    );
-    assert_eq!(
-        &source[range.start() as usize..range.end() as usize],
-        target
-    );
-}
-
-#[test]
 fn template_head_expression_preserves_infrastructure_failure() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -982,21 +867,74 @@ fn rendered_diagnostic_message(
 }
 
 #[test]
-fn template_head_formatter_conflict_keeps_the_reversed_order() {
-    let style_directives = frontend_test_style_directives();
-    let (diagnostic, mut string_table, _) =
-        parse_template_failure("[$raw, $md: body]", &style_directives);
-    let view = diagnostic
-        .first()
-        .expect("formatter conflict should compact to one record");
-    assert_eq!(
-        view.string_ids(),
-        [string_table.intern("md"), string_table.intern("raw"),].as_slice()
-    );
-    assert_eq!(
-        rendered_diagnostic_message(&diagnostic, &string_table),
-        "`$raw` and `$md` cannot be combined because both control template body formatting. Choose one formatter."
-    );
+fn formatter_conflicts_keep_authored_names_and_spans_in_both_orders() {
+    let directives = frontend_test_style_directives();
+    for earlier in ["raw", "md", "html", "css", "escape_html", "code"] {
+        for incoming in ["raw", "md", "html", "css", "escape_html", "code"] {
+            if earlier == incoming {
+                continue;
+            }
+            let source = format!("// π\n[${earlier}, ${incoming}: body]");
+            let (diagnostic, mut strings, spans) = parse_template_failure(&source, &directives);
+            let view = diagnostic.first().expect("formatter conflict");
+            let facts = view
+                .family_view::<InvalidTemplateStructureView>()
+                .expect("typed conflict facts");
+            assert_eq!(
+                facts.reason,
+                InvalidTemplateStructureCode::IncompatibleHeadItem
+            );
+            let conflict = facts.head_conflict.expect("conflict");
+            assert_eq!(
+                conflict.reason,
+                TemplateHeadConflictReason::MultipleFormatters,
+                "{source}"
+            );
+            assert_eq!(conflict.owner, TemplateHeadConflictOwner::EarlierItem);
+            assert_eq!(conflict.incoming_kind, TemplateHeadItemKind::Directive);
+            assert_eq!(conflict.earlier_kind, TemplateHeadItemKind::Directive);
+            if earlier == "raw" && incoming == "md" {
+                assert_eq!(
+                    rendered_diagnostic_message(&diagnostic, &strings),
+                    "`$raw` and `$md` cannot be combined because both control template body formatting. Choose one formatter."
+                );
+            }
+            assert_eq!(
+                view.string_ids(),
+                [strings.intern(incoming), strings.intern(earlier)].as_slice(),
+                "{source}"
+            );
+            let SiteRef::Local(primary) = view.primary_site() else {
+                panic!("formatter conflict needs a primary span");
+            };
+            assert_eq!(primary.source(), SourceId::COMPILATION_ROOT);
+            assert!(matches!(
+                view.primary_label_message(),
+                Some(DurableLabelMessage::ConflictsWithEarlierHeadItem)
+            ));
+            let primary = primary.resolve_with(spans.resolver_for(SourceId::COMPILATION_ROOT));
+            assert_eq!(
+                &source[primary.start() as usize..primary.end() as usize],
+                format!("${incoming}")
+            );
+            let label = view
+                .durable_labels()
+                .next()
+                .expect("earlier formatter label");
+            assert!(matches!(
+                label.message,
+                DurableLabelMessage::EarlierTemplateHeadItem
+            ));
+            let SiteRef::Local(previous) = label.site else {
+                panic!("formatter conflict needs an earlier span");
+            };
+            let previous = previous.resolve_with(spans.resolver_for(SourceId::COMPILATION_ROOT));
+            assert_eq!(
+                &source[previous.start() as usize..previous.end() as usize],
+                format!("${earlier}")
+            );
+        }
+    }
 }
 
 #[test]
@@ -1133,6 +1071,30 @@ fn required_absent_conflict_labels_the_earlier_expression() {
 #[test]
 fn compatible_head_items_still_parse_together() {
     assert_eq!(folded_template_output("[$fresh, \"x\"]"), "x");
+}
+
+#[test]
+fn fresh_preserves_balanced_formatter_output_under_parent_wrappers() {
+    for source in [
+        "[$before [:<b>], $after [:</b>]:[$code \"text\", $fresh:[$not_a_directive]]]",
+        "[$before [:<b>], $after [:</b>]:[$fresh, $code \"text\":[$not_a_directive]]]",
+    ] {
+        assert_eq!(
+            folded_template_output(source),
+            "<code class='codeblock'>[$not_a_directive]</code>",
+            "{source}"
+        );
+    }
+    for source in [
+        "[$before [:<b>], $after [:</b>]:[$css, $fresh:.button[data-kind=\"cta\"] { color: red; }]]",
+        "[$before [:<b>], $after [:</b>]:[$fresh, $css:.button[data-kind=\"cta\"] { color: red; }]]",
+    ] {
+        assert_eq!(
+            folded_template_output(source),
+            ".button[data-kind=\"cta\"] { color: red; }",
+            "{source}"
+        );
+    }
 }
 
 /// Asserts one truncated template reports `MissingClosingBracket` at EOF and labels its opening.

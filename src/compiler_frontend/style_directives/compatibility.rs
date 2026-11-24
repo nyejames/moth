@@ -19,17 +19,15 @@ impl TemplateHeadTag {
     pub const FORMATTER_DIRECTIVE: Self = Self(1 << 4);
     pub const BEFORE_DIRECTIVE: Self = Self(1 << 5);
     pub const FRESH_DIRECTIVE: Self = Self(1 << 6);
-    pub const RAW_DIRECTIVE: Self = Self(1 << 7);
-    pub const CODE_DIRECTIVE: Self = Self(1 << 8);
-    pub const AFTER_DIRECTIVE: Self = Self(1 << 9);
+    pub const AFTER_DIRECTIVE: Self = Self(1 << 7);
     /// A non-directive meaningful item: a value, literal, path, `this` or inlined template.
-    pub const EXPRESSION: Self = Self(1 << 10);
-    pub const SUPPLIED_DIRECTIVE: Self = Self(1 << 11);
+    pub const EXPRESSION: Self = Self(1 << 8);
+    pub const SUPPLIED_DIRECTIVE: Self = Self(1 << 9);
     /// A trailing `if`/`loop` template control-flow suffix.
-    pub const CONTROL_FLOW: Self = Self(1 << 12);
+    pub const CONTROL_FLOW: Self = Self(1 << 10);
 
     /// How many one-bit tag slots exist. Every declared tag constant uses one index below this.
-    pub const SLOT_COUNT: usize = 13;
+    pub const SLOT_COUNT: usize = 11;
 
     pub const fn empty() -> Self {
         Self(0)
@@ -57,8 +55,6 @@ const _: () = assert!(
             | TemplateHeadTag::BEFORE_DIRECTIVE.0
             | TemplateHeadTag::AFTER_DIRECTIVE.0
             | TemplateHeadTag::FRESH_DIRECTIVE.0
-            | TemplateHeadTag::RAW_DIRECTIVE.0
-            | TemplateHeadTag::CODE_DIRECTIVE.0
             | TemplateHeadTag::EXPRESSION.0
             | TemplateHeadTag::SUPPLIED_DIRECTIVE.0
             | TemplateHeadTag::CONTROL_FLOW.0)

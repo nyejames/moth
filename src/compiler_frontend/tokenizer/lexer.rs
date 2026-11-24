@@ -1625,7 +1625,7 @@ fn tokenize_style_directive(
     }
 
     let directive = string_table.intern(&directive_text);
-    let Some(body_mode) = style_directives.body_mode_for(&directive_text) else {
+    let Some(spec) = style_directives.find(&directive_text) else {
         // Only a template head owns template directives; every other position, including a code
         // template body, is a source position.
         let occurrence = if stream.mode == TokenizeMode::TemplateHead {
@@ -1646,7 +1646,9 @@ fn tokenize_style_directive(
         .into());
     };
 
-    stream.mark_current_template_body_mode(body_mode);
+    if let Some(body_mode) = spec.body_mode {
+        stream.mark_current_template_body_mode(body_mode);
+    }
     emit_style_directive(stream, directive, attached)
 }
 

@@ -31,7 +31,7 @@
 
 ### AUD-0028-F01: Directive class and source kind are encoded redundantly
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Redundancy`
 
 #### Evidence
@@ -70,7 +70,7 @@ F03 concerns the separate handler-specific representation; neither requires acce
 
 ### AUD-0028-F02: Raw and code compatibility bits have no distinct consumer
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Redundancy`
 
 #### Evidence
@@ -107,7 +107,7 @@ The correctness entry about neutral directives overwriting lexical body mode is 
 
 ### AUD-0028-F03: Handler specs allow absent formatter and style identity
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Redundancy`
 
 #### Evidence
@@ -144,7 +144,7 @@ F01 concerns recognition, not handler dispatch. The lexical body-mode correctnes
 
 ### AUD-0028-F04: Header remapping retains the removed export annotation route
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Redundancy`
 
 #### Evidence
@@ -180,6 +180,24 @@ Run source-directive header tests (especially `doc_and_route_stack_on_one_target
 #### Linked findings
 
 None. This is independent of recognition simplification in F01.
+
+## Resolution (2026-11-24)
+
+- **F01 accepted and closed.** The directive kind determines occurrence
+  eligibility and carries the source kind and operand contract directly.
+- **F02 accepted and closed.** All formatters share the same exclusivity tag.
+  Conflict diagnostics retain both authored names and spans.
+- **F03 accepted and closed.** Every handler supplies its formatter and a
+  separate semantic style label. Child-template suppression remains explicit.
+- **F04 accepted and closed.** Published export routes remap and rebind through
+  export mode alone. Retained expression operands still rebind to their source.
+
+Neutral directives also leave the frame's lexical body mode unchanged. Tests
+cover code and CSS with `$fresh` or `$supplied` in both head orders and a
+genuinely non-identity source rebind. Independent review checked the affected
+boundaries. Focused directive, template, lexer and header tests and the
+`namespaced_public_exports` and `namespaced_reexport_origins` HTML integration
+cases passed.
 
 ## Checked and clean
 

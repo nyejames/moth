@@ -16,18 +16,21 @@ use crate::compiler_frontend::style_directives::specs::{
     CONFIG_DIRECTIVE_NAME, CoreStyleDirectiveKind, DOC_DIRECTIVE_NAME, EXPORT_DIRECTIVE_NAME,
     FAST_MATH_DIRECTIVE_NAME, INFALLIBLE_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME,
     SAFE_MATH_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME, SUPPLIED_DIRECTIVE_NAME, SourceDirectiveKind,
-    SourceModifierOperand, SourceModifierTarget, StyleDirectiveArgumentType,
-    StyleDirectiveContexts, StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveSpec,
-    TODO_DIRECTIVE_NAME,
+    SourceModifierOperand, StyleDirectiveArgumentType, StyleDirectiveHandlerSpec,
+    StyleDirectiveSpec, TODO_DIRECTIVE_NAME,
 };
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 
 pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
+    let formatter_compatibility = TemplateHeadCompatibility::blocks_same(
+        TemplateHeadTag::FORMATTER_DIRECTIVE,
+        TemplateHeadConflictReason::MultipleFormatters,
+    );
+
     vec![
         StyleDirectiveSpec::core(
             "before",
-            TemplateBodyMode::Normal,
-            StyleDirectiveContexts::TEMPLATE_HEAD,
+            None,
             TemplateHeadCompatibility::blocks_same(
                 TemplateHeadTag::BEFORE_DIRECTIVE,
                 TemplateHeadConflictReason::DuplicateExclusiveDirective,
@@ -36,8 +39,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         ),
         StyleDirectiveSpec::core(
             "after",
-            TemplateBodyMode::Normal,
-            StyleDirectiveContexts::TEMPLATE_HEAD,
+            None,
             TemplateHeadCompatibility::blocks_same(
                 TemplateHeadTag::AFTER_DIRECTIVE,
                 TemplateHeadConflictReason::DuplicateExclusiveDirective,
@@ -46,8 +48,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         ),
         StyleDirectiveSpec::core(
             "fresh",
-            TemplateBodyMode::Normal,
-            StyleDirectiveContexts::TEMPLATE_HEAD,
+            None,
             TemplateHeadCompatibility::blocks_same(
                 TemplateHeadTag::FRESH_DIRECTIVE,
                 TemplateHeadConflictReason::DuplicateExclusiveDirective,
@@ -56,8 +57,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         ),
         StyleDirectiveSpec::core(
             SLOT_DIRECTIVE_NAME,
-            TemplateBodyMode::Normal,
-            StyleDirectiveContexts::TEMPLATE_HEAD,
+            None,
             TemplateHeadCompatibility {
                 presence_tags: TemplateHeadTag::MEANINGFUL_ITEM | TemplateHeadTag::SLOT_DIRECTIVE,
                 required_absent_tags: TemplateHeadTag::MEANINGFUL_ITEM,
@@ -68,8 +68,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         ),
         StyleDirectiveSpec::core(
             SUPPLIED_DIRECTIVE_NAME,
-            TemplateBodyMode::Normal,
-            StyleDirectiveContexts::TEMPLATE_HEAD,
+            None,
             TemplateHeadCompatibility {
                 presence_tags: TemplateHeadTag::MEANINGFUL_ITEM
                     | TemplateHeadTag::SUPPLIED_DIRECTIVE,
@@ -98,8 +97,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         ),
         StyleDirectiveSpec::core(
             INSERT_DIRECTIVE_NAME,
-            TemplateBodyMode::Normal,
-            StyleDirectiveContexts::TEMPLATE_HEAD,
+            None,
             TemplateHeadCompatibility::blocks_same(
                 TemplateHeadTag::IN_DIRECTIVE,
                 TemplateHeadConflictReason::DuplicateExclusiveDirective,
@@ -108,8 +106,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         ),
         StyleDirectiveSpec::core(
             "note",
-            TemplateBodyMode::DiscardBalanced,
-            StyleDirectiveContexts::TEMPLATE_HEAD,
+            Some(TemplateBodyMode::DiscardBalanced),
             TemplateHeadCompatibility {
                 presence_tags: TemplateHeadTag::MEANINGFUL_ITEM
                     | TemplateHeadTag::COMMENT_DIRECTIVE,
@@ -123,143 +120,98 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         ),
         StyleDirectiveSpec::core(
             "raw",
-            TemplateBodyMode::Normal,
-            StyleDirectiveContexts::TEMPLATE_HEAD,
-            TemplateHeadCompatibility {
-                presence_tags: TemplateHeadTag::MEANINGFUL_ITEM
-                    | TemplateHeadTag::FORMATTER_DIRECTIVE
-                    | TemplateHeadTag::RAW_DIRECTIVE,
-                required_absent_tags: TemplateHeadTag::empty(),
-                blocks_future_tags: TemplateHeadTag::FORMATTER_DIRECTIVE,
-                conflict_reason: Some(TemplateHeadConflictReason::MultipleFormatters),
-            },
+            Some(TemplateBodyMode::Normal),
+            formatter_compatibility,
             CoreStyleDirectiveKind::Raw,
         ),
         StyleDirectiveSpec::handler(
             "md",
-            TemplateBodyMode::Normal,
-            StyleDirectiveContexts::TEMPLATE_HEAD,
-            TemplateHeadCompatibility {
-                presence_tags: TemplateHeadTag::MEANINGFUL_ITEM
-                    | TemplateHeadTag::FORMATTER_DIRECTIVE,
-                required_absent_tags: TemplateHeadTag::empty(),
-                blocks_future_tags: TemplateHeadTag::FORMATTER_DIRECTIVE,
-                conflict_reason: Some(TemplateHeadConflictReason::MultipleFormatters),
+            Some(TemplateBodyMode::Normal),
+            formatter_compatibility,
+            StyleDirectiveHandlerSpec {
+                argument_type: None,
+                style_id: "markdown",
+                suppress_child_templates: false,
+                formatter_factory: markdown_formatter_factory,
             },
-            StyleDirectiveHandlerSpec::new(
-                None,
-                StyleDirectiveEffects {
-                    style_id: Some("markdown"),
-                    ..StyleDirectiveEffects::default()
-                },
-                Some(markdown_formatter_factory),
-            ),
         ),
         StyleDirectiveSpec::handler(
             "html",
-            TemplateBodyMode::Normal,
-            StyleDirectiveContexts::TEMPLATE_HEAD,
-            TemplateHeadCompatibility::blocks_same(
-                TemplateHeadTag::FORMATTER_DIRECTIVE,
-                TemplateHeadConflictReason::MultipleFormatters,
-            ),
-            StyleDirectiveHandlerSpec::new(
-                None,
-                StyleDirectiveEffects {
-                    style_id: Some("html"),
-                    ..StyleDirectiveEffects::default()
-                },
-                Some(html_formatter_factory),
-            ),
+            Some(TemplateBodyMode::Normal),
+            formatter_compatibility,
+            StyleDirectiveHandlerSpec {
+                argument_type: None,
+                style_id: "html",
+                suppress_child_templates: false,
+                formatter_factory: html_formatter_factory,
+            },
         ),
         StyleDirectiveSpec::handler(
             "css",
-            TemplateBodyMode::Balanced,
-            StyleDirectiveContexts::TEMPLATE_HEAD,
-            TemplateHeadCompatibility::blocks_same(
-                TemplateHeadTag::FORMATTER_DIRECTIVE,
-                TemplateHeadConflictReason::MultipleFormatters,
-            ),
-            StyleDirectiveHandlerSpec::new(
-                Some(StyleDirectiveArgumentType::String),
-                StyleDirectiveEffects {
-                    style_id: Some("css"),
-                    ..StyleDirectiveEffects::default()
-                },
-                Some(css_formatter_factory),
-            ),
+            Some(TemplateBodyMode::Balanced),
+            formatter_compatibility,
+            StyleDirectiveHandlerSpec {
+                argument_type: Some(StyleDirectiveArgumentType::String),
+                style_id: "css",
+                suppress_child_templates: false,
+                formatter_factory: css_formatter_factory,
+            },
         ),
         StyleDirectiveSpec::handler(
             "escape_html",
-            TemplateBodyMode::Normal,
-            StyleDirectiveContexts::TEMPLATE_HEAD,
-            TemplateHeadCompatibility::blocks_same(
-                TemplateHeadTag::FORMATTER_DIRECTIVE,
-                TemplateHeadConflictReason::MultipleFormatters,
-            ),
-            StyleDirectiveHandlerSpec::new(
-                None,
-                StyleDirectiveEffects {
-                    style_id: Some("escape_html"),
-                    ..StyleDirectiveEffects::default()
-                },
-                Some(escape_html_formatter_factory),
-            ),
+            Some(TemplateBodyMode::Normal),
+            formatter_compatibility,
+            StyleDirectiveHandlerSpec {
+                argument_type: None,
+                style_id: "escape_html",
+                suppress_child_templates: false,
+                formatter_factory: escape_html_formatter_factory,
+            },
         ),
         StyleDirectiveSpec::handler(
             "code",
-            TemplateBodyMode::Balanced,
-            StyleDirectiveContexts::TEMPLATE_HEAD,
-            TemplateHeadCompatibility {
-                presence_tags: TemplateHeadTag::MEANINGFUL_ITEM
-                    | TemplateHeadTag::FORMATTER_DIRECTIVE
-                    | TemplateHeadTag::CODE_DIRECTIVE,
-                required_absent_tags: TemplateHeadTag::empty(),
-                blocks_future_tags: TemplateHeadTag::FORMATTER_DIRECTIVE,
-                conflict_reason: Some(TemplateHeadConflictReason::MultipleFormatters),
+            Some(TemplateBodyMode::Balanced),
+            formatter_compatibility,
+            StyleDirectiveHandlerSpec {
+                argument_type: Some(StyleDirectiveArgumentType::String),
+                style_id: "code",
+                suppress_child_templates: true,
+                formatter_factory: code_formatter_factory,
             },
-            StyleDirectiveHandlerSpec::new(
-                Some(StyleDirectiveArgumentType::String),
-                StyleDirectiveEffects {
-                    style_id: Some("code"),
-                    suppress_child_templates: Some(true),
-                },
-                Some(code_formatter_factory),
-            ),
         ),
         StyleDirectiveSpec::source_modifier(
             EXPORT_DIRECTIVE_NAME,
-            SourceModifierTarget::ExportablePublicApiItem,
+            SourceDirectiveKind::Export,
             SourceModifierOperand::OptionalPublicRoute,
         ),
         StyleDirectiveSpec::source_modifier(
             CONFIG_DIRECTIVE_NAME,
-            SourceModifierTarget::ExplicitTypedCompileTimeBinding,
+            SourceDirectiveKind::Config,
             SourceModifierOperand::None,
         ),
         StyleDirectiveSpec::source_modifier(
             DOC_DIRECTIVE_NAME,
-            SourceModifierTarget::DeclarationDocumentation,
+            SourceDirectiveKind::Doc,
             SourceModifierOperand::RequiredSingleString,
         ),
         StyleDirectiveSpec::source_modifier(
             TODO_DIRECTIVE_NAME,
-            SourceModifierTarget::DeclarationOrStatementTodo,
+            SourceDirectiveKind::Todo,
             SourceModifierOperand::RequiredSingleString,
         ),
         StyleDirectiveSpec::source_modifier(
             FAST_MATH_DIRECTIVE_NAME,
-            SourceModifierTarget::SourceConstraint(SourceDirectiveKind::FastMath),
+            SourceDirectiveKind::FastMath,
             SourceModifierOperand::None,
         ),
         StyleDirectiveSpec::source_modifier(
             SAFE_MATH_DIRECTIVE_NAME,
-            SourceModifierTarget::SourceConstraint(SourceDirectiveKind::SafeMath),
+            SourceDirectiveKind::SafeMath,
             SourceModifierOperand::None,
         ),
         StyleDirectiveSpec::source_modifier(
             INFALLIBLE_DIRECTIVE_NAME,
-            SourceModifierTarget::SourceConstraint(SourceDirectiveKind::Infallible),
+            SourceDirectiveKind::Infallible,
             SourceModifierOperand::None,
         ),
     ]

@@ -79,33 +79,6 @@ pub(crate) const SAFE_MATH_DIRECTIVE_NAME: &str = "safe_math";
 /// It guarantees that no recoverable error or Moth-semantic trap escapes its lexical scope.
 pub(crate) const INFALLIBLE_DIRECTIVE_NAME: &str = "infallible";
 
-/// Attachment contexts a registered directive may appear in.
-///
-/// WHAT:
-/// - `TEMPLATE_HEAD`: the directive prefixes a template and modifies that template.
-/// - `SOURCE_MODIFIER`: the directive attaches to one following eligible source construct and may
-///   share that attachment line with other source modifiers.
-///
-/// WHY:
-/// - A known name in the wrong context is a typed contextual error, never an unknown-name or
-///   invalid-character failure. One context fact on the spec keeps recognition and context checks
-///   data-driven instead of adding name branches at each parse site.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct StyleDirectiveContexts(u8);
-
-impl StyleDirectiveContexts {
-    pub const TEMPLATE_HEAD: Self = Self(1 << 0);
-    pub const SOURCE_MODIFIER: Self = Self(1 << 1);
-
-    pub const fn allows_template_head(self) -> bool {
-        self.0 & Self::TEMPLATE_HEAD.0 != 0
-    }
-
-    pub const fn allows_source_modifier(self) -> bool {
-        self.0 & Self::SOURCE_MODIFIER.0 != 0
-    }
-}
-
 /// Which source position owns a directive name.
 ///
 /// WHAT:
@@ -121,35 +94,12 @@ pub(crate) enum DirectiveOccurrence {
     Source,
 }
 
-/// Eligible target of one source-modifier directive.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SourceModifierTarget {
-    /// Exactly one explicitly typed top-level compile-time `#` binding.
-    ExplicitTypedCompileTimeBinding,
-    /// One authored public declaration or direct-selection dependency clause.
-    ExportablePublicApiItem,
-    /// One following declaration, including an eligible local declaration.
-    DeclarationDocumentation,
-    /// One following declaration or complete executable statement.
-    DeclarationOrStatementTodo,
-    /// One callable declaration (free function, receiver method or generic function) or one
-    /// complete executable statement.
-    ///
-    /// WHAT: the three lexical source constraints share this eligibility set, so the variant
-    ///       carries which constraint its directive names.
-    /// WHY: the target contract stays one fact per eligibility set while each directive keeps its
-    ///      own semantic kind; three identical target variants would make every target match
-    ///      drift-prone without expressing any difference.
-    SourceConstraint(SourceDirectiveKind),
-}
-
 /// Semantic role of one recognised source directive.
 ///
-/// WHAT: separates the retained syntax kind from its target contract.
-/// WHY: attachment handles every directive in one run, then each kind applies its own meaning
+/// Attachment handles every directive in one run, then each kind applies its own meaning
 /// without re-resolving names or branching on spelling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SourceDirectiveKind {
+pub enum SourceDirectiveKind {
     Config,
     Export,
     Doc,
@@ -168,18 +118,6 @@ impl SourceDirectiveKind {
     ///      grouping lives here instead of being spelled out as the same alternation again.
     pub(crate) fn is_source_constraint(self) -> bool {
         matches!(self, Self::FastMath | Self::SafeMath | Self::Infallible)
-    }
-}
-
-impl SourceModifierTarget {
-    pub(crate) fn directive_kind(self) -> SourceDirectiveKind {
-        match self {
-            Self::ExplicitTypedCompileTimeBinding => SourceDirectiveKind::Config,
-            Self::ExportablePublicApiItem => SourceDirectiveKind::Export,
-            Self::DeclarationDocumentation => SourceDirectiveKind::Doc,
-            Self::DeclarationOrStatementTodo => SourceDirectiveKind::Todo,
-            Self::SourceConstraint(kind) => kind,
-        }
     }
 }
 
@@ -346,19 +284,6 @@ pub enum StyleDirectiveArgumentValue {
     String(String),
 }
 
-/// Semantic template-style state a handler-based directive applies when used.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct StyleDirectiveEffects {
-    /// Optional semantic style label applied to the effective `TemplateIr.style.id`.
-    ///
-    /// This is intentionally distinct from `Formatter.id`:
-    /// - `style_id` tags parsed template semantics.
-    /// - `Formatter.id` identifies the concrete formatter implementation.
-    pub style_id: Option<&'static str>,
-    /// Optional toggle for parsing `[...]` as literal body text.
-    pub suppress_child_templates: Option<bool>,
-}
-
 /// Formatter factory used by handler-based directives.
 ///
 /// Returns:
@@ -377,24 +302,12 @@ pub type FormatterFactory = fn(Option<&StyleDirectiveArgumentValue>) -> Result<F
 pub struct StyleDirectiveHandlerSpec {
     /// Optional single operand contract for `$name value`.
     pub argument_type: Option<StyleDirectiveArgumentType>,
-    /// Template style-state toggles applied when this directive is parsed.
-    pub effects: StyleDirectiveEffects,
-    /// Optional formatter factory invoked with the parsed optional operand.
-    pub formatter_factory: Option<FormatterFactory>,
-}
-
-impl StyleDirectiveHandlerSpec {
-    pub fn new(
-        argument_type: Option<StyleDirectiveArgumentType>,
-        effects: StyleDirectiveEffects,
-        formatter_factory: Option<FormatterFactory>,
-    ) -> Self {
-        Self {
-            argument_type,
-            effects,
-            formatter_factory,
-        }
-    }
+    /// Semantic label written to `Style::id`, separate from the formatter callback.
+    pub style_id: &'static str,
+    /// Whether to treat child-template delimiters as literal text.
+    pub suppress_child_templates: bool,
+    /// Formatter factory invoked with the parsed optional operand.
+    pub formatter_factory: FormatterFactory,
 }
 
 /// Directive class contract.
@@ -402,25 +315,23 @@ impl StyleDirectiveHandlerSpec {
 pub enum StyleDirectiveKind {
     Core(CoreStyleDirectiveKind),
     Handler(StyleDirectiveHandlerSpec),
-    /// A source-only directive whose eligible target and operand shape the spec states.
+    /// A source-only directive with its semantic kind and operand shape.
     SourceModifier {
-        target: SourceModifierTarget,
+        kind: SourceDirectiveKind,
         operand: SourceModifierOperand,
     },
 }
 
 /// Frontend-owned contract for one style directive.
 ///
-/// `body_mode` controls template-body tokenization after the directive appears in the template
-/// head. `head_compatibility` controls parse-time compatibility against other meaningful head
-/// items. `contexts` states which attachment location recognises the name, and `kind` controls
-/// AST-level directive handling.
+/// `body_mode` selects template-body tokenization when this directive owns that choice.
+/// `head_compatibility` controls compatibility with other head items and `kind` controls
+/// occurrence eligibility and AST-level handling.
 #[derive(Clone, Debug)]
 pub struct StyleDirectiveSpec {
     pub name: String,
-    pub body_mode: TemplateBodyMode,
+    pub body_mode: Option<TemplateBodyMode>,
     pub head_compatibility: TemplateHeadCompatibility,
-    pub contexts: StyleDirectiveContexts,
     pub kind: StyleDirectiveKind,
 }
 
@@ -428,8 +339,7 @@ impl StyleDirectiveSpec {
     /// Declare a handler-based frontend directive.
     pub fn handler(
         name: impl Into<String>,
-        body_mode: TemplateBodyMode,
-        contexts: StyleDirectiveContexts,
+        body_mode: Option<TemplateBodyMode>,
         head_compatibility: TemplateHeadCompatibility,
         handler: StyleDirectiveHandlerSpec,
     ) -> Self {
@@ -437,7 +347,6 @@ impl StyleDirectiveSpec {
             name: name.into(),
             body_mode,
             head_compatibility,
-            contexts,
             kind: StyleDirectiveKind::Handler(handler),
         }
     }
@@ -445,8 +354,7 @@ impl StyleDirectiveSpec {
     /// Internal helper for compiler-owned core template directives.
     pub(crate) fn core(
         name: &str,
-        body_mode: TemplateBodyMode,
-        contexts: StyleDirectiveContexts,
+        body_mode: Option<TemplateBodyMode>,
         head_compatibility: TemplateHeadCompatibility,
         kind: CoreStyleDirectiveKind,
     ) -> Self {
@@ -454,7 +362,6 @@ impl StyleDirectiveSpec {
             name: name.to_string(),
             body_mode,
             head_compatibility,
-            contexts,
             kind: StyleDirectiveKind::Core(kind),
         }
     }
@@ -462,15 +369,14 @@ impl StyleDirectiveSpec {
     /// Internal helper for source-directive names.
     pub(crate) fn source_modifier(
         name: &str,
-        target: SourceModifierTarget,
+        kind: SourceDirectiveKind,
         operand: SourceModifierOperand,
     ) -> Self {
         Self {
             name: name.to_string(),
-            body_mode: TemplateBodyMode::Normal,
+            body_mode: None,
             head_compatibility: TemplateHeadCompatibility::default(),
-            contexts: StyleDirectiveContexts::SOURCE_MODIFIER,
-            kind: StyleDirectiveKind::SourceModifier { target, operand },
+            kind: StyleDirectiveKind::SourceModifier { kind, operand },
         }
     }
 }

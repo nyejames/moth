@@ -3,6 +3,153 @@
 use super::*;
 
 #[test]
+fn supplied_choice_names_keep_their_completion_budget_and_error_paths() {
+    let prepared = |max_decoded_bytes| {
+        Schema::record(vec![Field::required(
+            "f",
+            SchemaType::Collection {
+                element: Box::new(SchemaType::Choice {
+                    name: "C".into(),
+                    variants: vec![Variant::unit("Long")],
+                }),
+            },
+        )])
+        .with_limits(Limits {
+            max_decoded_bytes,
+            ..Limits::default()
+        })
+        .prepare()
+        .expect("choice schema fits the byte budget")
+    };
+    let choice = || Value::Choice {
+        qualifier: None,
+        variant: "Long".into(),
+        fields: vec![],
+    };
+    let value = Value::Record(vec![(
+        "f".into(),
+        Value::Collection(vec![choice(), choice()]),
+    )]);
+
+    encode_document(&value, &prepared(9)).expect("field and two variants fit nine bytes");
+    let error = encode_document(&value, &prepared(8)).expect_err("second variant exceeds budget");
+    assert_eq!(error.code, MonErrorCode::DecodedBudget);
+    assert_eq!(
+        error.path,
+        vec![PathSegment::Field("f".into()), PathSegment::Index(1)]
+    );
+}
+
+#[test]
+fn map_entry_nodes_are_charged_during_parsing() {
+    let prepared = |max_nodes| {
+        Schema::record(vec![Field::required(
+            "m",
+            SchemaType::Map {
+                key: Box::new(SchemaType::Bool),
+                value: Box::new(SchemaType::Bool),
+            },
+        )])
+        .with_limits(Limits {
+            max_nodes,
+            ..Limits::default()
+        })
+        .prepare()
+        .expect("map schema fits the node budget")
+    };
+
+    let input = "(m = {true = false, false = true})";
+    let tight = prepared(6);
+    for document in [input.to_owned(), format!("{input} tail")] {
+        let error = decode_document(&document, &tight).expect_err("second entry exceeds budget");
+        assert_eq!(error.code, MonErrorCode::NodeBudget);
+        assert_eq!(
+            error.path,
+            vec![PathSegment::Field("m".into()), PathSegment::Index(1)]
+        );
+        let start = document.rfind("false").expect("second key exists") as u32;
+        assert_eq!(
+            error.span,
+            Some(moth_mon::Span {
+                start,
+                end: start + 5
+            })
+        );
+    }
+
+    let first_entry = "(m = {{{true = false}}})";
+    let error = decode_document(first_entry, &prepared(5))
+        .expect_err("first entry is charged before its value");
+    assert_eq!(error.code, MonErrorCode::NodeBudget);
+    assert_eq!(
+        error.path,
+        vec![
+            PathSegment::Field("m".into()),
+            PathSegment::Index(0),
+            PathSegment::Index(0),
+            PathSegment::Index(0)
+        ]
+    );
+    let start = first_entry.find("true").expect("first key exists") as u32;
+    assert_eq!(
+        error.span,
+        Some(moth_mon::Span {
+            start,
+            end: start + 4
+        })
+    );
+
+    for (document, limit, indexes, detail) in [
+        (
+            "(m = {{{true = ",
+            5,
+            vec![0, 0, 0],
+            "MON map entry is missing its value",
+        ),
+        (
+            "(m = {true = false, false = ",
+            6,
+            vec![1],
+            "MON value is missing",
+        ),
+    ] {
+        let error = decode_document(document, &prepared(limit))
+            .expect_err("a missing value retains its syntax error at the node limit");
+        assert_eq!(error.code, MonErrorCode::UnexpectedEnd);
+        assert_eq!(error.detail, detail);
+        let mut path = vec![PathSegment::Field("m".into())];
+        path.extend(indexes.into_iter().map(PathSegment::Index));
+        assert_eq!(error.path, path);
+        let end = document.len() as u32;
+        assert_eq!(error.span, Some(moth_mon::Span { start: end, end }));
+    }
+
+    for document in ["(m = {{{{=}}}})", "(m = {{{{}}}})"] {
+        let error = decode_document(document, &prepared(5))
+            .expect_err("nested empty containers reach schema validation at the exact limit");
+        assert_eq!(error.code, MonErrorCode::MapKind);
+    }
+
+    for document in ["(m = {=})", "(m = {true = false})"] {
+        decode_document(document, &tight).expect("empty and one-entry maps fit");
+    }
+    let collection = decode_document("(m = {true, false})", &prepared(5))
+        .expect_err("collection remains distinct from a map");
+    assert_eq!(collection.code, MonErrorCode::MapKind);
+
+    let exact = prepared(8);
+    let value = decode_document(input, &exact).expect("two entries fit exactly eight nodes");
+    let encoded = encode_document(&value, &exact).expect("the same node budget permits encoding");
+    assert_eq!(
+        decode_document(&encoded, &exact).expect("encoded map decodes within the same limit"),
+        value
+    );
+    let trailing = decode_document(&format!("{input} tail"), &exact)
+        .expect_err("trailing input remains an error when the map fits");
+    assert_eq!(trailing.code, MonErrorCode::TrailingInput);
+}
+
+#[test]
 fn max_safe_depth_accepts_decodes_and_drops_nested_records() {
     let mut nested_type = SchemaType::I32;
     let mut nested_value = Value::I32(7);

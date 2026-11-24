@@ -33,20 +33,6 @@ None.
 - [AUD-0025-F03: `visit_statement` spells `HirWriteTarget` through crate paths](./audits/open_audits/AUD-0025-numeric-proofs-style.md#aud-0025-f03-visit_statement-spells-hirwritetarget-through-crate-paths)
   - `Style` | `analysis.numeric_proofs`
 
-- [AUD-0027-F01: Signature-slot mismatch comparison is duplicated](./audits/open_audits/AUD-0027-host-contract-redundancy.md#aud-0027-f01-signature-slot-mismatch-comparison-is-duplicated)
-  - `Redundancy` | `crates.moth_host.contracts`
-- [AUD-0027-F02: Requirement export ordering has an unobservable tie-breaker](./audits/open_audits/AUD-0027-host-contract-redundancy.md#aud-0027-f02-requirement-export-ordering-has-an-unobservable-tie-breaker)
-  - `Redundancy` | `crates.moth_host.contracts`
-
-- [AUD-0028-F01: Directive class and source kind are encoded redundantly](./audits/open_audits/AUD-0028-directive-implementation-redundancy.md#aud-0028-f01-directive-class-and-source-kind-are-encoded-redundantly)
-  - `Redundancy` | `frontend.directive_implementation`
-- [AUD-0028-F02: Raw and code compatibility bits have no distinct consumer](./audits/open_audits/AUD-0028-directive-implementation-redundancy.md#aud-0028-f02-raw-and-code-compatibility-bits-have-no-distinct-consumer)
-  - `Redundancy` | `frontend.directive_implementation`
-- [AUD-0028-F03: Handler specs allow absent formatter and style identity](./audits/open_audits/AUD-0028-directive-implementation-redundancy.md#aud-0028-f03-handler-specs-allow-absent-formatter-and-style-identity)
-  - `Redundancy` | `frontend.directive_implementation`
-- [AUD-0028-F04: Header remapping retains the removed export annotation route](./audits/open_audits/AUD-0028-directive-implementation-redundancy.md#aud-0028-f04-header-remapping-retains-the-removed-export-annotation-route)
-  - `Redundancy` | `frontend.directive_implementation`
-
 ## Accepted
 
 None.

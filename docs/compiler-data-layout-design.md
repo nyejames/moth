@@ -1449,6 +1449,8 @@ them into an owned path segment or error detail, and this includes rejected
 names: a reserved label, qualifier or variant, or a reserved schema field,
 reports `DecodedBudget` instead of copying a spelling that exceeds the remaining
 budget. Borrowed name recognition that copies nothing is not charged.
+When completion succeeds, programmatic records and choices reuse the one
+charged name copy from the validation path in the completed value.
 Reader and schema validation share one allocation-free borrowed effective-scale
 rule; each path keeps its own span, error code and detail context. These are
 logical byte charges against `max_decoded_bytes`, not exact allocator-resident
