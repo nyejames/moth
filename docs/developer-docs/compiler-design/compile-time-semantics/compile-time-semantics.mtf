@@ -184,6 +184,8 @@ signature, compiles the statement body, classifies every reachable expression
 and prepares catch handlers once. A refused declaration reports a source
 diagnostic instead of leaving a runtime path.
 
+The accepted const access model uses one bounded interpreter-owned live storage domain for a required evaluation and its nested calls. Reference handles preserve places and allocation identity. Successful overlapping writes invalidate earlier immutable reference generations, while multiple mutable aliases may coexist. The interpreter checks actual uses and ordinary permissions, not hypothetical paths or runtime lifetime topology. Only validated finite data crosses the folded-value publication boundary. There is no const HIR or runtime borrow summary. The Access and aliasing reference owns the full contract. See the progress matrix for implementation status.
+
 Ordinary functions are never evaluated at compile time, in any build profile.
 A call to an ordinary function stays a runtime call even when every argument
 is constant, so its failure, constraint and fast-use evidence is identical in

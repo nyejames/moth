@@ -59,6 +59,8 @@ receiver methods are not available on the const record itself.
 Use one projected field when runtime code needs the value. See
 @../constants/#const-records (Const records) for the const-record contract.
 
+A non-generic const receiver method uses the ordinary const marker and shared `this T` on an eligible same-file nominal struct or choice. Its receiver and arguments must be available at compile time. The receiver is evaluated once before the explicit arguments and follows the same shared access and generational validation as an ordinary const parameter. The method may return one or more success values through the same const execution path. Mutable and generic const receiver methods are not part of this contract. Eligible nominal constant receivers do not make anonymous data-only records method-capable or enable runtime methods on const records. See @../functions/function-declarations (Function declarations) and @../progress (Progress).
+
 ### Visibility
 
 Receiver-method visibility follows receiver-type visibility.

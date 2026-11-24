@@ -87,8 +87,7 @@ Core functions with an explicit constant-evaluation contract and declared const 
 
 ## References, copies and lifetimes
 
-Existing values use shared read-only access when bound, passed, returned or stored. A live shared alias blocks overlapping mutation.
-The compiler follows the *last use*, not just lexical scope.
+Existing values use shared read-only access when bound, passed, returned or stored. In runtime code a live shared alias blocks overlapping mutation. The compiler follows the *last use*, not just lexical scope.
 
 [codeblock, $code "moth":
     items ~= {1, 2}
@@ -120,9 +119,9 @@ A value returned from a function gets a separate caller binding, even if it shar
 Every member must be copyable. Opaque handles and resources need an independent-copy contract.
 Literals, templates and computed results are not copyable places.
 
-`~place` grants exclusive access for one operation, without copying or moving. Stored references must outlive their containers.
+In runtime code, `~place` grants exclusive access for one operation, without copying or moving. Stored references must outlive their containers.
 Field and element aliases also retain their containing storage. Moth has no explicit reference types, lifetime annotations or move operator.
-Access and lifetime checks apply to every build profile.
+Runtime access and lifetime checks apply to every build profile. Required const functions instead use dynamic generational access checks with bounded interpreter-owned storage.
 
 Further detail: @../memory (Memory).
 
@@ -279,8 +278,7 @@ A const function writes `#` between its name and parameter list. Every call must
     label #= [: result [double(21)]]
 ]
 
-Const declarations handle immutable ordinary-value parameters and one or more ordinary success slots.
-A required const call that cannot execute is a source error, not a runtime fallback.
+Const declarations handle immutable ordinary-value parameters and one or more ordinary success slots. Their reference and copy semantics remain the same, but multiple mutable aliases may coexist inside const execution. A successful overlapping mutation invalidates existing immutable references. Later use of a stale reference is a compilation error on the executed path. Unused references need no lifetime proof, and unexecuted paths have no dynamic access verdict. Mutation permissions still apply. No IO, async or external mutable state is allowed. A required const call that cannot execute is a source error, not a runtime fallback. See @../functions/function-declarations (Function declarations) for the full contract and @../progress (Progress) for support.
 Ordinary function calls stay runtime calls in every build profile, even with constant arguments.
 
 

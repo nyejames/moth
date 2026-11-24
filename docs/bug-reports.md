@@ -169,12 +169,12 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: in an ordinary function, `base ~= value + 0`, `view ~= base`, `~view, extra = pair(3)`, then `seen = view * 10 + extra` reports MOTH-BORROW-0003 at the multi-bind: "Cannot read `__hir_tmp_2` while mutable alias `view` is still needed later". The docs say updates through mutable aliases write through to their referents. The same body in a const function evaluates and writes through (`base` becomes 3), so const and runtime acceptance diverge. The diagnostic also exposes a compiler temporary name.
 - Investigate: the result temporaries are fresh values and should not conflict with the alias. Check how multi-bind lowering orders the temporary reads against the alias write, and keep generated names out of user diagnostics.
 
-### Const function bodies skip runtime borrow rules
+### Const interpreter lacks generational access and complete reference identity
 
-- Found: const multi-return phase, 2026-11. Confirmed on the Phase 3 binary, so it pre-dates this phase.
-- Where: const declaration preparation. A const body is executed by the typed-AST interpreter and never reaches HIR borrow checking.
-- Observed: `bump #|value I32| -> I32: base ~= value; ~base = base + 1; return base;` compiles and folds, while the same body as an ordinary function reports MOTH-BORROW-0007 "Cannot mutably access immutable local `value`". The multi-bind alias entry above is a second instance of the same divergence.
-- Investigate: the [const checkpoint's access design gate](./roadmap/plans/const-functions-evaluation-foundation-and-semantics-plan.md#access-design-gate) records the validation-only HIR proposal. It requires the production checker and ordinary alias summaries, including imported and multiple-result calls, without publishing const bodies in runtime HIR.
+- Found: const multi-return phase, 2026-11. Confirmed on the Phase 3 binary. The owner has since approved dynamic const access validation instead of runtime borrow checking.
+- Where: const execution frame bindings, mutable alias refresh, projection handling and call/result delivery.
+- Observed: `bump #|value I32| -> I32: base ~= value; ~base = base + 1; return base;` compiles and folds despite its immutable parameter. This remains invalid under the accepted const model. Missing invalidation and incomplete shared-reference identity are outstanding implementation issues. Multiple overlapping mutable aliases and checks restricted to executed paths are now intentional const semantics, not bugs.
+- Investigate: implement the [corrective checkpoint](./roadmap/plans/const-functions-evaluation-foundation-and-semantics-plan.md#corrective-checkpoint-before-phase-5) with stable live storage, projection-aware generations, proper reference permission and result boundaries. Do not introduce validation-only HIR. Retire this report after C1-C5 reproduce the old failure and verify the replacement contract.
 
 ### Retained stale paths can make the next output manifest invalid
 

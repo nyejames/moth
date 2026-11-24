@@ -25,7 +25,7 @@ It may not depend on:
 - runtime function calls
 - host calls
 - runtime-only template content
-- mutable state
+- external mutable state
 
 ### Ordering
 
@@ -60,7 +60,7 @@ See @../resources/#file-values (File values).
 
 ### Compile-time and runtime agreement
 
-Folding must preserve runtime language semantics.
+Folding must preserve the semantics of the operations being evaluated. Required const functions have an explicit compile-time access contract, so runtime static borrow verdicts do not define their dynamic access verdicts. Numeric, cast, formatting, evaluation-order and other shared operation rules still agree.
 
 Examples:
 
@@ -71,7 +71,7 @@ Examples:
 - `F64 -> String` uses Moth's stable formatter.
 - Compile-time and runtime template interpolation use the same F64 formatting.
 
-The compiler must not accept one result during folding and produce another at runtime.
+The compiler must not change the result of a shared operation by folding it. A required const function has no runtime body. Its deliberate access exception is described in @../functions/function-declarations (Function declarations).
 
 ### Advisory const facts
 
@@ -127,8 +127,7 @@ Required const execution remains bounded by typed project settings:
 
 - `const_work_limit` limits evaluation steps for one required const call. The
   aggregate module allowance is eight times this value.
-- `const_memory_limit_mb` limits retained folded value and text allocation
-  in MiB for one required call, with the same aggregate multiplier.
+- `const_memory_limit_mb` limits retained const execution allocation in MiB for one required call, including folded values, live storage, projection/access metadata and text, with the same aggregate multiplier. The compiler also bounds retained slots and structural depth. Work and allocation limits cover live reference traversal, copying and freezing without introducing a separate access budget.
 
 Configured values above compiler maxima are project configuration errors.
 Exhausting a required const budget reports a source error.

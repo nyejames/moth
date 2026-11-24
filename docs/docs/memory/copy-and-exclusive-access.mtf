@@ -14,7 +14,7 @@
 
 - every copyable allocation in the graph is duplicated into the destination lifetime region
 - internal alias topology is preserved: repeated source references to one allocation become repeated references to one copied allocation
-- internal cycles are preserved in the copied graph
+- internal cycles are preserved in the copied graph where supported by the runtime declared-region contract. Const execution initially excludes cyclic graphs
 - a copied acyclic graph may be allocated into an inferred or declared destination region
 - a copied cyclic graph must be allocated wholly into one declared region. Copying a cycle into an ordinary inferred region is invalid. Preserving internal alias topology does not override the rule that direct source-created cycles require one declared region
 - the copied graph shares no mutable allocation with the source graph
@@ -24,6 +24,8 @@
 `copy` accepts a visible binding, field projection or parenthesised place. Literals, templates, calls and computed expressions aren't copy places and are rejected.
 
 ### Exclusive access with `~`
+
+The exclusive access rules in this section describe runtime code. Const execution keeps the same mutation markers and reference/copy semantics but permits overlapping mutable aliases under the generational access contract. A mutation invalidates overlapping immutable references, and their later use is a compilation error. See @#reference-semantics (Reference semantics).
 
 `~place` requests temporary mutation-capable access to an existing mutable place. It excludes conflicting access while active.
 

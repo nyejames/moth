@@ -13,7 +13,7 @@ Companion authorities:
 
 **Moth is reference-semantic by default, copy-explicit and move-inferred. It omits explicit reference types and lifetime syntax, not references themselves.**
 
-The source language stays small: existing values use shared access by default, mutation requires explicit exclusive access, copies are explicit and moves are inferred by the compiler.
+The source language stays small: existing values use shared access by default, copies are explicit and runtime moves are inferred by the compiler. Runtime mutation requires explicit exclusive access. Const execution retains mutation permissions but permits overlapping mutable aliases under dynamic generational access validation.
 
 These pages record the accepted memory model and target backend architecture. They include design decisions that are not yet implemented, particularly around lifetime-topology validation, retained-edge liveness, declared regions, Retained Edge Counting and collector-free backend lowering.
 
@@ -21,13 +21,15 @@ They are not an implementation-status report. Use `docs/docs/progress/@entry.mot
 
 ## The model in one paragraph
 
-Moth is reference-semantic and statically memory-safe. Existing values use shared, read-only access by default. Mutation requires explicit exclusive access. Copies are explicit and transfer is inferred. Memory safety comes from mandatory borrow validation and mandatory lifetime-topology validation, not from a collector. Every allocation family has exactly one statically proven semantic lifetime owner, and every retained edge must point to storage that lives at least as long as the container holding it.
+Moth is reference-semantic. Existing values use shared, read-only access by default. Copies are explicit. Runtime code is statically memory-safe: mutation requires explicit exclusive access, transfer is inferred and mandatory borrow and lifetime-topology validation prove one semantic lifetime owner for every allocation family and legal retained edges. A collector cannot substitute for that proof. Required const execution is sequential and bounded. It preserves reference semantics and mutation permissions but allows overlapping mutable aliases, invalidates overlapping immutable references on mutation and diagnoses subsequent stale use dynamically. Interpreter-owned storage cannot escape. The Access and aliasing reference owns the full const contract.
 
 Garbage collection is a permitted physical representation of a topology that has already been proven legal. It is not the semantic correctness baseline. GC cannot legalise an invalid or unproven topology, and a release build on a backend that advertises full memory control must not fall back to a tracing collector.
 
 **Region** is Moth's general semantic lifetime-owner concept. An **inferred region** is chosen by the compiler. A **declared region** is a hard source-declared `name:` region whose membership is explicit through `into name`. A declared region is not necessarily a physical arena.
 
 ## Mandatory proof and physical strategy
+
+These proofs and physical strategies apply to runtime executable code. Const bodies have a separate interpreter access contract and no runtime ownership plan.
 
 **Mandatory semantic proof**
 
@@ -106,6 +108,8 @@ The mechanisms are ordered. A later mechanism consumes validated facts from earl
 
 ## Rules every contributor must know
 
+The static exclusivity, lifetime and physical strategy rules below govern runtime code. Const functions retain rules 1 and 2 and ordinary mutation permissions, with the generational access exception described in Access and aliasing. They do not run the runtime memory analyses.
+
 **1. Moth is reference-semantic by default.** Reading, binding, passing, returning or storing an existing value uses shared reference semantics unless exclusive access or explicit copy applies. The language omits reference type constructors and lifetime syntax, not references themselves.
 
 **2. Copies are explicit.** `copy` creates an independent value graph. Ordinary assignment and argument passing do not clone existing values. Fresh aggregates built from shared inputs do not implicitly copy those inputs.
@@ -114,7 +118,7 @@ The mechanisms are ordered. A later mechanism consumes validated facts from earl
 
 **4. Last-use analysis is central.** There is no explicit move syntax. Alias activity is path-sensitive and non-lexical for shared aliases and observed exclusive aliases; whether an issued but never-used exclusive capability may be elided remains an explicit experiment until canonical semantics adopt it. Branches are analysed independently and loops use fixed-point future-use reasoning. The compiler may transfer affine cleanup responsibility only where every relevant path proves no later source use. When transfer is not proven, the operation remains a borrow and the program stays valid.
 
-**5. Borrow validation is mandatory.** Shared and exclusive conflicts are checked under every backend and every build profile, including GC-native backends.
+**5. Runtime borrow validation is mandatory.** Shared and exclusive conflicts are checked under every backend and every build profile, including GC-native backends.
 
 **6. One lifetime owner and retained-edge legality.** Every allocation family has exactly one semantic lifetime owner. An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object (`R_value >= R_container`).
 

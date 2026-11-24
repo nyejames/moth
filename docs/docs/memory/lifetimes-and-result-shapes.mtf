@@ -1,7 +1,7 @@
 ### Accepted mandatory topology, deferred validation
 
-The accepted language contract requires mandatory, backend-independent
-lifetime-region and escape validation. That validation remains deferred in the
+The accepted runtime language contract requires mandatory, backend-independent
+lifetime-region and escape validation. Required const execution instead owns bounded temporary storage and checks actual accesses under the generational contract in @#reference-semantics (Reference semantics). That validation remains deferred in the
 current compiler. Once implemented, it will prove every retained reference
 legal under one lifetime owner, and GC won't bypass it.
 
