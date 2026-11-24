@@ -169,6 +169,33 @@ Check for an existing entry before adding one. Name where the problem lives, wha
 - Observed: in an ordinary function, `base ~= value + 0`, `view ~= base`, `~view, extra = pair(3)`, then `seen = view * 10 + extra` reports MOTH-BORROW-0003 at the multi-bind: "Cannot read `__hir_tmp_2` while mutable alias `view` is still needed later". The docs say updates through mutable aliases write through to their referents. The same body in a const function evaluates and writes through (`base` becomes 3), so const and runtime acceptance diverge. The diagnostic also exposes a compiler temporary name.
 - Investigate: the result temporaries are fresh values and should not conflict with the alias. Check how multi-bind lowering orders the temporary reads against the alias write, and keep generated names out of user diagnostics.
 
+### Ordinary struct construction bypasses an immutable parameter's access
+
+- Found: const storage C1 controls, 2026-11. Confirmed by executing the emitted JavaScript. Independent of const execution and the existing-target multi-bind issue.
+- Where: ordinary aggregate construction and projected mutation validation. A writable aggregate must not grant mutation of a stored read-only referent.
+- Reproducer:
+
+  ```moth
+  Box = | child {I32} |
+
+  marshal |items {I32}| -> I32:
+      box ~= Box(child = items)
+      ~box.child.push(2)
+      return box.child.length()
+  ;
+
+  observe || -> I32:
+      source ~{I32} = {1}
+      observed = marshal(source)
+      return observed * 10 + source.length()
+  ;
+
+  ~[:[observe()]]
+  ```
+
+- Observed: the compiler accepts the program and renders `22`. The push writes through to the caller's allocation. Direct mutation through a fresh result of `identity(items)` instead receives `MOTH-BORROW-0007`.
+- Expected: reject mutation of the stored immutable referent at the push. Still allow replacing `box.child` and mutating independent storage introduced with `copy`. Investigate how ordinary borrow validation preserves permission through aggregate-retained edges.
+
 ### Const interpreter lacks generational access and complete reference identity
 
 - Found: const multi-return phase, 2026-11. Confirmed on the Phase 3 binary. The owner has since approved dynamic const access validation instead of runtime borrow checking.
