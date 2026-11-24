@@ -10,10 +10,10 @@
 
 **Spec and permanent authorities:** `docs/compiler-design-overview.md` (Stage 4, typed expression ownership, result slots and const execution), `docs/docs/functions/function-declarations.mtf`, `docs/docs/functions/returns-and-multiple-values.mtf`, `docs/docs/structs/receiver-methods.mtf`, `docs/docs/constants/constant-folding.mtf`, `docs/docs/directives/constraints.mtf`, `docs/docs/loops/collection-loops.mtf`, the canonical pattern references and `docs/docs/design-scope/deferred-and-outside-scope.mtf`. The accepted decisions below supersede the old V1 restrictions only for the features explicitly approved here. Transfer enduring decisions into their canonical owners as implementation lands.
 
-**Status:** Active - Foundation Phases A-C complete
-**Current slice:** Phase 0, reassess the shared evaluator after profile cleanup
+**Status:** Active - Foundation Phases A-C and Phase 0 complete
+**Current slice:** Phase 1, extract value-only evaluation from AST replacement
 **Blockers:** None known
-**Next action:** Trace duplicate traversals, appended expression rows, staging and clones in required const execution, then measure the Phase 0 workloads with existing counters.
+**Next action:** Extract the value-only fold from `fold_root` and make `fold_expression_with_constants` return a value without committing a row.
 
 ## Global constraints
 
@@ -312,11 +312,56 @@ The foundation gates A-C are mandatory and sequential. The subsequent feature ph
 
 ### Task 0.1: Identify and benchmark redundant const work
 
-- [ ] Trace `FoldContext::fold_walk`, `fold_root`, `ConstInterpreter::evaluate_expression_inner`, `RewriteWalk`, `fold_to_constant` and `rewrite_expression_children` against the current implementation. Count duplicate traversals, appended expression rows, staging and clones. Identify which lazy, handler, projection and TIR operations still need specialised rewriting.
-- [ ] Reuse Phase A/C benchmark data, then measure representative scalar, repeated nested call, collection, catch, `Dec`, imported helper and structural-template workloads with existing counters. Add only attribution-critical benchmark instrumentation. Use `just bench-check` where useful; keep raw measurements local.
-- [ ] Verify existing `const_function_constant_call_success`, `const_function_logical_short_circuit_success`, `const_function_rebuilt_catch_success`, `const_function_collection_operations_success`, `const_function_nested_template_call_success`, `const_function_imported_success`, `const_function_structural_text_refusal_rejected` and the work/memory-limit cases. Ensure each selector actually runs.
+- [x] Trace `FoldContext::fold_walk`, `fold_root`, `ConstInterpreter::evaluate_expression_inner`, `RewriteWalk`, `fold_to_constant` and `rewrite_expression_children` against the current implementation. Count duplicate traversals, appended expression rows, staging and clones. Identify which lazy, handler, projection and TIR operations still need specialised rewriting.
+- [x] Reuse Phase A/C benchmark data, then measure representative scalar, repeated nested call, collection, catch, `Dec`, imported helper and structural-template workloads with existing counters. Add only attribution-critical benchmark instrumentation. Use `just bench-check` where useful; keep raw measurements local.
+- [x] Verify existing `const_function_constant_call_success`, `const_function_logical_short_circuit_success`, `const_function_rebuilt_catch_success`, `const_function_collection_operations_success`, `const_function_nested_template_call_success`, `const_function_imported_success`, `const_function_structural_text_refusal_rejected` and the work/memory-limit cases. Ensure each selector actually runs.
 
 **Exit:** Measured redundant-work owners, retained semantic special cases and exact API/test targets for Phases 1-2. No new evaluator or global cache.
+
+### Phase 0 outcome
+
+**Trace.** One required call `f(1)` whose body is `return g(x) + 1` (`g` returns `x * 2`) runs three `RewriteWalk`s (program site, `f` body, `g` body), four `fold_walk`s (each argument, then each body result over the rewritten tree), four `stage_values` transactions and five collection/handler probes. It appends about nine expression rows, of which one survives. Each `fold_to_constant` commits a `Constant` row only to read its `ConstValueId` back. Each interpreted expression is walked twice: `evaluate_expression_inner` rewrites it, then `fold_to_constant` folds the rewritten tree. Rebuilt parents and their provenance rows die once that fold settles.
+
+**Measurements.** Release CLI build of the main module, median of 15 runs. Rows are `ast_census_expression_rows` from a `benchmark_counters` build. A literal-only control with the same 600 declarations takes 12.3 ms and produces 1,850 rows.
+
+| Workload | Call sites | Time (ms) | Expression rows |
+| --- | --- | --- | --- |
+| scalar arithmetic | 600 | 16.4 | 4,871 |
+| nested depth 8 | 300 | 18.0 | 10,290 |
+| collection loop | 300 | 16.1 | 5,768 |
+| catch on `get` | 300 | 14.2 | 3,550 |
+| `Dec2` arithmetic | 300 | 13.3 | 2,161 |
+| imported helper | 600 | 14.7 | 3,663 |
+| template result | 300 | 13.3 | 2,752 |
+
+A scalar call costs about 7 µs and five dead rows. Each nested call level adds about four rows. The absolute cost is small. No existing benchmark workload declares a const function, so these workloads stay local and no counter was added: the row census already attributes the dead rows.
+
+**Redundant-work owners, by cost.**
+1. `fold_to_constant` commit-and-read-back, through `fold_root` and `commit_replacement`. This is the Phase 1 target.
+2. The rewrite-then-fold double walk in `evaluate_expression_inner`. This is the Phase 2 target.
+3. Per-node `Vec` allocation and `root_substitution`/`const_call_site` probes in `RewriteWalk::enter`.
+4. Repeated `evaluate_collection_read` and handler-table probes per expression.
+5. Provenance clones and the extra provenance row in `inherit_replaced_provenance`.
+6. In templates: per-template sorting of bound paths, two rows per frame binding and a `FrameBindings` rebuild per site.
+
+**Retained special cases.** These keep rewriting:
+- Required-call substitution in program expressions.
+- Catch-handler identity keyed by `ExprId`, and early handler return.
+- Lazy `and`/`or`: `FoldContext::complete` requires both operands, so routing these through `fold_walk` would execute the inactive operand.
+- TIR template completion.
+- Collection mutation and bounds recovery.
+
+**Phase 1 targets.**
+- Extract the scalar staging block of `fold_root` into a value-only fold over `&AstExpressionBuilder` that returns value, not-constant or refusal.
+- `fold_root` keeps the multi-slot host branch and the replacement commit.
+- `fold_expression_with_constants` becomes that value-only fold. Its callers are `ConstInterpreter::fold_to_constant`, `ConstValueResolver::resolve_expression`, and the unit tests in `type_resolution_tests.rs` and `direct_projection_tests.rs`. All of them want a value.
+- Tests: the value-only fold leaves the row count and the original `ExprId` untouched, a refusal publishes no reachable value, and the `Runtime` boundary still refuses composites that `Content` builds.
+
+**Phase 2 targets.**
+- Try a value-only fold of the original expression with frame bindings at the top of `evaluate_expression_inner`.
+- Rewrite only when that fold reports not-constant and the tree contains const calls, catches, lazy logic, templates or collection reads.
+- Keep `RewriteWalk` for program-site substitution.
+- Regressions: `const_function_logical_short_circuit_success`, `const_function_rebuilt_catch_success`, `const_function_collection_operations_success` and `const_function_nested_template_call_success`.
 
 ## Phase 1: Extract value-only evaluation from AST replacement
 
