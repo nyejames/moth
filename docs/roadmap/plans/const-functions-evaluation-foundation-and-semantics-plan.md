@@ -13,7 +13,7 @@
 **Status:** Foundation Phases A-C and Phases 0-4 complete. Independent checkpoint corrections verified. C1 contract decisions, C2 live storage and C3 dynamic access validation complete. Owned graph publication and integrated checkpoint validation remain pending.
 **Current slice:** C4, required evaluation and owned graph publication.
 **Approved C1 decisions:** Retain read-only stored referents and publish owned graphs that preserve observable allocation sharing. Fresh runtime materialisation uses ordinary runtime receiving and access rules.
-**Next action:** Preserve allocation sharing at the folded-value and runtime handoffs, then verify the integrated checkpoint. Do not implement validation-only HIR or resume Phase 5.
+**Next action:** Close the ordinary borrow-provenance gap described in C4 before publishing shared graphs to runtime code. Do not implement validation-only HIR or resume Phase 5.
 
 ## Global constraints
 
@@ -787,7 +787,39 @@ documentation check passed for the updated progress page.
 - [ ] Implement the C1-approved outer publication contract. Freeze validated finite data into the existing `ConstValueStore`/owned public projection, preserving types, structural resource strings, configuration/project provenance, slot order and const-record restrictions. Never publish storage IDs, generations or borrowed graphs. Release temporary state at the owning boundary. A failed required evaluation publishes no partial semantic success.
 - [ ] Keep imported callable materialisation on stable origins and retained syntax/context. No provider HIR or const borrow summaries. Check private helper chains and donor diagnostic sites. Ensure provider semantic changes invalidate consumer folded results through existing interface/materialisation compatibility facts, not another fingerprint domain.
 - [ ] Extend the real build-service parity fixtures with valid and invalid const access, imports/packages, structural results and type-level evaluation. Verify identical debug/release diagnostics, output and runtime handoff. No const function, target requirement or link edge reaches runtime. Preserve the fail-closed runtime HIR guard. Runtime borrow rules still reject conflicting mutable aliases.
-- [ ] Retain the ordinary multi-bind false-conflict report as independent runtime work. The new const policy neither fixes nor justifies that bug. Fix separately in its ordinary HIR/borrow owner with approval, preserving simultaneous RHS evaluation and the distinction between fresh slots and fresh allocations.
+- [x] Retain the ordinary multi-bind false-conflict report as independent runtime work. The new const policy neither fixes nor justifies that bug. Fix separately in its ordinary HIR/borrow owner with approval, preserving simultaneous RHS evaluation and the distinction between fresh slots and fresh allocations.
+
+**Runtime publication gate (open).** The C4 candidate materialises shared
+allocations once. The straight-line `return items, items` case rejects a
+conflicting mutation. The production checker still accepts two overlapping
+accesses that must fail:
+
+- `return Box(items), items`: after receiving both results, `~items.push(2)`
+  succeeds before a later read of `box.items`. Constructor transfer does not
+  carry the retained field edge into borrow analysis.
+- A runtime value-`if` arm receives `items, items` and forwards both slots with
+  `then`. The outer mutation succeeds before a later sibling read. Jump
+  transfer carries the common root, but lexical scope pruning drops it.
+
+This is a Stage 6 dependency, not a change to the approved const rules. The
+[production borrow plan](production-borrow-checker.md#open-work---production)
+owns the missing provenance work (BC-06). Keep binding visibility separate
+from live allocation provenance. Track which field or entry retains the
+allocation and distinguish edge replacement from mutation of its referent.
+Do not union every child into the aggregate root: that would reject writes
+when the only later use reads an independent sibling. Reuse the production
+checker and its control-flow transfers. Keep C4 and Phase 5 gated until the
+runtime handoff passes both the conflict tests and legal replacement, copy
+and disjoint-access controls.
+
+The uncommitted C4 candidate passed 160 of 162 const integration cases on
+the pinned Node version. Only the two runtime conflicts above failed. The
+build-service parity tests covered a source package's shared graph, an
+unresolved site-root string, type-level evaluation and a private donor
+access diagnostic. The independent JavaScript `copy` fix (`fc974cd84d`)
+preserves sharing across records, maps and nested collections. The docs
+check passed and the release build produced 95 files. `just validate`
+remains the integrated C5 gate.
 
 ### C5. Checkpoint verification and simplification
 
